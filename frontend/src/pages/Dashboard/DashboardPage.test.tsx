@@ -1,0 +1,153 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Route, Routes } from "react-router-dom";
+import { renderApp } from "@/test/render";
+import { DashboardPage } from "./DashboardPage";
+import { ChatPage } from "@/pages/Chat/ChatPage";
+import { LoginPage } from "@/pages/Login/LoginPage";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+
+const { loginMock, meMock, logoutMock, listEmployeesMock } = vi.hoisted(() => ({
+  loginMock: vi.fn(),
+  meMock: vi.fn(),
+  logoutMock: vi.fn(),
+  listEmployeesMock: vi.fn(),
+}));
+
+vi.mock("@/services/auth.service", () => ({
+  authApi: {
+    login: loginMock,
+    me: meMock,
+    logout: logoutMock,
+  },
+}));
+
+vi.mock("@/services/employee.service", async () => {
+  const actual = await vi.importActual<typeof import("@/services/employee.service")>(
+    "@/services/employee.service",
+  );
+  return {
+    ...actual,
+    employeeApi: {
+      list: listEmployeesMock,
+      create: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+    },
+  };
+});
+
+function renderDashboard(extraRoutes = false) {
+  return renderApp(
+    <Routes>
+      {extraRoutes ? <Route path="/login" element={<LoginPage />} /> : null}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/chat" element={<ChatPage />} />
+      </Route>
+    </Routes>,
+    { route: "/dashboard" },
+  );
+}
+
+describe("Dashboard page", () => {
+  beforeEach(() => {
+    loginMock.mockReset();
+    meMock.mockReset();
+    logoutMock.mockReset().mockResolvedValue({ ok: true });
+    listEmployeesMock.mockReset().mockResolvedValue({
+      count: 2,
+      employees: [
+        {
+          id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+          name: "עמית",
+          surname: "חתן",
+          nickname: "עמית",
+          email: "amit@example.com",
+          phone: "050-0000001",
+        },
+        {
+          id: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          name: "טל",
+          surname: "דור",
+          nickname: "טל",
+          email: "tal@example.com",
+          phone: "050-0000002",
+        },
+      ],
+    });
+    meMock.mockResolvedValue({
+      user: { id: "11111111-1111-4111-8111-111111111111", username: "Amit" },
+    });
+  });
+
+  it("displays a greeting with the authenticated username", async () => {
+    renderDashboard();
+
+    expect(await screen.findByTestId("dashboard-greeting")).toHaveTextContent(
+      "Hello, Amit",
+    );
+    expect(screen.getByText("Welcome back to your dashboard.")).toBeInTheDocument();
+    expect(await screen.findByTestId("employee-count")).toHaveTextContent("3 employees");
+    expect(screen.getByTitle("לוסי")).toHaveTextContent("לוסי");
+    expect(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).toHaveTextContent(
+      "עמית",
+    );
+    expect(screen.getByTitle("טל דור · tal@example.com · 050-0000002")).toHaveTextContent(
+      "טל",
+    );
+    expect(screen.getByRole("button", { name: "Add employee" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Update employee" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete employee" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("link", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  it("enables update and delete after selecting an employee", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+
+    expect(screen.getByTestId("employee-contact")).toHaveTextContent(
+      "amit@example.com · 050-0000001",
+    );
+
+    expect(screen.getByRole("button", { name: "Update employee" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete employee" })).toBeEnabled();
+  });
+
+  it("shows email and phone fields when adding an employee", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Phone")).toBeInTheDocument();
+  });
+
+  it("opens the chat screen from the Chat tab", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByRole("link", { name: "Chat" }));
+
+    expect(await screen.findByTestId("chat-page")).toBeInTheDocument();
+    expect(screen.getByLabelText("Chat As")).toBeInTheDocument();
+  });
+
+  it("logs the user out and returns to login", async () => {
+    const user = userEvent.setup();
+    renderDashboard(true);
+
+    await user.click(await screen.findByRole("button", { name: "Log out" }));
+
+    expect(logoutMock).toHaveBeenCalledOnce();
+    expect(await screen.findByTestId("login-page")).toBeInTheDocument();
+  });
+});

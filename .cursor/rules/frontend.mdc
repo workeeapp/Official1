@@ -1,0 +1,14 @@
+---
+description: React UI conventions for login and dashboard
+globs: frontend/**/*.{ts,tsx,css}
+alwaysApply: false
+---
+
+# Frontend
+
+- Use functional components and keep data fetching in `services/` or `hooks/`.
+- All inputs need visible labels and associated error text via `aria-describedby`.
+- Keep the blue SaaS palette from `frontend/src/index.css`.
+- Layouts must work at 320px, 768px, and 1280px without horizontal scroll.
+- Interactive controls need a minimum height of 44px (`min-h-11`).
+- Authenticated pages read the username from `useAuth()`, never from hard-coded UI text.

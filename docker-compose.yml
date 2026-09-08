@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: workee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: workee
+      POSTGRES_PASSWORD: workee
+      POSTGRES_DB: workee
+    ports:
+      - "5432:5432"
+    volumes:
+      - workee_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workee -d workee"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  workee_pg_data:

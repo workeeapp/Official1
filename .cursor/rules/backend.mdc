@@ -1,0 +1,14 @@
+---
+description: Backend API and Prisma conventions
+globs: backend/**/*.{ts,js}
+alwaysApply: false
+---
+
+# Backend
+
+- Add new endpoints under `backend/src/routes` and wire them through controllers.
+- Throw `AppError` subclasses from services. Let `errorMiddleware` format the response.
+- Database access belongs in `backend/src/services` or `backend/src/database`.
+- The Prisma `User` model maps to the `Users` table. Preserve username uniqueness.
+- Handle Prisma `P2002` as a conflict when creating users.
+- Cover login, session, and user-service changes with Vitest tests.

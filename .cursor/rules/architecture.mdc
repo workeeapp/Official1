@@ -1,0 +1,19 @@
+---
+description: Layered architecture and extensibility conventions
+alwaysApply: true
+---
+
+# Architecture
+
+Keep a strict separation of concerns:
+
+```text
+Frontend UI → frontend services → REST API → controllers → services → Prisma → PostgreSQL
+```
+
+- Do not put business logic or database access in React components.
+- Keep Express route handlers thin. Validation, auth, and persistence belong in dedicated modules.
+- Authentication is centralized in `backend/src/auth` and `backend/src/services/auth.service.ts`.
+- Shared validation and public types live in `shared/` and must stay in sync for client and server.
+- New pages should reuse `AppShell` and `ProtectedRoute`. New APIs should follow `/api/<domain>` with a controller/service pair.
+- Do not implement registration, password reset, social login, or roles unless explicitly requested.

@@ -1,0 +1,16 @@
+---
+description: Authentication and secret-handling rules
+alwaysApply: true
+---
+
+# Security
+
+- Hash passwords with Argon2id. Never store or log plaintext passwords.
+- Never return `password` or `passwordHash` from an API response.
+- Keep secrets in environment variables. Do not commit `.env`.
+- Use the httpOnly `workee_session` cookie. Do not store tokens in `localStorage`.
+- Invalid credentials must use the generic message `Invalid username or password`.
+- Validate every mutating request on the server even if the client already validated it.
+- Use Prisma for queries. Do not concatenate SQL.
+- In production, cookies must be `Secure` and `SameSite=Lax`.
+- User-facing errors must stay generic. Do not expose stack traces.
