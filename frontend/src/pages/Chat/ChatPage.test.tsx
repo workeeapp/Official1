@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
 import { ChatPage } from "./ChatPage";
-import { formatChatTime } from "./chatTime";
+import { formatChatTime, sortChatMessages } from "./chatTime";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -173,6 +173,84 @@ describe("Chat page", () => {
       "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       expect.any(AbortSignal),
     );
+  });
+
+  it("keeps the speaker message before the assistant when history timestamps tie", async () => {
+    const sameTime = new Date().toISOString();
+    historyMock.mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages: [
+        {
+          id: "a1",
+          author: "assistant",
+          speaker: "לוסי",
+          text: "pong from lucy",
+          createdAt: sameTime,
+        },
+        {
+          id: "u1",
+          author: "you",
+          speaker: "עמית",
+          text: "ping from amit",
+          createdAt: sameTime,
+        },
+      ],
+      raw: { output_text: "pong from lucy" },
+    });
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    const dialog = await screen.findByTestId("chat-messages");
+    expect(await within(dialog).findByText("ping from amit")).toBeInTheDocument();
+    expect(within(dialog).getByText("pong from lucy")).toBeInTheDocument();
+    expect(dialog.textContent?.indexOf("ping from amit")).toBeLessThan(
+      dialog.textContent?.indexOf("pong from lucy") ?? 0,
+    );
+    expect(sortChatMessages([
+      { author: "assistant", createdAt: sameTime },
+      { author: "you", createdAt: sameTime },
+    ]).map((message) => message.author)).toEqual(["you", "assistant"]);
+  });
+
+  it("only refreshes the selected Chat As and Chat With pair", async () => {
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    expect(await screen.findByTestId("chat-page")).toBeInTheDocument();
+    await waitFor(() => expect(historyMock).toHaveBeenCalled());
+    expect(
+      historyMock.mock.calls.every(
+        ([employeeId, digitalEmployeeId]) =>
+          employeeId === "415ff13e-38d0-4dee-98b5-71e5dd11a38d" &&
+          digitalEmployeeId === "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      ),
+    ).toBe(true);
+    expect(subscribeMock).toHaveBeenCalledWith(
+      "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      expect.any(Function),
+    );
+    expect(
+      subscribeMock.mock.calls.every(
+        ([employeeId, digitalEmployeeId]) =>
+          employeeId === "415ff13e-38d0-4dee-98b5-71e5dd11a38d" &&
+          digitalEmployeeId === "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      ),
+    ).toBe(true);
   });
 
   it("sends the typed message to the API and shows the reply", async () => {
@@ -592,6 +670,23 @@ describe("Chat page", () => {
         },
       ],
     });
+    historyMock.mockImplementation(async (employeeId: string) => ({
+      employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages:
+        employeeId === "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4"
+          ? [
+              {
+                id: "n1",
+                author: "assistant" as const,
+                speaker: "Assistant",
+                text: "עמית הוסיף חלב לרשימת הקניות שלך",
+                actions: ["Add to shopping list: חלב"],
+              },
+            ]
+          : [],
+      raw: null,
+    }));
     const user = userEvent.setup();
     renderApp(
       <Routes>
@@ -638,6 +733,22 @@ describe("Chat page", () => {
         },
       ],
     });
+    historyMock.mockImplementation(async (employeeId: string) => ({
+      employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages:
+        employeeId === "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4"
+          ? [
+              {
+                id: "relay-1",
+                author: "assistant" as const,
+                speaker: "לוסי",
+                text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+              },
+            ]
+          : [],
+      raw: null,
+    }));
     const user = userEvent.setup();
     renderApp(
       <Routes>

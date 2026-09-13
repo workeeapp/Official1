@@ -308,7 +308,13 @@ describe("chat API", () => {
             ...found,
             messages: messageStore
               .filter((message) => message.conversationId === found.id)
-              .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+              .sort((a, b) => {
+                const byTime = a.createdAt.getTime() - b.createdAt.getTime();
+                if (byTime !== 0) {
+                  return byTime;
+                }
+                return b.author.localeCompare(a.author);
+              }),
           };
         }
         return found;
@@ -450,7 +456,7 @@ describe("chat API", () => {
             text: String(item.text),
             actions: item.actions ?? null,
             raw: item.raw ?? null,
-            createdAt: new Date(),
+            createdAt: item.createdAt instanceof Date ? item.createdAt : new Date(),
           });
         }
         return { count: data.length };
@@ -505,6 +511,13 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
     expect(createResponse.mock.calls[0][0].message).toContain("hi");
     expect(messageCreateMany).toHaveBeenCalledOnce();
+    const saved = messageCreateMany.mock.calls[0][0].data as Array<{
+      author: string;
+      createdAt: Date;
+    }>;
+    expect(saved[0].author).toBe("you");
+    expect(saved[1].author).toBe("assistant");
+    expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
   });
 
   it("reuses the same conversation for the same user and employee", async () => {

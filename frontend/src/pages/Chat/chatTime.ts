@@ -31,6 +31,27 @@ export function formatChatTime(value: string): string {
   });
 }
 
+export function sortChatMessages<T extends { author: string; createdAt?: string }>(
+  messages: T[],
+): T[] {
+  return [...messages].sort((left, right) => {
+    const leftTime = Date.parse(left.createdAt ?? "");
+    const rightTime = Date.parse(right.createdAt ?? "");
+    const leftValid = !Number.isNaN(leftTime);
+    const rightValid = !Number.isNaN(rightTime);
+
+    if (leftValid && rightValid && leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+
+    if (left.author !== right.author) {
+      return left.author === "you" ? -1 : 1;
+    }
+
+    return 0;
+  });
+}
+
 export function chatDayKey(value?: string): string | null {
   const date = value ? parseDate(value) : null;
   if (!date) {

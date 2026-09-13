@@ -298,6 +298,8 @@ async function saveTurn(input: {
   raw: unknown;
 }): Promise<void> {
   const parsed = parseLlmReply(input.reply);
+  const userAt = new Date();
+  const assistantAt = new Date(userAt.getTime() + 1);
 
   await prisma.chatMessage.createMany({
     data: [
@@ -306,6 +308,7 @@ async function saveTurn(input: {
         author: "you",
         speaker: input.speaker,
         text: input.message,
+        createdAt: userAt,
       },
       {
         conversationId: input.conversationId,
@@ -314,6 +317,7 @@ async function saveTurn(input: {
         text: parsed.response,
         actions: parsed.actions.length > 0 ? parsed.actions : Prisma.JsonNull,
         raw: toJsonValue(input.raw),
+        createdAt: assistantAt,
       },
     ],
   });
@@ -504,7 +508,7 @@ export async function getChatHistory(
     },
     include: {
       messages: {
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { author: "desc" }],
       },
     },
   });

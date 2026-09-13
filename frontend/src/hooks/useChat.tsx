@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { useLocation } from "react-router-dom";
 import {
   chatThreadKey,
   parseLlmReply,
@@ -23,6 +24,7 @@ type KnownConversation = {
   startedAt: string | null;
 };
 import { chatApi } from "@/services/chat.service";
+import { sortChatMessages } from "@/pages/Chat/chatTime";
 import { ApiError } from "@/types";
 
 export type ChatMessage = ChatThreadMessage;
@@ -62,13 +64,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdsRef = useRef<Record<string, KnownConversation>>({});
+  const location = useLocation();
+  const viewingChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
 
   useEffect(() => {
     return () => abortRef.current?.abort();
   }, []);
 
   useEffect(() => {
-    if (!chatAsId || !chatWithId) {
+    if (!viewingChat || !chatAsId || !chatWithId) {
       return;
     }
 
@@ -144,7 +148,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       window.clearInterval(poll);
       unsubscribe();
     };
-  }, [chatAsId, chatWithId]);
+  }, [viewingChat, chatAsId, chatWithId]);
 
   const setChatAsId = useCallback((id: string) => {
     setChatAsIdState(id);
@@ -191,7 +195,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abortRef.current = abort;
 
       try {
-        const { reply, raw, notifications } = await chatApi.send(
+        const { reply, raw } = await chatApi.send(
           {
             message: input.text,
             employeeId: input.employeeId,
@@ -203,59 +207,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         );
         const parsed = parseLlmReply(reply);
 
-        setThreads((current) => {
-          const next = {
-            ...current,
-            [threadId]: [
-              ...(current[threadId] ?? []),
-              {
-                id: crypto.randomUUID(),
-                author: "assistant" as const,
-                speaker: input.assistantSpeaker ?? "Assistant",
-                text: parsed.response,
-                createdAt: new Date().toISOString(),
-                actions: parsed.actions,
-              },
-            ],
-          };
-
-          for (const notification of notifications ?? []) {
-            const partnerId =
-              notification.digitalEmployeeId ?? input.digitalEmployeeId;
-            const notificationThread = partnerId
-              ? chatThreadKey(notification.employeeId, partnerId)
-              : notification.employeeId;
-            const thread = next[notificationThread] ?? [];
-            next[notificationThread] = thread.some(
-              (message) =>
-                message.id === notification.message.id ||
-                messageKey(message) === messageKey(notification.message),
-            )
-              ? thread
-              : [...thread, notification.message];
-          }
-
-          return next;
-        });
-        setRawResponses((current) => {
-          const next = {
-            ...current,
-            [threadId]: raw ?? reply,
-          };
-
-          for (const notification of notifications ?? []) {
-            if (notification.raw !== undefined) {
-              const partnerId =
-                notification.digitalEmployeeId ?? input.digitalEmployeeId;
-              const notificationThread = partnerId
-                ? chatThreadKey(notification.employeeId, partnerId)
-                : notification.employeeId;
-              next[notificationThread] = notification.raw;
-            }
-          }
-
-          return next;
-        });
+        setThreads((current) => ({
+          ...current,
+          [threadId]: [
+            ...(current[threadId] ?? []),
+            {
+              id: crypto.randomUUID(),
+              author: "assistant" as const,
+              speaker: input.assistantSpeaker ?? "Assistant",
+              text: parsed.response,
+              createdAt: new Date().toISOString(),
+              actions: parsed.actions,
+            },
+          ],
+        }));
+        setRawResponses((current) => ({
+          ...current,
+          [threadId]: raw ?? reply,
+        }));
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === "ABORTED") {
           return;
@@ -373,25 +342,64 @@ function applyHistory(
     startedAt: history.startedAt,
   };
 
-  setThreads((current) => ({
-    ...current,
-    [threadId]: conversationChanged
-      ? history.messages
-      : mergeMessages(current[threadId] ?? [], history.messages),
-  }));
+  setThreads((current) => {
+    const merged = sortChatMessages(
+      conversationChanged
+        ? history.messages
+        : mergeMessages(current[threadId] ?? [], history.messages),
+    );
+    if (sameMessages(current[threadId] ?? [], merged)) {
+      return current;
+    }
+    return {
+      ...current,
+      [threadId]: merged,
+    };
+  });
   setRawResponses((current) => {
     if (conversationChanged) {
       const next = { ...current };
       if (history.raw === undefined || history.raw === null) {
+        if (current[threadId] === undefined) {
+          return current;
+        }
         delete next[threadId];
         return next;
       }
+      if (current[threadId] === history.raw) {
+        return current;
+      }
       return { ...next, [threadId]: history.raw };
+    }
+    const raw = history.raw ?? current[threadId];
+    if (current[threadId] === raw) {
+      return current;
     }
     return {
       ...current,
-      [threadId]: history.raw ?? current[threadId],
+      [threadId]: raw,
     };
+  });
+}
+
+function sameMessages(left: ChatMessage[], right: ChatMessage[]): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((message, index) => {
+    const other = right[index];
+    return (
+      message.id === other.id &&
+      message.author === other.author &&
+      message.speaker === other.speaker &&
+      message.text === other.text &&
+      message.createdAt === other.createdAt &&
+      JSON.stringify(message.actions ?? []) === JSON.stringify(other.actions ?? [])
+    );
   });
 }
 
@@ -436,7 +444,7 @@ function mergeMessages(
     (message) =>
       !incomingIds.has(message.id) && !incomingKeys.has(messageKey(message)),
   );
-  return [...mergedIncoming, ...localOnly];
+  return sortChatMessages([...mergedIncoming, ...localOnly]);
 }
 
 export function useChat(): ChatContextValue {

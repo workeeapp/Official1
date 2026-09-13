@@ -4,7 +4,7 @@ import { Button } from "@/components/Button";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
 import { employeeDisplayName } from "@/services/employee.service";
-import { chatDayKey, formatChatDate, formatChatTime } from "./chatTime";
+import { chatDayKey, formatChatDate, formatChatTime, sortChatMessages } from "./chatTime";
 
 export function ChatPage() {
   const { tableEmployees, digitalEmployees, status } = useEmployees();
@@ -53,7 +53,7 @@ export function ChatPage() {
     selectedEmployee && selectedDigital
       ? chatThreadKey(selectedEmployee.id, selectedDigital.id)
       : "";
-  const messages = threadId ? (threads[threadId] ?? []) : [];
+  const messages = sortChatMessages(threadId ? (threads[threadId] ?? []) : []);
   const sending = Boolean(sendingEmployeeId);
   const sendingThisThread = sendingEmployeeId === threadId;
   const loadingHistory = historyLoadingId === threadId;
