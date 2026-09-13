@@ -2,16 +2,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { hashPassword } from "../src/auth/password.js";
 
-const { findUnique, findMany, create, findFirst, update, remove } = vi.hoisted(
-  () => ({
-    findUnique: vi.fn(),
-    findMany: vi.fn(),
-    create: vi.fn(),
-    findFirst: vi.fn(),
-    update: vi.fn(),
-    remove: vi.fn(),
-  }),
-);
+const {
+  findUnique,
+  findMany,
+  create,
+  findFirst,
+  update,
+  remove,
+  listFindMany,
+  filingFindMany,
+} = vi.hoisted(() => ({
+  findUnique: vi.fn(),
+  findMany: vi.fn(),
+  create: vi.fn(),
+  findFirst: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
+  listFindMany: vi.fn(),
+  filingFindMany: vi.fn(),
+}));
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
@@ -24,6 +33,12 @@ vi.mock("../src/database/prisma.js", () => ({
       findFirst,
       update,
       delete: remove,
+    },
+    employeeList: {
+      findMany: listFindMany,
+    },
+    employeeFiling: {
+      findMany: filingFindMany,
     },
   },
 }));
@@ -51,6 +66,8 @@ describe("employees API", () => {
     findFirst.mockReset();
     update.mockReset();
     remove.mockReset();
+    listFindMany.mockReset().mockResolvedValue([]);
+    filingFindMany.mockReset().mockResolvedValue([]);
     app = createApp();
   });
 
@@ -131,5 +148,61 @@ describe("employees API", () => {
     expect(response.body.employee.nickname).toBe("Dana");
     expect(response.body.employee.email).toBe("dana@example.com");
     expect(response.body.employee.phone).toBe("050-1111111");
+  });
+
+  it("returns saved records for an owned employee", async () => {
+    const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
+    const createdAt = new Date("2026-09-13T07:00:00.000Z");
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    findFirst.mockResolvedValue({
+      id: employeeId,
+      userId,
+      name: "עמית",
+      surname: "חתן",
+      nickname: "עמית",
+      email: null,
+      phone: null,
+      createdAt: new Date(),
+    });
+    listFindMany.mockResolvedValue([
+      {
+        listType: "tasks",
+        name: "",
+        employee: { name: "עמית", nickname: "עמית" },
+        items: [
+          {
+            id: "task-1",
+            itemKey: "לקרוא ספר",
+            data: { "שם מטלה": "לקרוא ספר" },
+            addedById: employeeId,
+            createdAt,
+          },
+        ],
+      },
+    ]);
+    findMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: "עמית" },
+    ]);
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .get(`/api/employees/${employeeId}/records`)
+      .set("Cookie", cookieHeader(loginResponse));
+
+    expect(response.status).toBe(200);
+    expect(response.body.groups[0].title).toBe("Tasks");
+    expect(response.body.groups[0].items[0]).toMatchObject({
+      title: "לקרוא ספר",
+      createdBy: "עמית",
+    });
   });
 });

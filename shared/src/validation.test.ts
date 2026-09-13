@@ -100,6 +100,12 @@ describe("validateChatInput", () => {
     );
   });
 
+  it("rejects an invalid employee id", () => {
+    expect(
+      validateChatInput({ message: "hi", employeeId: "not-a-uuid" }).employeeId,
+    ).toBe("Employee is invalid");
+  });
+
   it("accepts a valid message for an employee", () => {
     expect(
       validateChatInput({

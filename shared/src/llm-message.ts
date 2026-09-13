@@ -3,6 +3,186 @@ export interface ParsedLlmMessage {
   actions: string[];
 }
 
+export type LlmListType = "shopping" | "contacts" | "tasks" | "custom";
+export type LlmListActionName = "add" | "remove" | "update";
+export type LlmFilingActionName = "add_filing" | "remove_filing" | "update_filing";
+
+export interface LlmListAction {
+  action: LlmListActionName;
+  listType: LlmListType;
+  listName: string;
+  items: Record<string, unknown>[];
+  targets: string[];
+}
+
+export interface LlmFilingAction {
+  action: LlmFilingActionName;
+  itemName: string;
+  itemInfo: string;
+  targets: string[];
+}
+
+export interface LlmMetadata {
+  lists: LlmListAction[];
+  filing: LlmFilingAction[];
+}
+
+const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
+const LIST_TYPES = new Set<LlmListType>(["shopping", "contacts", "tasks", "custom"]);
+const FILING_ACTIONS = new Set<LlmFilingActionName>([
+  "add_filing",
+  "remove_filing",
+  "update_filing",
+]);
+
+export function emptyLlmMetadata(): LlmMetadata {
+  return { lists: [], filing: [] };
+}
+
+export function parseLlmMetadata(metadata: unknown): LlmMetadata {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return emptyLlmMetadata();
+  }
+
+  const meta = metadata as Record<string, unknown>;
+  const defaultTargets = parseTargets(meta);
+  return {
+    lists: Array.isArray(meta.lists)
+      ? meta.lists.flatMap((entry) => {
+          const action = toListAction(entry);
+          if (!action) {
+            return [];
+          }
+          return [
+            {
+              ...action,
+              targets: action.targets.length > 0 ? action.targets : defaultTargets,
+            },
+          ];
+        })
+      : [],
+    filing: Array.isArray(meta.filing)
+      ? meta.filing.flatMap((entry) => {
+          const action = toFilingAction(entry);
+          if (!action) {
+            return [];
+          }
+          return [
+            {
+              ...action,
+              targets: action.targets.length > 0 ? action.targets : defaultTargets,
+            },
+          ];
+        })
+      : [],
+  };
+}
+
+export function parseTargets(value: unknown): string[] {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const raw = record
+    ? (record.targets ?? record.target ?? record.for ?? record.assignees)
+    : value;
+
+  if (typeof raw === "string" && raw.trim()) {
+    return [raw.trim()];
+  }
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+}
+
+export function parseReplyMetadata(text: string): LlmMetadata {
+  return extractLlmPayload(text)?.metadata ?? emptyLlmMetadata();
+}
+
+function toListAction(value: unknown): LlmListAction | null {
+  if (!isActionRecord(value) || !LIST_ACTIONS.has(value.action as LlmListActionName)) {
+    return null;
+  }
+
+  const listType = LIST_TYPES.has(value.list_type as LlmListType)
+    ? (value.list_type as LlmListType)
+    : "custom";
+  const items = Array.isArray(value.items)
+    ? value.items.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === "object" && !Array.isArray(item)),
+      )
+    : [];
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return {
+    action: value.action as LlmListActionName,
+    listType,
+    listName: listType === "custom" ? readText(value, ["list_name", "name", "רשימה"]) : "",
+    items,
+    targets: parseTargets(value),
+  };
+}
+
+function toFilingAction(value: unknown): LlmFilingAction | null {
+  if (!isActionRecord(value) || !FILING_ACTIONS.has(value.action as LlmFilingActionName)) {
+    return null;
+  }
+
+  const itemName = readText(value, ["item_name", "שם הפריט", "name"]);
+  if (!itemName) {
+    return null;
+  }
+
+  return {
+    action: value.action as LlmFilingActionName,
+    itemName,
+    itemInfo: readText(value, ["item_info", "מידע נוסף", "info"]),
+    targets: parseTargets(value),
+  };
+}
+
+function readText(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function extractLlmPayload(text: string): {
+  response: string;
+  rawMetadata: unknown;
+  metadata: LlmMetadata;
+} | null {
+  const parsed = extractJsonObject(text);
+  if (!parsed) {
+    return null;
+  }
+
+  const response =
+    typeof parsed.response === "string" && parsed.response.trim()
+      ? parsed.response.trim()
+      : text;
+
+  return {
+    response,
+    rawMetadata: parsed.metadata,
+    metadata: parseLlmMetadata(parsed.metadata),
+  };
+}
+
 const LIST_TYPE_LABELS: Record<string, string> = {
   shopping: "shopping list",
   contacts: "contacts list",
@@ -20,19 +200,14 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 export function parseLlmReply(text: string): ParsedLlmMessage {
-  const parsed = extractJsonObject(text);
-  if (!parsed) {
+  const payload = extractLlmPayload(text);
+  if (!payload) {
     return { response: text, actions: [] };
   }
 
-  const response =
-    typeof parsed.response === "string" && parsed.response.trim()
-      ? parsed.response.trim()
-      : text;
-
   return {
-    response,
-    actions: collectActionDescriptions(parsed.metadata),
+    response: payload.response,
+    actions: collectActionDescriptions(payload.rawMetadata),
   };
 }
 
@@ -154,7 +329,23 @@ function describeListAction(list: Record<string, unknown>): string {
     ? list.items.map(itemLabel).filter(Boolean).join(", ")
     : "";
 
-  return names ? `${verb} ${listName}: ${names}` : `${verb} ${listName}`;
+  const targetSuffix = describeTargets(list);
+  return names
+    ? `${verb} ${listName}${targetSuffix}: ${names}`
+    : `${verb} ${listName}${targetSuffix}`;
+}
+
+function describeTargets(record: Record<string, unknown>): string {
+  const targets = parseTargets(record);
+  if (targets.length === 0) {
+    return "";
+  }
+
+  if (targets.some((target) => /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i.test(target))) {
+    return " for everyone";
+  }
+
+  return ` for ${targets.join(", ")}`;
 }
 
 function describeFilingAction(filing: Record<string, unknown>): string {
@@ -178,6 +369,10 @@ function describeFilingAction(filing: Record<string, unknown>): string {
   }
 
   return verb;
+}
+
+export function llmItemLabel(item: unknown): string {
+  return itemLabel(item);
 }
 
 function itemLabel(item: unknown): string {

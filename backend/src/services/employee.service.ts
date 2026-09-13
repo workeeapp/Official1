@@ -23,6 +23,25 @@ export async function listEmployeesForUser(userId: string): Promise<PublicEmploy
   return employees.map(toPublicEmployee);
 }
 
+export async function resolveActingEmployee(userId: string): Promise<PublicEmployee> {
+  const employees = await listEmployeesForUser(userId);
+  if (employees.length === 0) {
+    throw new NotFoundError("Employee not found");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true },
+  });
+  const username = user?.username.trim();
+  return (
+    employees.find(
+      (employee) =>
+        employee.nickname?.trim() === username || employee.name === username,
+    ) ?? employees[0]
+  );
+}
+
 export async function getEmployeeForUser(
   userId: string,
   employeeId: string,

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
 import { DashboardPage } from "./DashboardPage";
+import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
 import { LoginPage } from "@/pages/Login/LoginPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -34,6 +35,9 @@ vi.mock("@/services/employee.service", async () => {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),
+      records: vi.fn().mockResolvedValue({ employeeId: "", groups: [] }),
+      updateRecord: vi.fn(),
+      deleteRecord: vi.fn(),
     },
   };
 });
@@ -44,6 +48,7 @@ function renderDashboard(extraRoutes = false) {
       {extraRoutes ? <Route path="/login" element={<LoginPage />} /> : null}
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/chat" element={<ChatPage />} />
       </Route>
     </Routes>,
@@ -89,46 +94,26 @@ describe("Dashboard page", () => {
       "Hello, Amit",
     );
     expect(screen.getByText("Welcome back to your dashboard.")).toBeInTheDocument();
-    expect(await screen.findByTestId("employee-count")).toHaveTextContent("3 employees");
-    expect(screen.getByTitle("לוסי")).toHaveTextContent("לוסי");
-    expect(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).toHaveTextContent(
-      "עמית",
-    );
-    expect(screen.getByTitle("טל דור · tal@example.com · 050-0000002")).toHaveTextContent(
-      "טל",
-    );
-    expect(screen.getByRole("button", { name: "Add employee" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Update employee" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Delete employee" })).toBeDisabled();
+    expect(screen.queryByTestId("employee-count")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    expect(screen.getByRole("link", { name: "Employees" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Chat" })).toBeInTheDocument();
   });
 
-  it("enables update and delete after selecting an employee", async () => {
+  it("opens the employees screen from the Employees tab", async () => {
     const user = userEvent.setup();
     renderDashboard();
 
-    await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+    await user.click(await screen.findByRole("link", { name: "Employees" }));
 
-    expect(screen.getByTestId("employee-contact")).toHaveTextContent(
-      "amit@example.com · 050-0000001",
+    expect(await screen.findByTestId("employees-page")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Employees" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-
-    expect(screen.getByRole("button", { name: "Update employee" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Delete employee" })).toBeEnabled();
-  });
-
-  it("shows email and phone fields when adding an employee", async () => {
-    const user = userEvent.setup();
-    renderDashboard();
-
-    await user.click(await screen.findByRole("button", { name: "Add employee" }));
-
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(screen.getByLabelText("Phone")).toBeInTheDocument();
   });
 
   it("opens the chat screen from the Chat tab", async () => {

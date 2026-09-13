@@ -12,9 +12,12 @@ export function ChatPage() {
     threads,
     rawResponses,
     sendingEmployeeId,
+    historyLoadingId,
     error,
     send,
+    resetConversation,
     stop,
+    resetting,
   } = useChat();
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -32,6 +35,7 @@ export function ChatPage() {
   const messages = threadId ? (threads[threadId] ?? []) : [];
   const sending = Boolean(sendingEmployeeId);
   const sendingThisThread = sendingEmployeeId === threadId;
+  const loadingHistory = historyLoadingId === threadId;
   const completeResponse = formatCompleteResponse(
     threadId ? rawResponses[threadId] : undefined,
   );
@@ -79,34 +83,47 @@ export function ChatPage() {
     >
       <div className="shrink-0 border-b border-border px-6 py-5 sm:px-8">
         <h1 className="sr-only">Chat</h1>
-        <div className="max-w-xs">
-          <label
-            htmlFor="chat-as"
-            className="text-sm font-medium text-text-primary"
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="max-w-xs w-full">
+            <label
+              htmlFor="chat-as"
+              className="text-sm font-medium text-text-primary"
+            >
+              Chat As
+            </label>
+            <select
+              id="chat-as"
+              name="chatAs"
+              data-testid="chat-as"
+              value={chatAsId}
+              disabled={status === "loading" || tableEmployees.length === 0 || sending}
+              onChange={(event) => setChatAsId(event.target.value)}
+              className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-text-primary shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+            >
+              {status === "loading" ? (
+                <option value="">Loading employees…</option>
+              ) : tableEmployees.length === 0 ? (
+                <option value="">No employees</option>
+              ) : (
+                tableEmployees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employeeDisplayName(employee)}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="border border-border bg-background text-text-primary hover:bg-primary-light sm:w-auto"
+            disabled={!selectedEmployee || sending || resetting || loadingHistory}
+            loading={resetting}
+            busyLabel="Resetting…"
+            onClick={() => void resetConversation()}
           >
-            Chat As
-          </label>
-          <select
-            id="chat-as"
-            name="chatAs"
-            data-testid="chat-as"
-            value={chatAsId}
-            disabled={status === "loading" || tableEmployees.length === 0 || sending}
-            onChange={(event) => setChatAsId(event.target.value)}
-            className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-text-primary shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
-          >
-            {status === "loading" ? (
-              <option value="">Loading employees…</option>
-            ) : tableEmployees.length === 0 ? (
-              <option value="">No employees</option>
-            ) : (
-              tableEmployees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employeeDisplayName(employee)}
-                </option>
-              ))
-            )}
-          </select>
+            Reset Conversation
+          </Button>
         </div>
       </div>
 
@@ -115,10 +132,27 @@ export function ChatPage() {
         data-testid="chat-messages"
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-6 py-5 sm:px-8"
       >
-        {messages.length === 0 && !sendingThisThread ? (
-          <p className="m-auto max-w-sm text-center text-sm text-text-secondary">
-            No messages yet. Write something below to begin.
+        {loadingHistory && messages.length === 0 ? (
+          <p
+            data-testid="chat-history-loading"
+            className="m-auto max-w-sm text-center text-sm text-text-secondary"
+          >
+            Loading conversation…
           </p>
+        ) : messages.length === 0 && !sendingThisThread ? (
+          <div
+            data-testid="new-conversation"
+            className="m-auto max-w-sm rounded-2xl border border-primary/25 bg-primary-light px-5 py-6 text-center"
+          >
+            <p className="text-sm font-semibold text-primary">New conversation</p>
+            <p className="mt-2 text-sm leading-6 text-text-primary">
+              This is a new conversation. Previous chat messages are not included.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-text-secondary">
+              Lists, tasks, and filings will be sent to the assistant with the first
+              message.
+            </p>
+          </div>
         ) : (
           <>
             {messages.map((message) => (

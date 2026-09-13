@@ -6,8 +6,18 @@ export type {
   PublicEmployee,
   EmployeesResponse,
   EmployeeInput,
+  EmployeeRecordField,
+  EmployeeRecordItem,
+  EmployeeRecordGroup,
+  EmployeeRecordsResponse,
+  EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,
+  ChatThreadNotification,
+  ChatMessageAuthor,
+  ChatThreadMessage,
+  ChatHistoryResponse,
+  ChatLiveEvent,
 } from "./types";
 export {
   USERNAME_MIN_LENGTH,
@@ -25,10 +35,26 @@ export {
   validateEmployeeInput,
   hasEmployeeFieldErrors,
   CHAT_MESSAGE_MAX_LENGTH,
+  validateEmployeeId,
   validateChatMessage,
   validateChatInput,
   hasChatFieldErrors,
 } from "./validation";
 export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
-export { parseLlmReply } from "./llm-message";
-export type { ParsedLlmMessage } from "./llm-message";
+export {
+  emptyLlmMetadata,
+  parseLlmMetadata,
+  parseLlmReply,
+  parseReplyMetadata,
+  parseTargets,
+  llmItemLabel,
+} from "./llm-message";
+export type {
+  LlmFilingAction,
+  LlmFilingActionName,
+  LlmListAction,
+  LlmListActionName,
+  LlmListType,
+  LlmMetadata,
+  ParsedLlmMessage,
+} from "./llm-message";

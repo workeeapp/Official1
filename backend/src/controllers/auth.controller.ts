@@ -5,7 +5,6 @@ import {
   clearSessionCookie,
   setSessionCookie,
 } from "../auth/session.js";
-import { forgetConversation } from "../services/chat.service.js";
 import { UnauthorizedError } from "../utils/errors.js";
 
 export async function login(req: Request, res: Response): Promise<void> {
@@ -25,11 +24,7 @@ export async function me(req: Request, res: Response): Promise<void> {
   res.status(200).json({ user });
 }
 
-export async function logout(req: Request, res: Response): Promise<void> {
-  if (req.sessionId) {
-    forgetConversation(req.sessionId);
-  }
-
+export async function logout(_req: Request, res: Response): Promise<void> {
   clearSessionCookie(res);
   res.status(200).json({ ok: true });
 }

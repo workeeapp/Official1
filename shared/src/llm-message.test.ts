@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLlmReply } from "./llm-message.js";
+import { parseLlmReply, parseReplyMetadata } from "./llm-message.js";
 
 describe("parseLlmReply", () => {
   it("returns plain text when the reply is not JSON", () => {
@@ -64,5 +64,83 @@ describe("parseLlmReply", () => {
       "Add to shopping list: milk",
       "File: car number — 3434343",
     ]);
+  });
+
+  it("keeps action targets and mentions them in the description", () => {
+    const reply = JSON.stringify({
+      response: "Told Tal.",
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            list_type: "shopping",
+            targets: ["טל"],
+            items: [{ name: "חלב" }],
+          },
+        ],
+        filing: [],
+      },
+    });
+
+    expect(parseLlmReply(reply).actions).toEqual([
+      "Add to shopping list for טל: חלב",
+    ]);
+    expect(parseReplyMetadata(reply).lists[0].targets).toEqual(["טל"]);
+  });
+
+  it("extracts structured list, task, and filing actions", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "Done.",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "shopping",
+                items: [{ "שם פריט": "חלב", כמות: 1 }],
+              },
+              {
+                action: "add",
+                list_type: "tasks",
+                items: [{ "שם מטלה": "לקנות מתנה" }],
+              },
+            ],
+            filing: [
+              {
+                action: "add_filing",
+                item_name: "מספר רכב",
+                item_info: "3434343",
+              },
+            ],
+          },
+        }),
+      ),
+    ).toEqual({
+      lists: [
+        {
+          action: "add",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "חלב", כמות: 1 }],
+          targets: [],
+        },
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "לקנות מתנה" }],
+          targets: [],
+        },
+      ],
+      filing: [
+        {
+          action: "add_filing",
+          itemName: "מספר רכב",
+          itemInfo: "3434343",
+          targets: [],
+        },
+      ],
+    });
   });
 });

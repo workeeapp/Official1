@@ -166,6 +166,18 @@ export interface ChatFieldErrors {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function validateEmployeeId(employeeId: unknown): string | undefined {
+  if (typeof employeeId !== "string" || employeeId.trim().length === 0) {
+    return "Employee is required";
+  }
+
+  if (!UUID_PATTERN.test(employeeId)) {
+    return "Employee is invalid";
+  }
+
+  return undefined;
+}
+
 export function validateChatMessage(message: unknown): string | undefined {
   if (typeof message !== "string" || message.trim().length === 0) {
     return "Message is required";
@@ -189,10 +201,10 @@ export function validateChatInput(input: {
     errors.message = messageError;
   }
 
-  if (typeof input.employeeId !== "string" || input.employeeId.trim().length === 0) {
-    errors.employeeId = "Employee is required";
-  } else if (!UUID_PATTERN.test(input.employeeId)) {
-    errors.employeeId = "Employee is invalid";
+  const employeeIdError = validateEmployeeId(input.employeeId);
+
+  if (employeeIdError) {
+    errors.employeeId = employeeIdError;
   }
 
   return errors;

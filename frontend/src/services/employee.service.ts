@@ -1,4 +1,10 @@
-import type { EmployeeInput, EmployeesResponse, PublicEmployee } from "@workee/shared";
+import type {
+  EmployeeInput,
+  EmployeeRecordField,
+  EmployeeRecordsResponse,
+  EmployeesResponse,
+  PublicEmployee,
+} from "@workee/shared";
 import { api } from "./http";
 
 export const DEFAULT_EMPLOYEE: PublicEmployee = {
@@ -37,6 +43,34 @@ export const employeeApi = {
     return api<{ ok: boolean }>(`/api/employees/${id}`, {
       method: "DELETE",
     });
+  },
+
+  records(id: string, signal?: AbortSignal): Promise<EmployeeRecordsResponse> {
+    return api<EmployeeRecordsResponse>(`/api/employees/${id}/records`, { signal });
+  },
+
+  updateRecord(
+    employeeId: string,
+    itemId: string,
+    fields: EmployeeRecordField[],
+  ): Promise<{ records: EmployeeRecordsResponse }> {
+    return api<{ records: EmployeeRecordsResponse }>(
+      `/api/employees/${employeeId}/records/${itemId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ fields }),
+      },
+    );
+  },
+
+  deleteRecord(
+    employeeId: string,
+    itemId: string,
+  ): Promise<{ records: EmployeeRecordsResponse }> {
+    return api<{ records: EmployeeRecordsResponse }>(
+      `/api/employees/${employeeId}/records/${itemId}`,
+      { method: "DELETE" },
+    );
   },
 };
 

@@ -3,6 +3,7 @@ import {
   validateEmployeeInput,
   type EmployeeFieldErrors,
   type EmployeeInput,
+  type EmployeeRecordField,
 } from "@workee/shared";
 import { ValidationError } from "../utils/errors.js";
 
@@ -48,4 +49,26 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     email: optionalText(record.email),
     phone: optionalText(record.phone),
   };
+}
+
+export function parseRecordFields(body: unknown): EmployeeRecordField[] {
+  if (!body || typeof body !== "object") {
+    throw new ValidationError("Fields are required", { fields: "Fields are required" });
+  }
+
+  const fields = (body as Record<string, unknown>).fields;
+  if (!Array.isArray(fields) || fields.length === 0) {
+    throw new ValidationError("Fields are required", { fields: "Fields are required" });
+  }
+
+  return fields.map((field) => {
+    if (!field || typeof field !== "object") {
+      throw new ValidationError("Fields are required", { fields: "Fields are required" });
+    }
+    const record = field as Record<string, unknown>;
+    return {
+      label: String(record.label ?? "").trim(),
+      value: String(record.value ?? ""),
+    };
+  });
 }

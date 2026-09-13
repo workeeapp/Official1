@@ -1,6 +1,7 @@
 import {
   hasChatFieldErrors,
   validateChatInput,
+  validateEmployeeId,
   type ChatFieldErrors,
   type ChatMessageRequest,
 } from "@workee/shared";
@@ -38,4 +39,26 @@ export function parseChatMessageBody(body: unknown): ChatMessageRequest {
     message: String(record.message).trim(),
     employeeId: String(record.employeeId),
   };
+}
+
+export function parseEmployeeIdBody(body: unknown): string {
+  if (!body || typeof body !== "object") {
+    throw new ValidationError("Please correct the highlighted fields", {
+      employeeId: "Employee is required",
+    });
+  }
+
+  return parseEmployeeIdQuery((body as Record<string, unknown>).employeeId);
+}
+
+export function parseEmployeeIdQuery(employeeId: unknown): string {
+  const error = validateEmployeeId(employeeId);
+
+  if (error) {
+    throw new ValidationError("Please correct the highlighted fields", {
+      employeeId: error,
+    });
+  }
+
+  return String(employeeId);
 }

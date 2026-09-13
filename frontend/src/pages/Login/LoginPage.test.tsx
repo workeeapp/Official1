@@ -5,6 +5,7 @@ import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
 import { LoginPage } from "./LoginPage";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
+import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ApiError } from "@/types";
@@ -35,6 +36,9 @@ vi.mock("@/services/employee.service", async () => {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),
+      records: vi.fn().mockResolvedValue({ employeeId: "", groups: [] }),
+      updateRecord: vi.fn(),
+      deleteRecord: vi.fn(),
     },
   };
 });
@@ -45,6 +49,7 @@ function renderLoginFlow(route = "/login") {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/chat" element={<ChatPage />} />
       </Route>
     </Routes>,
