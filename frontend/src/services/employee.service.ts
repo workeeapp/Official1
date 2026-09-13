@@ -1,4 +1,5 @@
 import type {
+  DigitalEmployeeDefaults,
   EmployeeInput,
   EmployeeRecordField,
   EmployeeRecordsResponse,
@@ -7,22 +8,13 @@ import type {
 } from "@workee/shared";
 import { api } from "./http";
 
-export const DEFAULT_EMPLOYEE: PublicEmployee = {
-  id: "default-lucy",
-  name: "לוסי",
-  surname: "",
-  nickname: "לוסי",
-  email: null,
-  phone: null,
-};
-
-export function isDefaultEmployee(employee: Pick<PublicEmployee, "id">): boolean {
-  return employee.id === DEFAULT_EMPLOYEE.id;
-}
-
 export const employeeApi = {
   list(): Promise<EmployeesResponse> {
     return api<EmployeesResponse>("/api/employees");
+  },
+
+  digitalDefaults(): Promise<DigitalEmployeeDefaults> {
+    return api<DigitalEmployeeDefaults>("/api/employees/digital-defaults");
   },
 
   create(input: EmployeeInput): Promise<{ employee: PublicEmployee }> {
@@ -73,15 +65,6 @@ export const employeeApi = {
     );
   },
 };
-
-export function withDefaultEmployee(employees: PublicEmployee[]): PublicEmployee[] {
-  const alreadyIncluded = employees.some(
-    (employee) =>
-      employee.id === DEFAULT_EMPLOYEE.id || employee.nickname === DEFAULT_EMPLOYEE.nickname,
-  );
-
-  return alreadyIncluded ? employees : [DEFAULT_EMPLOYEE, ...employees];
-}
 
 export function employeeFullName(employee: PublicEmployee): string {
   return `${employee.name} ${employee.surname}`.trim();

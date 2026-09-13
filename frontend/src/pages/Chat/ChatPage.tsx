@@ -1,14 +1,18 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { chatThreadKey } from "@workee/shared";
 import { Button } from "@/components/Button";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
 import { employeeDisplayName } from "@/services/employee.service";
+import { chatDayKey, formatChatDate, formatChatTime } from "./chatTime";
 
 export function ChatPage() {
-  const { tableEmployees, status } = useEmployees();
+  const { tableEmployees, digitalEmployees, status } = useEmployees();
   const {
     chatAsId,
     setChatAsId,
+    chatWithId,
+    setChatWithId,
     threads,
     rawResponses,
     sendingEmployeeId,
@@ -28,10 +32,27 @@ export function ChatPage() {
     }
   }, [chatAsId, setChatAsId, tableEmployees]);
 
+  useEffect(() => {
+    if (!chatWithId && digitalEmployees.length > 0) {
+      const preferred =
+        digitalEmployees.find((employee) => employee.protected) ?? digitalEmployees[0];
+      setChatWithId(preferred.id);
+    }
+  }, [chatWithId, digitalEmployees]);
+
   const selectedEmployee =
     tableEmployees.find((employee) => employee.id === chatAsId) ??
     tableEmployees[0];
-  const threadId = selectedEmployee?.id ?? "";
+  const selectedDigital =
+    digitalEmployees.find((employee) => employee.id === chatWithId) ??
+    digitalEmployees[0];
+  const chatWithName = selectedDigital
+    ? employeeDisplayName(selectedDigital)
+    : "Assistant";
+  const threadId =
+    selectedEmployee && selectedDigital
+      ? chatThreadKey(selectedEmployee.id, selectedDigital.id)
+      : "";
   const messages = threadId ? (threads[threadId] ?? []) : [];
   const sending = Boolean(sendingEmployeeId);
   const sendingThisThread = sendingEmployeeId === threadId;
@@ -64,6 +85,8 @@ export function ChatPage() {
       employeeId: selectedEmployee.id,
       speaker: employeeDisplayName(selectedEmployee),
       text,
+      digitalEmployeeId: selectedDigital?.id,
+      assistantSpeaker: chatWithName,
     });
   }
 
@@ -113,6 +136,35 @@ export function ChatPage() {
               )}
             </select>
           </div>
+          <div className="max-w-xs w-full">
+            <label
+              htmlFor="chat-with"
+              className="text-sm font-medium text-text-primary"
+            >
+              Chat With
+            </label>
+            <select
+              id="chat-with"
+              name="chatWith"
+              data-testid="chat-with"
+              value={chatWithId}
+              disabled={status === "loading" || digitalEmployees.length === 0 || sending}
+              onChange={(event) => setChatWithId(event.target.value)}
+              className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-text-primary shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+            >
+              {status === "loading" ? (
+                <option value="">Loading employees…</option>
+              ) : digitalEmployees.length === 0 ? (
+                <option value="">No digital employees</option>
+              ) : (
+                digitalEmployees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>
+                    {employeeDisplayName(employee)}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
           <Button
             type="button"
             variant="ghost"
@@ -149,31 +201,57 @@ export function ChatPage() {
               This is a new conversation. Previous chat messages are not included.
             </p>
             <p className="mt-1 text-sm leading-6 text-text-secondary">
-              Lists, tasks, and filings will be sent to the assistant with the first
+              Lists, tasks, and filings will be sent to {chatWithName} with the first
               message.
             </p>
           </div>
         ) : (
           <>
-            {messages.map((message) => (
+            {messages.map((message, index) => {
+              const previousDay = chatDayKey(messages[index - 1]?.createdAt);
+              const currentDay = chatDayKey(message.createdAt);
+              const showDate = Boolean(currentDay && currentDay !== previousDay);
+              const time = message.createdAt ? formatChatTime(message.createdAt) : "";
+
+              return (
+              <div key={message.id} className="flex flex-col gap-3">
+                {showDate && message.createdAt ? (
+                  <p
+                    data-testid="chat-date"
+                    className="self-center rounded-full bg-background px-3 py-1 text-xs font-medium text-text-secondary"
+                  >
+                    {formatChatDate(message.createdAt)}
+                  </p>
+                ) : null}
               <div
-                key={message.id}
                 className={`flex max-w-[85%] flex-col gap-2 ${
                   message.author === "you" ? "self-end" : "self-start"
                 }`}
               >
                 <div>
                   <p className="mb-1 px-1 text-xs font-medium text-text-secondary">
-                    {message.speaker}
+                    {message.author === "assistant" ? chatWithName : message.speaker}
                   </p>
                   <p
-                    className={`rounded-2xl px-3.5 py-2.5 text-sm leading-6 ${
+                    className={`rounded-2xl px-3.5 pt-2.5 pb-1.5 text-sm leading-6 ${
                       message.author === "you"
                         ? "bg-primary text-white"
                         : "bg-primary-light text-text-primary"
                     }`}
                   >
-                    {message.text}
+                    <span className="block whitespace-pre-wrap">{message.text}</span>
+                    {time ? (
+                      <span
+                        data-testid="chat-time"
+                        className={`mt-1 block text-end text-[11px] leading-4 ${
+                          message.author === "you"
+                            ? "text-white/70"
+                            : "text-text-secondary"
+                        }`}
+                      >
+                        {time}
+                      </span>
+                    ) : null}
                   </p>
                 </div>
                 {message.actions?.map((action) => (
@@ -186,13 +264,15 @@ export function ChatPage() {
                   </p>
                 ))}
               </div>
-            ))}
+              </div>
+              );
+            })}
             {sendingThisThread ? (
               <p
                 data-testid="chat-pending"
                 className="self-start px-1 text-sm text-text-secondary"
               >
-                Assistant is typing…
+                {chatWithName} is typing…
               </p>
             ) : null}
           </>

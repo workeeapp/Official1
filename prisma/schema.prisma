@@ -20,18 +20,24 @@ model User {
 }
 
 model Employee {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  name      String   @db.VarChar(100)
-  surname   String   @db.VarChar(100)
-  nickname  String?  @db.VarChar(100)
-  email     String?  @db.VarChar(254)
-  phone     String?  @db.VarChar(32)
-  createdAt DateTime @default(now()) @map("created_at")
-  user              User               @relation(fields: [userId], references: [id], onDelete: Restrict)
-  chatConversations ChatConversation[]
-  lists             EmployeeList[]
-  filings           EmployeeFiling[]
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  kind         String   @default("human") @db.VarChar(16)
+  name         String   @db.VarChar(100)
+  surname      String   @db.VarChar(100)
+  nickname     String?  @db.VarChar(100)
+  email        String?  @db.VarChar(254)
+  phone        String?  @db.VarChar(32)
+  model        String?  @db.VarChar(100)
+  temperature  Float?
+  instructions String?  @db.Text
+  isProtected  Boolean  @default(false) @map("is_protected")
+  createdAt    DateTime @default(now()) @map("created_at")
+  user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  chatConversations        ChatConversation[] @relation("ConversationSpeaker")
+  digitalChatConversations ChatConversation[] @relation("ConversationPartner")
+  lists                    EmployeeList[]
+  filings                  EmployeeFiling[]
 
   @@index([userId])
   @@map("Employees")
@@ -41,16 +47,19 @@ model ChatConversation {
   id                   String        @id @default(uuid()) @db.Uuid
   userId               String        @map("user_id") @db.Uuid
   employeeId           String        @map("employee_id") @db.Uuid
+  digitalEmployeeId    String        @map("digital_employee_id") @db.Uuid
   openaiConversationId String        @map("openai_conversation_id") @db.VarChar(255)
   createdAt            DateTime      @default(now()) @map("created_at")
   updatedAt            DateTime      @updatedAt @map("updated_at")
   user                 User          @relation(fields: [userId], references: [id], onDelete: Restrict)
-  employee             Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee             Employee      @relation("ConversationSpeaker", fields: [employeeId], references: [id], onDelete: Cascade)
+  digitalEmployee      Employee      @relation("ConversationPartner", fields: [digitalEmployeeId], references: [id], onDelete: Cascade)
   contextInjectedAt    DateTime?     @map("context_injected_at")
   messages             ChatMessage[]
 
-  @@unique([userId, employeeId])
+  @@unique([userId, employeeId, digitalEmployeeId])
   @@index([userId])
+  @@index([digitalEmployeeId])
   @@map("ChatConversations")
 }
 

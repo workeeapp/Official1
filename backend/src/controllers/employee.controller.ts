@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { humanEmployees, isProtectedEmployee } from "@workee/shared";
 import { notifySharedItemEvents } from "../services/chat.service.js";
 import {
   deleteEmployeeRecord,
@@ -8,6 +9,7 @@ import {
 import {
   createEmployeeForUser,
   deleteEmployeeForUser,
+  getDigitalEmployeeDefaults,
   getEmployeeForUser,
   listEmployeesForUser,
   resolveActingEmployee,
@@ -27,6 +29,14 @@ export async function listEmployees(req: Request, res: Response): Promise<void> 
     employees,
     count: employees.length,
   });
+}
+
+export async function getDigitalDefaults(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  res.status(200).json(getDigitalEmployeeDefaults());
 }
 
 export async function getEmployeeRecords(req: Request, res: Response): Promise<void> {
@@ -57,12 +67,18 @@ export async function updateEmployeeRecordItem(
     listEmployeesForUser(req.user.id),
   ]);
   const events = await updateEmployeeRecord(employeeId, itemId, fields, actor.id);
-  const notifications = await notifySharedItemEvents({
-    userId: req.user.id,
-    actor,
-    employees,
-    events,
-  });
+  const digital =
+    employees.find((employee) => isProtectedEmployee(employee)) ??
+    employees.find((employee) => employee.kind === "digital");
+  const notifications = digital
+    ? await notifySharedItemEvents({
+        userId: req.user.id,
+        actor,
+        employees: humanEmployees(employees),
+        events,
+        digitalEmployeeId: digital.id,
+      })
+    : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });
 }
@@ -83,12 +99,18 @@ export async function deleteEmployeeRecordItem(
     listEmployeesForUser(req.user.id),
   ]);
   const events = await deleteEmployeeRecord(employeeId, itemId, actor.id);
-  const notifications = await notifySharedItemEvents({
-    userId: req.user.id,
-    actor,
-    employees,
-    events,
-  });
+  const digital =
+    employees.find((employee) => isProtectedEmployee(employee)) ??
+    employees.find((employee) => employee.kind === "digital");
+  const notifications = digital
+    ? await notifySharedItemEvents({
+        userId: req.user.id,
+        actor,
+        employees: humanEmployees(employees),
+        events,
+        digitalEmployeeId: digital.id,
+      })
+    : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });
 }

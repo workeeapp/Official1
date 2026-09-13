@@ -87,6 +87,29 @@ describe("validateEmployeeInput", () => {
     expect(errors.email).toBe("Email is invalid");
     expect(errors.phone).toBe("Phone is invalid");
   });
+
+  it("requires model, temperature, and instructions for a digital employee", () => {
+    const errors = validateEmployeeInput({
+      kind: "digital",
+      name: "לוסי",
+    });
+    expect(errors.model).toBe("Model is required");
+    expect(errors.temperature).toBe("Temperature is required");
+    expect(errors.instructions).toBe("Instructions are required");
+    expect(errors.surname).toBeUndefined();
+  });
+
+  it("accepts a valid digital employee", () => {
+    expect(
+      validateEmployeeInput({
+        kind: "digital",
+        name: "לוסי",
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+      }),
+    ).toEqual({});
+  });
 });
 
 describe("validateChatInput", () => {

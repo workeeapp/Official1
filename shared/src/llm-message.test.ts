@@ -141,6 +141,33 @@ describe("parseLlmReply", () => {
           targets: [],
         },
       ],
+      messages: [],
     });
+  });
+
+  it("extracts a relayed message for another employee", () => {
+    const reply = JSON.stringify({
+      response: "שלחתי לטל",
+      metadata: {
+        lists: [],
+        filing: [],
+        messages: [
+          {
+            targets: ["טל"],
+            text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+          },
+        ],
+      },
+    });
+
+    expect(parseReplyMetadata(reply).messages).toEqual([
+      {
+        targets: ["טל"],
+        text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+      },
+    ]);
+    expect(parseLlmReply(reply).actions).toEqual([
+      "Send message for טל: עמית שואל מה שלומך?\nמה לענות לו ?",
+    ]);
   });
 });

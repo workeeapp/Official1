@@ -3,6 +3,7 @@ import {
   createEmployee,
   deleteEmployee,
   deleteEmployeeRecordItem,
+  getDigitalDefaults,
   getEmployeeRecords,
   listEmployees,
   updateEmployee,
@@ -14,6 +15,7 @@ import { asyncHandler } from "../middleware/async-handler.js";
 export const employeeRouter = Router();
 
 employeeRouter.get("/", requireAuth, asyncHandler(listEmployees));
+employeeRouter.get("/digital-defaults", requireAuth, asyncHandler(getDigitalDefaults));
 employeeRouter.get("/:id/records", requireAuth, asyncHandler(getEmployeeRecords));
 employeeRouter.patch("/:id/records/:itemId", requireAuth, asyncHandler(updateEmployeeRecordItem));
 employeeRouter.delete("/:id/records/:itemId", requireAuth, asyncHandler(deleteEmployeeRecordItem));

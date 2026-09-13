@@ -2,6 +2,7 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { validateLoginInput, hasFieldErrors } from "@workee/shared";
 import { hashPassword } from "../backend/src/auth/password.js";
+import { loadLlmConfig } from "../backend/src/config/llm.js";
 
 const prisma = new PrismaClient();
 
@@ -72,6 +73,29 @@ async function main(): Promise<void> {
       },
     });
     console.log(`Seeded employee "${created.name} ${created.surname}" (${created.id})`);
+  }
+
+  const lucy = await prisma.employee.findFirst({
+    where: { userId: user.id, isProtected: true },
+  });
+  if (lucy) {
+    console.log(`Protected employee "${lucy.name}" already exists.`);
+  } else {
+    const config = loadLlmConfig();
+    const createdLucy = await prisma.employee.create({
+      data: {
+        userId: user.id,
+        kind: "digital",
+        isProtected: true,
+        name: "לוסי",
+        surname: "",
+        nickname: "לוסי",
+        model: config.model,
+        temperature: config.temperature,
+        instructions: config.systemMessage,
+      },
+    });
+    console.log(`Seeded protected employee "${createdLucy.name}" (${createdLucy.id})`);
   }
 }
 

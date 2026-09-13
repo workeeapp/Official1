@@ -20,13 +20,20 @@ export interface LoginRequest {
   password: string;
 }
 
+export type EmployeeKind = "human" | "digital";
+
 export interface PublicEmployee {
   id: string;
+  kind?: EmployeeKind;
   name: string;
   surname: string;
   nickname: string | null;
   email: string | null;
   phone: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  instructions?: string | null;
+  protected?: boolean;
 }
 
 export interface EmployeesResponse {
@@ -65,16 +72,51 @@ export interface EmployeeRecordsResponse {
 }
 
 export interface EmployeeInput {
+  kind?: EmployeeKind;
   name: string;
-  surname: string;
+  surname?: string;
   nickname?: string | null;
   email?: string | null;
   phone?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  instructions?: string | null;
+}
+
+export interface DigitalEmployeeDefaults {
+  model: string;
+  temperature: number;
+  instructions: string;
+}
+
+export function isDigitalEmployee(
+  employee: Pick<PublicEmployee, "kind">,
+): boolean {
+  return employee.kind === "digital";
+}
+
+export function humanEmployees<T extends Pick<PublicEmployee, "kind">>(
+  employees: T[],
+): T[] {
+  return employees.filter((employee) => employee.kind !== "digital");
+}
+
+export function digitalEmployees<T extends Pick<PublicEmployee, "kind">>(
+  employees: T[],
+): T[] {
+  return employees.filter((employee) => employee.kind === "digital");
+}
+
+export function isProtectedEmployee(
+  employee: Pick<PublicEmployee, "protected">,
+): boolean {
+  return employee.protected === true;
 }
 
 export interface ChatMessageRequest {
   message: string;
   employeeId: string;
+  digitalEmployeeId?: string;
 }
 
 export interface ChatMessageResponse {
@@ -85,6 +127,7 @@ export interface ChatMessageResponse {
 
 export interface ChatThreadNotification {
   employeeId: string;
+  digitalEmployeeId?: string;
   message: ChatThreadMessage;
   raw?: unknown;
 }
@@ -96,11 +139,13 @@ export interface ChatThreadMessage {
   author: ChatMessageAuthor;
   speaker: string;
   text: string;
+  createdAt?: string;
   actions?: string[];
 }
 
 export interface ChatHistoryResponse {
   employeeId: string;
+  digitalEmployeeId?: string;
   conversationId: string | null;
   startedAt: string | null;
   messages: ChatThreadMessage[];
@@ -110,6 +155,11 @@ export interface ChatHistoryResponse {
 
 export interface ChatLiveEvent {
   employeeId: string;
+  digitalEmployeeId?: string;
   message: ChatThreadMessage;
   raw?: unknown;
+}
+
+export function chatThreadKey(employeeId: string, digitalEmployeeId: string): string {
+  return `${employeeId}:${digitalEmployeeId}`;
 }

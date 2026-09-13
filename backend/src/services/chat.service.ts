@@ -1,5 +1,6 @@
 import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
+  humanEmployees,
   parseLlmReply,
   parseReplyMetadata,
   type ChatHistoryResponse,
@@ -8,7 +9,8 @@ import {
   type LlmMetadata,
   type PublicEmployee,
 } from "@workee/shared";
-import { loadLlmConfig } from "../config/llm.js";
+import { loadLlmConfig, type LlmConfig } from "../config/llm.js";
+import { ValidationError } from "../utils/errors.js";
 import { prisma } from "../database/prisma.js";
 import {
   isUniqueConstraintError,
@@ -24,7 +26,9 @@ import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js"
 import {
   employeeDisplayName,
   fallbackNotificationText,
+  planRelayDeliveries,
   planTargetedActions,
+  resolveRelayMessages,
   resolveSpokenMetadata,
 } from "./employee-targets.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
@@ -51,9 +55,11 @@ function emptyHistory(
   employeeId: string,
   conversationId: string | null,
   startedAt: Date | string | null = null,
+  digitalEmployeeId?: string,
 ): ChatHistoryResponse {
   return {
     employeeId,
+    digitalEmployeeId,
     conversationId,
     startedAt: startedAt instanceof Date ? startedAt.toISOString() : startedAt,
     messages: [],
@@ -65,6 +71,7 @@ function emptyHistory(
 function toHistoryResponse(
   employeeId: string,
   conversation: {
+    digitalEmployeeId?: string;
     openaiConversationId: string;
     updatedAt: Date;
     messages: ChatMessageRow[];
@@ -76,6 +83,7 @@ function toHistoryResponse(
 
   return {
     employeeId,
+    digitalEmployeeId: conversation.digitalEmployeeId,
     conversationId: conversation.openaiConversationId,
     startedAt: conversation.updatedAt.toISOString(),
     messages: conversation.messages.map(toThreadMessage),
@@ -94,8 +102,66 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     author: row.author === "assistant" ? "assistant" : "you",
     speaker: row.speaker,
     text: row.text,
+    createdAt: row.createdAt.toISOString(),
     ...(actions.length > 0 ? { actions } : {}),
   };
+}
+
+function llmConfigForDigital(digital?: PublicEmployee): LlmConfig {
+  if (digital?.model && digital.instructions?.trim()) {
+    return {
+      model: digital.model,
+      temperature: digital.temperature ?? 0,
+      systemMessage: digital.instructions,
+    };
+  }
+
+  return loadLlmConfig();
+}
+
+function pickDigitalEmployee(employees: PublicEmployee[]): PublicEmployee | undefined {
+  return (
+    employees.find((employee) => employee.kind === "digital" && employee.protected) ??
+    employees.find(
+      (employee) =>
+        employee.kind === "digital" &&
+        (employee.nickname === "לוסי" || employee.name === "לוסי"),
+    ) ??
+    employees.find((employee) => employee.kind === "digital")
+  );
+}
+
+async function resolveDigitalChatPartner(
+  userId: string,
+  digitalEmployeeId: string | undefined,
+  employees: PublicEmployee[],
+): Promise<PublicEmployee | undefined> {
+  if (!digitalEmployeeId) {
+    return pickDigitalEmployee(employees);
+  }
+
+  const employee = await getEmployeeForUser(userId, digitalEmployeeId);
+  if (employee.kind !== "digital") {
+    throw new ValidationError("Chat partner must be a digital employee", {
+      digitalEmployeeId: "Employee is invalid",
+    });
+  }
+
+  return employee;
+}
+
+export async function requireDigitalChatPartner(
+  userId: string,
+  digitalEmployeeId?: string,
+): Promise<PublicEmployee> {
+  const employees = await listEmployeesForUser(userId);
+  const digital = await resolveDigitalChatPartner(userId, digitalEmployeeId, employees);
+  if (!digital) {
+    throw new ValidationError("Digital employee is required", {
+      digitalEmployeeId: "Employee is required",
+    });
+  }
+  return digital;
 }
 
 function targetingInstructions(
@@ -111,6 +177,12 @@ function targetingInstructions(
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
     "If omitted, the action applies only to the current speaker.",
+    "If the speaker asks you to send, check, ask, or tell another employee (human or digital) something, add metadata.messages.",
+    'Example: "תשלחי הודעה לטל - מה שלומך?" → messages: [{ "targets": ["טל"], "text": "עמית שואל מה שלומך?\\nמה לענות לו?" }].',
+    'Example: "תבדקי עם טל אם הוא קנה שמן" → messages: [{ "targets": ["טל"], "text": "עמית שואל אם קנית שמן?" }].',
+    "Write metadata.messages[].text for the recipient, in second person, and mention the speaker by name.",
+    "Do not turn a send/check request into a list or task unless they also asked to add one.",
+    "If there are no messages to send, metadata.messages = [].",
     "If the speaker says they bought or already have an item, remove it from their shopping list.",
     "When asked what someone still needs, answer only from EMPLOYEE_SAVED_DATA. Never mention items that are not listed there.",
   ].join("\n");
@@ -172,13 +244,16 @@ async function expireIdleConversation(existing: {
 async function getOrCreateConversation(
   userId: string,
   employeeId: string,
+  digitalEmployeeId: string,
 ): Promise<{
   id: string;
   openaiConversationId: string;
   needsContext: boolean;
 }> {
   const existing = await prisma.chatConversation.findUnique({
-    where: { userId_employeeId: { userId, employeeId } },
+    where: {
+      userId_employeeId_digitalEmployeeId: { userId, employeeId, digitalEmployeeId },
+    },
   });
 
   if (existing) {
@@ -192,6 +267,7 @@ async function getOrCreateConversation(
       data: {
         userId,
         employeeId,
+        digitalEmployeeId,
         openaiConversationId,
       },
     });
@@ -202,7 +278,9 @@ async function getOrCreateConversation(
     }
 
     const raced = await prisma.chatConversation.findUniqueOrThrow({
-      where: { userId_employeeId: { userId, employeeId } },
+      where: {
+        userId_employeeId_digitalEmployeeId: { userId, employeeId, digitalEmployeeId },
+      },
     });
     return {
       ...raced,
@@ -214,6 +292,7 @@ async function getOrCreateConversation(
 async function saveTurn(input: {
   conversationId: string;
   speaker: string;
+  assistantSpeaker: string;
   message: string;
   reply: string;
   raw: unknown;
@@ -231,7 +310,7 @@ async function saveTurn(input: {
       {
         conversationId: input.conversationId,
         author: "assistant",
-        speaker: "Assistant",
+        speaker: input.assistantSpeaker,
         text: parsed.response,
         actions: parsed.actions.length > 0 ? parsed.actions : Prisma.JsonNull,
         raw: toJsonValue(input.raw),
@@ -240,8 +319,49 @@ async function saveTurn(input: {
   });
 }
 
+async function pushRelayMessage(input: {
+  userId: string;
+  employeeId: string;
+  digitalEmployeeId: string;
+  speaker: string;
+  text: string;
+}): Promise<ChatThreadNotification> {
+  const conversation = await getOrCreateConversation(
+    input.userId,
+    input.employeeId,
+    input.digitalEmployeeId,
+  );
+  const raw = { relay: true };
+  const message = await saveAssistantMessage({
+    conversationId: conversation.id,
+    speaker: input.speaker,
+    text: input.text,
+    actions: [],
+    raw,
+  });
+
+  if (conversation.needsContext) {
+    await markContextInjected(conversation.id);
+  }
+
+  const notification = {
+    employeeId: input.employeeId,
+    digitalEmployeeId: input.digitalEmployeeId,
+    message,
+    raw,
+  };
+  publishChatEvent(
+    input.userId,
+    input.employeeId,
+    input.digitalEmployeeId,
+    notification,
+  );
+  return notification;
+}
+
 async function saveAssistantMessage(input: {
   conversationId: string;
+  speaker: string;
   text: string;
   actions: string[];
   raw: unknown;
@@ -250,7 +370,7 @@ async function saveAssistantMessage(input: {
     data: {
       conversationId: input.conversationId,
       author: "assistant",
-      speaker: "Assistant",
+      speaker: input.speaker,
       text: input.text,
       actions: input.actions.length > 0 ? input.actions : Prisma.JsonNull,
       raw: toJsonValue(input.raw),
@@ -275,8 +395,14 @@ async function pushTargetNotification(input: {
   purchased?: boolean;
   recipientIsOwner?: boolean;
   ownerName?: string;
+  assistantSpeaker?: string;
+  digitalEmployeeId: string;
 }): Promise<ChatThreadNotification> {
-  const conversation = await getOrCreateConversation(input.userId, input.target.id);
+  const conversation = await getOrCreateConversation(
+    input.userId,
+    input.target.id,
+    input.digitalEmployeeId,
+  );
   const text = fallbackNotificationText(input.actor, input.metadata, {
     purchased: input.purchased,
     recipientIsOwner: input.recipientIsOwner,
@@ -291,6 +417,7 @@ async function pushTargetNotification(input: {
   const raw = { notification: text };
   const message = await saveAssistantMessage({
     conversationId: conversation.id,
+    speaker: input.assistantSpeaker ?? "Assistant",
     text,
     actions,
     raw,
@@ -302,10 +429,11 @@ async function pushTargetNotification(input: {
 
   const notification = {
     employeeId: input.target.id,
+    digitalEmployeeId: input.digitalEmployeeId,
     message,
     raw,
   };
-  publishChatEvent(input.userId, input.target.id, notification);
+  publishChatEvent(input.userId, input.target.id, input.digitalEmployeeId, notification);
   return notification;
 }
 
@@ -314,6 +442,8 @@ export async function notifySharedItemEvents(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
   events: SharedItemEvent[];
+  assistantSpeaker?: string;
+  digitalEmployeeId: string;
 }): Promise<ChatThreadNotification[]> {
   const notified = new Set<string>();
   const notifications: ChatThreadNotification[] = [];
@@ -347,6 +477,8 @@ export async function notifySharedItemEvents(input: {
         purchased: event.purchased,
         recipientIsOwner: event.listOwnerId === target.id,
         ownerName: owner ? employeeDisplayName(owner) : undefined,
+        assistantSpeaker: input.assistantSpeaker,
+        digitalEmployeeId: input.digitalEmployeeId,
       }),
     );
   }
@@ -357,11 +489,19 @@ export async function notifySharedItemEvents(input: {
 export async function getChatHistory(
   userId: string,
   employeeId: string,
+  digitalEmployeeId?: string,
 ): Promise<ChatHistoryResponse> {
   await getEmployeeForUser(userId, employeeId);
+  const digital = await requireDigitalChatPartner(userId, digitalEmployeeId);
 
   const conversation = await prisma.chatConversation.findUnique({
-    where: { userId_employeeId: { userId, employeeId } },
+    where: {
+      userId_employeeId_digitalEmployeeId: {
+        userId,
+        employeeId,
+        digitalEmployeeId: digital.id,
+      },
+    },
     include: {
       messages: {
         orderBy: { createdAt: "asc" },
@@ -370,7 +510,7 @@ export async function getChatHistory(
   });
 
   if (!conversation) {
-    return emptyHistory(employeeId, null);
+    return emptyHistory(employeeId, null, null, digital.id);
   }
 
   const lastActivity =
@@ -381,6 +521,7 @@ export async function getChatHistory(
       employeeId,
       rotated.openaiConversationId,
       rotated.updatedAt,
+      digital.id,
     );
   }
 
@@ -390,10 +531,18 @@ export async function getChatHistory(
 export async function resetChatConversation(
   userId: string,
   employeeId: string,
+  digitalEmployeeId?: string,
 ): Promise<ChatHistoryResponse> {
   await getEmployeeForUser(userId, employeeId);
+  const digital = await requireDigitalChatPartner(userId, digitalEmployeeId);
   const existing = await prisma.chatConversation.findUnique({
-    where: { userId_employeeId: { userId, employeeId } },
+    where: {
+      userId_employeeId_digitalEmployeeId: {
+        userId,
+        employeeId,
+        digitalEmployeeId: digital.id,
+      },
+    },
   });
 
   if (existing) {
@@ -402,6 +551,7 @@ export async function resetChatConversation(
       employeeId,
       rotated.openaiConversationId,
       rotated.updatedAt,
+      digital.id,
     );
   }
 
@@ -409,29 +559,52 @@ export async function resetChatConversation(
     data: {
       userId,
       employeeId,
+      digitalEmployeeId: digital.id,
       openaiConversationId: await getLlmClient().createConversation(),
     },
   });
-  return emptyHistory(employeeId, created.openaiConversationId, created.updatedAt);
+  return emptyHistory(
+    employeeId,
+    created.openaiConversationId,
+    created.updatedAt,
+    digital.id,
+  );
 }
 
 export async function sendChatMessage(input: {
   userId: string;
   message: string;
   employeeId: string;
+  digitalEmployeeId?: string;
 }): Promise<{
   reply: string;
   raw: unknown;
   notifications: ChatThreadNotification[];
 }> {
-  const config = loadLlmConfig();
   const client = getLlmClient();
   const [employee, employees] = await Promise.all([
     getEmployeeForUser(input.userId, input.employeeId),
     listEmployeesForUser(input.userId),
   ]);
+  const humans = humanEmployees(employees);
+  const digital = await resolveDigitalChatPartner(
+    input.userId,
+    input.digitalEmployeeId,
+    employees,
+  );
+  if (!digital) {
+    throw new ValidationError("Digital employee is required", {
+      digitalEmployeeId: "Employee is required",
+    });
+  }
+  const config = llmConfigForDigital(digital);
   const speaker = speakerName(employee);
-  const conversation = await getOrCreateConversation(input.userId, input.employeeId);
+  const assistantSpeaker = speakerName(digital);
+  const conversation = await getOrCreateConversation(
+    input.userId,
+    input.employeeId,
+    digital.id,
+  );
   const context = formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId));
   const instructions = [
     config.systemMessage,
@@ -463,21 +636,34 @@ export async function sendChatMessage(input: {
     await saveTurn({
       conversationId: conversation.id,
       speaker,
+      assistantSpeaker,
       message: input.message,
       reply: turn.reply,
       raw: turn.raw,
     });
 
+    const parsedMetadata = parseReplyMetadata(turn.reply);
     const metadata = resolveSpokenMetadata(
       input.message,
-      parseReplyMetadata(turn.reply),
-      employees,
+      parsedMetadata,
+      humans,
       employee.id,
     );
     const plan = planTargetedActions({
       actor: employee,
-      employees,
+      employees: humans,
       metadata,
+    });
+    const relays = planRelayDeliveries({
+      actor: employee,
+      sender: digital,
+      employees,
+      messages: resolveRelayMessages(
+        input.message,
+        parsedMetadata.messages ?? [],
+        employees,
+        employee.id,
+      ),
     });
 
     const collectedEvents: SharedItemEvent[] = [];
@@ -495,8 +681,10 @@ export async function sendChatMessage(input: {
     const notifications = await notifySharedItemEvents({
       userId: input.userId,
       actor: employee,
-      employees,
+      employees: humans,
       events: collectedEvents,
+      assistantSpeaker,
+      digitalEmployeeId: digital.id,
     });
     const notified = new Set(notifications.map((item) => item.employeeId));
 
@@ -512,6 +700,26 @@ export async function sendChatMessage(input: {
           target: notification.employee,
           metadata: notification.metadata,
           recipientIsOwner: true,
+          assistantSpeaker,
+          digitalEmployeeId: digital.id,
+        }),
+      );
+    }
+
+    const relayed = new Set<string>();
+    for (const relay of relays) {
+      const key = `${relay.employeeId}:${relay.digitalEmployeeId}`;
+      if (relayed.has(key)) {
+        continue;
+      }
+      relayed.add(key);
+      notifications.push(
+        await pushRelayMessage({
+          userId: input.userId,
+          employeeId: relay.employeeId,
+          digitalEmployeeId: relay.digitalEmployeeId,
+          speaker: assistantSpeaker,
+          text: relay.text,
         }),
       );
     }

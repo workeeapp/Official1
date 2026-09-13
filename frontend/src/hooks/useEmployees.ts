@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type { EmployeeInput, PublicEmployee } from "@workee/shared";
-import { employeeApi, withDefaultEmployee } from "@/services/employee.service";
+import {
+  digitalEmployees,
+  humanEmployees,
+  type EmployeeInput,
+  type PublicEmployee,
+} from "@workee/shared";
+import { employeeApi } from "@/services/employee.service";
 import { ApiError } from "@/types";
 
 interface EmployeesState {
   employees: PublicEmployee[];
   tableEmployees: PublicEmployee[];
+  digitalEmployees: PublicEmployee[];
   count: number;
   status: "loading" | "ready" | "error";
   error: string | null;
@@ -16,11 +22,11 @@ interface EmployeesState {
 }
 
 function toVisibleState(employees: PublicEmployee[]) {
-  const visibleEmployees = withDefaultEmployee(employees);
   return {
-    employees: visibleEmployees,
-    tableEmployees: employees,
-    count: visibleEmployees.length,
+    employees,
+    tableEmployees: humanEmployees(employees),
+    digitalEmployees: digitalEmployees(employees),
+    count: employees.length,
   };
 }
 
@@ -31,6 +37,7 @@ export function useEmployees(): EmployeesState {
   >>({
     employees: [],
     tableEmployees: [],
+    digitalEmployees: [],
     count: 0,
     status: "loading",
     error: null,

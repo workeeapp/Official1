@@ -9,8 +9,12 @@ import { api } from "./http";
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export const chatApi = {
-  history(employeeId: string, signal?: AbortSignal): Promise<ChatHistoryResponse> {
-    const query = new URLSearchParams({ employeeId });
+  history(
+    employeeId: string,
+    digitalEmployeeId: string,
+    signal?: AbortSignal,
+  ): Promise<ChatHistoryResponse> {
+    const query = new URLSearchParams({ employeeId, digitalEmployeeId });
     return api<ChatHistoryResponse>(`/api/chat/messages?${query}`, { signal });
   },
   send(
@@ -23,22 +27,27 @@ export const chatApi = {
       signal,
     });
   },
-  reset(employeeId: string, signal?: AbortSignal): Promise<ChatHistoryResponse> {
+  reset(
+    employeeId: string,
+    digitalEmployeeId: string,
+    signal?: AbortSignal,
+  ): Promise<ChatHistoryResponse> {
     return api<ChatHistoryResponse>("/api/chat/reset", {
       method: "POST",
-      body: JSON.stringify({ employeeId }),
+      body: JSON.stringify({ employeeId, digitalEmployeeId }),
       signal,
     });
   },
   subscribe(
     employeeId: string,
+    digitalEmployeeId: string,
     onEvent: (event: ChatLiveEvent) => void,
   ): () => void {
     if (typeof EventSource === "undefined") {
       return () => {};
     }
 
-    const query = new URLSearchParams({ employeeId });
+    const query = new URLSearchParams({ employeeId, digitalEmployeeId });
     const source = new EventSource(`${API_BASE}/api/chat/events?${query}`, {
       withCredentials: true,
     });

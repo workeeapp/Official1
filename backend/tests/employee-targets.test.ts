@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { PublicEmployee } from "@workee/shared";
 import {
   fallbackNotificationText,
+  fallbackRelayText,
   inferTargetsFromMessage,
+  planRelayDeliveries,
   planTargetedActions,
   resolveActionTargets,
+  resolveRelayMessages,
   resolveSpokenMetadata,
 } from "../src/services/employee-targets.service.js";
 
@@ -91,7 +94,7 @@ describe("employee targets", () => {
         employees,
         amit.id,
       ),
-    ).toEqual({ lists: [], filing: [] });
+    ).toEqual({ lists: [], filing: [], messages: [] });
   });
 
   it("synthesizes a task when the LLM returns no actions", () => {
@@ -237,6 +240,85 @@ describe("employee targets", () => {
         filing: [],
       }),
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
+  });
+
+  it("plans a Lucy message for Tal and a digital employee", () => {
+    const lucy: PublicEmployee = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+    };
+    const diana: PublicEmployee = {
+      id: "8bbbe1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      kind: "digital",
+      name: "דיאנה",
+      surname: "",
+      nickname: "דיאנה",
+      email: null,
+      phone: null,
+    };
+    const roster = [...employees, lucy, diana];
+
+    expect(
+      resolveRelayMessages(
+        "תשלחי הודעה לטל - מה שלומך ?",
+        [
+          {
+            targets: ["טל"],
+            text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+          },
+        ],
+        roster,
+        amit.id,
+      ),
+    ).toEqual([
+      {
+        targets: ["טל"],
+        text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+      },
+    ]);
+
+    expect(
+      fallbackRelayText("עמית", "תבדקי עם טל אם הוא קנה שמן", ["טל"]),
+    ).toBe("עמית שואל אם קנית שמן ?");
+
+    expect(
+      resolveRelayMessages("תבדקי עם טל אם הוא קנה שמן", [], roster, amit.id),
+    ).toEqual([
+      {
+        targets: ["טל"],
+        text: "עמית שואל אם קנית שמן ?",
+      },
+    ]);
+
+    expect(
+      planRelayDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: roster,
+        messages: [
+          { targets: ["טל"], text: "עמית שואל מה שלומך ?" },
+          { targets: ["דיאנה"], text: "עמית שואל מה מחיר הטיסה ?" },
+        ],
+      }),
+    ).toEqual([
+      {
+        employeeId: tal.id,
+        digitalEmployeeId: lucy.id,
+        target: tal,
+        text: "עמית שואל מה שלומך ?",
+      },
+      {
+        employeeId: amit.id,
+        digitalEmployeeId: diana.id,
+        target: diana,
+        text: "עמית שואל מה מחיר הטיסה ?",
+      },
+    ]);
   });
 
   it("builds a purchase notification when someone buys a shared item", () => {

@@ -1,8 +1,10 @@
 import {
   emptyLlmMetadata,
+  isDigitalEmployee,
   llmItemLabel,
   type LlmFilingAction,
   type LlmListAction,
+  type LlmMessageAction,
   type LlmMetadata,
   type PublicEmployee,
 } from "@workee/shared";
@@ -87,14 +89,184 @@ export function resolveSpokenMetadata(
     lists.some((list) => list.targets.length > 0) ||
     filing.some((entry) => entry.targets.length > 0);
 
+  const messages = metadata.messages ?? [];
+
   if (hasTargetedWork || inferred.length === 0 || !looksLikeAssignment(message)) {
-    return { lists, filing };
+    return { lists, filing, messages };
   }
 
   const synthesized = synthesizeAssignment(message, inferred);
   return synthesized
-    ? { lists: [...lists, synthesized], filing }
-    : { lists, filing };
+    ? { lists: [...lists, synthesized], filing, messages }
+    : { lists, filing, messages };
+}
+
+export function looksLikeRelayMessage(message: string): boolean {
+  return (
+    /תשלח(?:י)?(?:\s+הודעה)?\s+ל/.test(message) ||
+    /תבדק(?:י)?\s+עם/.test(message) ||
+    /(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\s+ל/.test(message) ||
+    /(?:תשאלי?|שאלי?)\s+את/.test(message)
+  );
+}
+
+export function resolveRelayMessages(
+  message: string,
+  actions: LlmMessageAction[],
+  employees: PublicEmployee[],
+  actorId: string,
+): LlmMessageAction[] {
+  const inferred = inferTargetsFromMessage(message, employees, actorId);
+  const filled = actions
+    .map((action) => ({
+      text: action.text.trim(),
+      targets: action.targets.length > 0 ? action.targets : inferred,
+    }))
+    .filter((action) => action.text.length > 0 && action.targets.length > 0);
+
+  if (filled.length > 0) {
+    return filled;
+  }
+
+  if (inferred.length === 0 || !looksLikeRelayMessage(message)) {
+    return [];
+  }
+
+  const actor = employees.find((employee) => employee.id === actorId);
+  return [
+    {
+      targets: inferred,
+      text: fallbackRelayText(
+        actor ? employeeDisplayName(actor) : "מישהו",
+        message,
+        inferred,
+      ),
+    },
+  ];
+}
+
+export function fallbackRelayText(
+  actorName: string,
+  userMessage: string,
+  targetNames: string[],
+): string {
+  const intent = extractRelayIntent(userMessage, targetNames)
+    .replace(/\?+$/g, "")
+    .trim();
+  const checking = /תבדק|אם\s+/.test(userMessage);
+  if (checking) {
+    const asked = intent
+      .replace(/^אם\s+/, "")
+      .replace(/הוא\s+/g, "")
+      .replace(/היא\s+/g, "")
+      .replace(/קנתה/g, "קנית")
+      .replace(/קנה/g, "קנית");
+    return `${actorName} שואל אם ${asked} ?`;
+  }
+
+  return `${actorName} שואל ${intent} ?\nמה לענות לו ?`;
+}
+
+function extractRelayIntent(message: string, targetNames: string[]): string {
+  const escaped = targetNames
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const name = escaped || "\\S+";
+  let text = message.trim();
+  const patterns = [
+    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s*[-–:]\\s*`, "u"),
+    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s+`, "u"),
+    new RegExp(`^תבדק(?:י)?\\s+עם\\s+(?:${name})\\s+`, "u"),
+    new RegExp(
+      `^(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\\s+ל(?:${name})\\s*[-–:]?\\s*`,
+      "u",
+    ),
+    new RegExp(`^(?:תשאלי?|שאלי?)\\s+את\\s+(?:${name})\\s+`, "u"),
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.test(text)) {
+      text = text.replace(pattern, "");
+      break;
+    }
+  }
+
+  return text.trim() || message.trim();
+}
+
+export function planRelayDeliveries(input: {
+  actor: PublicEmployee;
+  sender: PublicEmployee;
+  employees: PublicEmployee[];
+  messages: LlmMessageAction[];
+}): Array<{
+  employeeId: string;
+  digitalEmployeeId: string;
+  target: PublicEmployee;
+  text: string;
+}> {
+  const deliveries: Array<{
+    employeeId: string;
+    digitalEmployeeId: string;
+    target: PublicEmployee;
+    text: string;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const action of input.messages) {
+    const targets = resolveNamedRelayTargets(
+      action.targets,
+      input.employees,
+    ).filter(
+      (target) =>
+        target.id !== input.actor.id && target.id !== input.sender.id,
+    );
+
+    for (const target of targets) {
+      const employeeId = isDigitalEmployee(target)
+        ? input.actor.id
+        : target.id;
+      const digitalEmployeeId = isDigitalEmployee(target)
+        ? target.id
+        : input.sender.id;
+      const key = `${employeeId}:${digitalEmployeeId}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deliveries.push({
+        employeeId,
+        digitalEmployeeId,
+        target,
+        text: action.text,
+      });
+    }
+  }
+
+  return deliveries;
+}
+
+function resolveNamedRelayTargets(
+  rawTargets: string[],
+  employees: PublicEmployee[],
+): PublicEmployee[] {
+  if (rawTargets.length === 0) {
+    return [];
+  }
+
+  if (rawTargets.some((target) => ALL_TARGET_TOKENS.test(target.trim()))) {
+    return employees;
+  }
+
+  const matched = new Map<string, PublicEmployee>();
+  for (const raw of rawTargets) {
+    const employee = matchEmployee(raw, employees);
+    if (employee) {
+      matched.set(employee.id, employee);
+    }
+  }
+
+  return [...matched.values()];
 }
 
 function retargetListAction(

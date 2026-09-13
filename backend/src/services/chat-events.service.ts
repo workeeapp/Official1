@@ -3,16 +3,21 @@ import type { ChatLiveEvent } from "@workee/shared";
 
 const subscribers = new Map<string, Set<Response>>();
 
-function subscriberKey(userId: string, employeeId: string): string {
-  return `${userId}:${employeeId}`;
+function subscriberKey(
+  userId: string,
+  employeeId: string,
+  digitalEmployeeId: string,
+): string {
+  return `${userId}:${employeeId}:${digitalEmployeeId}`;
 }
 
 export function subscribeChatEvents(
   userId: string,
   employeeId: string,
+  digitalEmployeeId: string,
   res: Response,
 ): () => void {
-  const key = subscriberKey(userId, employeeId);
+  const key = subscriberKey(userId, employeeId, digitalEmployeeId);
   const bucket = subscribers.get(key) ?? new Set<Response>();
   bucket.add(res);
   subscribers.set(key, bucket);
@@ -28,9 +33,10 @@ export function subscribeChatEvents(
 export function publishChatEvent(
   userId: string,
   employeeId: string,
+  digitalEmployeeId: string,
   event: ChatLiveEvent,
 ): void {
-  const bucket = subscribers.get(subscriberKey(userId, employeeId));
+  const bucket = subscribers.get(subscriberKey(userId, employeeId, digitalEmployeeId));
   if (!bucket || bucket.size === 0) {
     return;
   }

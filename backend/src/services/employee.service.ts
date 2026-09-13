@@ -1,20 +1,104 @@
 import type { Employee } from "@prisma/client";
-import type { EmployeeInput, PublicEmployee } from "@workee/shared";
+import type {
+  DigitalEmployeeDefaults,
+  EmployeeInput,
+  PublicEmployee,
+} from "@workee/shared";
+import { humanEmployees } from "@workee/shared";
+import { loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
-import { NotFoundError } from "../utils/errors.js";
+import { ConflictError, NotFoundError } from "../utils/errors.js";
+
+const LUCY_NAME = "לוסי";
 
 export function toPublicEmployee(employee: Employee): PublicEmployee {
+  const kind = employee.kind === "digital" ? "digital" : "human";
   return {
     id: employee.id,
+    kind,
     name: employee.name,
     surname: employee.surname,
     nickname: employee.nickname,
     email: employee.email,
     phone: employee.phone,
+    model: employee.model,
+    temperature: employee.temperature,
+    instructions: employee.instructions,
+    protected: employee.isProtected,
   };
 }
 
+export function getDigitalEmployeeDefaults(): DigitalEmployeeDefaults {
+  const config = loadLlmConfig();
+  return {
+    model: config.model,
+    temperature: config.temperature,
+    instructions: config.systemMessage,
+  };
+}
+
+async function ensureProtectedLucy(userId: string): Promise<void> {
+  const existing = await prisma.employee.findFirst({
+    where: { userId, isProtected: true },
+  });
+  if (existing) {
+    await refreshProtectedLucyInstructions(existing);
+    return;
+  }
+
+  const namedLucy = await prisma.employee.findFirst({
+    where: {
+      userId,
+      kind: "digital",
+      OR: [{ name: LUCY_NAME }, { nickname: LUCY_NAME }],
+    },
+  });
+  if (namedLucy) {
+    await prisma.employee.update({
+      where: { id: namedLucy.id },
+      data: { isProtected: true },
+    });
+    await refreshProtectedLucyInstructions({
+      ...namedLucy,
+      isProtected: true,
+    });
+    return;
+  }
+
+  const defaults = getDigitalEmployeeDefaults();
+  await prisma.employee.create({
+    data: {
+      userId,
+      kind: "digital",
+      isProtected: true,
+      name: LUCY_NAME,
+      surname: "",
+      nickname: LUCY_NAME,
+      model: defaults.model,
+      temperature: defaults.temperature,
+      instructions: defaults.instructions,
+    },
+  });
+}
+
+async function refreshProtectedLucyInstructions(employee: Employee): Promise<void> {
+  const current = employee.instructions ?? "";
+  if (current.includes('"messages"')) {
+    return;
+  }
+  if (!current.includes("If no action exists → metadata.lists")) {
+    return;
+  }
+
+  const defaults = getDigitalEmployeeDefaults();
+  await prisma.employee.update({
+    where: { id: employee.id },
+    data: { instructions: defaults.instructions },
+  });
+}
+
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
+  await ensureProtectedLucy(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
@@ -24,7 +108,7 @@ export async function listEmployeesForUser(userId: string): Promise<PublicEmploy
 }
 
 export async function resolveActingEmployee(userId: string): Promise<PublicEmployee> {
-  const employees = await listEmployeesForUser(userId);
+  const employees = humanEmployees(await listEmployeesForUser(userId));
   if (employees.length === 0) {
     throw new NotFoundError("Employee not found");
   }
@@ -61,18 +145,44 @@ async function findOwnedEmployee(userId: string, employeeId: string): Promise<Em
   return employee;
 }
 
+function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
+  if (kind === "digital") {
+    return {
+      kind: "digital",
+      name: input.name,
+      surname: input.surname?.trim() || "",
+      nickname: input.nickname ?? input.name,
+      email: null,
+      phone: null,
+      model: input.model ?? null,
+      temperature: input.temperature ?? null,
+      instructions: input.instructions ?? null,
+    };
+  }
+
+  return {
+    kind: "human",
+    name: input.name,
+    surname: input.surname ?? "",
+    nickname: input.nickname ?? null,
+    email: input.email ?? null,
+    phone: input.phone ?? null,
+    model: null,
+    temperature: null,
+    instructions: null,
+  };
+}
+
 export async function createEmployeeForUser(
   userId: string,
   input: EmployeeInput,
 ): Promise<PublicEmployee> {
+  const kind = input.kind === "digital" ? "digital" : "human";
   const employee = await prisma.employee.create({
     data: {
       userId,
-      name: input.name,
-      surname: input.surname,
-      nickname: input.nickname ?? null,
-      email: input.email ?? null,
-      phone: input.phone ?? null,
+      isProtected: false,
+      ...persistEmployeeData(input, kind),
     },
   });
 
@@ -84,17 +194,12 @@ export async function updateEmployeeForUser(
   employeeId: string,
   input: EmployeeInput,
 ): Promise<PublicEmployee> {
-  await findOwnedEmployee(userId, employeeId);
+  const existing = await findOwnedEmployee(userId, employeeId);
+  const kind = existing.kind === "digital" ? "digital" : "human";
 
   const employee = await prisma.employee.update({
     where: { id: employeeId },
-    data: {
-      name: input.name,
-      surname: input.surname,
-      nickname: input.nickname ?? null,
-      email: input.email ?? null,
-      phone: input.phone ?? null,
-    },
+    data: persistEmployeeData(input, kind),
   });
 
   return toPublicEmployee(employee);
@@ -104,7 +209,11 @@ export async function deleteEmployeeForUser(
   userId: string,
   employeeId: string,
 ): Promise<void> {
-  await findOwnedEmployee(userId, employeeId);
+  const employee = await findOwnedEmployee(userId, employeeId);
+  if (employee.isProtected) {
+    throw new ConflictError("Lucy cannot be deleted");
+  }
+
   await prisma.employee.delete({
     where: { id: employeeId },
   });

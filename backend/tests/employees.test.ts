@@ -150,6 +150,123 @@ describe("employees API", () => {
     expect(response.body.employee.phone).toBe("050-1111111");
   });
 
+  it("creates a digital employee with model settings", async () => {
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    create.mockResolvedValue({
+      id: "66666666-6666-4666-8666-666666666666",
+      userId,
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "You manage lists and filings.",
+      createdAt: new Date(),
+    });
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .post("/api/employees")
+      .set("Cookie", cookieHeader(loginResponse))
+      .send({
+        kind: "digital",
+        name: "לוסי",
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.employee).toMatchObject({
+      kind: "digital",
+      name: "לוסי",
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "You manage lists and filings.",
+    });
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "digital",
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+      }),
+    });
+  });
+
+  it("rejects deleting the protected Lucy employee", async () => {
+    const lucyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    findFirst.mockResolvedValue({
+      id: lucyId,
+      userId,
+      kind: "digital",
+      isProtected: true,
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "You manage lists and filings.",
+      createdAt: new Date(),
+    });
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .delete(`/api/employees/${lucyId}`)
+      .set("Cookie", cookieHeader(loginResponse));
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.message).toBe("Lucy cannot be deleted");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("returns digital employee defaults from LLM config", async () => {
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .get("/api/employees/digital-defaults")
+      .set("Cookie", cookieHeader(loginResponse));
+
+    expect(response.status).toBe(200);
+    expect(response.body.model).toBeTruthy();
+    expect(typeof response.body.temperature).toBe("number");
+    expect(response.body.instructions).toContain("metadata");
+  });
+
   it("returns saved records for an owned employee", async () => {
     const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
     const createdAt = new Date("2026-09-13T07:00:00.000Z");

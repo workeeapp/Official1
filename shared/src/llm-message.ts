@@ -22,9 +22,15 @@ export interface LlmFilingAction {
   targets: string[];
 }
 
+export interface LlmMessageAction {
+  targets: string[];
+  text: string;
+}
+
 export interface LlmMetadata {
   lists: LlmListAction[];
   filing: LlmFilingAction[];
+  messages?: LlmMessageAction[];
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -36,7 +42,7 @@ const FILING_ACTIONS = new Set<LlmFilingActionName>([
 ]);
 
 export function emptyLlmMetadata(): LlmMetadata {
-  return { lists: [], filing: [] };
+  return { lists: [], filing: [], messages: [] };
 }
 
 export function parseLlmMetadata(metadata: unknown): LlmMetadata {
@@ -47,6 +53,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const meta = metadata as Record<string, unknown>;
   const defaultTargets = parseTargets(meta);
   return {
+    messages: parseMessageActions(meta),
     lists: Array.isArray(meta.lists)
       ? meta.lists.flatMap((entry) => {
           const action = toListAction(entry);
@@ -129,6 +136,35 @@ function toListAction(value: unknown): LlmListAction | null {
     listName: listType === "custom" ? readText(value, ["list_name", "name", "רשימה"]) : "",
     items,
     targets: parseTargets(value),
+  };
+}
+
+function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {
+  const raw = meta.messages ?? meta.relays ?? meta.outbound;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.flatMap((entry) => {
+    const action = toMessageAction(entry);
+    return action ? [action] : [];
+  });
+}
+
+function toMessageAction(value: unknown): LlmMessageAction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const text = readText(record, ["text", "message", "body", "תוכן"]);
+  if (!text) {
+    return null;
+  }
+
+  return {
+    text,
+    targets: parseTargets(record),
   };
 }
 
@@ -281,6 +317,14 @@ function collectActionDescriptions(metadata: unknown): string[] {
     }
   }
 
+  if (Array.isArray(meta.messages)) {
+    for (const item of meta.messages) {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        descriptions.push(describeMessageAction(item as Record<string, unknown>));
+      }
+    }
+  }
+
   return descriptions;
 }
 
@@ -346,6 +390,14 @@ function describeTargets(record: Record<string, unknown>): string {
   }
 
   return ` for ${targets.join(", ")}`;
+}
+
+function describeMessageAction(record: Record<string, unknown>): string {
+  const text = readText(record, ["text", "message", "body", "תוכן"]);
+  const targetSuffix = describeTargets(record);
+  return text
+    ? `Send message${targetSuffix}: ${text}`
+    : `Send message${targetSuffix}`;
 }
 
 function describeFilingAction(filing: Record<string, unknown>): string {

@@ -6,6 +6,8 @@ export type {
   PublicEmployee,
   EmployeesResponse,
   EmployeeInput,
+  EmployeeKind,
+  DigitalEmployeeDefaults,
   EmployeeRecordField,
   EmployeeRecordItem,
   EmployeeRecordGroup,
@@ -32,14 +34,24 @@ export {
   EMPLOYEE_NAME_MAX_LENGTH,
   EMPLOYEE_EMAIL_MAX_LENGTH,
   EMPLOYEE_PHONE_MAX_LENGTH,
+  EMPLOYEE_MODEL_MAX_LENGTH,
+  EMPLOYEE_INSTRUCTIONS_MAX_LENGTH,
   validateEmployeeInput,
   hasEmployeeFieldErrors,
   CHAT_MESSAGE_MAX_LENGTH,
   validateEmployeeId,
   validateChatMessage,
+  parseEmployeeKind,
   validateChatInput,
   hasChatFieldErrors,
 } from "./validation";
+export {
+  isDigitalEmployee,
+  humanEmployees,
+  digitalEmployees,
+  isProtectedEmployee,
+  chatThreadKey,
+} from "./types";
 export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
 export {
   emptyLlmMetadata,
@@ -55,6 +67,7 @@ export type {
   LlmListAction,
   LlmListActionName,
   LlmListType,
+  LlmMessageAction,
   LlmMetadata,
   ParsedLlmMessage,
 } from "./llm-message";

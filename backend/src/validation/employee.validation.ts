@@ -1,5 +1,6 @@
 import {
   hasEmployeeFieldErrors,
+  parseEmployeeKind,
   validateEmployeeInput,
   type EmployeeFieldErrors,
   type EmployeeInput,
@@ -15,21 +16,29 @@ function compactFieldErrors(errors: EmployeeFieldErrors): Record<string, string>
   );
 }
 
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 export function parseEmployeeBody(body: unknown): EmployeeInput {
   if (!body || typeof body !== "object") {
-    throw new ValidationError("Name and surname are required", {
+    throw new ValidationError("Employee details are required", {
       name: "Name is required",
-      surname: "Surname is required",
     });
   }
 
   const record = body as Record<string, unknown>;
+  const kind = parseEmployeeKind(record.kind);
   const errors = validateEmployeeInput({
+    kind,
     name: record.name,
     surname: record.surname,
     nickname: record.nickname,
     email: record.email,
     phone: record.phone,
+    model: record.model,
+    temperature: record.temperature,
+    instructions: record.instructions,
   });
 
   if (hasEmployeeFieldErrors(errors)) {
@@ -39,11 +48,25 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     );
   }
 
-  const optionalText = (value: unknown): string | null =>
-    typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  const name = String(record.name).trim();
+
+  if (kind === "digital") {
+    return {
+      kind,
+      name,
+      surname: "",
+      nickname: optionalText(record.nickname) ?? name,
+      email: null,
+      phone: null,
+      model: String(record.model).trim(),
+      temperature: Number(record.temperature),
+      instructions: String(record.instructions).trim(),
+    };
+  }
 
   return {
-    name: String(record.name).trim(),
+    kind,
+    name,
     surname: String(record.surname).trim(),
     nickname: optionalText(record.nickname),
     email: optionalText(record.email),

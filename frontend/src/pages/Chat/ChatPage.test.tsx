@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
 import { ChatPage } from "./ChatPage";
+import { formatChatTime } from "./chatTime";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -77,6 +78,19 @@ describe("Chat page", () => {
           email: null,
           phone: null,
         },
+        {
+          id: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          kind: "digital" as const,
+          protected: true,
+          name: "לוסי",
+          surname: "",
+          nickname: "לוסי",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "You manage lists and filings.",
+        },
       ],
     });
     sendMock.mockReset().mockResolvedValue({
@@ -85,6 +99,7 @@ describe("Chat page", () => {
     });
     historyMock.mockReset().mockImplementation(async (employeeId: string) => ({
       employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       conversationId: null,
       startedAt: null,
       messages: [],
@@ -93,6 +108,7 @@ describe("Chat page", () => {
     }));
     resetMock.mockReset().mockImplementation(async (employeeId: string) => ({
       employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       conversationId: "conv_reset",
       startedAt: "2026-09-13T10:00:00.000Z",
       messages: [],
@@ -103,6 +119,12 @@ describe("Chat page", () => {
   });
 
   it("shows saved chat history when opening a conversation", async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(15, 4, 0, 0);
+    const today = new Date();
+    today.setHours(10, 30, 0, 0);
+
     historyMock.mockResolvedValue({
       employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
       messages: [
@@ -111,12 +133,14 @@ describe("Chat page", () => {
           author: "you",
           speaker: "עמית",
           text: "yesterday hello",
+          createdAt: yesterday.toISOString(),
         },
         {
           id: "m2",
           author: "assistant",
           speaker: "Assistant",
           text: "saved reply",
+          createdAt: today.toISOString(),
         },
       ],
       raw: { output_text: "saved raw" },
@@ -132,14 +156,21 @@ describe("Chat page", () => {
     );
 
     expect(await screen.findByText("yesterday hello")).toBeInTheDocument();
+    expect(screen.getByText("אתמול")).toBeInTheDocument();
+    expect(screen.getByText("היום")).toBeInTheDocument();
+    expect(screen.getByText(formatChatTime(yesterday.toISOString()))).toBeInTheDocument();
+    expect(screen.getByText(formatChatTime(today.toISOString()))).toBeInTheDocument();
     expect(
       within(screen.getByTestId("chat-messages")).getByText("saved reply"),
     ).toBeInTheDocument();
+    expect(within(screen.getByTestId("chat-messages")).getByText("לוסי")).toBeInTheDocument();
+    expect(within(screen.getByTestId("chat-messages")).queryByText("Assistant")).not.toBeInTheDocument();
     expect(screen.getByTestId("llm-complete-response")).toHaveTextContent(
       "saved raw",
     );
     expect(historyMock).toHaveBeenCalledWith(
       "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       expect.any(AbortSignal),
     );
   });
@@ -162,10 +193,15 @@ describe("Chat page", () => {
     );
     expect(screen.getByRole("button", { name: "Reset Conversation" })).toBeInTheDocument();
     expect(screen.getByLabelText("Chat As")).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "עמית" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "טל" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "לוסי" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByLabelText("Chat With")).toBeInTheDocument();
+    const chatAs = screen.getByTestId("chat-as");
+    expect(await within(chatAs).findByRole("option", { name: "עמית" })).toBeInTheDocument();
+    expect(within(chatAs).getByRole("option", { name: "טל" })).toBeInTheDocument();
+    expect(within(chatAs).queryByRole("option", { name: "לוסי" })).not.toBeInTheDocument();
+    expect(within(chatAs).getAllByRole("option")).toHaveLength(2);
+    expect(
+      within(screen.getByTestId("chat-with")).getByRole("option", { name: "לוסי" }),
+    ).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Message"), "hi");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -174,10 +210,13 @@ describe("Chat page", () => {
       {
         message: "hi",
         employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+        digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       },
       expect.any(AbortSignal),
     );
     expect(screen.getByText("hi")).toBeInTheDocument();
+    expect(await screen.findByText("היום")).toBeInTheDocument();
+    expect(screen.getAllByTestId("chat-time").length).toBeGreaterThan(0);
     expect(
       await within(screen.getByTestId("chat-messages")).findByText(
         "Hello from the assistant",
@@ -186,6 +225,35 @@ describe("Chat page", () => {
     expect(screen.getByTestId("llm-complete-response")).toHaveTextContent(
       "Hello from the assistant",
     );
+
+    historyMock.mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      conversationId: "conv_poll",
+      startedAt: "2026-09-13T10:00:00.000Z",
+      messages: [
+        {
+          id: "server-1",
+          author: "you",
+          speaker: "עמית",
+          text: "hi",
+        },
+        {
+          id: "server-2",
+          author: "assistant",
+          speaker: "לוסי",
+          text: "Hello from the assistant",
+        },
+      ],
+      raw: { output_text: "Hello from the assistant" },
+      isNew: false,
+    });
+
+    await waitFor(() => expect(historyMock.mock.calls.length).toBeGreaterThan(1), {
+      timeout: 3500,
+    });
+    expect(screen.getByText("היום")).toBeInTheDocument();
+    expect(screen.getAllByTestId("chat-time").length).toBeGreaterThan(0);
   });
 
   it("shows only the JSON response in the dialog and an action when present", async () => {
@@ -246,6 +314,7 @@ describe("Chat page", () => {
       {
         message: "hi",
         employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+        digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       },
       expect.any(AbortSignal),
     );
@@ -293,6 +362,7 @@ describe("Chat page", () => {
       {
         message: "list for tal",
         employeeId: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+        digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       },
       expect.any(AbortSignal),
     );
@@ -315,6 +385,95 @@ describe("Chat page", () => {
       "Reply for Amit",
     );
     expect(screen.queryByText("list for tal")).not.toBeInTheDocument();
+  });
+
+  it("keeps a separate thread for each Chat With digital employee", async () => {
+    listEmployeesMock.mockResolvedValue({
+      count: 3,
+      employees: [
+        {
+          id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+          name: "עמית",
+          surname: "חתן",
+          nickname: "עמית",
+          email: null,
+          phone: null,
+        },
+        {
+          id: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          kind: "digital" as const,
+          protected: true,
+          name: "לוסי",
+          surname: "",
+          nickname: "לוסי",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "Lucy instructions",
+        },
+        {
+          id: "8bbbe1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          kind: "digital" as const,
+          name: "דיאנה",
+          surname: "",
+          nickname: "דיאנה",
+          email: null,
+          phone: null,
+          model: "gpt-4.1",
+          temperature: 0.4,
+          instructions: "Diana instructions",
+        },
+      ],
+    });
+    sendMock
+      .mockResolvedValueOnce({
+        reply: "Reply from Lucy",
+        raw: { output_text: "Reply from Lucy" },
+      })
+      .mockResolvedValueOnce({
+        reply: "Reply from Diana",
+        raw: { output_text: "Reply from Diana" },
+      });
+    const user = userEvent.setup();
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await user.type(await screen.findByLabelText("Message"), "hello lucy");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(
+      await within(screen.getByTestId("chat-messages")).findByText("Reply from Lucy"),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Chat With"), "דיאנה");
+    expect(screen.queryByText("hello lucy")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reply from Lucy")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Message"), "hello diana");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(sendMock).toHaveBeenLastCalledWith(
+      {
+        message: "hello diana",
+        employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+        digitalEmployeeId: "8bbbe1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(
+      await within(screen.getByTestId("chat-messages")).findByText("Reply from Diana"),
+    ).toBeInTheDocument();
+    expect(within(screen.getByTestId("chat-messages")).getByText("דיאנה")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Chat With"), "לוסי");
+    expect(screen.getByText("hello lucy")).toBeInTheDocument();
+    expect(screen.getByText("Reply from Lucy")).toBeInTheDocument();
+    expect(screen.queryByText("hello diana")).not.toBeInTheDocument();
   });
 
   it("shows an error when the chat API fails", async () => {
@@ -462,9 +621,60 @@ describe("Chat page", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a relayed Lucy message when switching to the target employee", async () => {
+    sendMock.mockResolvedValue({
+      reply: "שלחתי לטל",
+      raw: { output_text: "sent" },
+      notifications: [
+        {
+          employeeId: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          message: {
+            id: "relay-1",
+            author: "assistant",
+            speaker: "לוסי",
+            text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+          },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await user.type(
+      await screen.findByLabelText("Message"),
+      "תשלחי הודעה לטל - מה שלומך ?",
+    );
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(
+      await within(screen.getByTestId("chat-messages")).findByText("שלחתי לטל"),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText("Chat As"),
+      "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+    );
+    expect(
+      await within(screen.getByTestId("chat-messages")).findByText(
+        /עמית שואל מה שלומך/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("chat-messages")).getByText(/מה לענות לו/),
+    ).toBeInTheDocument();
+  });
+
   it("refetches the other employee's thread so saved notifications appear", async () => {
     historyMock.mockImplementation(async (employeeId: string) => ({
       employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       messages:
         employeeId === "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4"
           ? [
@@ -512,7 +722,7 @@ describe("Chat page", () => {
           };
         }) => void)
       | undefined;
-    subscribeMock.mockImplementation((_employeeId: string, listener) => {
+    subscribeMock.mockImplementation((_employeeId: string, _digitalEmployeeId: string, listener) => {
       onEvent = listener;
       return () => {};
     });
@@ -578,6 +788,7 @@ describe("Chat page", () => {
 
     historyMock.mockImplementation(async (employeeId: string) => ({
       employeeId,
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
       conversationId: "conv_reset",
       startedAt: "2026-09-13T10:00:00.000Z",
       messages: [],
@@ -586,7 +797,10 @@ describe("Chat page", () => {
     }));
     await user.click(screen.getByRole("button", { name: "Reset Conversation" }));
 
-    expect(resetMock).toHaveBeenCalledWith("415ff13e-38d0-4dee-98b5-71e5dd11a38d");
+    expect(resetMock).toHaveBeenCalledWith(
+      "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+    );
     expect(await screen.findByTestId("new-conversation")).toHaveTextContent(
       "New conversation",
     );

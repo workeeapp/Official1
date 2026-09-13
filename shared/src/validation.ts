@@ -75,13 +75,19 @@ export function hasFieldErrors(errors: FieldErrors): boolean {
 export const EMPLOYEE_NAME_MAX_LENGTH = 100;
 export const EMPLOYEE_EMAIL_MAX_LENGTH = 254;
 export const EMPLOYEE_PHONE_MAX_LENGTH = 32;
+export const EMPLOYEE_MODEL_MAX_LENGTH = 100;
+export const EMPLOYEE_INSTRUCTIONS_MAX_LENGTH = 50_000;
 
 export interface EmployeeFieldErrors {
+  kind?: string;
   name?: string;
   surname?: string;
   nickname?: string;
   email?: string;
   phone?: string;
+  model?: string;
+  temperature?: string;
+  instructions?: string;
 }
 
 function validatePersonName(value: unknown, label: string): string | undefined {
@@ -99,20 +105,78 @@ function validatePersonName(value: unknown, label: string): string | undefined {
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[+]?[\d\s().-]{6,}$/;
 
+export function parseEmployeeKind(value: unknown): "human" | "digital" {
+  return value === "digital" ? "digital" : "human";
+}
+
+function parseTemperature(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
 export function validateEmployeeInput(input: {
+  kind?: unknown;
   name?: unknown;
   surname?: unknown;
   nickname?: unknown;
   email?: unknown;
   phone?: unknown;
+  model?: unknown;
+  temperature?: unknown;
+  instructions?: unknown;
 }): EmployeeFieldErrors {
   const errors: EmployeeFieldErrors = {};
+  const kind = parseEmployeeKind(input.kind);
   const nameError = validatePersonName(input.name, "Name");
-  const surnameError = validatePersonName(input.surname, "Surname");
 
   if (nameError) {
     errors.name = nameError;
   }
+
+  if (kind === "digital") {
+    if (typeof input.model !== "string" || input.model.trim().length === 0) {
+      errors.model = "Model is required";
+    } else if (input.model.trim().length > EMPLOYEE_MODEL_MAX_LENGTH) {
+      errors.model = `Model must be at most ${EMPLOYEE_MODEL_MAX_LENGTH} characters`;
+    }
+
+    const temperature = parseTemperature(input.temperature);
+    if (temperature === undefined) {
+      errors.temperature = "Temperature is required";
+    } else if (temperature < 0 || temperature > 2) {
+      errors.temperature = "Temperature must be between 0 and 2";
+    }
+
+    if (
+      typeof input.instructions !== "string" ||
+      input.instructions.trim().length === 0
+    ) {
+      errors.instructions = "Instructions are required";
+    } else if (input.instructions.trim().length > EMPLOYEE_INSTRUCTIONS_MAX_LENGTH) {
+      errors.instructions = `Instructions must be at most ${EMPLOYEE_INSTRUCTIONS_MAX_LENGTH} characters`;
+    }
+
+    if (
+      typeof input.nickname === "string" &&
+      input.nickname.trim().length > EMPLOYEE_NAME_MAX_LENGTH
+    ) {
+      errors.nickname = `Nickname must be at most ${EMPLOYEE_NAME_MAX_LENGTH} characters`;
+    }
+
+    return errors;
+  }
+
+  const surnameError = validatePersonName(input.surname, "Surname");
 
   if (surnameError) {
     errors.surname = surnameError;
@@ -148,11 +212,15 @@ export function validateEmployeeInput(input: {
 
 export function hasEmployeeFieldErrors(errors: EmployeeFieldErrors): boolean {
   return Boolean(
-    errors.name ||
+    errors.kind ||
+      errors.name ||
       errors.surname ||
       errors.nickname ||
       errors.email ||
-      errors.phone,
+      errors.phone ||
+      errors.model ||
+      errors.temperature ||
+      errors.instructions,
   );
 }
 
@@ -161,6 +229,7 @@ export const CHAT_MESSAGE_MAX_LENGTH = 4000;
 export interface ChatFieldErrors {
   message?: string;
   employeeId?: string;
+  digitalEmployeeId?: string;
 }
 
 const UUID_PATTERN =
@@ -193,6 +262,7 @@ export function validateChatMessage(message: unknown): string | undefined {
 export function validateChatInput(input: {
   message?: unknown;
   employeeId?: unknown;
+  digitalEmployeeId?: unknown;
 }): ChatFieldErrors {
   const errors: ChatFieldErrors = {};
   const messageError = validateChatMessage(input.message);
@@ -207,9 +277,20 @@ export function validateChatInput(input: {
     errors.employeeId = employeeIdError;
   }
 
+  if (
+    input.digitalEmployeeId !== undefined &&
+    input.digitalEmployeeId !== null &&
+    input.digitalEmployeeId !== ""
+  ) {
+    const digitalEmployeeIdError = validateEmployeeId(input.digitalEmployeeId);
+    if (digitalEmployeeIdError) {
+      errors.digitalEmployeeId = digitalEmployeeIdError;
+    }
+  }
+
   return errors;
 }
 
 export function hasChatFieldErrors(errors: ChatFieldErrors): boolean {
-  return Boolean(errors.message || errors.employeeId);
+  return Boolean(errors.message || errors.employeeId || errors.digitalEmployeeId);
 }

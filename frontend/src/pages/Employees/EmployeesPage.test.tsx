@@ -7,14 +7,21 @@ import { EmployeesPage } from "./EmployeesPage";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
-const { meMock, listEmployeesMock, recordsMock, updateRecordMock, deleteRecordMock } =
-  vi.hoisted(() => ({
-    meMock: vi.fn(),
-    listEmployeesMock: vi.fn(),
-    recordsMock: vi.fn(),
-    updateRecordMock: vi.fn(),
-    deleteRecordMock: vi.fn(),
-  }));
+const {
+  meMock,
+  listEmployeesMock,
+  recordsMock,
+  updateRecordMock,
+  deleteRecordMock,
+  digitalDefaultsMock,
+} = vi.hoisted(() => ({
+  meMock: vi.fn(),
+  listEmployeesMock: vi.fn(),
+  recordsMock: vi.fn(),
+  updateRecordMock: vi.fn(),
+  deleteRecordMock: vi.fn(),
+  digitalDefaultsMock: vi.fn(),
+}));
 
 vi.mock("@/services/auth.service", () => ({
   authApi: {
@@ -32,6 +39,7 @@ vi.mock("@/services/employee.service", async () => {
     ...actual,
     employeeApi: {
       list: listEmployeesMock,
+      digitalDefaults: digitalDefaultsMock,
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),
@@ -57,8 +65,21 @@ function renderEmployees() {
 describe("Employees page", () => {
   beforeEach(() => {
     listEmployeesMock.mockReset().mockResolvedValue({
-      count: 2,
+      count: 3,
       employees: [
+        {
+          id: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+          kind: "digital" as const,
+          protected: true,
+          name: "לוסי",
+          surname: "",
+          nickname: "לוסי",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "You manage lists and filings.",
+        },
         {
           id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
           name: "עמית",
@@ -86,6 +107,11 @@ describe("Employees page", () => {
     });
     updateRecordMock.mockReset();
     deleteRecordMock.mockReset();
+    digitalDefaultsMock.mockReset().mockResolvedValue({
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "You manage lists and filings.",
+    });
   });
 
   it("lists employees and keeps default actions disabled until a row is selected", async () => {
@@ -93,7 +119,7 @@ describe("Employees page", () => {
 
     expect(await screen.findByTestId("employees-page")).toBeInTheDocument();
     expect(await screen.findByTestId("employee-count")).toHaveTextContent("3 employees");
-    expect(screen.getByTitle("לוסי")).toHaveTextContent("לוסי");
+    expect(screen.getByTitle("לוסי · gpt-4.1-mini")).toHaveTextContent("לוסי");
     expect(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).toHaveTextContent(
       "עמית",
     );
@@ -207,14 +233,54 @@ describe("Employees page", () => {
     expect(panel).toHaveTextContent("3434343");
   });
 
-  it("shows email and phone fields when adding an employee", async () => {
+  it("shows email and phone fields after choosing a person", async () => {
     const user = userEvent.setup();
     renderEmployees();
 
     await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    expect(screen.getByRole("button", { name: "Person" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workee (digital)" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Person" }));
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Phone")).toBeInTheDocument();
+  });
+
+  it("shows model, temperature, and instructions for a digital employee", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    await user.click(screen.getByRole("button", { name: "Workee (digital)" }));
+
+    expect(await screen.findByLabelText("Nickname")).toBeInTheDocument();
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1-mini");
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0);
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
+      "You manage lists and filings.",
+    );
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  it("lets Lucy be edited but not deleted", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("לוסי · gpt-4.1-mini"));
+
+    expect(screen.getByRole("button", { name: "Update employee" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete employee" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Update employee" }));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("לוסי");
+    expect(screen.getByLabelText("Nickname")).toHaveValue("לוסי");
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1-mini");
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
+      "You manage lists and filings.",
+    );
   });
 
   it("edits a saved item and refreshes the records", async () => {

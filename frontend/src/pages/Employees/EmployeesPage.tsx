@@ -6,6 +6,7 @@ import type {
   EmployeeRecordsResponse,
   PublicEmployee,
 } from "@workee/shared";
+import { isDigitalEmployee, isProtectedEmployee } from "@workee/shared";
 import { useEmployees } from "@/hooks/useEmployees";
 import { EmployeeFormDialog } from "@/components/EmployeeFormDialog";
 import { EmployeeRecordDialog } from "@/components/EmployeeRecordDialog";
@@ -16,11 +17,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@/components/IconButton";
-import {
-  employeeDisplayName,
-  employeeFullName,
-  isDefaultEmployee,
-} from "@/services/employee.service";
+import { employeeDisplayName, employeeFullName } from "@/services/employee.service";
 import { ApiError } from "@/types";
 
 type DialogMode = "add" | "update" | null;
@@ -51,14 +48,15 @@ export function EmployeesPage() {
 
   const selectedEmployee =
     employees.find((employee) => employee.id === selectedId) ?? null;
-  const canMutateSelected = Boolean(
-    selectedEmployee && !isDefaultEmployee(selectedEmployee),
+  const canUpdateSelected = Boolean(selectedEmployee);
+  const canDeleteSelected = Boolean(
+    selectedEmployee && !isProtectedEmployee(selectedEmployee),
   );
 
   useEffect(() => {
-    if (!selectedEmployee || isDefaultEmployee(selectedEmployee)) {
+    if (!selectedEmployee) {
       setRecords(null);
-      setRecordsStatus(selectedEmployee ? "ready" : "idle");
+      setRecordsStatus("idle");
       setRecordsError(null);
       return;
     }
@@ -97,12 +95,8 @@ export function EmployeesPage() {
   }
 
   function openUpdate() {
-    if (!canMutateSelected) {
-      setActionError(
-        selectedEmployee
-          ? "The default employee cannot be updated."
-          : "Select an employee to update.",
-      );
+    if (!canUpdateSelected) {
+      setActionError("Select an employee to update.");
       return;
     }
 
@@ -112,10 +106,10 @@ export function EmployeesPage() {
   }
 
   async function handleDelete() {
-    if (!selectedEmployee || !canMutateSelected) {
+    if (!selectedEmployee || !canDeleteSelected) {
       setActionError(
         selectedEmployee
-          ? "The default employee cannot be deleted."
+          ? "Lucy cannot be deleted."
           : "Select an employee to delete.",
       );
       return;
@@ -239,14 +233,14 @@ export function EmployeesPage() {
               <IconButton
                 label="Update employee"
                 onClick={openUpdate}
-                disabled={!canMutateSelected}
+                disabled={!canUpdateSelected}
               >
                 <PencilIcon />
               </IconButton>
               <IconButton
                 label="Delete employee"
                 onClick={handleDelete}
-                disabled={!canMutateSelected}
+                disabled={!canDeleteSelected}
               >
                 <TrashIcon />
               </IconButton>
@@ -275,9 +269,18 @@ export function EmployeesPage() {
             data-testid="employee-contact"
             className="mt-4 text-sm text-text-secondary"
           >
-            {[selectedEmployee.email, selectedEmployee.phone]
-              .filter(Boolean)
-              .join(" · ") || "No email or phone"}
+            {isDigitalEmployee(selectedEmployee)
+              ? [
+                  selectedEmployee.model,
+                  selectedEmployee.temperature != null
+                    ? `Temperature ${selectedEmployee.temperature}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "No model configured"
+              : [selectedEmployee.email, selectedEmployee.phone]
+                  .filter(Boolean)
+                  .join(" · ") || "No email or phone"}
           </p>
         ) : null}
 
@@ -451,7 +454,9 @@ function EmployeeChip({
   onSelect: () => void;
 }) {
   const fullName = employeeFullName(employee);
-  const contact = [employee.email, employee.phone].filter(Boolean).join(" · ");
+  const contact = isDigitalEmployee(employee)
+    ? employee.model
+    : [employee.email, employee.phone].filter(Boolean).join(" · ");
   const title = contact ? `${fullName} · ${contact}` : fullName;
 
   return (

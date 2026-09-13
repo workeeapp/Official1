@@ -11,6 +11,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  chatThreadKey,
   parseLlmReply,
   type ChatHistoryResponse,
   type ChatLiveEvent,
@@ -29,6 +30,8 @@ export type ChatMessage = ChatThreadMessage;
 interface ChatContextValue {
   chatAsId: string;
   setChatAsId: (id: string) => void;
+  chatWithId: string;
+  setChatWithId: (id: string) => void;
   threads: Record<string, ChatMessage[]>;
   rawResponses: Record<string, unknown>;
   sendingEmployeeId: string | null;
@@ -39,6 +42,8 @@ interface ChatContextValue {
     employeeId: string;
     speaker: string;
     text: string;
+    digitalEmployeeId?: string;
+    assistantSpeaker?: string;
   }) => Promise<void>;
   resetConversation: () => Promise<void>;
   stop: () => void;
@@ -48,6 +53,7 @@ const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [chatAsId, setChatAsIdState] = useState("");
+  const [chatWithId, setChatWithIdState] = useState("");
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
   const [rawResponses, setRawResponses] = useState<Record<string, unknown>>({});
   const [sendingEmployeeId, setSendingEmployeeId] = useState<string | null>(null);
@@ -62,20 +68,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!chatAsId) {
+    if (!chatAsId || !chatWithId) {
       return;
     }
 
     const employeeId = chatAsId;
+    const digitalEmployeeId = chatWithId;
+    const threadId = chatThreadKey(employeeId, digitalEmployeeId);
     const abort = new AbortController();
     let initial = true;
-    setHistoryLoadingId(employeeId);
+    setHistoryLoadingId(threadId);
 
     const refresh = () =>
       chatApi
-        .history(employeeId, abort.signal)
+        .history(employeeId, digitalEmployeeId, abort.signal)
         .then((history) => {
-          applyHistory(employeeId, history, conversationIdsRef.current, setThreads, setRawResponses);
+          applyHistory(threadId, history, conversationIdsRef.current, setThreads, setRawResponses);
         })
         .catch((caught) => {
           if (caught instanceof ApiError && caught.code === "ABORTED") {
@@ -94,7 +102,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           if (initial) {
             initial = false;
             setHistoryLoadingId((current) =>
-              current === employeeId ? null : current,
+              current === threadId ? null : current,
             );
           }
         });
@@ -103,8 +111,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (event.employeeId !== employeeId) {
         return;
       }
+      if (event.digitalEmployeeId && event.digitalEmployeeId !== digitalEmployeeId) {
+        return;
+      }
       setThreads((current) => {
-        const thread = current[employeeId] ?? [];
+        const thread = current[threadId] ?? [];
         const already = thread.some(
           (message) =>
             message.id === event.message.id ||
@@ -112,12 +123,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         );
         return already
           ? current
-          : { ...current, [employeeId]: [...thread, event.message] };
+          : { ...current, [threadId]: [...thread, event.message] };
       });
       if (event.raw !== undefined) {
         setRawResponses((current) => ({
           ...current,
-          [employeeId]: event.raw,
+          [threadId]: event.raw,
         }));
       }
     };
@@ -126,39 +137,55 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const poll = window.setInterval(() => {
       void refresh();
     }, 2000);
-    const unsubscribe = chatApi.subscribe(employeeId, applyLiveEvent);
+    const unsubscribe = chatApi.subscribe(employeeId, digitalEmployeeId, applyLiveEvent);
 
     return () => {
       abort.abort();
       window.clearInterval(poll);
       unsubscribe();
     };
-  }, [chatAsId]);
+  }, [chatAsId, chatWithId]);
 
   const setChatAsId = useCallback((id: string) => {
     setChatAsIdState(id);
     setError(null);
   }, []);
 
+  const setChatWithId = useCallback((id: string) => {
+    setChatWithIdState(id);
+    setError(null);
+  }, []);
+
   const send = useCallback(
-    async (input: { employeeId: string; speaker: string; text: string }) => {
+    async (input: {
+      employeeId: string;
+      speaker: string;
+      text: string;
+      digitalEmployeeId?: string;
+      assistantSpeaker?: string;
+    }) => {
       if (sendingEmployeeId) {
         return;
       }
+
+      const threadId = input.digitalEmployeeId
+        ? chatThreadKey(input.employeeId, input.digitalEmployeeId)
+        : input.employeeId;
 
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         author: "you",
         speaker: input.speaker,
         text: input.text,
+        createdAt: new Date().toISOString(),
       };
 
       setThreads((current) => ({
         ...current,
-        [input.employeeId]: [...(current[input.employeeId] ?? []), userMessage],
+        [threadId]: [...(current[threadId] ?? []), userMessage],
       }));
       setError(null);
-      setSendingEmployeeId(input.employeeId);
+      setSendingEmployeeId(threadId);
 
       const abort = new AbortController();
       abortRef.current = abort;
@@ -168,6 +195,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           {
             message: input.text,
             employeeId: input.employeeId,
+            ...(input.digitalEmployeeId
+              ? { digitalEmployeeId: input.digitalEmployeeId }
+              : {}),
           },
           abort.signal,
         );
@@ -176,21 +206,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setThreads((current) => {
           const next = {
             ...current,
-            [input.employeeId]: [
-              ...(current[input.employeeId] ?? []),
+            [threadId]: [
+              ...(current[threadId] ?? []),
               {
                 id: crypto.randomUUID(),
                 author: "assistant" as const,
-                speaker: "Assistant",
+                speaker: input.assistantSpeaker ?? "Assistant",
                 text: parsed.response,
+                createdAt: new Date().toISOString(),
                 actions: parsed.actions,
               },
             ],
           };
 
           for (const notification of notifications ?? []) {
-            const thread = next[notification.employeeId] ?? [];
-            next[notification.employeeId] = thread.some(
+            const partnerId =
+              notification.digitalEmployeeId ?? input.digitalEmployeeId;
+            const notificationThread = partnerId
+              ? chatThreadKey(notification.employeeId, partnerId)
+              : notification.employeeId;
+            const thread = next[notificationThread] ?? [];
+            next[notificationThread] = thread.some(
               (message) =>
                 message.id === notification.message.id ||
                 messageKey(message) === messageKey(notification.message),
@@ -204,12 +240,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setRawResponses((current) => {
           const next = {
             ...current,
-            [input.employeeId]: raw ?? reply,
+            [threadId]: raw ?? reply,
           };
 
           for (const notification of notifications ?? []) {
             if (notification.raw !== undefined) {
-              next[notification.employeeId] = notification.raw;
+              const partnerId =
+                notification.digitalEmployeeId ?? input.digitalEmployeeId;
+              const notificationThread = partnerId
+                ? chatThreadKey(notification.employeeId, partnerId)
+                : notification.employeeId;
+              next[notificationThread] = notification.raw;
             }
           }
 
@@ -236,26 +277,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const resetConversation = useCallback(async () => {
-    if (!chatAsId || sendingEmployeeId || resetting) {
+    if (!chatAsId || !chatWithId || sendingEmployeeId || resetting) {
       return;
     }
 
+    const threadId = chatThreadKey(chatAsId, chatWithId);
     setResetting(true);
     setError(null);
 
     try {
-      const history = await chatApi.reset(chatAsId);
-      conversationIdsRef.current[chatAsId] = {
+      const history = await chatApi.reset(chatAsId, chatWithId);
+      conversationIdsRef.current[threadId] = {
         id: history.conversationId,
         startedAt: history.startedAt,
       };
       setThreads((current) => ({
         ...current,
-        [chatAsId]: [],
+        [threadId]: [],
       }));
       setRawResponses((current) => {
         const next = { ...current };
-        delete next[chatAsId];
+        delete next[threadId];
         return next;
       });
     } catch (caught) {
@@ -267,7 +309,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } finally {
       setResetting(false);
     }
-  }, [chatAsId, resetting, sendingEmployeeId]);
+  }, [chatAsId, chatWithId, resetting, sendingEmployeeId]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -277,6 +319,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     () => ({
       chatAsId,
       setChatAsId,
+      chatWithId,
+      setChatWithId,
       threads,
       rawResponses,
       sendingEmployeeId,
@@ -290,6 +334,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [
       chatAsId,
       setChatAsId,
+      chatWithId,
+      setChatWithId,
       threads,
       rawResponses,
       sendingEmployeeId,
@@ -306,13 +352,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 }
 
 function applyHistory(
-  employeeId: string,
+  threadId: string,
   history: ChatHistoryResponse,
   knownIds: Record<string, KnownConversation>,
   setThreads: Dispatch<SetStateAction<Record<string, ChatMessage[]>>>,
   setRawResponses: Dispatch<SetStateAction<Record<string, unknown>>>,
 ): void {
-  const known = knownIds[employeeId];
+  const known = knownIds[threadId];
   if (isStaleHistory(known, history)) {
     return;
   }
@@ -322,29 +368,29 @@ function applyHistory(
     history.conversationId != null &&
     known.id !== history.conversationId;
 
-  knownIds[employeeId] = {
+  knownIds[threadId] = {
     id: history.conversationId,
     startedAt: history.startedAt,
   };
 
   setThreads((current) => ({
     ...current,
-    [employeeId]: conversationChanged
+    [threadId]: conversationChanged
       ? history.messages
-      : mergeMessages(current[employeeId] ?? [], history.messages),
+      : mergeMessages(current[threadId] ?? [], history.messages),
   }));
   setRawResponses((current) => {
     if (conversationChanged) {
       const next = { ...current };
       if (history.raw === undefined || history.raw === null) {
-        delete next[employeeId];
+        delete next[threadId];
         return next;
       }
-      return { ...next, [employeeId]: history.raw };
+      return { ...next, [threadId]: history.raw };
     }
     return {
       ...current,
-      [employeeId]: history.raw ?? current[employeeId],
+      [threadId]: history.raw ?? current[threadId],
     };
   });
 }
@@ -371,13 +417,26 @@ function mergeMessages(
     return local;
   }
 
+  const localById = new Map(local.map((message) => [message.id, message]));
+  const localByKey = new Map(local.map((message) => [messageKey(message), message]));
   const incomingIds = new Set(incoming.map((message) => message.id));
   const incomingKeys = new Set(incoming.map((message) => messageKey(message)));
+  const mergedIncoming = incoming.map((message) => {
+    if (message.createdAt) {
+      return message;
+    }
+
+    const previous =
+      localById.get(message.id) ?? localByKey.get(messageKey(message));
+    return previous?.createdAt
+      ? { ...message, createdAt: previous.createdAt }
+      : message;
+  });
   const localOnly = local.filter(
     (message) =>
       !incomingIds.has(message.id) && !incomingKeys.has(messageKey(message)),
   );
-  return [...incoming, ...localOnly];
+  return [...mergedIncoming, ...localOnly];
 }
 
 export function useChat(): ChatContextValue {

@@ -6,6 +6,7 @@ type ConversationRow = {
   id: string;
   userId: string;
   employeeId: string;
+  digitalEmployeeId: string;
   openaiConversationId: string;
   contextInjectedAt: Date | null;
   createdAt: Date;
@@ -75,8 +76,8 @@ const { createConversation, createResponse } = vi.hoisted(() => ({
 const conversationStore = new Map<string, ConversationRow>();
 const messageStore: MessageRow[] = [];
 
-function storeKey(userId: string, employeeId: string): string {
-  return `${userId}:${employeeId}`;
+function storeKey(userId: string, employeeId: string, digitalEmployeeId: string): string {
+  return `${userId}:${employeeId}:${digitalEmployeeId}`;
 }
 
 function resetChatStore(): void {
@@ -103,6 +104,15 @@ vi.mock("../src/database/prisma.js", () => ({
     employee: {
       findFirst,
       findMany,
+      update: vi.fn(),
+      create: vi.fn().mockResolvedValue({
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        kind: "digital",
+        isProtected: true,
+        name: "לוסי",
+        surname: "",
+        nickname: "לוסי",
+      }),
     },
     chatConversation: {
       findUnique: conversationFindUnique,
@@ -142,6 +152,7 @@ const PASSWORD = "ChangeMe123!";
 const userId = "11111111-1111-4111-8111-111111111111";
 const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 const otherEmployeeId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
+const lucyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 let passwordHash: string;
 let app: ReturnType<typeof createApp>;
@@ -190,12 +201,45 @@ function tableEmployees() {
       phone: null,
       createdAt: new Date(),
     },
+    {
+      id: lucyId,
+      userId,
+      kind: "digital",
+      isProtected: true,
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "You manage lists and filings.",
+      createdAt: new Date(),
+    },
   ];
 }
 
 function mockOwnedEmployee() {
   findMany.mockResolvedValue(tableEmployees());
-  findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => {
+  findFirst.mockImplementation(async ({ where }: { where: { id?: string; isProtected?: boolean } }) => {
+    if (where.isProtected || where.id === lucyId) {
+      return {
+        id: lucyId,
+        userId,
+        kind: "digital",
+        isProtected: true,
+        name: "לוסי",
+        surname: "",
+        nickname: "לוסי",
+        email: null,
+        phone: null,
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+        createdAt: new Date(),
+      };
+    }
+
     if (where.id === employeeId) {
       return {
         id: employeeId,
@@ -243,11 +287,18 @@ describe("chat API", () => {
         where,
         include,
       }: {
-        where: { userId_employeeId: { userId: string; employeeId: string } };
+        where: {
+          userId_employeeId_digitalEmployeeId: {
+            userId: string;
+            employeeId: string;
+            digitalEmployeeId: string;
+          };
+        };
         include?: { messages?: unknown };
       }) => {
+        const pair = where.userId_employeeId_digitalEmployeeId;
         const found = conversationStore.get(
-          storeKey(where.userId_employeeId.userId, where.userId_employeeId.employeeId),
+          storeKey(pair.userId, pair.employeeId, pair.digitalEmployeeId),
         );
         if (!found) {
           return null;
@@ -265,7 +316,13 @@ describe("chat API", () => {
     );
     conversationFindUniqueOrThrow.mockReset().mockImplementation(
       async (args: {
-        where: { userId_employeeId: { userId: string; employeeId: string } };
+        where: {
+          userId_employeeId_digitalEmployeeId: {
+            userId: string;
+            employeeId: string;
+            digitalEmployeeId: string;
+          };
+        };
       }) => {
         const found = await conversationFindUnique(args);
         if (!found) {
@@ -278,18 +335,27 @@ describe("chat API", () => {
       async ({
         data,
       }: {
-        data: { userId: string; employeeId: string; openaiConversationId: string };
+        data: {
+          userId: string;
+          employeeId: string;
+          digitalEmployeeId: string;
+          openaiConversationId: string;
+        };
       }) => {
         const row: ConversationRow = {
           id: crypto.randomUUID(),
           userId: data.userId,
           employeeId: data.employeeId,
+          digitalEmployeeId: data.digitalEmployeeId,
           openaiConversationId: data.openaiConversationId,
           contextInjectedAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
-        conversationStore.set(storeKey(row.userId, row.employeeId), row);
+        conversationStore.set(
+          storeKey(row.userId, row.employeeId, row.digitalEmployeeId),
+          row,
+        );
         return row;
       },
     );
@@ -517,11 +583,13 @@ describe("chat API", () => {
       author: "you",
       speaker: "עמית",
       text: "hi",
+      createdAt: expect.any(String),
     });
     expect(history.body.messages[1]).toMatchObject({
       author: "assistant",
-      speaker: "Assistant",
+      speaker: "לוסי",
       text: "Hello from the model",
+      createdAt: expect.any(String),
     });
     expect(history.body.raw).toEqual({ output_text: "Hello from the model" });
   });
@@ -537,6 +605,7 @@ describe("chat API", () => {
     expect(history.status).toBe(200);
     expect(history.body).toEqual({
       employeeId,
+      digitalEmployeeId: lucyId,
       conversationId: null,
       startedAt: null,
       messages: [],
@@ -572,6 +641,7 @@ describe("chat API", () => {
     expect(reset.status).toBe(200);
     expect(reset.body).toEqual({
       employeeId,
+      digitalEmployeeId: lucyId,
       conversationId: "conv_reset_2",
       startedAt: expect.any(String),
       messages: [],
@@ -585,6 +655,7 @@ describe("chat API", () => {
 
     expect(history.body).toEqual({
       employeeId,
+      digitalEmployeeId: lucyId,
       conversationId: "conv_reset_2",
       startedAt: expect.any(String),
       messages: [],
@@ -629,6 +700,7 @@ describe("chat API", () => {
     expect(history.status).toBe(200);
     expect(history.body).toEqual({
       employeeId,
+      digitalEmployeeId: lucyId,
       conversationId: "conv_idle",
       startedAt: expect.any(String),
       messages: [],
@@ -696,6 +768,80 @@ describe("chat API", () => {
     expect(createConversation).toHaveBeenCalledTimes(2);
     expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_test_other");
+  });
+
+  it("starts a separate conversation and uses each digital employee's LLM settings", async () => {
+    const dianaId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const cookie = await login();
+    mockOwnedEmployee();
+    findMany.mockResolvedValue([
+      ...tableEmployees(),
+      {
+        id: dianaId,
+        userId,
+        kind: "digital",
+        isProtected: false,
+        name: "דיאנה",
+        surname: "",
+        nickname: "דיאנה",
+        email: null,
+        phone: null,
+        model: "gpt-4.1",
+        temperature: 0.4,
+        instructions: "Diana system prompt",
+        createdAt: new Date(),
+      },
+    ]);
+    const previousFindFirst = findFirst.getMockImplementation();
+    findFirst.mockImplementation(async (args: { where: { id?: string; isProtected?: boolean } }) => {
+      if (args.where.id === dianaId) {
+        return {
+          id: dianaId,
+          userId,
+          kind: "digital",
+          isProtected: false,
+          name: "דיאנה",
+          surname: "",
+          nickname: "דיאנה",
+          email: null,
+          phone: null,
+          model: "gpt-4.1",
+          temperature: 0.4,
+          instructions: "Diana system prompt",
+          createdAt: new Date(),
+        };
+      }
+      return previousFindFirst?.(args);
+    });
+
+    await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi lucy", employeeId, digitalEmployeeId: lucyId });
+
+    createConversation.mockResolvedValue("conv_diana");
+    createResponse.mockResolvedValue({
+      reply: "Diana reply",
+      raw: { output_text: "Diana reply" },
+    });
+
+    const diana = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi diana", employeeId, digitalEmployeeId: dianaId });
+
+    expect(diana.status).toBe(200);
+    expect(createConversation).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
+    expect(createResponse.mock.calls[0][0].model).toBe("gpt-4.1-mini");
+    expect(createResponse.mock.calls[0][0].temperature).toBe(0);
+    expect(createResponse.mock.calls[0][0].instructions).toContain(
+      "You manage lists and filings.",
+    );
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
+    expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
+    expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
+    expect(createResponse.mock.calls[1][0].instructions).toContain("Diana system prompt");
   });
 
   it("includes current employee records in every LLM turn", async () => {
@@ -1045,6 +1191,130 @@ describe("chat API", () => {
     expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
     expect(response.body.notifications[0].message.text).toBe(
       "עמית עדכן קופסת טונה ברשימת הקניות שלך",
+    );
+  });
+
+  it("relays an LLM-phrased message to Tal's Lucy thread", async () => {
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שלחתי לטל",
+        metadata: {
+          lists: [],
+          filing: [],
+          messages: [
+            {
+              targets: ["טל"],
+              text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "sent" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({
+        message: "תשלחי הודעה לטל - מה שלומך ?",
+        employeeId,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.notifications).toHaveLength(1);
+    expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
+    expect(response.body.notifications[0].digitalEmployeeId).toBe(lucyId);
+    expect(response.body.notifications[0].message.speaker).toBe("לוסי");
+    expect(response.body.notifications[0].message.text).toBe(
+      "עמית שואל מה שלומך?\nמה לענות לו ?",
+    );
+  });
+
+  it("relays a check to Tal even when the LLM omitted messages", async () => {
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "בדקתי עם טל",
+        metadata: { lists: [], filing: [], messages: [] },
+      }),
+      raw: { output_text: "check" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({
+        message: "תבדקי עם טל אם הוא קנה שמן",
+        employeeId,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.notifications).toHaveLength(1);
+    expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
+    expect(response.body.notifications[0].message.text).toBe(
+      "עמית שואל אם קנית שמן ?",
+    );
+  });
+
+  it("delivers a relayed message to a digital employee on the speaker thread", async () => {
+    const dianaId = "8bbbe1a2-c4c1-4edc-9d87-fe5ac740c1f4";
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שלחתי לדיאנה",
+        metadata: {
+          lists: [],
+          filing: [],
+          messages: [
+            {
+              targets: ["דיאנה"],
+              text: "עמית שואל מה מחיר הטיסה ?",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "diana" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+    findMany.mockResolvedValue([
+      ...tableEmployees(),
+      {
+        id: dianaId,
+        userId,
+        kind: "digital",
+        isProtected: false,
+        name: "דיאנה",
+        surname: "",
+        nickname: "דיאנה",
+        email: null,
+        phone: null,
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "Travel agent",
+        createdAt: new Date(),
+      },
+    ]);
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({
+        message: "תשלחי הודעה לדיאנה - מה מחיר הטיסה ?",
+        employeeId,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.notifications).toHaveLength(1);
+    expect(response.body.notifications[0].employeeId).toBe(employeeId);
+    expect(response.body.notifications[0].digitalEmployeeId).toBe(dianaId);
+    expect(response.body.notifications[0].message.text).toBe(
+      "עמית שואל מה מחיר הטיסה ?",
     );
   });
 });
