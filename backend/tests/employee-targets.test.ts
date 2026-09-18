@@ -86,6 +86,59 @@ describe("employee targets", () => {
     expect(plan.notifications.map((item) => item.employee.id)).toEqual([tal.id]);
   });
 
+  it("puts a meeting with Tal on both calendars and skips the assignment note", () => {
+    const resolved = resolveSpokenMetadata(
+      "שמור פגישה עם טל ליום ראשון בשעה 10",
+      {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [
+              {
+                "שם מטלה": "פגישה עם טל",
+                "תאריך לביצוע": "יום ראשון",
+                "שעה לביצוע": "10:00",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      employees,
+      amit.id,
+    );
+
+    expect(resolved.lists[0]?.targets).toEqual(["עמית", "טל"]);
+
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      metadata: resolved,
+    });
+
+    expect(
+      plan.applications.filter((item) =>
+        item.metadata.lists.some((list) =>
+          list.items.some((entry) => entry["שם מטלה"] === "פגישה עם טל"),
+        ),
+      ).map((item) => item.employeeId).sort(),
+    ).toEqual([amit.id, tal.id].sort());
+    expect(
+      plan.applications.some((item) =>
+        item.metadata.lists.some((list) =>
+          list.items.some(
+            (entry) =>
+              typeof entry["שם מטלה"] === "string" &&
+              String(entry["שם מטלה"]).includes("קיבל מטלה"),
+          ),
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it("does not invent a task from a question about someone else", () => {
     expect(
       resolveSpokenMetadata(

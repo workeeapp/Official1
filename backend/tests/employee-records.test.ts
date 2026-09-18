@@ -72,6 +72,7 @@ import {
   applyEmployeeMetadata,
   deleteEmployeeRecord,
   formatEmployeeContext,
+  formatTeamSchedules,
   getEmployeeOwnedRecords,
   getEmployeeRecordSnapshot,
   updateEmployeeRecord,
@@ -152,6 +153,22 @@ describe("employee records", () => {
     expect(context).toContain("חלב");
     expect(context).toContain("לקנות מתנה");
     expect(context).toContain("מספר רכב");
+  });
+
+  it("formats dated team schedules for meeting conflict checks", () => {
+    const schedules = formatTeamSchedules([
+      {
+        owner: "טל",
+        item_name: "פגישה עם לקוח",
+        date: "יום ראשון",
+        time: "10:00",
+        all_day: false,
+      },
+    ]);
+
+    expect(schedules).toContain("TEAM_SCHEDULES");
+    expect(schedules).toContain("טל");
+    expect(schedules).toContain("10:00");
   });
 
   it("applies add, update, and remove actions for lists, tasks, and filings", async () => {

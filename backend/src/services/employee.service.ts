@@ -82,18 +82,22 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
 }
 
 async function refreshProtectedLucyInstructions(employee: Employee): Promise<void> {
-  const current = employee.instructions ?? "";
-  if (current.includes('"messages"')) {
-    return;
-  }
-  if (!current.includes("If no action exists → metadata.lists")) {
+  const defaults = getDigitalEmployeeDefaults();
+  if (
+    employee.instructions === defaults.instructions &&
+    employee.model === defaults.model &&
+    employee.temperature === defaults.temperature
+  ) {
     return;
   }
 
-  const defaults = getDigitalEmployeeDefaults();
   await prisma.employee.update({
     where: { id: employee.id },
-    data: { instructions: defaults.instructions },
+    data: {
+      instructions: defaults.instructions,
+      model: defaults.model,
+      temperature: defaults.temperature,
+    },
   });
 }
 

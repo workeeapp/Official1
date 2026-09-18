@@ -19,7 +19,9 @@ import {
 import {
   applyEmployeeMetadata,
   formatEmployeeContext,
+  formatTeamSchedules,
   getEmployeeRecordSnapshot,
+  getTeamSchedules,
   type SharedItemEvent,
 } from "./employee-records.service.js";
 import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
@@ -176,7 +178,11 @@ function targetingInstructions(
     'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"].',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
-    "If omitted, the action applies only to the current speaker.",
+    `Example: "שמור פגישה עם טל ביום ראשון בשעה 10" → tasks add, targets: ["${speaker}", "טל"].`,
+    "A meeting WITH someone must include the current speaker and every named participant in targets.",
+    "If the speaker gives a meeting date without a time and did not say all-day / יום שלם, ask before saving.",
+    "If omitted on a normal list item, the action applies only to the current speaker.",
+    "If asked what you can do, say you manage any list (shopping is only one example), then list the full catalog. Do not shorten it for this speaker.",
     "If the speaker asks you to send, check, ask, or tell another employee (human or digital) something, add metadata.messages.",
     'Example: "תשלחי הודעה לטל - מה שלומך?" → messages: [{ "targets": ["טל"], "text": "עמית שואל מה שלומך?\\nמה לענות לו?" }].',
     'Example: "תבדקי עם טל אם הוא קנה שמן" → messages: [{ "targets": ["טל"], "text": "עמית שואל אם קנית שמן?" }].',
@@ -609,13 +615,19 @@ export async function sendChatMessage(input: {
     input.employeeId,
     digital.id,
   );
-  const context = formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId));
+  const context = [
+    formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
+    formatTeamSchedules(await getTeamSchedules(input.userId)),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const instructions = [
     config.systemMessage,
     `The user is chatting as ${speaker}.`,
     targetingInstructions(employees, speaker),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "If asked what someone still needs to buy, use only current shopping lists in EMPLOYEE_SAVED_DATA.",
+    "If asked what you can do, say you manage any list, not only shopping, then list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists or tasks from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     context,
   ]
@@ -623,7 +635,7 @@ export async function sendChatMessage(input: {
     .join("\n\n");
   const message = [
     context,
-    "Use only EMPLOYEE_SAVED_DATA. If an item is missing from those lists, it is not needed.",
+    "When answering about existing shopping, tasks, or meetings, use only EMPLOYEE_SAVED_DATA and TEAM_SCHEDULES.",
     `${speaker}: ${input.message}`,
   ]
     .filter(Boolean)

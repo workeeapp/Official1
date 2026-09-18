@@ -72,6 +72,10 @@ export function inferTargetsFromMessage(
   return mentioned;
 }
 
+export function looksLikeMeeting(message: string): boolean {
+  return /פגיש(?:ה|ות)|ישיב(?:ה|ות)/.test(message);
+}
+
 export function resolveSpokenMetadata(
   message: string,
   metadata: LlmMetadata,
@@ -79,8 +83,15 @@ export function resolveSpokenMetadata(
   actorId: string,
 ): LlmMetadata {
   const inferred = inferTargetsFromMessage(message, employees, actorId);
+  const actor = employees.find((employee) => employee.id === actorId);
+  const actorName = actor ? employeeDisplayName(actor) : "";
   const lists = metadata.lists.map((list) =>
-    retargetListAction(list, inferred, employees, actorId),
+    withMeetingParticipants(
+      retargetListAction(list, inferred, employees, actorId),
+      inferred,
+      actorName,
+      message,
+    ),
   );
   const filing = metadata.filing.map((entry) =>
     entry.targets.length > 0 ? entry : { ...entry, targets: inferred },
@@ -269,6 +280,29 @@ function resolveNamedRelayTargets(
   return [...matched.values()];
 }
 
+function withMeetingParticipants(
+  list: LlmListAction,
+  inferred: string[],
+  actorName: string,
+  message: string,
+): LlmListAction {
+  if (list.listType !== "tasks" || !looksLikeMeeting(message)) {
+    return list;
+  }
+
+  const names = [actorName, ...list.targets, ...inferred]
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const unique: string[] = [];
+  for (const name of names) {
+    if (!unique.includes(name)) {
+      unique.push(name);
+    }
+  }
+
+  return unique.length > 0 ? { ...list, targets: unique } : list;
+}
+
 function retargetListAction(
   list: LlmListAction,
   inferred: string[],
@@ -435,13 +469,18 @@ export function planTargetedActions(input: {
       addNotification(target.id, metadata);
     }
 
+    const actorIncluded = targets.some((target) => target.id === input.actor.id);
     const assignment = assignmentTaskForTargets(
       input.employees,
       others,
       list,
       isAllTarget(list.targets),
     );
-    if (assignment) {
+    const jointMeeting =
+      actorIncluded &&
+      list.listType === "tasks" &&
+      list.items.some((item) => looksLikeMeeting(llmItemLabel(item)));
+    if (assignment && !jointMeeting) {
       applications.push({
         employeeId: input.actor.id,
         metadata: { lists: [assignment], filing: [] },

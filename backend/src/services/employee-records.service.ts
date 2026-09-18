@@ -69,7 +69,8 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
   return [
     "EMPLOYEE_SAVED_DATA:",
     "This is the current saved information visible to this employee.",
-    "Treat it as the only source of truth. Do not mention items that are not listed here.",
+    "Treat it as the only source of truth for existing lists, tasks, and filings. Do not mention saved items that are not listed here.",
+    "This does not limit your capabilities catalog. If asked what you can do, list every capability.",
     "scope=personal means only this employee can see that item.",
     "scope=shared means the listed employees can see it.",
     "When this employee asks what they need to buy or do, include every item on their own lists.",
@@ -83,6 +84,67 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
       2,
     ),
   ].join("\n");
+}
+
+export interface TeamScheduleEntry {
+  owner: string;
+  item_name: string;
+  date: string;
+  time: string | null;
+  all_day: boolean;
+}
+
+export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
+  if (entries.length === 0) {
+    return [
+      "TEAM_SCHEDULES:",
+      "No dated tasks or meetings are currently saved for any employee.",
+    ].join("\n");
+  }
+
+  return [
+    "TEAM_SCHEDULES:",
+    "Dated tasks and meetings for all employees. Use this to detect time conflicts before adding a meeting.",
+    "Do not reveal another employee's shopping, contacts, or filings from this list.",
+    JSON.stringify(entries, null, 2),
+  ].join("\n");
+}
+
+export async function getTeamSchedules(userId: string): Promise<TeamScheduleEntry[]> {
+  const lists = await prisma.employeeList.findMany({
+    where: {
+      listType: "tasks",
+      employee: { userId },
+    },
+    include: {
+      employee: { select: { name: true, nickname: true } },
+      items: { orderBy: { createdAt: "asc" } },
+    },
+  });
+
+  const entries: TeamScheduleEntry[] = [];
+  for (const list of lists) {
+    const owner = list.employee.nickname?.trim() || list.employee.name;
+    for (const item of list.items) {
+      const data = asRecord(item.data);
+      const date = readItemText(data, ["תאריך לביצוע", "date"]);
+      if (!date) {
+        continue;
+      }
+      const time = readItemText(data, ["שעה לביצוע", "time"]) || null;
+      const allDayValue = data["יום שלם"];
+      entries.push({
+        owner,
+        item_name:
+          readItemText(data, ITEM_NAME_KEYS.tasks) || item.itemKey,
+        date,
+        time,
+        all_day: allDayValue === true || allDayValue === "true",
+      });
+    }
+  }
+
+  return entries;
 }
 
 export function parseAssignmentNote(text: string): {
