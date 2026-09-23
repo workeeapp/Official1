@@ -15,7 +15,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "user:create": "tsx backend/src/scripts/create-user.ts"
+    "user:create": "tsx backend/src/scripts/create-user.ts",
+    "keep-up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/keep-workee-up.ps1",
+    "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

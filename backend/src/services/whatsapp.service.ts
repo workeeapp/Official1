@@ -1,9 +1,11 @@
-import { humanEmployees, parseLlmReply } from "@workee/shared";
+import { digitalEmployees, humanEmployees, parseLlmReply } from "@workee/shared";
+import type { PublicEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { sendChatMessage } from "./chat.service.js";
 import { listEmployeesForUser, resolveActingEmployee } from "./employee.service.js";
+import { sendWhatsAppText } from "./whatsapp-send.js";
 
 export interface WhatsAppVerifyQuery {
   mode?: string;
@@ -94,6 +96,28 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
 }
 
 const recentInboundIds = new Set<string>();
+const whatsappWorkerByPhone = new Map<string, string>();
+
+const SWITCH_WORKER =
+  /^(?:talk to|chat with|switch to|דבר עם|דברי עם|עבור אל|עבור ל|עברי ל)\s+(.+)$/iu;
+const LIST_WORKERS =
+  /^(?:who can i (?:talk|chat) to|list workers|איזה עובדים|מי העובדים|עם מי אפשר לדבר)\??$/iu;
+
+export function parseWhatsAppWorkerCommand(text: string): {
+  list?: boolean;
+  workerName?: string;
+  rest?: string;
+} {
+  const trimmed = text.trim();
+  if (LIST_WORKERS.test(trimmed)) {
+    return { list: true };
+  }
+  const switched = trimmed.match(SWITCH_WORKER);
+  if (!switched?.[1]) {
+    return {};
+  }
+  return { workerName: switched[1].trim() };
+}
 
 export function phonesMatch(left: string, right: string): boolean {
   const a = left.replace(/\D/g, "");
@@ -127,14 +151,27 @@ export async function handleInboundWhatsAppTexts(
 
     try {
       const speaker = await resolveWhatsAppSpeaker(message.from);
+      const employees = await listEmployeesForUser(speaker.userId);
+      const digitals = digitalEmployees(employees);
+      const routed = await routeWhatsAppDigital(
+        message.from,
+        message.text,
+        digitals,
+      );
+      if (routed.notice && !routed.message) {
+        await sendWhatsAppText(message.from, routed.notice);
+        continue;
+      }
       const turn = await sendChatMessage({
         userId: speaker.userId,
         employeeId: speaker.employeeId,
-        message: message.text,
+        digitalEmployeeId: routed.digital.id,
+        message: routed.message ?? message.text,
       });
       const reply = parseLlmReply(turn.reply).response.trim();
-      if (reply) {
-        await sendWhatsAppText(message.from, reply);
+      const text = [routed.notice, reply].filter(Boolean).join("\n\n");
+      if (text) {
+        await sendWhatsAppText(message.from, text);
       }
     } catch (error) {
       console.error(
@@ -145,34 +182,106 @@ export async function handleInboundWhatsAppTexts(
   }
 }
 
-export async function sendWhatsAppText(to: string, text: string): Promise<void> {
-  const env = getEnv();
-  const token = env.WHATSAPP_ACCESS_TOKEN?.trim();
-  const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID?.trim();
-  if (!token || !phoneNumberId) {
+async function routeWhatsAppDigital(
+  from: string,
+  text: string,
+  digitals: PublicEmployee[],
+): Promise<{ digital: PublicEmployee; notice?: string; message?: string }> {
+  const command = parseWhatsAppWorkerCommand(text);
+  const fallback =
+    digitals.find((employee) => employee.protected) ?? digitals[0];
+  if (!fallback) {
     throw new ServiceUnavailableError();
   }
 
-  const response = await fetch(
-    `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to,
-        type: "text",
-        text: { body: text.slice(0, 4096), preview_url: false },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new ServiceUnavailableError();
+  if (command.list) {
+    const names = digitals
+      .map((employee) => employee.nickname?.trim() || employee.name)
+      .join(", ");
+    return {
+      digital: fallback,
+      notice: names
+        ? `אפשר לדבר עם: ${names}. כתוב "דבר עם <שם>" כדי לעבור.`
+        : "אין עובדים דיגיטליים.",
+    };
   }
+
+  if (command.workerName) {
+    const matched = matchDigitalName(command.workerName, digitals);
+    if (!matched) {
+      return {
+        digital: sessionDigital(from, digitals) ?? fallback,
+        notice: `לא מצאתי עובד דיגיטלי בשם ${command.workerName}. כתוב "מי העובדים" לרשימה.`,
+      };
+    }
+    whatsappWorkerByPhone.set(from, matched.id);
+    return {
+      digital: matched,
+      notice: `עכשיו אתה מדבר עם ${matched.nickname?.trim() || matched.name}.`,
+      message: restAfterDigitalName(command.workerName, matched),
+    };
+  }
+
+  return {
+    digital: sessionDigital(from, digitals) ?? fallback,
+  };
+}
+
+function sessionDigital(
+  from: string,
+  digitals: PublicEmployee[],
+): PublicEmployee | undefined {
+  const id = whatsappWorkerByPhone.get(from);
+  return id ? digitals.find((employee) => employee.id === id) : undefined;
+}
+
+function restAfterDigitalName(
+  raw: string,
+  employee: PublicEmployee,
+): string | undefined {
+  const aliases = [
+    employee.nickname,
+    employee.name,
+    `${employee.name} ${employee.surname}`.trim(),
+  ]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map((value) => value.trim())
+    .sort((left, right) => right.length - left.length);
+  const lower = raw.trim().toLowerCase();
+  for (const alias of aliases) {
+    if (lower === alias.toLowerCase()) {
+      return undefined;
+    }
+    if (lower.startsWith(`${alias.toLowerCase()} `)) {
+      const rest = raw.trim().slice(alias.length).replace(/^[\s,:\-]+/, "");
+      return rest || undefined;
+    }
+  }
+  return undefined;
+}
+
+function matchDigitalName(
+  raw: string,
+  digitals: PublicEmployee[],
+): PublicEmployee | undefined {
+  const needle = raw.trim().toLowerCase();
+  const ranked = [...digitals].sort((left, right) => {
+    const leftName = (left.nickname?.trim() || left.name).length;
+    const rightName = (right.nickname?.trim() || right.name).length;
+    return rightName - leftName;
+  });
+  return ranked.find((employee) => {
+    const aliases = [
+      employee.nickname,
+      employee.name,
+      `${employee.name} ${employee.surname}`.trim(),
+    ]
+      .filter((value): value is string => Boolean(value && value.trim()))
+      .map((value) => value.trim().toLowerCase());
+    return aliases.some(
+      (alias) => needle === alias || needle.startsWith(`${alias} `),
+    );
+  });
 }
 
 async function resolveWhatsAppSpeaker(from: string): Promise<{

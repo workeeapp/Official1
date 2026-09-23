@@ -35,6 +35,7 @@ import {
 } from "./employee-targets.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson } from "./llm-client.js";
+import { deliverWhatsAppRelays } from "./whatsapp-send.js";
 
 function speakerName(employee: {
   name: string;
@@ -750,6 +751,7 @@ export async function sendChatMessage(input: {
         }),
       );
     }
+    await deliverWhatsAppRelays(relays, employee.id);
 
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
