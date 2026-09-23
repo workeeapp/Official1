@@ -25,6 +25,7 @@ export function ChatPage() {
   } = useChat();
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const pinToBottomRef = useRef(true);
 
   useEffect(() => {
     if (!chatAsId && tableEmployees.length > 0) {
@@ -60,8 +61,21 @@ export function ChatPage() {
   const completeResponse = formatCompleteResponse(
     threadId ? rawResponses[threadId] : undefined,
   );
+  const lastMessageId = messages.at(-1)?.id ?? "";
+  const messageCount = messages.length;
 
   useEffect(() => {
+    pinToBottomRef.current = true;
+  }, [threadId]);
+
+  useEffect(() => {
+    if (sendingThisThread) {
+      pinToBottomRef.current = true;
+    }
+    if (!pinToBottomRef.current) {
+      return;
+    }
+
     const list = listRef.current;
     if (!list) {
       return;
@@ -71,7 +85,17 @@ export function ChatPage() {
     } else {
       list.scrollTop = list.scrollHeight;
     }
-  }, [messages, sendingThisThread, threadId]);
+  }, [lastMessageId, messageCount, sendingThisThread, threadId]);
+
+  function handleMessagesScroll() {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    pinToBottomRef.current =
+      list.scrollHeight - list.scrollTop - list.clientHeight <= 96;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -182,6 +206,7 @@ export function ChatPage() {
       <div
         ref={listRef}
         data-testid="chat-messages"
+        onScroll={handleMessagesScroll}
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-6 py-5 sm:px-8"
       >
         {loadingHistory && messages.length === 0 ? (

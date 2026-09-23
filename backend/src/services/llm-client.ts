@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { LlmJsonSchemaFormat } from "../config/llm.js";
 import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 
@@ -15,6 +16,7 @@ export interface LlmClient {
     model: string;
     temperature: number;
     instructions: string;
+    textFormat?: LlmJsonSchemaFormat;
   }): Promise<LlmTurn>;
 }
 
@@ -67,6 +69,7 @@ function createOpenAiClient(apiKey: string): LlmClient {
         instructions: input.instructions,
         conversation: input.conversationId,
         input: input.message,
+        ...(input.textFormat ? { text: { format: input.textFormat } } : {}),
       });
       return {
         reply: extractOutputText(response),

@@ -851,10 +851,15 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[0][0].instructions).toContain(
       "You manage lists and filings.",
     );
+    expect(createResponse.mock.calls[0][0].textFormat).toMatchObject({
+      type: "json_schema",
+      name: "lucy_metadata_response",
+    });
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
     expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
     expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
     expect(createResponse.mock.calls[1][0].instructions).toContain("Diana system prompt");
+    expect(createResponse.mock.calls[1][0].textFormat).toBeUndefined();
   });
 
   it("includes current employee records in every LLM turn", async () => {

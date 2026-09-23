@@ -110,6 +110,16 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
 }
 
 function llmConfigForDigital(digital?: PublicEmployee): LlmConfig {
+  const fileConfig = loadLlmConfig();
+  if (digital?.protected) {
+    return {
+      model: digital.model ?? fileConfig.model,
+      temperature: digital.temperature ?? fileConfig.temperature,
+      systemMessage: digital.instructions?.trim() || fileConfig.systemMessage,
+      responseFormat: fileConfig.responseFormat,
+    };
+  }
+
   if (digital?.model && digital.instructions?.trim()) {
     return {
       model: digital.model,
@@ -118,7 +128,7 @@ function llmConfigForDigital(digital?: PublicEmployee): LlmConfig {
     };
   }
 
-  return loadLlmConfig();
+  return fileConfig;
 }
 
 function pickDigitalEmployee(employees: PublicEmployee[]): PublicEmployee | undefined {
@@ -182,7 +192,7 @@ function targetingInstructions(
     "A meeting WITH someone must include the current speaker and every named participant in targets.",
     "If the speaker gives a meeting date without a time and did not say all-day / יום שלם, ask before saving.",
     "If omitted on a normal list item, the action applies only to the current speaker.",
-    "If asked what you can do, say you manage any list (shopping is only one example), then list the full catalog. Do not shorten it for this speaker.",
+    "If asked what you can do, list: lists of any kind, a task list, meetings, filings, and messages. Meetings are not part of the task list. Do not shorten it for this speaker.",
     "If the speaker asks you to send, check, ask, or tell another employee (human or digital) something, add metadata.messages.",
     'Example: "תשלחי הודעה לטל - מה שלומך?" → messages: [{ "targets": ["טל"], "text": "עמית שואל מה שלומך?\\nמה לענות לו?" }].',
     'Example: "תבדקי עם טל אם הוא קנה שמן" → messages: [{ "targets": ["טל"], "text": "עמית שואל אם קנית שמן?" }].',
@@ -627,7 +637,7 @@ export async function sendChatMessage(input: {
     targetingInstructions(employees, speaker),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "If asked what someone still needs to buy, use only current shopping lists in EMPLOYEE_SAVED_DATA.",
-    "If asked what you can do, say you manage any list, not only shopping, then list every capability. Saved data does not limit that answer.",
+    "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists or tasks from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     context,
   ]
@@ -648,6 +658,7 @@ export async function sendChatMessage(input: {
       model: config.model,
       temperature: config.temperature,
       instructions,
+      textFormat: config.responseFormat,
     });
     await saveTurn({
       conversationId: conversation.id,

@@ -14,6 +14,12 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   CLIENT_ORIGIN: z.string().default("http://localhost:5173"),
   OPENAI_API_KEY: z.string().optional(),
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional(),
+  WHATSAPP_APP_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

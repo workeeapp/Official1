@@ -1,4 +1,6 @@
 {
+  "name": "lucy_turn",
+  "description": "Lucy list, meeting, filing, and message actions. Returns a user-facing response plus a top-level metadata object.",
   "model": "gpt-4.1",
   "temperature": 0,
   "systemMessage": [
@@ -175,5 +177,128 @@
     "3. NEVER skip items or actions.",
     "4. If no action exists → metadata.lists = [], metadata.filing = [], metadata.messages = [].",
     "5. EMPLOYEE_SAVED_DATA is the source of truth for existing lists, tasks, and filings. TEAM_SCHEDULES is the source of truth for other employees' dated meetings/tasks. Capabilities questions ignore both."
-  ]
+  ],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "lucy_metadata_response",
+      "strict": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "response": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "lists": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "add",
+                        "remove",
+                        "update"
+                      ]
+                    },
+                    "list_type": {
+                      "type": "string",
+                      "enum": [
+                        "shopping",
+                        "contacts",
+                        "tasks",
+                        "custom"
+                      ]
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "list_type",
+                    "targets",
+                    "items"
+                  ]
+                }
+              },
+              "filing": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "add_filing",
+                        "remove_filing",
+                        "update_filing"
+                      ]
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "item_name": {
+                      "type": "string"
+                    },
+                    "item_info": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "targets",
+                    "item_name",
+                    "item_info"
+                  ]
+                }
+              },
+              "messages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "targets",
+                    "text"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "response",
+          "metadata"
+        ]
+      }
+    }
+  }
 }
