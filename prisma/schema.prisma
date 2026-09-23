@@ -38,6 +38,8 @@ model Employee {
   digitalChatConversations ChatConversation[] @relation("ConversationPartner")
   lists                    EmployeeList[]
   filings                  EmployeeFiling[]
+  ownedReminders           Reminder[]         @relation("ReminderOwner")
+  actedReminders           Reminder[]         @relation("ReminderActor")
 
   @@index([userId])
   @@map("Employees")
@@ -123,4 +125,27 @@ model EmployeeFiling {
   @@unique([employeeId, itemName])
   @@index([employeeId])
   @@map("EmployeeFilings")
+}
+
+model Reminder {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  ownerId   String   @map("owner_id") @db.Uuid
+  actorId   String   @map("actor_id") @db.Uuid
+  itemKey   String   @map("item_key") @db.VarChar(255)
+  itemLabel String   @map("item_label") @db.VarChar(255)
+  listType  String   @map("list_type") @db.VarChar(32)
+  fireAt    DateTime @map("fire_at")
+  repeat    String   @default("once") @db.VarChar(16)
+  pingIds     Json     @default("[]") @map("ping_ids")
+  messageText String   @default("") @map("message_text") @db.Text
+  status      String   @default("active") @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  owner     Employee @relation("ReminderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  actor     Employee @relation("ReminderActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([userId, status, fireAt])
+  @@index([ownerId, itemKey])
+  @@map("Reminders")
 }

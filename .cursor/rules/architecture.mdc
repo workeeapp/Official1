@@ -17,4 +17,5 @@ Frontend UI → frontend services → REST API → controllers → services → 
 - Shared validation and public types live in `shared/` and must stay in sync for client and server.
 - New pages should reuse `AppShell` and `ProtectedRoute`. New APIs should follow `/api/<domain>` with a controller/service pair.
 - WhatsApp Cloud API is a channel into `sendChatMessage` (`/api/whatsapp/webhook`). Do not add a second LLM path for inbound WhatsApp.
+- Develop a new capability on a separate digital worker prompt (e.g. `LLM.david.json` for reminders). Lucy’s `LLM.config.json` stays the front desk. The worker emits metadata; the server applies and fires it.
 - Do not implement registration, password reset, social login, or roles unless explicitly requested.

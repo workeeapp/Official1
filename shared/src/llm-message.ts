@@ -27,10 +27,27 @@ export interface LlmMessageAction {
   text: string;
 }
 
+export type LlmReminderActionName = "add" | "remove" | "update";
+export type LlmReminderRepeat = "once" | "daily";
+
+export interface LlmReminderAction {
+  action: LlmReminderActionName;
+  item: string;
+  listType: LlmListType;
+  date: string;
+  time: string;
+  repeat: LlmReminderRepeat;
+  ping: string[];
+  targets: string[];
+  text: string;
+  inSeconds: number | null;
+}
+
 export interface LlmMetadata {
   lists: LlmListAction[];
   filing: LlmFilingAction[];
   messages?: LlmMessageAction[];
+  reminders?: LlmReminderAction[];
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -41,8 +58,11 @@ const FILING_ACTIONS = new Set<LlmFilingActionName>([
   "update_filing",
 ]);
 
+const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "update"]);
+const REMINDER_REPEATS = new Set<LlmReminderRepeat>(["once", "daily"]);
+
 export function emptyLlmMetadata(): LlmMetadata {
-  return { lists: [], filing: [], messages: [] };
+  return { lists: [], filing: [], messages: [], reminders: [] };
 }
 
 export function parseLlmMetadata(metadata: unknown): LlmMetadata {
@@ -54,6 +74,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const defaultTargets = parseTargets(meta);
   return {
     messages: parseMessageActions(meta),
+    reminders: parseReminderActions(meta),
     lists: Array.isArray(meta.lists)
       ? meta.lists.flatMap((entry) => {
           const action = toListAction(entry);
@@ -149,6 +170,90 @@ function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] 
     const action = toMessageAction(entry);
     return action ? [action] : [];
   });
+}
+
+function parseReminderActions(meta: Record<string, unknown>): LlmReminderAction[] {
+  const raw = meta.reminders ?? meta.schedules;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.flatMap((entry) => {
+    const action = toReminderAction(entry);
+    return action ? [action] : [];
+  });
+}
+
+function toReminderAction(value: unknown): LlmReminderAction | null {
+  if (!isActionRecord(value) || !REMINDER_ACTIONS.has(value.action as LlmReminderActionName)) {
+    return null;
+  }
+
+  const item = readText(value, ["item", "item_name", "שם פריט", "שם מטלה", "name"]);
+  if (!item) {
+    return null;
+  }
+
+  const listType = LIST_TYPES.has(value.list_type as LlmListType)
+    ? (value.list_type as LlmListType)
+    : "shopping";
+  const repeat = REMINDER_REPEATS.has(value.repeat as LlmReminderRepeat)
+    ? (value.repeat as LlmReminderRepeat)
+    : "once";
+  const when = readText(value, ["when"]);
+  const date = readText(value, ["date", "יום", "relative"]) || parseWhenDate(when);
+  const time = readText(value, ["time", "שעה"]) || parseWhenTime(when);
+
+  return {
+    action: value.action as LlmReminderActionName,
+    item,
+    listType,
+    date,
+    time,
+    repeat,
+    ping: parseTargets({ targets: value.ping ?? value.notify ?? value.ping_targets }),
+    targets: parseTargets(value),
+    text: readText(value, ["text", "message", "body", "תוכן", "sentence"]),
+    inSeconds: parseInSeconds(value),
+  };
+}
+
+function parseInSeconds(value: Record<string, unknown>): number | null {
+  const raw = value.in_seconds ?? value.inSeconds ?? value.in ?? value.delay;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.round(raw);
+  }
+  if (typeof raw !== "string" || !raw.trim()) {
+    return null;
+  }
+  const text = raw.trim().toLowerCase();
+  const seconds = text.match(/(?:in\s+)?(\d+)\s*(?:s|sec|secs|second|seconds|שניות|שניה)/);
+  if (seconds) {
+    return Number(seconds[1]);
+  }
+  const minutes = text.match(/(?:in\s+)?(\d+)\s*(?:m|min|mins|minute|minutes|דקות|דקה)/);
+  if (minutes) {
+    return Number(minutes[1]) * 60;
+  }
+  return null;
+}
+
+function parseWhenDate(when: string): string {
+  const trimmed = when.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const iso = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) {
+    return iso[1];
+  }
+  const first = trimmed.split(/\s+/)[0] ?? "";
+  return first;
+}
+
+function parseWhenTime(when: string): string {
+  const match = when.match(/\b(\d{1,2}:\d{2})\b/);
+  return match?.[1] ?? "";
 }
 
 function toMessageAction(value: unknown): LlmMessageAction | null {
@@ -321,6 +426,20 @@ function collectActionDescriptions(metadata: unknown): string[] {
     for (const item of meta.messages) {
       if (item && typeof item === "object" && !Array.isArray(item)) {
         descriptions.push(describeMessageAction(item as Record<string, unknown>));
+      }
+    }
+  }
+
+  if (Array.isArray(meta.reminders)) {
+    for (const item of meta.reminders) {
+      if (isActionRecord(item)) {
+        const name = readText(item, ["item", "item_name", "name"]);
+        const when = [item.date, item.time, item.when].filter(
+          (part): part is string => typeof part === "string" && part.trim().length > 0,
+        );
+        descriptions.push(
+          `Remind ${when.join(" ") || "later"}${name ? `: ${name}` : ""}`.trim(),
+        );
       }
     }
   }

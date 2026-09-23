@@ -147,7 +147,7 @@ describe("employee targets", () => {
         employees,
         amit.id,
       ),
-    ).toEqual({ lists: [], filing: [], messages: [] });
+    ).toEqual({ lists: [], filing: [], messages: [], reminders: [] });
   });
 
   it("synthesizes a task when the LLM returns no actions", () => {

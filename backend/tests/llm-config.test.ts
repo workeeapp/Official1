@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
+import { loadDavidConfig, loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 
@@ -25,5 +25,14 @@ describe("LLM action schema", () => {
 
     expect(config.responseFormat?.name).toBe("lucy_metadata_response");
     expect(config.systemMessage).toContain("metadata");
+  });
+
+  it("loads David reminder rules without changing Lucy config", () => {
+    const lucy = loadLlmConfig(repoRoot);
+    const david = loadDavidConfig(repoRoot);
+
+    expect(david?.systemMessage).toContain("CLOCK");
+    expect(david?.systemMessage).toContain("in");
+    expect(lucy.systemMessage).not.toContain("LLM.david");
   });
 });

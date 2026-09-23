@@ -1,0 +1,111 @@
+import { digitalEmployees, isProtectedEmployee } from "@workee/shared";
+import { getEnv } from "../config/env.js";
+import { prisma } from "../database/prisma.js";
+import { publishChatEvent } from "./chat-events.service.js";
+import { listEmployeesForUser } from "./employee.service.js";
+import { sendWhatsAppText } from "./whatsapp-send.js";
+
+function pingIds(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function nextDaily(from: Date): Date {
+  return new Date(from.getTime() + 24 * 60 * 60 * 1000);
+}
+
+export async function fireDueReminders(now = new Date()): Promise<number> {
+  if (getEnv().NODE_ENV === "test" || !prisma.reminder) {
+    return 0;
+  }
+
+  const due = await prisma.reminder.findMany({
+    where: { status: "active", fireAt: { lte: now } },
+  });
+
+  for (const reminder of due) {
+    const employees = await listEmployeesForUser(reminder.userId);
+    const lucy = employees.find((employee) => isProtectedEmployee(employee));
+    const digitals = digitalEmployees(employees);
+    const speaker = lucy ?? digitals[0];
+    const text = reminder.messageText.trim() || `תזכורת: ${reminder.itemLabel}`;
+
+    for (const employeeId of pingIds(reminder.pingIds)) {
+      const target = employees.find((employee) => employee.id === employeeId);
+      if (!target || !speaker) {
+        continue;
+      }
+
+      const conversation = await prisma.chatConversation.findUnique({
+        where: {
+          userId_employeeId_digitalEmployeeId: {
+            userId: reminder.userId,
+            employeeId: target.id,
+            digitalEmployeeId: speaker.id,
+          },
+        },
+      });
+      if (conversation) {
+        const created = await prisma.chatMessage.create({
+          data: {
+            conversationId: conversation.id,
+            author: "assistant",
+            speaker: speaker.nickname?.trim() || speaker.name,
+            text,
+            raw: { reminder: true },
+          },
+        });
+        publishChatEvent(reminder.userId, target.id, speaker.id, {
+          employeeId: target.id,
+          digitalEmployeeId: speaker.id,
+          message: {
+            id: created.id,
+            author: "assistant",
+            speaker: created.speaker,
+            text: created.text,
+            createdAt: created.createdAt.toISOString(),
+          },
+          raw: { reminder: true },
+        });
+      }
+
+      if (target.phone?.trim() && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
+        try {
+          await sendWhatsAppText(target.phone, text);
+        } catch (error) {
+          console.error(
+            "Reminder WhatsApp failed",
+            error instanceof Error ? error.message : "unknown",
+          );
+        }
+      }
+    }
+
+    if (reminder.repeat === "daily") {
+      await prisma.reminder.update({
+        where: { id: reminder.id },
+        data: { fireAt: nextDaily(reminder.fireAt) },
+      });
+    } else {
+      await prisma.reminder.update({
+        where: { id: reminder.id },
+        data: { status: "done" },
+      });
+    }
+  }
+
+  return due.length;
+}
+
+export function startReminderTicker(): void {
+  if (getEnv().NODE_ENV === "test") {
+    return;
+  }
+  setInterval(() => {
+    void fireDueReminders().catch((error) => {
+      console.error(
+        "Reminder tick failed",
+        error instanceof Error ? error.message : "unknown",
+      );
+    });
+  }, 30_000);
+}

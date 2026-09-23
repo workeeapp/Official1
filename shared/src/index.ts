@@ -69,5 +69,8 @@ export type {
   LlmListType,
   LlmMessageAction,
   LlmMetadata,
+  LlmReminderAction,
+  LlmReminderActionName,
+  LlmReminderRepeat,
   ParsedLlmMessage,
 } from "./llm-message";

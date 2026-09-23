@@ -83,6 +83,9 @@ describe("WhatsApp webhook", () => {
     expect(parseWhatsAppWorkerCommand("talk to Lucy")).toEqual({
       workerName: "Lucy",
     });
+    expect(parseWhatsAppWorkerCommand("דבר עם דוד הליצן")).toEqual({
+      workerName: "דוד הליצן",
+    });
     expect(parseWhatsAppWorkerCommand("hello")).toEqual({});
   });
 

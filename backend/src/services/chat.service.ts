@@ -35,6 +35,7 @@ import {
 } from "./employee-targets.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson } from "./llm-client.js";
+import { applyReminders } from "./reminder.service.js";
 import { deliverWhatsAppRelays } from "./whatsapp-send.js";
 
 function speakerName(employee: {
@@ -175,6 +176,26 @@ export async function requireDigitalChatPartner(
     });
   }
   return digital;
+}
+
+function isDavidEmployee(employee: PublicEmployee): boolean {
+  if (employee.protected || employee.kind === "human") {
+    return false;
+  }
+  const label = `${employee.name} ${employee.nickname ?? ""}`;
+  return label.includes("דוד");
+}
+
+function davidTargetingInstructions(
+  employees: PublicEmployee[],
+  speaker: string,
+): string {
+  const names = employees.map(employeeDisplayName).join(", ");
+  return [
+    `Known employees: ${names}. Current speaker: ${speaker}.`,
+    "Never ask whether to save as a task list or as a reminder only.",
+    "A reminder request always means: list item + clock. Infer shopping vs tasks yourself.",
+  ].join("\n");
 }
 
 function targetingInstructions(
@@ -635,7 +656,9 @@ export async function sendChatMessage(input: {
   const instructions = [
     config.systemMessage,
     `The user is chatting as ${speaker}.`,
-    targetingInstructions(employees, speaker),
+    isDavidEmployee(digital)
+      ? davidTargetingInstructions(employees, speaker)
+      : targetingInstructions(employees, speaker),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "If asked what someone still needs to buy, use only current shopping lists in EMPLOYEE_SAVED_DATA.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
@@ -705,6 +728,12 @@ export async function sendChatMessage(input: {
         )),
       );
     }
+    await applyReminders({
+      userId: input.userId,
+      actor: employee,
+      employees: humans,
+      reminders: metadata.reminders ?? [],
+    });
 
     const notifications = await notifySharedItemEvents({
       userId: input.userId,

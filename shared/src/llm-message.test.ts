@@ -142,6 +142,7 @@ describe("parseLlmReply", () => {
         },
       ],
       messages: [],
+      reminders: [],
     });
   });
 
@@ -168,6 +169,41 @@ describe("parseLlmReply", () => {
     ]);
     expect(parseLlmReply(reply).actions).toEqual([
       "Send message for טל: עמית שואל מה שלומך?\nמה לענות לו ?",
+    ]);
+  });
+
+  it("extracts a reminder that fires in a few seconds", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "תזכיר בעוד 10 שניות",
+          metadata: {
+            lists: [],
+            filing: [],
+            reminders: [
+              {
+                action: "add",
+                item: "חלב",
+                list_type: "shopping",
+                in: "10 seconds",
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toEqual([
+      {
+        action: "add",
+        item: "חלב",
+        listType: "shopping",
+        date: "",
+        time: "",
+        repeat: "once",
+        ping: [],
+        targets: [],
+        text: "",
+        inSeconds: 10,
+      },
     ]);
   });
 });

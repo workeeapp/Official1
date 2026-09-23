@@ -88,6 +88,27 @@ export function loadLlmResponseFormat(
   return undefined;
 }
 
+const DAVID_CANDIDATES = ["LLM.david.json", "../LLM.david.json"];
+
+export function loadDavidConfig(cwd = process.cwd()): LlmConfig | undefined {
+  for (const relativePath of DAVID_CANDIDATES) {
+    const path = resolve(cwd, relativePath);
+    try {
+      const parsed = llmConfigSchema.safeParse(
+        normalizeLlmConfig(parseLlmConfigText(readFileSync(path, "utf8"))),
+      );
+      if (parsed.success) {
+        return parsed.data;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+    }
+  }
+  return undefined;
+}
+
 function toResponsesJsonSchemaFormat(raw: unknown): LlmJsonSchemaFormat | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return undefined;

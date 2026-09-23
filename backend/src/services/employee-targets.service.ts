@@ -102,14 +102,16 @@ export function resolveSpokenMetadata(
 
   const messages = metadata.messages ?? [];
 
+  const reminders = metadata.reminders ?? [];
+
   if (hasTargetedWork || inferred.length === 0 || !looksLikeAssignment(message)) {
-    return { lists, filing, messages };
+    return { lists, filing, messages, reminders };
   }
 
   const synthesized = synthesizeAssignment(message, inferred);
   return synthesized
-    ? { lists: [...lists, synthesized], filing, messages }
-    : { lists, filing, messages };
+    ? { lists: [...lists, synthesized], filing, messages, reminders }
+    : { lists, filing, messages, reminders };
 }
 
 export function looksLikeRelayMessage(message: string): boolean {

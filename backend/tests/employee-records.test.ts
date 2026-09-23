@@ -18,6 +18,8 @@ const {
   filingDelete,
   filingDeleteMany,
   employeeFindMany,
+  employeeFindUnique,
+  reminderFindMany,
 } = vi.hoisted(() => ({
   listFindMany: vi.fn(),
   listFindUnique: vi.fn(),
@@ -36,6 +38,8 @@ const {
   filingDelete: vi.fn(),
   filingDeleteMany: vi.fn(),
   employeeFindMany: vi.fn(),
+  employeeFindUnique: vi.fn(),
+  reminderFindMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -64,6 +68,10 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     employee: {
       findMany: employeeFindMany,
+      findUnique: employeeFindUnique,
+    },
+    reminder: {
+      findMany: reminderFindMany,
     },
   },
 }));
@@ -103,6 +111,8 @@ describe("employee records", () => {
     filingDelete.mockReset();
     filingDeleteMany.mockReset();
     employeeFindMany.mockReset().mockResolvedValue([]);
+    employeeFindUnique.mockReset().mockResolvedValue({ userId: "user-1" });
+    reminderFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("builds an identity key from Hebrew shopping and task fields", () => {
@@ -362,6 +372,7 @@ describe("employee records", () => {
           scope: "personal",
         },
       ],
+      reminders: [],
     });
   });
 
@@ -510,6 +521,7 @@ describe("employee records", () => {
     await expect(getEmployeeRecordSnapshot(employeeId)).resolves.toEqual({
       lists: [],
       filing: [],
+      reminders: [],
     });
   });
 

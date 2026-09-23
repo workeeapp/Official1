@@ -26,7 +26,9 @@ Username: Amit
 Password: ChangeMe123!
 ```
 
-Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). Lucy’s structured reply schema is `LLM.action.json`.
+Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). Lucy’s structured reply schema is `LLM.action.json`. Do not put reminder experiments in Lucy’s file.
+
+New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). He emits `metadata.lists` plus `metadata.reminders`; the server stores a clock on the list item and fires WhatsApp/thread pings. Lucy’s prompt stays the front desk.
 
 Do not commit `.env` or access tokens.
 

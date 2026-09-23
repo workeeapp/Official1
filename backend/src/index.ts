@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { getEnv } from "./config/env.js";
 import { prisma } from "./database/prisma.js";
+import { startReminderTicker } from "./services/reminder-fire.js";
 
 async function main(): Promise<void> {
   const env = getEnv();
@@ -9,6 +10,7 @@ async function main(): Promise<void> {
   const server = app.listen(env.PORT, () => {
     console.log(`API listening on http://localhost:${env.PORT}`);
   });
+  startReminderTicker();
 
   const shutdown = async (signal: string) => {
     console.log(`Received ${signal}, shutting down`);

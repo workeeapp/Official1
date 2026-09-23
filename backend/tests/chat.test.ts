@@ -104,6 +104,9 @@ vi.mock("../src/database/prisma.js", () => ({
     employee: {
       findFirst,
       findMany,
+      findUnique: vi.fn().mockResolvedValue({
+        userId: "11111111-1111-4111-8111-111111111111",
+      }),
       update: vi.fn(),
       create: vi.fn().mockResolvedValue({
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -141,6 +144,13 @@ vi.mock("../src/database/prisma.js", () => ({
     employeeFiling: {
       findMany: filingFindMany,
       upsert: filingUpsert,
+    },
+    reminder: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
 }));

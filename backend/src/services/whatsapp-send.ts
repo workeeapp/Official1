@@ -33,7 +33,26 @@ export async function sendWhatsAppText(to: string, text: string): Promise<void> 
   );
 
   if (!response.ok) {
+    const detail = await graphErrorDetail(response);
+    console.error(`WhatsApp send failed status=${response.status} ${detail}`);
     throw new ServiceUnavailableError();
+  }
+}
+
+async function graphErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as {
+      error?: { code?: unknown; type?: unknown; message?: unknown };
+    };
+    const code = body.error?.code ?? "";
+    const type = body.error?.type ?? "";
+    const message =
+      typeof body.error?.message === "string"
+        ? body.error.message.replace(/EAA[A-Za-z0-9]+/g, "[token]")
+        : "";
+    return `code=${code} type=${type} ${message}`.trim();
+  } catch {
+    return "body=unreadable";
   }
 }
 

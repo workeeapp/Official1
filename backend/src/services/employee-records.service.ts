@@ -9,6 +9,7 @@ import type {
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { prisma } from "../database/prisma.js";
 import { toPlainJson } from "./llm-client.js";
+import { toReminderSnapshotRow, type ReminderSnapshotRow } from "./reminder.service.js";
 
 export type ItemScope = "personal" | "shared";
 
@@ -31,6 +32,7 @@ export interface EmployeeRecordSnapshot {
     owner: string;
     scope: ItemScope;
   }>;
+  reminders?: ReminderSnapshotRow[];
 }
 
 const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
@@ -54,7 +56,11 @@ export function itemIdentity(
 }
 
 export function hasEmployeeRecords(snapshot: EmployeeRecordSnapshot): boolean {
-  return snapshot.lists.length > 0 || snapshot.filing.length > 0;
+  return (
+    snapshot.lists.length > 0 ||
+    snapshot.filing.length > 0 ||
+    (snapshot.reminders?.length ?? 0) > 0
+  );
 }
 
 export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string {
@@ -79,6 +85,7 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
       {
         lists: snapshot.lists,
         filing: snapshot.filing,
+        reminders: snapshot.reminders ?? [],
       },
       null,
       2,
@@ -297,7 +304,11 @@ export async function deleteEmployeeRecord(
 export async function getEmployeeRecordSnapshot(
   employeeId: string,
 ): Promise<EmployeeRecordSnapshot> {
-  const [ownLists, sharedItems, ownFilings] = await Promise.all([
+  const owner = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { userId: true },
+  });
+  const [ownLists, sharedItems, ownFilings, reminderRows, people] = await Promise.all([
     prisma.employeeList.findMany({
       where: { employeeId },
       include: {
@@ -323,6 +334,27 @@ export async function getEmployeeRecordSnapshot(
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
+    owner && prisma.reminder
+      ? prisma.reminder.findMany({
+          where: {
+            userId: owner.userId,
+            OR: [
+              { status: "active" },
+              {
+                status: "done",
+                fireAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+              },
+            ],
+          },
+          orderBy: { fireAt: "asc" },
+        })
+      : Promise.resolve([]),
+    owner
+      ? prisma.employee.findMany({
+          where: { userId: owner.userId },
+          select: { id: true, name: true, nickname: true, surname: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   const currentShopping = new Map<string, Set<string>>();
@@ -412,6 +444,10 @@ export async function getEmployeeRecordSnapshot(
     }
   }
 
+  const names = new Map(
+    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
+  );
+
   return {
     lists,
     filing: ownFilings.map((filing) => ({
@@ -420,6 +456,12 @@ export async function getEmployeeRecordSnapshot(
       owner: filing.employee.nickname?.trim() || filing.employee.name,
       scope: "personal" as const,
     })),
+    reminders: reminderRows
+      .filter((row) => {
+        const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
+        return row.ownerId === employeeId || pings.includes(employeeId);
+      })
+      .map((row) => toReminderSnapshotRow(row, names)),
   };
 }
 

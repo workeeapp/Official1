@@ -5,7 +5,7 @@ import type {
   PublicEmployee,
 } from "@workee/shared";
 import { humanEmployees } from "@workee/shared";
-import { loadLlmConfig } from "../config/llm.js";
+import { loadDavidConfig, loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
 import { ConflictError, NotFoundError } from "../utils/errors.js";
 
@@ -101,8 +101,57 @@ async function refreshProtectedLucyInstructions(employee: Employee): Promise<voi
   });
 }
 
+function isDavidEmployee(employee: Employee): boolean {
+  if (employee.isProtected || employee.kind !== "digital") {
+    return false;
+  }
+  const label = `${employee.name} ${employee.nickname ?? ""}`;
+  return label.includes("דוד");
+}
+
+async function ensureDavidReminderPrompt(userId: string): Promise<void> {
+  try {
+    const config = loadDavidConfig();
+    if (!config) {
+      return;
+    }
+    const candidates = await prisma.employee.findMany({
+      where: {
+        userId,
+        kind: "digital",
+        isProtected: false,
+      },
+    });
+    const david = candidates.find((employee) => isDavidEmployee(employee));
+    if (!david) {
+      return;
+    }
+    if (
+      david.instructions === config.systemMessage &&
+      david.model === config.model &&
+      david.temperature === config.temperature
+    ) {
+      return;
+    }
+    await prisma.employee.update({
+      where: { id: david.id },
+      data: {
+        instructions: config.systemMessage,
+        model: config.model,
+        temperature: config.temperature,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "David prompt sync failed",
+      error instanceof Error ? error.message : "unknown",
+    );
+  }
+}
+
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
+  await ensureDavidReminderPrompt(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },

@@ -100,8 +100,8 @@ const whatsappWorkerByPhone = new Map<string, string>();
 
 const SWITCH_WORKER =
   /^(?:talk to|chat with|switch to|דבר עם|דברי עם|עבור אל|עבור ל|עברי ל)\s+(.+)$/iu;
-const LIST_WORKERS =
-  /^(?:who can i (?:talk|chat) to|list workers|איזה עובדים|מי העובדים|עם מי אפשר לדבר)\??$/iu;
+  const LIST_WORKERS =
+  /(?:who can i (?:talk|chat) to|list workers|איזה עובדים|מי העובדים|עם מי אפשר לדבר)/iu;
 
 export function parseWhatsAppWorkerCommand(text: string): {
   list?: boolean;
@@ -159,6 +159,7 @@ export async function handleInboundWhatsAppTexts(
         digitals,
       );
       if (routed.notice && !routed.message) {
+        console.log("WhatsApp worker command notice");
         await sendWhatsAppText(message.from, routed.notice);
         continue;
       }
@@ -279,7 +280,11 @@ function matchDigitalName(
       .filter((value): value is string => Boolean(value && value.trim()))
       .map((value) => value.trim().toLowerCase());
     return aliases.some(
-      (alias) => needle === alias || needle.startsWith(`${alias} `),
+      (alias) =>
+        needle === alias ||
+        needle.startsWith(`${alias} `) ||
+        alias === needle ||
+        alias.startsWith(`${needle} `),
     );
   });
 }
