@@ -174,6 +174,25 @@ export function formatWhatsAppSkipNotice(skips: WhatsAppDeliverySkip[]): string 
     .join("\n");
 }
 
+/** When the engine refused a send/save, this question is the reply — not a footnote. */
+export function composeAssistantReply(input: {
+  llmReply: string;
+  listed: string;
+  notice: string;
+  ownAsk: string;
+}): string {
+  if (input.listed) {
+    return appendEngineNotice(
+      replaceLlmResponse(input.llmReply, input.listed),
+      input.notice,
+    );
+  }
+  if (input.ownAsk.trim()) {
+    return replaceLlmResponse(input.llmReply, input.ownAsk.trim());
+  }
+  return appendEngineNotice(input.llmReply, input.notice);
+}
+
 export function replaceLlmResponse(reply: string, response: string): string {
   try {
     const parsed: unknown = JSON.parse(reply);

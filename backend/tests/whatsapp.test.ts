@@ -4,6 +4,7 @@ import { createApp } from "../src/app.js";
 import { resetEnvCache } from "../src/config/env.js";
 import {
   appendEngineNotice,
+  composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
 } from "../src/services/whatsapp-send.js";
@@ -205,6 +206,36 @@ describe("WhatsApp webhook", () => {
         "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.",
       ),
     ).toContain("לא נשלח");
+  });
+
+  it("replaces a false send claim when the engine owns the ask", () => {
+    const spoken = composeAssistantReply({
+      llmReply: JSON.stringify({
+        response: "שלחתי למיכל",
+        metadata: { messages: [{ targets: ["מיכל"], text: "" }] },
+      }),
+      listed: "",
+      notice: "מה לשלוח ל«מיכל»? אפשר גם שלום.",
+      ownAsk: "אין לי מספר ל«מיכל». מה המספר?",
+    });
+    expect(spoken).toContain("אין לי מספר ל«מיכל»");
+    expect(spoken).not.toContain("שלחתי");
+  });
+
+  it("uses one delete confirm when the engine owns the ask", () => {
+    const spoken = composeAssistantReply({
+      llmReply: JSON.stringify({
+        response:
+          "למחוק את התזכורות: 'לבדוק למה מיכל קיבלה תשובה' ו'לבדוק למה הודעה למיכל נשלחה אלי'?",
+        metadata: {},
+      }),
+      listed: "",
+      notice: "למחוק את אלה: לבדוק למה מיכל קיבלה תשובה, לבדוק למה הודעה למיכל נשלחה אלי?",
+      ownAsk:
+        "למחוק את אלה: לבדוק למה מיכל קיבלה תשובה, לבדוק למה הודעה למיכל נשלחה אלי?",
+    });
+    expect(spoken.match(/למחוק/g)).toHaveLength(1);
+    expect(spoken).not.toContain("התזכורות:");
   });
 });
 

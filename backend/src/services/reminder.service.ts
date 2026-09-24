@@ -2,6 +2,7 @@ import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
+import { scheduleSoon } from "./reminder-fire.js";
 
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
 
@@ -20,6 +21,7 @@ export interface ReminderSnapshotRow {
   owner: string;
   text: string;
   status: string;
+  send_status: "pending" | "sent" | "failed";
   sent: boolean;
   sent_at: string | null;
 }
@@ -152,19 +154,14 @@ function matchEmployee(
 }
 
 export function resolveReminderPingDestinations(
-  reminder: Pick<LlmReminderAction, "ping"> & { targets?: string[] },
+  reminder: Pick<LlmReminderAction, "ping"> & {
+    targets?: string[];
+    item?: string;
+    text?: string;
+  },
   employees: PublicEmployee[],
   fallbackId: string,
 ): string[] {
-  const dest: string[] = [];
-  const seen = new Set<string>();
-  const add = (value: string) => {
-    if (!seen.has(value)) {
-      seen.add(value);
-      dest.push(value);
-    }
-  };
-
   const named = [
     ...reminder.ping,
     ...("targets" in reminder && Array.isArray(reminder.targets)
@@ -172,24 +169,65 @@ export function resolveReminderPingDestinations(
       : []),
   ];
 
+  const phones: string[] = [];
+  const people: string[] = [];
+  const addPhone = (value: string) => {
+    if (!phones.includes(value)) {
+      phones.push(value);
+    }
+  };
+  const addPerson = (value: string) => {
+    if (!people.includes(value)) {
+      people.push(value);
+    }
+  };
+
   for (const raw of named) {
-    const phones = phonesInToken(raw);
-    if (phones.length > 0) {
-      for (const phone of phones) {
-        add(phone);
+    const found = phonesInToken(raw);
+    if (found.length > 0) {
+      for (const phone of found) {
+        addPhone(phone);
       }
       continue;
     }
     const employee = matchEmployee(raw, employees);
     if (employee) {
-      add(employee.id);
+      addPerson(employee.id);
     }
   }
 
-  if (dest.length > 0) {
-    return dest;
+  for (const raw of [reminder.item, reminder.text]) {
+    if (!raw) {
+      continue;
+    }
+    for (const phone of phonesInToken(raw)) {
+      addPhone(phone);
+    }
+  }
+
+  if (phones.length > 0) {
+    return phones;
+  }
+  if (people.length > 0) {
+    return people;
   }
   return named.length > 0 ? [] : [fallbackId];
+}
+
+export function formatPingLabel(
+  value: string,
+  employees: PublicEmployee[],
+): string {
+  const employee = employees.find((row) => row.id === value);
+  if (employee) {
+    const digits = (employee.phone ?? "").replace(/\D/g, "");
+    if (digits.length >= 4) {
+      return `…${digits.slice(-4)}`;
+    }
+    return employee.nickname?.trim() || employee.name;
+  }
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 4 ? `…${digits.slice(-4)}` : value.slice(0, 8);
 }
 
 function phonesInToken(raw: string): string[] {
@@ -204,6 +242,26 @@ function phonesInToken(raw: string): string[] {
     }
   }
   return found;
+}
+
+export function unknownDestNames(
+  reminder: Pick<LlmReminderAction, "ping"> & { targets?: string[] },
+  employees: PublicEmployee[],
+): string[] {
+  const named = [
+    ...reminder.ping,
+    ...(reminder.targets ?? []),
+  ];
+  const unknown: string[] = [];
+  for (const raw of named) {
+    if (phonesInToken(raw).length > 0 || matchEmployee(raw, employees)) {
+      continue;
+    }
+    if (raw.trim()) {
+      unknown.push(raw.trim());
+    }
+  }
+  return unknown;
 }
 
 function ownerIdFor(
@@ -331,14 +389,21 @@ export async function applyReminders(input: {
 }): Promise<{
   removed: string[];
   missed: string[];
-  saved: Array<{ item: string; fireAt: string }>;
-  skipped: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }>;
+  saved: Array<{ item: string; fireAt: string; ping?: string }>;
+  skipped: Array<{
+    item: string;
+    reason: "no_time" | "db" | "no_phone";
+    dest?: string;
+  }>;
 }> {
   const removed: string[] = [];
   const missed: string[] = [];
-  const saved: Array<{ item: string; fireAt: string }> = [];
-  const skipped: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }> =
-    [];
+  const saved: Array<{ item: string; fireAt: string; ping?: string }> = [];
+  const skipped: Array<{
+    item: string;
+    reason: "no_time" | "db" | "no_phone";
+    dest?: string;
+  }> = [];
   if (!prisma.reminder) {
     for (const reminder of input.reminders.filter((row) => row.action !== "remove")) {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
@@ -383,7 +448,11 @@ export async function applyReminders(input: {
       input.actor.id,
     );
     if (pingIds.length === 0) {
-      skipped.push({ item: reminder.item.trim(), reason: "no_phone" });
+      skipped.push({
+        item: reminder.item.trim(),
+        reason: "no_phone",
+        dest: unknownDestNames(reminder, input.employees).join(", "),
+      });
       continue;
     }
 
@@ -428,7 +497,11 @@ export async function applyReminders(input: {
       saved.push({
         item: reminder.item.trim(),
         fireAt: formatJerusalemDateTime(fireAt),
+        ping: pingIds
+          .map((id) => formatPingLabel(id, input.employees))
+          .join(","),
       });
+      scheduleSoon(fireAt);
     } catch {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
@@ -455,14 +528,22 @@ export function formatActiveRemindersReply(
 export function formatReminderApplyNotice(result: {
   removed: string[];
   missed: string[];
-  saved?: Array<{ item: string; fireAt: string }>;
-  skipped?: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }>;
+  saved?: Array<{ item: string; fireAt: string; ping?: string }>;
+  skipped?: Array<{
+    item: string;
+    reason: "no_time" | "db" | "no_phone";
+    dest?: string;
+  }>;
 }): string {
   const parts: string[] = [];
   if (result.saved && result.saved.length > 0) {
     parts.push(
       result.saved
-        .map((row) => `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`)
+        .map((row) =>
+          row.ping
+            ? `נשמרה התזכורת «${row.item}» ל-${row.fireAt} (אל ${row.ping}).`
+            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`,
+        )
         .join(" "),
     );
   }
@@ -473,7 +554,9 @@ export function formatReminderApplyNotice(result: {
           row.reason === "db"
             ? `לא נשמרה «${row.item}» — השמירה נכשלה.`
             : row.reason === "no_phone"
-              ? `לא נשמרה «${row.item}» — צריך מספר WhatsApp ליעד, לא רק שם.`
+              ? row.dest
+                ? `אין לי מספר ל«${row.dest}». מה המספר?`
+                : `אין לי מספר ליעד. מה המספר?`
             : `לא נשמרה «${row.item}» — חסר זמן תזכורת (שעה או in).`,
         )
         .join(" "),
@@ -536,11 +619,16 @@ export function toReminderSnapshotRow(
     ownerId: string;
     messageText: string;
     status: string;
+    sendStatus?: string;
+    sentAt?: Date | null;
   },
   names: Map<string, string>,
 ): ReminderSnapshotRow {
   const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
-  const sent = row.status === "done";
+  const sendStatus =
+    row.sendStatus === "sent" || row.sendStatus === "failed"
+      ? row.sendStatus
+      : "pending";
   return {
     item: row.itemLabel,
     list_type: row.listType,
@@ -550,7 +638,8 @@ export function toReminderSnapshotRow(
     owner: names.get(row.ownerId) ?? row.ownerId,
     text: row.messageText,
     status: row.status,
-    sent,
-    sent_at: sent ? formatJerusalemDateTime(row.fireAt) : null,
+    send_status: sendStatus,
+    sent: sendStatus === "sent",
+    sent_at: row.sentAt ? formatJerusalemDateTime(row.sentAt) : null,
   };
 }

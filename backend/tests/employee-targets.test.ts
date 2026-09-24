@@ -3,6 +3,7 @@ import type { PublicEmployee } from "@workee/shared";
 import {
   fallbackNotificationText,
   fallbackRelayText,
+  formatMissingSendTextNotice,
   inferTargetsFromMessage,
   planPhoneRelays,
   planRelayDeliveries,
@@ -334,6 +335,12 @@ describe("employee targets", () => {
     ).toBe("עמית שואל אם קנית שמן ?");
 
     expect(resolveRelayMessages([])).toEqual([]);
+    expect(
+      formatMissingSendTextNotice([{ targets: ["עמית"], text: "" }]),
+    ).toBe("מה לשלוח ל«עמית»? אפשר גם שלום.");
+    expect(
+      formatMissingSendTextNotice([{ targets: ["עמית"], text: "היי" }]),
+    ).toBe("");
 
     expect(
       planRelayDeliveries({

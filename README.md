@@ -33,7 +33,11 @@ New capabilities are developed on a **separate digital worker** with its own pro
 - `lists` / `filing` / `messages` / `reminders` — write or send
 - `handoff.worker` — switch the WhatsApp session to that digital employee
 - `query: "reminders"` — list **active** rows from the database (not from chat memory)
-- `confirm: true|false` — apply or drop a pending reminder update/delete
+- `confirm: true|false` — apply or drop a pending reminder delete
+
+The engine does not invent a destination or a message body. An unknown name without digits is not saved. A spoken question (`?`) holds outbound WhatsApp until the speaker confirms. A phone in the reminder item or text is the ping, even if `ping` names the speaker. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+
+A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`.
 
 Do not add regex that guesses user intent. Lucy’s prompt stays the front desk.
 

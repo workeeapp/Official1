@@ -111,6 +111,21 @@ export function resolveRelayMessages(
   );
 }
 
+export function formatMissingSendTextNotice(
+  actions: LlmMessageAction[],
+): string {
+  const dests = actions
+    .filter((action) => action.targets.length > 0 && !action.text.trim())
+    .flatMap((action) => action.targets.map((target) => target.trim()))
+    .filter(Boolean);
+  if (dests.length === 0) {
+    return "";
+  }
+  return dests.length === 1
+    ? `מה לשלוח ל«${dests[0]}»? אפשר גם שלום.`
+    : `מה לשלוח? אפשר גם שלום.`;
+}
+
 export function fallbackRelayText(
   actorName: string,
   userMessage: string,

@@ -140,6 +140,8 @@ model Reminder {
   pingIds     Json     @default("[]") @map("ping_ids")
   messageText String   @default("") @map("message_text") @db.Text
   status      String   @default("active") @db.VarChar(16)
+  sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
+  sentAt      DateTime? @map("sent_at")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   owner     Employee @relation("ReminderOwner", fields: [ownerId], references: [id], onDelete: Cascade)

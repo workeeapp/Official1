@@ -5,6 +5,8 @@ import { isMissingTableError } from "../utils/errors.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
+import { formatAttributedOutbound } from "./outbound-text.js";
+import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 
 function pingIds(value: unknown): string[] {
@@ -37,14 +39,26 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const lucy = employees.find((employee) => isProtectedEmployee(employee));
     const digitals = digitalEmployees(employees);
     const speaker = lucy ?? digitals[0];
-    const text = reminder.messageText.trim() || `תזכורת: ${reminder.itemLabel}`;
+    const actor = employees.find((employee) => employee.id === reminder.actorId);
+    const actorName = actor?.nickname?.trim() || actor?.name || "";
+    const dests = pingIds(reminder.pingIds);
+    const sendResults: boolean[] = [];
 
-    for (const dest of pingIds(reminder.pingIds)) {
+    for (const dest of dests) {
       const target =
         employees.find((employee) => employee.id === dest) ??
         employees.find(
           (employee) => employee.phone && phonesMatch(employee.phone, dest),
         );
+      const destIsActor =
+        dest === reminder.actorId ||
+        Boolean(actor?.phone && phonesMatch(actor.phone, dest));
+      const text = formatAttributedOutbound({
+        actorName,
+        destIsActor,
+        item: reminder.itemLabel,
+        text: reminder.messageText,
+      });
 
       if (target && speaker) {
         const conversation = await prisma.chatConversation.findUnique({
@@ -82,32 +96,72 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       }
 
       const phone = target?.phone?.trim() || (looksLikePhone(dest) ? dest : "");
+      recordWhatsAppEvent(
+        "reminder_fire",
+        `item=${reminder.itemLabel} dest=${dest.slice(-4)} phone=${phone ? `…${phone.replace(/\D/g, "").slice(-4)}` : "none"}`,
+      );
       if (phone && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
         try {
-          await sendWhatsAppText(phone, text, { ignoreSession: true });
+          const result = await sendWhatsAppText(phone, text, {
+            ignoreSession: true,
+          });
+          sendResults.push(result === "sent");
         } catch (error) {
           console.error(
             "Reminder WhatsApp failed",
             error instanceof Error ? error.message : "unknown",
           );
+          sendResults.push(false);
         }
+      } else {
+        sendResults.push(false);
       }
     }
+
+    const sendStatus =
+      dests.length > 0 &&
+      sendResults.length > 0 &&
+      sendResults.every(Boolean)
+        ? "sent"
+        : "failed";
+    const sentAt = sendStatus === "sent" ? now : null;
 
     if (reminder.repeat === "daily") {
       await prisma.reminder.update({
         where: { id: reminder.id },
-        data: { fireAt: nextDaily(reminder.fireAt) },
+        data: {
+          fireAt: nextDaily(reminder.fireAt),
+          sendStatus,
+          sentAt,
+        },
       });
     } else {
       await prisma.reminder.update({
         where: { id: reminder.id },
-        data: { status: "done" },
+        data: { status: "done", sendStatus, sentAt },
       });
     }
   }
 
   return due.length;
+}
+
+export function scheduleSoon(fireAt: Date): void {
+  if (getEnv().NODE_ENV === "test") {
+    return;
+  }
+  const delay = Math.max(0, fireAt.getTime() - Date.now());
+  if (delay > 120_000) {
+    return;
+  }
+  setTimeout(() => {
+    void fireDueReminders().catch((error) => {
+      console.error(
+        "Reminder tick failed",
+        error instanceof Error ? error.message : "unknown",
+      );
+    });
+  }, delay + 250);
 }
 
 export function startReminderTicker(): void {
@@ -121,5 +175,5 @@ export function startReminderTicker(): void {
         error instanceof Error ? error.message : "unknown",
       );
     });
-  }, 30_000);
+  }, 10_000);
 }

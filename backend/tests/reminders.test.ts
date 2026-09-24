@@ -9,6 +9,8 @@ import {
   reminderLabelsMatch,
   resolveReminderFireAt,
   resolveReminderPingDestinations,
+  toReminderSnapshotRow,
+  unknownDestNames,
 } from "../src/services/reminder.service.js";
 import type { LlmReminderAction } from "@workee/shared";
 
@@ -82,6 +84,16 @@ describe("resolveReminderPingDestinations", () => {
     ).toEqual([]);
   });
 
+  it("pulls digits out of the reminder item when ping is empty", () => {
+    expect(
+      resolveReminderPingDestinations(
+        { ping: [], item: "היי 050-222-2222" },
+        [tal],
+        tal.id,
+      ),
+    ).toEqual(["0502222222"]);
+  });
+
   it("pulls digits out of a ping token that also has a name", () => {
     expect(
       resolveReminderPingDestinations(
@@ -90,6 +102,19 @@ describe("resolveReminderPingDestinations", () => {
         tal.id,
       ),
     ).toEqual(["0502222222"]);
+  });
+
+  it("uses a phone in the item even if ping is the speaker", () => {
+    expect(
+      resolveReminderPingDestinations(
+        {
+          ping: ["טל"],
+          item: "לשלוח הודעה 'היום אנחנו נפגשים' למספר 0523691495",
+        },
+        [tal],
+        tal.id,
+      ),
+    ).toEqual(["0523691495"]);
   });
 
   it("uses reminder targets as ping when ping is empty", () => {
@@ -110,6 +135,19 @@ describe("resolveReminderPingDestinations", () => {
         "other",
       ),
     ).toEqual(["0501111111"]);
+  });
+});
+
+describe("unknown dest", () => {
+  it("treats מיכל as an unknown name and asks for the number", () => {
+    expect(unknownDestNames({ ping: ["מיכל"] }, [tal])).toEqual(["מיכל"]);
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        skipped: [{ item: "היי", reason: "no_phone", dest: "מיכל" }],
+      }),
+    ).toBe("אין לי מספר ל«מיכל». מה המספר?");
   });
 });
 
@@ -149,6 +187,33 @@ describe("planReminderWrites", () => {
   });
 });
 
+describe("toReminderSnapshotRow", () => {
+  it("does not treat a finished clock as sent when WhatsApp failed", () => {
+    expect(
+      toReminderSnapshotRow(
+        {
+          itemLabel: "חלב",
+          listType: "shopping",
+          fireAt: new Date("2026-09-24T17:08:00.000Z"),
+          repeat: "once",
+          pingIds: [],
+          ownerId: tal.id,
+          messageText: "",
+          status: "done",
+          sendStatus: "failed",
+          sentAt: null,
+        },
+        new Map([[tal.id, "טל"]]),
+      ),
+    ).toMatchObject({
+      status: "done",
+      send_status: "failed",
+      sent: false,
+      sent_at: null,
+    });
+  });
+});
+
 describe("formatActiveRemindersReply", () => {
   it("lists only active rows from the database snapshot", () => {
     expect(
@@ -162,6 +227,7 @@ describe("formatActiveRemindersReply", () => {
           owner: "טל",
           text: "",
           status: "active",
+          send_status: "pending",
           sent: false,
           sent_at: null,
         },
@@ -174,6 +240,7 @@ describe("formatActiveRemindersReply", () => {
           owner: "טל",
           text: "",
           status: "cancelled",
+          send_status: "pending",
           sent: false,
           sent_at: null,
         },

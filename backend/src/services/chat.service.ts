@@ -31,12 +31,14 @@ import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js"
 import {
   employeeDisplayName,
   fallbackNotificationText,
+  formatMissingSendTextNotice,
   planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
   resolveRelayMessages,
   resolveSpokenMetadata,
 } from "./employee-targets.service.js";
+import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson } from "./llm-client.js";
 import {
@@ -48,13 +50,17 @@ import {
   planReminderWrites,
 } from "./reminder.service.js";
 import {
-  appendEngineNotice,
+  composeAssistantReply,
   deliverWhatsAppPhones,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
-  replaceLlmResponse,
 } from "./whatsapp-send.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
+import {
+  planOutboundSends,
+  spokenReplyLooksLikeQuestion,
+} from "./outbound-hold.js";
+import { formatAttributedOutbound } from "./outbound-text.js";
 
 function speakerName(employee: {
   name: string;
@@ -217,6 +223,8 @@ function davidTargetingInstructions(
     "If the speaker wants to speak with another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" }. Telling someone something is messages, not handoff.",
     "ping and messages.targets may be employee names or phone numbers. A number is a WhatsApp destination.",
     "A one-time WhatsApp now to a number → metadata.messages with that number in targets and the text. A later ping to a number → reminders.ping with that number.",
+    "If they want to send or remind someone whose name is not in Known employees, ASK for their WhatsApp number. Do not emit messages or reminders until ping/targets has digits. Do not say you sent or saved.",
+    "If they want to send someone a message but did not say the words, ASK what to send. You may offer שלום. Do not invent text. Do not emit messages or a later ping until they give words or agree to שלום. A question plus filled messages still sends — leave messages empty while you ask.",
     "Delete/update: put the intended reminders action in metadata without confirmed. Ask a yes/no question. After they confirm, emit confirmed: true on that action or metadata.confirm=true. After they refuse, metadata.confirm=false.",
     "If they want to see current reminders — any wording — set metadata.query to \"reminders\". The server lists them from the database.",
   ].join("\n");
@@ -246,7 +254,9 @@ function targetingInstructions(
     "Do not turn a send/check request into a list or task unless they also asked to add one.",
     "If there are no messages to send, metadata.messages = [].",
     "messages.targets may be employee names or a phone number. A number is a WhatsApp destination, not an employee name.",
-    "If the speaker wants to speak with, switch to, or be transferred to another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" } and confirm in response.",
+    "If they name someone who is not in Known employees, ask for that person's WhatsApp number. Do not emit messages until you have digits.",
+    "If they ask to send a message but did not say what it should say, ask what to send. You may offer שלום. Do not invent text. Do not emit metadata.messages until they give words or agree to שלום. Asking 'is this the wording?' with messages filled still sends — leave messages empty while you ask.",
+    "If the speaker wants to speak with, switch to, or be transferred to another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" } and confirm in feminine Hebrew (מעבירה אותך לדוד, not מעביר).",
     "Do not use metadata.messages for a conversation switch. Asking you to tell or send someone something is messages, not handoff.",
     "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
     "Reminders are דוד (also called הליצן — same person). Create, change, or delete a reminder → metadata.handoff { \"worker\": \"דוד\" }. Never say you saved a reminder.",
@@ -677,6 +687,21 @@ export async function resetChatConversation(
   );
 }
 
+function attachMessagePhonesToReminders(metadata: LlmMetadata): LlmMetadata {
+  const extras = (metadata.messages ?? [])
+    .flatMap((action) => action.targets)
+    .filter((target) => looksLikePhone(target));
+  if (extras.length === 0) {
+    return metadata;
+  }
+  return {
+    ...metadata,
+    reminders: (metadata.reminders ?? []).map((row) =>
+      row.ping.length > 0 ? row : { ...row, ping: extras },
+    ),
+  };
+}
+
 function matchHandoffWorker(
   workerName: string | undefined,
   digitals: PublicEmployee[],
@@ -803,11 +828,13 @@ export async function sendChatMessage(input: {
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
-    const metadata = resolveSpokenMetadata(
-      input.message,
-      parsedMetadata,
-      humans,
-      employee.id,
+    const metadata = attachMessagePhonesToReminders(
+      resolveSpokenMetadata(
+        input.message,
+        parsedMetadata,
+        humans,
+        employee.id,
+      ),
     );
     const plan = planTargetedActions({
       actor: employee,
@@ -851,18 +878,43 @@ export async function sendChatMessage(input: {
     });
     recordWhatsAppEvent(
       "reminder_apply",
-      `worker=${digital.name} query=${metadata.query ?? "none"} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length}`,
+      `worker=${digital.name} query=${metadata.query ?? "none"} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
+    );
+    const confirmAsk = formatReminderConfirmNotice(
+      reminderPlan.ask,
+      reminderPlan.cancelled,
+      reminderPlan.noneToDelete,
     );
     const reminderNotice = [
-      formatReminderConfirmNotice(
-        reminderPlan.ask,
-        reminderPlan.cancelled,
-        reminderPlan.noneToDelete,
-      ),
+      confirmAsk,
       formatReminderApplyNotice(reminderResult),
     ]
       .filter(Boolean)
       .join("\n");
+
+    const phoneRelays = planPhoneRelays(
+      parsedMetadata.messages ?? [],
+      employees,
+      employee.id,
+    );
+    const outbound = planOutboundSends({
+      conversationId: conversation.id,
+      relays,
+      phones: phoneRelays,
+      spokenAsk: spokenReplyLooksLikeQuestion(
+        parseLlmReply(turn.reply).response,
+      ),
+      confirm: metadata.confirm ?? null,
+      reminderAsk: reminderPlan.ask.length > 0,
+      reminderRemoved: reminderResult.removed.length > 0,
+      reminderCancelled: reminderPlan.cancelled,
+    });
+    if (outbound.held) {
+      recordWhatsAppEvent(
+        "outbound_held",
+        "spoken reply is still a question",
+      );
+    }
 
     const notifications = await notifySharedItemEvents({
       userId: input.userId,
@@ -892,8 +944,27 @@ export async function sendChatMessage(input: {
       );
     }
 
+    const actorName = speakerName(employee);
+    const attributedRelays = outbound.relays.map((relay) => ({
+      ...relay,
+      text: formatAttributedOutbound({
+        actorName,
+        destIsActor: relay.employeeId === employee.id,
+        text: relay.text,
+      }),
+    }));
+    const attributedPhones = outbound.phones.map((row) => ({
+      ...row,
+      text: formatAttributedOutbound({
+        actorName,
+        destIsActor: Boolean(
+          employee.phone && phonesMatch(employee.phone, row.phone),
+        ),
+        text: row.text,
+      }),
+    }));
     const relayed = new Set<string>();
-    for (const relay of relays) {
+    for (const relay of attributedRelays) {
       const key = `${relay.employeeId}:${relay.digitalEmployeeId}`;
       if (relayed.has(key)) {
         continue;
@@ -910,12 +981,24 @@ export async function sendChatMessage(input: {
       );
     }
     const skips = [
-      ...(await deliverWhatsAppRelays(relays, employee.id)),
-      ...(await deliverWhatsAppPhones(
-        planPhoneRelays(parsedMetadata.messages ?? [], employees, employee.id),
-      )),
+      ...(await deliverWhatsAppRelays(attributedRelays, employee.id)),
+      ...(await deliverWhatsAppPhones(attributedPhones)),
     ];
-    const notice = [reminderNotice, formatWhatsAppSkipNotice(skips)]
+    const missingSend = formatMissingSendTextNotice(
+      parsedMetadata.messages ?? [],
+    );
+    const destRefuse = formatReminderApplyNotice({
+      removed: [],
+      missed: [],
+      skipped: reminderResult.skipped.filter(
+        (row) => row.reason === "no_phone" || row.reason === "no_time",
+      ),
+    });
+    const notice = [
+      reminderNotice,
+      missingSend,
+      formatWhatsAppSkipNotice(skips),
+    ]
       .filter(Boolean)
       .join("\n\n");
     const listed =
@@ -926,14 +1009,28 @@ export async function sendChatMessage(input: {
             : [],
         )
       : "";
-    const reply = listed
-      ? appendEngineNotice(replaceLlmResponse(turn.reply, listed), notice)
-      : appendEngineNotice(turn.reply, notice);
+    const ownAsk =
+      !listed &&
+      reminderResult.saved.length === 0 &&
+      reminderResult.removed.length === 0 &&
+      outbound.relays.length === 0 &&
+      outbound.phones.length === 0 &&
+      !outbound.held
+        ? [confirmAsk, missingSend, destRefuse].filter(Boolean).join("\n")
+        : "";
+    const reply = composeAssistantReply({
+      llmReply: turn.reply,
+      listed,
+      notice,
+      ownAsk,
+    });
     if (listed) {
       await replaceAssistantText(
         conversation.id,
         [listed, notice].filter(Boolean).join("\n\n"),
       );
+    } else if (ownAsk) {
+      await replaceAssistantText(conversation.id, ownAsk);
     } else if (notice) {
       await appendAssistantNotice(conversation.id, notice);
     }
