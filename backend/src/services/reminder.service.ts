@@ -285,6 +285,12 @@ function ownerIdFor(
 
 const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
 
+export function pendingReminderDeleteNames(conversationId: string): string[] {
+  return (pendingReminderMutations.get(conversationId) ?? [])
+    .map((row) => row.item.trim())
+    .filter(Boolean);
+}
+
 export function planReminderWrites(
   conversationId: string,
   incoming: LlmReminderAction[],
@@ -305,6 +311,16 @@ export function planReminderWrites(
   const waiting = mutations.filter((row) => !row.confirmed);
   const pending = pendingReminderMutations.get(conversationId) ?? [];
 
+  if (pending.length > 0 && confirm === false) {
+    pendingReminderMutations.delete(conversationId);
+    return { apply: adds, ask: [], cancelled: true, noneToDelete: false };
+  }
+
+  if (pending.length > 0 && confirm === true) {
+    pendingReminderMutations.delete(conversationId);
+    return { apply: [...adds, ...pending], ask: [], cancelled: false, noneToDelete: false };
+  }
+
   if (ready.length > 0 && waiting.length === 0) {
     pendingReminderMutations.delete(conversationId);
     return {
@@ -318,16 +334,6 @@ export function planReminderWrites(
   if (waiting.length > 0) {
     pendingReminderMutations.set(conversationId, waiting);
     return { apply: [...adds, ...ready], ask: waiting, cancelled: false, noneToDelete: false };
-  }
-
-  if (pending.length > 0 && confirm === false) {
-    pendingReminderMutations.delete(conversationId);
-    return { apply: adds, ask: [], cancelled: true, noneToDelete: false };
-  }
-
-  if (pending.length > 0 && confirm === true) {
-    pendingReminderMutations.delete(conversationId);
-    return { apply: [...adds, ...pending], ask: [], cancelled: false, noneToDelete: false };
   }
 
   return { apply: adds, ask: [], cancelled: false, noneToDelete: false };

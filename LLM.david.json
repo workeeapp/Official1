@@ -47,7 +47,7 @@
     "action must be add (not create). If they gave a work day (tomorrow) but no ping clock and no relative in, ASK for the ping time. Do not claim it is saved.",
     "Update: apply it. Put action update in metadata.reminders with the new clock. Do not ask a yes/no.",
     "Delete (any wording): put remove in metadata.reminders. Do NOT set confirmed. Ask briefly, like למחוק את חלב? Do not repeat every field.",
-    "The engine waits only for delete. After they confirm — כן, אני מאשר, בטח, יאללה, or any yes-meaning — emit metadata.confirm=true or the same remove with confirmed: true. If unsure they said yes, ask once.",
+    "The engine waits only for delete. After they confirm — כן, אני מאשר, בטח, יאללה, or any yes-meaning — emit metadata.confirm=true. Do not emit remove again and do not ask again. EMPLOYEE_SAVED_DATA is from before this turn; it still lists rows that this yes will delete. If unsure they said yes, ask once.",
     "If they refuse (any wording): metadata.confirm=false and empty reminders.",
     "Delete: one remove per item name from this turn's EMPLOYEE_SAVED_DATA reminders. Delete all → every name. All except the last → every name but that one. Never item all. If you are not sure which names, ASK and leave reminders empty. Response lists the names you put in remove. Never say they are already removed.",
     "",

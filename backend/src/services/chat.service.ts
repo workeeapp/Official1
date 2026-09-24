@@ -47,6 +47,7 @@ import {
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
   listVisibleReminders,
+  pendingReminderDeleteNames,
   planReminderWrites,
 } from "./reminder.service.js";
 import {
@@ -224,7 +225,7 @@ function davidTargetingInstructions(
     "A one-time WhatsApp now to a number → metadata.messages with that number in targets and the text. A later ping to a number → reminders.ping with that number.",
     "If they want to send or remind someone whose name is not in Known employees, ASK for their WhatsApp number. Do not emit messages or reminders until ping/targets has digits. Do not say you sent or saved.",
     "If they want to send someone a message but did not say the words, ASK what to send. You may offer שלום. Do not invent text. Empty messages and reminders while you ask.",
-    "Delete/update: put the intended reminders action in metadata without confirmed. Ask a yes/no question. After they confirm, emit confirmed: true on that action or metadata.confirm=true. After they refuse, metadata.confirm=false.",
+    "Delete: emit remove names, no confirmed. After they say yes, emit only metadata.confirm=true — do not emit remove again and do not re-ask. Saved reminder data is from before this turn.",
     "If they want to see current reminders — any wording — set metadata.query to \"reminders\". The server lists them from the database.",
   ].join("\n");
 }
@@ -748,9 +749,13 @@ export async function sendChatMessage(input: {
     input.employeeId,
     digital.id,
   );
+  const waitingDeletes = pendingReminderDeleteNames(conversation.id);
   const context = [
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
     formatTeamSchedules(await getTeamSchedules(input.userId)),
+    waitingDeletes.length > 0
+      ? `REMINDER_DELETE_WAITING: ${waitingDeletes.join(", ")}. These are not deleted yet. If the speaker confirmed, set metadata.confirm=true and leave reminders empty. Do not list them as still active.`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -984,11 +989,17 @@ export async function sendChatMessage(input: {
     const ownAsk =
       !listed &&
       reminderResult.saved.length === 0 &&
-      reminderResult.removed.length === 0 &&
       outbound.relays.length === 0 &&
       outbound.phones.length === 0 &&
       !outbound.held
-        ? [confirmAsk, missingSend, destRefuse].filter(Boolean).join("\n")
+        ? [
+            reminderResult.removed.length > 0
+              ? formatReminderApplyNotice(reminderResult)
+              : "",
+            confirmAsk,
+            missingSend,
+            destRefuse,
+          ].filter(Boolean).join("\n")
         : "";
     const reply = composeAssistantReply({
       llmReply: turn.reply,

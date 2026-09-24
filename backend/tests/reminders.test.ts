@@ -236,6 +236,26 @@ describe("planReminderWrites", () => {
     expect(planned.ask.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
   });
 
+  it("applies the held deletes when they confirm even if remove is sent again", () => {
+    planReminderWrites("conv-5", [
+      { ...milkRemove, item: "התאמן" },
+      { ...milkRemove, item: "ללכת לסופר" },
+    ]);
+    const confirmed = planReminderWrites(
+      "conv-5",
+      [
+        { ...milkRemove, item: "התאמן" },
+        { ...milkRemove, item: "ללכת לסופר" },
+      ],
+      true,
+    );
+    expect(confirmed.apply.map((row) => row.item)).toEqual([
+      "התאמן",
+      "ללכת לסופר",
+    ]);
+    expect(confirmed.ask).toEqual([]);
+  });
+
   it("does not expand item all into other reminders", () => {
     const planned = planReminderWrites("conv-4", [
       { ...milkRemove, item: "all" },
