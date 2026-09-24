@@ -149,3 +149,10 @@ model Reminder {
   @@index([ownerId, itemKey])
   @@map("Reminders")
 }
+
+model WhatsAppInbound {
+  phone         String   @id @db.VarChar(32)
+  lastInboundAt DateTime @map("last_inbound_at")
+
+  @@map("WhatsAppInbounds")
+}

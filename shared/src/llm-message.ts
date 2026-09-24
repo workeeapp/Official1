@@ -41,13 +41,23 @@ export interface LlmReminderAction {
   targets: string[];
   text: string;
   inSeconds: number | null;
+  confirmed: boolean;
 }
+
+export interface LlmHandoffAction {
+  worker: string;
+}
+
+export type LlmQuery = "reminders" | "reminders_sent";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
   filing: LlmFilingAction[];
   messages?: LlmMessageAction[];
   reminders?: LlmReminderAction[];
+  handoff?: LlmHandoffAction | null;
+  query?: LlmQuery | null;
+  confirm?: boolean | null;
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -62,7 +72,15 @@ const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "updat
 const REMINDER_REPEATS = new Set<LlmReminderRepeat>(["once", "daily"]);
 
 export function emptyLlmMetadata(): LlmMetadata {
-  return { lists: [], filing: [], messages: [], reminders: [] };
+  return {
+    lists: [],
+    filing: [],
+    messages: [],
+    reminders: [],
+    handoff: null,
+    query: null,
+    confirm: null,
+  };
 }
 
 export function parseLlmMetadata(metadata: unknown): LlmMetadata {
@@ -75,6 +93,9 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   return {
     messages: parseMessageActions(meta),
     reminders: parseReminderActions(meta),
+    handoff: parseHandoff(meta),
+    query: parseQuery(meta),
+    confirm: parseConfirm(meta),
     lists: Array.isArray(meta.lists)
       ? meta.lists.flatMap((entry) => {
           const action = toListAction(entry);
@@ -160,6 +181,54 @@ function toListAction(value: unknown): LlmListAction | null {
   };
 }
 
+function parseHandoff(meta: Record<string, unknown>): LlmHandoffAction | null {
+  const raw = meta.handoff ?? meta.switch ?? meta.talk_to ?? meta.talkTo;
+  if (typeof raw === "string" && raw.trim()) {
+    return { worker: raw.trim() };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const worker = readText(raw as Record<string, unknown>, [
+    "worker",
+    "name",
+    "to",
+    "employee",
+  ]);
+  return worker ? { worker } : null;
+}
+
+function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
+  const raw = meta.query ?? meta.show ?? meta.list;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const value = raw.trim().toLowerCase();
+  if (
+    value === "reminders" ||
+    value === "reminder" ||
+    value === "תזכורות" ||
+    value === "active_reminders"
+  ) {
+    return "reminders";
+  }
+  if (value === "reminders_sent" || value === "sent") {
+    return "reminders_sent";
+  }
+  return null;
+}
+
+function parseConfirm(meta: Record<string, unknown>): boolean | null {
+  const raw = meta.confirm ?? meta.confirmed;
+  if (raw === true) {
+    return true;
+  }
+  if (raw === false) {
+    return false;
+  }
+  return null;
+}
+
 function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {
   const raw = meta.messages ?? meta.relays ?? meta.outbound;
   if (!Array.isArray(raw)) {
@@ -215,6 +284,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     targets: parseTargets(value),
     text: readText(value, ["text", "message", "body", "תוכן", "sentence"]),
     inSeconds: parseInSeconds(value),
+    confirmed: value.confirmed === true || value.confirm === true,
   };
 }
 
@@ -427,6 +497,13 @@ function collectActionDescriptions(metadata: unknown): string[] {
       if (item && typeof item === "object" && !Array.isArray(item)) {
         descriptions.push(describeMessageAction(item as Record<string, unknown>));
       }
+    }
+  }
+
+  if (meta.handoff != null || meta.switch != null || meta.talk_to != null) {
+    const handoff = parseHandoff(meta);
+    if (handoff) {
+      descriptions.push(`Handoff to ${handoff.worker}`);
     }
   }
 

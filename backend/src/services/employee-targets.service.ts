@@ -8,6 +8,7 @@ import {
   type LlmMetadata,
   type PublicEmployee,
 } from "@workee/shared";
+import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import type { ItemVisibility } from "./employee-records.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
@@ -77,41 +78,20 @@ export function looksLikeMeeting(message: string): boolean {
 }
 
 export function resolveSpokenMetadata(
-  message: string,
+  _message: string,
   metadata: LlmMetadata,
-  employees: PublicEmployee[],
-  actorId: string,
+  _employees?: PublicEmployee[],
+  _actorId?: string,
 ): LlmMetadata {
-  const inferred = inferTargetsFromMessage(message, employees, actorId);
-  const actor = employees.find((employee) => employee.id === actorId);
-  const actorName = actor ? employeeDisplayName(actor) : "";
-  const lists = metadata.lists.map((list) =>
-    withMeetingParticipants(
-      retargetListAction(list, inferred, employees, actorId),
-      inferred,
-      actorName,
-      message,
-    ),
-  );
-  const filing = metadata.filing.map((entry) =>
-    entry.targets.length > 0 ? entry : { ...entry, targets: inferred },
-  );
-  const hasTargetedWork =
-    lists.some((list) => list.targets.length > 0) ||
-    filing.some((entry) => entry.targets.length > 0);
-
-  const messages = metadata.messages ?? [];
-
-  const reminders = metadata.reminders ?? [];
-
-  if (hasTargetedWork || inferred.length === 0 || !looksLikeAssignment(message)) {
-    return { lists, filing, messages, reminders };
-  }
-
-  const synthesized = synthesizeAssignment(message, inferred);
-  return synthesized
-    ? { lists: [...lists, synthesized], filing, messages, reminders }
-    : { lists, filing, messages, reminders };
+  return {
+    lists: metadata.lists,
+    filing: metadata.filing,
+    messages: metadata.messages ?? [],
+    reminders: metadata.reminders ?? [],
+    handoff: metadata.handoff ?? null,
+    query: metadata.query ?? null,
+    confirm: metadata.confirm ?? null,
+  };
 }
 
 export function looksLikeRelayMessage(message: string): boolean {
@@ -124,38 +104,11 @@ export function looksLikeRelayMessage(message: string): boolean {
 }
 
 export function resolveRelayMessages(
-  message: string,
   actions: LlmMessageAction[],
-  employees: PublicEmployee[],
-  actorId: string,
 ): LlmMessageAction[] {
-  const inferred = inferTargetsFromMessage(message, employees, actorId);
-  const filled = actions
-    .map((action) => ({
-      text: action.text.trim(),
-      targets: action.targets.length > 0 ? action.targets : inferred,
-    }))
-    .filter((action) => action.text.length > 0 && action.targets.length > 0);
-
-  if (filled.length > 0) {
-    return filled;
-  }
-
-  if (inferred.length === 0 || !looksLikeRelayMessage(message)) {
-    return [];
-  }
-
-  const actor = employees.find((employee) => employee.id === actorId);
-  return [
-    {
-      targets: inferred,
-      text: fallbackRelayText(
-        actor ? employeeDisplayName(actor) : "מישהו",
-        message,
-        inferred,
-      ),
-    },
-  ];
+  return actions.filter(
+    (action) => action.text.trim().length > 0 && action.targets.length > 0,
+  );
 }
 
 export function fallbackRelayText(
@@ -253,6 +206,38 @@ export function planRelayDeliveries(input: {
         target,
         text: action.text,
       });
+    }
+  }
+
+  return deliveries;
+}
+
+export function planPhoneRelays(
+  messages: LlmMessageAction[],
+  employees: PublicEmployee[],
+  actorId?: string,
+): Array<{ phone: string; text: string }> {
+  const deliveries: Array<{ phone: string; text: string }> = [];
+  const seen = new Set<string>();
+
+  for (const action of messages) {
+    if (!action.text.trim()) {
+      continue;
+    }
+    for (const raw of action.targets) {
+      if (!looksLikePhone(raw)) {
+        continue;
+      }
+      const matched = matchEmployee(raw, employees);
+      if (matched && matched.id !== actorId) {
+        continue;
+      }
+      const phone = normalizePhoneDigits(raw);
+      if (seen.has(phone)) {
+        continue;
+      }
+      seen.add(phone);
+      deliveries.push({ phone, text: action.text });
     }
   }
 
@@ -683,7 +668,7 @@ function matchEmployee(
   employees: PublicEmployee[],
 ): PublicEmployee | undefined {
   const needle = normalizeName(raw);
-  return employees.find((employee) => {
+  const byName = employees.find((employee) => {
     const aliases = [
       employee.nickname,
       employee.name,
@@ -696,6 +681,15 @@ function matchEmployee(
 
     return aliases.includes(needle);
   });
+  if (byName) {
+    return byName;
+  }
+  if (!looksLikePhone(raw)) {
+    return undefined;
+  }
+  return employees.find(
+    (employee) => employee.phone && phonesMatch(employee.phone, raw),
+  );
 }
 
 function normalizeName(value: string): string {

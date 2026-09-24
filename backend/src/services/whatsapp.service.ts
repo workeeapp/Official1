@@ -1,11 +1,20 @@
-import { digitalEmployees, humanEmployees, parseLlmReply } from "@workee/shared";
+import {
+  digitalEmployees,
+  humanEmployees,
+  parseLlmReply,
+  parseReplyMetadata,
+} from "@workee/shared";
 import type { PublicEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { sendChatMessage } from "./chat.service.js";
 import { listEmployeesForUser, resolveActingEmployee } from "./employee.service.js";
+import { phonesMatch } from "../utils/phone.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
+import { markWhatsAppInbound } from "./whatsapp-window.js";
+
+export { phonesMatch };
 
 export interface WhatsAppVerifyQuery {
   mode?: string;
@@ -98,37 +107,6 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
 const recentInboundIds = new Set<string>();
 const whatsappWorkerByPhone = new Map<string, string>();
 
-const SWITCH_WORKER =
-  /^(?:talk to|chat with|switch to|דבר עם|דברי עם|עבור אל|עבור ל|עברי ל)\s+(.+)$/iu;
-  const LIST_WORKERS =
-  /(?:who can i (?:talk|chat) to|list workers|איזה עובדים|מי העובדים|עם מי אפשר לדבר)/iu;
-
-export function parseWhatsAppWorkerCommand(text: string): {
-  list?: boolean;
-  workerName?: string;
-  rest?: string;
-} {
-  const trimmed = text.trim();
-  if (LIST_WORKERS.test(trimmed)) {
-    return { list: true };
-  }
-  const switched = trimmed.match(SWITCH_WORKER);
-  if (!switched?.[1]) {
-    return {};
-  }
-  return { workerName: switched[1].trim() };
-}
-
-export function phonesMatch(left: string, right: string): boolean {
-  const a = left.replace(/\D/g, "");
-  const b = right.replace(/\D/g, "");
-  if (!a || !b) {
-    return false;
-  }
-  const size = Math.min(9, a.length, b.length);
-  return size >= 8 && a.slice(-size) === b.slice(-size);
-}
-
 export async function handleInboundWhatsAppTexts(
   messages: InboundWhatsAppText[],
 ): Promise<void> {
@@ -150,29 +128,31 @@ export async function handleInboundWhatsAppTexts(
     }
 
     try {
+      await markWhatsAppInbound(message.from);
       const speaker = await resolveWhatsAppSpeaker(message.from);
       const employees = await listEmployeesForUser(speaker.userId);
       const digitals = digitalEmployees(employees);
-      const routed = await routeWhatsAppDigital(
-        message.from,
-        message.text,
-        digitals,
-      );
-      if (routed.notice && !routed.message) {
-        console.log("WhatsApp worker command notice");
-        await sendWhatsAppText(message.from, routed.notice);
-        continue;
+      const digital =
+        sessionDigital(message.from, digitals) ??
+        digitals.find((employee) => employee.protected) ??
+        digitals[0];
+      if (!digital) {
+        throw new ServiceUnavailableError();
       }
       const turn = await sendChatMessage({
         userId: speaker.userId,
         employeeId: speaker.employeeId,
-        digitalEmployeeId: routed.digital.id,
-        message: routed.message ?? message.text,
+        digitalEmployeeId: digital.id,
+        message: message.text,
       });
+      applyWhatsAppHandoff(
+        message.from,
+        parseReplyMetadata(turn.reply).handoff?.worker,
+        digitals,
+      );
       const reply = parseLlmReply(turn.reply).response.trim();
-      const text = [routed.notice, reply].filter(Boolean).join("\n\n");
-      if (text) {
-        await sendWhatsAppText(message.from, text);
+      if (reply) {
+        await sendWhatsAppText(message.from, reply, { ignoreSession: true });
       }
     } catch (error) {
       console.error(
@@ -183,49 +163,20 @@ export async function handleInboundWhatsAppTexts(
   }
 }
 
-async function routeWhatsAppDigital(
+export function applyWhatsAppHandoff(
   from: string,
-  text: string,
+  workerName: string | undefined,
   digitals: PublicEmployee[],
-): Promise<{ digital: PublicEmployee; notice?: string; message?: string }> {
-  const command = parseWhatsAppWorkerCommand(text);
-  const fallback =
-    digitals.find((employee) => employee.protected) ?? digitals[0];
-  if (!fallback) {
-    throw new ServiceUnavailableError();
+): PublicEmployee | undefined {
+  if (!workerName?.trim()) {
+    return undefined;
   }
-
-  if (command.list) {
-    const names = digitals
-      .map((employee) => employee.nickname?.trim() || employee.name)
-      .join(", ");
-    return {
-      digital: fallback,
-      notice: names
-        ? `אפשר לדבר עם: ${names}. כתוב "דבר עם <שם>" כדי לעבור.`
-        : "אין עובדים דיגיטליים.",
-    };
+  const matched = matchDigitalName(workerName, digitals);
+  if (!matched) {
+    return undefined;
   }
-
-  if (command.workerName) {
-    const matched = matchDigitalName(command.workerName, digitals);
-    if (!matched) {
-      return {
-        digital: sessionDigital(from, digitals) ?? fallback,
-        notice: `לא מצאתי עובד דיגיטלי בשם ${command.workerName}. כתוב "מי העובדים" לרשימה.`,
-      };
-    }
-    whatsappWorkerByPhone.set(from, matched.id);
-    return {
-      digital: matched,
-      notice: `עכשיו אתה מדבר עם ${matched.nickname?.trim() || matched.name}.`,
-      message: restAfterDigitalName(command.workerName, matched),
-    };
-  }
-
-  return {
-    digital: sessionDigital(from, digitals) ?? fallback,
-  };
+  whatsappWorkerByPhone.set(from, matched.id);
+  return matched;
 }
 
 function sessionDigital(
@@ -234,31 +185,6 @@ function sessionDigital(
 ): PublicEmployee | undefined {
   const id = whatsappWorkerByPhone.get(from);
   return id ? digitals.find((employee) => employee.id === id) : undefined;
-}
-
-function restAfterDigitalName(
-  raw: string,
-  employee: PublicEmployee,
-): string | undefined {
-  const aliases = [
-    employee.nickname,
-    employee.name,
-    `${employee.name} ${employee.surname}`.trim(),
-  ]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .map((value) => value.trim())
-    .sort((left, right) => right.length - left.length);
-  const lower = raw.trim().toLowerCase();
-  for (const alias of aliases) {
-    if (lower === alias.toLowerCase()) {
-      return undefined;
-    }
-    if (lower.startsWith(`${alias.toLowerCase()} `)) {
-      const rest = raw.trim().slice(alias.length).replace(/^[\s,:\-]+/, "");
-      return rest || undefined;
-    }
-  }
-  return undefined;
 }
 
 function matchDigitalName(

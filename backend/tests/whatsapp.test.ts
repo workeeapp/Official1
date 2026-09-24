@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { resetEnvCache } from "../src/config/env.js";
-import { deliverWhatsAppRelays } from "../src/services/whatsapp-send.js";
 import {
+  appendEngineNotice,
+  deliverWhatsAppRelays,
+  formatWhatsAppSkipNotice,
+} from "../src/services/whatsapp-send.js";
+import { sessionOpenAt } from "../src/services/whatsapp-window.js";
+import {
+  applyWhatsAppHandoff,
   extractInboundTexts,
-  parseWhatsAppWorkerCommand,
   phonesMatch,
 } from "../src/services/whatsapp.service.js";
 
@@ -71,22 +76,35 @@ describe("WhatsApp webhook", () => {
     expect(phonesMatch("050-0000002", "972500000001")).toBe(false);
   });
 
-  it("parses WhatsApp worker switch commands", () => {
-    expect(parseWhatsAppWorkerCommand("מי העובדים")).toEqual({ list: true });
-    expect(parseWhatsAppWorkerCommand("who can I talk to")).toEqual({ list: true });
-    expect(parseWhatsAppWorkerCommand("דבר עם דוד")).toEqual({
-      workerName: "דוד",
-    });
-    expect(parseWhatsAppWorkerCommand("עברי ל לוסי")).toEqual({
-      workerName: "לוסי",
-    });
-    expect(parseWhatsAppWorkerCommand("talk to Lucy")).toEqual({
-      workerName: "Lucy",
-    });
-    expect(parseWhatsAppWorkerCommand("דבר עם דוד הליצן")).toEqual({
-      workerName: "דוד הליצן",
-    });
-    expect(parseWhatsAppWorkerCommand("hello")).toEqual({});
+  it("treats a 24h inbound window as open only while it lasts", () => {
+    const now = new Date("2026-09-24T12:00:00.000Z");
+    expect(sessionOpenAt(null, now)).toBe(false);
+    expect(sessionOpenAt(new Date("2026-09-23T12:00:01.000Z"), now)).toBe(true);
+    expect(sessionOpenAt(new Date("2026-09-23T12:00:00.000Z"), now)).toBe(false);
+  });
+
+  it("applies an LLM handoff to a digital worker", () => {
+    const lucy = {
+      id: "lucy",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      kind: "digital" as const,
+      protected: true,
+    };
+    const david = {
+      id: "david",
+      name: "דוד",
+      surname: "הליצן",
+      nickname: "דוד",
+      kind: "digital" as const,
+      protected: false,
+    };
+    const digitals = [lucy, david] as never;
+    expect(applyWhatsAppHandoff("972500000001", "דוד", digitals)?.id).toBe(
+      "david",
+    );
+    expect(applyWhatsAppHandoff("972500000001", undefined, digitals)).toBeUndefined();
   });
 
   it("extracts inbound text messages and ignores status updates", () => {
@@ -147,6 +165,21 @@ describe("WhatsApp webhook", () => {
     );
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("explains a skipped WhatsApp send without a 24h window", () => {
+    expect(
+      formatWhatsAppSkipNotice([{ label: "מיכל", reason: "no_session" }]),
+    ).toContain("מיכל");
+    expect(
+      formatWhatsAppSkipNotice([{ label: "מיכל", reason: "no_session" }]),
+    ).toContain("24");
+    expect(
+      appendEngineNotice(
+        JSON.stringify({ response: "שלחתי למיכל", metadata: {} }),
+        "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.",
+      ),
+    ).toContain("לא נשלח");
   });
 });
 

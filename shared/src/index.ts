@@ -68,6 +68,8 @@ export type {
   LlmListActionName,
   LlmListType,
   LlmMessageAction,
+  LlmHandoffAction,
+  LlmQuery,
   LlmMetadata,
   LlmReminderAction,
   LlmReminderActionName,

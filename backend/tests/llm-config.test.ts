@@ -33,6 +33,9 @@ describe("LLM action schema", () => {
 
     expect(david?.systemMessage).toContain("CLOCK");
     expect(david?.systemMessage).toContain("in");
+    expect(david?.systemMessage).toContain("phone numbers");
+    expect(david?.systemMessage).toContain("CONFIRM BEFORE CHANGE OR DELETE");
+    expect(david?.systemMessage).toContain("metadata.query");
     expect(lucy.systemMessage).not.toContain("LLM.david");
   });
 });

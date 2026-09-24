@@ -75,7 +75,8 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
   return [
     "EMPLOYEE_SAVED_DATA:",
     "This is the current saved information visible to this employee.",
-    "Treat it as the only source of truth for existing lists, tasks, and filings. Do not mention saved items that are not listed here.",
+    "Treat it as the only source of truth for existing lists, tasks, filings, and reminders. Do not mention saved items that are not listed here.",
+    "If asked which reminders exist now, list only reminders with status=active. Do not bring back a reminder from earlier in the chat if it is not active here.",
     "This does not limit your capabilities catalog. If asked what you can do, list every capability.",
     "scope=personal means only this employee can see that item.",
     "scope=shared means the listed employees can see it.",
@@ -85,6 +86,9 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
       {
         lists: snapshot.lists,
         filing: snapshot.filing,
+        active_reminders: (snapshot.reminders ?? [])
+          .filter((row) => row.status === "active")
+          .map((row) => row.item),
         reminders: snapshot.reminders ?? [],
       },
       null,

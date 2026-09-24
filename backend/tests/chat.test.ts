@@ -1062,7 +1062,7 @@ describe("chat API", () => {
     );
   });
 
-  it("saves a spoken task for Tal even when the LLM omitted targets", async () => {
+  it("saves a task for Tal only when the LLM set targets", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
         response: "הוספתי מטלה: טל צריך לקחת מחר בבוקר את הילדים לגינה.",
@@ -1073,9 +1073,10 @@ describe("chat API", () => {
               list_type: "tasks",
               items: [
                 {
-                  "שם מטלה": "טל צריך לקחת מחר בבוקר את הילדים לגינה",
+                  "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה",
                 },
               ],
+              targets: ["טל"],
             },
           ],
           filing: [],
@@ -1261,7 +1262,7 @@ describe("chat API", () => {
     );
   });
 
-  it("relays a check to Tal even when the LLM omitted messages", async () => {
+  it("does not relay when the LLM omitted messages", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
         response: "בדקתי עם טל",
@@ -1282,11 +1283,7 @@ describe("chat API", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.notifications).toHaveLength(1);
-    expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
-    expect(response.body.notifications[0].message.text).toBe(
-      "עמית שואל אם קנית שמן ?",
-    );
+    expect(response.body.notifications).toHaveLength(0);
   });
 
   it("delivers a relayed message to a digital employee on the speaker thread", async () => {

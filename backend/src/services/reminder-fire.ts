@@ -3,6 +3,7 @@ import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { listEmployeesForUser } from "./employee.service.js";
+import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 
 function pingIds(value: unknown): string[] {
@@ -29,48 +30,52 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const speaker = lucy ?? digitals[0];
     const text = reminder.messageText.trim() || `תזכורת: ${reminder.itemLabel}`;
 
-    for (const employeeId of pingIds(reminder.pingIds)) {
-      const target = employees.find((employee) => employee.id === employeeId);
-      if (!target || !speaker) {
-        continue;
-      }
+    for (const dest of pingIds(reminder.pingIds)) {
+      const target =
+        employees.find((employee) => employee.id === dest) ??
+        employees.find(
+          (employee) => employee.phone && phonesMatch(employee.phone, dest),
+        );
 
-      const conversation = await prisma.chatConversation.findUnique({
-        where: {
-          userId_employeeId_digitalEmployeeId: {
-            userId: reminder.userId,
+      if (target && speaker) {
+        const conversation = await prisma.chatConversation.findUnique({
+          where: {
+            userId_employeeId_digitalEmployeeId: {
+              userId: reminder.userId,
+              employeeId: target.id,
+              digitalEmployeeId: speaker.id,
+            },
+          },
+        });
+        if (conversation) {
+          const created = await prisma.chatMessage.create({
+            data: {
+              conversationId: conversation.id,
+              author: "assistant",
+              speaker: speaker.nickname?.trim() || speaker.name,
+              text,
+              raw: { reminder: true },
+            },
+          });
+          publishChatEvent(reminder.userId, target.id, speaker.id, {
             employeeId: target.id,
             digitalEmployeeId: speaker.id,
-          },
-        },
-      });
-      if (conversation) {
-        const created = await prisma.chatMessage.create({
-          data: {
-            conversationId: conversation.id,
-            author: "assistant",
-            speaker: speaker.nickname?.trim() || speaker.name,
-            text,
+            message: {
+              id: created.id,
+              author: "assistant",
+              speaker: created.speaker,
+              text: created.text,
+              createdAt: created.createdAt.toISOString(),
+            },
             raw: { reminder: true },
-          },
-        });
-        publishChatEvent(reminder.userId, target.id, speaker.id, {
-          employeeId: target.id,
-          digitalEmployeeId: speaker.id,
-          message: {
-            id: created.id,
-            author: "assistant",
-            speaker: created.speaker,
-            text: created.text,
-            createdAt: created.createdAt.toISOString(),
-          },
-          raw: { reminder: true },
-        });
+          });
+        }
       }
 
-      if (target.phone?.trim() && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
+      const phone = target?.phone?.trim() || (looksLikePhone(dest) ? dest : "");
+      if (phone && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
         try {
-          await sendWhatsAppText(target.phone, text);
+          await sendWhatsAppText(phone, text);
         } catch (error) {
           console.error(
             "Reminder WhatsApp failed",

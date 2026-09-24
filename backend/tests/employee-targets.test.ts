@@ -4,6 +4,7 @@ import {
   fallbackNotificationText,
   fallbackRelayText,
   inferTargetsFromMessage,
+  planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
   resolveActionTargets,
@@ -58,10 +59,8 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [
-              { "שם מטלה": "טל צריך לקחת מחר בבוקר את הילדים לגינה" },
-            ],
-            targets: [],
+            items: [{ "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה" }],
+            targets: ["טל"],
           },
         ],
         filing: [],
@@ -102,7 +101,7 @@ describe("employee targets", () => {
                 "שעה לביצוע": "10:00",
               },
             ],
-            targets: [],
+            targets: ["עמית", "טל"],
           },
         ],
         filing: [],
@@ -147,25 +146,25 @@ describe("employee targets", () => {
         employees,
         amit.id,
       ),
-    ).toEqual({ lists: [], filing: [], messages: [], reminders: [] });
+    ).toEqual({
+      lists: [],
+      filing: [],
+      messages: [],
+      reminders: [],
+      handoff: null,
+      query: null,
+      confirm: null,
+    });
   });
 
-  it("synthesizes a task when the LLM returns no actions", () => {
+  it("does not invent a task when the LLM returns no actions", () => {
     const resolved = resolveSpokenMetadata(
       "טל צריך לקחת מחר בבוקר את הילדים לגינה",
       { lists: [], filing: [] },
       employees,
       amit.id,
     );
-    expect(resolved.lists).toEqual([
-      {
-        action: "add",
-        listType: "tasks",
-        listName: "",
-        items: [{ "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה" }],
-        targets: ["טל"],
-      },
-    ]);
+    expect(resolved.lists).toEqual([]);
   });
 
   it("defaults to the speaker when no target is given", () => {
@@ -317,17 +316,12 @@ describe("employee targets", () => {
     const roster = [...employees, lucy, diana];
 
     expect(
-      resolveRelayMessages(
-        "תשלחי הודעה לטל - מה שלומך ?",
-        [
-          {
-            targets: ["טל"],
-            text: "עמית שואל מה שלומך?\nמה לענות לו ?",
-          },
-        ],
-        roster,
-        amit.id,
-      ),
+      resolveRelayMessages([
+        {
+          targets: ["טל"],
+          text: "עמית שואל מה שלומך?\nמה לענות לו ?",
+        },
+      ]),
     ).toEqual([
       {
         targets: ["טל"],
@@ -339,14 +333,7 @@ describe("employee targets", () => {
       fallbackRelayText("עמית", "תבדקי עם טל אם הוא קנה שמן", ["טל"]),
     ).toBe("עמית שואל אם קנית שמן ?");
 
-    expect(
-      resolveRelayMessages("תבדקי עם טל אם הוא קנה שמן", [], roster, amit.id),
-    ).toEqual([
-      {
-        targets: ["טל"],
-        text: "עמית שואל אם קנית שמן ?",
-      },
-    ]);
+    expect(resolveRelayMessages([])).toEqual([]);
 
     expect(
       planRelayDeliveries({
@@ -393,5 +380,15 @@ describe("employee targets", () => {
         { completed: true },
       ),
     ).toBe("טל קנה קופסת טונה");
+  });
+
+  it("plans a WhatsApp send to a raw phone number", () => {
+    expect(
+      planPhoneRelays(
+        [{ targets: ["050-222-2222"], text: "היי מהמטה" }],
+        employees,
+        amit.id,
+      ),
+    ).toEqual([{ phone: "0502222222", text: "היי מהמטה" }]);
   });
 });

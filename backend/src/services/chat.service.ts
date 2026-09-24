@@ -28,6 +28,7 @@ import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js"
 import {
   employeeDisplayName,
   fallbackNotificationText,
+  planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
   resolveRelayMessages,
@@ -35,8 +36,21 @@ import {
 } from "./employee-targets.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson } from "./llm-client.js";
-import { applyReminders } from "./reminder.service.js";
-import { deliverWhatsAppRelays } from "./whatsapp-send.js";
+import {
+  applyReminders,
+  formatActiveRemindersReply,
+  formatReminderApplyNotice,
+  formatReminderConfirmNotice,
+  listVisibleReminders,
+  planReminderWrites,
+} from "./reminder.service.js";
+import {
+  appendEngineNotice,
+  deliverWhatsAppPhones,
+  deliverWhatsAppRelays,
+  formatWhatsAppSkipNotice,
+  replaceLlmResponse,
+} from "./whatsapp-send.js";
 
 function speakerName(employee: {
   name: string;
@@ -195,6 +209,11 @@ function davidTargetingInstructions(
     `Known employees: ${names}. Current speaker: ${speaker}.`,
     "Never ask whether to save as a task list or as a reminder only.",
     "A reminder request always means: list item + clock. Infer shopping vs tasks yourself.",
+    "If the speaker wants to speak with another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" }. Telling someone something is messages, not handoff.",
+    "ping and messages.targets may be employee names or phone numbers. A number is a WhatsApp destination.",
+    "A one-time WhatsApp now to a number → metadata.messages with that number in targets and the text. A later ping to a number → reminders.ping with that number.",
+    "Delete/update: put the intended reminders action in metadata without confirmed. Ask a yes/no question. After they confirm, emit confirmed: true on that action or metadata.confirm=true. After they refuse, metadata.confirm=false.",
+    "If they want to see current reminders — any wording — set metadata.query to \"reminders\". The server lists them from the database.",
   ].join("\n");
 }
 
@@ -206,7 +225,7 @@ function targetingInstructions(
   return [
     `Known employees: ${names}.`,
     `Current speaker: ${speaker}.`,
-    'If the speaker assigns an action to another employee or to everyone, set targets on that action to those names or ["all"].',
+    'If the speaker assigns an action to another employee or to everyone, set targets on that action to those names or ["all"]. The server will not infer targets from the sentence.',
     'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"].',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
@@ -221,6 +240,10 @@ function targetingInstructions(
     "Write metadata.messages[].text for the recipient, in second person, and mention the speaker by name.",
     "Do not turn a send/check request into a list or task unless they also asked to add one.",
     "If there are no messages to send, metadata.messages = [].",
+    "messages.targets may be employee names or a phone number. A number is a WhatsApp destination, not an employee name.",
+    "If the speaker wants to speak with, switch to, or be transferred to another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" } and confirm in response.",
+    "Do not use metadata.messages for a conversation switch. Asking you to tell or send someone something is messages, not handoff.",
+    "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
     "If the speaker says they bought or already have an item, remove it from their shopping list.",
     "When asked what someone still needs, answer only from EMPLOYEE_SAVED_DATA. Never mention items that are not listed there.",
   ].join("\n");
@@ -358,6 +381,40 @@ async function saveTurn(input: {
         createdAt: assistantAt,
       },
     ],
+  });
+}
+
+async function replaceAssistantText(
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  const last = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!last) {
+    return;
+  }
+  await prisma.chatMessage.update({
+    where: { id: last.id },
+    data: { text },
+  });
+}
+
+async function appendAssistantNotice(
+  conversationId: string,
+  notice: string,
+): Promise<void> {
+  const last = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!last) {
+    return;
+  }
+  await prisma.chatMessage.update({
+    where: { id: last.id },
+    data: { text: `${last.text.trim()}\n\n${notice}` },
   });
 }
 
@@ -662,7 +719,8 @@ export async function sendChatMessage(input: {
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "If asked what someone still needs to buy, use only current shopping lists in EMPLOYEE_SAVED_DATA.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
-    "Ignore older shopping lists or tasks from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
+    "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
+    "If asked which reminders exist now, list only status=active from this turn. Missing from active_reminders means deleted.",
     context,
   ]
     .filter(Boolean)
@@ -709,12 +767,7 @@ export async function sendChatMessage(input: {
       actor: employee,
       sender: digital,
       employees,
-      messages: resolveRelayMessages(
-        input.message,
-        parsedMetadata.messages ?? [],
-        employees,
-        employee.id,
-      ),
+      messages: resolveRelayMessages(parsedMetadata.messages ?? []),
     });
 
     const collectedEvents: SharedItemEvent[] = [];
@@ -728,12 +781,33 @@ export async function sendChatMessage(input: {
         )),
       );
     }
-    await applyReminders({
+    const visibleReminders = prisma.reminder
+      ? await listVisibleReminders(input.userId, employee.id, humans)
+      : [];
+    const reminderPlan = planReminderWrites(
+      conversation.id,
+      metadata.reminders ?? [],
+      visibleReminders
+        .filter((row) => row.status === "active")
+        .map((row) => ({ item: row.item, listType: row.list_type })),
+      metadata.confirm ?? null,
+    );
+    const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
       employees: humans,
-      reminders: metadata.reminders ?? [],
+      reminders: reminderPlan.apply,
     });
+    const reminderNotice = [
+      formatReminderConfirmNotice(
+        reminderPlan.ask,
+        reminderPlan.cancelled,
+        reminderPlan.noneToDelete,
+      ),
+      formatReminderApplyNotice(reminderResult),
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const notifications = await notifySharedItemEvents({
       userId: input.userId,
@@ -780,12 +854,39 @@ export async function sendChatMessage(input: {
         }),
       );
     }
-    await deliverWhatsAppRelays(relays, employee.id);
+    const skips = [
+      ...(await deliverWhatsAppRelays(relays, employee.id)),
+      ...(await deliverWhatsAppPhones(
+        planPhoneRelays(parsedMetadata.messages ?? [], employees, employee.id),
+      )),
+    ];
+    const notice = [reminderNotice, formatWhatsAppSkipNotice(skips)]
+      .filter(Boolean)
+      .join("\n\n");
+    const listed =
+      (parsedMetadata.query ?? metadata.query) === "reminders"
+      ? formatActiveRemindersReply(
+          prisma.reminder
+            ? await listVisibleReminders(input.userId, employee.id, humans)
+            : [],
+        )
+      : "";
+    const reply = listed
+      ? appendEngineNotice(replaceLlmResponse(turn.reply, listed), notice)
+      : appendEngineNotice(turn.reply, notice);
+    if (listed) {
+      await replaceAssistantText(
+        conversation.id,
+        [listed, notice].filter(Boolean).join("\n\n"),
+      );
+    } else if (notice) {
+      await appendAssistantNotice(conversation.id, notice);
+    }
 
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
     }
-    return { reply: turn.reply, raw: turn.raw, notifications };
+    return { reply, raw: turn.raw, notifications };
   } catch (error) {
     if (error instanceof ServiceUnavailableError) {
       throw error;

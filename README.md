@@ -28,7 +28,14 @@ Password: ChangeMe123!
 
 Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). Lucy’s structured reply schema is `LLM.action.json`. Do not put reminder experiments in Lucy’s file.
 
-New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). He emits `metadata.lists` plus `metadata.reminders`; the server stores a clock on the list item and fires WhatsApp/thread pings. Lucy’s prompt stays the front desk.
+New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). The worker understands the speaker and emits metadata; the server only applies it:
+
+- `lists` / `filing` / `messages` / `reminders` — write or send
+- `handoff.worker` — switch the WhatsApp session to that digital employee
+- `query: "reminders"` — list **active** rows from the database (not from chat memory)
+- `confirm: true|false` — apply or drop a pending reminder update/delete
+
+Do not add regex that guesses user intent. Lucy’s prompt stays the front desk.
 
 Do not commit `.env` or access tokens.
 
@@ -49,7 +56,13 @@ WhatsApp is a channel into `sendChatMessage`, not a second bot. Inbound texts hi
 
 5. Legal pages Meta may ask for (served by the API): `/privacy`, `/data-deletion`, `/terms`.
 
-On WhatsApp, `מי העובדים` lists digital workers; `דבר עם <name>` switches the in-memory worker for that phone.
+On WhatsApp, asking to talk to a worker (any wording) is `metadata.handoff`. Asking which reminders exist is `metadata.query`. A raw phone in `messages.targets` or `reminders.ping` is a WhatsApp destination.
+
+Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound text is skipped unless that number wrote to the business in the last 24 hours (Meta session window). Replies to someone who just wrote always send.
+
+Two laptops can run the web app on different branches with their own Postgres. The Meta webhook is **one** URL (`wa.workee.site`), so only one machine’s tunnel should be up for WhatsApp.
+
+After pulling schema changes, stop the API and run `npx prisma migrate deploy` (and `npx prisma generate` if the client is locked).
 
 ## Stay up on this machine (Windows)
 

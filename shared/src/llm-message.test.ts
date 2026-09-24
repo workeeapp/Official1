@@ -143,7 +143,37 @@ describe("parseLlmReply", () => {
       ],
       messages: [],
       reminders: [],
+      handoff: null,
+      query: null,
+      confirm: null,
     });
+  });
+
+  it("extracts a conversation handoff from any metadata shape", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "מעבירה אותך לדוד",
+          metadata: { handoff: { worker: "דוד" } },
+        }),
+      ).handoff,
+    ).toEqual({ worker: "דוד" });
+    expect(
+      parseLlmReply(
+        JSON.stringify({
+          response: "Sure.",
+          metadata: { talk_to: "Lucy" },
+        }),
+      ).actions,
+    ).toEqual(["Handoff to Lucy"]);
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: { query: "reminders", confirm: true },
+        }),
+      ),
+    ).toMatchObject({ query: "reminders", confirm: true });
   });
 
   it("extracts a relayed message for another employee", () => {
@@ -203,6 +233,7 @@ describe("parseLlmReply", () => {
         targets: [],
         text: "",
         inSeconds: 10,
+        confirmed: false,
       },
     ]);
   });

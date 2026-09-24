@@ -1,5 +1,6 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
+import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
 
@@ -85,6 +86,39 @@ function itemKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
 }
 
+export function reminderLabelsMatch(stored: string, wanted: string): boolean {
+  const left = itemKey(stored);
+  const right = itemKey(wanted);
+  if (!left || !right || right.length < 2) {
+    return left === right;
+  }
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+async function cancelActiveReminder(
+  userId: string,
+  ownerId: string,
+  wanted: string,
+): Promise<string | null> {
+  const rows = await prisma.reminder.findMany({
+    where: { userId, status: "active" },
+  });
+  const owned = rows.filter((row) => row.ownerId === ownerId);
+  const pool = owned.length > 0 ? owned : rows;
+  const match = pool.find(
+    (row) =>
+      row.itemKey === itemKey(wanted) || reminderLabelsMatch(row.itemLabel, wanted),
+  );
+  if (!match) {
+    return null;
+  }
+  await prisma.reminder.update({
+    where: { id: match.id },
+    data: { status: "cancelled" },
+  });
+  return match.itemLabel;
+}
+
 function displayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
 }
@@ -94,7 +128,7 @@ function matchEmployee(
   employees: PublicEmployee[],
 ): PublicEmployee | undefined {
   const needle = name.trim().toLowerCase();
-  return employees.find((employee) => {
+  const byName = employees.find((employee) => {
     const aliases = [
       employee.nickname,
       employee.name,
@@ -104,17 +138,43 @@ function matchEmployee(
       .map((value) => value.trim().toLowerCase());
     return aliases.includes(needle);
   });
+  if (byName) {
+    return byName;
+  }
+  if (!looksLikePhone(name)) {
+    return undefined;
+  }
+  return employees.find(
+    (employee) => employee.phone && phonesMatch(employee.phone, name),
+  );
 }
 
-function pingIdsFor(
-  reminder: LlmReminderAction,
+export function resolveReminderPingDestinations(
+  reminder: Pick<LlmReminderAction, "ping">,
   employees: PublicEmployee[],
   fallbackId: string,
 ): string[] {
-  const ids = reminder.ping
-    .map((name) => matchEmployee(name, employees)?.id)
-    .filter((id): id is string => Boolean(id));
-  return ids.length > 0 ? [...new Set(ids)] : [fallbackId];
+  const dest: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    if (!seen.has(value)) {
+      seen.add(value);
+      dest.push(value);
+    }
+  };
+
+  for (const raw of reminder.ping) {
+    const employee = matchEmployee(raw, employees);
+    if (employee) {
+      add(employee.id);
+      continue;
+    }
+    if (looksLikePhone(raw)) {
+      add(normalizePhoneDigits(raw));
+    }
+  }
+
+  return dest.length > 0 ? dest : [fallbackId];
 }
 
 function ownerIdFor(
@@ -128,14 +188,128 @@ function ownerIdFor(
   return named ?? fallbackId;
 }
 
+const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
+
+function isAllReminderItem(item: string): boolean {
+  return /^(all|\*|כל|הכל|כולן|כולם|כל התזכורות)$/iu.test(item.trim());
+}
+
+function removesForItems(
+  items: Array<{ item: string; listType: string }>,
+): LlmReminderAction[] {
+  return items.map((row) => ({
+    action: "remove" as const,
+    item: row.item,
+    listType: (row.listType === "tasks" ? "tasks" : "shopping") as
+      | "shopping"
+      | "tasks",
+    date: "",
+    time: "",
+    repeat: "once" as const,
+    ping: [],
+    targets: [],
+    text: "",
+    inSeconds: null,
+    confirmed: false,
+  }));
+}
+
+export function planReminderWrites(
+  conversationId: string,
+  incoming: LlmReminderAction[],
+  existingItems: Array<{ item: string; listType: string }> = [],
+  confirm: boolean | null = null,
+): {
+  apply: LlmReminderAction[];
+  ask: LlmReminderAction[];
+  cancelled: boolean;
+  noneToDelete: boolean;
+} {
+  const adds = incoming.filter((row) => row.action === "add");
+  const mutations = incoming.filter(
+    (row) => row.action === "remove" || row.action === "update",
+  );
+  const ready = mutations.filter((row) => row.confirmed);
+  let waiting = mutations.filter((row) => !row.confirmed);
+  const pending = pendingReminderMutations.get(conversationId) ?? [];
+
+  const wantsAll = waiting.some(
+    (row) => row.action === "remove" && isAllReminderItem(row.item),
+  );
+
+  if (wantsAll) {
+    waiting = removesForItems(existingItems);
+    if (waiting.length === 0) {
+      pendingReminderMutations.delete(conversationId);
+      return {
+        apply: [...adds, ...ready],
+        ask: [],
+        cancelled: false,
+        noneToDelete: true,
+      };
+    }
+  }
+
+  if (ready.length > 0 && waiting.length === 0) {
+    pendingReminderMutations.delete(conversationId);
+    return { apply: [...adds, ...ready], ask: [], cancelled: false, noneToDelete: false };
+  }
+
+  if (waiting.length > 0) {
+    pendingReminderMutations.set(conversationId, waiting);
+    return { apply: [...adds, ...ready], ask: waiting, cancelled: false, noneToDelete: false };
+  }
+
+  if (pending.length > 0 && confirm === false) {
+    pendingReminderMutations.delete(conversationId);
+    return { apply: adds, ask: [], cancelled: true, noneToDelete: false };
+  }
+
+  if (pending.length > 0 && confirm === true) {
+    pendingReminderMutations.delete(conversationId);
+    return { apply: [...adds, ...pending], ask: [], cancelled: false, noneToDelete: false };
+  }
+
+  return { apply: adds, ask: [], cancelled: false, noneToDelete: false };
+}
+
+export function formatReminderConfirmNotice(
+  ask: LlmReminderAction[],
+  cancelled: boolean,
+  noneToDelete = false,
+): string {
+  if (cancelled) {
+    return "לא שיניתי ולא מחקתי כלום.";
+  }
+  if (noneToDelete) {
+    return "אין תזכורות פעילות למחוק.";
+  }
+  if (ask.length === 0) {
+    return "";
+  }
+  const removes = ask.filter((row) => row.action === "remove");
+  if (removes.length > 1 && removes.length === ask.length) {
+    const names = removes.map((row) => row.item).join(", ");
+    return `עוד לא בוצע. לאשר מחיקה של כל התזכורות הפעילות (${names})? כן / לא.`;
+  }
+  return ask
+    .map((row) => {
+      const verb = row.action === "remove" ? "למחוק" : "לעדכן";
+      return `עוד לא בוצע. לאשר ${verb} את התזכורת «${row.item}»? כן / לא.`;
+    })
+    .join("\n");
+}
+
 export async function applyReminders(input: {
   userId: string;
   actor: PublicEmployee;
   employees: PublicEmployee[];
   reminders: LlmReminderAction[];
-}): Promise<void> {
+}): Promise<{ removed: string[]; missed: string[] }> {
+  const removed: string[] = [];
+  const missed: string[] = [];
   if (!prisma.reminder) {
-    return;
+    return { removed, missed };
   }
   for (const reminder of input.reminders) {
     const ownerId = ownerIdFor(reminder, input.employees, input.actor.id);
@@ -145,15 +319,16 @@ export async function applyReminders(input: {
     }
 
     if (reminder.action === "remove") {
-      await prisma.reminder.updateMany({
-        where: {
-          userId: input.userId,
-          ownerId,
-          itemKey: key,
-          status: "active",
-        },
-        data: { status: "cancelled" },
-      });
+      const cancelled = await cancelActiveReminder(
+        input.userId,
+        ownerId,
+        reminder.item,
+      );
+      if (cancelled) {
+        removed.push(cancelled);
+      } else {
+        missed.push(reminder.item.trim());
+      }
       continue;
     }
 
@@ -167,7 +342,11 @@ export async function applyReminders(input: {
       continue;
     }
 
-    const pingIds = pingIdsFor(reminder, input.employees, input.actor.id);
+    const pingIds = resolveReminderPingDestinations(
+      reminder,
+      input.employees,
+      input.actor.id,
+    );
     const existing = await prisma.reminder.findFirst({
       where: {
         userId: input.userId,
@@ -207,6 +386,37 @@ export async function applyReminders(input: {
       },
     });
   }
+  return { removed, missed };
+}
+
+export function formatActiveRemindersReply(
+  rows: ReminderSnapshotRow[],
+): string {
+  const active = rows.filter((row) => row.status === "active");
+  if (active.length === 0) {
+    return "אין לך תזכורות פעילות.";
+  }
+  return [
+    "התזכורות הפעילות שלך:",
+    ...active.map((row) => {
+      const daily = row.repeat === "daily" ? ", כל יום" : "";
+      return `- ${row.item} (${row.fire_at}${daily})`;
+    }),
+  ].join("\n");
+}
+
+export function formatReminderApplyNotice(result: {
+  removed: string[];
+  missed: string[];
+}): string {
+  const parts: string[] = [];
+  if (result.removed.length > 0) {
+    parts.push(`נמחק: ${result.removed.join(", ")}.`);
+  }
+  if (result.missed.length > 0) {
+    parts.push(`לא נמצאה תזכורת פעילה בשם: ${result.missed.join(", ")}.`);
+  }
+  return parts.join(" ");
 }
 
 export async function listVisibleReminders(
