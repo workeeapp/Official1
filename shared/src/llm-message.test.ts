@@ -248,6 +248,9 @@ describe("parseLlmReply", () => {
         targets: [],
         text: "",
         inSeconds: 10,
+        everyCount: null,
+        everyUnit: null,
+        weekdays: null,
         confirmed: false,
       },
     ]);
@@ -269,6 +272,23 @@ describe("parseLlmReply", () => {
       ).reminders,
     ).toMatchObject([
       { action: "add", item: "חלב", inSeconds: 20 },
+    ]);
+  });
+
+  it("reads a weekly every field", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשמור",
+          metadata: {
+            reminders: [
+              { action: "add", item: "התאמן", time: "08:05", every: "כל שבוע" },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      { item: "התאמן", everyCount: 1, everyUnit: "weeks", repeat: "weekly" },
     ]);
   });
 

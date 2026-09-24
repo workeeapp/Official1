@@ -1,3 +1,5 @@
+import { parseReminderInterval } from "./reminder-interval.js";
+
 export interface ParsedLlmMessage {
   response: string;
   actions: string[];
@@ -28,7 +30,12 @@ export interface LlmMessageAction {
 }
 
 export type LlmReminderActionName = "add" | "remove" | "update";
-export type LlmReminderRepeat = "once" | "daily";
+export type LlmReminderRepeat =
+  | "once"
+  | "hourly"
+  | "daily"
+  | "weekly"
+  | "monthly";
 
 export interface LlmReminderAction {
   action: LlmReminderActionName;
@@ -41,6 +48,17 @@ export interface LlmReminderAction {
   targets: string[];
   text: string;
   inSeconds: number | null;
+  everyCount: number | null;
+  everyUnit:
+    | "seconds"
+    | "minutes"
+    | "hours"
+    | "days"
+    | "weeks"
+    | "months"
+    | "weekdays"
+    | null;
+  weekdays: number[] | null;
   confirmed: boolean;
 }
 
@@ -69,7 +87,13 @@ const FILING_ACTIONS = new Set<LlmFilingActionName>([
 ]);
 
 const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "update"]);
-const REMINDER_REPEATS = new Set<LlmReminderRepeat>(["once", "daily"]);
+const REMINDER_REPEATS = new Set<LlmReminderRepeat>([
+  "once",
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+]);
 
 export function emptyLlmMetadata(): LlmMetadata {
   return {
@@ -306,10 +330,23 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
   const listType = LIST_TYPES.has(listRaw as LlmListType)
     ? (listRaw as LlmListType)
     : "shopping";
+  const interval = parseReminderInterval(record);
   const repeatRaw = String(record.repeat ?? "").trim().toLowerCase();
   const repeat = REMINDER_REPEATS.has(repeatRaw as LlmReminderRepeat)
     ? (repeatRaw as LlmReminderRepeat)
-    : "once";
+    : interval
+      ? interval.unit === "hours"
+        ? "hourly"
+        : interval.unit === "days"
+          ? "daily"
+          : interval.unit === "weeks"
+            ? "weekly"
+            : interval.unit === "months"
+              ? "monthly"
+              : interval.unit === "weekdays"
+                ? "weekly"
+                : "daily"
+      : "once";
   const when = readText(record, ["when"]);
   const date = readText(record, ["date", "יום", "relative"]) || parseWhenDate(when);
   const time = normalizeNamedTime(
@@ -328,6 +365,9 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     targets: parseTargets(record),
     text: readText(record, ["text", "message", "body", "תוכן", "sentence"]),
     inSeconds,
+    everyCount: interval?.count ?? null,
+    everyUnit: interval?.unit ?? null,
+    weekdays: interval?.weekdays ?? null,
     confirmed: record.confirmed === true || record.confirm === true,
   };
 }

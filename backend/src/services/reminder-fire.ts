@@ -1,4 +1,9 @@
-import { digitalEmployees, isProtectedEmployee } from "@workee/shared";
+import {
+  addReminderInterval,
+  digitalEmployees,
+  isProtectedEmployee,
+  parseStoredRepeat,
+} from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
@@ -13,8 +18,16 @@ function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-function nextDaily(from: Date): Date {
-  return new Date(from.getTime() + 24 * 60 * 60 * 1000);
+function nextFireAt(from: Date, repeat: string, now: Date): Date | null {
+  const interval = parseStoredRepeat(repeat);
+  if (!interval) {
+    return null;
+  }
+  let next = addReminderInterval(from, interval);
+  while (next.getTime() <= now.getTime()) {
+    next = addReminderInterval(next, interval);
+  }
+  return next;
 }
 
 export async function fireDueReminders(now = new Date()): Promise<number> {
@@ -126,15 +139,17 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         : "failed";
     const sentAt = sendStatus === "sent" ? now : null;
 
-    if (reminder.repeat === "daily") {
+    const nextAt = nextFireAt(reminder.fireAt, reminder.repeat, now);
+    if (nextAt) {
       await prisma.reminder.update({
         where: { id: reminder.id },
         data: {
-          fireAt: nextDaily(reminder.fireAt),
+          fireAt: nextAt,
           sendStatus,
           sentAt,
         },
       });
+      scheduleSoon(nextAt);
     } else {
       await prisma.reminder.update({
         where: { id: reminder.id },

@@ -37,7 +37,7 @@ New capabilities are developed on a **separate digital worker** with its own pro
 
 The engine does not invent a destination or a message body. An unknown name without digits is not saved. A spoken question (`?`) holds outbound WhatsApp until the speaker confirms. A phone in the reminder item or text is the ping, even if `ping` names the speaker. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
-A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`.
+A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`. Recurring clocks use `repeat` as `once` or `count:unit` for any interval (`30:seconds`, `15:minutes`, `4:hours`, `1:days`, `1:weeks`, `1:months`) or `weekdays:1,3`. Legacy `daily` still means every day.
 
 Do not add regex that guesses user intent. Lucy’s prompt stays the front desk.
 

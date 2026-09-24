@@ -1,4 +1,12 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
+import {
+  addReminderInterval,
+  formatReminderIntervalHe,
+  nextWeekdayFireAt,
+  parseStoredRepeat,
+  serializeReminderRepeat,
+  type ReminderInterval,
+} from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
@@ -26,11 +34,26 @@ export interface ReminderSnapshotRow {
   sent_at: string | null;
 }
 
+function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
+  if (reminder.weekdays && reminder.weekdays.length > 0) {
+    return { count: 1, unit: "weekdays", weekdays: reminder.weekdays };
+  }
+  if (reminder.everyCount && reminder.everyUnit) {
+    return {
+      count: reminder.everyCount,
+      unit: reminder.everyUnit,
+      weekdays: reminder.weekdays ?? undefined,
+    };
+  }
+  return parseStoredRepeat(reminder.repeat);
+}
+
 export function resolveReminderFireAt(
   dateText: string,
   timeText: string,
   now = new Date(),
   inSeconds?: number | null,
+  interval?: ReminderInterval | null,
 ): Date | null {
   if (inSeconds && inSeconds > 0) {
     return new Date(now.getTime() + inSeconds * 1000);
@@ -52,7 +75,7 @@ export function resolveReminderFireAt(
     day = next.getUTCDate();
   } else if (relative === "today" || relative === "היום" || relative === "") {
     if (!timeText.trim() && !dateText.trim()) {
-      return null;
+      return interval ? addReminderInterval(now, interval) : null;
     }
   } else {
     const iso = relative.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -66,12 +89,21 @@ export function resolveReminderFireAt(
 
   const time = parseClock(timeText);
   if (!time) {
+    if (interval) {
+      return addReminderInterval(now, interval);
+    }
     return null;
   }
 
   let fireAt = new Date(Date.UTC(year, month, day, time.hour - 3, time.minute));
   while (fireAt.getTime() <= now.getTime()) {
     fireAt = new Date(fireAt.getTime() + 24 * 60 * 60 * 1000);
+  }
+  if (interval?.unit === "weekdays" && interval.weekdays?.length) {
+    fireAt = nextWeekdayFireAt(fireAt, interval.weekdays, false);
+    while (fireAt.getTime() <= now.getTime()) {
+      fireAt = nextWeekdayFireAt(fireAt, interval.weekdays, true);
+    }
   }
   return fireAt;
 }
@@ -301,6 +333,9 @@ function removesForItems(
     targets: [],
     text: "",
     inSeconds: null,
+    everyCount: null,
+    everyUnit: null,
+    weekdays: null,
     confirmed: false,
   }));
 }
@@ -435,11 +470,13 @@ export async function applyReminders(input: {
       continue;
     }
 
+    const interval = intervalOf(reminder);
     const fireAt = resolveReminderFireAt(
       reminder.date,
       reminder.time,
       new Date(),
       reminder.inSeconds,
+      interval,
     );
     if (!fireAt) {
       skipped.push({ item: reminder.item.trim(), reason: "no_time" });
@@ -477,7 +514,7 @@ export async function applyReminders(input: {
             itemLabel: reminder.item.trim().slice(0, 255),
             listType: reminder.listType,
             fireAt,
-            repeat: reminder.repeat,
+            repeat: serializeReminderRepeat(interval),
             pingIds,
             messageText: reminder.text.trim().slice(0, 4096),
           },
@@ -492,7 +529,7 @@ export async function applyReminders(input: {
             itemLabel: reminder.item.trim().slice(0, 255),
             listType: reminder.listType,
             fireAt,
-            repeat: reminder.repeat,
+            repeat: serializeReminderRepeat(interval),
             pingIds,
             messageText: reminder.text.trim().slice(0, 4096),
           },
@@ -523,8 +560,8 @@ export function formatActiveRemindersReply(
   return [
     "התזכורות הפעילות שלך:",
     ...active.map((row) => {
-      const daily = row.repeat === "daily" ? ", כל יום" : "";
-      return `- ${row.item} (${row.fire_at}${daily})`;
+      const cadence = formatReminderIntervalHe(row.repeat);
+      return `- ${row.item} (${row.fire_at}${cadence ? `, ${cadence}` : ""})`;
     }),
   ].join("\n");
 }

@@ -13,6 +13,17 @@ describe("formatAttributedOutbound", () => {
     ).toBe("תזכורת: חלב");
   });
 
+  it("uses one תזכורת line when item and text are the same", () => {
+    expect(
+      formatAttributedOutbound({
+        actorName: "טל",
+        destIsActor: true,
+        item: "התאמן",
+        text: "התאמן",
+      }),
+    ).toBe("תזכורת: להתאמן");
+  });
+
   it("says who asked when reminding someone else", () => {
     expect(
       formatAttributedOutbound({
@@ -21,7 +32,7 @@ describe("formatAttributedOutbound", () => {
         item: "להביא חלב",
         text: "",
       }),
-    ).toBe("טל ביקש לתזכר אותך: להביא חלב");
+    ).toBe("טל ביקש לתזכר אותך\nתזכורת: להביא חלב");
   });
 
   it("says who sent a dictated message", () => {

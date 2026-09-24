@@ -63,6 +63,15 @@ export {
   parseTargets,
   llmItemLabel,
 } from "./llm-message";
+export {
+  addReminderInterval,
+  formatReminderIntervalHe,
+  nextWeekdayFireAt,
+  parseReminderInterval,
+  parseStoredRepeat,
+  serializeReminderRepeat,
+} from "./reminder-interval";
+export type { ReminderInterval, ReminderIntervalUnit } from "./reminder-interval";
 export type {
   LlmFilingAction,
   LlmFilingActionName,

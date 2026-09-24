@@ -25,6 +25,9 @@ const milkRemove: LlmReminderAction = {
   targets: [],
   text: "",
   inSeconds: null,
+  everyCount: null,
+  everyUnit: null,
+  weekdays: null,
   confirmed: false,
 };
 
@@ -44,6 +47,15 @@ describe("resolveReminderFireAt", () => {
     const now = new Date("2026-09-24T10:00:00.000Z");
     const fireAt = resolveReminderFireAt("tomorrow", "", now, 10);
     expect(fireAt?.getTime()).toBe(now.getTime() + 10_000);
+  });
+
+  it("uses the interval as the first ping when there is no clock", () => {
+    const now = new Date("2026-09-24T10:00:00.000Z");
+    const fireAt = resolveReminderFireAt("", "", now, null, {
+      count: 1,
+      unit: "hours",
+    });
+    expect(fireAt?.toISOString()).toBe("2026-09-24T11:00:00.000Z");
   });
 
   it("returns null when neither a delay nor a clock is present", () => {
