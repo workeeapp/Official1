@@ -174,6 +174,14 @@ describe("parseLlmReply", () => {
         }),
       ),
     ).toMatchObject({ query: "reminders", confirm: true });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: { query: "todos" },
+        }),
+      ).query,
+    ).toBe("todos");
   });
 
   it("extracts a relayed message for another employee", () => {

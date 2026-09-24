@@ -24,6 +24,7 @@ import {
   formatEmployeeContext,
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
+  listItemLabels,
   getTeamSchedules,
   type SharedItemEvent,
 } from "./employee-records.service.js";
@@ -44,6 +45,7 @@ import { getLlmClient, toPlainJson } from "./llm-client.js";
 import {
   applyReminders,
   formatActiveRemindersReply,
+  formatTodosReply,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
   listVisibleReminders,
@@ -226,7 +228,8 @@ function davidTargetingInstructions(
     "If they want to send or remind someone whose name is not in Known employees, ASK for their WhatsApp number. Do not emit messages or reminders until ping/targets has digits. Do not say you sent or saved.",
     "If they want to send someone a message but did not say the words, ASK what to send. You may offer שלום. Do not invent text. Empty messages and reminders while you ask.",
     "Delete: emit remove names, no confirmed. After they say yes, emit only metadata.confirm=true — do not emit remove again and do not re-ask. Saved reminder data is from before this turn.",
-    "If they want to see current reminders — any wording — set metadata.query to \"reminders\". The server lists them from the database.",
+    "What the speaker still needs to do or buy — any wording — → metadata.query = \"todos\". The server lists shopping, tasks, and self-reminders only. A later send to someone else is not a todo.",
+    "Which reminder clocks exist, or what will be sent — any wording — → metadata.query = \"reminders\". The server lists every clock.",
   ].join("\n");
 }
 
@@ -261,9 +264,10 @@ function targetingInstructions(
     "Do not use metadata.messages for a conversation switch. Asking you to tell or send someone something is messages, not handoff.",
     "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
     "Reminders are דוד (also called הליצן — same person). Create, change, or delete a reminder → metadata.handoff { \"worker\": \"דוד\" }. Never say you saved a reminder.",
-    "Which reminders exist now — any wording — → metadata.query = \"reminders\". The server lists them from the database. Do not invent names.",
+    "What the speaker still needs to do or buy — any wording — → metadata.query = \"todos\". The server lists shopping, tasks, and self-reminders. Do not invent names. A scheduled send to someone else is not a todo.",
+    "Which reminder clocks exist, or what will be sent — any wording — → metadata.query = \"reminders\". The server lists every clock. Do not invent names.",
     "If the speaker says they bought or already have an item, remove it from their shopping list.",
-    "When asked what someone still needs, answer only from EMPLOYEE_SAVED_DATA. Never mention items that are not listed there.",
+    "When asked what someone still needs, use query todos. Never mention items that are not in that server list.",
   ].join("\n");
 }
 
@@ -978,14 +982,25 @@ export async function sendChatMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
+    const queryName = parsedMetadata.query ?? metadata.query;
+    const reminderRows = prisma.reminder
+      ? await listVisibleReminders(input.userId, employee.id, humans)
+      : [];
     const listed =
-      (parsedMetadata.query ?? metadata.query) === "reminders"
-      ? formatActiveRemindersReply(
-          prisma.reminder
-            ? await listVisibleReminders(input.userId, employee.id, humans)
-            : [],
-        )
-      : "";
+      queryName === "reminders"
+        ? formatActiveRemindersReply(reminderRows)
+        : queryName === "todos"
+          ? await (async () => {
+              const snapshot = await getEmployeeRecordSnapshot(input.employeeId);
+              return formatTodosReply({
+                shopping: listItemLabels(snapshot, "shopping"),
+                tasks: listItemLabels(snapshot, "tasks"),
+                reminders: reminderRows,
+                speakerId: employee.id,
+                speakerPhone: employee.phone,
+              });
+            })()
+          : "";
     const ownAsk =
       !listed &&
       reminderResult.saved.length === 0 &&

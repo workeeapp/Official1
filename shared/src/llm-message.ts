@@ -66,7 +66,7 @@ export interface LlmHandoffAction {
   worker: string;
 }
 
-export type LlmQuery = "reminders" | "reminders_sent";
+export type LlmQuery = "reminders" | "reminders_sent" | "todos";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
@@ -243,6 +243,9 @@ function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
   }
   if (value === "reminders_sent" || value === "sent") {
     return "reminders_sent";
+  }
+  if (value === "todos" || value === "todo" || value === "tasks") {
+    return "todos";
   }
   return null;
 }

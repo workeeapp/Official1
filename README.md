@@ -32,7 +32,8 @@ New capabilities are developed on a **separate digital worker** with its own pro
 
 - `lists` / `filing` / `messages` / `reminders` — write or send
 - `handoff.worker` — switch the WhatsApp session to that digital employee
-- `query: "reminders"` — list **active** rows from the database (not from chat memory)
+- `query: "todos"` — what the speaker still needs to do or buy (shopping, tasks, self-reminders). A later send to someone else is omitted.
+- `query: "reminders"` — every **active** clock from the database, including scheduled sends
 - `confirm: true|false` — apply or drop a pending reminder delete
 
 The engine does not invent a destination or a message body, and does not expand `item: "all"` or read Hebrew clocks. An unknown name without digits is not saved. Delete is one `remove` per item name from this turn’s data. Ping dest is `reminders.ping` or `messages.targets` only. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).

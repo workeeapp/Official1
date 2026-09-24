@@ -25,6 +25,7 @@ export interface ReminderSnapshotRow {
   fire_at: string;
   repeat: string;
   ping: string[];
+  ping_ids: string[];
   owner: string;
   text: string;
   status: string;
@@ -506,6 +507,68 @@ export function formatActiveRemindersReply(
   ].join("\n");
 }
 
+export function reminderIsScheduledSend(
+  row: Pick<ReminderSnapshotRow, "ping_ids">,
+  speakerId: string,
+  speakerPhone?: string | null,
+): boolean {
+  const dests = row.ping_ids ?? [];
+  if (dests.length === 0) {
+    return false;
+  }
+  return dests.some((dest) => {
+    if (dest === speakerId) {
+      return false;
+    }
+    if (speakerPhone && phonesMatch(speakerPhone, dest)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+export function formatTodosReply(input: {
+  shopping: string[];
+  tasks: string[];
+  reminders: ReminderSnapshotRow[];
+  speakerId: string;
+  speakerPhone?: string | null;
+}): string {
+  const shopping = uniqueLabels(input.shopping);
+  const tasks = uniqueLabels(input.tasks);
+  const listed = [...shopping, ...tasks];
+  const selfReminders = input.reminders.filter(
+    (row) =>
+      row.status === "active" &&
+      !reminderIsScheduledSend(row, input.speakerId, input.speakerPhone) &&
+      !listed.some((label) => reminderLabelsMatch(row.item, label)),
+  );
+  const lines = [
+    ...shopping.map((item) => `- ${item}`),
+    ...tasks.map((item) => `- ${item}`),
+    ...selfReminders.map((row) => `- ${row.item} (${row.fire_at})`),
+  ];
+  if (lines.length === 0) {
+    return "אין לך כרגע משימות או קניות ממתינות.";
+  }
+  return ["מה שאתה צריך לעשות:", ...lines].join("\n");
+}
+
+function uniqueLabels(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const label = value.trim();
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(label);
+  }
+  return result;
+}
+
 export function formatReminderApplyNotice(result: {
   removed: string[];
   missed: string[];
@@ -616,6 +679,7 @@ export function toReminderSnapshotRow(
     fire_at: formatJerusalemDateTime(row.fireAt),
     repeat: row.repeat,
     ping: pings.map((id) => names.get(id) ?? id),
+    ping_ids: pings,
     owner: names.get(row.ownerId) ?? row.ownerId,
     text: row.messageText,
     status: row.status,

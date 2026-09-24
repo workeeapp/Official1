@@ -59,6 +59,18 @@ export function itemIdentity(
   return normalizeKey(readItemText(item, ITEM_NAME_KEYS[listType]));
 }
 
+export function listItemLabels(
+  snapshot: EmployeeRecordSnapshot,
+  listType: "shopping" | "tasks",
+): string[] {
+  const keys = ITEM_NAME_KEYS[listType];
+  return snapshot.lists
+    .filter((list) => list.list_type === listType)
+    .flatMap((list) =>
+      list.items.map((item) => readItemText(item, keys)).filter(Boolean),
+    );
+}
+
 export function hasEmployeeRecords(snapshot: EmployeeRecordSnapshot): boolean {
   return (
     snapshot.lists.length > 0 ||

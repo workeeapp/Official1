@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PublicEmployee } from "@workee/shared";
 import {
   formatActiveRemindersReply,
+  formatTodosReply,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
@@ -302,6 +303,7 @@ describe("formatActiveRemindersReply", () => {
           fire_at: "2026-09-24 22:00",
           repeat: "once",
           ping: [],
+          ping_ids: [],
           owner: "טל",
           text: "",
           status: "active",
@@ -315,6 +317,7 @@ describe("formatActiveRemindersReply", () => {
           fire_at: "2026-09-23 10:00",
           repeat: "once",
           ping: [],
+          ping_ids: [],
           owner: "טל",
           text: "",
           status: "cancelled",
@@ -324,6 +327,44 @@ describe("formatActiveRemindersReply", () => {
         },
       ]),
     ).toBe("התזכורות הפעילות שלך:\n- חלב (2026-09-24 22:00)");
+  });
+});
+
+describe("formatTodosReply", () => {
+  const supermarket = {
+    item: "ללכת לסופר",
+    list_type: "tasks",
+    fire_at: "2026-09-25 21:30",
+    repeat: "once",
+    ping: ["טל"],
+    ping_ids: [tal.id],
+    owner: "טל",
+    text: "",
+    status: "active" as const,
+    send_status: "pending" as const,
+    sent: false,
+    sent_at: null,
+  };
+  const michalSend = {
+    ...supermarket,
+    item: "לשלוח הודעה למיכל",
+    fire_at: "2026-09-24 22:15",
+    ping: ["0523691495"],
+    ping_ids: ["0523691495"],
+  };
+
+  it("lists shopping, tasks, and self-reminders, not a send to someone else", () => {
+    expect(
+      formatTodosReply({
+        shopping: ["חלב"],
+        tasks: [],
+        reminders: [supermarket, michalSend],
+        speakerId: tal.id,
+        speakerPhone: tal.phone,
+      }),
+    ).toBe(
+      "מה שאתה צריך לעשות:\n- חלב\n- ללכת לסופר (2026-09-25 21:30)",
+    );
   });
 });
 
