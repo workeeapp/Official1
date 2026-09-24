@@ -314,7 +314,9 @@ function ownerIdFor(
 const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
 
 function isAllReminderItem(item: string): boolean {
-  return /^(all|\*|כל|הכל|כולן|כולם|כל התזכורות)$/iu.test(item.trim());
+  return /^(all|\*|כל|הכל|כולן|כולם|כל התזכורות(?:\s+הפעילות)?)$/iu.test(
+    item.trim(),
+  );
 }
 
 function removesForItems(
@@ -355,30 +357,55 @@ export function planReminderWrites(
     (row) => row.action === "add" || row.action === "update",
   );
   const mutations = incoming.filter((row) => row.action === "remove");
-  const ready = mutations.filter((row) => row.confirmed);
-  let waiting = mutations.filter((row) => !row.confirmed);
-  const pending = pendingReminderMutations.get(conversationId) ?? [];
-
-  const wantsAll = waiting.some(
-    (row) => row.action === "remove" && isAllReminderItem(row.item),
+  const ready = mutations.filter(
+    (row) => row.confirmed && !isAllReminderItem(row.item),
   );
+  let waiting = mutations.filter(
+    (row) => !row.confirmed && !isAllReminderItem(row.item),
+  );
+  const pending = pendingReminderMutations.get(conversationId) ?? [];
+  const incomingAll = mutations.filter((row) => isAllReminderItem(row.item));
 
-  if (wantsAll) {
-    waiting = removesForItems(existingItems);
-    if (waiting.length === 0) {
+  if (incomingAll.length > 0) {
+    const expanded =
+      pending.length > 0 ? pending : removesForItems(existingItems);
+    if (expanded.length === 0) {
       pendingReminderMutations.delete(conversationId);
       return {
-        apply: [...adds, ...ready],
+        apply: adds,
         ask: [],
         cancelled: false,
         noneToDelete: true,
       };
     }
+    const go =
+      confirm === true || incomingAll.some((row) => row.confirmed);
+    if (go) {
+      pendingReminderMutations.delete(conversationId);
+      return {
+        apply: [...adds, ...expanded],
+        ask: [],
+        cancelled: false,
+        noneToDelete: false,
+      };
+    }
+    pendingReminderMutations.set(conversationId, expanded);
+    return {
+      apply: adds,
+      ask: expanded,
+      cancelled: false,
+      noneToDelete: false,
+    };
   }
 
   if (ready.length > 0 && waiting.length === 0) {
     pendingReminderMutations.delete(conversationId);
-    return { apply: [...adds, ...ready], ask: [], cancelled: false, noneToDelete: false };
+    return {
+      apply: [...adds, ...ready],
+      ask: [],
+      cancelled: false,
+      noneToDelete: false,
+    };
   }
 
   if (waiting.length > 0) {

@@ -216,6 +216,17 @@ describe("planReminderWrites", () => {
     expect(formatReminderConfirmNotice(planned.ask, false, false)).toContain(
       "חלב",
     );
+
+    const confirmed = planReminderWrites(
+      "conv-3",
+      [{ ...milkRemove, item: "all", confirmed: true }],
+      [
+        { item: "חלב", listType: "shopping" },
+        { item: "מתנה", listType: "tasks" },
+      ],
+    );
+    expect(confirmed.apply.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
+    expect(confirmed.apply.some((row) => row.item === "all")).toBe(false);
   });
 });
 
