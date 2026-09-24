@@ -209,7 +209,7 @@ describe("parseLlmReply", () => {
           response: "אשלח",
           metadata: {
             reminders: [
-              { action: "add", item: "הודעה", in: "10s", ping: [502222222] },
+              { action: "add", item: "הודעה", in: 10, ping: [502222222] },
             ],
           },
         }),
@@ -230,7 +230,7 @@ describe("parseLlmReply", () => {
                 action: "add",
                 item: "חלב",
                 list_type: "shopping",
-                in: "10 seconds",
+                in: 10,
               },
             ],
           },
@@ -265,7 +265,7 @@ describe("parseLlmReply", () => {
             reminders: {
               action: "Create",
               item: "חלב",
-              in: "20s",
+              in: 20,
             },
           },
         }),
@@ -275,14 +275,20 @@ describe("parseLlmReply", () => {
     ]);
   });
 
-  it("reads a weekly every field", () => {
+  it("reads structured every_count and weekdays", () => {
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "אשמור",
           metadata: {
             reminders: [
-              { action: "add", item: "התאמן", time: "08:05", every: "כל שבוע" },
+              {
+                action: "add",
+                item: "התאמן",
+                time: "08:05",
+                every_count: 1,
+                every_unit: "weeks",
+              },
             ],
           },
         }),
@@ -292,18 +298,20 @@ describe("parseLlmReply", () => {
     ]);
   });
 
-  it("reads a Hebrew when field as date plus evening ping", () => {
+  it("does not translate Hebrew when or every fields", () => {
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "אשמור",
           metadata: {
             reminders: [
-              { action: "add", item: "חלב", when: "מחר בערב" },
+              { action: "add", item: "חלב", when: "מחר בערב", every: "כל שבוע" },
             ],
           },
         }),
       ).reminders,
-    ).toMatchObject([{ action: "add", item: "חלב", date: "מחר", time: "20:00" }]);
+    ).toMatchObject([
+      { action: "add", item: "חלב", date: "", time: "", everyCount: null },
+    ]);
   });
 });

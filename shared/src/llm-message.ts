@@ -347,11 +347,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
                 ? "weekly"
                 : "daily"
       : "once";
-  const when = readText(record, ["when"]);
-  const date = readText(record, ["date", "יום", "relative"]) || parseWhenDate(when);
-  const time = normalizeNamedTime(
-    readText(record, ["time", "שעה"]) || parseWhenTime(when),
-  );
+  const date = readText(record, ["date"]);
+  const time = parseClockField(readText(record, ["time"]));
   const inSeconds = parseInSeconds(record);
 
   return {
@@ -377,90 +374,24 @@ function parseInSeconds(value: Record<string, unknown>): number | null {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
     return Math.round(raw);
   }
-  if (typeof raw !== "string" || !raw.trim()) {
-    return null;
-  }
-  const text = raw.trim().toLowerCase();
-  if (/חצי\s*שעה|half\s*hour/.test(text)) {
-    return 30 * 60;
-  }
-  if (/^שעה$|^an?\s+hour$|^in an hour$|^בעוד\s*שעה$/.test(text)) {
-    return 60 * 60;
-  }
-  const seconds = text.match(/(\d+)\s*(?:s|sec|secs|second|seconds|שניות|שניה)/);
-  if (seconds) {
-    return Number(seconds[1]);
-  }
-  const minutes = text.match(/(\d+)\s*(?:m|min|mins|minute|minutes|דקות|דקה)/);
-  if (minutes) {
-    return Number(minutes[1]) * 60;
-  }
-  const hours = text.match(/(\d+)\s*(?:h|hr|hrs|hour|hours|שעות|שעה)/);
-  if (hours) {
-    return Number(hours[1]) * 3600;
+  if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+    const seconds = Number(raw.trim());
+    return seconds > 0 ? seconds : null;
   }
   return null;
 }
 
-function normalizeNamedTime(time: string): string {
-  const text = time.trim().toLowerCase();
-  if (!text) {
+function parseClockField(time: string): string {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
     return "";
   }
-  if (/^(morning|בוקר)$/.test(text)) {
-    return "09:00";
-  }
-  if (/^(noon|צהריים)$/.test(text)) {
-    return "12:00";
-  }
-  if (/^(afternoon|אחה["׳']?צ)$/.test(text)) {
-    return "15:00";
-  }
-  if (/^(evening|ערב)$/.test(text)) {
-    return "20:00";
-  }
-  if (/^(night|לילה)$/.test(text)) {
-    return "21:00";
-  }
-  const clock = text.match(/^(\d{1,2})(?::(\d{2}))?$/);
-  if (clock) {
-    return `${clock[1].padStart(2, "0")}:${(clock[2] ?? "00").padStart(2, "0")}`;
-  }
-  return time.trim();
-}
-
-function parseWhenDate(when: string): string {
-  const trimmed = when.trim();
-  if (!trimmed) {
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) {
     return "";
   }
-  const iso = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (iso) {
-    return iso[1];
-  }
-  const first = trimmed.split(/\s+/)[0] ?? "";
-  return first;
-}
-
-function parseWhenTime(when: string): string {
-  const clock = when.match(/\b(\d{1,2}:\d{2})\b/);
-  if (clock) {
-    return clock[1];
-  }
-  const hebrew = when.match(/(?:בשעה|ב-)\s*(\d{1,2})(?::(\d{2}))?/);
-  if (hebrew) {
-    return `${hebrew[1]}:${hebrew[2] ?? "00"}`;
-  }
-  if (/ערב|evening/i.test(when)) {
-    return "20:00";
-  }
-  if (/בוקר|morning/i.test(when)) {
-    return "09:00";
-  }
-  if (/צהריים|noon/i.test(when)) {
-    return "12:00";
-  }
-  return normalizeNamedTime(when);
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
 }
 
 function toMessageAction(value: unknown): LlmMessageAction | null {

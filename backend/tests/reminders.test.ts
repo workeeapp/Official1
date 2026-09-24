@@ -58,13 +58,34 @@ describe("resolveReminderFireAt", () => {
     expect(fireAt?.toISOString()).toBe("2026-09-24T11:00:00.000Z");
   });
 
+  it("uses weekdays numbers plus 13:30, not a weekday word in date", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "13:30",
+      new Date("2026-09-24T18:00:00.000Z"),
+      null,
+      { count: 1, unit: "weekdays", weekdays: [1] },
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-28T10:30:00.000Z");
+  });
+
+  it("does not treat date שני as Monday", () => {
+    const fireAt = resolveReminderFireAt(
+      "שני",
+      "13:30",
+      new Date("2026-09-24T18:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-25T10:30:00.000Z");
+  });
+
   it("returns null when neither a delay nor a clock is present", () => {
     expect(resolveReminderFireAt("tomorrow", "", new Date(), null)).toBeNull();
   });
 
   it("fires tomorrow evening when the clock is present", () => {
     const fireAt = resolveReminderFireAt(
-      "מחר",
+      "tomorrow",
       "20:00",
       new Date("2026-09-24T10:00:00.000Z"),
       null,
@@ -116,27 +137,21 @@ describe("resolveReminderPingDestinations", () => {
     ).toEqual([]);
   });
 
-  it("pulls digits out of the reminder item when ping is empty", () => {
+  it("does not harvest digits from item or mixed ping tokens", () => {
     expect(
       resolveReminderPingDestinations(
         { ping: [], item: "היי 050-222-2222" },
         [tal],
         tal.id,
       ),
-    ).toEqual(["0502222222"]);
-  });
-
-  it("pulls digits out of a ping token that also has a name", () => {
+    ).toEqual([tal.id]);
     expect(
       resolveReminderPingDestinations(
         { ping: ["מיכל 050-222-2222"] },
         [tal],
         tal.id,
       ),
-    ).toEqual(["0502222222"]);
-  });
-
-  it("uses a phone in the item even if ping is the speaker", () => {
+    ).toEqual([]);
     expect(
       resolveReminderPingDestinations(
         {
@@ -146,7 +161,7 @@ describe("resolveReminderPingDestinations", () => {
         [tal],
         tal.id,
       ),
-    ).toEqual(["0523691495"]);
+    ).toEqual([tal.id]);
   });
 
   it("uses reminder targets as ping when ping is empty", () => {

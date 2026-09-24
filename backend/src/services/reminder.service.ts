@@ -38,11 +38,10 @@ function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
   if (reminder.weekdays && reminder.weekdays.length > 0) {
     return { count: 1, unit: "weekdays", weekdays: reminder.weekdays };
   }
-  if (reminder.everyCount && reminder.everyUnit) {
+  if (reminder.everyCount && reminder.everyUnit && reminder.everyUnit !== "weekdays") {
     return {
       count: reminder.everyCount,
       unit: reminder.everyUnit,
-      weekdays: reminder.weekdays ?? undefined,
     };
   }
   return parseStoredRepeat(reminder.repeat);
@@ -68,38 +67,34 @@ export function resolveReminderFireAt(
   let year = y;
   let month = m;
   let day = d;
-  if (relative === "tomorrow" || relative === "מחר") {
+  if (relative === "tomorrow") {
     const next = new Date(Date.UTC(y, m, d + 1));
     year = next.getUTCFullYear();
     month = next.getUTCMonth();
     day = next.getUTCDate();
-  } else if (relative === "today" || relative === "היום" || relative === "") {
+  } else if (relative === "today" || relative === "") {
     if (!timeText.trim() && !dateText.trim()) {
       return interval ? addReminderInterval(now, interval) : null;
     }
   } else {
     const iso = relative.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!iso) {
-      return null;
+    if (iso) {
+      year = Number(iso[1]);
+      month = Number(iso[2]) - 1;
+      day = Number(iso[3]);
     }
-    year = Number(iso[1]);
-    month = Number(iso[2]) - 1;
-    day = Number(iso[3]);
   }
 
   const time = parseClock(timeText);
   if (!time) {
-    if (interval) {
-      return addReminderInterval(now, interval);
-    }
-    return null;
+    return interval ? addReminderInterval(now, interval) : null;
   }
 
   let fireAt = new Date(Date.UTC(year, month, day, time.hour - 3, time.minute));
   while (fireAt.getTime() <= now.getTime()) {
     fireAt = new Date(fireAt.getTime() + 24 * 60 * 60 * 1000);
   }
-  if (interval?.unit === "weekdays" && interval.weekdays?.length) {
+  if (interval?.weekdays?.length) {
     fireAt = nextWeekdayFireAt(fireAt, interval.weekdays, false);
     while (fireAt.getTime() <= now.getTime()) {
       fireAt = nextWeekdayFireAt(fireAt, interval.weekdays, true);
@@ -109,7 +104,7 @@ export function resolveReminderFireAt(
 }
 
 function parseClock(value: string): { hour: number; minute: number } | null {
-  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?$/);
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
   if (!match) {
     return null;
   }
@@ -219,25 +214,14 @@ export function resolveReminderPingDestinations(
   };
 
   for (const raw of named) {
-    const found = phonesInToken(raw);
-    if (found.length > 0) {
-      for (const phone of found) {
-        addPhone(phone);
-      }
+    const phone = destPhoneToken(raw);
+    if (phone) {
+      addPhone(phone);
       continue;
     }
     const employee = matchEmployee(raw, employees);
     if (employee) {
       addPerson(employee.id);
-    }
-  }
-
-  for (const raw of [reminder.item, reminder.text]) {
-    if (!raw) {
-      continue;
-    }
-    for (const phone of phonesInToken(raw)) {
-      addPhone(phone);
     }
   }
 
@@ -266,18 +250,12 @@ export function formatPingLabel(
   return digits.length >= 4 ? `…${digits.slice(-4)}` : value.slice(0, 8);
 }
 
-function phonesInToken(raw: string): string[] {
-  if (looksLikePhone(raw) && !/[A-Za-z\u0590-\u05FF]/.test(raw)) {
-    return [normalizePhoneDigits(raw)];
+function destPhoneToken(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!looksLikePhone(trimmed) || /[A-Za-z\u0590-\u05FF]/.test(trimmed)) {
+    return null;
   }
-  const found: string[] = [];
-  const matches = raw.match(/\+?\d[\d\s().-]{6,14}\d/g) ?? [];
-  for (const match of matches) {
-    if (looksLikePhone(match)) {
-      found.push(normalizePhoneDigits(match));
-    }
-  }
-  return found;
+  return normalizePhoneDigits(trimmed);
 }
 
 export function unknownDestNames(
@@ -290,7 +268,7 @@ export function unknownDestNames(
   ];
   const unknown: string[] = [];
   for (const raw of named) {
-    if (phonesInToken(raw).length > 0 || matchEmployee(raw, employees)) {
+    if (destPhoneToken(raw) || matchEmployee(raw, employees)) {
       continue;
     }
     if (raw.trim()) {
@@ -314,9 +292,7 @@ function ownerIdFor(
 const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
 
 function isAllReminderItem(item: string): boolean {
-  return /^(all|\*|כל|הכל|כולן|כולם|כל התזכורות(?:\s+הפעילות)?)$/iu.test(
-    item.trim(),
-  );
+  return item.trim().toLowerCase() === "all";
 }
 
 function removesForItems(

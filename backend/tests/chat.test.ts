@@ -602,7 +602,7 @@ describe("chat API", () => {
         reply: JSON.stringify({
           response: "שמרתי",
           metadata: {
-            reminders: [{ action: "add", item: "חלב", in: "20 seconds" }],
+            reminders: [{ action: "add", item: "חלב", in: 20 }],
           },
         }),
         raw: {},

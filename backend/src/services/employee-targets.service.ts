@@ -44,39 +44,6 @@ export function resolveActionTargets(
   return matched.size > 0 ? [...matched.values()] : fallback;
 }
 
-export function inferTargetsFromMessage(
-  message: string,
-  employees: PublicEmployee[],
-  actorId: string,
-): string[] {
-  if (/(כולם|כל אחד|כל העובדים)/.test(message) || ALL_TARGET_TOKENS.test(message.trim())) {
-    return ["all"];
-  }
-
-  const mentioned: string[] = [];
-  for (const employee of employees) {
-    if (employee.id === actorId) {
-      continue;
-    }
-    const aliases = [
-      employee.nickname,
-      employee.name,
-      `${employee.name} ${employee.surname}`,
-      employeeDisplayName(employee),
-    ].filter((value): value is string => Boolean(value && value.trim()));
-
-    if (aliases.some((alias) => message.includes(alias.trim()))) {
-      mentioned.push(employeeDisplayName(employee));
-    }
-  }
-
-  return mentioned;
-}
-
-export function looksLikeMeeting(message: string): boolean {
-  return /פגיש(?:ה|ות)|ישיב(?:ה|ות)/.test(message);
-}
-
 export function resolveSpokenMetadata(
   _message: string,
   metadata: LlmMetadata,
@@ -92,15 +59,6 @@ export function resolveSpokenMetadata(
     query: metadata.query ?? null,
     confirm: metadata.confirm ?? null,
   };
-}
-
-export function looksLikeRelayMessage(message: string): boolean {
-  return (
-    /תשלח(?:י)?(?:\s+הודעה)?\s+ל/.test(message) ||
-    /תבדק(?:י)?\s+עם/.test(message) ||
-    /(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\s+ל/.test(message) ||
-    /(?:תשאלי?|שאלי?)\s+את/.test(message)
-  );
 }
 
 export function resolveRelayMessages(
@@ -124,55 +82,6 @@ export function formatMissingSendTextNotice(
   return dests.length === 1
     ? `מה לשלוח ל«${dests[0]}»? אפשר גם שלום.`
     : `מה לשלוח? אפשר גם שלום.`;
-}
-
-export function fallbackRelayText(
-  actorName: string,
-  userMessage: string,
-  targetNames: string[],
-): string {
-  const intent = extractRelayIntent(userMessage, targetNames)
-    .replace(/\?+$/g, "")
-    .trim();
-  const checking = /תבדק|אם\s+/.test(userMessage);
-  if (checking) {
-    const asked = intent
-      .replace(/^אם\s+/, "")
-      .replace(/הוא\s+/g, "")
-      .replace(/היא\s+/g, "")
-      .replace(/קנתה/g, "קנית")
-      .replace(/קנה/g, "קנית");
-    return `${actorName} שואל אם ${asked} ?`;
-  }
-
-  return `${actorName} שואל ${intent} ?\nמה לענות לו ?`;
-}
-
-function extractRelayIntent(message: string, targetNames: string[]): string {
-  const escaped = targetNames
-    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|");
-  const name = escaped || "\\S+";
-  let text = message.trim();
-  const patterns = [
-    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s*[-–:]\\s*`, "u"),
-    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s+`, "u"),
-    new RegExp(`^תבדק(?:י)?\\s+עם\\s+(?:${name})\\s+`, "u"),
-    new RegExp(
-      `^(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\\s+ל(?:${name})\\s*[-–:]?\\s*`,
-      "u",
-    ),
-    new RegExp(`^(?:תשאלי?|שאלי?)\\s+את\\s+(?:${name})\\s+`, "u"),
-  ];
-
-  for (const pattern of patterns) {
-    if (pattern.test(text)) {
-      text = text.replace(pattern, "");
-      break;
-    }
-  }
-
-  return text.trim() || message.trim();
 }
 
 export function planRelayDeliveries(input: {
@@ -282,150 +191,6 @@ function resolveNamedRelayTargets(
   return [...matched.values()];
 }
 
-function withMeetingParticipants(
-  list: LlmListAction,
-  inferred: string[],
-  actorName: string,
-  message: string,
-): LlmListAction {
-  if (list.listType !== "tasks" || !looksLikeMeeting(message)) {
-    return list;
-  }
-
-  const names = [actorName, ...list.targets, ...inferred]
-    .map((name) => name.trim())
-    .filter(Boolean);
-  const unique: string[] = [];
-  for (const name of names) {
-    if (!unique.includes(name)) {
-      unique.push(name);
-    }
-  }
-
-  return unique.length > 0 ? { ...list, targets: unique } : list;
-}
-
-function retargetListAction(
-  list: LlmListAction,
-  inferred: string[],
-  employees: PublicEmployee[],
-  actorId: string,
-): LlmListAction {
-  const fromItems = inferTargetsFromItemLabels(list.items, employees, actorId);
-  const targets =
-    list.targets.length > 0
-      ? list.targets
-      : fromItems.length > 0
-        ? fromItems
-        : inferred;
-  if (targets.length === 0) {
-    return list;
-  }
-
-  return {
-    ...list,
-    targets,
-    items: list.items.map((item) => stripAssigneePrefix(item, employees, actorId)),
-  };
-}
-
-function inferTargetsFromItemLabels(
-  items: Record<string, unknown>[],
-  employees: PublicEmployee[],
-  actorId: string,
-): string[] {
-  const found = new Set<string>();
-  for (const item of items) {
-    const parsed = parseAssigneePrefix(llmItemLabel(item), employees, actorId);
-    if (parsed) {
-      found.add(parsed.target);
-    }
-  }
-  return [...found];
-}
-
-function parseAssigneePrefix(
-  text: string,
-  employees: PublicEmployee[],
-  actorId: string,
-): { target: string; rest: string } | null {
-  const match = text.trim().match(/^(.+?)\s+צרי(?:ך|כה|כים)\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const employee = matchEmployee(match[1], employees);
-  if (!employee || employee.id === actorId) {
-    return null;
-  }
-
-  return {
-    target: employeeDisplayName(employee),
-    rest: match[2].trim(),
-  };
-}
-
-function stripAssigneePrefix(
-  item: Record<string, unknown>,
-  employees: PublicEmployee[],
-  actorId: string,
-): Record<string, unknown> {
-  const parsed = parseAssigneePrefix(llmItemLabel(item), employees, actorId);
-  if (!parsed) {
-    return item;
-  }
-
-  const next = { ...item };
-  for (const key of ["שם מטלה", "שם פריט", "name", "task", "item_name"]) {
-    if (typeof next[key] === "string") {
-      next[key] = parsed.rest;
-    }
-  }
-  return next;
-}
-
-function looksLikeAssignment(message: string): boolean {
-  const trimmed = message.trim();
-  return (
-    /צרי(?:ך|כה|כים)\s+\S+/.test(trimmed) &&
-    !/^(מה|איזה|האם|למה|כמה)(?:\s|$)/.test(trimmed) &&
-    !/[?？]/.test(trimmed)
-  );
-}
-
-function synthesizeAssignment(
-  message: string,
-  inferred: string[],
-): LlmListAction | null {
-  const match = message.trim().match(/צרי(?:ך|כה|כים)\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const rest = match[1].trim();
-  if (!rest) {
-    return null;
-  }
-
-  if (/^לקנות\b/.test(rest)) {
-    return {
-      action: "add",
-      listType: "shopping",
-      listName: "",
-      items: [{ "שם פריט": rest.replace(/^לקנות\s+/, "") }],
-      targets: inferred,
-    };
-  }
-
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [{ "שם מטלה": rest }],
-    targets: inferred,
-  };
-}
-
 export function planTargetedActions(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
@@ -479,9 +244,7 @@ export function planTargetedActions(input: {
       isAllTarget(list.targets),
     );
     const jointMeeting =
-      actorIncluded &&
-      list.listType === "tasks" &&
-      list.items.some((item) => looksLikeMeeting(llmItemLabel(item)));
+      actorIncluded && others.length > 0 && list.listType === "tasks";
     if (assignment && !jointMeeting) {
       applications.push({
         employeeId: input.actor.id,

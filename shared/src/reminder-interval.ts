@@ -1,32 +1,5 @@
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
 
-const WEEKDAY_ALIASES: Record<string, number> = {
-  sunday: 0,
-  sun: 0,
-  ראשון: 0,
-  monday: 1,
-  mon: 1,
-  שני: 1,
-  tuesday: 2,
-  tue: 2,
-  tues: 2,
-  שלישי: 2,
-  wednesday: 3,
-  wed: 3,
-  רביעי: 3,
-  thursday: 4,
-  thu: 4,
-  thur: 4,
-  thurs: 4,
-  חמישי: 4,
-  friday: 5,
-  fri: 5,
-  שישי: 5,
-  saturday: 6,
-  sat: 6,
-  שבת: 6,
-};
-
 const WEEKDAY_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
 export const REMINDER_INTERVAL_UNITS = [
@@ -48,38 +21,17 @@ export interface ReminderInterval {
 }
 
 const UNIT_SET = new Set<string>(REMINDER_INTERVAL_UNITS);
+const COUNT_UNITS = new Set<ReminderIntervalUnit>([
+  "seconds",
+  "minutes",
+  "hours",
+  "days",
+  "weeks",
+  "months",
+]);
 
 export function parseStoredRepeat(value: string): ReminderInterval | null {
-  const raw = value.trim().toLowerCase();
-  if (!raw || raw === "once") {
-    return null;
-  }
-  if (raw === "hourly") {
-    return { count: 1, unit: "hours" };
-  }
-  if (raw === "daily") {
-    return { count: 1, unit: "days" };
-  }
-  if (raw === "weekly") {
-    return { count: 1, unit: "weeks" };
-  }
-  if (raw === "monthly") {
-    return { count: 1, unit: "months" };
-  }
-  const weekdaysStored = raw.match(/^weekdays:([\d,]+)$/);
-  if (weekdaysStored) {
-    const weekdays = parseWeekdayNumbers(weekdaysStored[1]);
-    if (weekdays.length > 0) {
-      return { count: 1, unit: "weekdays", weekdays };
-    }
-  }
-  const encoded = raw.match(
-    /^(\d+):(seconds|minutes|hours|days|weeks|months)$/,
-  );
-  if (encoded) {
-    return { count: Number(encoded[1]), unit: encoded[2] as ReminderIntervalUnit };
-  }
-  return parseIntervalText(raw);
+  return parseStructuredRepeatToken(value);
 }
 
 export function serializeReminderRepeat(interval: ReminderInterval | null): string {
@@ -87,9 +39,7 @@ export function serializeReminderRepeat(interval: ReminderInterval | null): stri
     return "once";
   }
   if (interval.unit === "weekdays") {
-    const days = [...new Set(interval.weekdays ?? [])]
-      .filter((day) => day >= 0 && day <= 6)
-      .sort((left, right) => left - right);
+    const days = normalizeWeekdays(interval.weekdays);
     return days.length > 0 ? `weekdays:${days.join(",")}` : "once";
   }
   return `${interval.count}:${interval.unit}`;
@@ -200,19 +150,17 @@ export function formatReminderIntervalHe(repeat: string): string {
 export function parseReminderInterval(
   record: Record<string, unknown>,
 ): ReminderInterval | null {
-  const listed = parseWeekdayList(
+  const listed = parseWeekdayNumberList(
     record.weekdays ?? record.days ?? record.week_days,
   );
   if (listed.length > 0) {
     return { count: 1, unit: "weekdays", weekdays: listed };
   }
-  const countRaw = record.every_count ?? record.everyCount;
-  const unitRaw = record.every_unit ?? record.everyUnit;
-  if (typeof countRaw === "number" && typeof unitRaw === "string") {
-    const unit = unitRaw.trim().toLowerCase();
-    if (countRaw > 0 && UNIT_SET.has(unit)) {
-      return { count: Math.round(countRaw), unit: unit as ReminderIntervalUnit };
-    }
+
+  const count = asPositiveInt(record.every_count ?? record.everyCount);
+  const unit = asUnit(record.every_unit ?? record.everyUnit);
+  if (count && unit && COUNT_UNITS.has(unit)) {
+    return { count, unit };
   }
 
   const raw =
@@ -223,54 +171,68 @@ export function parseReminderInterval(
   if (typeof raw !== "string" || !raw.trim()) {
     return null;
   }
-  return parseIntervalText(raw);
+  return parseStructuredRepeatToken(raw);
 }
 
-function parseIntervalText(text: string): ReminderInterval | null {
-  const value = text.trim().toLowerCase();
-  if (!value || value === "once") {
+function parseStructuredRepeatToken(value: string): ReminderInterval | null {
+  const raw = value.trim().toLowerCase();
+  if (!raw || raw === "once") {
     return null;
   }
-
-  const stored = value.match(
-    /^(\d+):(seconds|minutes|hours|days|weeks|months)$/,
-  );
-  if (stored) {
-    return { count: Number(stored[1]), unit: stored[2] as ReminderIntervalUnit };
-  }
-
-  const counted = value.match(
-    /(?:every|כל)?\s*(\d+)\s*(seconds?|sec|שניות|שניה|minutes?|mins?|min|דקות|דקה|hours?|hrs?|hr|שעות|שעה|days?|ימים|יום|weeks?|שבועות|שבוע|months?|חודשים|חודש)/,
-  );
-  if (counted) {
-    const unit = unitFromToken(counted[2]);
-    const count = Number(counted[1]);
-    if (unit && count > 0) {
-      return { count, unit };
-    }
-  }
-
-  if (/^(hourly|every hour|כל שעה)$/.test(value)) {
+  if (raw === "hourly") {
     return { count: 1, unit: "hours" };
   }
-  if (/^(daily|every day|כל יום)$/.test(value)) {
+  if (raw === "daily") {
     return { count: 1, unit: "days" };
   }
-  if (/^(weekly|every week|כל שבוע)$/.test(value)) {
+  if (raw === "weekly") {
     return { count: 1, unit: "weeks" };
   }
-  if (/^(monthly|every month|כל חודש)$/.test(value)) {
+  if (raw === "monthly") {
     return { count: 1, unit: "months" };
   }
-  if (/^כל שעתיים$/.test(value)) {
-    return { count: 2, unit: "hours" };
+  const weekdaysStored = raw.match(/^weekdays:([\d,]+)$/);
+  if (weekdaysStored) {
+    const weekdays = parseWeekdayNumbers(weekdaysStored[1]);
+    if (weekdays.length > 0) {
+      return { count: 1, unit: "weekdays", weekdays };
+    }
   }
-
-  const weekdays = extractWeekdays(value);
-  if (weekdays.length > 0) {
-    return { count: 1, unit: "weekdays", weekdays };
+  const encoded = raw.match(
+    /^(\d+):(seconds|minutes|hours|days|weeks|months)$/,
+  );
+  if (encoded) {
+    return { count: Number(encoded[1]), unit: encoded[2] as ReminderIntervalUnit };
   }
   return null;
+}
+
+function asPositiveInt(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.round(value);
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const count = Number(value.trim());
+    return count > 0 ? count : null;
+  }
+  return null;
+}
+
+function asUnit(value: unknown): ReminderIntervalUnit | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const unit = value.trim().toLowerCase();
+  if (UNIT_SET.has(unit)) {
+    return unit as ReminderIntervalUnit;
+  }
+  return null;
+}
+
+function normalizeWeekdays(weekdays: number[] | undefined): number[] {
+  return [
+    ...new Set((weekdays ?? []).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)),
+  ].sort((left, right) => left - right);
 }
 
 function parseWeekdayNumbers(raw: string): number[] {
@@ -284,64 +246,29 @@ function parseWeekdayNumbers(raw: string): number[] {
   ].sort((left, right) => left - right);
 }
 
-function parseWeekdayList(value: unknown): number[] {
-  if (Array.isArray(value)) {
-    return [
-      ...new Set(
-        value
-          .map((item) => weekdayFromToken(String(item)))
-          .filter((day): day is number => day !== null),
-      ),
-    ].sort((left, right) => left - right);
+function asWeekdayInt(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6) {
+    return value;
   }
-  if (typeof value === "string" && value.trim()) {
-    return extractWeekdays(value);
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const day = Number(value.trim());
+    return day >= 0 && day <= 6 ? day : null;
+  }
+  return null;
+}
+
+function parseWeekdayNumberList(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return normalizeWeekdays(
+      value.map((item) => asWeekdayInt(item)).filter((day): day is number => day !== null),
+    );
+  }
+  const single = asWeekdayInt(value);
+  if (single !== null) {
+    return [single];
+  }
+  if (typeof value === "string" && /^[\d,\s]+$/.test(value.trim())) {
+    return parseWeekdayNumbers(value);
   }
   return [];
-}
-
-function extractWeekdays(text: string): number[] {
-  const found: number[] = [];
-  const tokens = text
-    .toLowerCase()
-    .split(/[\s,+/]+/u)
-    .map((part) => part.replace(/^ו/, "").replace(/^יום/, "").trim())
-    .filter(Boolean);
-  for (const token of tokens) {
-    const day = weekdayFromToken(token);
-    if (day !== null && !found.includes(day)) {
-      found.push(day);
-    }
-  }
-  return found.sort((left, right) => left - right);
-}
-
-function weekdayFromToken(token: string): number | null {
-  const key = token.trim().toLowerCase().replace(/^יום\s*/, "");
-  if (key in WEEKDAY_ALIASES) {
-    return WEEKDAY_ALIASES[key];
-  }
-  return null;
-}
-
-function unitFromToken(token: string): ReminderIntervalUnit | null {
-  if (/^(s|sec|seconds?|שניות|שניה)$/.test(token)) {
-    return "seconds";
-  }
-  if (/^(m|min|mins|minutes?|דקות|דקה)$/.test(token)) {
-    return "minutes";
-  }
-  if (/^(h|hr|hrs|hours?|שעות|שעה)$/.test(token)) {
-    return "hours";
-  }
-  if (/^(d|days?|ימים|יום)$/.test(token)) {
-    return "days";
-  }
-  if (/^(w|weeks?|שבועות|שבוע)$/.test(token)) {
-    return "weeks";
-  }
-  if (/^(mo|months?|חודשים|חודש)$/.test(token)) {
-    return "months";
-  }
-  return null;
 }

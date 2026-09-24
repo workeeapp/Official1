@@ -8,35 +8,33 @@ import {
 } from "./reminder-interval.js";
 
 describe("reminder interval", () => {
-  it("parses named repeats and every text", () => {
+  it("reads structured count+unit and weekday numbers only", () => {
     expect(parseReminderInterval({ repeat: "weekly" })).toEqual({
       count: 1,
       unit: "weeks",
     });
-    expect(parseReminderInterval({ every: "2 hours" })).toEqual({
+    expect(
+      parseReminderInterval({ every_count: 2, every_unit: "hours" }),
+    ).toEqual({
       count: 2,
       unit: "hours",
     });
-    expect(parseReminderInterval({ every: "כל 4 שעות" })).toEqual({
-      count: 4,
+    expect(parseReminderInterval({ every: "2:hours" })).toEqual({
+      count: 2,
       unit: "hours",
     });
-    expect(parseReminderInterval({ every: "6 hours" })).toEqual({
-      count: 6,
-      unit: "hours",
-    });
-    expect(parseReminderInterval({ every: "כל 15 דקות" })).toEqual({
-      count: 15,
-      unit: "minutes",
-    });
-    expect(parseReminderInterval({ every: "כל 30 שניות" })).toEqual({
-      count: 30,
-      unit: "seconds",
-    });
-    expect(parseReminderInterval({ every: "כל חודש" })).toEqual({
+    expect(parseReminderInterval({ weekdays: [1, 3] })).toEqual({
       count: 1,
-      unit: "months",
+      unit: "weekdays",
+      weekdays: [1, 3],
     });
+    expect(parseReminderInterval({ weekdays: [0] })).toEqual({
+      count: 1,
+      unit: "weekdays",
+      weekdays: [0],
+    });
+    expect(parseReminderInterval({ every: "כל 4 שעות" })).toBeNull();
+    expect(parseReminderInterval({ every: "שני" })).toBeNull();
     expect(parseReminderInterval({ repeat: "once" })).toBeNull();
   });
 

@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PublicEmployee } from "@workee/shared";
 import {
   fallbackNotificationText,
-  fallbackRelayText,
   formatMissingSendTextNotice,
-  inferTargetsFromMessage,
   planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
@@ -43,15 +41,7 @@ const shani: PublicEmployee = {
 const employees = [amit, tal, shani];
 
 describe("employee targets", () => {
-  it("assigns a spoken task to Tal even when the LLM omitted targets", () => {
-    expect(
-      inferTargetsFromMessage(
-        "טל צריך לקחת מחר בבוקר את הילדים לגינה",
-        employees,
-        amit.id,
-      ),
-    ).toEqual(["טל"]);
-
+  it("applies metadata targets without reading the user sentence", () => {
     const resolved = resolveSpokenMetadata(
       "טל צריך לקחת מחר בבוקר את הילדים לגינה",
       {
@@ -329,10 +319,6 @@ describe("employee targets", () => {
         text: "עמית שואל מה שלומך?\nמה לענות לו ?",
       },
     ]);
-
-    expect(
-      fallbackRelayText("עמית", "תבדקי עם טל אם הוא קנה שמן", ["טל"]),
-    ).toBe("עמית שואל אם קנית שמן ?");
 
     expect(resolveRelayMessages([])).toEqual([]);
     expect(
