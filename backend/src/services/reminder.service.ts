@@ -69,7 +69,11 @@ export function resolveReminderFireAt(
     return null;
   }
 
-  return new Date(Date.UTC(year, month, day, time.hour - 3, time.minute));
+  let fireAt = new Date(Date.UTC(year, month, day, time.hour - 3, time.minute));
+  while (fireAt.getTime() <= now.getTime()) {
+    fireAt = new Date(fireAt.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return fireAt;
 }
 
 function parseClock(value: string): { hour: number; minute: number } | null {

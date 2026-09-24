@@ -60,6 +60,26 @@ describe("resolveReminderFireAt", () => {
     expect(fireAt?.toISOString()).toBe("2026-09-25T17:00:00.000Z");
   });
 
+  it("rolls a clock that already passed today to tomorrow", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "08:05",
+      new Date("2026-09-24T17:25:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-25T05:05:00.000Z");
+  });
+
+  it("keeps a clock that is still later today", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "08:05",
+      new Date("2026-09-24T04:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-24T05:05:00.000Z");
+  });
+
   it("shows Israel local time instead of UTC for saved reminders", () => {
     expect(formatJerusalemDateTime(new Date("2026-09-23T22:22:00.000Z"))).toBe(
       "2026-09-24 01:22",
