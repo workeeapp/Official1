@@ -38,7 +38,7 @@ import {
   resolveRelayMessages,
   resolveSpokenMetadata,
 } from "./employee-targets.service.js";
-import { looksLikePhone, phonesMatch } from "../utils/phone.js";
+import { phonesMatch } from "../utils/phone.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson } from "./llm-client.js";
 import {
@@ -56,10 +56,7 @@ import {
   formatWhatsAppSkipNotice,
 } from "./whatsapp-send.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import {
-  planOutboundSends,
-  spokenReplyLooksLikeQuestion,
-} from "./outbound-hold.js";
+import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
 
 function speakerName(employee: {
@@ -221,12 +218,12 @@ function davidTargetingInstructions(
     "A reminder request always means: list item + clock. Infer shopping vs tasks yourself.",
     "Reminder item is an infinitive to-do: להתאמן, לקנות חלב. Never imperative (התאמן).",
     "Never claim a reminder is saved unless metadata.reminders has action add with in (seconds number) or time (HH:mm).",
-    "You translate the interval. Do not put Hebrew in date/every. Recurring: every_count + every_unit. Weekdays: weekdays [1] for Monday (0=Sun … 6=Sat). Clock: time HH:mm. date: today, tomorrow, or YYYY-MM-DD. Every week Monday 13:30 → time \"13:30\", weekdays [1]. Delete all: item \"all\".",
+    "Ask until the reminder schema is complete, then emit it. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). time HH:mm. date empty or YYYY-MM-DD. Delete: one remove per item name from this turn's saved reminders — never item all. If unsure which names, ask.",
     "If the speaker wants to speak with another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" }. Telling someone something is messages, not handoff.",
     "ping and messages.targets may be employee names or phone numbers. A number is a WhatsApp destination.",
     "A one-time WhatsApp now to a number → metadata.messages with that number in targets and the text. A later ping to a number → reminders.ping with that number.",
     "If they want to send or remind someone whose name is not in Known employees, ASK for their WhatsApp number. Do not emit messages or reminders until ping/targets has digits. Do not say you sent or saved.",
-    "If they want to send someone a message but did not say the words, ASK what to send. You may offer שלום. Do not invent text. Do not emit messages or a later ping until they give words or agree to שלום. A question plus filled messages still sends — leave messages empty while you ask.",
+    "If they want to send someone a message but did not say the words, ASK what to send. You may offer שלום. Do not invent text. Empty messages and reminders while you ask.",
     "Delete/update: put the intended reminders action in metadata without confirmed. Ask a yes/no question. After they confirm, emit confirmed: true on that action or metadata.confirm=true. After they refuse, metadata.confirm=false.",
     "If they want to see current reminders — any wording — set metadata.query to \"reminders\". The server lists them from the database.",
   ].join("\n");
@@ -690,21 +687,6 @@ export async function resetChatConversation(
   );
 }
 
-function attachMessagePhonesToReminders(metadata: LlmMetadata): LlmMetadata {
-  const extras = (metadata.messages ?? [])
-    .flatMap((action) => action.targets)
-    .filter((target) => looksLikePhone(target));
-  if (extras.length === 0) {
-    return metadata;
-  }
-  return {
-    ...metadata,
-    reminders: (metadata.reminders ?? []).map((row) =>
-      row.ping.length > 0 ? row : { ...row, ping: extras },
-    ),
-  };
-}
-
 function matchHandoffWorker(
   workerName: string | undefined,
   digitals: PublicEmployee[],
@@ -831,13 +813,11 @@ export async function sendChatMessage(input: {
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
-    const metadata = attachMessagePhonesToReminders(
-      resolveSpokenMetadata(
-        input.message,
-        parsedMetadata,
-        humans,
-        employee.id,
-      ),
+    const metadata = resolveSpokenMetadata(
+      input.message,
+      parsedMetadata,
+      humans,
+      employee.id,
     );
     const plan = planTargetedActions({
       actor: employee,
@@ -868,9 +848,6 @@ export async function sendChatMessage(input: {
     const reminderPlan = planReminderWrites(
       conversation.id,
       metadata.reminders ?? [],
-      visibleReminders
-        .filter((row) => row.status === "active")
-        .map((row) => ({ item: row.item, listType: row.list_type })),
       metadata.confirm ?? null,
     );
     const reminderResult = await applyReminders({
@@ -901,16 +878,8 @@ export async function sendChatMessage(input: {
       employee.id,
     );
     const outbound = planOutboundSends({
-      conversationId: conversation.id,
       relays,
       phones: phoneRelays,
-      spokenAsk: spokenReplyLooksLikeQuestion(
-        parseLlmReply(turn.reply).response,
-      ),
-      confirm: metadata.confirm ?? null,
-      reminderAsk: reminderPlan.ask.length > 0,
-      reminderRemoved: reminderResult.removed.length > 0,
-      reminderCancelled: reminderPlan.cancelled,
     });
     if (outbound.held) {
       recordWhatsAppEvent(

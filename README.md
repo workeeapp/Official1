@@ -28,14 +28,14 @@ Password: ChangeMe123!
 
 Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). Lucy’s structured reply schema is `LLM.action.json`. Do not put reminder experiments in Lucy’s file.
 
-New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). The worker understands the speaker and emits metadata; the server only applies it:
+New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). The worker understands the speaker, asks until the schema is complete, then emits metadata. The server only applies those fields:
 
 - `lists` / `filing` / `messages` / `reminders` — write or send
 - `handoff.worker` — switch the WhatsApp session to that digital employee
 - `query: "reminders"` — list **active** rows from the database (not from chat memory)
 - `confirm: true|false` — apply or drop a pending reminder delete
 
-The engine does not invent a destination or a message body. An unknown name without digits is not saved. A spoken question (`?`) holds outbound WhatsApp until the speaker confirms. A phone in the reminder item or text is the ping, even if `ping` names the speaker. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+The engine does not invent a destination or a message body, and does not expand `item: "all"` or read Hebrew clocks. An unknown name without digits is not saved. Delete is one `remove` per item name from this turn’s data. Ping dest is `reminders.ping` or `messages.targets` only. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
 A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`. Recurring clocks use `repeat` as `once` or `count:unit` for any interval (`30:seconds`, `15:minutes`, `4:hours`, `1:days`, `1:weeks`, `1:months`) or `weekdays:1,3`. Legacy `daily` still means every day.
 

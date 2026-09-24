@@ -35,6 +35,16 @@ describe("formatAttributedOutbound", () => {
     ).toBe("טל ביקש לתזכר אותך\nתזכורת: להביא חלב");
   });
 
+  it("keeps a dictated message to self or a digital worker as the message", () => {
+    expect(
+      formatAttributedOutbound({
+        actorName: "עמית",
+        destIsActor: true,
+        text: "עמית שואל מה מחיר הטיסה ?",
+      }),
+    ).toBe("עמית שואל מה מחיר הטיסה ?");
+  });
+
   it("says who sent a dictated message", () => {
     expect(
       formatAttributedOutbound({

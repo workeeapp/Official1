@@ -83,14 +83,24 @@ describe("resolveReminderFireAt", () => {
     expect(resolveReminderFireAt("tomorrow", "", new Date(), null)).toBeNull();
   });
 
-  it("fires tomorrow evening when the clock is present", () => {
+  it("fires on an ISO date when the clock is present", () => {
+    const fireAt = resolveReminderFireAt(
+      "2026-09-25",
+      "20:00",
+      new Date("2026-09-24T10:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-25T17:00:00.000Z");
+  });
+
+  it("does not treat date tomorrow as the next calendar day", () => {
     const fireAt = resolveReminderFireAt(
       "tomorrow",
       "20:00",
       new Date("2026-09-24T10:00:00.000Z"),
       null,
     );
-    expect(fireAt?.toISOString()).toBe("2026-09-25T17:00:00.000Z");
+    expect(fireAt?.toISOString()).toBe("2026-09-24T17:00:00.000Z");
   });
 
   it("rolls a clock that already passed today to tomorrow", () => {
@@ -205,43 +215,33 @@ describe("planReminderWrites", () => {
     expect(first.ask).toEqual([milkRemove]);
     expect(formatReminderConfirmNotice(first.ask, false, false)).toContain("חלב");
 
-    const second = planReminderWrites("conv-1", [], [], true);
+    const second = planReminderWrites("conv-1", [], true);
     expect(second.apply).toEqual([milkRemove]);
     expect(second.ask).toEqual([]);
   });
 
   it("cancels a pending delete", () => {
     planReminderWrites("conv-2", [milkRemove]);
-    const cancelled = planReminderWrites("conv-2", [], [], false);
+    const cancelled = planReminderWrites("conv-2", [], false);
     expect(cancelled.apply).toEqual([]);
     expect(cancelled.cancelled).toBe(true);
   });
 
-  it("asks before deleting every active reminder", () => {
-    const planned = planReminderWrites(
-      "conv-3",
-      [{ ...milkRemove, item: "all" }],
-      [
-        { item: "חלב", listType: "shopping" },
-        { item: "מתנה", listType: "tasks" },
-      ],
-    );
+  it("asks only for the named items the model listed", () => {
+    const planned = planReminderWrites("conv-3", [
+      { ...milkRemove, item: "חלב" },
+      { ...milkRemove, item: "מתנה" },
+    ]);
     expect(planned.apply).toEqual([]);
     expect(planned.ask.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
-    expect(formatReminderConfirmNotice(planned.ask, false, false)).toContain(
-      "חלב",
-    );
+  });
 
-    const confirmed = planReminderWrites(
-      "conv-3",
-      [{ ...milkRemove, item: "all", confirmed: true }],
-      [
-        { item: "חלב", listType: "shopping" },
-        { item: "מתנה", listType: "tasks" },
-      ],
-    );
-    expect(confirmed.apply.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
-    expect(confirmed.apply.some((row) => row.item === "all")).toBe(false);
+  it("does not expand item all into other reminders", () => {
+    const planned = planReminderWrites("conv-4", [
+      { ...milkRemove, item: "all" },
+    ]);
+    expect(planned.apply).toEqual([]);
+    expect(planned.ask.map((row) => row.item)).toEqual(["all"]);
   });
 });
 

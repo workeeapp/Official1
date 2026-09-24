@@ -3,7 +3,6 @@ import {
   addReminderInterval,
   formatReminderIntervalHe,
   nextWeekdayFireAt,
-  parseStoredRepeat,
   serializeReminderRepeat,
   type ReminderInterval,
 } from "@workee/shared";
@@ -44,7 +43,7 @@ function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
       unit: reminder.everyUnit,
     };
   }
-  return parseStoredRepeat(reminder.repeat);
+  return null;
 }
 
 export function resolveReminderFireAt(
@@ -67,13 +66,8 @@ export function resolveReminderFireAt(
   let year = y;
   let month = m;
   let day = d;
-  if (relative === "tomorrow") {
-    const next = new Date(Date.UTC(y, m, d + 1));
-    year = next.getUTCFullYear();
-    month = next.getUTCMonth();
-    day = next.getUTCDate();
-  } else if (relative === "today" || relative === "") {
-    if (!timeText.trim() && !dateText.trim()) {
+  if (relative === "") {
+    if (!timeText.trim()) {
       return interval ? addReminderInterval(now, interval) : null;
     }
   } else {
@@ -291,37 +285,9 @@ function ownerIdFor(
 
 const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
 
-function isAllReminderItem(item: string): boolean {
-  return item.trim().toLowerCase() === "all";
-}
-
-function removesForItems(
-  items: Array<{ item: string; listType: string }>,
-): LlmReminderAction[] {
-  return items.map((row) => ({
-    action: "remove" as const,
-    item: row.item,
-    listType: (row.listType === "tasks" ? "tasks" : "shopping") as
-      | "shopping"
-      | "tasks",
-    date: "",
-    time: "",
-    repeat: "once" as const,
-    ping: [],
-    targets: [],
-    text: "",
-    inSeconds: null,
-    everyCount: null,
-    everyUnit: null,
-    weekdays: null,
-    confirmed: false,
-  }));
-}
-
 export function planReminderWrites(
   conversationId: string,
   incoming: LlmReminderAction[],
-  existingItems: Array<{ item: string; listType: string }> = [],
   confirm: boolean | null = null,
 ): {
   apply: LlmReminderAction[];
@@ -332,47 +298,12 @@ export function planReminderWrites(
   const adds = incoming.filter(
     (row) => row.action === "add" || row.action === "update",
   );
-  const mutations = incoming.filter((row) => row.action === "remove");
-  const ready = mutations.filter(
-    (row) => row.confirmed && !isAllReminderItem(row.item),
+  const mutations = incoming.filter(
+    (row) => row.action === "remove" && row.item.trim() !== "",
   );
-  let waiting = mutations.filter(
-    (row) => !row.confirmed && !isAllReminderItem(row.item),
-  );
+  const ready = mutations.filter((row) => row.confirmed);
+  const waiting = mutations.filter((row) => !row.confirmed);
   const pending = pendingReminderMutations.get(conversationId) ?? [];
-  const incomingAll = mutations.filter((row) => isAllReminderItem(row.item));
-
-  if (incomingAll.length > 0) {
-    const expanded =
-      pending.length > 0 ? pending : removesForItems(existingItems);
-    if (expanded.length === 0) {
-      pendingReminderMutations.delete(conversationId);
-      return {
-        apply: adds,
-        ask: [],
-        cancelled: false,
-        noneToDelete: true,
-      };
-    }
-    const go =
-      confirm === true || incomingAll.some((row) => row.confirmed);
-    if (go) {
-      pendingReminderMutations.delete(conversationId);
-      return {
-        apply: [...adds, ...expanded],
-        ask: [],
-        cancelled: false,
-        noneToDelete: false,
-      };
-    }
-    pendingReminderMutations.set(conversationId, expanded);
-    return {
-      apply: adds,
-      ask: expanded,
-      cancelled: false,
-      noneToDelete: false,
-    };
-  }
 
   if (ready.length > 0 && waiting.length === 0) {
     pendingReminderMutations.delete(conversationId);

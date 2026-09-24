@@ -31,7 +31,7 @@ export function formatAttributedOutbound(input: {
     return "";
   }
   if (input.destIsActor) {
-    return ping;
+    return isDictatedSend ? dictated : ping;
   }
   if (input.actorName && (dictated.includes(input.actorName) || ping.includes(input.actorName))) {
     return isDictatedSend ? dictated : ping;

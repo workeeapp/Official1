@@ -238,12 +238,7 @@ function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
     return null;
   }
   const value = raw.trim().toLowerCase();
-  if (
-    value === "reminders" ||
-    value === "reminder" ||
-    value === "תזכורות" ||
-    value === "active_reminders"
-  ) {
+  if (value === "reminders" || value === "reminder") {
     return "reminders";
   }
   if (value === "reminders_sent" || value === "sent") {
