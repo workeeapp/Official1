@@ -1,4 +1,6 @@
 import type { Request, Response } from "express";
+import { recordWhatsAppEvent } from "../services/whatsapp-log.js";
+import { getWhatsAppStatus as loadWhatsAppStatus } from "../services/whatsapp-status.js";
 import {
   extractInboundTexts,
   handleInboundWhatsAppTexts,
@@ -23,14 +25,29 @@ export function verifyWebhook(req: Request, res: Response): void {
   }
 }
 
+export async function getWhatsAppStatus(_req: Request, res: Response): Promise<void> {
+  res.status(200).json(await loadWhatsAppStatus());
+}
+
 export function receiveWebhook(req: Request, res: Response): void {
   const inbound = extractInboundTexts(req.body);
-  console.log(`WhatsApp webhook POST fields=${webhookFields(req.body)}`);
+  const fields = webhookFields(req.body);
+  recordWhatsAppEvent("webhook_post", `fields=${fields} inbound=${inbound.length}`);
   if (inbound.length > 0) {
-    console.log(`WhatsApp inbound ${inbound.length} text message(s)`);
+    for (const message of inbound) {
+      recordWhatsAppEvent(
+        "inbound_text",
+        `from=${maskPhone(message.from)} chars=${message.text.length}`,
+      );
+    }
     void handleInboundWhatsAppTexts(inbound);
   }
   res.status(200).json({ status: "ok" });
+}
+
+function maskPhone(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  return digits.length < 4 ? "****" : `…${digits.slice(-4)}`;
 }
 
 function webhookFields(body: unknown): string {

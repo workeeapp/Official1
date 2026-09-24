@@ -160,6 +160,22 @@ export interface ChatLiveEvent {
   raw?: unknown;
 }
 
+export interface WhatsAppFlowEvent {
+  at: string;
+  step: string;
+  detail: string;
+}
+
+export interface WhatsAppStatusResponse {
+  expectedWebhook: string;
+  metaWabaWebhook: string | null;
+  metaAppWebhook: string | null;
+  webhookMismatch: boolean;
+  hasAccessToken: boolean;
+  lastInboundAt: string | null;
+  events: WhatsAppFlowEvent[];
+}
+
 export function chatThreadKey(employeeId: string, digitalEmployeeId: string): string {
   return `${employeeId}:${digitalEmployeeId}`;
 }

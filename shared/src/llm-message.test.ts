@@ -202,6 +202,21 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("keeps a numeric phone in reminder ping", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              { action: "add", item: "הודעה", in: "10s", ping: [502222222] },
+            ],
+          },
+        }),
+      ).reminders?.[0]?.ping,
+    ).toEqual(["502222222"]);
+  });
+
   it("extracts a reminder that fires in a few seconds", () => {
     expect(
       parseReplyMetadata(
@@ -236,5 +251,39 @@ describe("parseLlmReply", () => {
         confirmed: false,
       },
     ]);
+  });
+
+  it("accepts create, a single reminder object, and compact delay text", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשמור",
+          metadata: {
+            reminders: {
+              action: "Create",
+              item: "חלב",
+              in: "20s",
+            },
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      { action: "add", item: "חלב", inSeconds: 20 },
+    ]);
+  });
+
+  it("reads a Hebrew when field as date plus evening ping", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשמור",
+          metadata: {
+            reminders: [
+              { action: "add", item: "חלב", when: "מחר בערב" },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([{ action: "add", item: "חלב", date: "מחר", time: "20:00" }]);
   });
 });

@@ -1,5 +1,6 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
+import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -132,6 +133,7 @@ function matchEmployee(
     const aliases = [
       employee.nickname,
       employee.name,
+      employee.surname,
       `${employee.name} ${employee.surname}`.trim(),
     ]
       .filter((value): value is string => Boolean(value && value.trim()))
@@ -150,7 +152,7 @@ function matchEmployee(
 }
 
 export function resolveReminderPingDestinations(
-  reminder: Pick<LlmReminderAction, "ping">,
+  reminder: Pick<LlmReminderAction, "ping"> & { targets?: string[] },
   employees: PublicEmployee[],
   fallbackId: string,
 ): string[] {
@@ -163,18 +165,45 @@ export function resolveReminderPingDestinations(
     }
   };
 
-  for (const raw of reminder.ping) {
+  const named = [
+    ...reminder.ping,
+    ...("targets" in reminder && Array.isArray(reminder.targets)
+      ? reminder.targets
+      : []),
+  ];
+
+  for (const raw of named) {
+    const phones = phonesInToken(raw);
+    if (phones.length > 0) {
+      for (const phone of phones) {
+        add(phone);
+      }
+      continue;
+    }
     const employee = matchEmployee(raw, employees);
     if (employee) {
       add(employee.id);
-      continue;
-    }
-    if (looksLikePhone(raw)) {
-      add(normalizePhoneDigits(raw));
     }
   }
 
-  return dest.length > 0 ? dest : [fallbackId];
+  if (dest.length > 0) {
+    return dest;
+  }
+  return named.length > 0 ? [] : [fallbackId];
+}
+
+function phonesInToken(raw: string): string[] {
+  if (looksLikePhone(raw) && !/[A-Za-z\u0590-\u05FF]/.test(raw)) {
+    return [normalizePhoneDigits(raw)];
+  }
+  const found: string[] = [];
+  const matches = raw.match(/\+?\d[\d\s().-]{6,14}\d/g) ?? [];
+  for (const match of matches) {
+    if (looksLikePhone(match)) {
+      found.push(normalizePhoneDigits(match));
+    }
+  }
+  return found;
 }
 
 function ownerIdFor(
@@ -225,10 +254,10 @@ export function planReminderWrites(
   cancelled: boolean;
   noneToDelete: boolean;
 } {
-  const adds = incoming.filter((row) => row.action === "add");
-  const mutations = incoming.filter(
-    (row) => row.action === "remove" || row.action === "update",
+  const adds = incoming.filter(
+    (row) => row.action === "add" || row.action === "update",
   );
+  const mutations = incoming.filter((row) => row.action === "remove");
   const ready = mutations.filter((row) => row.confirmed);
   let waiting = mutations.filter((row) => !row.confirmed);
   const pending = pendingReminderMutations.get(conversationId) ?? [];
@@ -287,17 +316,11 @@ export function formatReminderConfirmNotice(
   if (ask.length === 0) {
     return "";
   }
-  const removes = ask.filter((row) => row.action === "remove");
-  if (removes.length > 1 && removes.length === ask.length) {
-    const names = removes.map((row) => row.item).join(", ");
-    return `עוד לא בוצע. לאשר מחיקה של כל התזכורות הפעילות (${names})? כן / לא.`;
+  const names = ask.map((row) => row.item).filter(Boolean);
+  if (names.length === 1) {
+    return `למחוק את «${names[0]}»?`;
   }
-  return ask
-    .map((row) => {
-      const verb = row.action === "remove" ? "למחוק" : "לעדכן";
-      return `עוד לא בוצע. לאשר ${verb} את התזכורת «${row.item}»? כן / לא.`;
-    })
-    .join("\n");
+  return `למחוק את אלה: ${names.join(", ")}?`;
 }
 
 export async function applyReminders(input: {
@@ -305,11 +328,22 @@ export async function applyReminders(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
   reminders: LlmReminderAction[];
-}): Promise<{ removed: string[]; missed: string[] }> {
+}): Promise<{
+  removed: string[];
+  missed: string[];
+  saved: Array<{ item: string; fireAt: string }>;
+  skipped: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }>;
+}> {
   const removed: string[] = [];
   const missed: string[] = [];
+  const saved: Array<{ item: string; fireAt: string }> = [];
+  const skipped: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }> =
+    [];
   if (!prisma.reminder) {
-    return { removed, missed };
+    for (const reminder of input.reminders.filter((row) => row.action !== "remove")) {
+      skipped.push({ item: reminder.item.trim(), reason: "db" });
+    }
+    return { removed, missed, saved, skipped };
   }
   for (const reminder of input.reminders) {
     const ownerId = ownerIdFor(reminder, input.employees, input.actor.id);
@@ -339,6 +373,7 @@ export async function applyReminders(input: {
       reminder.inSeconds,
     );
     if (!fireAt) {
+      skipped.push({ item: reminder.item.trim(), reason: "no_time" });
       continue;
     }
 
@@ -347,46 +382,58 @@ export async function applyReminders(input: {
       input.employees,
       input.actor.id,
     );
-    const existing = await prisma.reminder.findFirst({
-      where: {
-        userId: input.userId,
-        ownerId,
-        itemKey: key,
-        status: "active",
-      },
-    });
-
-    if (existing) {
-      await prisma.reminder.update({
-        where: { id: existing.id },
-        data: {
-          itemLabel: reminder.item.trim().slice(0, 255),
-          listType: reminder.listType,
-          fireAt,
-          repeat: reminder.repeat,
-          pingIds,
-          messageText: reminder.text.trim().slice(0, 4096),
-        },
-      });
+    if (pingIds.length === 0) {
+      skipped.push({ item: reminder.item.trim(), reason: "no_phone" });
       continue;
     }
 
-    await prisma.reminder.create({
-      data: {
-        userId: input.userId,
-        ownerId,
-        actorId: input.actor.id,
-        itemKey: key,
-        itemLabel: reminder.item.trim().slice(0, 255),
-        listType: reminder.listType,
-        fireAt,
-        repeat: reminder.repeat,
-        pingIds,
-        messageText: reminder.text.trim().slice(0, 4096),
-      },
-    });
+    try {
+      const existing = await prisma.reminder.findFirst({
+        where: {
+          userId: input.userId,
+          ownerId,
+          itemKey: key,
+          status: "active",
+        },
+      });
+
+      if (existing) {
+        await prisma.reminder.update({
+          where: { id: existing.id },
+          data: {
+            itemLabel: reminder.item.trim().slice(0, 255),
+            listType: reminder.listType,
+            fireAt,
+            repeat: reminder.repeat,
+            pingIds,
+            messageText: reminder.text.trim().slice(0, 4096),
+          },
+        });
+      } else {
+        await prisma.reminder.create({
+          data: {
+            userId: input.userId,
+            ownerId,
+            actorId: input.actor.id,
+            itemKey: key,
+            itemLabel: reminder.item.trim().slice(0, 255),
+            listType: reminder.listType,
+            fireAt,
+            repeat: reminder.repeat,
+            pingIds,
+            messageText: reminder.text.trim().slice(0, 4096),
+          },
+        });
+      }
+      saved.push({
+        item: reminder.item.trim(),
+        fireAt: formatJerusalemDateTime(fireAt),
+      });
+    } catch {
+      skipped.push({ item: reminder.item.trim(), reason: "db" });
+    }
   }
-  return { removed, missed };
+  return { removed, missed, saved, skipped };
 }
 
 export function formatActiveRemindersReply(
@@ -408,8 +455,30 @@ export function formatActiveRemindersReply(
 export function formatReminderApplyNotice(result: {
   removed: string[];
   missed: string[];
+  saved?: Array<{ item: string; fireAt: string }>;
+  skipped?: Array<{ item: string; reason: "no_time" | "db" | "no_phone" }>;
 }): string {
   const parts: string[] = [];
+  if (result.saved && result.saved.length > 0) {
+    parts.push(
+      result.saved
+        .map((row) => `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`)
+        .join(" "),
+    );
+  }
+  if (result.skipped && result.skipped.length > 0) {
+    parts.push(
+      result.skipped
+        .map((row) =>
+          row.reason === "db"
+            ? `לא נשמרה «${row.item}» — השמירה נכשלה.`
+            : row.reason === "no_phone"
+              ? `לא נשמרה «${row.item}» — צריך מספר WhatsApp ליעד, לא רק שם.`
+            : `לא נשמרה «${row.item}» — חסר זמן תזכורת (שעה או in).`,
+        )
+        .join(" "),
+    );
+  }
   if (result.removed.length > 0) {
     parts.push(`נמחק: ${result.removed.join(", ")}.`);
   }
@@ -419,19 +488,34 @@ export function formatReminderApplyNotice(result: {
   return parts.join(" ");
 }
 
+export async function listReminderRowsForUser(userId: string) {
+  if (!prisma.reminder) {
+    return [];
+  }
+  try {
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    return await prisma.reminder.findMany({
+      where: {
+        userId,
+        OR: [{ status: "active" }, { status: "done", fireAt: { gte: since } }],
+      },
+      orderBy: { fireAt: "asc" },
+    });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      console.error("Reminders table missing");
+      return [];
+    }
+    throw error;
+  }
+}
+
 export async function listVisibleReminders(
   userId: string,
   employeeId: string,
   employees: PublicEmployee[],
 ): Promise<ReminderSnapshotRow[]> {
-  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  const rows = await prisma.reminder.findMany({
-    where: {
-      userId,
-      OR: [{ status: "active" }, { status: "done", fireAt: { gte: since } }],
-    },
-    orderBy: { fireAt: "asc" },
-  });
+  const rows = await listReminderRowsForUser(userId);
   const names = new Map(employees.map((employee) => [employee.id, displayName(employee)]));
 
   return rows

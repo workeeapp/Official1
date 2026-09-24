@@ -290,6 +290,17 @@
                     "text"
                   ]
                 }
+              },
+              "handoff": {
+                "type": "object",
+                "properties": {
+                  "worker": {
+                    "type": "string"
+                  }
+                }
+              },
+              "query": {
+                "type": ["string", "null"]
               }
             }
           }

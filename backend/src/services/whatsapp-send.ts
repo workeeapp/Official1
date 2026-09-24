@@ -2,6 +2,7 @@ import { isDigitalEmployee, type PublicEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
+import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { hasWhatsAppSession } from "./whatsapp-window.js";
 
 export type WhatsAppTextResult = "sent" | "no_session" | "failed";
@@ -29,7 +30,7 @@ export async function sendWhatsAppText(
   }
 
   if (!options?.ignoreSession && !(await hasWhatsAppSession(destination))) {
-    console.log("WhatsApp skip: no 24h session");
+    recordWhatsAppEvent("send_skip", `reason=no_session to=…${destination.slice(-4)}`);
     return "no_session";
   }
 
@@ -52,13 +53,15 @@ export async function sendWhatsAppText(
 
   if (!response.ok) {
     const detail = await graphErrorDetail(response);
-    console.error(`WhatsApp send failed status=${response.status} ${detail}`);
-    if (/\b131047\b/.test(detail)) {
-      return "no_session";
-    }
-    return "failed";
+    const result = /\b131047\b/.test(detail) ? "no_session" : "failed";
+    recordWhatsAppEvent(
+      "send_fail",
+      `status=${response.status} result=${result} ${detail}`.trim(),
+    );
+    return result;
   }
 
+  recordWhatsAppEvent("send_ok", `to=…${destination.slice(-4)}`);
   return "sent";
 }
 

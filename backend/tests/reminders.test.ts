@@ -3,6 +3,7 @@ import type { PublicEmployee } from "@workee/shared";
 import {
   formatActiveRemindersReply,
   formatJerusalemDateTime,
+  formatReminderApplyNotice,
   formatReminderConfirmNotice,
   planReminderWrites,
   reminderLabelsMatch,
@@ -47,6 +48,16 @@ describe("resolveReminderFireAt", () => {
     expect(resolveReminderFireAt("tomorrow", "", new Date(), null)).toBeNull();
   });
 
+  it("fires tomorrow evening when the clock is present", () => {
+    const fireAt = resolveReminderFireAt(
+      "מחר",
+      "20:00",
+      new Date("2026-09-24T10:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-09-25T17:00:00.000Z");
+  });
+
   it("shows Israel local time instead of UTC for saved reminders", () => {
     expect(formatJerusalemDateTime(new Date("2026-09-23T22:22:00.000Z"))).toBe(
       "2026-09-24 01:22",
@@ -65,6 +76,32 @@ describe("resolveReminderPingDestinations", () => {
     ).toEqual(["0502222222"]);
   });
 
+  it("does not fall back to the speaker when only a non-employee name is given", () => {
+    expect(
+      resolveReminderPingDestinations({ ping: ["מיכל"] }, [tal], tal.id),
+    ).toEqual([]);
+  });
+
+  it("pulls digits out of a ping token that also has a name", () => {
+    expect(
+      resolveReminderPingDestinations(
+        { ping: ["מיכל 050-222-2222"] },
+        [tal],
+        tal.id,
+      ),
+    ).toEqual(["0502222222"]);
+  });
+
+  it("uses reminder targets as ping when ping is empty", () => {
+    expect(
+      resolveReminderPingDestinations(
+        { ping: [], targets: ["טל"] },
+        [tal],
+        "other",
+      ),
+    ).toEqual([tal.id]);
+  });
+
   it("maps a stored employee phone to that employee", () => {
     expect(
       resolveReminderPingDestinations(
@@ -72,7 +109,7 @@ describe("resolveReminderPingDestinations", () => {
         [tal],
         "other",
       ),
-    ).toEqual([tal.id]);
+    ).toEqual(["0501111111"]);
   });
 });
 
@@ -142,6 +179,27 @@ describe("formatActiveRemindersReply", () => {
         },
       ]),
     ).toBe("התזכורות הפעילות שלך:\n- חלב (2026-09-24 22:00)");
+  });
+});
+
+describe("formatReminderApplyNotice", () => {
+  it("says when a reminder was stored or skipped", () => {
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        saved: [{ item: "חלב", fireAt: "2026-09-25 20:00" }],
+        skipped: [],
+      }),
+    ).toContain("נשמרה התזכורת «חלב»");
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        saved: [],
+        skipped: [{ item: "חלב", reason: "no_time" }],
+      }),
+    ).toContain("חסר זמן תזכורת");
   });
 });
 

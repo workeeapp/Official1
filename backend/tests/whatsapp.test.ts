@@ -9,6 +9,11 @@ import {
 } from "../src/services/whatsapp-send.js";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
 import {
+  listWhatsAppEvents,
+  recordWhatsAppEvent,
+  resetWhatsAppEvents,
+} from "../src/services/whatsapp-log.js";
+import {
   applyWhatsAppHandoff,
   extractInboundTexts,
   phonesMatch,
@@ -18,6 +23,7 @@ describe("WhatsApp webhook", () => {
   beforeEach(() => {
     process.env.WHATSAPP_VERIFY_TOKEN = "test-verify-token";
     resetEnvCache();
+    resetWhatsAppEvents();
   });
 
   it("returns the hub challenge when the verify token matches", async () => {
@@ -69,6 +75,22 @@ describe("WhatsApp webhook", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "ok" });
+    expect(listWhatsAppEvents()[0]?.step).toBe("inbound_text");
+    expect(listWhatsAppEvents().some((event) => event.step === "webhook_post")).toBe(
+      true,
+    );
+  });
+
+  it("redacts tokens in the flow log", () => {
+    const event = recordWhatsAppEvent("send_fail", "Authorization EAASecretToken99");
+    expect(event.detail).toContain("[token]");
+    expect(event.detail).not.toMatch(/EAASecretToken99/);
+  });
+
+  it("keeps WhatsApp status behind auth", async () => {
+    const app = createApp();
+    const response = await request(app).get("/api/whatsapp/status");
+    expect(response.status).toBe(401);
   });
 
   it("matches local and WhatsApp phone numbers", () => {
@@ -102,6 +124,9 @@ describe("WhatsApp webhook", () => {
     };
     const digitals = [lucy, david] as never;
     expect(applyWhatsAppHandoff("972500000001", "דוד", digitals)?.id).toBe(
+      "david",
+    );
+    expect(applyWhatsAppHandoff("972500000001", "הליצן", digitals)?.id).toBe(
       "david",
     );
     expect(applyWhatsAppHandoff("972500000001", undefined, digitals)).toBeUndefined();

@@ -9,7 +9,11 @@ import type {
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { prisma } from "../database/prisma.js";
 import { toPlainJson } from "./llm-client.js";
-import { toReminderSnapshotRow, type ReminderSnapshotRow } from "./reminder.service.js";
+import {
+  listReminderRowsForUser,
+  toReminderSnapshotRow,
+  type ReminderSnapshotRow,
+} from "./reminder.service.js";
 
 export type ItemScope = "personal" | "shared";
 
@@ -74,26 +78,15 @@ export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string 
 
   return [
     "EMPLOYEE_SAVED_DATA:",
-    "This is the current saved information visible to this employee.",
-    "Treat it as the only source of truth for existing lists, tasks, filings, and reminders. Do not mention saved items that are not listed here.",
-    "If asked which reminders exist now, list only reminders with status=active. Do not bring back a reminder from earlier in the chat if it is not active here.",
-    "This does not limit your capabilities catalog. If asked what you can do, list every capability.",
-    "scope=personal means only this employee can see that item.",
-    "scope=shared means the listed employees can see it.",
-    "When this employee asks what they need to buy or do, include every item on their own lists.",
-    "When they ask about another employee, mention only that employee's current shopping/tasks in this data. Never reveal another employee's personal items.",
-    JSON.stringify(
-      {
-        lists: snapshot.lists,
-        filing: snapshot.filing,
-        active_reminders: (snapshot.reminders ?? [])
-          .filter((row) => row.status === "active")
-          .map((row) => row.item),
-        reminders: snapshot.reminders ?? [],
-      },
-      null,
-      2,
-    ),
+    "Only these saved items exist. Do not invent others. active_reminders is the current reminder list.",
+    JSON.stringify({
+      lists: snapshot.lists,
+      filing: snapshot.filing,
+      active_reminders: (snapshot.reminders ?? [])
+        .filter((row) => row.status === "active")
+        .map((row) => row.item),
+      reminders: snapshot.reminders ?? [],
+    }),
   ].join("\n");
 }
 
@@ -115,9 +108,8 @@ export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
 
   return [
     "TEAM_SCHEDULES:",
-    "Dated tasks and meetings for all employees. Use this to detect time conflicts before adding a meeting.",
-    "Do not reveal another employee's shopping, contacts, or filings from this list.",
-    JSON.stringify(entries, null, 2),
+    "Dated tasks and meetings only. Do not reveal other employees' shopping or filings from this.",
+    JSON.stringify(entries),
   ].join("\n");
 }
 
@@ -338,21 +330,7 @@ export async function getEmployeeRecordSnapshot(
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
-    owner && prisma.reminder
-      ? prisma.reminder.findMany({
-          where: {
-            userId: owner.userId,
-            OR: [
-              { status: "active" },
-              {
-                status: "done",
-                fireAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
-              },
-            ],
-          },
-          orderBy: { fireAt: "asc" },
-        })
-      : Promise.resolve([]),
+    owner ? listReminderRowsForUser(owner.userId) : Promise.resolve([]),
     owner
       ? prisma.employee.findMany({
           where: { userId: owner.userId },

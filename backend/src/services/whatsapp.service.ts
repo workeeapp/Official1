@@ -9,8 +9,9 @@ import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { sendChatMessage } from "./chat.service.js";
-import { listEmployeesForUser, resolveActingEmployee } from "./employee.service.js";
+import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
+import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
@@ -139,24 +140,33 @@ export async function handleInboundWhatsAppTexts(
       if (!digital) {
         throw new ServiceUnavailableError();
       }
+      recordWhatsAppEvent(
+        "chat_start",
+        `worker=${digital.name} speaker=${speaker.employeeId.slice(0, 8)}`,
+      );
       const turn = await sendChatMessage({
         userId: speaker.userId,
         employeeId: speaker.employeeId,
         digitalEmployeeId: digital.id,
         message: message.text,
       });
-      applyWhatsAppHandoff(
-        message.from,
-        parseReplyMetadata(turn.reply).handoff?.worker,
-        digitals,
-      );
+      const handoff =
+        parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
+      applyWhatsAppHandoff(message.from, handoff, digitals);
+      if (handoff && handoff !== digital.name) {
+        recordWhatsAppEvent("handoff", `worker=${handoff}`);
+      }
       const reply = parseLlmReply(turn.reply).response.trim();
+      recordWhatsAppEvent("llm_ok", `replyChars=${reply.length}`);
       if (reply) {
-        await sendWhatsAppText(message.from, reply, { ignoreSession: true });
+        const sendResult = await sendWhatsAppText(message.from, reply, {
+          ignoreSession: true,
+        });
+        recordWhatsAppEvent("reply_send", `result=${sendResult}`);
       }
     } catch (error) {
-      console.error(
-        "WhatsApp reply failed",
+      recordWhatsAppEvent(
+        "reply_failed",
         error instanceof Error ? error.message : "unknown",
       );
     }
@@ -201,6 +211,7 @@ function matchDigitalName(
     const aliases = [
       employee.nickname,
       employee.name,
+      employee.surname,
       `${employee.name} ${employee.surname}`.trim(),
     ]
       .filter((value): value is string => Boolean(value && value.trim()))
@@ -239,21 +250,18 @@ async function resolveWhatsAppSpeaker(from: string): Promise<{
     throw new ServiceUnavailableError();
   }
 
-  const humans = humanEmployees(await listEmployeesForUser(fallbackUser.id));
-  const preferred = getEnv().WHATSAPP_DEFAULT_EMPLOYEE?.trim();
-  const named = preferred
-    ? humans.find(
-        (employee) =>
-          employee.nickname?.trim() === preferred ||
-          employee.name === preferred,
-      )
-    : undefined;
-  const acting = named ?? (await resolveActingEmployee(fallbackUser.id));
-  if (named && (!named.phone || !phonesMatch(named.phone, from))) {
-    await prisma.employee.update({
-      where: { id: named.id },
-      data: { phone: from },
-    });
-  }
-  return { userId: fallbackUser.id, employeeId: acting.id };
+  const created = await createEmployeeForUser(fallbackUser.id, {
+    kind: "human",
+    name: "אורח",
+    surname: "",
+    nickname: maskPhoneName(from),
+    email: null,
+    phone: from,
+  });
+  return { userId: fallbackUser.id, employeeId: created.id };
+}
+
+function maskPhoneName(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  return digits.length < 4 ? "אורח" : `אורח …${digits.slice(-4)}`;
 }

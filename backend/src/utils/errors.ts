@@ -60,6 +60,21 @@ export function isPrismaConnectionError(error: unknown): boolean {
   return false;
 }
 
+export function isContextTooLargeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /request too large|tokens per min \(TPM\)/i.test(message);
+}
+
+export function isMissingTableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /does not exist in the current database/i.test(message);
+}
+
+export function missingTableName(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.match(/`public\.(\w+)`/)?.[1] ?? null;
+}
+
 export function isUniqueConstraintError(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"

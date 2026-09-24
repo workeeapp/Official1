@@ -37,5 +37,7 @@ describe("LLM action schema", () => {
     expect(david?.systemMessage).toContain("CONFIRM BEFORE CHANGE OR DELETE");
     expect(david?.systemMessage).toContain("metadata.query");
     expect(lucy.systemMessage).not.toContain("LLM.david");
+    expect(lucy.systemMessage).toContain("דוד");
+    expect(lucy.systemMessage).toContain("metadata.query");
   });
 });

@@ -62,6 +62,8 @@ Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound 
 
 Two laptops can run the web app on different branches with their own Postgres. The Meta webhook is **one** URL (`wa.workee.site`), so only one machine’s tunnel should be up for WhatsApp.
 
+Signed-in **WhatsApp** tab (and `GET /api/whatsapp/status`) shows the flow log: webhook POST, inbound, LLM, send, and whether Meta’s WABA `override_callback_uri` still points at a dead `trycloudflare.com` URL. Tokens are never returned.
+
 After pulling schema changes, stop the API and run `npx prisma migrate deploy` (and `npx prisma generate` if the client is locked).
 
 ## Stay up on this machine (Windows)

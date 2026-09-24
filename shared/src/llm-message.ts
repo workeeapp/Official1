@@ -136,6 +136,10 @@ export function parseTargets(value: unknown): string[] {
     ? (record.targets ?? record.target ?? record.for ?? record.assignees)
     : value;
 
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return [String(raw)];
+  }
+
   if (typeof raw === "string" && raw.trim()) {
     return [raw.trim()];
   }
@@ -144,9 +148,15 @@ export function parseTargets(value: unknown): string[] {
     return [];
   }
 
-  return raw
-    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-    .map((entry) => entry.trim());
+  return raw.flatMap((entry) => {
+    if (typeof entry === "number" && Number.isFinite(entry)) {
+      return [String(entry)];
+    }
+    if (typeof entry === "string" && entry.trim()) {
+      return [entry.trim()];
+    }
+    return [];
+  });
 }
 
 export function parseReplyMetadata(text: string): LlmMetadata {
@@ -243,48 +253,82 @@ function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] 
 
 function parseReminderActions(meta: Record<string, unknown>): LlmReminderAction[] {
   const raw = meta.reminders ?? meta.schedules;
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw.flatMap((entry) => {
+  const entries = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return entries.flatMap((entry) => {
     const action = toReminderAction(entry);
     return action ? [action] : [];
   });
 }
 
+function reminderActionName(value: unknown): LlmReminderActionName | null {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (REMINDER_ACTIONS.has(raw as LlmReminderActionName)) {
+    return raw as LlmReminderActionName;
+  }
+  if (raw === "create" || raw === "new" || raw === "schedule" || raw === "set") {
+    return "add";
+  }
+  if (raw === "delete" || raw === "cancel") {
+    return "remove";
+  }
+  if (raw === "edit" || raw === "change") {
+    return "update";
+  }
+  return null;
+}
+
 function toReminderAction(value: unknown): LlmReminderAction | null {
-  if (!isActionRecord(value) || !REMINDER_ACTIONS.has(value.action as LlmReminderActionName)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const action = reminderActionName(record.action);
+  if (!action) {
     return null;
   }
 
-  const item = readText(value, ["item", "item_name", "שם פריט", "שם מטלה", "name"]);
+  const item = readText(record, [
+    "item",
+    "item_name",
+    "title",
+    "label",
+    "שם פריט",
+    "שם מטלה",
+    "name",
+  ]);
   if (!item) {
     return null;
   }
 
-  const listType = LIST_TYPES.has(value.list_type as LlmListType)
-    ? (value.list_type as LlmListType)
+  const listRaw = String(record.list_type ?? record.listType ?? "").trim();
+  const listType = LIST_TYPES.has(listRaw as LlmListType)
+    ? (listRaw as LlmListType)
     : "shopping";
-  const repeat = REMINDER_REPEATS.has(value.repeat as LlmReminderRepeat)
-    ? (value.repeat as LlmReminderRepeat)
+  const repeatRaw = String(record.repeat ?? "").trim().toLowerCase();
+  const repeat = REMINDER_REPEATS.has(repeatRaw as LlmReminderRepeat)
+    ? (repeatRaw as LlmReminderRepeat)
     : "once";
-  const when = readText(value, ["when"]);
-  const date = readText(value, ["date", "יום", "relative"]) || parseWhenDate(when);
-  const time = readText(value, ["time", "שעה"]) || parseWhenTime(when);
+  const when = readText(record, ["when"]);
+  const date = readText(record, ["date", "יום", "relative"]) || parseWhenDate(when);
+  const time = normalizeNamedTime(
+    readText(record, ["time", "שעה"]) || parseWhenTime(when),
+  );
+  const inSeconds = parseInSeconds(record);
 
   return {
-    action: value.action as LlmReminderActionName,
+    action,
     item,
     listType,
     date,
     time,
     repeat,
-    ping: parseTargets({ targets: value.ping ?? value.notify ?? value.ping_targets }),
-    targets: parseTargets(value),
-    text: readText(value, ["text", "message", "body", "תוכן", "sentence"]),
-    inSeconds: parseInSeconds(value),
-    confirmed: value.confirmed === true || value.confirm === true,
+    ping: parseTargets({ targets: record.ping ?? record.notify ?? record.ping_targets }),
+    targets: parseTargets(record),
+    text: readText(record, ["text", "message", "body", "תוכן", "sentence"]),
+    inSeconds,
+    confirmed: record.confirmed === true || record.confirm === true,
   };
 }
 
@@ -297,15 +341,52 @@ function parseInSeconds(value: Record<string, unknown>): number | null {
     return null;
   }
   const text = raw.trim().toLowerCase();
-  const seconds = text.match(/(?:in\s+)?(\d+)\s*(?:s|sec|secs|second|seconds|שניות|שניה)/);
+  if (/חצי\s*שעה|half\s*hour/.test(text)) {
+    return 30 * 60;
+  }
+  if (/^שעה$|^an?\s+hour$|^in an hour$|^בעוד\s*שעה$/.test(text)) {
+    return 60 * 60;
+  }
+  const seconds = text.match(/(\d+)\s*(?:s|sec|secs|second|seconds|שניות|שניה)/);
   if (seconds) {
     return Number(seconds[1]);
   }
-  const minutes = text.match(/(?:in\s+)?(\d+)\s*(?:m|min|mins|minute|minutes|דקות|דקה)/);
+  const minutes = text.match(/(\d+)\s*(?:m|min|mins|minute|minutes|דקות|דקה)/);
   if (minutes) {
     return Number(minutes[1]) * 60;
   }
+  const hours = text.match(/(\d+)\s*(?:h|hr|hrs|hour|hours|שעות|שעה)/);
+  if (hours) {
+    return Number(hours[1]) * 3600;
+  }
   return null;
+}
+
+function normalizeNamedTime(time: string): string {
+  const text = time.trim().toLowerCase();
+  if (!text) {
+    return "";
+  }
+  if (/^(morning|בוקר)$/.test(text)) {
+    return "09:00";
+  }
+  if (/^(noon|צהריים)$/.test(text)) {
+    return "12:00";
+  }
+  if (/^(afternoon|אחה["׳']?צ)$/.test(text)) {
+    return "15:00";
+  }
+  if (/^(evening|ערב)$/.test(text)) {
+    return "20:00";
+  }
+  if (/^(night|לילה)$/.test(text)) {
+    return "21:00";
+  }
+  const clock = text.match(/^(\d{1,2})(?::(\d{2}))?$/);
+  if (clock) {
+    return `${clock[1].padStart(2, "0")}:${(clock[2] ?? "00").padStart(2, "0")}`;
+  }
+  return time.trim();
 }
 
 function parseWhenDate(when: string): string {
@@ -322,8 +403,24 @@ function parseWhenDate(when: string): string {
 }
 
 function parseWhenTime(when: string): string {
-  const match = when.match(/\b(\d{1,2}:\d{2})\b/);
-  return match?.[1] ?? "";
+  const clock = when.match(/\b(\d{1,2}:\d{2})\b/);
+  if (clock) {
+    return clock[1];
+  }
+  const hebrew = when.match(/(?:בשעה|ב-)\s*(\d{1,2})(?::(\d{2}))?/);
+  if (hebrew) {
+    return `${hebrew[1]}:${hebrew[2] ?? "00"}`;
+  }
+  if (/ערב|evening/i.test(when)) {
+    return "20:00";
+  }
+  if (/בוקר|morning/i.test(when)) {
+    return "09:00";
+  }
+  if (/צהריים|noon/i.test(when)) {
+    return "12:00";
+  }
+  return normalizeNamedTime(when);
 }
 
 function toMessageAction(value: unknown): LlmMessageAction | null {

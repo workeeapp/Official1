@@ -20,6 +20,8 @@ export type {
   ChatThreadMessage,
   ChatHistoryResponse,
   ChatLiveEvent,
+  WhatsAppFlowEvent,
+  WhatsAppStatusResponse,
 } from "./types";
 export {
   USERNAME_MIN_LENGTH,

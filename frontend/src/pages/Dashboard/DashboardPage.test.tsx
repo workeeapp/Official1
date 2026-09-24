@@ -6,6 +6,7 @@ import { renderApp } from "@/test/render";
 import { DashboardPage } from "./DashboardPage";
 import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
+import { WhatsAppPage } from "@/pages/WhatsApp/WhatsAppPage";
 import { LoginPage } from "@/pages/Login/LoginPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
@@ -50,6 +51,7 @@ function renderDashboard(extraRoutes = false) {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/whatsapp" element={<WhatsAppPage />} />
       </Route>
     </Routes>,
     { route: "/dashboard" },
@@ -101,6 +103,7 @@ describe("Dashboard page", () => {
     );
     expect(screen.getByRole("link", { name: "Employees" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Chat" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "WhatsApp" })).toBeInTheDocument();
   });
 
   it("opens the employees screen from the Employees tab", async () => {

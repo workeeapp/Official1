@@ -105,8 +105,8 @@ function isDavidEmployee(employee: Employee): boolean {
   if (employee.isProtected || employee.kind !== "digital") {
     return false;
   }
-  const label = `${employee.name} ${employee.nickname ?? ""}`;
-  return label.includes("דוד");
+  const label = `${employee.name} ${employee.surname ?? ""} ${employee.nickname ?? ""}`;
+  return label.includes("דוד") || label.includes("ליצן");
 }
 
 async function ensureDavidReminderPrompt(userId: string): Promise<void> {

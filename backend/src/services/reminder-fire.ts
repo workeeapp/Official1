@@ -1,6 +1,7 @@
 import { digitalEmployees, isProtectedEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
+import { isMissingTableError } from "../utils/errors.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
@@ -19,9 +20,17 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     return 0;
   }
 
-  const due = await prisma.reminder.findMany({
-    where: { status: "active", fireAt: { lte: now } },
-  });
+  let due;
+  try {
+    due = await prisma.reminder.findMany({
+      where: { status: "active", fireAt: { lte: now } },
+    });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return 0;
+    }
+    throw error;
+  }
 
   for (const reminder of due) {
     const employees = await listEmployeesForUser(reminder.userId);
@@ -75,7 +84,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       const phone = target?.phone?.trim() || (looksLikePhone(dest) ? dest : "");
       if (phone && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
         try {
-          await sendWhatsAppText(phone, text);
+          await sendWhatsAppText(phone, text, { ignoreSession: true });
         } catch (error) {
           console.error(
             "Reminder WhatsApp failed",

@@ -1,5 +1,6 @@
 import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
+  digitalEmployees,
   humanEmployees,
   parseLlmReply,
   parseReplyMetadata,
@@ -13,7 +14,9 @@ import { loadLlmConfig, type LlmConfig } from "../config/llm.js";
 import { ValidationError } from "../utils/errors.js";
 import { prisma } from "../database/prisma.js";
 import {
+  isContextTooLargeError,
   isUniqueConstraintError,
+  missingTableName,
   ServiceUnavailableError,
 } from "../utils/errors.js";
 import {
@@ -51,6 +54,7 @@ import {
   formatWhatsAppSkipNotice,
   replaceLlmResponse,
 } from "./whatsapp-send.js";
+import { recordWhatsAppEvent } from "./whatsapp-log.js";
 
 function speakerName(employee: {
   name: string;
@@ -196,8 +200,8 @@ function isDavidEmployee(employee: PublicEmployee): boolean {
   if (employee.protected || employee.kind === "human") {
     return false;
   }
-  const label = `${employee.name} ${employee.nickname ?? ""}`;
-  return label.includes("דוד");
+  const label = `${employee.name} ${employee.surname ?? ""} ${employee.nickname ?? ""}`;
+  return label.includes("דוד") || label.includes("ליצן");
 }
 
 function davidTargetingInstructions(
@@ -209,6 +213,7 @@ function davidTargetingInstructions(
     `Known employees: ${names}. Current speaker: ${speaker}.`,
     "Never ask whether to save as a task list or as a reminder only.",
     "A reminder request always means: list item + clock. Infer shopping vs tasks yourself.",
+    "Never claim a reminder is saved unless metadata.reminders has action add with in or time.",
     "If the speaker wants to speak with another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" }. Telling someone something is messages, not handoff.",
     "ping and messages.targets may be employee names or phone numbers. A number is a WhatsApp destination.",
     "A one-time WhatsApp now to a number → metadata.messages with that number in targets and the text. A later ping to a number → reminders.ping with that number.",
@@ -244,6 +249,8 @@ function targetingInstructions(
     "If the speaker wants to speak with, switch to, or be transferred to another digital employee — any wording — set metadata.handoff to { \"worker\": \"<their name>\" } and confirm in response.",
     "Do not use metadata.messages for a conversation switch. Asking you to tell or send someone something is messages, not handoff.",
     "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
+    "Reminders are דוד (also called הליצן — same person). Create, change, or delete a reminder → metadata.handoff { \"worker\": \"דוד\" }. Never say you saved a reminder.",
+    "Which reminders exist now — any wording — → metadata.query = \"reminders\". The server lists them from the database. Do not invent names.",
     "If the speaker says they bought or already have an item, remove it from their shopping list.",
     "When asked what someone still needs, answer only from EMPLOYEE_SAVED_DATA. Never mention items that are not listed there.",
   ].join("\n");
@@ -670,15 +677,42 @@ export async function resetChatConversation(
   );
 }
 
+function matchHandoffWorker(
+  workerName: string | undefined,
+  digitals: PublicEmployee[],
+  currentId: string,
+): PublicEmployee | undefined {
+  const needle = workerName?.trim().toLowerCase();
+  if (!needle) {
+    return undefined;
+  }
+  return digitals.find((employee) => {
+    if (employee.id === currentId) {
+      return false;
+    }
+    const aliases = [
+      employee.nickname,
+      employee.name,
+      employee.surname,
+      `${employee.name} ${employee.surname}`.trim(),
+    ]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .map((value) => value.trim().toLowerCase());
+    return aliases.includes(needle);
+  });
+}
+
 export async function sendChatMessage(input: {
   userId: string;
   message: string;
   employeeId: string;
   digitalEmployeeId?: string;
+  skipHandoffFollow?: boolean;
 }): Promise<{
   reply: string;
   raw: unknown;
   notifications: ChatThreadNotification[];
+  answeredBy: string;
 }> {
   const client = getLlmClient();
   const [employee, employees] = await Promise.all([
@@ -699,7 +733,7 @@ export async function sendChatMessage(input: {
   const config = llmConfigForDigital(digital);
   const speaker = speakerName(employee);
   const assistantSpeaker = speakerName(digital);
-  const conversation = await getOrCreateConversation(
+  let conversation = await getOrCreateConversation(
     input.userId,
     input.employeeId,
     digital.id,
@@ -717,31 +751,48 @@ export async function sendChatMessage(input: {
       ? davidTargetingInstructions(employees, speaker)
       : targetingInstructions(employees, speaker),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
+    "EMPLOYEE_SAVED_DATA in this user message is the only source of truth for saved items.",
     "If asked what someone still needs to buy, use only current shopping lists in EMPLOYEE_SAVED_DATA.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     "If asked which reminders exist now, list only status=active from this turn. Missing from active_reminders means deleted.",
-    context,
   ]
     .filter(Boolean)
     .join("\n\n");
   const message = [
     context,
-    "When answering about existing shopping, tasks, or meetings, use only EMPLOYEE_SAVED_DATA and TEAM_SCHEDULES.",
     `${speaker}: ${input.message}`,
   ]
     .filter(Boolean)
     .join("\n\n");
 
   try {
-    const turn = await client.createResponse({
-      conversationId: conversation.openaiConversationId,
-      message,
-      model: config.model,
-      temperature: config.temperature,
-      instructions,
-      textFormat: config.responseFormat,
-    });
+    let turn;
+    try {
+      turn = await client.createResponse({
+        conversationId: conversation.openaiConversationId,
+        message,
+        model: config.model,
+        temperature: config.temperature,
+        instructions,
+        textFormat: config.responseFormat,
+      });
+    } catch (error) {
+      if (!isContextTooLargeError(error)) {
+        throw error;
+      }
+      recordWhatsAppEvent("chat_rotate", "openai_request_too_large");
+      const rotated = await rotateConversation(conversation);
+      conversation = { ...rotated, needsContext: true };
+      turn = await client.createResponse({
+        conversationId: conversation.openaiConversationId,
+        message,
+        model: config.model,
+        temperature: config.temperature,
+        instructions,
+        textFormat: config.responseFormat,
+      });
+    }
     await saveTurn({
       conversationId: conversation.id,
       speaker,
@@ -798,6 +849,10 @@ export async function sendChatMessage(input: {
       employees: humans,
       reminders: reminderPlan.apply,
     });
+    recordWhatsAppEvent(
+      "reminder_apply",
+      `worker=${digital.name} query=${metadata.query ?? "none"} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length}`,
+    );
     const reminderNotice = [
       formatReminderConfirmNotice(
         reminderPlan.ask,
@@ -886,8 +941,37 @@ export async function sendChatMessage(input: {
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
     }
-    return { reply, raw: turn.raw, notifications };
+    if (!input.skipHandoffFollow) {
+      const next = matchHandoffWorker(
+        parsedMetadata.handoff?.worker,
+        digitalEmployees(employees),
+        digital.id,
+      );
+      if (next) {
+        recordWhatsAppEvent("handoff", `follow=${next.name}`);
+        return sendChatMessage({
+          ...input,
+          digitalEmployeeId: next.id,
+          skipHandoffFollow: true,
+        });
+      }
+    }
+    return {
+      reply,
+      raw: turn.raw,
+      notifications,
+      answeredBy: digital.name,
+    };
   } catch (error) {
+    const table = missingTableName(error);
+    recordWhatsAppEvent(
+      "chat_failed",
+      table
+        ? `db_missing=${table}`
+        : error instanceof Error
+          ? error.message
+          : "unknown",
+    );
     if (error instanceof ServiceUnavailableError) {
       throw error;
     }

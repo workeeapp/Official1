@@ -128,6 +128,15 @@ vi.mock("../src/database/prisma.js", () => ({
       create: messageCreate,
       createMany: messageCreateMany,
       deleteMany: messageDeleteMany,
+      update: vi.fn().mockImplementation(
+        async ({ where, data }: { where: { id: string }; data: { text?: string } }) => {
+          const row = messageStore.find((message) => message.id === where.id);
+          if (row && data.text !== undefined) {
+            row.text = data.text;
+          }
+          return row ?? { id: where.id, ...data };
+        },
+      ),
     },
     employeeList: {
       findMany: listFindMany,
@@ -163,6 +172,7 @@ const userId = "11111111-1111-4111-8111-111111111111";
 const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 const otherEmployeeId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
 const lucyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const davidId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 let passwordHash: string;
 let app: ReturnType<typeof createApp>;
@@ -528,6 +538,112 @@ describe("chat API", () => {
     expect(saved[0].author).toBe("you");
     expect(saved[1].author).toBe("assistant");
     expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
+  });
+
+  it("follows a Lucy reminder handoff to David in the same turn", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    findMany.mockResolvedValue([
+      ...tableEmployees(),
+      {
+        id: davidId,
+        userId,
+        kind: "digital",
+        isProtected: false,
+        name: "דוד",
+        surname: "",
+        nickname: "דוד",
+        email: null,
+        phone: null,
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "Reminders",
+        createdAt: new Date(),
+      },
+    ]);
+    const previousFindFirst = findFirst.getMockImplementation();
+    findFirst.mockImplementation(async (args: { where: { id?: string; isProtected?: boolean } }) => {
+      if (args.where.id === davidId) {
+        return {
+          id: davidId,
+          userId,
+          kind: "digital",
+          isProtected: false,
+          name: "דוד",
+          surname: "",
+          nickname: "דוד",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "Reminders",
+          createdAt: new Date(),
+        };
+      }
+      return previousFindFirst?.(args);
+    });
+    createConversation
+      .mockResolvedValueOnce("conv_lucy")
+      .mockResolvedValueOnce("conv_david");
+    createResponse
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "מעבירה לדוד",
+          metadata: {
+            lists: [],
+            filing: [],
+            messages: [],
+            handoff: { worker: "דוד" },
+          },
+        }),
+        raw: {},
+      })
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "שמרתי",
+          metadata: {
+            reminders: [{ action: "add", item: "חלב", in: "20 seconds" }],
+          },
+        }),
+        raw: {},
+      });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תשמור תזכורת לחלב", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_david");
+  });
+
+  it("rotates the OpenAI conversation when the request is too large", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createConversation
+      .mockResolvedValueOnce("conv_test_1")
+      .mockResolvedValueOnce("conv_after_429");
+    createResponse
+      .mockRejectedValueOnce(
+        new Error(
+          "429 Request too large for gpt-4.1 on tokens per min (TPM): Limit 30000, Requested 30046.",
+        ),
+      )
+      .mockResolvedValueOnce({
+        reply: "After rotate",
+        raw: { output_text: "After rotate" },
+      });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toBe("After rotate");
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_after_429");
   });
 
   it("reuses the same conversation for the same user and employee", async () => {
@@ -912,11 +1028,12 @@ describe("chat API", () => {
       .send({ message: "hi", employeeId });
 
     const firstInstructions = createResponse.mock.calls[0][0].instructions as string;
+    const firstMessage = createResponse.mock.calls[0][0].message as string;
     expect(firstInstructions).toContain("EMPLOYEE_SAVED_DATA");
-    expect(firstInstructions).toContain("חלב");
-    expect(firstInstructions).toContain("לקנות מתנה");
-    expect(firstInstructions).toContain("מספר רכב");
-    expect(createResponse.mock.calls[0][0].message).toContain("עמית: hi");
+    expect(firstMessage).toContain("חלב");
+    expect(firstMessage).toContain("לקנות מתנה");
+    expect(firstMessage).toContain("מספר רכב");
+    expect(firstMessage).toContain("עמית: hi");
 
     createResponse.mockResolvedValue({
       reply: "Second reply",
