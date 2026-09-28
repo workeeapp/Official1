@@ -46,9 +46,12 @@ import {
   applyReminders,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
+  formatPendingActionContext,
+  hasUnrelatedWorkWhilePending,
   linkRemindersToWorkerTasks,
-  pendingReminderDeleteNames,
+  pendingFromStored,
   planReminderWrites,
+  type PendingDeleteAction,
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
@@ -272,17 +275,19 @@ function workerTargetingInstructions(
     `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → metadata.query = "self". Answer only from WORKER_SAVED_DATA. Tasks להזכיר ל… ARE your reminders. Never say you have none when one is listed.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
-    "If the speaker asks you to send, check, ask, or tell another employee something, add metadata.messages.",
-    "Write metadata.messages[].text for the recipient, in second person, and mention the speaker by name.",
-    "Do not turn a send/check request into a list or task unless they also asked to add one.",
-    "messages.targets may be employee names or a phone number.",
+    "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
+    `Scheduled dictated send: (1) reminders add with ping + text + in/time. (2) lists tasks add targeting yourself (${workerName}) — לשלוח הודעה ל<name> (same item label as the clock). That is YOUR job for query self. (3) messages = []. Do not put shopping/tasks on the speaker unless they also asked to buy or remember their own work.`,
+    "Write metadata.messages[].text / reminders.text for the recipient, in second person, and mention the speaker by name.",
+    "Do not turn a send/check request into a list or task unless they also asked to add one — except the worker task required for a scheduled send above.",
+    "messages.targets and reminders.ping may be employee names, SPEAKER_CONTACTS names, or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages while asking.",
-    "Yes → same turn: directory add with name + phone, AND if they already dictated the send/reminder words earlier in the thread, also emit messages (or reminders) with that text — do not ask again what to send. No → directory []; still emit messages/reminders using the phone digits if the words were already given.",
+    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking.",
+    "Yes → same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
-    "If they ask to send but did not say the words, ask. You may offer שלום. Empty messages while you ask.",
+    "If they ask to send but did not say the words, ask. You may offer שלום. Empty messages and reminders while you ask.",
+    `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
       : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
@@ -294,9 +299,9 @@ function workerTargetingInstructions(
     "Cancel a nudge: reminders remove only. Do not lists.remove the speaker shopping or task.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add with in or time.",
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Do not add a second clock. The server updates the linked worker task time.",
-    "Before reminders add: only if this turn's active_reminders already has the same work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Do not invent that one exists. Empty reminders while asking.",
+    "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time alone is never a match (two jobs at 10:00 → just add both). Unrelated clocks never trigger that ask (לאסוף יואב ≠ להזמין כרטיסים) — just add. Do not invent that one exists. Empty reminders while asking.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
-    "Delete reminder: one remove per name, no confirmed. After yes: metadata.confirm=true, empty reminders.",
+    "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
     "Answer in your response from this turn's saved data. The server does not write that answer.",
     "If the speaker says they bought or already have an item, remove it from their shopping list.",
@@ -322,7 +327,48 @@ async function rotateConversation(existing: { id: string }): Promise<{
     data: {
       openaiConversationId,
       contextInjectedAt: null,
+      pendingAction: null,
+      pendingTargets: Prisma.JsonNull,
+      pendingStep: null,
+      pendingAt: null,
     },
+  });
+}
+
+async function loadPendingDelete(
+  conversationId: string,
+): Promise<PendingDeleteAction | null> {
+  const row = await prisma.chatConversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      pendingAction: true,
+      pendingTargets: true,
+      pendingStep: true,
+      pendingAt: true,
+    },
+  });
+  return pendingFromStored(row);
+}
+
+async function savePendingDelete(
+  conversationId: string,
+  pending: PendingDeleteAction | null,
+): Promise<void> {
+  await prisma.chatConversation.update({
+    where: { id: conversationId },
+    data: pending
+      ? {
+          pendingAction: pending.action,
+          pendingTargets: pending.targets,
+          pendingStep: pending.step,
+          pendingAt: pending.at,
+        }
+      : {
+          pendingAction: null,
+          pendingTargets: Prisma.JsonNull,
+          pendingStep: null,
+          pendingAt: null,
+        },
   });
 }
 
@@ -786,7 +832,7 @@ export async function sendChatMessage(input: {
     input.employeeId,
     digital.id,
   );
-  const waitingDeletes = pendingReminderDeleteNames(conversation.id);
+  const waitingDeletes = await loadPendingDelete(conversation.id);
   const speakerContacts = await listContactsForEmployee(input.employeeId);
   const context = [
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
@@ -796,9 +842,7 @@ export async function sendChatMessage(input: {
     ),
     formatSpeakerContacts(speakerContacts),
     formatTeamSchedules(await getTeamSchedules(input.userId)),
-    waitingDeletes.length > 0
-      ? `REMINDER_DELETE_WAITING: ${waitingDeletes.join(", ")}. These are not deleted yet. If the speaker confirmed, set metadata.confirm=true and leave reminders empty. Do not list them as still active.`
-      : "",
+    formatPendingActionContext(waitingDeletes),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -818,6 +862,7 @@ export async function sendChatMessage(input: {
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     "query reminders = ping clocks only (active_reminders). Empty clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+    "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm means ask/confirm delete only. Reminder names pick targets, not send. Yes → confirm=true; no → confirm=false. Do not start messages or new reminders until the server clears the state.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -916,11 +961,23 @@ export async function sendChatMessage(input: {
       collectedEvents.push(...applied.events);
       listMutations.push(...applied.mutations);
     }
+    const abandonPending = Boolean(
+      waitingDeletes &&
+        hasUnrelatedWorkWhilePending({
+          confirm: metadata.confirm ?? null,
+          reminders: metadata.reminders ?? [],
+          messages: metadata.messages ?? [],
+          lists: metadata.lists ?? [],
+          filing: metadata.filing ?? [],
+        }),
+    );
     const reminderPlan = planReminderWrites(
-      conversation.id,
       metadata.reminders ?? [],
       metadata.confirm ?? null,
+      waitingDeletes,
+      { abandonPending },
     );
+    await savePendingDelete(conversation.id, reminderPlan.nextPending);
     const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
@@ -1073,16 +1130,18 @@ export async function sendChatMessage(input: {
       .filter(Boolean)
       .join("\n\n");
     const deliveryFailed = whatsappNotice.length > 0;
+    const confirmPending = reminderPlan.ask.length > 0;
+    const replaceSpoken = deliveryFailed || confirmPending;
     const reply = composeAssistantReply({
       llmReply: turn.reply,
       notice,
-      replaceResponse: deliveryFailed,
+      replaceResponse: replaceSpoken,
     });
     if (notice) {
       await appendAssistantNotice(
         conversation.id,
         notice,
-        deliveryFailed ? "replace" : "append",
+        replaceSpoken ? "replace" : "append",
       );
     }
 

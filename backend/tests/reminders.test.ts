@@ -259,58 +259,93 @@ describe("unknown dest", () => {
 
 describe("planReminderWrites", () => {
   it("holds a delete until the speaker confirms", () => {
-    const first = planReminderWrites("conv-1", [milkRemove]);
+    const first = planReminderWrites([milkRemove], null, null);
     expect(first.apply).toEqual([]);
     expect(first.ask).toEqual([milkRemove]);
+    expect(first.nextPending?.targets).toEqual(["חלב"]);
     expect(formatReminderConfirmNotice(first.ask, false, false)).toContain("חלב");
 
-    const second = planReminderWrites("conv-1", [], true);
-    expect(second.apply).toEqual([milkRemove]);
+    const second = planReminderWrites([], true, first.nextPending);
+    expect(second.apply.map((row) => row.item)).toEqual(["חלב"]);
     expect(second.ask).toEqual([]);
+    expect(second.nextPending).toBeNull();
   });
 
   it("cancels a pending delete", () => {
-    planReminderWrites("conv-2", [milkRemove]);
-    const cancelled = planReminderWrites("conv-2", [], false);
+    const held = planReminderWrites([milkRemove], null, null);
+    const cancelled = planReminderWrites([], false, held.nextPending);
     expect(cancelled.apply).toEqual([]);
     expect(cancelled.cancelled).toBe(true);
+    expect(cancelled.nextPending).toBeNull();
   });
 
   it("asks only for the named items the model listed", () => {
-    const planned = planReminderWrites("conv-3", [
-      { ...milkRemove, item: "חלב" },
-      { ...milkRemove, item: "מתנה" },
-    ]);
+    const planned = planReminderWrites(
+      [
+        { ...milkRemove, item: "חלב" },
+        { ...milkRemove, item: "מתנה" },
+      ],
+      null,
+      null,
+    );
     expect(planned.apply).toEqual([]);
     expect(planned.ask.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
+    expect(planned.nextPending?.targets).toEqual(["חלב", "מתנה"]);
   });
 
   it("applies the held deletes when they confirm even if remove is sent again", () => {
-    planReminderWrites("conv-5", [
-      { ...milkRemove, item: "התאמן" },
-      { ...milkRemove, item: "ללכת לסופר" },
-    ]);
+    const held = planReminderWrites(
+      [
+        { ...milkRemove, item: "התאמן" },
+        { ...milkRemove, item: "ללכת לסופר" },
+      ],
+      null,
+      null,
+    );
     const confirmed = planReminderWrites(
-      "conv-5",
       [
         { ...milkRemove, item: "התאמן" },
         { ...milkRemove, item: "ללכת לסופר" },
       ],
       true,
+      held.nextPending,
     );
     expect(confirmed.apply.map((row) => row.item)).toEqual([
       "התאמן",
       "ללכת לסופר",
     ]);
     expect(confirmed.ask).toEqual([]);
+    expect(confirmed.nextPending).toBeNull();
   });
 
   it("does not expand item all into other reminders", () => {
-    const planned = planReminderWrites("conv-4", [
-      { ...milkRemove, item: "all" },
-    ]);
+    const planned = planReminderWrites(
+      [{ ...milkRemove, item: "all" }],
+      null,
+      null,
+    );
     expect(planned.apply).toEqual([]);
     expect(planned.ask.map((row) => row.item)).toEqual(["all"]);
+  });
+
+  it("times out a stale pending delete", () => {
+    const held = planReminderWrites([milkRemove], null, null, {
+      now: new Date("2026-09-28T10:00:00.000Z"),
+    });
+    const timedOut = planReminderWrites([], null, held.nextPending, {
+      now: new Date("2026-09-28T10:20:00.000Z"),
+    });
+    expect(timedOut.cancelled).toBe(true);
+    expect(timedOut.nextPending).toBeNull();
+  });
+
+  it("abandons pending delete when unrelated work arrives", () => {
+    const held = planReminderWrites([milkRemove], null, null);
+    const abandoned = planReminderWrites([], null, held.nextPending, {
+      abandonPending: true,
+    });
+    expect(abandoned.cancelled).toBe(true);
+    expect(abandoned.nextPending).toBeNull();
   });
 });
 
@@ -446,6 +481,25 @@ describe("formatReminderApplyNotice", () => {
         skipped: [{ item: "חלב", reason: "no_time" }],
       }),
     ).toContain("חסר זמן תזכורת");
+  });
+
+  it("notes another active clock at the same time without blocking", () => {
+    const notice = formatReminderApplyNotice({
+      removed: [],
+      missed: [],
+      saved: [
+        {
+          item: "לאסוף את יואב מהחוג",
+          fireAt: "2026-09-29 10:00",
+          sameTimeOthers: ["להזמין כרטיסים"],
+        },
+      ],
+      skipped: [],
+    });
+    expect(notice).toContain("נשמרה התזכורת «לאסוף את יואב מהחוג»");
+    expect(notice).toContain("יש לך כבר תזכורת אחרת באותה שעה");
+    expect(notice).toContain("להזמין כרטיסים");
+    expect(notice).not.toContain("לעדכן");
   });
 });
 

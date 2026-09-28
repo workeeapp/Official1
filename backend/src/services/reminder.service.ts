@@ -505,24 +505,133 @@ function ownerIdFor(
   return named ?? fallbackId;
 }
 
-const pendingReminderMutations = new Map<string, LlmReminderAction[]>();
+export const PENDING_DELETE_TIMEOUT_MS = 15 * 60 * 1000;
 
-export function pendingReminderDeleteNames(conversationId: string): string[] {
-  return (pendingReminderMutations.get(conversationId) ?? [])
-    .map((row) => row.item.trim())
-    .filter(Boolean);
-}
+export type PendingDeleteAction = {
+  action: "delete_reminder";
+  step: "confirm";
+  targets: string[];
+  at: Date;
+};
 
-export function planReminderWrites(
-  conversationId: string,
-  incoming: LlmReminderAction[],
-  confirm: boolean | null = null,
-): {
+export type ReminderWritePlan = {
   apply: LlmReminderAction[];
   ask: LlmReminderAction[];
   cancelled: boolean;
   noneToDelete: boolean;
-} {
+  nextPending: PendingDeleteAction | null;
+};
+
+function emptyPlan(
+  apply: LlmReminderAction[] = [],
+  extras: Partial<ReminderWritePlan> = {},
+): ReminderWritePlan {
+  return {
+    apply,
+    ask: [],
+    cancelled: false,
+    noneToDelete: false,
+    nextPending: null,
+    ...extras,
+  };
+}
+
+function removeShell(item: string): LlmReminderAction {
+  return {
+    action: "remove",
+    item,
+    listType: "tasks",
+    date: "",
+    time: "",
+    repeat: "once",
+    ping: [],
+    targets: [],
+    text: "",
+    inSeconds: null,
+    everyCount: null,
+    everyUnit: null,
+    weekdays: null,
+    confirmed: false,
+  };
+}
+
+export function pendingFromStored(row: {
+  pendingAction: string | null;
+  pendingTargets: unknown;
+  pendingStep: string | null;
+  pendingAt: Date | null;
+} | null): PendingDeleteAction | null {
+  if (!row || row.pendingAction !== "delete_reminder" || row.pendingStep !== "confirm") {
+    return null;
+  }
+  const targets = Array.isArray(row.pendingTargets)
+    ? row.pendingTargets.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+  if (targets.length === 0 || !row.pendingAt) {
+    return null;
+  }
+  return {
+    action: "delete_reminder",
+    step: "confirm",
+    targets,
+    at: row.pendingAt,
+  };
+}
+
+export function formatPendingActionContext(
+  pending: PendingDeleteAction | null,
+): string {
+  if (!pending) {
+    return "";
+  }
+  return [
+    "PENDING_ACTION_STATE:",
+    `current_action: ${pending.action}`,
+    `current_target: ${pending.targets.join(", ")}`,
+    `current_step: ${pending.step}`,
+    "Stay inside this action until the server clears it.",
+    "A reminder name from the speaker selects/narrows targets — it is NOT a send or new command.",
+    "Yes / confirm → metadata.confirm=true and empty reminders.",
+    "No / cancel → metadata.confirm=false and empty reminders.",
+    "Do not emit messages, lists, or reminder adds while current_step is confirm.",
+  ].join("\n");
+}
+
+export function hasUnrelatedWorkWhilePending(input: {
+  confirm: boolean | null;
+  reminders: LlmReminderAction[];
+  messages: Array<{ text: string; targets: string[] }>;
+  lists: unknown[];
+  filing: unknown[];
+}): boolean {
+  if (input.confirm !== null) {
+    return false;
+  }
+  if (input.reminders.some((row) => row.action === "add" || row.action === "update")) {
+    return true;
+  }
+  if (
+    input.messages.some(
+      (row) => row.text.trim().length > 0 && row.targets.length > 0,
+    )
+  ) {
+    return true;
+  }
+  if (input.lists.length > 0 || input.filing.length > 0) {
+    return true;
+  }
+  return false;
+}
+
+/** Pure planner: pending delete lives in nextPending, not an in-memory Map. */
+export function planReminderWrites(
+  incoming: LlmReminderAction[],
+  confirm: boolean | null = null,
+  stored: PendingDeleteAction | null = null,
+  options: { now?: Date; timeoutMs?: number; abandonPending?: boolean } = {},
+): ReminderWritePlan {
+  const now = options.now ?? new Date();
+  const timeoutMs = options.timeoutMs ?? PENDING_DELETE_TIMEOUT_MS;
   const adds = incoming.filter(
     (row) => row.action === "add" || row.action === "update",
   );
@@ -531,34 +640,58 @@ export function planReminderWrites(
   );
   const ready = mutations.filter((row) => row.confirmed);
   const waiting = mutations.filter((row) => !row.confirmed);
-  const pending = pendingReminderMutations.get(conversationId) ?? [];
 
-  if (pending.length > 0 && confirm === false) {
-    pendingReminderMutations.delete(conversationId);
-    return { apply: adds, ask: [], cancelled: true, noneToDelete: false };
+  let pending = stored;
+  if (
+    pending &&
+    now.getTime() - pending.at.getTime() > timeoutMs
+  ) {
+    pending = null;
+    if (confirm === null && waiting.length === 0 && ready.length === 0) {
+      return emptyPlan(adds, { cancelled: true });
+    }
   }
 
-  if (pending.length > 0 && confirm === true) {
-    pendingReminderMutations.delete(conversationId);
-    return { apply: [...adds, ...pending], ask: [], cancelled: false, noneToDelete: false };
+  if (options.abandonPending && pending) {
+    return emptyPlan(adds, { cancelled: true, nextPending: null });
+  }
+
+  if (pending && confirm === false) {
+    return emptyPlan(adds, { cancelled: true });
+  }
+
+  if (pending && confirm === true) {
+    const held = pending.targets.map(removeShell);
+    return emptyPlan([...adds, ...held]);
   }
 
   if (ready.length > 0 && waiting.length === 0) {
-    pendingReminderMutations.delete(conversationId);
-    return {
-      apply: [...adds, ...ready],
-      ask: [],
-      cancelled: false,
-      noneToDelete: false,
-    };
+    return emptyPlan([...adds, ...ready]);
   }
 
   if (waiting.length > 0) {
-    pendingReminderMutations.set(conversationId, waiting);
-    return { apply: [...adds, ...ready], ask: waiting, cancelled: false, noneToDelete: false };
+    const targets = waiting.map((row) => row.item.trim()).filter(Boolean);
+    return {
+      apply: [...adds, ...ready],
+      ask: waiting,
+      cancelled: false,
+      noneToDelete: false,
+      nextPending: {
+        action: "delete_reminder",
+        step: "confirm",
+        targets,
+        at: pending?.at ?? now,
+      },
+    };
   }
 
-  return { apply: adds, ask: [], cancelled: false, noneToDelete: false };
+  if (pending) {
+    return emptyPlan(adds, {
+      nextPending: pending,
+    });
+  }
+
+  return emptyPlan(adds);
 }
 
 export function formatReminderConfirmNotice(
@@ -598,6 +731,7 @@ export async function applyReminders(input: {
     itemLabel: string;
     fireAt: string;
     ping?: string;
+    sameTimeOthers?: string[];
   }>;
   skipped: Array<{
     item: string;
@@ -615,6 +749,7 @@ export async function applyReminders(input: {
     itemLabel: string;
     fireAt: string;
     ping?: string;
+    sameTimeOthers?: string[];
   }> = [];
   const skipped: Array<{
     item: string;
@@ -728,15 +863,26 @@ export async function applyReminders(input: {
               : null,
         fireAt,
       });
+      const fireLabel = formatJerusalemDateTime(fireAt);
+      const sameTimeOthers = uniqueLabels(
+        owned
+          .filter(
+            (peer) =>
+              peer.id !== row.id &&
+              formatJerusalemDateTime(peer.fireAt) === fireLabel,
+          )
+          .map((peer) => peer.itemLabel),
+      );
       saved.push({
         id: row.id,
         item: reminder.item.trim(),
         itemKey: key,
         itemLabel: label,
-        fireAt: formatJerusalemDateTime(fireAt),
+        fireAt: fireLabel,
         ping: pingIds
           .map((id) => formatPingLabel(id, input.employees))
           .join(","),
+        ...(sameTimeOthers.length > 0 ? { sameTimeOthers } : {}),
       });
       scheduleSoon(fireAt);
     } catch {
@@ -843,7 +989,12 @@ function uniqueLabels(values: string[]): string[] {
 export function formatReminderApplyNotice(result: {
   removed: string[];
   missed: string[];
-  saved?: Array<{ item: string; fireAt: string; ping?: string }>;
+  saved?: Array<{
+    item: string;
+    fireAt: string;
+    ping?: string;
+    sameTimeOthers?: string[];
+  }>;
   skipped?: Array<{
     item: string;
     reason: "no_time" | "db" | "no_phone";
@@ -854,11 +1005,20 @@ export function formatReminderApplyNotice(result: {
   if (result.saved && result.saved.length > 0) {
     parts.push(
       result.saved
-        .map((row) =>
-          row.ping
+        .map((row) => {
+          const saved = row.ping
             ? `נשמרה התזכורת «${row.item}» ל-${row.fireAt} (אל ${row.ping}).`
-            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`,
-        )
+            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`;
+          const others = (row.sameTimeOthers ?? []).filter(Boolean);
+          if (others.length === 0) {
+            return saved;
+          }
+          const listed =
+            others.length === 1
+              ? `«${others[0]}»`
+              : others.map((name) => `«${name}»`).join(", ");
+          return `${saved} שים לב: יש לך כבר תזכורת אחרת באותה שעה (${listed}).`;
+        })
         .join(" "),
     );
   }
