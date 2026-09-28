@@ -279,7 +279,9 @@ function workerTargetingInstructions(
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory while asking. If they say yes → metadata.directory add with name + phone. If no → directory [].",
+    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages while asking.",
+    "Yes → same turn: directory add with name + phone, AND if they already dictated the send/reminder words earlier in the thread, also emit messages (or reminders) with that text — do not ask again what to send. No → directory []; still emit messages/reminders using the phone digits if the words were already given.",
+    "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
     "If they ask to send but did not say the words, ask. You may offer שלום. Empty messages while you ask.",
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
@@ -440,6 +442,7 @@ async function saveTurn(input: {
 async function appendAssistantNotice(
   conversationId: string,
   notice: string,
+  mode: "append" | "replace" = "append",
 ): Promise<void> {
   const last = await prisma.chatMessage.findFirst({
     where: { conversationId, author: "assistant" },
@@ -448,9 +451,11 @@ async function appendAssistantNotice(
   if (!last) {
     return;
   }
+  const nextText =
+    mode === "replace" ? notice : `${last.text.trim()}\n\n${notice}`;
   await prisma.chatMessage.update({
     where: { id: last.id },
-    data: { text: `${last.text.trim()}\n\n${notice}` },
+    data: { text: nextText },
   });
 }
 
@@ -1056,22 +1061,29 @@ export async function sendChatMessage(input: {
       ...(await deliverWhatsAppRelays(attributedRelays, employee.id)),
       ...(await deliverWhatsAppPhones(attributedPhones)),
     ];
+    const whatsappNotice = formatWhatsAppSkipNotice(skips);
     const missingSend = formatMissingSendTextNotice(
       parsedMetadata.messages ?? [],
     );
     const notice = [
       reminderNotice,
       missingSend,
-      formatWhatsAppSkipNotice(skips),
+      whatsappNotice,
     ]
       .filter(Boolean)
       .join("\n\n");
+    const deliveryFailed = whatsappNotice.length > 0;
     const reply = composeAssistantReply({
       llmReply: turn.reply,
       notice,
+      replaceResponse: deliveryFailed,
     });
     if (notice) {
-      await appendAssistantNotice(conversation.id, notice);
+      await appendAssistantNotice(
+        conversation.id,
+        notice,
+        deliveryFailed ? "replace" : "append",
+      );
     }
 
     if (conversation.needsContext) {

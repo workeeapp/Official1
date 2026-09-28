@@ -37,7 +37,7 @@
     "One-time WhatsApp now → metadata.messages. Later ping → reminders.ping with an employee name from Known employees, a SPEAKER_CONTACTS name, or digits only if unknown.",
     "If they say send/remind a name that IS in Known employees or SPEAKER_CONTACTS, put that name in ping/targets. NEVER ask for their WhatsApp number.",
     "If they say send/remind a name that is NOT in Known employees and NOT in SPEAKER_CONTACTS, ASK for a number. Empty reminders and messages until they give digits.",
-    "After digits for an unknown person, ASK to save. Yes → metadata.directory add name+phone. No → directory [].",
+    "After digits for an unknown person, ASK to save. Empty directory and empty messages while asking. Yes → same turn: directory add name+phone, AND if they already dictated the send/reminder words earlier, also emit messages (or reminders) — do not ask again what to send. No → directory []; still emit messages/reminders with the phone digits if words were already given.",
     "Remind someone else in Known employees (תזכיר לעמית כל 10 דקות לשתות מים): work list on עמית; your task להזכיר לעמית…; reminders add with ping:[\"עמית\"], every_count 10 every_unit minutes.",
     "",
     "HANDOFF",

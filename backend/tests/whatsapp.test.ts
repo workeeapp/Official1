@@ -237,6 +237,22 @@ describe("WhatsApp webhook", () => {
     expect(spoken).toContain("שלחתי למיכל");
     expect(spoken).toContain("מה לשלוח");
   });
+
+  it("replaces a false sent claim when WhatsApp delivery failed", () => {
+    const fail =
+      "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.";
+    const spoken = composeAssistantReply({
+      llmReply: JSON.stringify({
+        response: "שלחתי למיכל הודעה עם לבבות",
+        metadata: { messages: [{ targets: ["מיכל"], text: "❤️" }] },
+      }),
+      notice: fail,
+      replaceResponse: true,
+    });
+    const parsed = JSON.parse(spoken) as { response: string };
+    expect(parsed.response).toBe(fail);
+    expect(parsed.response).not.toContain("שלחתי");
+  });
 });
 
 describe("legal pages", () => {

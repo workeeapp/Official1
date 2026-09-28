@@ -251,8 +251,28 @@ export function formatWhatsAppSkipNotice(skips: WhatsAppDeliverySkip[]): string 
 export function composeAssistantReply(input: {
   llmReply: string;
   notice: string;
+  /** When WhatsApp delivery failed, drop the model's false "sent" claim. */
+  replaceResponse?: boolean;
 }): string {
+  if (input.replaceResponse && input.notice.trim()) {
+    return setEngineResponse(input.llmReply, input.notice.trim());
+  }
   return appendEngineNotice(input.llmReply, input.notice);
+}
+
+export function setEngineResponse(reply: string, response: string): string {
+  try {
+    const parsed: unknown = JSON.parse(reply);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({
+        ...(parsed as Record<string, unknown>),
+        response,
+      });
+    }
+  } catch {
+    /* plain text */
+  }
+  return response;
 }
 
 export function appendEngineNotice(reply: string, notice: string): string {
