@@ -143,6 +143,7 @@ describe("parseLlmReply", () => {
       ],
       messages: [],
       reminders: [],
+      directory: [],
       handoff: null,
       query: null,
       confirm: null,

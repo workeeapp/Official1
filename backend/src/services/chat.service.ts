@@ -52,6 +52,12 @@ import {
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
+  applyDirectoryActions,
+  formatDirectoryApplyNotice,
+  formatSpeakerContacts,
+  listContactsForEmployee,
+} from "./contact.service.js";
+import {
   composeAssistantReply,
   deliverWhatsAppPhones,
   deliverWhatsAppRelays,
@@ -271,7 +277,9 @@ function workerTargetingInstructions(
     "Do not turn a send/check request into a list or task unless they also asked to add one.",
     "messages.targets may be employee names or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
-    "If they name someone who is not in Known employees, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
+    "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
+    "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
+    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory while asking. If they say yes → metadata.directory add with name + phone. If no → directory [].",
     "If they ask to send but did not say the words, ask. You may offer שלום. Empty messages while you ask.",
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
@@ -774,12 +782,14 @@ export async function sendChatMessage(input: {
     digital.id,
   );
   const waitingDeletes = pendingReminderDeleteNames(conversation.id);
+  const speakerContacts = await listContactsForEmployee(input.employeeId);
   const context = [
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
     formatEmployeeContext(
       await getEmployeeRecordSnapshot(digital.id),
       "WORKER_SAVED_DATA",
     ),
+    formatSpeakerContacts(speakerContacts),
     formatTeamSchedules(await getTeamSchedules(input.userId)),
     waitingDeletes.length > 0
       ? `REMINDER_DELETE_WAITING: ${waitingDeletes.join(", ")}. These are not deleted yet. If the speaker confirmed, set metadata.confirm=true and leave reminders empty. Do not list them as still active.`
@@ -793,6 +803,11 @@ export async function sendChatMessage(input: {
     workerTargetingInstructions(employees, speaker, digital),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "EMPLOYEE_SAVED_DATA is the speaker's saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+    employee.isOwner
+      ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
+      : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
+    "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
     "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
     "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders. The server never replaces your response.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
@@ -906,8 +921,17 @@ export async function sendChatMessage(input: {
       actor: employee,
       employees: humans,
       reminders: reminderPlan.apply,
+      contacts: speakerContacts,
     });
-    const workerItems: WorkerTaskRef[] = [
+    const directoryResult = await applyDirectoryActions({
+      userId: input.userId,
+      ownerEmployeeId: employee.id,
+      actions: metadata.directory ?? [],
+    });
+    const refreshedContacts =
+      directoryResult.saved.length > 0 || directoryResult.removed.length > 0
+        ? await listContactsForEmployee(employee.id)
+        : speakerContacts;    const workerItems: WorkerTaskRef[] = [
       ...(input.pendingWorkerItems ?? []),
       ...listMutations
         .filter(
@@ -939,6 +963,7 @@ export async function sendChatMessage(input: {
     const reminderNotice = [
       confirmAsk,
       formatReminderApplyNotice(reminderResult),
+      formatDirectoryApplyNotice(directoryResult),
     ]
       .filter(Boolean)
       .join("\n");
@@ -947,6 +972,7 @@ export async function sendChatMessage(input: {
       parsedMetadata.messages ?? [],
       employees,
       employee.id,
+      refreshedContacts,
     );
     const outbound = planOutboundSends({
       relays,

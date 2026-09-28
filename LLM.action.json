@@ -291,6 +291,25 @@
                   ]
                 }
               },
+              "directory": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["add", "remove"]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["action", "name", "phone"]
+                }
+              },
               "handoff": {
                 "type": "object",
                 "properties": {

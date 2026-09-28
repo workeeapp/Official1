@@ -10,6 +10,7 @@ import {
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import type { ItemVisibility } from "./employee-records.service.js";
+import { matchContact, type SpeakerContact } from "./contact.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
@@ -57,6 +58,7 @@ export function resolveSpokenMetadata(
     filing: metadata.filing,
     messages: metadata.messages ?? [],
     reminders: metadata.reminders ?? [],
+    directory: metadata.directory ?? [],
     handoff: metadata.handoff ?? null,
     query: metadata.query ?? null,
     confirm: metadata.confirm ?? null,
@@ -143,6 +145,7 @@ export function planPhoneRelays(
   messages: LlmMessageAction[],
   employees: PublicEmployee[],
   actorId?: string,
+  contacts: SpeakerContact[] = [],
 ): Array<{ phone: string; text: string }> {
   const deliveries: Array<{ phone: string; text: string }> = [];
   const seen = new Set<string>();
@@ -152,15 +155,21 @@ export function planPhoneRelays(
       continue;
     }
     for (const raw of action.targets) {
-      if (!looksLikePhone(raw)) {
-        continue;
+      let phone = "";
+      if (looksLikePhone(raw)) {
+        const matched = matchEmployee(raw, employees);
+        if (matched && matched.id !== actorId) {
+          continue;
+        }
+        phone = normalizePhoneDigits(raw);
+      } else {
+        const contact = matchContact(raw, contacts);
+        if (!contact) {
+          continue;
+        }
+        phone = normalizePhoneDigits(contact.phone);
       }
-      const matched = matchEmployee(raw, employees);
-      if (matched && matched.id !== actorId) {
-        continue;
-      }
-      const phone = normalizePhoneDigits(raw);
-      if (seen.has(phone)) {
+      if (!phone || seen.has(phone)) {
         continue;
       }
       seen.add(phone);

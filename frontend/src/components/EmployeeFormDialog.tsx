@@ -38,6 +38,7 @@ export function EmployeeFormDialog({
   const [nickname, setNickname] = useState(employee?.nickname ?? "");
   const [email, setEmail] = useState(employee?.email ?? "");
   const [phone, setPhone] = useState(employee?.phone ?? "");
+  const [isOwner, setIsOwner] = useState(employee?.isOwner === true);
   const [model, setModel] = useState(employee?.model ?? "");
   const [temperature, setTemperature] = useState(
     employee?.temperature != null ? String(employee.temperature) : "0",
@@ -150,6 +151,7 @@ export function EmployeeFormDialog({
       nickname: nickname.trim(),
       email: email.trim(),
       phone: phone.trim(),
+      isOwner,
     });
   }
 
@@ -303,6 +305,21 @@ export function EmployeeFormDialog({
                   onBlur={() => setTouched((current) => ({ ...current, phone: true }))}
                   onChange={(event) => setPhone(event.target.value)}
                 />
+                <label className="flex items-start gap-2 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    name="employee-is-owner"
+                    className="mt-1"
+                    checked={isOwner}
+                    onChange={(event) => setIsOwner(event.target.checked)}
+                  />
+                  <span>
+                    Account owner
+                    <span className="mt-0.5 block text-text-secondary">
+                      Sees everyone’s lists, tasks, and reminder clocks. Several owners are allowed.
+                    </span>
+                  </span>
+                </label>
               </>
             )}
             {defaultsError ? (

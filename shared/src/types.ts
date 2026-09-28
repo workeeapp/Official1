@@ -34,6 +34,7 @@ export interface PublicEmployee {
   temperature?: number | null;
   instructions?: string | null;
   protected?: boolean;
+  isOwner?: boolean;
 }
 
 export interface EmployeesResponse {
@@ -81,6 +82,7 @@ export interface EmployeeInput {
   model?: string | null;
   temperature?: number | null;
   instructions?: string | null;
+  isOwner?: boolean;
 }
 
 export interface DigitalEmployeeDefaults {
@@ -111,6 +113,12 @@ export function isProtectedEmployee(
   employee: Pick<PublicEmployee, "protected">,
 ): boolean {
   return employee.protected === true;
+}
+
+export function isAccountOwner(
+  employee: Pick<PublicEmployee, "isOwner" | "kind">,
+): boolean {
+  return employee.kind !== "digital" && employee.isOwner === true;
 }
 
 export interface ChatMessageRequest {

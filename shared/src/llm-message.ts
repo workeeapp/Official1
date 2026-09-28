@@ -29,6 +29,14 @@ export interface LlmMessageAction {
   text: string;
 }
 
+export type LlmDirectoryActionName = "add" | "remove";
+
+export interface LlmDirectoryAction {
+  action: LlmDirectoryActionName;
+  name: string;
+  phone: string;
+}
+
 export type LlmReminderActionName = "add" | "remove" | "update";
 export type LlmReminderRepeat =
   | "once"
@@ -73,6 +81,7 @@ export interface LlmMetadata {
   filing: LlmFilingAction[];
   messages?: LlmMessageAction[];
   reminders?: LlmReminderAction[];
+  directory?: LlmDirectoryAction[];
   handoff?: LlmHandoffAction | null;
   query?: LlmQuery | null;
   confirm?: boolean | null;
@@ -102,6 +111,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     filing: [],
     messages: [],
     reminders: [],
+    directory: [],
     handoff: null,
     query: null,
     confirm: null,
@@ -119,6 +129,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   return {
     messages: parseMessageActions(meta),
     reminders: parseReminderActions(meta),
+    directory: parseDirectoryActions(meta),
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
     confirm: parseConfirm(meta),
@@ -291,6 +302,42 @@ function parseReminderActions(meta: Record<string, unknown>): LlmReminderAction[
     const action = toReminderAction(entry);
     return action ? [action] : [];
   });
+}
+
+function parseDirectoryActions(meta: Record<string, unknown>): LlmDirectoryAction[] {
+  const raw = meta.directory ?? meta.phonebook ?? meta.saved_contacts;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((entry) => {
+    const action = toDirectoryAction(entry);
+    return action ? [action] : [];
+  });
+}
+
+function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const actionRaw = String(record.action ?? "add")
+    .trim()
+    .toLowerCase();
+  const action: LlmDirectoryActionName | null =
+    actionRaw === "add" || actionRaw === "save" || actionRaw === "create"
+      ? "add"
+      : actionRaw === "remove" || actionRaw === "delete"
+        ? "remove"
+        : null;
+  if (!action) {
+    return null;
+  }
+  const name = readText(record, ["name", "שם", "contact", "label"]);
+  const phone = readText(record, ["phone", "טלפון", "number", "whatsapp"]);
+  if (!name || !phone) {
+    return null;
+  }
+  return { action, name, phone };
 }
 
 function reminderActionName(value: unknown): LlmReminderActionName | null {
@@ -574,6 +621,22 @@ function collectActionDescriptions(metadata: unknown): string[] {
       if (item && typeof item === "object" && !Array.isArray(item)) {
         descriptions.push(describeMessageAction(item as Record<string, unknown>));
       }
+    }
+  }
+
+  if (Array.isArray(meta.directory)) {
+    for (const item of meta.directory) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        continue;
+      }
+      const row = item as Record<string, unknown>;
+      const name = readText(row, ["name", "שם"]);
+      const action = String(row.action ?? "add").toLowerCase();
+      descriptions.push(
+        action === "remove"
+          ? `Remove contact${name ? `: ${name}` : ""}`
+          : `Save contact${name ? `: ${name}` : ""}`,
+      );
     }
   }
 

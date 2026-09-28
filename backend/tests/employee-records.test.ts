@@ -130,6 +130,8 @@ describe("employee records", () => {
   it("builds an identity key from Hebrew shopping and task fields", () => {
     expect(itemIdentity("shopping", { "שם פריט": "חלב", כמות: 1 })).toBe("חלב");
     expect(itemIdentity("tasks", { "שם מטלה": "לקנות מתנה" })).toBe("לקנות מתנה");
+    expect(itemIdentity("custom", { "שם החנות": "אדידס" })).toBe("אדידס");
+    expect(itemIdentity("custom", { brand: "פומה" })).toBe("פומה");
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");

@@ -25,6 +25,7 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     temperature: employee.temperature,
     instructions: employee.instructions,
     protected: employee.isProtected,
+    isOwner: kind === "human" ? employee.isOwner : false,
   };
 }
 
@@ -152,12 +153,36 @@ async function ensureDavidReminderPrompt(userId: string): Promise<void> {
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
   await ensureDavidReminderPrompt(userId);
+  await ensureAccountOwner(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
   });
 
   return employees.map(toPublicEmployee);
+}
+
+async function ensureAccountOwner(userId: string): Promise<void> {
+  const humans = await prisma.employee.findMany({
+    where: { userId, kind: "human" },
+    orderBy: { createdAt: "asc" },
+  });
+  if (humans.length === 0 || humans.some((row) => row.isOwner)) {
+    return;
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true },
+  });
+  const username = user?.username.trim();
+  const pick =
+    humans.find(
+      (row) => row.nickname?.trim() === username || row.name === username,
+    ) ?? humans[0];
+  await prisma.employee.update({
+    where: { id: pick.id },
+    data: { isOwner: true },
+  });
 }
 
 export async function resolveActingEmployee(userId: string): Promise<PublicEmployee> {
@@ -201,7 +226,7 @@ async function findOwnedEmployee(userId: string, employeeId: string): Promise<Em
 function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
   if (kind === "digital") {
     return {
-      kind: "digital",
+      kind: "digital" as const,
       name: input.name,
       surname: input.surname?.trim() || "",
       nickname: input.nickname ?? input.name,
@@ -210,11 +235,12 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
       model: input.model ?? null,
       temperature: input.temperature ?? null,
       instructions: input.instructions ?? null,
+      isOwner: false,
     };
   }
 
   return {
-    kind: "human",
+    kind: "human" as const,
     name: input.name,
     surname: input.surname ?? "",
     nickname: input.nickname ?? null,
@@ -223,6 +249,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
     model: null,
     temperature: null,
     instructions: null,
+    isOwner: input.isOwner === true,
   };
 }
 
@@ -231,11 +258,12 @@ export async function createEmployeeForUser(
   input: EmployeeInput,
 ): Promise<PublicEmployee> {
   const kind = input.kind === "digital" ? "digital" : "human";
+  const data = persistEmployeeData(input, kind);
   const employee = await prisma.employee.create({
     data: {
       userId,
       isProtected: false,
-      ...persistEmployeeData(input, kind),
+      ...data,
     },
   });
 
@@ -249,10 +277,11 @@ export async function updateEmployeeForUser(
 ): Promise<PublicEmployee> {
   const existing = await findOwnedEmployee(userId, employeeId);
   const kind = existing.kind === "digital" ? "digital" : "human";
+  const data = persistEmployeeData(input, kind);
 
   const employee = await prisma.employee.update({
     where: { id: employeeId },
-    data: persistEmployeeData(input, kind),
+    data,
   });
 
   return toPublicEmployee(employee);

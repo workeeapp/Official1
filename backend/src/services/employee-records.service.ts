@@ -44,7 +44,7 @@ const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
   tasks: ["שם מטלה", "name", "task", "item_name"],
-  custom: ["name", "שם", "item_name", "שם פריט"],
+  custom: ["name", "שם", "item_name", "שם פריט", "שם החנות", "store", "title"],
 };
 
 export function itemIdentity(
@@ -57,7 +57,24 @@ export function itemIdentity(
     return normalizeKey([first, last].filter(Boolean).join("|"));
   }
 
-  return normalizeKey(readItemText(item, ITEM_NAME_KEYS[listType]));
+  const fromKeys = normalizeKey(readItemText(item, ITEM_NAME_KEYS[listType]));
+  if (fromKeys) {
+    return fromKeys;
+  }
+
+  // Custom columns (e.g. שם החנות) may not match the built-in title keys.
+  if (listType === "custom") {
+    for (const value of Object.values(item)) {
+      if (typeof value === "string" && value.trim()) {
+        return normalizeKey(value);
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return normalizeKey(String(value));
+      }
+    }
+  }
+
+  return "";
 }
 
 export function listItemLabels(
@@ -315,34 +332,48 @@ export async function deleteEmployeeRecord(
 
 export async function getEmployeeRecordSnapshot(
   employeeId: string,
+  options?: { accountOwner?: boolean },
 ): Promise<EmployeeRecordSnapshot> {
   const owner = await prisma.employee.findUnique({
     where: { id: employeeId },
-    select: { userId: true },
+    select: { userId: true, isOwner: true, kind: true },
   });
+  const seeAll =
+    options?.accountOwner === true ||
+    (owner?.kind !== "digital" && owner?.isOwner === true);
+
+  const listWhere = seeAll && owner
+    ? { employee: { userId: owner.userId, kind: "human" } }
+    : { employeeId };
+  const filingWhere = seeAll && owner
+    ? { employee: { userId: owner.userId, kind: "human" } }
+    : { employeeId };
+
   const [ownLists, sharedItems, ownFilings, reminderRows, people] = await Promise.all([
     prisma.employeeList.findMany({
-      where: { employeeId },
+      where: listWhere,
       include: {
-        employee: { select: { name: true, nickname: true } },
+        employee: { select: { id: true, name: true, nickname: true } },
         items: { orderBy: { createdAt: "asc" } },
       },
       orderBy: [{ listType: "asc" }, { name: "asc" }],
     }),
-    prisma.employeeListItem.findMany({
-      where: {
-        scope: "shared",
-        list: { employeeId: { not: employeeId } },
-      },
-      include: {
-        list: {
-          include: { employee: { select: { id: true, name: true, nickname: true } } },
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeListItem.findMany({
+          where: {
+            scope: "shared",
+            list: { employeeId: { not: employeeId } },
+          },
+          include: {
+            list: {
+              include: { employee: { select: { id: true, name: true, nickname: true } } },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        }),
     prisma.employeeFiling.findMany({
-      where: { employeeId },
+      where: filingWhere,
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
@@ -456,6 +487,9 @@ export async function getEmployeeRecordSnapshot(
     })),
     reminders: reminderRows
       .filter((row) => {
+        if (seeAll) {
+          return true;
+        }
         const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
         return row.ownerId === employeeId || pings.includes(employeeId);
       })
@@ -1205,7 +1239,18 @@ function ownedItemTitle(
   }
 
   const keys = ITEM_NAME_KEYS[listType as LlmListType] ?? ITEM_NAME_KEYS.custom;
-  return readItemText(data, keys) || fallback;
+  const titled = readItemText(data, keys);
+  if (titled) {
+    return titled;
+  }
+  if (listType === "custom") {
+    for (const value of Object.values(data)) {
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+  return fallback;
 }
 
 function ownedItemFields(data: Record<string, unknown>): EmployeeRecordField[] {

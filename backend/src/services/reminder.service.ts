@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
+import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -396,6 +397,7 @@ export function resolveReminderPingDestinations(
   },
   employees: PublicEmployee[],
   fallbackId: string,
+  contacts: SpeakerContact[] = [],
 ): string[] {
   const named = [
     ...reminder.ping,
@@ -426,6 +428,11 @@ export function resolveReminderPingDestinations(
     const employee = matchEmployee(raw, employees);
     if (employee) {
       addPerson(employee.id);
+      continue;
+    }
+    const contact = matchContact(raw, contacts);
+    if (contact) {
+      addPhone(normalizePhoneDigits(contact.phone));
     }
   }
 
@@ -465,6 +472,7 @@ function destPhoneToken(raw: string): string | null {
 export function unknownDestNames(
   reminder: Pick<LlmReminderAction, "ping"> & { targets?: string[] },
   employees: PublicEmployee[],
+  contacts: SpeakerContact[] = [],
 ): string[] {
   const named = [
     ...reminder.ping,
@@ -472,7 +480,11 @@ export function unknownDestNames(
   ];
   const unknown: string[] = [];
   for (const raw of named) {
-    if (destPhoneToken(raw) || matchEmployee(raw, employees)) {
+    if (
+      destPhoneToken(raw) ||
+      matchEmployee(raw, employees) ||
+      matchContact(raw, contacts)
+    ) {
       continue;
     }
     if (raw.trim()) {
@@ -575,6 +587,7 @@ export async function applyReminders(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
   reminders: LlmReminderAction[];
+  contacts?: SpeakerContact[];
 }): Promise<{
   removed: string[];
   missed: string[];
@@ -592,6 +605,7 @@ export async function applyReminders(input: {
     dest?: string;
   }>;
 }> {
+  const contacts = input.contacts ?? [];
   const removed: string[] = [];
   const missed: string[] = [];
   const saved: Array<{
@@ -651,12 +665,13 @@ export async function applyReminders(input: {
       reminder,
       input.employees,
       input.actor.id,
+      contacts,
     );
     if (pingIds.length === 0) {
       skipped.push({
         item: reminder.item.trim(),
         reason: "no_phone",
-        dest: unknownDestNames(reminder, input.employees).join(", "),
+        dest: unknownDestNames(reminder, input.employees, contacts).join(", "),
       });
       continue;
     }

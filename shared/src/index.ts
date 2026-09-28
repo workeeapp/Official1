@@ -53,6 +53,7 @@ export {
   humanEmployees,
   digitalEmployees,
   isProtectedEmployee,
+  isAccountOwner,
   chatThreadKey,
 } from "./types";
 export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
@@ -80,6 +81,8 @@ export type {
   LlmListActionName,
   LlmListType,
   LlmMessageAction,
+  LlmDirectoryAction,
+  LlmDirectoryActionName,
   LlmHandoffAction,
   LlmQuery,
   LlmMetadata,

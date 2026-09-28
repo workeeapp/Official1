@@ -29,8 +29,9 @@ public static class WorkeeSleep {
 }
 
 function Keep-Awake {
-  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
-  [void][WorkeeSleep]::SetThreadExecutionState([uint32]2147483713)
+  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_AWAYMODE_REQUIRED
+  # Display+system required reduces Modern Standby idle sleep while Workee must stay up.
+  [void][WorkeeSleep]::SetThreadExecutionState([uint32]2147483715)
 }
 
 function Wait-Docker {
@@ -87,7 +88,7 @@ if (Test-ApiPort) {
   Write-Log "API already listening on 3003; holding sleep lock only"
   while ($true) {
     Keep-Awake
-    Start-Sleep -Seconds 60
+    Start-Sleep -Seconds 15
     try {
       Ensure-Postgres
     } catch {

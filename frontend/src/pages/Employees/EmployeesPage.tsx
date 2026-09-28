@@ -473,7 +473,10 @@ function EmployeeChip({
             : "bg-primary-light text-primary hover:bg-primary/15"
         }`}
       >
-        <span dir="auto">{employeeDisplayName(employee)}</span>
+        <span dir="auto">
+          {employeeDisplayName(employee)}
+          {employee.isOwner ? " · owner" : ""}
+        </span>
         <span
           role="tooltip"
           className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-text-primary px-2.5 py-1 text-xs font-medium text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
