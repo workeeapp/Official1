@@ -284,7 +284,7 @@ function workerTargetingInstructions(
     "Cancel a nudge: reminders remove only. Do not lists.remove the speaker shopping or task.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add with in or time.",
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Do not add a second clock. The server updates the linked worker task time.",
-    "Before reminders add: if active_reminders already has the same work by meaning, ASK לעדכן או להוסיף עוד אחת? Empty reminders while asking.",
+    "Before reminders add: only if this turn's active_reminders already has the same work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Do not invent that one exists. Empty reminders while asking.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. After yes: metadata.confirm=true, empty reminders.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",

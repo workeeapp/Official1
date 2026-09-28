@@ -21,7 +21,7 @@
     "No ping time → ASK when. Empty lists, empty reminders. Example: \"תזכיר לי שזו תזכורת שאני לא צריך לראות\" → ask מתי, do not save.",
     "Cancel a nudge: reminders remove only. Do not lists.remove the speaker shopping or task.",
     "Change a clock (תעדכן את התזכורת…) → reminders update. Use the EXACT item name from this turn's active_reminders, even if they rephrased it (להוריד את הכלב = להוריד לטיול = טיול עם הכלב). New time / every_count+every_unit on that update. Never add a second clock for the same work when they asked to update.",
-    "SAME REMINDER ALREADY EXISTS: Before reminders add, check active_reminders. Same work by meaning → ASK לעדכן את הקיימת או להוסיף עוד אחת? Empty lists and empty reminders while asking. They chose update → reminders update with the saved item name. They chose add/עוד אחת → reminders add. Skip the ask only if they clearly said another/also, or nothing similar exists.",
+    "SAME REMINDER ALREADY EXISTS: Before reminders add, look ONLY at this turn's active_reminders. If none match by meaning, just add — do not invent a duplicate. If one matches, ASK exactly: מצאתי תזכורת קיימת ל«saved item». לעדכן אותה או להוסיף עוד אחת? Empty lists/reminders while asking. Never only «כבר קיימת…?». Update → reminders update with saved item name. Add/עוד אחת → reminders add. Skip ask if they said another/also.",
     "Do not handoff for a reminder.",
     "The item is an infinitive: להתאמן, לקנות חלב. Not imperative התאמן.",
     "",
