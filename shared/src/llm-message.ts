@@ -66,7 +66,7 @@ export interface LlmHandoffAction {
   worker: string;
 }
 
-export type LlmQuery = "reminders" | "reminders_sent" | "todos";
+export type LlmQuery = "reminders" | "reminders_sent" | "todos" | "self";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
@@ -76,6 +76,7 @@ export interface LlmMetadata {
   handoff?: LlmHandoffAction | null;
   query?: LlmQuery | null;
   confirm?: boolean | null;
+  targets?: string[];
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -104,6 +105,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     handoff: null,
     query: null,
     confirm: null,
+    targets: [],
   };
 }
 
@@ -120,6 +122,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
     confirm: parseConfirm(meta),
+    targets: defaultTargets,
     lists: Array.isArray(meta.lists)
       ? meta.lists.flatMap((entry) => {
           const action = toListAction(entry);
@@ -244,8 +247,16 @@ function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
   if (value === "reminders_sent" || value === "sent") {
     return "reminders_sent";
   }
-  if (value === "todos" || value === "todo" || value === "tasks") {
+  if (value === "todos" || value === "todo") {
     return "todos";
+  }
+  if (
+    value === "self" ||
+    value === "worker" ||
+    value === "mine" ||
+    value === "tasks"
+  ) {
+    return "self";
   }
   return null;
 }

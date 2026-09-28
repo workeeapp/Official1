@@ -6,6 +6,7 @@ import {
   serializeReminderRepeat,
   type ReminderInterval,
 } from "@workee/shared";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
@@ -115,6 +116,70 @@ function itemKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
 }
 
+export function formatJerusalemClock(value: Date): string {
+  return formatJerusalemDateTime(value).slice(-5);
+}
+
+export function applyTimeToTaskLabel(label: string, time: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    return `ב־${time}`;
+  }
+  if (/\d{1,2}:\d{2}/.test(trimmed)) {
+    return trimmed.replace(/\d{1,2}:\d{2}/, time);
+  }
+  return `${trimmed} ב־${time}`;
+}
+
+export async function syncLinkedWorkerTaskClock(input: {
+  reminderId: string;
+  workerItemId?: string | null;
+  fireAt: Date;
+}): Promise<void> {
+  if (!prisma.employeeListItem?.findUnique || !prisma.employeeListItem?.update) {
+    return;
+  }
+  try {
+    const item = input.workerItemId
+      ? await prisma.employeeListItem.findUnique({
+          where: { id: input.workerItemId },
+        })
+      : await prisma.employeeListItem.findUnique({
+          where: { reminderId: input.reminderId },
+        });
+    if (!item) {
+      return;
+    }
+    const time = formatJerusalemClock(input.fireAt);
+    const data =
+      item.data && typeof item.data === "object" && !Array.isArray(item.data)
+        ? { ...(item.data as Record<string, unknown>) }
+        : {};
+    const currentName =
+      typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()
+        ? data["שם מטלה"].trim()
+        : item.itemKey;
+    const nextName = applyTimeToTaskLabel(currentName, time);
+    await prisma.employeeListItem.update({
+      where: { id: item.id },
+      data: {
+        data: {
+          ...data,
+          "שם מטלה": nextName,
+          "שעה לביצוע": time,
+        },
+        ...(itemKey(nextName) !== item.itemKey
+          ? { itemKey: itemKey(nextName) }
+          : {}),
+      },
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+  }
+}
+
 export function reminderLabelsMatch(stored: string, wanted: string): boolean {
   const left = itemKey(stored);
   const right = itemKey(wanted);
@@ -122,6 +187,146 @@ export function reminderLabelsMatch(stored: string, wanted: string): boolean {
     return left === right;
   }
   return left === right || left.includes(right) || right.includes(left);
+}
+
+export interface WorkerTaskRef {
+  id: string;
+  itemKey: string;
+}
+
+export function pairWorkerItemsToReminders(
+  reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
+  workerItems: WorkerTaskRef[],
+): Array<{ reminderId: string; workerItemId: string }> {
+  if (reminders.length === 0 || workerItems.length === 0) {
+    return [];
+  }
+  if (reminders.length === 1 && workerItems.length === 1) {
+    return [
+      { reminderId: reminders[0].id, workerItemId: workerItems[0].id },
+    ];
+  }
+  const used = new Set<string>();
+  const pairs: Array<{ reminderId: string; workerItemId: string }> = [];
+  for (const reminder of reminders) {
+    const match = workerItems.find(
+      (item) =>
+        !used.has(item.id) &&
+        (item.itemKey === reminder.itemKey ||
+          reminderLabelsMatch(reminder.itemLabel, item.itemKey) ||
+          reminderLabelsMatch(reminder.itemKey, item.itemKey)),
+    );
+    if (!match) {
+      continue;
+    }
+    used.add(match.id);
+    pairs.push({ reminderId: reminder.id, workerItemId: match.id });
+  }
+  return pairs;
+}
+
+export async function linkRemindersToWorkerTasks(
+  reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
+  workerItems: WorkerTaskRef[],
+): Promise<void> {
+  if (!prisma.employeeListItem?.update || !prisma.reminder?.update) {
+    return;
+  }
+  for (const pair of pairWorkerItemsToReminders(reminders, workerItems)) {
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: pair.workerItemId },
+        data: { reminderId: pair.reminderId },
+      });
+      await prisma.reminder.update({
+        where: { id: pair.reminderId },
+        data: { workerItemId: pair.workerItemId },
+      });
+    } catch (error) {
+      if (!isMissingTableError(error)) {
+        throw error;
+      }
+    }
+  }
+}
+
+function isMissingRecord(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025"
+  );
+}
+
+export async function removeReminderAndLinkedWorkerTask(match: {
+  id: string;
+  workerItemId?: string | null;
+}): Promise<void> {
+  const workerItemId = match.workerItemId ?? null;
+  if (prisma.employeeListItem?.deleteMany) {
+    await prisma.employeeListItem.deleteMany({
+      where: {
+        OR: [
+          { reminderId: match.id },
+          ...(workerItemId ? [{ id: workerItemId }] : []),
+        ],
+      },
+    });
+  }
+  if (!prisma.reminder?.delete) {
+    return;
+  }
+  try {
+    await prisma.reminder.delete({ where: { id: match.id } });
+  } catch (error) {
+    if (isMissingTableError(error) || isMissingRecord(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function cancelReminderLinkedToWorkerItem(
+  workerItemId: string,
+): Promise<void> {
+  if (!prisma.reminder?.findFirst && !prisma.employeeListItem?.findUnique) {
+    return;
+  }
+  try {
+    const item = prisma.employeeListItem?.findUnique
+      ? await prisma.employeeListItem.findUnique({
+          where: { id: workerItemId },
+        })
+      : null;
+    const reminderId =
+      item && "reminderId" in item && typeof item.reminderId === "string"
+        ? item.reminderId
+        : null;
+    const clock = prisma.reminder?.findFirst
+      ? await prisma.reminder.findFirst({
+          where: {
+            OR: [
+              { workerItemId },
+              ...(reminderId ? [{ id: reminderId }] : []),
+            ],
+          },
+        })
+      : null;
+    const id = clock?.id ?? reminderId;
+    if (!id) {
+      return;
+    }
+    const linkedWorkerId =
+      clock && "workerItemId" in clock && typeof clock.workerItemId === "string"
+        ? clock.workerItemId
+        : workerItemId;
+    await removeReminderAndLinkedWorkerTask({
+      id,
+      workerItemId: linkedWorkerId,
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+  }
 }
 
 async function cancelActiveReminder(
@@ -141,9 +346,13 @@ async function cancelActiveReminder(
   if (!match) {
     return null;
   }
-  await prisma.reminder.update({
-    where: { id: match.id },
-    data: { status: "cancelled" },
+  const workerItemId =
+    "workerItemId" in match && typeof match.workerItemId === "string"
+      ? match.workerItemId
+      : null;
+  await removeReminderAndLinkedWorkerTask({
+    id: match.id,
+    workerItemId,
   });
   return match.itemLabel;
 }
@@ -369,7 +578,14 @@ export async function applyReminders(input: {
 }): Promise<{
   removed: string[];
   missed: string[];
-  saved: Array<{ item: string; fireAt: string; ping?: string }>;
+  saved: Array<{
+    id: string;
+    item: string;
+    itemKey: string;
+    itemLabel: string;
+    fireAt: string;
+    ping?: string;
+  }>;
   skipped: Array<{
     item: string;
     reason: "no_time" | "db" | "no_phone";
@@ -378,7 +594,14 @@ export async function applyReminders(input: {
 }> {
   const removed: string[] = [];
   const missed: string[] = [];
-  const saved: Array<{ item: string; fireAt: string; ping?: string }> = [];
+  const saved: Array<{
+    id: string;
+    item: string;
+    itemKey: string;
+    itemLabel: string;
+    fireAt: string;
+    ping?: string;
+  }> = [];
   const skipped: Array<{
     item: string;
     reason: "no_time" | "db" | "no_phone";
@@ -439,45 +662,62 @@ export async function applyReminders(input: {
     }
 
     try {
-      const existing = await prisma.reminder.findFirst({
-        where: {
-          userId: input.userId,
-          ownerId,
-          itemKey: key,
-          status: "active",
-        },
+      const rows = await prisma.reminder.findMany({
+        where: { userId: input.userId, status: "active" },
       });
+      const owned = rows.filter((row) => row.ownerId === ownerId);
+      const pool = owned.length > 0 ? owned : rows;
+      const existing = pool.find(
+        (row) =>
+          row.itemKey === key ||
+          reminderLabelsMatch(row.itemLabel, reminder.item) ||
+          reminderLabelsMatch(row.itemKey, key),
+      );
 
-      if (existing) {
-        await prisma.reminder.update({
-          where: { id: existing.id },
-          data: {
-            itemLabel: reminder.item.trim().slice(0, 255),
-            listType: reminder.listType,
-            fireAt,
-            repeat: serializeReminderRepeat(interval),
-            pingIds,
-            messageText: reminder.text.trim().slice(0, 4096),
-          },
-        });
-      } else {
-        await prisma.reminder.create({
-          data: {
-            userId: input.userId,
-            ownerId,
-            actorId: input.actor.id,
-            itemKey: key,
-            itemLabel: reminder.item.trim().slice(0, 255),
-            listType: reminder.listType,
-            fireAt,
-            repeat: serializeReminderRepeat(interval),
-            pingIds,
-            messageText: reminder.text.trim().slice(0, 4096),
-          },
-        });
-      }
+      const label = reminder.item.trim().slice(0, 255);
+      const row = existing
+        ? await prisma.reminder.update({
+            where: { id: existing.id },
+            data: {
+              itemLabel: label,
+              listType: reminder.listType,
+              fireAt,
+              repeat: serializeReminderRepeat(interval),
+              pingIds,
+              messageText: reminder.text.trim().slice(0, 4096),
+            },
+          })
+        : await prisma.reminder.create({
+            data: {
+              userId: input.userId,
+              ownerId,
+              actorId: input.actor.id,
+              itemKey: key,
+              itemLabel: label,
+              listType: reminder.listType,
+              fireAt,
+              repeat: serializeReminderRepeat(interval),
+              pingIds,
+              messageText: reminder.text.trim().slice(0, 4096),
+            },
+          });
+      await syncLinkedWorkerTaskClock({
+        reminderId: row.id,
+        workerItemId:
+          "workerItemId" in row && typeof row.workerItemId === "string"
+            ? row.workerItemId
+            : existing &&
+                "workerItemId" in existing &&
+                typeof existing.workerItemId === "string"
+              ? existing.workerItemId
+              : null,
+        fireAt,
+      });
       saved.push({
+        id: row.id,
         item: reminder.item.trim(),
+        itemKey: key,
+        itemLabel: label,
         fireAt: formatJerusalemDateTime(fireAt),
         ping: pingIds
           .map((id) => formatPingLabel(id, input.employees))
@@ -533,6 +773,8 @@ export function formatTodosReply(input: {
   reminders: ReminderSnapshotRow[];
   speakerId: string;
   speakerPhone?: string | null;
+  voice?: "speaker" | "self-female" | "self-male" | "named";
+  subjectName?: string;
 }): string {
   const shopping = uniqueLabels(input.shopping);
   const tasks = uniqueLabels(input.tasks);
@@ -543,13 +785,27 @@ export function formatTodosReply(input: {
       !reminderIsScheduledSend(row, input.speakerId, input.speakerPhone) &&
       !listed.some((label) => reminderLabelsMatch(row.item, label)),
   );
-  const lines = [
-    ...shopping.map((item) => `- ${item}`),
-    ...tasks.map((item) => `- ${item}`),
-    ...selfReminders.map((row) => `- ${row.item} (${row.fire_at})`),
+  const items = [
+    ...shopping,
+    ...tasks,
+    ...selfReminders.map((row) => `${row.item} (${row.fire_at})`),
   ];
-  if (lines.length === 0) {
+  const lines = items.map((item) => `- ${item}`);
+  if (input.voice === "self-female" || input.voice === "self-male") {
+    const verb = input.voice === "self-female" ? "צריכה" : "צריך";
+    if (items.length === 0) {
+      return "אין לי כרגע משימות ממתינות.";
+    }
+    if (items.length === 1) {
+      return `אני ${verb} ${items[0]}`;
+    }
+    return [`אני ${verb}:`, ...lines].join("\n");
+  }
+  if (items.length === 0) {
     return "אין לך כרגע משימות או קניות ממתינות.";
+  }
+  if (input.voice === "named" && input.subjectName) {
+    return [`מה ש${input.subjectName} צריך לעשות:`, ...lines].join("\n");
   }
   return ["מה שאתה צריך לעשות:", ...lines].join("\n");
 }

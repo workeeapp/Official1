@@ -73,6 +73,20 @@ const { createConversation, createResponse } = vi.hoisted(() => ({
   createResponse: vi.fn(),
 }));
 
+const deliverWhatsAppRelaysMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([]),
+);
+
+vi.mock("../src/services/whatsapp-send.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/whatsapp-send.js")>();
+  return {
+    ...actual,
+    deliverWhatsAppRelays: (...args: unknown[]) =>
+      deliverWhatsAppRelaysMock(...args),
+  };
+});
+
 const conversationStore = new Map<string, ConversationRow>();
 const messageStore: MessageRow[] = [];
 
@@ -160,6 +174,7 @@ vi.mock("../src/database/prisma.js", () => ({
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
+      delete: vi.fn(),
     },
   },
 }));
@@ -301,6 +316,7 @@ describe("chat API", () => {
       reply: "Hello from the model",
       raw: { output_text: "Hello from the model" },
     });
+    deliverWhatsAppRelaysMock.mockReset().mockResolvedValue([]);
     resetChatStore();
     conversationFindUnique.mockReset().mockImplementation(
       async ({
@@ -521,10 +537,20 @@ describe("chat API", () => {
       .send({ message: "hi", employeeId });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       reply: "Hello from the model",
       raw: { output_text: "Hello from the model" },
       notifications: [],
+    });
+    expect(response.body.request).toMatchObject({
+      model: expect.any(String),
+      conversation: "conv_test_1",
+      input: expect.stringContaining("hi"),
+      instructions: expect.any(String),
+    });
+    expect(response.body.timing).toEqual({
+      llmMs: expect.any(Number),
+      afterLlmMs: expect.any(Number),
     });
     expect(createConversation).toHaveBeenCalledOnce();
     expect(createResponse).toHaveBeenCalledOnce();
@@ -540,7 +566,35 @@ describe("chat API", () => {
     expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
   });
 
-  it("follows a Lucy reminder handoff to David in the same turn", async () => {
+  it("lets Lucy save a reminder without handing off to David", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שמרתי תזכורת לחלב",
+        metadata: {
+          lists: [],
+          filing: [],
+          messages: [],
+          reminders: [{ action: "add", item: "לקנות חלב", in: 20, time: "" }],
+        },
+      }),
+      raw: {},
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תזכירי לי לקנות חלב בעוד 20 שניות", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledOnce();
+    expect(createResponse.mock.calls[0][0].instructions).toContain(
+      "Do not handoff for a reminder",
+    );
+  });
+
+  it("follows a handoff when the speaker asks to talk to David", async () => {
     const cookie = await login();
     mockOwnedEmployee();
     findMany.mockResolvedValue([
@@ -588,7 +642,7 @@ describe("chat API", () => {
     createResponse
       .mockResolvedValueOnce({
         reply: JSON.stringify({
-          response: "מעבירה לדוד",
+          response: "מעבירה אותך לדוד",
           metadata: {
             lists: [],
             filing: [],
@@ -611,7 +665,7 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "תשמור תזכורת לחלב", employeeId });
+      .send({ message: "אני רוצה לדבר עם דוד", employeeId });
 
     expect(response.status).toBe(200);
     expect(createResponse).toHaveBeenCalledTimes(2);
@@ -666,7 +720,7 @@ describe("chat API", () => {
       .send({ message: "how are you", employeeId });
 
     expect(second.status).toBe(200);
-    expect(second.body).toEqual({
+    expect(second.body).toMatchObject({
       reply: "Second reply",
       raw: { output_text: "Second reply" },
       notifications: [],
@@ -731,6 +785,10 @@ describe("chat API", () => {
       createdAt: expect.any(String),
     });
     expect(history.body.raw).toEqual({ output_text: "Hello from the model" });
+    expect(history.body.request).toMatchObject({
+      conversation: "conv_test_1",
+      input: expect.stringContaining("hi"),
+    });
   });
 
   it("returns empty history when the employee has no conversation", async () => {
@@ -749,6 +807,7 @@ describe("chat API", () => {
       startedAt: null,
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
   });
@@ -785,6 +844,7 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
 
@@ -799,6 +859,7 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
 
@@ -844,6 +905,7 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
     expect(createConversation).toHaveBeenCalledTimes(2);
@@ -899,7 +961,7 @@ describe("chat API", () => {
       .send({ message: "hello", employeeId: otherEmployeeId });
 
     expect(other.status).toBe(200);
-    expect(other.body).toEqual({
+    expect(other.body).toMatchObject({
       reply: "Reply for Tal",
       raw: { output_text: "Reply for Tal" },
       notifications: [],
@@ -985,7 +1047,10 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
     expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
     expect(createResponse.mock.calls[1][0].instructions).toContain("Diana system prompt");
-    expect(createResponse.mock.calls[1][0].textFormat).toBeUndefined();
+    expect(createResponse.mock.calls[1][0].textFormat).toMatchObject({
+      type: "json_schema",
+      name: "lucy_metadata_response",
+    });
   });
 
   it("includes current employee records in every LLM turn", async () => {
@@ -1228,6 +1293,15 @@ describe("chat API", () => {
     expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
     expect(response.body.notifications[0].message.text).toBe(
       "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
+    );
+    expect(deliverWhatsAppRelaysMock).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          target: expect.objectContaining({ id: otherEmployeeId }),
+          text: "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
+        }),
+      ],
+      employeeId,
     );
   });
 

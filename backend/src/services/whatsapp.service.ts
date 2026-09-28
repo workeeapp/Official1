@@ -12,7 +12,7 @@ import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import { sendWhatsAppText } from "./whatsapp-send.js";
+import { sendWhatsAppText, startWhatsAppTyping } from "./whatsapp-send.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -128,6 +128,7 @@ export async function handleInboundWhatsAppTexts(
       }
     }
 
+    const stopTyping = startWhatsAppTyping(message.messageId);
     try {
       await markWhatsAppInbound(message.from);
       const speaker = await resolveWhatsAppSpeaker(message.from);
@@ -169,6 +170,8 @@ export async function handleInboundWhatsAppTexts(
         "reply_failed",
         error instanceof Error ? error.message : "unknown",
       );
+    } finally {
+      stopTyping();
     }
   }
 }

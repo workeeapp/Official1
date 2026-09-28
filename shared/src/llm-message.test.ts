@@ -146,6 +146,7 @@ describe("parseLlmReply", () => {
       handoff: null,
       query: null,
       confirm: null,
+      targets: [],
     });
   });
 
@@ -178,10 +179,26 @@ describe("parseLlmReply", () => {
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
-          metadata: { query: "todos" },
+          metadata: { query: "todos", targets: ["לוסי"] },
+        }),
+      ),
+    ).toMatchObject({ query: "todos", targets: ["לוסי"] });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: { query: "self" },
         }),
       ).query,
-    ).toBe("todos");
+    ).toBe("self");
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: { query: "tasks" },
+        }),
+      ).query,
+    ).toBe("self");
   });
 
   it("extracts a relayed message for another employee", () => {

@@ -15,6 +15,7 @@ export type {
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,
+  ChatReplyTiming,
   ChatThreadNotification,
   ChatMessageAuthor,
   ChatThreadMessage,

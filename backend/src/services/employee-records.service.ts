@@ -10,6 +10,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.j
 import { prisma } from "../database/prisma.js";
 import { toPlainJson } from "./llm-client.js";
 import {
+  cancelReminderLinkedToWorkerItem,
   listReminderRowsForUser,
   toReminderSnapshotRow,
   type ReminderSnapshotRow,
@@ -79,17 +80,20 @@ export function hasEmployeeRecords(snapshot: EmployeeRecordSnapshot): boolean {
   );
 }
 
-export function formatEmployeeContext(snapshot: EmployeeRecordSnapshot): string {
+export function formatEmployeeContext(
+  snapshot: EmployeeRecordSnapshot,
+  label = "EMPLOYEE_SAVED_DATA",
+): string {
   if (!hasEmployeeRecords(snapshot)) {
     return [
-      "EMPLOYEE_SAVED_DATA:",
+      `${label}:`,
       "There are currently no visible lists, tasks, or filings.",
       "If asked what someone needs to buy or do, say they have nothing pending.",
     ].join("\n");
   }
 
   return [
-    "EMPLOYEE_SAVED_DATA:",
+    `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders is the current reminder list.",
     JSON.stringify({
       lists: snapshot.lists,
@@ -466,14 +470,22 @@ export interface SharedItemEvent {
   purchased?: boolean;
 }
 
-export async function applyEmployeeMetadata(
+export interface ListItemMutation {
+  action: "add" | "update" | "remove";
+  itemId: string;
+  employeeId: string;
+  listType: string;
+  itemKey: string;
+}
+
+export async function applyEmployeeRecords(
   employeeId: string,
   metadata: LlmMetadata,
   visibility?: ItemVisibility,
   actorId?: string,
-): Promise<SharedItemEvent[]> {
+): Promise<{ events: SharedItemEvent[]; mutations: ListItemMutation[] }> {
   if (metadata.lists.length === 0 && metadata.filing.length === 0) {
-    return [];
+    return { events: [], mutations: [] };
   }
 
   const resolved: ItemVisibility = visibility ?? {
@@ -483,9 +495,12 @@ export async function applyEmployeeMetadata(
   };
   const actor = actorId ?? employeeId;
   const events: SharedItemEvent[] = [];
+  const mutations: ListItemMutation[] = [];
 
   for (const action of metadata.lists) {
-    events.push(...(await applyListAction(employeeId, action, resolved, actor)));
+    const result = await applyListAction(employeeId, action, resolved, actor);
+    events.push(...result.events);
+    mutations.push(...result.mutations);
   }
 
   for (const action of metadata.filing) {
@@ -523,7 +538,22 @@ export async function applyEmployeeMetadata(
     }
   }
 
-  return events;
+  return { events, mutations };
+}
+
+export async function applyEmployeeMetadata(
+  employeeId: string,
+  metadata: LlmMetadata,
+  visibility?: ItemVisibility,
+  actorId?: string,
+): Promise<SharedItemEvent[]> {
+  const result = await applyEmployeeRecords(
+    employeeId,
+    metadata,
+    visibility,
+    actorId,
+  );
+  return result.events;
 }
 
 async function updateOwnedListItem(
@@ -755,8 +785,9 @@ async function applyListAction(
   action: LlmListAction,
   visibility: ItemVisibility,
   actorId: string,
-): Promise<SharedItemEvent[]> {
+): Promise<{ events: SharedItemEvent[]; mutations: ListItemMutation[] }> {
   const events: SharedItemEvent[] = [];
+  const mutations: ListItemMutation[] = [];
   const listName = action.listName.slice(0, 100);
   const list =
     (await prisma.employeeList.findUnique({
@@ -785,6 +816,16 @@ async function applyListAction(
     if (action.action === "remove") {
       const existing = await findMatchingItem(list.id, itemKey);
       const removedKey = existing?.itemKey ?? itemKey;
+      if (existing?.id) {
+        await cancelReminderLinkedToWorkerItem(existing.id);
+        mutations.push({
+          action: "remove",
+          itemId: existing.id,
+          employeeId,
+          listType: action.listType,
+          itemKey: removedKey,
+        });
+      }
       await prisma.employeeListItem.deleteMany({
         where: { listId: list.id, itemKey: removedKey },
       });
@@ -820,7 +861,7 @@ async function applyListAction(
       continue;
     }
 
-    const existing = await findMatchingItem(list.id, itemKey);
+    const existing = await findMatchingItem(list.id, itemKey, action.action);
     const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
     const nextData = toJsonValue(
       action.action === "update" && existing
@@ -837,15 +878,34 @@ async function applyListAction(
     if (existing) {
       await prisma.employeeListItem.update({
         where: { id: existing.id },
-        data: fields,
+        data: {
+          ...fields,
+          ...(action.action === "update" && itemKey !== existing.itemKey
+            ? { itemKey }
+            : {}),
+        },
+      });
+      mutations.push({
+        action: "update",
+        itemId: existing.id,
+        employeeId,
+        listType: action.listType,
+        itemKey: existing.itemKey,
       });
     } else {
-      await prisma.employeeListItem.create({
+      const created = await prisma.employeeListItem.create({
         data: {
           listId: list.id,
           itemKey,
           ...fields,
         },
+      });
+      mutations.push({
+        action: "add",
+        itemId: created.id,
+        employeeId,
+        listType: action.listType,
+        itemKey,
       });
     }
 
@@ -868,10 +928,14 @@ async function applyListAction(
     }
   }
 
-  return events;
+  return { events, mutations };
 }
 
-async function findMatchingItem(listId: string, itemKey: string) {
+async function findMatchingItem(
+  listId: string,
+  itemKey: string,
+  action?: LlmListAction["action"],
+) {
   const exact = await prisma.employeeListItem.findUnique({
     where: { listId_itemKey: { listId, itemKey } },
   });
@@ -882,14 +946,20 @@ async function findMatchingItem(listId: string, itemKey: string) {
   const items = await prisma.employeeListItem.findMany({
     where: { listId },
   });
-  return (
+  const fuzzy =
     items.find(
       (item) =>
         item.itemKey === itemKey ||
         item.itemKey.includes(itemKey) ||
         itemKey.includes(item.itemKey),
-    ) ?? null
-  );
+    ) ?? null;
+  if (fuzzy) {
+    return fuzzy;
+  }
+  if (action === "update" && items.length === 1) {
+    return items[0];
+  }
+  return null;
 }
 
 function mergeItemVisibility(

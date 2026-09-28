@@ -30,6 +30,30 @@ function nextFireAt(from: Date, repeat: string, now: Date): Date | null {
   return next;
 }
 
+export async function settleFiredReminder(
+  reminder: { id: string; fireAt: Date; repeat: string },
+  now: Date,
+  sendStatus: "sent" | "failed",
+): Promise<void> {
+  const sentAt = sendStatus === "sent" ? now : null;
+  const nextAt = nextFireAt(reminder.fireAt, reminder.repeat, now);
+  if (nextAt) {
+    await prisma.reminder.update({
+      where: { id: reminder.id },
+      data: {
+        fireAt: nextAt,
+        sendStatus,
+        sentAt,
+      },
+    });
+    scheduleSoon(nextAt);
+    return;
+  }
+  await prisma.reminder.delete({
+    where: { id: reminder.id },
+  });
+}
+
 export async function fireDueReminders(now = new Date()): Promise<number> {
   if (getEnv().NODE_ENV === "test" || !prisma.reminder) {
     return 0;
@@ -137,25 +161,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       sendResults.every(Boolean)
         ? "sent"
         : "failed";
-    const sentAt = sendStatus === "sent" ? now : null;
 
-    const nextAt = nextFireAt(reminder.fireAt, reminder.repeat, now);
-    if (nextAt) {
-      await prisma.reminder.update({
-        where: { id: reminder.id },
-        data: {
-          fireAt: nextAt,
-          sendStatus,
-          sentAt,
-        },
-      });
-      scheduleSoon(nextAt);
-    } else {
-      await prisma.reminder.update({
-        where: { id: reminder.id },
-        data: { status: "done", sendStatus, sentAt },
-      });
-    }
+    await settleFiredReminder(reminder, now, sendStatus);
   }
 
   return due.length;

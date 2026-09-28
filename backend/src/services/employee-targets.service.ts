@@ -21,6 +21,7 @@ export function resolveActionTargets(
   rawTargets: string[],
   employees: PublicEmployee[],
   actorId: string,
+  extras: PublicEmployee[] = [],
 ): PublicEmployee[] {
   const actor = employees.find((employee) => employee.id === actorId);
   const fallback = actor ? [actor] : [];
@@ -33,9 +34,10 @@ export function resolveActionTargets(
     return employees;
   }
 
+  const pool = [...employees, ...extras];
   const matched = new Map<string, PublicEmployee>();
   for (const raw of rawTargets) {
-    const employee = matchEmployee(raw, employees);
+    const employee = matchEmployee(raw, pool);
     if (employee) {
       matched.set(employee.id, employee);
     }
@@ -58,6 +60,7 @@ export function resolveSpokenMetadata(
     handoff: metadata.handoff ?? null,
     query: metadata.query ?? null,
     confirm: metadata.confirm ?? null,
+    targets: metadata.targets ?? [],
   };
 }
 
@@ -194,6 +197,7 @@ function resolveNamedRelayTargets(
 export function planTargetedActions(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
+  workers?: PublicEmployee[];
   metadata: LlmMetadata;
 }): {
   applications: Array<{
@@ -225,21 +229,25 @@ export function planTargetedActions(input: {
       list.targets,
       input.employees,
       input.actor.id,
+      input.workers,
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
-    const shared = others.length > 0 || isAllTarget(list.targets);
+    const humanOthers = others.filter((target) => !isDigitalEmployee(target));
+    const shared = humanOthers.length > 0 || isAllTarget(list.targets);
     const visibility = visibilityFor(input.actor.id, targets, shared);
     const metadata = { lists: [{ ...list, targets: [] }], filing: [] };
 
     for (const target of targets) {
       applications.push({ employeeId: target.id, metadata, visibility });
-      addNotification(target.id, metadata);
+      if (!isDigitalEmployee(target)) {
+        addNotification(target.id, metadata);
+      }
     }
 
     const actorIncluded = targets.some((target) => target.id === input.actor.id);
     const assignment = assignmentTaskForTargets(
       input.employees,
-      others,
+      humanOthers,
       list,
       isAllTarget(list.targets),
     );
@@ -259,20 +267,25 @@ export function planTargetedActions(input: {
       filing.targets,
       input.employees,
       input.actor.id,
+      input.workers,
     );
-    const others = targets.filter((target) => target.id !== input.actor.id);
-    const shared = others.length > 0 || isAllTarget(filing.targets);
+    const humanOthers = targets.filter(
+      (target) => target.id !== input.actor.id && !isDigitalEmployee(target),
+    );
+    const shared = humanOthers.length > 0 || isAllTarget(filing.targets);
     const visibility = visibilityFor(input.actor.id, targets, shared);
     const metadata = { lists: [], filing: [{ ...filing, targets: [] }] };
 
     for (const target of targets) {
       applications.push({ employeeId: target.id, metadata, visibility });
-      addNotification(target.id, metadata);
+      if (!isDigitalEmployee(target)) {
+        addNotification(target.id, metadata);
+      }
     }
 
     const assignment = assignmentTaskForFiling(
       input.employees,
-      others,
+      humanOthers,
       filing,
       isAllTarget(filing.targets),
     );

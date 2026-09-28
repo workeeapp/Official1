@@ -71,13 +71,15 @@ export async function updateEmployeeRecordItem(
     employees.find((employee) => isProtectedEmployee(employee)) ??
     employees.find((employee) => employee.kind === "digital");
   const notifications = digital
-    ? await notifySharedItemEvents({
-        userId: req.user.id,
-        actor,
-        employees: humanEmployees(employees),
-        events,
-        digitalEmployeeId: digital.id,
-      })
+    ? (
+        await notifySharedItemEvents({
+          userId: req.user.id,
+          actor,
+          employees: humanEmployees(employees),
+          events,
+          digitalEmployeeId: digital.id,
+        })
+      ).notifications
     : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });
@@ -103,13 +105,15 @@ export async function deleteEmployeeRecordItem(
     employees.find((employee) => isProtectedEmployee(employee)) ??
     employees.find((employee) => employee.kind === "digital");
   const notifications = digital
-    ? await notifySharedItemEvents({
-        userId: req.user.id,
-        actor,
-        employees: humanEmployees(employees),
-        events,
-        digitalEmployeeId: digital.id,
-      })
+    ? (
+        await notifySharedItemEvents({
+          userId: req.user.id,
+          actor,
+          employees: humanEmployees(employees),
+          events,
+          digitalEmployeeId: digital.id,
+        })
+      ).notifications
     : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });

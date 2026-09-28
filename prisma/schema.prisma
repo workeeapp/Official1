@@ -105,7 +105,10 @@ model EmployeeListItem {
   visibleTo  Json         @default("[]") @map("visible_to")
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
-  list       EmployeeList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  list          EmployeeList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  reminderId    String?      @unique @map("reminder_id") @db.Uuid
+  reminderClock Reminder?    @relation("ClockOwnsTask", fields: [reminderId], references: [id], onDelete: Cascade)
+  ownedClock    Reminder?    @relation("TaskOwnsClock")
 
   @@unique([listId, itemKey])
   @@index([scope])
@@ -142,10 +145,13 @@ model Reminder {
   status      String   @default("active") @db.VarChar(16)
   sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
   sentAt      DateTime? @map("sent_at")
+  workerItemId String?   @unique @map("worker_item_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   owner     Employee @relation("ReminderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   actor     Employee @relation("ReminderActor", fields: [actorId], references: [id], onDelete: Restrict)
+  workerItem EmployeeListItem? @relation("TaskOwnsClock", fields: [workerItemId], references: [id], onDelete: Cascade)
+  ownedTask  EmployeeListItem? @relation("ClockOwnsTask")
 
   @@index([userId, status, fireAt])
   @@index([ownerId, itemKey])

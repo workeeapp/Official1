@@ -145,6 +145,7 @@ describe("employee targets", () => {
       handoff: null,
       query: null,
       confirm: null,
+      targets: [],
     });
   });
 
@@ -373,6 +374,63 @@ describe("employee targets", () => {
         { completed: true },
       ),
     ).toBe("טל קנה קופסת טונה");
+  });
+
+  it("applies a named digital worker task without an assignment on the speaker", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: ["עמית"],
+          },
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "להזכיר לעמית לקנות חלב ב-08:00" }],
+            targets: ["לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.some((row) => row.employeeId === lucy.id)).toBe(
+      true,
+    );
+    expect(plan.applications.some((row) => row.employeeId === amit.id)).toBe(
+      true,
+    );
+    expect(
+      plan.applications.some(
+        (row) =>
+          row.employeeId === amit.id &&
+          row.metadata.lists.some((list) =>
+            list.items.some((item) =>
+              String(item["שם מטלה"] ?? "").includes("לוסי"),
+            ),
+          ),
+      ),
+    ).toBe(false);
+    expect(plan.notifications.map((row) => row.employee.id)).not.toContain(
+      lucy.id,
+    );
   });
 
   it("plans a WhatsApp send to a raw phone number", () => {

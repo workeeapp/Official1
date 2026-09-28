@@ -8,16 +8,41 @@ export interface LlmTurn {
   raw: unknown;
 }
 
+export type LlmResponseInput = {
+  conversationId: string;
+  message: string;
+  model: string;
+  temperature: number;
+  instructions: string;
+  textFormat?: LlmJsonSchemaFormat;
+};
+
 export interface LlmClient {
   createConversation(): Promise<string>;
-  createResponse(input: {
-    conversationId: string;
-    message: string;
-    model: string;
-    temperature: number;
-    instructions: string;
-    textFormat?: LlmJsonSchemaFormat;
-  }): Promise<LlmTurn>;
+  createResponse(input: LlmResponseInput): Promise<LlmTurn>;
+}
+
+export function usesGpt6RequestRules(model: string): boolean {
+  return model.trim().toLowerCase().startsWith("gpt-6-");
+}
+
+export function toResponsesCreateBody(
+  input: LlmResponseInput,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: input.model,
+    instructions: input.instructions,
+    conversation: input.conversationId,
+    input: input.message,
+  };
+  if (input.textFormat) {
+    body.text = { format: input.textFormat };
+  }
+  if (usesGpt6RequestRules(input.model)) {
+    body.reasoning = { effort: "none" };
+  }
+  body.temperature = input.temperature;
+  return body;
 }
 
 let override: LlmClient | null = null;
@@ -63,14 +88,11 @@ function createOpenAiClient(apiKey: string): LlmClient {
       return conversation.id;
     },
     async createResponse(input) {
-      const response = await client.responses.create({
-        model: input.model,
-        temperature: input.temperature,
-        instructions: input.instructions,
-        conversation: input.conversationId,
-        input: input.message,
-        ...(input.textFormat ? { text: { format: input.textFormat } } : {}),
-      });
+      const response = await client.responses.create(
+        toResponsesCreateBody(input) as Parameters<
+          OpenAI["responses"]["create"]
+        >[0],
+      );
       return {
         reply: extractOutputText(response),
         raw: toPlainJson(response),

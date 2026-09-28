@@ -7,6 +7,8 @@ import {
   composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
+  sendWhatsAppTyping,
+  whatsappTypingBody,
 } from "../src/services/whatsapp-send.js";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
 import {
@@ -169,6 +171,22 @@ describe("WhatsApp webhook", () => {
     expect(response.status).toBe(503);
   });
 
+  it("marks the inbound message read and shows typing", () => {
+    expect(whatsappTypingBody("wamid.1")).toEqual({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: "wamid.1",
+      typing_indicator: { type: "text" },
+    });
+  });
+
+  it("does not call Meta for typing in test", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await sendWhatsAppTyping("wamid.1");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it("does not call Meta when delivering relays in test", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     await deliverWhatsAppRelays(
@@ -208,34 +226,16 @@ describe("WhatsApp webhook", () => {
     ).toContain("לא נשלח");
   });
 
-  it("replaces a false send claim when the engine owns the ask", () => {
+  it("keeps the model response and only appends an engine notice", () => {
     const spoken = composeAssistantReply({
       llmReply: JSON.stringify({
         response: "שלחתי למיכל",
         metadata: { messages: [{ targets: ["מיכל"], text: "" }] },
       }),
-      listed: "",
       notice: "מה לשלוח ל«מיכל»? אפשר גם שלום.",
-      ownAsk: "אין לי מספר ל«מיכל». מה המספר?",
     });
-    expect(spoken).toContain("אין לי מספר ל«מיכל»");
-    expect(spoken).not.toContain("שלחתי");
-  });
-
-  it("uses one delete confirm when the engine owns the ask", () => {
-    const spoken = composeAssistantReply({
-      llmReply: JSON.stringify({
-        response:
-          "למחוק את התזכורות: 'לבדוק למה מיכל קיבלה תשובה' ו'לבדוק למה הודעה למיכל נשלחה אלי'?",
-        metadata: {},
-      }),
-      listed: "",
-      notice: "למחוק את אלה: לבדוק למה מיכל קיבלה תשובה, לבדוק למה הודעה למיכל נשלחה אלי?",
-      ownAsk:
-        "למחוק את אלה: לבדוק למה מיכל קיבלה תשובה, לבדוק למה הודעה למיכל נשלחה אלי?",
-    });
-    expect(spoken.match(/למחוק/g)).toHaveLength(1);
-    expect(spoken).not.toContain("התזכורות:");
+    expect(spoken).toContain("שלחתי למיכל");
+    expect(spoken).toContain("מה לשלוח");
   });
 });
 

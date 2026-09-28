@@ -119,10 +119,17 @@ export interface ChatMessageRequest {
   digitalEmployeeId?: string;
 }
 
+export interface ChatReplyTiming {
+  llmMs: number;
+  afterLlmMs: number;
+}
+
 export interface ChatMessageResponse {
   reply: string;
   raw: unknown;
+  request?: unknown;
   notifications?: ChatThreadNotification[];
+  timing?: ChatReplyTiming;
 }
 
 export interface ChatThreadNotification {
@@ -141,6 +148,8 @@ export interface ChatThreadMessage {
   text: string;
   createdAt?: string;
   actions?: string[];
+  llmMs?: number;
+  afterLlmMs?: number;
 }
 
 export interface ChatHistoryResponse {
@@ -150,6 +159,7 @@ export interface ChatHistoryResponse {
   startedAt: string | null;
   messages: ChatThreadMessage[];
   raw: unknown;
+  request?: unknown;
   isNew: boolean;
 }
 

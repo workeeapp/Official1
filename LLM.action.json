@@ -1,7 +1,7 @@
 {
   "name": "lucy_turn",
   "description": "Lucy list, meeting, filing, and message actions. Returns a user-facing response plus a top-level metadata object.",
-  "model": "gpt-4.1",
+  "model": "gpt-6-luna",
   "temperature": 0,
   "systemMessage": [
     "SYSTEM:",
@@ -298,6 +298,45 @@
                     "type": "string"
                   }
                 }
+              },
+              "reminders": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["add", "remove", "update"]
+                    },
+                    "item": { "type": "string" },
+                    "list_type": {
+                      "type": "string",
+                      "enum": ["shopping", "contacts", "tasks", "custom"]
+                    },
+                    "date": { "type": "string" },
+                    "time": { "type": "string" },
+                    "in": { "type": ["number", "null"] },
+                    "every_count": { "type": ["number", "null"] },
+                    "every_unit": { "type": ["string", "null"] },
+                    "weekdays": {
+                      "type": ["array", "null"],
+                      "items": { "type": "number" }
+                    },
+                    "ping": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "text": { "type": "string" },
+                    "confirmed": { "type": "boolean" }
+                  }
+                }
+              },
+              "confirm": {
+                "type": ["boolean", "null"]
               },
               "query": {
                 "type": ["string", "null"]

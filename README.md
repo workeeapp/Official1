@@ -26,21 +26,20 @@ Username: Amit
 Password: ChangeMe123!
 ```
 
-Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). Lucy’s structured reply schema is `LLM.action.json`. Do not put reminder experiments in Lucy’s file.
+Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). The structured reply schema is `LLM.action.json` (lists, filing, messages, reminders, handoff, query, confirm). David’s voice lives in `LLM.david.json`; both workers emit the same actions.
 
-New capabilities are developed on a **separate digital worker** with its own prompt. Reminders are developed on **דוד** (`LLM.david.json`). The worker understands the speaker, asks until the schema is complete, then emits metadata. The server only applies those fields:
+The worker understands the speaker, asks until the schema is complete, then emits metadata. The server only applies those fields:
 
 - `lists` / `filing` / `messages` / `reminders` — write or send
 - `handoff.worker` — switch the WhatsApp session to that digital employee
-- `query: "todos"` — what the speaker still needs to do or buy (shopping, tasks, self-reminders). A later send to someone else is omitted.
-- `query: "reminders"` — every **active** clock from the database, including scheduled sends
+- `query: "todos"` / `"self"` / `"reminders"` — which saved data the model should read. The model writes `response`. The server does not replace that text.
 - `confirm: true|false` — apply or drop a pending reminder delete
 
 The engine does not invent a destination or a message body, and does not expand `item: "all"` or read Hebrew clocks. An unknown name without digits is not saved. Delete is one `remove` per item name from this turn’s data. Ping dest is `reminders.ping` or `messages.targets` only. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
 A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`. Recurring clocks use `repeat` as `once` or `count:unit` for any interval (`30:seconds`, `15:minutes`, `4:hours`, `1:days`, `1:weeks`, `1:months`) or `weekdays:1,3`. Legacy `daily` still means every day.
 
-Do not add regex that guesses user intent. Lucy’s prompt stays the front desk.
+Do not add regex that guesses user intent. Handoff is only a conversation switch.
 
 Do not commit `.env` or access tokens.
 

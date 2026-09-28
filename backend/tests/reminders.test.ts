@@ -3,9 +3,11 @@ import type { PublicEmployee } from "@workee/shared";
 import {
   formatActiveRemindersReply,
   formatTodosReply,
+  applyTimeToTaskLabel,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
+  pairWorkerItemsToReminders,
   planReminderWrites,
   reminderLabelsMatch,
   resolveReminderFireAt,
@@ -196,6 +198,52 @@ describe("resolveReminderPingDestinations", () => {
   });
 });
 
+describe("applyTimeToTaskLabel", () => {
+  it("replaces an existing clock in the worker task name", () => {
+    expect(
+      applyTimeToTaskLabel(
+        "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־09:00",
+        "10:00",
+      ),
+    ).toBe("להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־10:00");
+  });
+
+  it("appends a clock when the task name has none", () => {
+    expect(applyTimeToTaskLabel("להזכיר לעמית לאכול פיצה", "08:00")).toBe(
+      "להזכיר לעמית לאכול פיצה ב־08:00",
+    );
+  });
+});
+
+describe("pairWorkerItemsToReminders", () => {
+  it("links one new clock to one worker task even when labels differ", () => {
+    expect(
+      pairWorkerItemsToReminders(
+        [{ id: "r1", itemKey: "לקנות חלב", itemLabel: "לקנות חלב" }],
+        [{ id: "w1", itemKey: "להזכיר לעמית לקנות חלב ב-08:00" }],
+      ),
+    ).toEqual([{ reminderId: "r1", workerItemId: "w1" }]);
+  });
+
+  it("pairs by matching item text when there are several clocks", () => {
+    expect(
+      pairWorkerItemsToReminders(
+        [
+          { id: "r1", itemKey: "חלב", itemLabel: "חלב" },
+          { id: "r2", itemKey: "מייל", itemLabel: "מייל" },
+        ],
+        [
+          { id: "w1", itemKey: "להזכיר מייל" },
+          { id: "w2", itemKey: "להזכיר חלב" },
+        ],
+      ),
+    ).toEqual([
+      { reminderId: "r1", workerItemId: "w2" },
+      { reminderId: "r2", workerItemId: "w1" },
+    ]);
+  });
+});
+
 describe("unknown dest", () => {
   it("treats מיכל as an unknown name and asks for the number", () => {
     expect(unknownDestNames({ ping: ["מיכל"] }, [tal])).toEqual(["מיכל"]);
@@ -365,6 +413,18 @@ describe("formatTodosReply", () => {
     ).toBe(
       "מה שאתה צריך לעשות:\n- חלב\n- ללכת לסופר (2026-09-25 21:30)",
     );
+  });
+
+  it("speaks as Lucy about her own task", () => {
+    expect(
+      formatTodosReply({
+        shopping: [],
+        tasks: ["לבדוק מייל"],
+        reminders: [],
+        speakerId: "lucy-1",
+        voice: "self-female",
+      }),
+    ).toBe("אני צריכה לבדוק מייל");
   });
 });
 

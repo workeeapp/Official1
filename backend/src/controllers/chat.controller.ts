@@ -32,14 +32,14 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
   }
 
   const { message, employeeId, digitalEmployeeId } = parseChatMessageBody(req.body);
-  const { reply, raw, notifications } = await sendChatMessage({
+  const { reply, raw, request, notifications, timing } = await sendChatMessage({
     userId: req.user.id,
     employeeId,
     digitalEmployeeId,
     message,
   });
 
-  res.status(200).json({ reply, raw, notifications });
+  res.status(200).json({ reply, raw, request, notifications, timing });
 }
 
 export async function resetConversation(req: Request, res: Response): Promise<void> {

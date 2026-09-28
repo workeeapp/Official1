@@ -4,7 +4,13 @@ import { Button } from "@/components/Button";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
 import { employeeDisplayName } from "@/services/employee.service";
-import { chatDayKey, formatChatDate, formatChatTime, sortChatMessages } from "./chatTime";
+import {
+  chatDayKey,
+  formatChatDate,
+  formatChatTime,
+  formatDurationMs,
+  sortChatMessages,
+} from "./chatTime";
 
 export function ChatPage() {
   const { tableEmployees, digitalEmployees, status } = useEmployees();
@@ -15,6 +21,7 @@ export function ChatPage() {
     setChatWithId,
     threads,
     rawResponses,
+    rawRequests,
     sendingEmployeeId,
     historyLoadingId,
     error,
@@ -25,6 +32,8 @@ export function ChatPage() {
   } = useChat();
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const keepComposerFocusRef = useRef(false);
   const pinToBottomRef = useRef(true);
 
   useEffect(() => {
@@ -58,8 +67,11 @@ export function ChatPage() {
   const sending = Boolean(sendingEmployeeId);
   const sendingThisThread = sendingEmployeeId === threadId;
   const loadingHistory = historyLoadingId === threadId;
-  const completeResponse = formatCompleteResponse(
+  const completeResponse = formatCompletePayload(
     threadId ? rawResponses[threadId] : undefined,
+  );
+  const completeRequest = formatCompletePayload(
+    threadId ? rawRequests[threadId] : undefined,
   );
   const lastMessageId = messages.at(-1)?.id ?? "";
   const messageCount = messages.length;
@@ -87,6 +99,12 @@ export function ChatPage() {
     }
   }, [lastMessageId, messageCount, sendingThisThread, threadId]);
 
+  useEffect(() => {
+    if (keepComposerFocusRef.current) {
+      composerRef.current?.focus();
+    }
+  });
+
   function handleMessagesScroll() {
     const list = listRef.current;
     if (!list) {
@@ -105,6 +123,8 @@ export function ChatPage() {
     }
 
     setDraft("");
+    keepComposerFocusRef.current = true;
+    composerRef.current?.focus();
     await send({
       employeeId: selectedEmployee.id,
       speaker: employeeDisplayName(selectedEmployee),
@@ -112,6 +132,8 @@ export function ChatPage() {
       digitalEmployeeId: selectedDigital?.id,
       assistantSpeaker: chatWithName,
     });
+    keepComposerFocusRef.current = false;
+    composerRef.current?.focus();
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -124,10 +146,11 @@ export function ChatPage() {
   }
 
   return (
-    <section
-      data-testid="chat-page"
-      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-sm"
-    >
+    <section data-testid="chat-page" className="flex flex-col gap-6">
+      <div
+        data-testid="chat-dialog"
+        className="flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-sm"
+      >
       <div className="shrink-0 border-b border-border px-6 py-5 sm:px-8">
         <h1 className="sr-only">Chat</h1>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -207,7 +230,7 @@ export function ChatPage() {
         ref={listRef}
         data-testid="chat-messages"
         onScroll={handleMessagesScroll}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-6 py-5 sm:px-8"
+        className="flex h-[22.5rem] shrink-0 flex-col gap-3 overflow-y-auto overscroll-contain px-6 py-1 sm:px-8"
       >
         {loadingHistory && messages.length === 0 ? (
           <p
@@ -265,16 +288,36 @@ export function ChatPage() {
                     }`}
                   >
                     <span className="block whitespace-pre-wrap">{message.text}</span>
-                    {time ? (
+                    {time ||
+                    message.llmMs != null ||
+                    message.afterLlmMs != null ? (
                       <span
-                        data-testid="chat-time"
-                        className={`mt-1 block text-end text-[11px] leading-4 ${
+                        className={`mt-1 flex items-baseline justify-between gap-2 text-[11px] leading-4 ${
                           message.author === "you"
                             ? "text-white/70"
                             : "text-text-secondary"
                         }`}
                       >
-                        {time}
+                        {message.author === "assistant" &&
+                        (message.llmMs != null || message.afterLlmMs != null) ? (
+                          <span data-testid="chat-llm-timing">
+                            {[
+                              message.llmMs != null
+                                ? `LLM ${formatDurationMs(message.llmMs)}`
+                                : "",
+                              message.afterLlmMs != null
+                                ? `שרת ${formatDurationMs(message.afterLlmMs)}`
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        ) : (
+                          <span />
+                        )}
+                        {time ? (
+                          <span data-testid="chat-time">{time}</span>
+                        ) : null}
                       </span>
                     ) : null}
                   </p>
@@ -321,11 +364,11 @@ export function ChatPage() {
           Message
         </label>
         <textarea
+          ref={composerRef}
           id="chat-message"
           name="message"
           rows={2}
           value={draft}
-          disabled={sending}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleComposerKeyDown}
           placeholder="Write a message…"
@@ -350,16 +393,17 @@ export function ChatPage() {
           </Button>
         )}
       </form>
+      </div>
 
       <div
         data-testid="llm-complete-response"
-        className="min-h-0 shrink-0 border-t border-border bg-background/70 px-4 py-3 sm:px-5"
+        className="rounded-2xl border border-border bg-surface px-4 py-4 shadow-sm sm:px-5"
       >
         <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">
           Complete response
         </p>
         {completeResponse ? (
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border bg-surface p-3 text-xs leading-5 text-text-primary">
+          <pre className="mt-2 whitespace-pre-wrap break-words rounded-xl border border-border bg-background p-3 text-xs leading-5 text-text-primary">
             {completeResponse}
           </pre>
         ) : (
@@ -368,11 +412,29 @@ export function ChatPage() {
           </p>
         )}
       </div>
+
+      <div
+        data-testid="llm-complete-request"
+        className="rounded-2xl border border-border bg-surface px-4 py-4 shadow-sm sm:px-5"
+      >
+        <p className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Complete request
+        </p>
+        {completeRequest ? (
+          <pre className="mt-2 whitespace-pre-wrap break-words rounded-xl border border-border bg-background p-3 text-xs leading-5 text-text-primary">
+            {completeRequest}
+          </pre>
+        ) : (
+          <p className="mt-2 text-sm text-text-secondary">
+            The complete OpenAI request will appear here after Send.
+          </p>
+        )}
+      </div>
     </section>
   );
 }
 
-function formatCompleteResponse(raw: unknown): string {
+function formatCompletePayload(raw: unknown): string {
   if (raw === undefined || raw === null) {
     return "";
   }

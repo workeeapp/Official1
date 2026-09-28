@@ -20,6 +20,9 @@ const {
   employeeFindMany,
   employeeFindUnique,
   reminderFindMany,
+  reminderFindFirst,
+  reminderUpdate,
+  reminderDelete,
 } = vi.hoisted(() => ({
   listFindMany: vi.fn(),
   listFindUnique: vi.fn(),
@@ -40,6 +43,9 @@ const {
   employeeFindMany: vi.fn(),
   employeeFindUnique: vi.fn(),
   reminderFindMany: vi.fn(),
+  reminderFindFirst: vi.fn(),
+  reminderUpdate: vi.fn(),
+  reminderDelete: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -72,6 +78,9 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     reminder: {
       findMany: reminderFindMany,
+      findFirst: reminderFindFirst,
+      update: reminderUpdate,
+      delete: reminderDelete,
     },
   },
 }));
@@ -113,6 +122,9 @@ describe("employee records", () => {
     employeeFindMany.mockReset().mockResolvedValue([]);
     employeeFindUnique.mockReset().mockResolvedValue({ userId: "user-1" });
     reminderFindMany.mockReset().mockResolvedValue([]);
+    reminderFindFirst.mockReset().mockResolvedValue(null);
+    reminderUpdate.mockReset();
+    reminderDelete.mockReset();
   });
 
   it("builds an identity key from Hebrew shopping and task fields", () => {
@@ -273,6 +285,50 @@ describe("employee records", () => {
     );
     expect(filingDeleteMany).toHaveBeenCalledWith({
       where: { employeeId, itemName: "רישיון ישן" },
+    });
+  });
+
+  it("updates the only task when the new name does not match the stored key", async () => {
+    const list = { id: "lucy-tasks", employeeId, listType: "tasks", name: "" };
+    listFindUnique.mockResolvedValue(list);
+    itemFindUnique.mockResolvedValue(null);
+    itemFindMany
+      .mockResolvedValueOnce([
+        {
+          id: "task-1",
+          listId: list.id,
+          itemKey: "להזכיר לעמית לבדוק מייל",
+          data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
+          scope: "personal",
+          addedById: employeeId,
+          visibleTo: [employeeId],
+        },
+      ])
+      .mockResolvedValue([]);
+    itemUpdate.mockResolvedValue({ id: "task-1" });
+
+    await applyEmployeeMetadata(employeeId, {
+      lists: [
+        {
+          action: "update",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "להזכיר לטל לבדוק מייל" }],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "task-1" },
+      data: expect.objectContaining({
+        itemKey: "להזכיר לטל לבדוק מייל",
+        data: expect.objectContaining({
+          "שם מטלה": "להזכיר לטל לבדוק מייל",
+        }),
+      }),
     });
   });
 

@@ -19,6 +19,16 @@ export function formatChatDate(value: string, now = new Date()): string {
   return date.toLocaleDateString("he-IL");
 }
 
+export function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "";
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export function formatChatTime(value: string): string {
   const date = parseDate(value);
   if (!date) {
