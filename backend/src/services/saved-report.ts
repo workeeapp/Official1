@@ -184,13 +184,22 @@ function formatListLines(
       continue;
     }
     for (const item of list.items) {
-      const label = listItemLabel(listType, item);
-      if (!label) {
-        continue;
-      }
-      const bits = [label];
+      const bits: string[] = [];
       if (listType === "custom" && list.list_name) {
-        bits.unshift(`[${list.list_name}]`);
+        bits.push(`[${list.list_name}]`);
+      }
+      if (listType === "custom") {
+        const fields = formatCustomItemFields(item);
+        if (!fields) {
+          continue;
+        }
+        bits.push(fields);
+      } else {
+        const label = listItemLabel(listType, item);
+        if (!label) {
+          continue;
+        }
+        bits.push(label);
       }
       if (listType === "tasks") {
         const date = readField(item, ["תאריך לביצוע", "date"]);
@@ -218,6 +227,35 @@ function formatListLines(
     }
   }
   return lines.join("\n");
+}
+
+/** Prefer full column dump for custom lists so reports show items, not just owner. */
+function formatCustomItemFields(item: Record<string, unknown>): string {
+  const skip = new Set([
+    "scope",
+    "owner",
+    "visibility",
+    "visible_to",
+    "visibleTo",
+  ]);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(item)) {
+    if (skip.has(key) || key.startsWith("_")) {
+      continue;
+    }
+    if (typeof value === "string" && value.trim()) {
+      parts.push(`${key}: ${value.trim()}`);
+      continue;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      parts.push(`${key}: ${value}`);
+      continue;
+    }
+    if (typeof value === "boolean") {
+      parts.push(`${key}: ${value ? "כן" : "לא"}`);
+    }
+  }
+  return parts.join(", ");
 }
 
 function formatFilingLines(

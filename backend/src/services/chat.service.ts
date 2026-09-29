@@ -874,6 +874,7 @@ export async function sendChatMessage(input: {
     "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
     "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders.",
     "Status report / what do I have saved / דוח מצב: metadata.query = \"report\". For a partial report set metadata.sections to one or more of: reminders, sends, tasks, shopping, filings, contacts, custom. Omit sections for the full report. The server formats the detailed report.",
+    "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: query report + sections [\"custom\"] (or the matching list type), OR answer by enumerating that list's items and column values from EMPLOYEE_SAVED_DATA. Never reply with only the owner name — owner is whose list it is; the answer is the items.",
     "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"] only. EMPLOYEE_SAVED_DATA does not include send history — the server loads it when you emit that query. Do not invent past sends.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",

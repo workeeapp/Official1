@@ -170,4 +170,38 @@ describe("formatSavedDataReport", () => {
     expect(text).not.toContain("תזכורות:");
     expect(text).not.toContain("תיוקים:");
   });
+
+  it("lists custom list item fields, not only the owner name", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [
+          {
+            list_type: "custom",
+            list_name: "שיעורי נהיגה",
+            owner: "מאיה",
+            items: [
+              { תאריך: "2026-10-01", שעה: "16:00", נושא: "חניה" },
+              { תאריך: "2026-10-03", שעה: "17:30", נושא: "כביש מהיר" },
+            ],
+          },
+        ],
+        filing: [],
+        reminders: [],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["custom"],
+      multiOwner: true,
+    });
+
+    expect(text).toContain("שיעורי נהיגה");
+    expect(text).toContain("תאריך: 2026-10-01");
+    expect(text).toContain("נושא: חניה");
+    expect(text).toContain("כביש מהיר");
+    expect(text).toContain("(מאיה)");
+    expect(text.split("\n").some((line) => line.trim() === "- מאיה")).toBe(
+      false,
+    );
+  });
 });
