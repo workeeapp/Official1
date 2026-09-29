@@ -317,4 +317,35 @@ describe("formatSavedDataReport", () => {
       false,
     );
   });
+
+  it("shows the custom list header so named lists are recognizable in reports", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [
+          {
+            list_type: "custom",
+            list_name: "שיעורי הנהיגה של מאיה",
+            owner: "טל",
+            items: [
+              {
+                תאריך: "2026-09-29",
+                "מספר שיעור": 1,
+                שולם: "לא",
+              },
+            ],
+          },
+        ],
+        filing: [],
+        reminders: [],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["custom"],
+    });
+
+    expect(text).toContain("[שיעורי הנהיגה של מאיה]");
+    expect(text).toContain("מספר שיעור: 1");
+    expect(text).not.toContain("- אין");
+  });
 });

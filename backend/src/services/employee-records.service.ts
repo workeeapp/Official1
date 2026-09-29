@@ -12,6 +12,7 @@ import { prisma } from "../database/prisma.js";
 import { recordAuditEvent, listRecentMutationHistory } from "./audit.service.js";
 import { toPlainJson } from "./llm-client.js";
 import {
+  cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
   listReminderRowsForUser,
   toReminderSnapshotRow,
@@ -369,9 +370,14 @@ export async function getEmployeeOwnedRecords(
     .filter((list) => list.items.length > 0)
     .map((list) => {
       const ownerName = list.employee.nickname?.trim() || list.employee.name;
+      const titleName =
+        list.name.trim() ||
+        (list.listType === "custom"
+          ? deriveCustomListName(list.items.map((item) => asRecord(item.data)))
+          : "");
       return {
         type: list.listType,
-        title: listTitle(list.listType, list.name),
+        title: listTitle(list.listType, titleName),
         items: list.items.map((item) =>
           toOwnedListItem(list.listType, item, names, ownerName),
         ),
@@ -576,25 +582,30 @@ export async function getEmployeeRecordSnapshot(
   }
 
   const lists = ownLists
-    .map((list) => ({
-      list_type: list.listType,
-      ...(list.name ? { list_name: list.name } : {}),
-      owner: list.employee.nickname?.trim() || list.employee.name,
-      items: list.items
-        .filter((item) =>
-          !isOrphanAssignment(
-            asRecord(item.data),
-            currentShopping,
+    .map((list) => {
+      const derivedName =
+        list.name.trim() ||
+        (list.listType === "custom"
+          ? deriveCustomListName(list.items.map((item) => asRecord(item.data)))
+          : "");
+      return {
+        list_type: list.listType,
+        ...(derivedName ? { list_name: derivedName } : {}),
+        owner: list.employee.nickname?.trim() || list.employee.name,
+        items: list.items
+          .filter(
+            (item) =>
+              !isOrphanAssignment(asRecord(item.data), currentShopping),
+          )
+          .map((item) =>
+            withVisibility(
+              item.data,
+              item.scope,
+              list.employee.nickname?.trim() || list.employee.name,
+            ),
           ),
-        )
-        .map((item) =>
-          withVisibility(
-            item.data,
-            item.scope,
-            list.employee.nickname?.trim() || list.employee.name,
-          ),
-        ),
-    }))
+      };
+    })
     .filter((list) => list.items.length > 0);
 
   for (const [owner, byType] of sharedByOwner) {
@@ -859,11 +870,21 @@ async function deleteOwnedListItem(
     where: { id: existing.id },
     data: { deletedAt: new Date(), reminderId: null },
   });
+  await cancelReminderLinkedToWorkerItem(existing.id);
   const owner = await prisma.employee.findUnique({
     where: { id: existing.list.employeeId },
     select: { userId: true },
   });
   if (owner) {
+    const label =
+      ownedItemTitle(listType, asRecord(existing.data), existing.itemKey) ||
+      existing.itemKey;
+    await cancelActiveRemindersMatchingWork({
+      userId: owner.userId,
+      itemKey: existing.itemKey,
+      itemLabel: label,
+      actorEmployeeId: actorId,
+    });
     await recordAuditEvent({
       userId: owner.userId,
       actorEmployeeId: actorId,
@@ -1049,7 +1070,22 @@ async function applyListAction(
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, action);
-  const listName = resolvedAction.listName.slice(0, 100);
+  let listName = resolvedAction.listName.slice(0, 100);
+  if (!listName && resolvedAction.listType === "custom") {
+    for (const raw of resolvedAction.items) {
+      const record = asRecord(raw);
+      const fromItem =
+        typeof record.list_name === "string"
+          ? record.list_name.trim()
+          : typeof record.listName === "string"
+            ? record.listName.trim()
+            : "";
+      if (fromItem) {
+        listName = fromItem.slice(0, 100);
+        break;
+      }
+    }
+  }
   const list =
     (await prisma.employeeList.findUnique({
       where: {
@@ -1067,6 +1103,31 @@ async function applyListAction(
         name: listName,
       },
     }));
+
+  // Repair legacy custom rows that were created with an empty name while
+  // list_name lived only on the item JSON.
+  if (
+    listName &&
+    list.name.trim() === "" &&
+    resolvedAction.listType === "custom"
+  ) {
+    const clash = await prisma.employeeList.findUnique({
+      where: {
+        employeeId_listType_name: {
+          employeeId,
+          listType: "custom",
+          name: listName,
+        },
+      },
+    });
+    if (!clash || clash.id === list.id) {
+      await prisma.employeeList.update({
+        where: { id: list.id },
+        data: { name: listName },
+      });
+      list.name = listName;
+    }
+  }
 
   for (const rawItem of resolvedAction.items) {
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
@@ -1099,6 +1160,20 @@ async function applyListAction(
         where: { id: employeeId },
         select: { userId: true },
       });
+      if (owner) {
+        const label =
+          ownedItemTitle(
+            resolvedAction.listType,
+            existing ? asRecord(existing.data) : item,
+            removedKey,
+          ) || removedKey;
+        await cancelActiveRemindersMatchingWork({
+          userId: owner.userId,
+          itemKey: removedKey,
+          itemLabel: label,
+          actorEmployeeId: actorId,
+        });
+      }
       if (owner && existing?.id) {
         await recordAuditEvent({
           userId: owner.userId,
@@ -1543,6 +1618,23 @@ function listTitle(listType: string, listName: string): string {
     return listName.trim();
   }
   return LIST_TYPE_TITLES[listType] ?? (listName.trim() || "List");
+}
+
+export function deriveCustomListName(
+  items: Array<Record<string, unknown>>,
+): string {
+  for (const item of items) {
+    const name =
+      typeof item.list_name === "string"
+        ? item.list_name.trim()
+        : typeof item.listName === "string"
+          ? item.listName.trim()
+          : "";
+    if (name) {
+      return name.slice(0, 100);
+    }
+  }
+  return "";
 }
 
 function toOwnedListItem(

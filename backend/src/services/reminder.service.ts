@@ -401,6 +401,61 @@ export async function cancelReminderLinkedToWorkerItem(
   }
 }
 
+/**
+ * When a speaker shopping/task wrapper is removed, cancel active clocks that
+ * are the same work by key/label (self-nudge clocks are linked to the worker
+ * task, not the speaker row).
+ */
+export async function cancelActiveRemindersMatchingWork(input: {
+  userId: string;
+  itemKey: string;
+  itemLabel?: string;
+  actorEmployeeId?: string | null;
+}): Promise<string[]> {
+  if (!prisma.reminder?.findMany) {
+    return [];
+  }
+  const wantedKey = itemKey(input.itemKey);
+  const wantedLabel = (input.itemLabel ?? input.itemKey).trim();
+  if (!wantedKey && !wantedLabel) {
+    return [];
+  }
+  try {
+    const rows = await prisma.reminder.findMany({
+      where: { userId: input.userId, status: "active" },
+    });
+    const matches = rows.filter(
+      (row) =>
+        (wantedKey.length > 0 && row.itemKey === wantedKey) ||
+        reminderLabelsMatch(row.itemLabel, wantedLabel) ||
+        (wantedKey.length > 0
+          ? reminderLabelsMatch(row.itemKey, wantedKey)
+          : false),
+    );
+    const cancelled: string[] = [];
+    for (const match of matches) {
+      const workerItemId =
+        "workerItemId" in match && typeof match.workerItemId === "string"
+          ? match.workerItemId
+          : null;
+      await removeReminderAndLinkedWorkerTask({
+        id: match.id,
+        workerItemId,
+        userId: input.userId,
+        actorEmployeeId: input.actorEmployeeId,
+        label: match.itemLabel,
+      });
+      cancelled.push(match.itemLabel);
+    }
+    return cancelled;
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 async function cancelActiveReminder(
   userId: string,
   ownerId: string,
