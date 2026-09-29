@@ -6,6 +6,7 @@ import {
   reminderIsScheduledSend,
   type ReminderSnapshotRow,
 } from "./reminder.service.js";
+import { resolveRelativeDateLabel } from "../utils/relative-date.js";
 
 const ALL_SECTIONS: ReportSection[] = [
   "reminders",
@@ -237,22 +238,45 @@ function formatCustomItemFields(item: Record<string, unknown>): string {
     "visibility",
     "visible_to",
     "visibleTo",
+    "list_name",
+    "list_type",
+    "listName",
+    "listType",
   ]);
+  const labelFor = (key: string): string | null => {
+    if (skip.has(key) || key.startsWith("_")) {
+      return null;
+    }
+    // Never surface schema/code identifiers to users.
+    if (/^[A-Z][A-Z0-9_]*$/.test(key) && key.includes("_")) {
+      return null;
+    }
+    const mapped: Record<string, string> = {
+      date: "תאריך",
+      time: "שעה",
+      name: "שם",
+      title: "כותרת",
+      item_name: "שם",
+      store: "חנות",
+    };
+    return mapped[key] ?? key;
+  };
   const parts: string[] = [];
   for (const [key, value] of Object.entries(item)) {
-    if (skip.has(key) || key.startsWith("_")) {
+    const label = labelFor(key);
+    if (!label) {
       continue;
     }
     if (typeof value === "string" && value.trim()) {
-      parts.push(`${key}: ${value.trim()}`);
+      parts.push(`${label}: ${resolveRelativeDateLabel(value.trim())}`);
       continue;
     }
     if (typeof value === "number" && Number.isFinite(value)) {
-      parts.push(`${key}: ${value}`);
+      parts.push(`${label}: ${value}`);
       continue;
     }
     if (typeof value === "boolean") {
-      parts.push(`${key}: ${value ? "כן" : "לא"}`);
+      parts.push(`${label}: ${value ? "כן" : "לא"}`);
     }
   }
   return parts.join(", ");

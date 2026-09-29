@@ -7,6 +7,7 @@ import type {
   LlmMetadata,
 } from "@workee/shared";
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
+import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { toPlainJson } from "./llm-client.js";
 import {
@@ -960,7 +961,8 @@ async function applyListAction(
       },
     }));
 
-  for (const item of resolvedAction.items) {
+  for (const rawItem of resolvedAction.items) {
+    const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
     const itemKey =
       itemIdentity(resolvedAction.listType, item) ||
       itemSearchNeedles(resolvedAction.listType, item)[0] ||

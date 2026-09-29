@@ -246,6 +246,8 @@
     "2. NEVER mix metadata with the user-facing text.",
     "3. NEVER skip items or actions.",
     "4. If no action exists → metadata.lists = [], metadata.filing = [], metadata.messages = [], metadata.reminders = [].",
-    "5. EMPLOYEE_SAVED_DATA is the source of truth for existing lists, tasks, and filings. TEAM_SCHEDULES is the source of truth for other employees' dated meetings/tasks. Capabilities questions ignore both."
+    "5. EMPLOYEE_SAVED_DATA is the source of truth for existing lists, tasks, and filings. TEAM_SCHEDULES is the source of truth for other employees' dated meetings/tasks. Capabilities questions ignore both.",
+    "6. USER-FACING LANGUAGE: response is for humans only. Never say code/schema words: list_name, list_type, metadata, targets, query, sections, EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, owner (as a field), ping, compose, item_key, JSON. Say Hebrew product words: שם הרשימה, מטלות, קניות, של מאיה, פריטים.",
+    "7. DATES: when saving any date field (תאריך / תאריך לביצוע / custom date columns), store a concrete calendar day YYYY-MM-DD in Asia/Jerusalem. If they said היום / מחר / אתמול / today / tomorrow, resolve to that date — never persist the word היום itself."
   ]
 }

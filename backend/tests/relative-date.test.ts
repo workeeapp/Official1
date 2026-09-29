@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+import {
+  jerusalemYmd,
+  normalizeRelativeDatesInRecord,
+  resolveRelativeDateLabel,
+} from "../src/utils/relative-date.js";
+
+describe("relative-date", () => {
+  const noonUtc = new Date("2026-09-29T12:00:00.000Z");
+
+  it("resolves היום / מחר / אתמול to YYYY-MM-DD in Jerusalem", () => {
+    const today = jerusalemYmd(noonUtc);
+    expect(resolveRelativeDateLabel("היום", noonUtc)).toBe(today);
+    expect(resolveRelativeDateLabel("מחר", noonUtc)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(resolveRelativeDateLabel("מחר", noonUtc)).not.toBe(today);
+    expect(resolveRelativeDateLabel("אתמול", noonUtc)).not.toBe(today);
+  });
+
+  it("leaves concrete dates and other text unchanged", () => {
+    expect(resolveRelativeDateLabel("2026-10-01", noonUtc)).toBe("2026-10-01");
+    expect(resolveRelativeDateLabel("חניה", noonUtc)).toBe("חניה");
+  });
+
+  it("normalizes relative labels inside item records", () => {
+    expect(
+      normalizeRelativeDatesInRecord(
+        { תאריך: "היום", נושא: "חניה" },
+        noonUtc,
+      ),
+    ).toEqual({
+      תאריך: jerusalemYmd(noonUtc),
+      נושא: "חניה",
+    });
+  });
+});

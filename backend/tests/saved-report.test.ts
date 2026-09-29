@@ -180,7 +180,7 @@ describe("formatSavedDataReport", () => {
             list_name: "שיעורי נהיגה",
             owner: "מאיה",
             items: [
-              { תאריך: "2026-10-01", שעה: "16:00", נושא: "חניה" },
+              { תאריך: "היום", שעה: "16:00", נושא: "חניה" },
               { תאריך: "2026-10-03", שעה: "17:30", נושא: "כביש מהיר" },
             ],
           },
@@ -196,10 +196,12 @@ describe("formatSavedDataReport", () => {
     });
 
     expect(text).toContain("שיעורי נהיגה");
-    expect(text).toContain("תאריך: 2026-10-01");
+    expect(text).toMatch(/תאריך: \d{4}-\d{2}-\d{2}/);
+    expect(text).not.toContain("תאריך: היום");
     expect(text).toContain("נושא: חניה");
     expect(text).toContain("כביש מהיר");
     expect(text).toContain("(מאיה)");
+    expect(text).not.toMatch(/LIST_NAME|list_name/i);
     expect(text.split("\n").some((line) => line.trim() === "- מאיה")).toBe(
       false,
     );
