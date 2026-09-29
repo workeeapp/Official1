@@ -52,13 +52,15 @@ The worker understands the speaker, asks until the schema is complete, then emit
 | `reminders` | Active ping clocks only |
 | `report` | Full or partial status digest (+ optional `sections`) |
 
-**Response text:** normally the model writes `response`. The server may replace or correct it in a few cases: `query: "report"` (formatted status report), failed WhatsApp delivery notices, reminder-delete confirm prompts, and shopping/tasks wording fixes after list apply.
+**Response text:** normally the model writes `response`. The server may replace or correct it in a few cases: `query: "report"` (formatted status report), failed WhatsApp delivery notices, reminder-delete confirm prompts, and shopping/tasks wording fixes after list apply. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …).
 
-**Do not** expand `item: "all"`, parse weekday words in `date`, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+**Do not** expand `item: "all"`, invent reminder clocks from weekday words in free text, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
 ## Lists, meetings, sharing
 
 - **Shopping** = things to buy. **Tasks** = work to do (including meetings with date/time). Dated tasks also appear in `TEAM_SCHEDULES` so the worker can see other people’s calendar rows without their private shopping.
+- **Custom lists** = named lists with user-defined columns. When asked to show a list (e.g. שיעורי נהיגה של מאיה), answer with the **items and their fields**, not only the owner’s name.
+- **Dates:** store concrete `YYYY-MM-DD` (Asia/Jerusalem). Exact labels `היום` / `מחר` / `אתמול` (and today/tomorrow/yesterday) are resolved on save and when formatting reports — do not leave the word היום in saved data.
 - On remove/update, the server resolves `list_type` from where the item actually lives. If the spoken reply says קניות for a tasks item, the reply is corrected to מטלות (and the reverse).
 - List/filing actions may target another human or `כולם`. Shared shopping changes can notify the other person’s assistant thread when someone buys or updates an item.
 
@@ -88,7 +90,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 
 ## Status report
 
-`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`. Empty sections = full report. The **server** formats the Hebrew report from DB.
+`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`. Empty sections = full report. The **server** formats the Hebrew report from DB (custom rows show column values; relative day labels are shown as real dates).
 
 ## Architecture note
 
