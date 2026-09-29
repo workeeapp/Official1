@@ -34,24 +34,45 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 | Metadata | Role |
 |----------|------|
-| `lists` | Shopping, tasks, contacts-list type, or custom lists |
+| `lists` | Shopping, tasks (incl. dated meetings), contacts-list type, or custom lists. Optional `targets` for other employees / everyone |
 | `filing` | Durable facts / memory (IDs, family context, preferences). Injected every turn in `EMPLOYEE_SAVED_DATA` |
 | `directory` | Personal phone book (`Contacts`) — not Employees |
 | `messages` | Send **now** on WhatsApp / in-app |
 | `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / recurring) |
-| `query` | `todos` / `self` / `reminders` / `report` (+ optional `sections`) |
+| `query` | Which saved data to read — see below |
 | `confirm` | Apply or drop a pending reminder delete |
 | `handoff.worker` | Switch the conversation to another digital employee |
+
+**`query` values:**
+
+| Value | Meaning |
+|-------|---------|
+| `todos` | Speaker shopping / tasks still open |
+| `self` | This digital worker’s own lists and reminder jobs (`WORKER_SAVED_DATA`) |
+| `reminders` | Active ping clocks only |
+| `report` | Full or partial status digest (+ optional `sections`) |
 
 **Response text:** normally the model writes `response`. The server may replace or correct it in a few cases: `query: "report"` (formatted status report), failed WhatsApp delivery notices, reminder-delete confirm prompts, and shopping/tasks wording fixes after list apply.
 
 **Do not** expand `item: "all"`, parse weekday words in `date`, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+
+## Lists, meetings, sharing
+
+- **Shopping** = things to buy. **Tasks** = work to do (including meetings with date/time). Dated tasks also appear in `TEAM_SCHEDULES` so the worker can see other people’s calendar rows without their private shopping.
+- On remove/update, the server resolves `list_type` from where the item actually lives. If the spoken reply says קניות for a tasks item, the reply is corrected to מטלות (and the reverse).
+- List/filing actions may target another human or `כולם`. Shared shopping changes can notify the other person’s assistant thread when someone buys or updates an item.
 
 ## People, visibility, contacts
 
 - **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA`; non-owners see their own.
 - **Contacts** — the speaker’s personal phone book (`metadata.directory`). Resolve message/reminder targets via Employees first, then contacts. Do **not** create Employees for outsiders.
 - WhatsApp inbound from an unknown number may create a temporary guest Employee named `אורח …XXXX`. Guests are hidden from the Employees UI and Chat-as picker.
+
+## App UI
+
+- **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy / David / other digital). Guests are omitted from Chat-as.
+- **Employees** — CRUD for humans and digital workers (guests hidden); optional owner flag.
+- **Dashboard** — signed-in home. **WhatsApp** — webhook/flow status for operators.
 
 ## Reminders and scheduled sends
 
@@ -60,6 +81,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Fixed copy:** `compose` false/omit; `text` is the final WhatsApp body.
 - **Compose at fire:** `compose: true`; `text` is a brief only; the LLM writes the final body when the clock fires. `last_composed_text` stores the last send so repeats can be avoided.
 - **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
+- Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways).
 - Reminder **delete** uses server Action State on the conversation (`pending_action` / `pending_targets` / `pending_step`), injected each turn — not LLM memory.
 
