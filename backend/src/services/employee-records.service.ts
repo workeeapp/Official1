@@ -224,8 +224,7 @@ export function formatEmployeeContext(
 
   return [
     `${label}:`,
-    "Only these saved items exist. Do not invent others. active_reminders is pending clocks only.",
-    "reminders may include status=done rows from the last 14 days (already fired). For those, sent_at is when WhatsApp ran and sent_text is the body that went out (or the brief if compose failed).",
+    "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not here — use metadata.query = \"report\" with sections [\"sends\"] when the speaker asks what was already sent.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
     JSON.stringify({
       lists: snapshot.lists,
@@ -447,7 +446,7 @@ export async function deleteEmployeeRecord(
 
 export async function getEmployeeRecordSnapshot(
   employeeId: string,
-  options?: { accountOwner?: boolean },
+  options?: { accountOwner?: boolean; includeDoneSendHistory?: boolean },
 ): Promise<EmployeeRecordSnapshot> {
   const owner = await prisma.employee.findUnique({
     where: { id: employeeId },
@@ -608,6 +607,10 @@ export async function getEmployeeRecordSnapshot(
         const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
         return row.ownerId === employeeId || pings.includes(employeeId);
       })
+      .filter(
+        (row) =>
+          options?.includeDoneSendHistory === true || row.status === "active",
+      )
       .map((row) => toReminderSnapshotRow(row, names)),
   };
 }

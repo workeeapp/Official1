@@ -150,7 +150,7 @@ describe("employees API", () => {
     expect(response.body.employee.phone).toBe("050-1111111");
   });
 
-  it("creates a digital employee with model settings", async () => {
+  it("creates a digital employee inheriting Lucy LLM defaults", async () => {
     findUnique.mockResolvedValue({
       id: userId,
       username: "Amit",
@@ -158,20 +158,13 @@ describe("employees API", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    create.mockResolvedValue({
+    create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       id: "66666666-6666-4666-8666-666666666666",
       userId,
-      kind: "digital",
-      name: "לוסי",
-      surname: "",
-      nickname: "לוסי",
-      email: null,
-      phone: null,
-      model: "gpt-4.1-mini",
-      temperature: 0,
-      instructions: "You manage lists and filings.",
+      isProtected: false,
       createdAt: new Date(),
-    });
+      ...data,
+    }));
 
     const loginResponse = await request(app)
       .post("/api/auth/login")
@@ -182,26 +175,25 @@ describe("employees API", () => {
       .set("Cookie", cookieHeader(loginResponse))
       .send({
         kind: "digital",
-        name: "לוסי",
-        model: "gpt-4.1-mini",
-        temperature: 0,
-        instructions: "You manage lists and filings.",
+        name: "דיאנה",
+        model: "custom-model-ignored",
+        temperature: 0.9,
+        instructions: "custom prompt ignored",
       });
 
     expect(response.status).toBe(201);
     expect(response.body.employee).toMatchObject({
       kind: "digital",
-      name: "לוסי",
-      model: "gpt-4.1-mini",
-      temperature: 0,
-      instructions: "You manage lists and filings.",
+      name: "דיאנה",
     });
+    expect(response.body.employee.instructions).toContain("metadata");
+    expect(response.body.employee.instructions).not.toBe("custom prompt ignored");
+    expect(response.body.employee.model).not.toBe("custom-model-ignored");
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         kind: "digital",
-        model: "gpt-4.1-mini",
-        temperature: 0,
-        instructions: "You manage lists and filings.",
+        name: "דיאנה",
+        instructions: expect.stringContaining("metadata"),
       }),
     });
   });

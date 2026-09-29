@@ -186,27 +186,9 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
   };
 }
 
-function llmConfigForDigital(digital?: PublicEmployee): LlmConfig {
-  const fileConfig = loadLlmConfig();
-  if (digital?.protected) {
-    return {
-      model: digital.model ?? fileConfig.model,
-      temperature: digital.temperature ?? fileConfig.temperature,
-      systemMessage: digital.instructions?.trim() || fileConfig.systemMessage,
-      responseFormat: fileConfig.responseFormat,
-    };
-  }
-
-  if (digital?.model && digital.instructions?.trim()) {
-    return {
-      model: digital.model,
-      temperature: digital.temperature ?? 0,
-      systemMessage: digital.instructions,
-      responseFormat: fileConfig.responseFormat,
-    };
-  }
-
-  return fileConfig;
+/** Every digital worker uses Lucy's base LLM.config (+ shared action schema). */
+function llmConfigForDigital(_digital?: PublicEmployee): LlmConfig {
+  return loadLlmConfig();
 }
 
 function pickDigitalEmployee(employees: PublicEmployee[]): PublicEmployee | undefined {
@@ -294,7 +276,7 @@ function workerTargetingInstructions(
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
       : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
-    `Handoff only if they want to speak with another digital employee. metadata.handoff = { "worker": "<their name>" }. ${feminine ? "Confirm feminine: מעבירה אותך לדוד." : "Confirm: מעביר אותך ללוסי."} Messages are not a conversation switch.`,
+    `Handoff only if they want to speak with another digital employee. metadata.handoff = { "worker": "<their name>" }. ${feminine ? "Confirm feminine: מעבירה אותך ל«שם»." : "Confirm masculine: מעביר אותך ל«שם»."} Messages are not a conversation switch.`,
     "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
     "One sentence can be several actions. Fill every array that applies.",
     `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder.`,
@@ -892,10 +874,10 @@ export async function sendChatMessage(input: {
     "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
     "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders.",
     "Status report / what do I have saved / דוח מצב: metadata.query = \"report\". For a partial report set metadata.sections to one or more of: reminders, sends, tasks, shopping, filings, contacts, custom. Omit sections for the full report. The server formats the detailed report.",
-    "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"]. Also readable from EMPLOYEE_SAVED_DATA.reminders where status=done (sent_at + sent_text). Do not invent past sends.",
+    "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"] only. EMPLOYEE_SAVED_DATA does not include send history — the server loads it when you emit that query. Do not invent past sends.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
-    "query reminders = ping clocks (active_reminders) plus recent done rows in reminders. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+    "query reminders = ping clocks only (active_reminders). Send history is not in saved data — use query report + sections sends. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
     "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm means ask/confirm delete only. Reminder names pick targets, not send. Yes → confirm=true; no → confirm=false. Do not start messages or new reminders until the server clears the state.",
   ]
     .filter(Boolean)
@@ -1167,14 +1149,19 @@ export async function sendChatMessage(input: {
     const confirmPending = reminderPlan.ask.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
     if (metadata.query === "report" && !deliveryFailed && !confirmPending) {
-      const reportSnapshot = await getEmployeeRecordSnapshot(employee.id);
+      const reportSections = metadata.reportSections ?? [];
+      const needSendHistory =
+        reportSections.length === 0 || reportSections.includes("sends");
+      const reportSnapshot = await getEmployeeRecordSnapshot(employee.id, {
+        includeDoneSendHistory: needSendHistory,
+      });
       const reportText = formatSavedDataReport({
         snapshot: reportSnapshot,
         contacts: refreshedContacts,
         speakerId: employee.id,
         speakerPhone: employee.phone,
         speakerName: speaker,
-        sections: metadata.reportSections ?? [],
+        sections: reportSections,
         multiOwner: employee.isOwner === true,
       });
       workingReply = setEngineResponse(workingReply, reportText);

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadDavidConfig, loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
+import { loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 
@@ -25,26 +25,11 @@ describe("LLM action schema", () => {
 
     expect(config.responseFormat?.name).toBe("lucy_metadata_response");
     expect(config.systemMessage).toContain("metadata");
-  });
-
-  it("loads David reminder rules without changing Lucy config", () => {
-    const lucy = loadLlmConfig(repoRoot);
-    const david = loadDavidConfig(repoRoot);
-
-    expect(david?.systemMessage).toContain("CLOCK");
-    expect(david?.systemMessage).toContain("in");
-    expect(david?.systemMessage).toContain("digits");
-    expect(david?.systemMessage).toContain("CONFIRM BEFORE DELETE");
-    expect(david?.systemMessage).toContain("query todos");
-    expect(david?.systemMessage).toContain("query report");
-    expect(lucy.systemMessage).not.toContain("LLM.david");
-    expect(lucy.systemMessage).toContain("דוד");
-    expect(lucy.systemMessage).toContain("metadata.query");
-    expect(lucy.systemMessage).toContain("query report");
-    expect(lucy.systemMessage).toContain("sections");
-    expect(lucy.systemMessage).toContain("compose_source");
-    expect(lucy.systemMessage).toContain("git_log");
-    expect(lucy.systemMessage).toContain("PLATFORM INTERNAL");
-    expect(david?.systemMessage).toContain("compose_source");
+    expect(config.systemMessage).toContain("metadata.query");
+    expect(config.systemMessage).toContain("query report");
+    expect(config.systemMessage).toContain("sections");
+    expect(config.systemMessage).toContain("compose_source");
+    expect(config.systemMessage).toContain("git_log");
+    expect(config.systemMessage).toContain("PLATFORM INTERNAL");
   });
 });

@@ -1,6 +1,6 @@
 # Workee
 
-A React frontend, Express API, and PostgreSQL app. Users sign in with a username and password. Sessions use an httpOnly `workee_session` cookie. Chat talks to OpenAI through a digital employee (Lucy by default; David is available via handoff). WhatsApp Cloud API is an optional inbound channel into the same chat service.
+A React frontend, Express API, and PostgreSQL app. Users sign in with a username and password. Sessions use an httpOnly `workee_session` cookie. Chat talks to OpenAI through a digital employee (Lucy by default; other digital workers via handoff). WhatsApp Cloud API is an optional inbound channel into the same chat service.
 
 ## Setup
 
@@ -26,7 +26,7 @@ Username: Amit
 Password: ChangeMe123!
 ```
 
-Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and Lucy’s system message come from `LLM.config.json`. The structured reply schema is `LLM.action.json`. David’s voice lives in `LLM.david.json`. Both workers emit the same action catalog.
+Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the shared system message come from `LLM.config.json`. The structured reply schema is `LLM.action.json`. Every digital employee inherits that Lucy base catalog; identity (name / handoff) is per worker. Future capability add-ons can layer on top of the base.
 
 ## How chat works
 
@@ -70,7 +70,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 ## App UI
 
-- **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy / David / other digital). Guests are omitted from Chat-as.
+- **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy or any other digital). Guests are omitted from Chat-as.
 - **Employees** — CRUD for humans and digital workers (guests hidden); optional owner flag.
 - **Dashboard** — signed-in home. **WhatsApp** — webhook/flow status for operators.
 
@@ -83,7 +83,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
 - Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways).
-- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and remains in `EMPLOYEE_SAVED_DATA.reminders` for 14 days. `sent_text` is what went out (`last_composed_text` or `text`). Ask “what did we send” → `query: "report"` + `sections: ["sends"]` (server formats upcoming + recent history).
+- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for 14 days. It is **not** injected every chat turn — only when you ask via `query: "report"` + `sections: ["sends"]` (or a full report). `sent_text` is what went out (`last_composed_text` or `text`).
 - Reminder **delete** uses server Action State on the conversation (`pending_action` / `pending_targets` / `pending_step`), injected each turn — not LLM memory.
 
 ## Status report

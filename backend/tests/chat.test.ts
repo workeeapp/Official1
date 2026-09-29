@@ -1009,7 +1009,7 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_test_other");
   });
 
-  it("starts a separate conversation and uses each digital employee's LLM settings", async () => {
+  it("starts a separate conversation per digital employee with shared Lucy LLM settings", async () => {
     const dianaId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const cookie = await login();
     mockOwnedEmployee();
@@ -1072,23 +1072,25 @@ describe("chat API", () => {
     expect(diana.status).toBe(200);
     expect(createConversation).toHaveBeenCalledTimes(2);
     expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
-    expect(createResponse.mock.calls[0][0].model).toBe("gpt-4.1-mini");
-    expect(createResponse.mock.calls[0][0].temperature).toBe(0);
-    expect(createResponse.mock.calls[0][0].instructions).toContain(
-      "You manage lists and filings.",
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
+    expect(createResponse.mock.calls[0][0].model).toBe(
+      createResponse.mock.calls[1][0].model,
+    );
+    expect(createResponse.mock.calls[0][0].temperature).toBe(
+      createResponse.mock.calls[1][0].temperature,
     );
     expect(createResponse.mock.calls[0][0].textFormat).toMatchObject({
       type: "json_schema",
       name: "lucy_metadata_response",
     });
-    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
-    expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
-    expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
-    expect(createResponse.mock.calls[1][0].instructions).toContain("Diana system prompt");
     expect(createResponse.mock.calls[1][0].textFormat).toMatchObject({
       type: "json_schema",
       name: "lucy_metadata_response",
     });
+    expect(createResponse.mock.calls[1][0].instructions).toContain("You are דיאנה");
+    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+      "Diana system prompt",
+    );
   });
 
   it("includes current employee records in every LLM turn", async () => {
