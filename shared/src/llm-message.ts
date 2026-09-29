@@ -37,6 +37,18 @@ export interface LlmDirectoryAction {
   phone: string;
 }
 
+export type LlmHoldKind = "directory" | "lists" | "reminders" | "filing";
+
+/** Draft kept while asking for a missing required field (server PENDING_ACTION_STATE). */
+export interface LlmHold {
+  kind: LlmHoldKind;
+  need: string;
+  directory: LlmDirectoryAction[];
+  lists: LlmListAction[];
+  reminders: LlmReminderAction[];
+  filing: LlmFilingAction[];
+}
+
 export type LlmReminderActionName = "add" | "remove" | "update";
 export type LlmReminderRepeat =
   | "once"
@@ -114,6 +126,11 @@ export interface LlmMetadata {
    * further scope history to that domain.
    */
   reportHistoryKinds?: ReportHistoryKind[];
+  /**
+   * Incomplete multi-turn draft: known fields while asking for `need`.
+   * Server stores this as PENDING_ACTION_STATE (same idea as reminder delete confirm).
+   */
+  hold?: LlmHold | null;
   confirm?: boolean | null;
   targets?: string[];
 }
@@ -146,6 +163,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     query: null,
     reportSections: [],
     reportHistoryKinds: [],
+    hold: null,
     confirm: null,
     targets: [],
   };
@@ -159,44 +177,49 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const meta = metadata as Record<string, unknown>;
   const defaultTargets = parseTargets(meta);
   const reportSections = parseReportSections(meta);
+  const lists = Array.isArray(meta.lists)
+    ? meta.lists.flatMap((entry) => {
+        const action = toListAction(entry);
+        if (!action) {
+          return [];
+        }
+        return [
+          {
+            ...action,
+            targets: action.targets.length > 0 ? action.targets : defaultTargets,
+          },
+        ];
+      })
+    : [];
+  const filing = Array.isArray(meta.filing)
+    ? meta.filing.flatMap((entry) => {
+        const action = toFilingAction(entry);
+        if (!action) {
+          return [];
+        }
+        return [
+          {
+            ...action,
+            targets: action.targets.length > 0 ? action.targets : defaultTargets,
+          },
+        ];
+      })
+    : [];
+  const reminders = parseReminderActions(meta);
+  const directory = parseDirectoryActions(meta);
   return {
     messages: parseMessageActions(meta),
-    reminders: parseReminderActions(meta),
-    directory: parseDirectoryActions(meta),
+    reminders,
+    directory,
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
+    hold: parseHold(meta, { directory, lists, reminders, filing }),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
-    lists: Array.isArray(meta.lists)
-      ? meta.lists.flatMap((entry) => {
-          const action = toListAction(entry);
-          if (!action) {
-            return [];
-          }
-          return [
-            {
-              ...action,
-              targets: action.targets.length > 0 ? action.targets : defaultTargets,
-            },
-          ];
-        })
-      : [],
-    filing: Array.isArray(meta.filing)
-      ? meta.filing.flatMap((entry) => {
-          const action = toFilingAction(entry);
-          if (!action) {
-            return [];
-          }
-          return [
-            {
-              ...action,
-              targets: action.targets.length > 0 ? action.targets : defaultTargets,
-            },
-          ];
-        })
-      : [],
+    lists,
+    filing,
   };
 }
 
@@ -516,6 +539,92 @@ function parseConfirm(meta: Record<string, unknown>): boolean | null {
     return false;
   }
   return null;
+}
+
+const HOLD_KINDS = new Set<LlmHoldKind>([
+  "directory",
+  "lists",
+  "reminders",
+  "filing",
+]);
+
+function parseHold(
+  meta: Record<string, unknown>,
+  fallback: {
+    directory: LlmDirectoryAction[];
+    lists: LlmListAction[];
+    reminders: LlmReminderAction[];
+    filing: LlmFilingAction[];
+  },
+): LlmHold | null {
+  const raw = meta.hold ?? meta.pending_hold ?? meta.pendingHold;
+  if (raw == null || raw === false) {
+    return null;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const kindRaw =
+    typeof record.kind === "string"
+      ? record.kind.trim().toLowerCase()
+      : typeof record.action === "string"
+        ? record.action.trim().toLowerCase().replace(/^complete_/, "")
+        : "";
+  if (!HOLD_KINDS.has(kindRaw as LlmHoldKind)) {
+    return null;
+  }
+  const need =
+    typeof record.need === "string"
+      ? record.need.trim()
+      : typeof record.missing === "string"
+        ? record.missing.trim()
+        : typeof record.ask === "string"
+          ? record.ask.trim()
+          : "";
+  if (!need) {
+    return null;
+  }
+
+  const nestedDirectory = parseDirectoryActions(record);
+  const nestedReminders = parseReminderActions(record);
+  const nestedLists = Array.isArray(record.lists)
+    ? record.lists.flatMap((entry) => {
+        const action = toListAction(entry);
+        return action ? [action] : [];
+      })
+    : [];
+  const nestedFiling = Array.isArray(record.filing)
+    ? record.filing.flatMap((entry) => {
+        const action = toFilingAction(entry);
+        return action ? [action] : [];
+      })
+    : [];
+
+  const directory =
+    nestedDirectory.length > 0 ? nestedDirectory : fallback.directory;
+  const lists = nestedLists.length > 0 ? nestedLists : fallback.lists;
+  const reminders =
+    nestedReminders.length > 0 ? nestedReminders : fallback.reminders;
+  const filing = nestedFiling.length > 0 ? nestedFiling : fallback.filing;
+
+  if (
+    directory.length === 0 &&
+    lists.length === 0 &&
+    reminders.length === 0 &&
+    filing.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    kind: kindRaw as LlmHoldKind,
+    need: need.slice(0, 200),
+    directory,
+    lists,
+    reminders,
+    filing,
+  };
 }
 
 function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {

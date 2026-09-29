@@ -88,6 +88,8 @@ export type {
   LlmDirectoryAction,
   LlmDirectoryActionName,
   LlmHandoffAction,
+  LlmHold,
+  LlmHoldKind,
   LlmQuery,
   ReportSection,
   ReportHistoryKind,

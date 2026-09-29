@@ -312,6 +312,34 @@
                   "required": ["action", "name", "phone"]
                 }
               },
+              "hold": {
+                "type": ["object", "null"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["directory", "lists", "reminders", "filing"]
+                  },
+                  "need": { "type": "string" },
+                  "directory": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": ["add", "remove"]
+                        },
+                        "name": { "type": "string" },
+                        "phone": { "type": "string" }
+                      },
+                      "required": ["action", "name", "phone"]
+                    }
+                  },
+                  "lists": { "type": "array", "items": { "type": "object" } },
+                  "reminders": { "type": "array", "items": { "type": "object" } },
+                  "filing": { "type": "array", "items": { "type": "object" } }
+                }
+              },
               "handoff": {
                 "type": "object",
                 "properties": {

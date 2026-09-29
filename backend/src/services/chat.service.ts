@@ -47,14 +47,18 @@ import {
   applyReminders,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
-  formatPendingActionContext,
   hasUnrelatedWorkWhilePending,
   linkRemindersToWorkerTasks,
-  pendingFromStored,
   planReminderWrites,
-  type PendingDeleteAction,
   type WorkerTaskRef,
 } from "./reminder.service.js";
+import {
+  conversationPendingFromStored,
+  formatConversationPendingContext,
+  pendingToStored,
+  resolveNextPending,
+  type ConversationPendingAction,
+} from "./pending-action.service.js";
 import {
   applyDirectoryActions,
   formatDirectoryApplyNotice,
@@ -268,9 +272,10 @@ function workerTargetingInstructions(
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking.",
-    "Yes → same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; still emit messages or reminders using the phone digits if the words were already given.",
+    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking — but set metadata.hold kind=directory with the known name+phone draft and need=confirm_save.",
+    "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
+    "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
     "If they ask to send but did not say the words, ask. You may offer שלום. Empty messages and reminders while you ask.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
@@ -328,9 +333,9 @@ async function rotateConversation(existing: { id: string }): Promise<{
   });
 }
 
-async function loadPendingDelete(
+async function loadPendingAction(
   conversationId: string,
-): Promise<PendingDeleteAction | null> {
+): Promise<ConversationPendingAction | null> {
   const row = await prisma.chatConversation.findUnique({
     where: { id: conversationId },
     select: {
@@ -340,28 +345,25 @@ async function loadPendingDelete(
       pendingAt: true,
     },
   });
-  return pendingFromStored(row);
+  return conversationPendingFromStored(row);
 }
 
-async function savePendingDelete(
+async function savePendingAction(
   conversationId: string,
-  pending: PendingDeleteAction | null,
+  pending: ConversationPendingAction | null,
 ): Promise<void> {
+  const stored = pendingToStored(pending);
   await prisma.chatConversation.update({
     where: { id: conversationId },
-    data: pending
-      ? {
-          pendingAction: pending.action,
-          pendingTargets: pending.targets,
-          pendingStep: pending.step,
-          pendingAt: pending.at,
-        }
-      : {
-          pendingAction: null,
-          pendingTargets: Prisma.JsonNull,
-          pendingStep: null,
-          pendingAt: null,
-        },
+    data: {
+      pendingAction: stored.pendingAction,
+      pendingTargets:
+        stored.pendingTargets === null
+          ? Prisma.JsonNull
+          : (stored.pendingTargets as Prisma.InputJsonValue),
+      pendingStep: stored.pendingStep,
+      pendingAt: stored.pendingAt,
+    },
   });
 }
 
@@ -846,7 +848,9 @@ export async function sendChatMessage(input: {
     input.employeeId,
     digital.id,
   );
-  const waitingDeletes = await loadPendingDelete(conversation.id);
+  const waitingPending = await loadPendingAction(conversation.id);
+  const waitingDeletes =
+    waitingPending?.action === "delete_reminder" ? waitingPending : null;
   const speakerContacts = await listContactsForEmployee(input.employeeId);
   const context = [
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
@@ -856,7 +860,7 @@ export async function sendChatMessage(input: {
     ),
     formatSpeakerContacts(speakerContacts),
     formatTeamSchedules(await getTeamSchedules(input.userId)),
-    formatPendingActionContext(waitingDeletes),
+    formatConversationPendingContext(waitingPending),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -880,11 +884,11 @@ export async function sendChatMessage(input: {
     "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
     "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"] only. EMPLOYEE_SAVED_DATA does not include send history — the server loads it when you emit that query. Do not invent past sends.",
     "Did a self-reminder already fire / האם שלחת תזכורת לקנות X / מתי נשלחה: metadata.query = \"report\" and metadata.sections = [\"reminders\"] (server includes recent done clocks with sent_at). Do not say none just because active_reminders is empty.",
-    "Mutation history / מה נמחק / מתי ביטלנו / מתי עדכנו / מה התווסף / מי עדכן: metadata.query = \"report\" + sections:[\"history\"]. Scope: history+shopping = shopping mutations only (not tasks); history+reminders = clocks only; history+tasks = tasks only. Narrow by kind with history_kinds:[\"remove\"] / [\"update\"] / [\"add\"] / [\"fire\"] (or put מחיקות|עודכן|התווסף|נשלח in sections). Examples: היסטוריית קניות → [\"history\",\"shopping\"]; מה נמחק מתזכורות → [\"history\",\"reminders\"] + history_kinds:[\"remove\"]; מה עודכן בתזכורות → history_kinds:[\"update\"]; מה התווסף לתזכורות → history_kinds:[\"add\"]. Server formats who+when; do not invent history.",
+    "Was something deleted/cancelled/updated / מה נמחק / מחקתי את X / מתי ביטלנו / מתי עדכנו את התזכורת / מי עדכן: metadata.query = \"report\" and metadata.sections = [\"history\"] (add [\"reminders\"] if it was a clock). The server formats audit rows with when + who (ע״י). Do not invent history.",
+    "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → reminder delete confirm only. current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true; no → confirm=false. Do not start unrelated work until the server clears the state.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     "query reminders = ping clocks only (active_reminders). Send history is not in saved data — use query report + sections sends. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
-    "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm means ask/confirm delete only. Reminder names pick targets, not send. Yes → confirm=true; no → confirm=false. Do not start messages or new reminders until the server clears the state.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -999,7 +1003,18 @@ export async function sendChatMessage(input: {
       waitingDeletes,
       { abandonPending },
     );
-    await savePendingDelete(conversation.id, reminderPlan.nextPending);
+    const nextPending = resolveNextPending({
+      stored: waitingPending,
+      hold: metadata.hold ?? null,
+      reminderNext: reminderPlan.nextPending,
+      directory: metadata.directory ?? [],
+      lists: metadata.lists ?? [],
+      reminders: metadata.reminders ?? [],
+      filing: metadata.filing ?? [],
+      messages: metadata.messages ?? [],
+      confirm: metadata.confirm ?? null,
+    });
+    await savePendingAction(conversation.id, nextPending);
     const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
@@ -1015,7 +1030,8 @@ export async function sendChatMessage(input: {
     const refreshedContacts =
       directoryResult.saved.length > 0 || directoryResult.removed.length > 0
         ? await listContactsForEmployee(employee.id)
-        : speakerContacts;    const workerItems: WorkerTaskRef[] = [
+        : speakerContacts;
+    const workerItems: WorkerTaskRef[] = [
       ...(input.pendingWorkerItems ?? []),
       ...listMutations
         .filter(

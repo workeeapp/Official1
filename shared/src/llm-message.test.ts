@@ -148,6 +148,7 @@ describe("parseLlmReply", () => {
       query: null,
       reportSections: [],
       reportHistoryKinds: [],
+      hold: null,
       confirm: null,
       targets: [],
     });
@@ -264,6 +265,28 @@ describe("parseLlmReply", () => {
       query: "report",
       reportSections: ["reminders", "history"],
       reportHistoryKinds: ["remove"],
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "מה שם המשפחה?",
+          metadata: {
+            hold: {
+              kind: "directory",
+              need: "שם משפחה",
+              directory: [
+                { action: "add", name: "יואב", phone: "0515520802" },
+              ],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      hold: {
+        kind: "directory",
+        need: "שם משפחה",
+        directory: [{ action: "add", name: "יואב", phone: "0515520802" }],
+      },
     });
     expect(
       parseReplyMetadata(
