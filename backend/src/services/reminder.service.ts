@@ -30,6 +30,13 @@ export interface ReminderSnapshotRow {
   ping_ids: string[];
   owner: string;
   text: string;
+  /** Final WhatsApp body from the last compose-at-fire (empty when fixed copy). */
+  last_composed_text: string;
+  /**
+   * Body that was / will be sent: last_composed_text when present, else text.
+   * Use this when answering what we sent.
+   */
+  sent_text: string;
   compose_at_fire: boolean;
   compose_source: string;
   status: string;
@@ -1169,7 +1176,16 @@ export async function listReminderRowsForUser(userId: string) {
     return await prisma.reminder.findMany({
       where: {
         userId,
-        OR: [{ status: "active" }, { status: "done", fireAt: { gte: since } }],
+        OR: [
+          { status: "active" },
+          {
+            status: "done",
+            OR: [
+              { sentAt: { gte: since } },
+              { sentAt: null, fireAt: { gte: since } },
+            ],
+          },
+        ],
       },
       orderBy: { fireAt: "asc" },
     });
@@ -1209,6 +1225,7 @@ export function toReminderSnapshotRow(
     messageText: string;
     composeAtFire?: boolean;
     composeSource?: string;
+    lastComposedText?: string | null;
     status: string;
     sendStatus?: string;
     sentAt?: Date | null;
@@ -1220,6 +1237,8 @@ export function toReminderSnapshotRow(
     row.sendStatus === "sent" || row.sendStatus === "failed"
       ? row.sendStatus
       : "pending";
+  const text = row.messageText ?? "";
+  const lastComposed = (row.lastComposedText ?? "").trim();
   return {
     item: row.itemLabel,
     list_type: row.listType,
@@ -1228,7 +1247,9 @@ export function toReminderSnapshotRow(
     ping: pings.map((id) => names.get(id) ?? id),
     ping_ids: pings,
     owner: names.get(row.ownerId) ?? row.ownerId,
-    text: row.messageText,
+    text,
+    last_composed_text: lastComposed,
+    sent_text: lastComposed || text,
     compose_at_fire: row.composeAtFire === true,
     compose_source: row.composeSource === "git_log" ? "git_log" : "",
     status: row.status,

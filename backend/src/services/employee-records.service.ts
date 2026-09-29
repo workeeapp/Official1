@@ -224,7 +224,8 @@ export function formatEmployeeContext(
 
   return [
     `${label}:`,
-    "Only these saved items exist. Do not invent others. active_reminders is the current reminder list.",
+    "Only these saved items exist. Do not invent others. active_reminders is pending clocks only.",
+    "reminders may include status=done rows from the last 14 days (already fired). For those, sent_at is when WhatsApp ran and sent_text is the body that went out (or the brief if compose failed).",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
     JSON.stringify({
       lists: snapshot.lists,

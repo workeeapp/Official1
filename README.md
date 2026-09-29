@@ -83,6 +83,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
 - Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways).
+- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and remains in `EMPLOYEE_SAVED_DATA.reminders` for 14 days. `sent_text` is what went out (`last_composed_text` or `text`). Ask “what did we send” → `query: "report"` + `sections: ["sends"]` (server formats upcoming + recent history).
 - Reminder **delete** uses server Action State on the conversation (`pending_action` / `pending_targets` / `pending_step`), injected each turn — not LLM memory.
 
 ## Status report

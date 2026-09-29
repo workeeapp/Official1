@@ -19,7 +19,7 @@ const ALL_SECTIONS: ReportSection[] = [
 
 const SECTION_TITLES: Record<ReportSection, string> = {
   reminders: "תזכורות",
-  sends: "שליחות מתוזמנות",
+  sends: "שליחות (מתוזמנות והיסטוריה)",
   tasks: "מטלות",
   shopping: "קניות",
   filings: "תיוקים",
@@ -103,8 +103,11 @@ function formatSection(
       return formatReminderLines(
         (input.snapshot.reminders ?? []).filter(
           (row) =>
-            row.status === "active" &&
-            reminderIsScheduledSend(row, input.speakerId, input.speakerPhone),
+            reminderIsScheduledSend(row, input.speakerId, input.speakerPhone) &&
+            (row.status === "active" ||
+              row.status === "done" ||
+              row.send_status === "sent" ||
+              row.send_status === "failed"),
         ),
         input.multiOwner,
         true,
@@ -134,9 +137,20 @@ function formatReminderLines(
   }
   return rows
     .map((row) => {
-      const parts = [row.item, row.fire_at];
+      const parts = [row.item];
+      if (row.status === "done") {
+        parts.push("בוצע");
+        if (row.sent_at) {
+          parts.push(row.sent_at);
+        } else {
+          parts.push(row.fire_at);
+        }
+        parts.push(row.send_status === "sent" ? "נשלח" : "נכשל");
+      } else {
+        parts.push(row.fire_at);
+      }
       const cadence = formatReminderIntervalHe(row.repeat);
-      if (cadence) {
+      if (cadence && row.status === "active") {
         parts.push(cadence);
       }
       if (asSend) {
@@ -144,10 +158,11 @@ function formatReminderLines(
         if (ping) {
           parts.push(`אל ${ping}`);
         }
-        if (row.compose_at_fire) {
+        const body = (row.sent_text || row.text || "").trim();
+        if (body) {
+          parts.push(`«${body.slice(0, 120)}»`);
+        } else if (row.compose_at_fire && row.status === "active") {
           parts.push("compose");
-        } else if (row.text?.trim()) {
-          parts.push(`«${row.text.trim().slice(0, 80)}»`);
         }
       }
       if (multiOwner && row.owner) {

@@ -310,7 +310,7 @@ function workerTargetingInstructions(
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
-    "Full or partial status report (דוח / מה יש לי / תזכורות ומטלות / רק קניות): metadata.query = \"report\". Optional metadata.sections = subset of reminders|sends|tasks|shopping|filings|contacts|custom. Empty sections = full report. Keep response short; the server writes the detailed report.",
+    "Full or partial status report (דוח / מה יש לי / תזכורות ומטלות / רק קניות / מה שלחנו): metadata.query = \"report\". Optional metadata.sections = subset of reminders|sends|tasks|shopping|filings|contacts|custom. Empty sections = full report. Ask what we already sent → sections:[\"sends\"] (includes recent done). Keep response short; the server writes the detailed report.",
     "Answer in your response from this turn's saved data. The server does not write that answer — except query report (server formats the report) and known false delivery / list-type wording fixes.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
@@ -892,9 +892,10 @@ export async function sendChatMessage(input: {
     "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
     "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders.",
     "Status report / what do I have saved / דוח מצב: metadata.query = \"report\". For a partial report set metadata.sections to one or more of: reminders, sends, tasks, shopping, filings, contacts, custom. Omit sections for the full report. The server formats the detailed report.",
+    "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"]. Also readable from EMPLOYEE_SAVED_DATA.reminders where status=done (sent_at + sent_text). Do not invent past sends.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
-    "query reminders = ping clocks only (active_reminders). Empty clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+    "query reminders = ping clocks (active_reminders) plus recent done rows in reminders. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
     "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm means ask/confirm delete only. Reminder names pick targets, not send. Yes → confirm=true; no → confirm=false. Do not start messages or new reminders until the server clears the state.",
   ]
     .filter(Boolean)

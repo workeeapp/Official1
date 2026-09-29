@@ -1,15 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { reminderUpdate, reminderDelete } = vi.hoisted(() => ({
-  reminderUpdate: vi.fn(),
-  reminderDelete: vi.fn(),
-}));
+const { reminderUpdate, reminderDelete, reminderFindUnique, itemUpdateMany, itemDelete } =
+  vi.hoisted(() => ({
+    reminderUpdate: vi.fn(),
+    reminderDelete: vi.fn(),
+    reminderFindUnique: vi.fn(),
+    itemUpdateMany: vi.fn(),
+    itemDelete: vi.fn(),
+  }));
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     reminder: {
       update: reminderUpdate,
       delete: reminderDelete,
+      findUnique: reminderFindUnique,
+    },
+    employeeListItem: {
+      updateMany: itemUpdateMany,
+      delete: itemDelete,
     },
   },
 }));
@@ -27,21 +36,38 @@ describe("settleFiredReminder", () => {
   beforeEach(() => {
     reminderUpdate.mockReset();
     reminderDelete.mockReset();
+    reminderFindUnique.mockReset().mockResolvedValue({ workerItemId: "task-1" });
+    itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    itemDelete.mockReset().mockResolvedValue({});
   });
 
-  it("deletes a one-shot clock so the linked worker task cascades away", async () => {
+  it("marks a one-shot clock done with sent_at and detaches the worker task", async () => {
+    const now = new Date("2026-09-28T00:03:00.000Z");
     await settleFiredReminder(
       {
         id: "clock-1",
         fireAt: new Date("2026-09-28T00:00:00.000Z"),
         repeat: "once",
       },
-      new Date("2026-09-28T00:03:00.000Z"),
+      now,
       "sent",
     );
 
-    expect(reminderDelete).toHaveBeenCalledWith({ where: { id: "clock-1" } });
-    expect(reminderUpdate).not.toHaveBeenCalled();
+    expect(reminderDelete).not.toHaveBeenCalled();
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: {
+        status: "done",
+        sendStatus: "sent",
+        sentAt: now,
+        workerItemId: null,
+      },
+    });
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { reminderId: "clock-1" },
+      data: { reminderId: null },
+    });
+    expect(itemDelete).toHaveBeenCalledWith({ where: { id: "task-1" } });
   });
 
   it("keeps a repeating clock", async () => {
@@ -58,6 +84,7 @@ describe("settleFiredReminder", () => {
 
     expect(reminderDelete).not.toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalled();
+    expect(itemDelete).not.toHaveBeenCalled();
   });
 });
 

@@ -60,6 +60,8 @@ describe("formatSavedDataReport", () => {
             send_status: "pending",
             sent: false,
             sent_at: null,
+            last_composed_text: "",
+            sent_text: "",
           },
           {
             item: "לשלוח הודעה לעמית",
@@ -76,6 +78,8 @@ describe("formatSavedDataReport", () => {
             send_status: "pending",
             sent: false,
             sent_at: null,
+            last_composed_text: "",
+            sent_text: "בוקר טוב",
           },
         ],
       },
@@ -88,7 +92,7 @@ describe("formatSavedDataReport", () => {
     expect(text).toContain("דו״ח מצב עבור טל:");
     expect(text).toContain("תזכורות:");
     expect(text).toContain("לשתות מים");
-    expect(text).toContain("שליחות מתוזמנות:");
+    expect(text).toContain("שליחות (מתוזמנות והיסטוריה):");
     expect(text).toContain("לשלוח הודעה לעמית");
     expect(text).toContain("מטלות:");
     expect(text).toContain("להכין חביתה לילדים");
@@ -98,6 +102,45 @@ describe("formatSavedDataReport", () => {
     expect(text).toContain("רכב: 12-345");
     expect(text).toContain("אנשי קשר:");
     expect(text).toContain("מיכל");
+  });
+
+  it("includes done scheduled sends with sent_at and sent body", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [],
+        filing: [],
+        reminders: [
+          {
+            item: "לשלוח הודעה לעמית",
+            list_type: "tasks",
+            fire_at: "2026-09-29 09:00",
+            repeat: "once",
+            ping: ["עמית"],
+            ping_ids: ["amit-1"],
+            owner: "טל",
+            text: "תקציר קצר",
+            compose_at_fire: true,
+            compose_source: "",
+            status: "done",
+            send_status: "sent",
+            sent: true,
+            sent_at: "2026-09-29 09:00",
+            last_composed_text: "היי עמית, הנה העדכון...",
+            sent_text: "היי עמית, הנה העדכון...",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["sends"],
+    });
+
+    expect(text).toContain("שליחות (מתוזמנות והיסטוריה):");
+    expect(text).toContain("בוצע");
+    expect(text).toContain("נשלח");
+    expect(text).toContain("אל עמית");
+    expect(text).toContain("היי עמית, הנה העדכון");
   });
 
   it("builds a partial report for selected sections only", () => {

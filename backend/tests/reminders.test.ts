@@ -376,6 +376,8 @@ describe("toReminderSnapshotRow", () => {
       send_status: "failed",
       sent: false,
       sent_at: null,
+      last_composed_text: "",
+      sent_text: "",
     });
   });
 });
@@ -399,6 +401,8 @@ describe("formatActiveRemindersReply", () => {
           send_status: "pending",
           sent: false,
           sent_at: null,
+          last_composed_text: "",
+          sent_text: "",
         },
         {
           item: "ישן",
@@ -415,6 +419,8 @@ describe("formatActiveRemindersReply", () => {
           send_status: "pending",
           sent: false,
           sent_at: null,
+          last_composed_text: "",
+          sent_text: "",
         },
       ]),
     ).toBe("התזכורות הפעילות שלך:\n- חלב (2026-09-24 22:00)");
@@ -437,6 +443,8 @@ describe("formatTodosReply", () => {
     send_status: "pending" as const,
     sent: false,
     sent_at: null,
+    last_composed_text: "",
+    sent_text: "",
   };
   const michalSend = {
     ...supermarket,

@@ -74,9 +74,41 @@ export async function settleFiredReminder(
     scheduleSoon(nextAt);
     return;
   }
-  await prisma.reminder.delete({
+
+  // One-shot: keep the row as history (status=done + sent_at). Detach the
+  // worker task first so deleting that item cannot CASCADE-delete this clock.
+  let workerItemId: string | null = null;
+  if (typeof prisma.reminder.findUnique === "function") {
+    const row = await prisma.reminder.findUnique({
+      where: { id: reminder.id },
+      select: { workerItemId: true },
+    });
+    workerItemId = row?.workerItemId ?? null;
+  }
+
+  await prisma.reminder.update({
     where: { id: reminder.id },
+    data: {
+      status: "done",
+      sendStatus,
+      sentAt,
+      workerItemId: null,
+    },
   });
+
+  if (prisma.employeeListItem?.updateMany) {
+    await prisma.employeeListItem.updateMany({
+      where: { reminderId: reminder.id },
+      data: { reminderId: null },
+    });
+  }
+  if (workerItemId && prisma.employeeListItem?.delete) {
+    try {
+      await prisma.employeeListItem.delete({ where: { id: workerItemId } });
+    } catch {
+      // Already removed.
+    }
+  }
 }
 
 export async function fireDueReminders(now = new Date()): Promise<number> {
