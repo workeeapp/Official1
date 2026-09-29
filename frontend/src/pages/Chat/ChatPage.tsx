@@ -287,7 +287,9 @@ export function ChatPage() {
                         : "bg-primary-light text-text-primary"
                     }`}
                   >
-                    <span className="block whitespace-pre-wrap">{message.text}</span>
+                    <span className="block whitespace-pre-wrap" dir="auto">
+                      {message.text}
+                    </span>
                     {time ||
                     message.llmMs != null ||
                     message.afterLlmMs != null ? (
@@ -372,6 +374,7 @@ export function ChatPage() {
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleComposerKeyDown}
           placeholder="Write a message…"
+          dir="auto"
           className="min-h-11 w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-text-primary shadow-sm placeholder:text-text-secondary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
         />
         {sending ? (

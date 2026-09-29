@@ -110,6 +110,7 @@ model EmployeeListItem {
   scope      String       @default("personal") @db.VarChar(16)
   addedById  String?      @map("added_by_id") @db.Uuid
   visibleTo  Json         @default("[]") @map("visible_to")
+  deletedAt  DateTime?    @map("deleted_at")
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
   list          EmployeeList @relation(fields: [listId], references: [id], onDelete: Cascade)
@@ -117,23 +118,26 @@ model EmployeeListItem {
   reminderClock Reminder?    @relation("ClockOwnsTask", fields: [reminderId], references: [id], onDelete: Cascade)
   ownedClock    Reminder?    @relation("TaskOwnsClock")
 
-  @@unique([listId, itemKey])
+  @@index([listId, itemKey])
   @@index([scope])
+  @@index([deletedAt])
   @@map("EmployeeListItems")
 }
 
 model EmployeeFiling {
-  id         String   @id @default(uuid()) @db.Uuid
-  employeeId String   @map("employee_id") @db.Uuid
-  itemName   String   @map("item_name") @db.VarChar(200)
-  itemInfo   String   @map("item_info") @db.Text
-  addedById  String?  @map("added_by_id") @db.Uuid
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  employeeId String    @map("employee_id") @db.Uuid
+  itemName   String    @map("item_name") @db.VarChar(200)
+  itemInfo   String    @map("item_info") @db.Text
+  addedById  String?   @map("added_by_id") @db.Uuid
+  deletedAt  DateTime? @map("deleted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@unique([employeeId, itemName])
+  @@index([employeeId, itemName])
   @@index([employeeId])
+  @@index([deletedAt])
   @@map("EmployeeFilings")
 }
 
@@ -169,6 +173,22 @@ model Reminder {
   @@index([userId, status, fireAt])
   @@index([ownerId, itemKey])
   @@map("Reminders")
+}
+
+model AuditEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  actorEmployeeId  String?  @map("actor_employee_id") @db.Uuid
+  action           String   @db.VarChar(64)
+  entityType       String   @map("entity_type") @db.VarChar(64)
+  entityId         String?  @map("entity_id") @db.Uuid
+  summary          String   @db.VarChar(500)
+  detail           Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("AuditEvents")
 }
 
 model WhatsAppInbound {

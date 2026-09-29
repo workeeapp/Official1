@@ -16,6 +16,7 @@ const ALL_SECTIONS: ReportSection[] = [
   "filings",
   "contacts",
   "custom",
+  "history",
 ];
 
 const SECTION_TITLES: Record<ReportSection, string> = {
@@ -26,6 +27,7 @@ const SECTION_TITLES: Record<ReportSection, string> = {
   filings: "תיוקים",
   contacts: "אנשי קשר",
   custom: "רשימות מותאמות",
+  history: "היסטוריית שינויים (מחיקות/עדכונים)",
 };
 
 export function normalizeReportSections(
@@ -91,12 +93,14 @@ function formatSection(
       return formatReminderLines(
         (input.snapshot.reminders ?? []).filter(
           (row) =>
-            row.status === "active" &&
             !reminderIsScheduledSend(
               row,
               input.speakerId,
               input.speakerPhone,
-            ),
+            ) &&
+            (row.status === "active" ||
+              row.status === "done" ||
+              row.status === "cancelled"),
         ),
         input.multiOwner,
       );
@@ -107,6 +111,7 @@ function formatSection(
             reminderIsScheduledSend(row, input.speakerId, input.speakerPhone) &&
             (row.status === "active" ||
               row.status === "done" ||
+              row.status === "cancelled" ||
               row.send_status === "sent" ||
               row.send_status === "failed"),
         ),
@@ -123,6 +128,8 @@ function formatSection(
       return formatFilingLines(input.snapshot, input.multiOwner);
     case "contacts":
       return formatContactLines(input.contacts);
+    case "history":
+      return formatHistoryLines(input.snapshot.history ?? []);
     default:
       return "";
   }
@@ -147,6 +154,9 @@ function formatReminderLines(
           parts.push(row.fire_at);
         }
         parts.push(row.send_status === "sent" ? "נשלח" : "נכשל");
+      } else if (row.status === "cancelled") {
+        parts.push("בוטל");
+        parts.push(row.changed_at ?? row.fire_at);
       } else {
         parts.push(row.fire_at);
       }
@@ -172,6 +182,105 @@ function formatReminderLines(
       return `- ${parts.join(" · ")}`;
     })
     .join("\n");
+}
+
+function formatHistoryLines(
+  rows: Array<{
+    action: string;
+    summary: string;
+    at: string;
+    actor?: string | null;
+  }>,
+): string {
+  if (rows.length === 0) {
+    return "";
+  }
+  return rows
+    .map((row) => {
+      const verb = historyVerb(row.action, row.summary);
+      const subject = formatHistorySubject(row.action, row.summary);
+      const parts = [verb, row.at];
+      if (row.actor?.trim()) {
+        parts.push(`ע״י ${row.actor.trim()}`);
+      }
+      if (subject) {
+        parts.push(subject);
+      }
+      return `- ${parts.join(" · ")}`;
+    })
+    .join("\n");
+}
+
+function historyVerb(action: string, summary: string): string {
+  if (
+    action === "list_remove" ||
+    action === "filing_remove" ||
+    action === "reminder_cancel"
+  ) {
+    return "נמחק";
+  }
+  if (action === "reminder_fire") {
+    return "נשלח";
+  }
+  if (
+    action === "list_add" ||
+    action === "filing_add" ||
+    (action === "reminder_save" && summary.startsWith("add "))
+  ) {
+    return "נוסף";
+  }
+  if (
+    action === "list_update" ||
+    action === "filing_update" ||
+    (action === "reminder_save" && summary.startsWith("update "))
+  ) {
+    return "עודכן";
+  }
+  return "עודכן";
+}
+
+/** Product Hebrew only — never expose `add reminder:` / `remove tasks:` jargon. */
+function formatHistorySubject(action: string, summary: string): string {
+  const trimmed = summary.trim();
+  const match = trimmed.match(
+    /^(add|update|remove|cancel|fire)\s+(\w+)\s*:\s*(.+)$/i,
+  );
+  if (match) {
+    const kind = match[2].toLowerCase();
+    const label = match[3].trim();
+    const kindHe =
+      kind === "reminder"
+        ? "תזכורת"
+        : kind === "shopping"
+          ? "קניות"
+          : kind === "tasks"
+            ? "מטלה"
+            : kind === "filing"
+              ? "תיוק"
+              : kind === "custom"
+                ? "רשימה"
+                : kind === "contacts"
+                  ? "איש קשר"
+                  : null;
+    if (kindHe && label) {
+      return `${kindHe} «${label}»`;
+    }
+    if (label) {
+      return `«${label}»`;
+    }
+  }
+  if (action.startsWith("reminder") && trimmed) {
+    return `תזכורת «${trimmed}»`;
+  }
+  if (action.startsWith("filing") && trimmed) {
+    return `תיוק «${trimmed}»`;
+  }
+  // Drop leftover English schema tokens if any slipped through.
+  if (/^(add|update|remove|cancel|fire)\b/i.test(trimmed)) {
+    const rest = trimmed.replace(/^(add|update|remove|cancel|fire)\s+\w+\s*:\s*/i, "").trim();
+    return rest ? `«${rest}»` : "";
+  }
+  return trimmed;
 }
 
 function formatListLines(

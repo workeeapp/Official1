@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { reminderUpdate, reminderDelete, reminderFindUnique, itemUpdateMany, itemDelete } =
+const { reminderUpdate, reminderDelete, reminderFindUnique, itemUpdateMany, itemUpdate } =
   vi.hoisted(() => ({
     reminderUpdate: vi.fn(),
     reminderDelete: vi.fn(),
     reminderFindUnique: vi.fn(),
     itemUpdateMany: vi.fn(),
-    itemDelete: vi.fn(),
+    itemUpdate: vi.fn(),
   }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -18,13 +18,17 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     employeeListItem: {
       updateMany: itemUpdateMany,
-      delete: itemDelete,
+      update: itemUpdate,
     },
   },
 }));
 
 vi.mock("../src/config/env.js", () => ({
   getEnv: () => ({ NODE_ENV: "test" }),
+}));
+
+vi.mock("../src/services/audit.service.js", () => ({
+  recordAuditEvent: vi.fn(),
 }));
 
 import {
@@ -38,7 +42,7 @@ describe("settleFiredReminder", () => {
     reminderDelete.mockReset();
     reminderFindUnique.mockReset().mockResolvedValue({ workerItemId: "task-1" });
     itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
-    itemDelete.mockReset().mockResolvedValue({});
+    itemUpdate.mockReset().mockResolvedValue({});
   });
 
   it("marks a one-shot clock done with sent_at and detaches the worker task", async () => {
@@ -67,7 +71,10 @@ describe("settleFiredReminder", () => {
       where: { reminderId: "clock-1" },
       data: { reminderId: null },
     });
-    expect(itemDelete).toHaveBeenCalledWith({ where: { id: "task-1" } });
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "task-1" },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
   });
 
   it("keeps a repeating clock", async () => {
@@ -84,7 +91,7 @@ describe("settleFiredReminder", () => {
 
     expect(reminderDelete).not.toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalled();
-    expect(itemDelete).not.toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
   });
 });
 

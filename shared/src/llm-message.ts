@@ -92,7 +92,8 @@ export type ReportSection =
   | "shopping"
   | "filings"
   | "contacts"
-  | "custom";
+  | "custom"
+  | "history";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
@@ -337,6 +338,13 @@ const REPORT_SECTION_ALIASES: Record<string, ReportSection> = {
   lists: "custom",
   list: "custom",
   רשימות: "custom",
+  history: "history",
+  deleted: "history",
+  deletes: "history",
+  cancelled: "history",
+  היסטוריה: "history",
+  מחיקות: "history",
+  נמחק: "history",
 };
 
 function normalizeReportSectionToken(raw: string): ReportSection | null {

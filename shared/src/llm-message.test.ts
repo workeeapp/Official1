@@ -222,6 +222,20 @@ describe("parseLlmReply", () => {
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
+          metadata: {
+            query: "report",
+            sections: ["history", "מחיקות"],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      query: "report",
+      reportSections: ["history"],
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
           metadata: { query: "tasks" },
         }),
       ).query,

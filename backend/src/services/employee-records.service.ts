@@ -9,6 +9,7 @@ import type {
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
+import { recordAuditEvent, listRecentMutationHistory } from "./audit.service.js";
 import { toPlainJson } from "./llm-client.js";
 import {
   cancelReminderLinkedToWorkerItem,
@@ -39,6 +40,14 @@ export interface EmployeeRecordSnapshot {
     scope: ItemScope;
   }>;
   reminders?: ReminderSnapshotRow[];
+  /** Recent cancels/removes/updates (report section history only). */
+  history?: Array<{
+    action: string;
+    summary: string;
+    at: string;
+    entity_type: string;
+    actor?: string | null;
+  }>;
 }
 
 const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
@@ -269,7 +278,7 @@ export async function getTeamSchedules(userId: string): Promise<TeamScheduleEntr
     },
     include: {
       employee: { select: { name: true, nickname: true } },
-      items: { orderBy: { createdAt: "asc" } },
+      items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
     },
   });
 
@@ -340,12 +349,12 @@ export async function getEmployeeOwnedRecords(
       where: { employeeId },
       include: {
         employee: { select: { name: true, nickname: true } },
-        items: { orderBy: { createdAt: "asc" } },
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
       },
       orderBy: [{ listType: "asc" }, { name: "asc" }],
     }),
     prisma.employeeFiling.findMany({
-      where: { employeeId },
+      where: { employeeId, deletedAt: null },
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
@@ -405,7 +414,7 @@ export async function updateEmployeeRecord(
   actorId: string,
 ): Promise<SharedItemEvent[]> {
   const listItem = await prisma.employeeListItem.findFirst({
-    where: { id: itemId, list: { employeeId } },
+    where: { id: itemId, deletedAt: null, list: { employeeId } },
     include: { list: true },
   });
   if (listItem) {
@@ -413,7 +422,7 @@ export async function updateEmployeeRecord(
   }
 
   const filing = await prisma.employeeFiling.findFirst({
-    where: { id: itemId, employeeId },
+    where: { id: itemId, employeeId, deletedAt: null },
   });
   if (filing) {
     return updateOwnedFiling(filing, fields, actorId);
@@ -428,7 +437,7 @@ export async function deleteEmployeeRecord(
   actorId: string,
 ): Promise<SharedItemEvent[]> {
   const listItem = await prisma.employeeListItem.findFirst({
-    where: { id: itemId, list: { employeeId } },
+    where: { id: itemId, deletedAt: null, list: { employeeId } },
     include: { list: true },
   });
   if (listItem) {
@@ -436,7 +445,7 @@ export async function deleteEmployeeRecord(
   }
 
   const filing = await prisma.employeeFiling.findFirst({
-    where: { id: itemId, employeeId },
+    where: { id: itemId, employeeId, deletedAt: null },
   });
   if (filing) {
     return deleteOwnedFiling(filing, actorId);
@@ -447,7 +456,11 @@ export async function deleteEmployeeRecord(
 
 export async function getEmployeeRecordSnapshot(
   employeeId: string,
-  options?: { accountOwner?: boolean; includeDoneSendHistory?: boolean },
+  options?: {
+    accountOwner?: boolean;
+    includeDoneSendHistory?: boolean;
+    includeMutationHistory?: boolean;
+  },
 ): Promise<EmployeeRecordSnapshot> {
   const owner = await prisma.employee.findUnique({
     where: { id: employeeId },
@@ -464,12 +477,13 @@ export async function getEmployeeRecordSnapshot(
     ? { employee: { userId: owner.userId, kind: "human" } }
     : { employeeId };
 
-  const [ownLists, sharedItems, ownFilings, reminderRows, people] = await Promise.all([
+  const [ownLists, sharedItems, ownFilings, reminderRows, people, history] =
+    await Promise.all([
     prisma.employeeList.findMany({
       where: listWhere,
       include: {
         employee: { select: { id: true, name: true, nickname: true } },
-        items: { orderBy: { createdAt: "asc" } },
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
       },
       orderBy: [{ listType: "asc" }, { name: "asc" }],
     }),
@@ -478,6 +492,7 @@ export async function getEmployeeRecordSnapshot(
       : prisma.employeeListItem.findMany({
           where: {
             scope: "shared",
+            deletedAt: null,
             list: { employeeId: { not: employeeId } },
           },
           include: {
@@ -488,7 +503,7 @@ export async function getEmployeeRecordSnapshot(
           orderBy: { createdAt: "asc" },
         }),
     prisma.employeeFiling.findMany({
-      where: filingWhere,
+      where: { ...filingWhere, deletedAt: null },
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
@@ -498,6 +513,9 @@ export async function getEmployeeRecordSnapshot(
           where: { userId: owner.userId },
           select: { id: true, name: true, nickname: true, surname: true },
         })
+      : Promise.resolve([]),
+    options?.includeMutationHistory === true && owner
+      ? listRecentMutationHistory(owner.userId)
       : Promise.resolve([]),
   ]);
 
@@ -551,8 +569,9 @@ export async function getEmployeeRecordSnapshot(
       : [],
   );
   if (orphanIds.length > 0) {
-    await prisma.employeeListItem.deleteMany({
-      where: { id: { in: orphanIds } },
+    await prisma.employeeListItem.updateMany({
+      where: { id: { in: orphanIds }, deletedAt: null },
+      data: { deletedAt: new Date(), reminderId: null },
     });
   }
 
@@ -613,6 +632,7 @@ export async function getEmployeeRecordSnapshot(
           options?.includeDoneSendHistory === true || row.status === "active",
       )
       .map((row) => toReminderSnapshotRow(row, names)),
+    ...(options?.includeMutationHistory === true ? { history } : {}),
   };
 }
 
@@ -656,29 +676,77 @@ export async function applyEmployeeRecords(
     mutations.push(...result.mutations);
   }
 
+  const filingOwner = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { userId: true },
+  });
   for (const action of metadata.filing) {
     if (action.action === "remove_filing") {
-      await prisma.employeeFiling.deleteMany({
-        where: { employeeId, itemName: action.itemName.slice(0, 200) },
+      const itemName = action.itemName.slice(0, 200);
+      const doomed = await prisma.employeeFiling.findMany({
+        where: { employeeId, itemName, deletedAt: null },
+        select: { id: true },
       });
-    } else {
-      await prisma.employeeFiling.upsert({
+      await prisma.employeeFiling.updateMany({
         where: {
-          employeeId_itemName: {
-            employeeId,
-            itemName: action.itemName.slice(0, 200),
-          },
-        },
-        create: {
           employeeId,
-          itemName: action.itemName.slice(0, 200),
-          itemInfo: action.itemInfo,
-          addedById: resolved.addedById,
+          itemName,
+          deletedAt: null,
         },
-        update: {
-          itemInfo: action.itemInfo,
-        },
+        data: { deletedAt: new Date() },
       });
+      if (filingOwner) {
+        for (const row of doomed) {
+          await recordAuditEvent({
+            userId: filingOwner.userId,
+            actorEmployeeId: actor,
+            action: "filing_remove",
+            entityType: "EmployeeFiling",
+            entityId: row.id,
+            summary: `remove filing: ${itemName}`,
+          });
+        }
+      }
+    } else {
+      const itemName = action.itemName.slice(0, 200);
+      const existingFiling = await prisma.employeeFiling.findFirst({
+        where: { employeeId, itemName, deletedAt: null },
+      });
+      if (existingFiling) {
+        await prisma.employeeFiling.update({
+          where: { id: existingFiling.id },
+          data: { itemInfo: action.itemInfo },
+        });
+        if (filingOwner) {
+          await recordAuditEvent({
+            userId: filingOwner.userId,
+            actorEmployeeId: actor,
+            action: "filing_update",
+            entityType: "EmployeeFiling",
+            entityId: existingFiling.id,
+            summary: `update filing: ${itemName}`,
+          });
+        }
+      } else {
+        const created = await prisma.employeeFiling.create({
+          data: {
+            employeeId,
+            itemName,
+            itemInfo: action.itemInfo,
+            addedById: resolved.addedById,
+          },
+        });
+        if (filingOwner) {
+          await recordAuditEvent({
+            userId: filingOwner.userId,
+            actorEmployeeId: actor,
+            action: "filing_add",
+            entityType: "EmployeeFiling",
+            entityId: created.id,
+            summary: `add filing: ${itemName}`,
+          });
+        }
+      }
     }
 
     const watchers = sharedAudience(resolved, employeeId, actor);
@@ -733,10 +801,15 @@ async function updateOwnedListItem(
   }
 
   if (nextKey !== existing.itemKey) {
-    const clash = await prisma.employeeListItem.findUnique({
-      where: { listId_itemKey: { listId: existing.list.id, itemKey: nextKey } },
+    const clash = await prisma.employeeListItem.findFirst({
+      where: {
+        listId: existing.list.id,
+        itemKey: nextKey,
+        deletedAt: null,
+        NOT: { id: existing.id },
+      },
     });
-    if (clash && clash.id !== existing.id) {
+    if (clash) {
       throw new ConflictError("An item with this name already exists");
     }
   }
@@ -782,7 +855,24 @@ async function deleteOwnedListItem(
   actorId: string,
 ): Promise<SharedItemEvent[]> {
   const listType = existing.list.listType as LlmListType;
-  await prisma.employeeListItem.delete({ where: { id: existing.id } });
+  await prisma.employeeListItem.update({
+    where: { id: existing.id },
+    data: { deletedAt: new Date(), reminderId: null },
+  });
+  const owner = await prisma.employee.findUnique({
+    where: { id: existing.list.employeeId },
+    select: { userId: true },
+  });
+  if (owner) {
+    await recordAuditEvent({
+      userId: owner.userId,
+      actorEmployeeId: actorId,
+      action: "list_remove",
+      entityType: "EmployeeListItem",
+      entityId: existing.id,
+      summary: `remove ${listType}: ${existing.itemKey}`,
+    });
+  }
   const watchers = mutationAudience(existing.list.employeeId, actorId, existing);
   await deleteRelatedAssignmentTasks(
     uniqueIds([actorId, existing.list.employeeId, ...watchers]),
@@ -863,7 +953,24 @@ async function deleteOwnedFiling(
   },
   actorId: string,
 ): Promise<SharedItemEvent[]> {
-  await prisma.employeeFiling.delete({ where: { id: existing.id } });
+  await prisma.employeeFiling.update({
+    where: { id: existing.id },
+    data: { deletedAt: new Date() },
+  });
+  const owner = await prisma.employee.findUnique({
+    where: { id: existing.employeeId },
+    select: { userId: true },
+  });
+  if (owner) {
+    await recordAuditEvent({
+      userId: owner.userId,
+      actorEmployeeId: actorId,
+      action: "filing_remove",
+      entityType: "EmployeeFiling",
+      entityId: existing.id,
+      summary: `remove filing: ${existing.itemName}`,
+    });
+  }
   return mutationEvents({
     ownerId: existing.employeeId,
     actorId,
@@ -984,9 +1091,24 @@ async function applyListAction(
           itemKey: removedKey,
         });
       }
-      await prisma.employeeListItem.deleteMany({
-        where: { listId: list.id, itemKey: removedKey },
+      await prisma.employeeListItem.updateMany({
+        where: { listId: list.id, itemKey: removedKey, deletedAt: null },
+        data: { deletedAt: new Date(), reminderId: null },
       });
+      const owner = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { userId: true },
+      });
+      if (owner && existing?.id) {
+        await recordAuditEvent({
+          userId: owner.userId,
+          actorEmployeeId: actorId,
+          action: "list_remove",
+          entityType: "EmployeeListItem",
+          entityId: existing.id,
+          summary: `remove ${resolvedAction.listType}: ${removedKey}`,
+        });
+      }
       const watchers = await resolveWatchers({
         existing,
         visibility,
@@ -1037,6 +1159,10 @@ async function applyListAction(
       visibleTo: resolvedVisibility.visibleTo,
     };
 
+    const listOwner = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { userId: true },
+    });
     if (existing) {
       await prisma.employeeListItem.update({
         where: { id: existing.id },
@@ -1054,6 +1180,16 @@ async function applyListAction(
         listType: resolvedAction.listType,
         itemKey: existing.itemKey,
       });
+      if (listOwner) {
+        await recordAuditEvent({
+          userId: listOwner.userId,
+          actorEmployeeId: actorId,
+          action: "list_update",
+          entityType: "EmployeeListItem",
+          entityId: existing.id,
+          summary: `update ${resolvedAction.listType}: ${itemKey}`,
+        });
+      }
     } else {
       const created = await prisma.employeeListItem.create({
         data: {
@@ -1069,6 +1205,16 @@ async function applyListAction(
         listType: resolvedAction.listType,
         itemKey,
       });
+      if (listOwner) {
+        await recordAuditEvent({
+          userId: listOwner.userId,
+          actorEmployeeId: actorId,
+          action: "list_add",
+          entityType: "EmployeeListItem",
+          entityId: created.id,
+          summary: `add ${resolvedAction.listType}: ${itemKey}`,
+        });
+      }
     }
 
     const watchers = await resolveWatchers({
@@ -1157,15 +1303,15 @@ async function findMatchingItem(
   itemKey: string,
   action?: LlmListAction["action"],
 ) {
-  const exact = await prisma.employeeListItem.findUnique({
-    where: { listId_itemKey: { listId, itemKey } },
+  const exact = await prisma.employeeListItem.findFirst({
+    where: { listId, itemKey, deletedAt: null },
   });
   if (exact) {
     return exact;
   }
 
   const items = await prisma.employeeListItem.findMany({
-    where: { listId },
+    where: { listId, deletedAt: null },
   });
   const fuzzy =
     items.find(
@@ -1290,6 +1436,7 @@ async function findAssignmentWatcherIds(
   const items = await prisma.employeeListItem.findMany({
     where: {
       itemKey: { contains: itemKey },
+      deletedAt: null,
       list: {
         listType: "tasks",
         employeeId: { not: ownerId },
@@ -1311,14 +1458,16 @@ async function deleteRelatedAssignmentTasks(
     return;
   }
 
-  await prisma.employeeListItem.deleteMany({
+  await prisma.employeeListItem.updateMany({
     where: {
       itemKey: { contains: itemKey },
+      deletedAt: null,
       list: {
         listType: "tasks",
         employeeId: { in: employeeIds },
       },
     },
+    data: { deletedAt: new Date(), reminderId: null },
   });
 }
 

@@ -18,6 +18,7 @@ import {
 } from "./git-changelog.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
+import { recordAuditEvent } from "./audit.service.js";
 
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
@@ -56,7 +57,14 @@ function nextFireAt(from: Date, repeat: string, now: Date): Date | null {
 }
 
 export async function settleFiredReminder(
-  reminder: { id: string; fireAt: Date; repeat: string },
+  reminder: {
+    id: string;
+    fireAt: Date;
+    repeat: string;
+    userId?: string;
+    actorId?: string;
+    itemLabel?: string;
+  },
   now: Date,
   sendStatus: "sent" | "failed",
 ): Promise<void> {
@@ -102,12 +110,27 @@ export async function settleFiredReminder(
       data: { reminderId: null },
     });
   }
-  if (workerItemId && prisma.employeeListItem?.delete) {
+  if (workerItemId && prisma.employeeListItem?.update) {
     try {
-      await prisma.employeeListItem.delete({ where: { id: workerItemId } });
+      await prisma.employeeListItem.update({
+        where: { id: workerItemId },
+        data: { deletedAt: new Date(), reminderId: null },
+      });
     } catch {
       // Already removed.
     }
+  }
+
+  if (reminder.userId) {
+    await recordAuditEvent({
+      userId: reminder.userId,
+      actorEmployeeId: reminder.actorId,
+      action: "reminder_fire",
+      entityType: "Reminder",
+      entityId: reminder.id,
+      summary: `fire reminder: ${reminder.itemLabel ?? reminder.id}`,
+      detail: { sendStatus, sentAt: sentAt?.toISOString() ?? null },
+    });
   }
 }
 

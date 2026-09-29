@@ -85,12 +85,13 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
 - Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways). On cancel, the model should also remove the speaker wrapper item when it matches that nudge (or ask if it looks like independent work).
-- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for 14 days. It is **not** injected every chat turn — only when you ask via `query: "report"` + `sections: ["sends"]` (or a full report). `sent_text` is what went out (`last_composed_text` or `text`).
+- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for 14 days. It is **not** injected every chat turn — only when you ask via `query: "report"` with `sections` including `reminders` and/or `sends` (or a full report). Self-nudge history answers “האם שלחת תזכורת / מתי?” via `sections: ["reminders"]`; outbound message history via `sections: ["sends"]`. `sent_text` is what went out (`last_composed_text` or `text`).
+- Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations append to `AuditEvents` (who/when/summary). Report `sections: ["history"]` surfaces recent adds/updates/deletes/fires so Lucy can answer what changed, when, and who.
 - Reminder **delete** uses server Action State on the conversation (`pending_action` / `pending_targets` / `pending_step`), injected each turn — not LLM memory.
 
 ## Status report
 
-`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`. Empty sections = full report. The **server** formats the Hebrew report from DB (custom rows show column values; relative day labels are shown as real dates).
+`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`, `history`. Empty sections = full report. The **server** formats the Hebrew report from DB (custom rows show column values; relative day labels are shown as real dates). For `reminders` / `sends` / full report the server also loads recent `done` and `cancelled` clocks (last 14 days). `history` loads recent adds/updates/deletes/fires from `AuditEvents` and formats them in product Hebrew (who · when · what) — never raw audit labels like `add reminder:`.
 
 ## Architecture note
 

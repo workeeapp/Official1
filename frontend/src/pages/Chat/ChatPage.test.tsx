@@ -170,6 +170,9 @@ describe("Chat page", () => {
     expect(
       within(screen.getByTestId("chat-messages")).getByText("saved reply"),
     ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("chat-messages")).getByText("saved reply"),
+    ).toHaveAttribute("dir", "auto");
     expect(within(screen.getByTestId("chat-messages")).getByText("לוסי")).toBeInTheDocument();
     expect(within(screen.getByTestId("chat-messages")).queryByText("Assistant")).not.toBeInTheDocument();
     expect(screen.getByTestId("llm-complete-response")).toHaveTextContent(

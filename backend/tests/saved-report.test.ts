@@ -14,6 +14,7 @@ describe("normalizeReportSections", () => {
       "filings",
       "contacts",
       "custom",
+      "history",
     ]);
   });
 
@@ -102,6 +103,116 @@ describe("formatSavedDataReport", () => {
     expect(text).toContain("רכב: 12-345");
     expect(text).toContain("אנשי קשר:");
     expect(text).toContain("מיכל");
+  });
+
+  it("includes done self-reminders with sent_at in the reminders section", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [],
+        filing: [],
+        reminders: [
+          {
+            item: "לקנות מחשבון מדעי",
+            list_type: "shopping",
+            fire_at: "2026-09-29 15:05",
+            repeat: "once",
+            ping: ["טל"],
+            ping_ids: [speakerId],
+            owner: "טל",
+            text: "",
+            compose_at_fire: false,
+            compose_source: "",
+            status: "done",
+            send_status: "sent",
+            sent: true,
+            sent_at: "2026-09-29 15:05",
+            last_composed_text: "",
+            sent_text: "",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["reminders"],
+    });
+
+    expect(text).toContain("תזכורות:");
+    expect(text).toContain("לקנות מחשבון מדעי");
+    expect(text).toContain("בוצע");
+    expect(text).toContain("2026-09-29 15:05");
+    expect(text).toContain("נשלח");
+    expect(text).not.toContain("- אין");
+  });
+
+  it("includes cancelled reminders and mutation history", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [],
+        filing: [],
+        reminders: [
+          {
+            item: "לקנות מחשבון מדעי",
+            list_type: "shopping",
+            fire_at: "2026-09-29 15:05",
+            repeat: "once",
+            ping: ["טל"],
+            ping_ids: [speakerId],
+            owner: "טל",
+            text: "",
+            compose_at_fire: false,
+            compose_source: "",
+            status: "cancelled",
+            send_status: "pending",
+            sent: false,
+            sent_at: null,
+            changed_at: "2026-09-29 15:10",
+            last_composed_text: "",
+            sent_text: "",
+          },
+        ],
+        history: [
+          {
+            action: "reminder_cancel",
+            summary: "cancel reminder: לקנות מחשבון מדעי",
+            at: "2026-09-29 15:10",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "reminder_save",
+            summary: "update reminder: לקנות מחשבון מדעי",
+            at: "2026-09-29 15:04",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "list_remove",
+            summary: "remove shopping: חלב",
+            at: "2026-09-29 14:00",
+            entity_type: "EmployeeListItem",
+            actor: "לוסי",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["reminders", "history"],
+    });
+
+    expect(text).toContain("בוטל");
+    expect(text).toContain("2026-09-29 15:10");
+    expect(text).toContain("היסטוריית שינויים");
+    expect(text).toContain("נמחק");
+    expect(text).toContain("עודכן");
+    expect(text).toContain("ע״י טל");
+    expect(text).toContain("ע״י לוסי");
+    expect(text).toContain("תזכורת «לקנות מחשבון מדעי»");
+    expect(text).toContain("קניות «חלב»");
+    expect(text).not.toContain("cancel reminder");
+    expect(text).not.toContain("update reminder");
+    expect(text).not.toContain("remove shopping");
   });
 
   it("includes done scheduled sends with sent_at and sent body", () => {

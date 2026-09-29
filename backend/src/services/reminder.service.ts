@@ -11,6 +11,7 @@ import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
+import { recordAuditEvent } from "./audit.service.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
 const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -43,6 +44,8 @@ export interface ReminderSnapshotRow {
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
   sent_at: string | null;
+  /** When status changed to done/cancelled (Jerusalem). */
+  changed_at?: string | null;
 }
 
 function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
@@ -195,7 +198,7 @@ export async function syncLinkedWorkerTaskClock(input: {
       : await prisma.employeeListItem.findUnique({
           where: { reminderId: input.reminderId },
         });
-    if (!item) {
+    if (!item || item.deletedAt) {
       return;
     }
     const time = formatJerusalemClock(input.fireAt);
@@ -307,23 +310,44 @@ function isMissingRecord(error: unknown): boolean {
 export async function removeReminderAndLinkedWorkerTask(match: {
   id: string;
   workerItemId?: string | null;
+  userId?: string;
+  actorEmployeeId?: string | null;
+  label?: string;
 }): Promise<void> {
   const workerItemId = match.workerItemId ?? null;
-  if (prisma.employeeListItem?.deleteMany) {
-    await prisma.employeeListItem.deleteMany({
+  if (prisma.employeeListItem?.updateMany) {
+    await prisma.employeeListItem.updateMany({
       where: {
+        deletedAt: null,
         OR: [
           { reminderId: match.id },
           ...(workerItemId ? [{ id: workerItemId }] : []),
         ],
       },
+      data: { deletedAt: new Date(), reminderId: null },
     });
   }
-  if (!prisma.reminder?.delete) {
+  if (!prisma.reminder?.update) {
     return;
   }
   try {
-    await prisma.reminder.delete({ where: { id: match.id } });
+    await prisma.reminder.update({
+      where: { id: match.id },
+      data: {
+        status: "cancelled",
+        workerItemId: null,
+      },
+    });
+    if (match.userId) {
+      await recordAuditEvent({
+        userId: match.userId,
+        actorEmployeeId: match.actorEmployeeId,
+        action: "reminder_cancel",
+        entityType: "Reminder",
+        entityId: match.id,
+        summary: `cancel reminder: ${match.label ?? match.id}`,
+      });
+    }
   } catch (error) {
     if (isMissingTableError(error) || isMissingRecord(error)) {
       return;
@@ -401,6 +425,8 @@ async function cancelActiveReminder(
   await removeReminderAndLinkedWorkerTask({
     id: match.id,
     workerItemId,
+    userId,
+    label: match.itemLabel,
   });
   return match.itemLabel;
 }
@@ -426,6 +452,8 @@ async function cancelActiveReminderAnyOwner(
   await removeReminderAndLinkedWorkerTask({
     id: match.id,
     workerItemId,
+    userId,
+    label: match.itemLabel,
   });
   return match.itemLabel;
 }
@@ -986,6 +1014,15 @@ export async function applyReminders(input: {
               : null,
         fireAt,
       });
+      await recordAuditEvent({
+        userId: input.userId,
+        actorEmployeeId: input.actor.id,
+        action: "reminder_save",
+        entityType: "Reminder",
+        entityId: row.id,
+        summary: `${existing ? "update" : "add"} reminder: ${label}`,
+        detail: { fireAt: fireAt.toISOString(), pingIds },
+      });
       const fireLabel = formatJerusalemDateTime(fireAt);
       const sameTimeOthers = uniqueLabels(
         owned
@@ -1190,6 +1227,10 @@ export async function listReminderRowsForUser(userId: string) {
               { sentAt: null, fireAt: { gte: since } },
             ],
           },
+          {
+            status: "cancelled",
+            updatedAt: { gte: since },
+          },
         ],
       },
       orderBy: { fireAt: "asc" },
@@ -1234,6 +1275,7 @@ export function toReminderSnapshotRow(
     status: string;
     sendStatus?: string;
     sentAt?: Date | null;
+    updatedAt?: Date | null;
   },
   names: Map<string, string>,
 ): ReminderSnapshotRow {
@@ -1244,6 +1286,14 @@ export function toReminderSnapshotRow(
       : "pending";
   const text = row.messageText ?? "";
   const lastComposed = (row.lastComposedText ?? "").trim();
+  const changedAt =
+    row.status === "done" && row.sentAt
+      ? formatJerusalemDateTime(row.sentAt)
+      : row.status === "cancelled" && row.updatedAt
+        ? formatJerusalemDateTime(row.updatedAt)
+        : row.updatedAt && row.status !== "active"
+          ? formatJerusalemDateTime(row.updatedAt)
+          : null;
   return {
     item: row.itemLabel,
     list_type: row.listType,
@@ -1261,5 +1311,6 @@ export function toReminderSnapshotRow(
     send_status: sendStatus,
     sent: sendStatus === "sent",
     sent_at: row.sentAt ? formatJerusalemDateTime(row.sentAt) : null,
+    changed_at: changedAt,
   };
 }
