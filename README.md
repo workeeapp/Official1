@@ -26,7 +26,9 @@ Username: Amit
 Password: ChangeMe123!
 ```
 
-Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the shared system message come from `LLM.config.json`. The structured reply schema is `LLM.action.json`. Every digital employee inherits that Lucy base catalog; identity (name / handoff) is per worker. Future capability add-ons can layer on top of the base.
+Chat needs `OPENAI_API_KEY` in `.env`. `LLM.config.json` seeds Lucy’s default model/temperature/system message; `LLM.action.json` is the shared structured-reply schema for every digital worker. Each digital employee stores their own `instructions` / model / temperature in the DB and that row is what chat loads. On add/edit you can **Inherit from Lucy** to copy Lucy’s current saved prompt into the form. A **custom** prompt runs alone (thin session identity only) — the server does **not** append Lucy’s capability engine unless the saved text matches Lucy / the file base (inherit) or the worker is protected Lucy.
+
+**Sharing:** item-level `targets` sharing on shopping/tasks/custom items stays as before. In addition, a **named custom list** or **filing** with the speaker plus partners (or `all`) creates one shared object (`EmployeeLists` / `EmployeeFilings` `scope` + `visible_to`); every partner sees all items and is notified on add/update/remove. Guests (`אורח`) may be partners for viewing only — they cannot mutate.
 
 ## How chat works
 
@@ -40,7 +42,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 | `messages` | Send **now** on WhatsApp / in-app |
 | `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / recurring) |
 | `query` | Which saved data to read — see below |
-| `confirm` | Apply or drop a pending reminder delete |
+| `confirm` | Apply or drop a pending reminder delete or bulk list delete |
 | `handoff.worker` | Switch the conversation to another digital employee |
 
 **`query` values:**
@@ -50,9 +52,8 @@ The worker understands the speaker, asks until the schema is complete, then emit
 | `todos` | Speaker shopping / tasks still open |
 | `self` | This digital worker’s own lists and reminder jobs (`WORKER_SAVED_DATA`) |
 | `reminders` | Active ping clocks only |
-| `report` | Full or partial status digest (+ optional `sections`) |
 
-**Response text:** normally the model writes `response`. The server may replace or correct it in a few cases: `query: "report"` (formatted status report), failed WhatsApp delivery notices, reminder-delete confirm prompts, and shopping/tasks wording fixes after list apply. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …).
+**Response text:** the model writes `response`. The server may still append an apply summary after mutations, correct shopping/tasks wording after list apply, add WhatsApp delivery notices, or show reminder/bulk-delete confirm prompts — it does **not** replace answers with a server-built status report. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …).
 
 **Do not** expand `item: "all"`, invent reminder clocks from weekday words in free text, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
@@ -60,7 +61,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 - **Shopping** = things to buy. **Tasks** = work to do (including meetings with date/time). Dated tasks also appear in `TEAM_SCHEDULES` so the worker can see other people’s calendar rows without their private shopping.
 - **Custom lists** = named lists with user-defined columns. When asked to show a list (e.g. שיעורי נהיגה של מאיה), answer with the **items and their fields**, not only the owner’s name.
-- **Dates:** store concrete `YYYY-MM-DD` (Asia/Jerusalem). Exact labels `היום` / `מחר` / `אתמול` (and today/tomorrow/yesterday) are resolved on save and when formatting reports — do not leave the word היום in saved data.
+- **Dates:** store concrete `YYYY-MM-DD` (Asia/Jerusalem). Exact labels `היום` / `מחר` / `אתמול` (and today/tomorrow/yesterday) are resolved on save — do not leave the word היום in saved data.
 - On remove/update, the server resolves `list_type` from where the item actually lives. If the spoken reply says קניות for a tasks item, the reply is corrected to מטלות (and the reverse).
 - List/filing actions may target another human or `כולם`. Shared shopping changes can notify the other person’s assistant thread when someone buys or updates an item.
 
@@ -85,14 +86,11 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
 - Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways). On cancel, the model should also remove the speaker wrapper item when it matches that nudge (or ask if it looks like independent work). Removing a shopping/task item also cancels active clocks that match the same work by key/label (speaker wrapper is not FK-linked to the clock).
-- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for 14 days. It is **not** injected every chat turn — only when you ask via `query: "report"` with `sections` including `reminders` and/or `sends` (or a full report). Self-nudge history answers “האם שלחת תזכורת / מתי?” via `sections: ["reminders"]`; outbound message history via `sections: ["sends"]`. `sent_text` is what went out (`last_composed_text` or `text`).
-- Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations append to `AuditEvents` (who/when/summary). Report `sections: ["history"]` surfaces recent adds/updates/deletes/fires so Lucy can answer what changed, when, and who. Scope with a companion domain (`history`+`shopping` = shopping mutations only) and/or `history_kinds` (`add` / `update` / `remove` / `fire`).
-- Custom lists must always have a real `EmployeeLists.name`. Prefer the name the speaker already said (or `list_name` on the item); only ask “what should we call this list?” when none exists. Never persist custom rows with an empty name — snapshots/reports derive a title from item `list_name` when repairing legacy rows.
-- **Multi-turn Action State:** reminder delete confirm and incomplete adds (contacts/lists/reminders/filing) use conversation `pending_*` fields. While asking for a missing required field the model emits `metadata.hold` (kind + need + known draft); the server reinjects `PENDING_ACTION_STATE` next turn so a short reply like «דור» completes the draft instead of losing context. Phone-book saves (אנשי קשר + name + phone) use `metadata.directory` — first name is enough; do not require last name.
-
-## Status report
-
-`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`, `history`. Empty sections = full report. The **server** formats the Hebrew report from DB (custom rows show column values; relative day labels are shown as real dates). For `reminders` / `sends` / full report the server also loads recent `done` and `cancelled` clocks (last 14 days). `history` loads recent adds/updates/deletes/fires from `AuditEvents` and formats them in product Hebrew (who · when · what) — never raw audit labels like `add reminder:`. When `history` is paired with a domain section on a partial report (e.g. `["history","shopping"]`), the server filters audit rows to that domain. Optional `history_kinds` (or Hebrew tokens like `מחיקות` / `עודכן` / `התווסף` in `sections`) further limits to deletes, updates, adds, or fires.
+- After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for retention. Soft-deleted list/filing rows and done/cancelled clocks **stay in the DB** but are **never** loaded into `EMPLOYEE_SAVED_DATA` — live/active data only.
+- Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations still append to `AuditEvents` for internal retention; they are not injected into the model.
+- Custom lists must always have a real `EmployeeLists.name`. Prefer the name the speaker already said (or `list_name` on the item); only ask “what should we call this list?” when none exists. Never persist custom rows with an empty name — snapshots derive a title from item `list_name` when repairing legacy rows.
+- **Multi-turn Action State:** reminder delete confirm, bulk list-delete confirm (≥2 removes), and incomplete adds (contacts/lists/reminders/filing) use conversation `pending_*` fields. While asking for a missing required field the model emits `metadata.hold` (kind + need + known draft); the server reinjects `PENDING_ACTION_STATE` next turn so a short reply like «דור» completes the draft instead of losing context. Phone-book saves (אנשי קשר + name + phone) use `metadata.directory` — first name is enough; do not require last name.
+- **Apply feedback:** after the server applies mutations it appends a Hebrew summary of what actually happened (shopping/tasks/custom, filings, reminders, directory, sent messages) so the speaker always sees the real actions — not only the model's free-text claim.
 
 ## Architecture note
 

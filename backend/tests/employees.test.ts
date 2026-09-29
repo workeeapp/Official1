@@ -150,7 +150,7 @@ describe("employees API", () => {
     expect(response.body.employee.phone).toBe("050-1111111");
   });
 
-  it("creates a digital employee inheriting Lucy LLM defaults", async () => {
+  it("creates a digital employee with the submitted prompt and model", async () => {
     findUnique.mockResolvedValue({
       id: userId,
       username: "Amit",
@@ -176,24 +176,26 @@ describe("employees API", () => {
       .send({
         kind: "digital",
         name: "דיאנה",
-        model: "custom-model-ignored",
-        temperature: 0.9,
-        instructions: "custom prompt ignored",
+        model: "gpt-4.1",
+        temperature: 0.4,
+        instructions: "Diana custom system prompt",
       });
 
     expect(response.status).toBe(201);
     expect(response.body.employee).toMatchObject({
       kind: "digital",
       name: "דיאנה",
+      model: "gpt-4.1",
+      temperature: 0.4,
+      instructions: "Diana custom system prompt",
     });
-    expect(response.body.employee.instructions).toContain("metadata");
-    expect(response.body.employee.instructions).not.toBe("custom prompt ignored");
-    expect(response.body.employee.model).not.toBe("custom-model-ignored");
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         kind: "digital",
         name: "דיאנה",
-        instructions: expect.stringContaining("metadata"),
+        model: "gpt-4.1",
+        temperature: 0.4,
+        instructions: "Diana custom system prompt",
       }),
     });
   });
@@ -236,13 +238,28 @@ describe("employees API", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("returns digital employee defaults from LLM config", async () => {
+  it("returns digital defaults from Lucy's saved prompt when present", async () => {
     findUnique.mockResolvedValue({
       id: userId,
       username: "Amit",
       passwordHash,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+    findFirst.mockResolvedValue({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      userId,
+      kind: "digital",
+      isProtected: true,
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      model: "gpt-4.1",
+      temperature: 0.2,
+      instructions: "Lucy DB prompt for inherit",
+      createdAt: new Date(),
     });
 
     const loginResponse = await request(app)
@@ -254,9 +271,11 @@ describe("employees API", () => {
       .set("Cookie", cookieHeader(loginResponse));
 
     expect(response.status).toBe(200);
-    expect(response.body.model).toBeTruthy();
-    expect(typeof response.body.temperature).toBe("number");
-    expect(response.body.instructions).toContain("metadata");
+    expect(response.body).toMatchObject({
+      model: "gpt-4.1",
+      temperature: 0.2,
+      instructions: "Lucy DB prompt for inherit",
+    });
   });
 
   it("returns saved records for an owned employee", async () => {

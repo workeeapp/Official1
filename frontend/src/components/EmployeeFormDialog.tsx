@@ -45,6 +45,7 @@ export function EmployeeFormDialog({
   );
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
+  const [inheriting, setInheriting] = useState(false);
   const [touched, setTouched] = useState({
     name: false,
     surname: false,
@@ -55,6 +56,27 @@ export function EmployeeFormDialog({
     temperature: false,
     instructions: false,
   });
+
+  async function inheritFromLucy() {
+    setInheriting(true);
+    setDefaultsError(null);
+    try {
+      const defaults = await employeeApi.digitalDefaults();
+      setModel(defaults.model);
+      setTemperature(String(defaults.temperature));
+      setInstructions(defaults.instructions);
+      setTouched((current) => ({
+        ...current,
+        model: true,
+        temperature: true,
+        instructions: true,
+      }));
+    } catch {
+      setDefaultsError("Unable to load Lucy's prompt.");
+    } finally {
+      setInheriting(false);
+    }
+  }
 
   useEffect(() => {
     if (mode !== "add" || kind !== "digital" || employee) {
@@ -258,16 +280,44 @@ export function EmployeeFormDialog({
                   }
                   onChange={(event) => setTemperature(event.target.value)}
                 />
-                <Textarea
-                  name="employee-instructions"
-                  label="Instructions"
-                  value={instructions}
-                  error={visibleErrors.instructions}
-                  onBlur={() =>
-                    setTouched((current) => ({ ...current, instructions: true }))
-                  }
-                  onChange={(event) => setInstructions(event.target.value)}
-                />
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <p className="text-sm font-medium text-text-primary">
+                      Instructions
+                    </p>
+                    {employee?.protected ? null : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="sm:w-auto"
+                        disabled={inheriting || submitting}
+                        onClick={() => {
+                          void inheritFromLucy();
+                        }}
+                      >
+                        {inheriting ? "Loading…" : "Inherit from Lucy"}
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea
+                    id="employee-instructions"
+                    name="employee-instructions"
+                    label="Instructions"
+                    hideLabel
+                    value={instructions}
+                    error={visibleErrors.instructions}
+                    onBlur={() =>
+                      setTouched((current) => ({ ...current, instructions: true }))
+                    }
+                    onChange={(event) => setInstructions(event.target.value)}
+                  />
+                  <p className="text-xs text-text-secondary">
+                    Saved per worker and loaded from the database at chat time.
+                    {employee?.protected
+                      ? null
+                      : " Use Inherit from Lucy to copy Lucy's current prompt."}
+                  </p>
+                </div>
               </>
             ) : (
               <>

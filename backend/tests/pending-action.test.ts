@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   conversationPendingFromStored,
   formatConversationPendingContext,
+  formatListDeleteConfirmNotice,
   pendingHoldFromLlm,
   pendingToStored,
+  planListDeletes,
   resolveNextPending,
 } from "../src/services/pending-action.service.js";
 
@@ -111,7 +113,7 @@ describe("pending action hold", () => {
       confirm: null,
     });
     expect(next?.action).toBe("complete_directory");
-    if (next && next.action !== "delete_reminder") {
+    if (next && next.action === "complete_directory") {
       expect(next.draft.directory).toHaveLength(2);
       expect(next.draft.directory?.[0]?.name).toBe("יואב דור");
     }
@@ -154,5 +156,127 @@ describe("pending action hold", () => {
       action: "delete_reminder",
       targets: ["לשתות מים"],
     });
+  });
+});
+
+describe("planListDeletes", () => {
+  const twoTaskRemoves = [
+    {
+      action: "remove" as const,
+      listType: "tasks" as const,
+      listName: "",
+      targets: [] as string[],
+      items: [
+        { "שם מטלה": "להוריד את הכלב" },
+        { "שם מטלה": "לטפל בתקלות" },
+      ],
+    },
+  ];
+
+  it("holds two or more list removes until confirm", () => {
+    const planned = planListDeletes({
+      lists: twoTaskRemoves,
+      confirm: null,
+      stored: null,
+    });
+    expect(planned.applyLists).toEqual([]);
+    expect(planned.askLabels).toEqual(["להוריד את הכלב", "לטפל בתקלות"]);
+    expect(planned.nextPending).toMatchObject({
+      action: "delete_lists",
+      step: "confirm",
+      targets: ["להוריד את הכלב", "לטפל בתקלות"],
+    });
+    expect(formatListDeleteConfirmNotice(planned.askLabels, false)).toContain(
+      "לאשר מחיקה",
+    );
+  });
+
+  it("applies held list removes after confirm=true", () => {
+    const held = planListDeletes({
+      lists: twoTaskRemoves,
+      confirm: null,
+      stored: null,
+    });
+    const confirmed = planListDeletes({
+      lists: [],
+      confirm: true,
+      stored: held.nextPending,
+    });
+    expect(confirmed.applyLists).toEqual(twoTaskRemoves);
+    expect(confirmed.askLabels).toEqual([]);
+    expect(confirmed.nextPending).toBeNull();
+  });
+
+  it("cancels held list deletes on confirm=false", () => {
+    const held = planListDeletes({
+      lists: twoTaskRemoves,
+      confirm: null,
+      stored: null,
+    });
+    const cancelled = planListDeletes({
+      lists: [],
+      confirm: false,
+      stored: held.nextPending,
+    });
+    expect(cancelled.applyLists).toEqual([]);
+    expect(cancelled.cancelled).toBe(true);
+    expect(cancelled.nextPending).toBeNull();
+    expect(formatListDeleteConfirmNotice([], true)).toBe("ביטלתי את המחיקה.");
+  });
+
+  it("applies a single list remove immediately", () => {
+    const planned = planListDeletes({
+      lists: [
+        {
+          action: "remove",
+          listType: "shopping",
+          listName: "",
+          targets: [],
+          items: [{ "שם פריט": "חלב" }],
+        },
+      ],
+      confirm: null,
+      stored: null,
+    });
+    expect(planned.applyLists).toHaveLength(1);
+    expect(planned.askLabels).toEqual([]);
+    expect(planned.nextPending).toBeNull();
+  });
+
+  it("round-trips delete_lists through pending storage", () => {
+    const held = planListDeletes({
+      lists: twoTaskRemoves,
+      confirm: null,
+      stored: null,
+    });
+    const stored = pendingToStored(held.nextPending);
+    const roundTrip = conversationPendingFromStored({
+      pendingAction: stored.pendingAction,
+      pendingTargets: stored.pendingTargets,
+      pendingStep: stored.pendingStep,
+      pendingAt: stored.pendingAt,
+    });
+    expect(roundTrip).toMatchObject({
+      action: "delete_lists",
+      step: "confirm",
+      targets: ["להוריד את הכלב", "לטפל בתקלות"],
+    });
+    expect(formatConversationPendingContext(roundTrip)).toContain(
+      "confirm=true and empty lists",
+    );
+
+    const next = resolveNextPending({
+      stored: roundTrip,
+      hold: null,
+      reminderNext: null,
+      listDeleteNext: held.nextPending,
+      directory: [],
+      lists: [],
+      reminders: [],
+      filing: [],
+      messages: [],
+      confirm: null,
+    });
+    expect(next?.action).toBe("delete_lists");
   });
 });

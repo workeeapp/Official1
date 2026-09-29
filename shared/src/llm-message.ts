@@ -94,8 +94,7 @@ export type LlmQuery =
   | "reminders"
   | "reminders_sent"
   | "todos"
-  | "self"
-  | "report";
+  | "self";
 
 export type ReportSection =
   | "reminders"
@@ -274,17 +273,34 @@ function toListAction(value: unknown): LlmListAction | null {
       )
     : [];
 
-  if (items.length === 0) {
+  let listName =
+    listType === "custom" ? readText(value, ["list_name", "name", "רשימה"]) : "";
+  if (listType === "custom" && !listName) {
+    listName = listNameFromItems(items);
+  }
+
+  // Named custom lists may open/share with columns only (no rows yet).
+  if (items.length === 0 && !(listType === "custom" && listName)) {
     return null;
   }
 
   return {
     action: value.action as LlmListActionName,
     listType,
-    listName: listType === "custom" ? readText(value, ["list_name", "name", "רשימה"]) : "",
+    listName,
     items,
     targets: parseTargets(value),
   };
+}
+
+function listNameFromItems(items: Record<string, unknown>[]): string {
+  for (const item of items) {
+    const name = readText(item, ["list_name", "listName", "רשימה"]);
+    if (name) {
+      return name.slice(0, 100);
+    }
+  }
+  return "";
 }
 
 function parseHandoff(meta: Record<string, unknown>): LlmHandoffAction | null {
@@ -327,16 +343,7 @@ function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
   ) {
     return "self";
   }
-  if (
-    value === "report" ||
-    value === "summary" ||
-    value === "status" ||
-    value === "overview" ||
-    value.startsWith("report:") ||
-    value.startsWith("report=")
-  ) {
-    return "report";
-  }
+  // Legacy "report" / status dump — ignored; the model answers in response.
   return null;
 }
 
@@ -884,9 +891,10 @@ function extractLlmPayload(text: string): {
   }
 
   const response =
-    typeof parsed.response === "string" && parsed.response.trim()
+    typeof parsed.response === "string"
       ? parsed.response.trim()
-      : text;
+      : // Only fall back to raw text when the payload has no response field.
+        text;
 
   return {
     response,

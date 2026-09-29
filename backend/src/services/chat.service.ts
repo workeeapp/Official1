@@ -26,9 +26,11 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  type FilingMutation,
   type ListItemMutation,
   type SharedItemEvent,
 } from "./employee-records.service.js";
+import { formatTurnApplySummary } from "./apply-summary.js";
 import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import {
   employeeDisplayName,
@@ -45,7 +47,6 @@ import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.js";
 import {
   applyReminders,
-  formatReminderApplyNotice,
   formatReminderConfirmNotice,
   hasUnrelatedWorkWhilePending,
   linkRemindersToWorkerTasks,
@@ -55,13 +56,14 @@ import {
 import {
   conversationPendingFromStored,
   formatConversationPendingContext,
+  formatListDeleteConfirmNotice,
   pendingToStored,
+  planListDeletes,
   resolveNextPending,
   type ConversationPendingAction,
 } from "./pending-action.service.js";
 import {
   applyDirectoryActions,
-  formatDirectoryApplyNotice,
   formatSpeakerContacts,
   listContactsForEmployee,
 } from "./contact.service.js";
@@ -76,7 +78,6 @@ import {
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
-import { formatSavedDataReport } from "./saved-report.js";
 
 function speakerName(employee: {
   name: string;
@@ -190,9 +191,84 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
   };
 }
 
-/** Every digital worker uses Lucy's base LLM.config (+ shared action schema). */
-function llmConfigForDigital(_digital?: PublicEmployee): LlmConfig {
-  return loadLlmConfig();
+/** Per-worker prompt/model from DB; shared action schema from LLM.action.json. */
+function llmConfigForDigital(digital: PublicEmployee): LlmConfig {
+  const base = loadLlmConfig();
+  const systemMessage = digital.instructions?.trim() || base.systemMessage;
+  const model = digital.model?.trim() || base.model;
+  const temperature =
+    typeof digital.temperature === "number" && Number.isFinite(digital.temperature)
+      ? digital.temperature
+      : base.temperature;
+  return {
+    model,
+    temperature,
+    systemMessage,
+    ...(base.responseFormat ? { responseFormat: base.responseFormat } : {}),
+  };
+}
+
+function promptsEqual(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const a = left?.trim() ?? "";
+  const b = right?.trim() ?? "";
+  return a.length > 0 && a === b;
+}
+
+/**
+ * Lucy's full runtime engine (targeting / capabilities) is only attached when this
+ * worker is Lucy, or their saved prompt matches Lucy's / the file base (Inherit).
+ * A custom prompt must run alone — never diluted by Lucy's catalog.
+ */
+export function shouldAttachLucyRuntimeEngine(
+  digital: PublicEmployee,
+  employees: PublicEmployee[],
+  fileSystemMessage: string,
+): boolean {
+  if (digital.protected) {
+    return true;
+  }
+  const own = digital.instructions?.trim() ?? "";
+  if (!own) {
+    return true;
+  }
+  const lucy =
+    employees.find((row) => row.kind === "digital" && row.protected) ??
+    employees.find(
+      (row) =>
+        row.kind === "digital" &&
+        (row.nickname === "לוסי" || row.name === "לוסי"),
+    );
+  if (lucy && promptsEqual(own, lucy.instructions)) {
+    return true;
+  }
+  return promptsEqual(own, fileSystemMessage);
+}
+
+function thinSessionEnvelope(input: {
+  employees: PublicEmployee[];
+  speaker: string;
+  worker: PublicEmployee;
+  speakerIsOwner: boolean;
+}): string {
+  const workerName = speakerName(input.worker);
+  const names = input.employees.map(employeeDisplayName).join(", ");
+  const feminine =
+    input.worker.protected || workerName.includes("לוסי");
+  return [
+    `Current speaker: ${input.speaker}. You are ${workerName}.`,
+    `Known employees: ${names}.`,
+    "Follow ONLY your system instructions above for persona and capabilities. Do not invent Lucy's (or any other worker's) catalog if it is not in your prompt.",
+    "EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, and PENDING_ACTION_STATE in this turn's user message are facts — do not invent missing ones.",
+    input.speakerIsOwner
+      ? "This speaker is the account owner and may see every human's live saved data in EMPLOYEE_SAVED_DATA."
+      : "This speaker is not the account owner — answer only from their own live saved data (plus shared items visible to them).",
+    feminine
+      ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
+      : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
+  ].join("\n");
 }
 
 function pickDigitalEmployee(employees: PublicEmployee[]): PublicEmployee | undefined {
@@ -294,12 +370,14 @@ function workerTargetingInstructions(
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
-    "RELATED TO THESE items (קשורות למטלות האלה / לפריטים שמחקנו): answer only clocks/history that match those items by meaning. If none, say none. Never list unrelated active clocks.",
+    "RELATED TO THESE items (קשורות למטלות האלה / לפריטים שמחקנו): answer only active clocks that match those items by meaning. If none, say none. Never list unrelated active clocks. Never invent past deletes or completed history — the system does not load it.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
+    "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. A single bought item (קניתי חלב) may remove immediately without confirm.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
-    "Full or partial status report (דוח / מה יש לי / תזכורות ומטלות / רק קניות / מה שלחנו / מה נמחק): metadata.query = \"report\". Optional metadata.sections = subset of reminders|sends|tasks|shopping|filings|contacts|custom|history. Empty sections = full report. Ask what we already sent → sections:[\"sends\"]. Mutation history → sections:[\"history\"]; scope with a domain (history+shopping = shopping mutations only; history+reminders = clocks only) and/or history_kinds [\"add\"|\"update\"|\"remove\"|\"fire\"] (or Hebrew tokens מחיקות/עודכן/התווסף in sections). Keep response short; the server writes the detailed report.",
-    "Answer in your response from this turn's saved data. The server does not write that answer — except query report (server formats the report) and known false delivery / list-type wording fixes.",
+    "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report.",
+    "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes, and the apply summary of mutations it actually saved.",
+    "After any save/send/remove, keep response short; the server appends what it actually applied (shopping/tasks/reminders/filings/directory/messages).",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
     "Durable personal facts (משפחה עם ילדים, העדפות, כתובת…): metadata.filing add_filing without waiting for \"תתיקי\". Do not file one-off chores. Later turns: use filing from EMPLOYEE_SAVED_DATA as memory.",
@@ -521,6 +599,43 @@ async function patchLastAssistantText(
   });
 }
 
+async function clearLastAssistantActions(conversationId: string): Promise<void> {
+  const last = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!last) {
+    return;
+  }
+  await prisma.chatMessage.update({
+    where: { id: last.id },
+    data: { actions: Prisma.JsonNull },
+  });
+}
+
+/** Rewrite metadata.lists on an LLM JSON reply (e.g. drop held bulk removes). */
+function setReplyLists(reply: string, lists: unknown[]): string {
+  try {
+    const parsed: unknown = JSON.parse(reply);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as { metadata?: unknown };
+      const metadata =
+        record.metadata &&
+        typeof record.metadata === "object" &&
+        !Array.isArray(record.metadata)
+          ? (record.metadata as Record<string, unknown>)
+          : {};
+      return JSON.stringify({
+        ...record,
+        metadata: { ...metadata, lists },
+      });
+    }
+  } catch {
+    /* plain text */
+  }
+  return reply;
+}
+
 async function pushRelayMessage(input: {
   userId: string;
   employeeId: string;
@@ -597,6 +712,7 @@ async function pushTargetNotification(input: {
   purchased?: boolean;
   recipientIsOwner?: boolean;
   ownerName?: string;
+  partnerNames?: string[];
   assistantSpeaker?: string;
   digitalEmployeeId: string;
 }): Promise<{
@@ -612,6 +728,7 @@ async function pushTargetNotification(input: {
     purchased: input.purchased,
     recipientIsOwner: input.recipientIsOwner,
     ownerName: input.ownerName,
+    partnerNames: input.partnerNames,
   });
   const actions = parseLlmReply(
     JSON.stringify({
@@ -639,11 +756,11 @@ async function pushTargetNotification(input: {
     raw,
   };
   publishChatEvent(input.userId, input.target.id, input.digitalEmployeeId, notification);
-  const whatsappSkips = await deliverWhatsAppRelays(
+  const whatsappDelivery = await deliverWhatsAppRelays(
     [{ target: input.target, text }],
     input.actor.id,
   );
-  return { notification, whatsappSkips };
+  return { notification, whatsappSkips: whatsappDelivery.skips };
 }
 
 export async function notifySharedItemEvents(input: {
@@ -689,6 +806,7 @@ export async function notifySharedItemEvents(input: {
       purchased: event.purchased,
       recipientIsOwner: event.listOwnerId === target.id,
       ownerName: owner ? employeeDisplayName(owner) : undefined,
+      partnerNames: event.partnerNames,
       assistantSpeaker: input.assistantSpeaker,
       digitalEmployeeId: input.digitalEmployeeId,
     });
@@ -864,34 +982,47 @@ export async function sendChatMessage(input: {
   ]
     .filter(Boolean)
     .join("\n\n");
-  const instructions = [
-    config.systemMessage,
-    `The user is chatting as ${speaker}.`,
-    workerTargetingInstructions(employees, speaker, digital),
-    "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
-    "EMPLOYEE_SAVED_DATA is the speaker's saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
-    "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, preferences, IDs). It is injected every turn in full — use it when advising (trips, gifts, scheduling). Do not claim you lack a fact that appears there.",
-    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
-    employee.isOwner
-      ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
-      : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
-    "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
-    "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
-    "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Worker להזכיר-ל / לשלוח-הודעה jobs count as your reminder work.",
-    "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (query, sections, clocks, metadata, list_name).",
-    "Status report / what do I have saved / דוח מצב: metadata.query = \"report\". For a partial report set metadata.sections to one or more of: reminders, sends, tasks, shopping, filings, contacts, custom, history. Omit sections for the full report. The server formats the detailed report. reminders and sends include recent done/cancelled clocks; history is recent adds/updates/deletes/fires.",
-    "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: query report + sections [\"custom\"] (or the matching list type), OR answer by enumerating that list's items and column values from EMPLOYEE_SAVED_DATA. Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata.",
-    "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
-    "What did we send / send history / מה שלחנו / איזו הודעה נשלחה לעמית: metadata.query = \"report\" and metadata.sections = [\"sends\"] only. EMPLOYEE_SAVED_DATA does not include send history — the server loads it when you emit that query. Do not invent past sends.",
-    "Did a self-reminder already fire / האם שלחת תזכורת לקנות X / מתי נשלחה: metadata.query = \"report\" and metadata.sections = [\"reminders\"] (server includes recent done clocks with sent_at). Do not say none just because active_reminders is empty.",
-    "Was something deleted/cancelled/updated / מה נמחק / מחקתי את X / מתי ביטלנו / מתי עדכנו את התזכורת / מי עדכן: metadata.query = \"report\" and metadata.sections = [\"history\"] (add [\"reminders\"] if it was a clock). The server formats audit rows with when + who (ע״י). Do not invent history.",
-    "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → reminder delete confirm only. current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true; no → confirm=false. Do not start unrelated work until the server clears the state.",
-    "If asked what you can do, list every capability. Saved data does not limit that answer.",
-    "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
-    "query reminders = ping clocks only (active_reminders). Send history is not in saved data — use query report + sections sends. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const attachLucyEngine = shouldAttachLucyRuntimeEngine(
+    digital,
+    employees,
+    loadLlmConfig().systemMessage,
+  );
+  const instructions = attachLucyEngine
+    ? [
+        config.systemMessage,
+        `The user is chatting as ${speaker}.`,
+        workerTargetingInstructions(employees, speaker, digital),
+        "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
+        "EMPLOYEE_SAVED_DATA is the speaker's saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+        "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, preferences, IDs). It is injected every turn in full — use it when advising (trips, gifts, scheduling). Do not claim you lack a fact that appears there.",
+        "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+        employee.isOwner
+          ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
+          : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
+        "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
+        "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
+        "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): leave query empty. Answer from EMPLOYEE_SAVED_DATA for that owner — e.g. «טל צריך לקנות שוקו».",
+        "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Worker להזכיר-ל / לשלוח-הודעה jobs count as your reminder work.",
+        "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (query, sections, clocks, metadata, list_name).",
+        "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Never emit query report — the server no longer formats reports.",
+        "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA in response. Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata.",
+        "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
+        "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
+        "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → reminder delete confirm only. current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true; no → confirm=false. Do not start unrelated work until the server clears the state.",
+        "If asked what you can do, list every capability. Saved data does not limit that answer.",
+        "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
+        "query reminders = ping clocks only (active_reminders). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : [config.systemMessage, thinSessionEnvelope({
+        employees,
+        speaker,
+        worker: digital,
+        speakerIsOwner: employee.isOwner === true,
+      })]
+        .filter(Boolean)
+        .join("\n\n");
   const message = [
     context,
     `${speaker}: ${input.message}`,
@@ -962,11 +1093,20 @@ export async function sendChatMessage(input: {
       humans,
       employee.id,
     );
+    const listPlan = planListDeletes({
+      lists: metadata.lists ?? [],
+      confirm: metadata.confirm ?? null,
+      stored: waitingPending,
+    });
+    const metadataForApply = {
+      ...metadata,
+      lists: listPlan.applyLists,
+    };
     const plan = planTargetedActions({
       actor: employee,
       employees: humans,
       workers: digitalEmployees(employees),
-      metadata,
+      metadata: metadataForApply,
     });
     const relays = planRelayDeliveries({
       actor: employee,
@@ -977,6 +1117,8 @@ export async function sendChatMessage(input: {
 
     const collectedEvents: SharedItemEvent[] = [];
     const listMutations: ListItemMutation[] = [];
+    const filingMutations: FilingMutation[] = [];
+    const cancelledReminders: string[] = [];
     for (const application of plan.applications) {
       const applied = await applyEmployeeRecords(
         application.employeeId,
@@ -986,7 +1128,12 @@ export async function sendChatMessage(input: {
       );
       collectedEvents.push(...applied.events);
       listMutations.push(...applied.mutations);
+      filingMutations.push(...applied.filingMutations);
+      cancelledReminders.push(...applied.cancelledReminders);
     }
+    const guestMutationNotice = plan.guestMutationBlocked
+      ? "אורחים יכולים לצפות ברשימות ותיוקים משותפים, אבל לא להוסיף, לעדכן או למחוק."
+      : "";
     const abandonPending = Boolean(
       waitingDeletes &&
         hasUnrelatedWorkWhilePending({
@@ -1007,6 +1154,7 @@ export async function sendChatMessage(input: {
       stored: waitingPending,
       hold: metadata.hold ?? null,
       reminderNext: reminderPlan.nextPending,
+      listDeleteNext: listPlan.nextPending,
       directory: metadata.directory ?? [],
       lists: metadata.lists ?? [],
       reminders: metadata.reminders ?? [],
@@ -1055,15 +1203,13 @@ export async function sendChatMessage(input: {
       "reminder_apply",
       `worker=${digital.name} query=${metadata.query ?? "none"} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
     );
-    const confirmAsk = formatReminderConfirmNotice(
-      reminderPlan.ask,
-      reminderPlan.cancelled,
-      reminderPlan.noneToDelete,
-    );
-    const reminderNotice = [
-      confirmAsk,
-      formatReminderApplyNotice(reminderResult),
-      formatDirectoryApplyNotice(directoryResult),
+    const confirmAsk = [
+      formatReminderConfirmNotice(
+        reminderPlan.ask,
+        reminderPlan.cancelled,
+        reminderPlan.noneToDelete,
+      ),
+      formatListDeleteConfirmNotice(listPlan.askLabels, listPlan.cancelled),
     ]
       .filter(Boolean)
       .join("\n");
@@ -1108,6 +1254,7 @@ export async function sendChatMessage(input: {
         target: notification.employee,
         metadata: notification.metadata,
         recipientIsOwner: true,
+        partnerNames: notification.partnerNames,
         assistantSpeaker,
         digitalEmployeeId: digital.id,
       });
@@ -1151,65 +1298,93 @@ export async function sendChatMessage(input: {
         }),
       );
     }
+    const waRelays = await deliverWhatsAppRelays(attributedRelays, employee.id);
+    const waPhones = await deliverWhatsAppPhones(attributedPhones);
     const skips = [
       ...sharedWhatsAppSkips,
-      ...(await deliverWhatsAppRelays(attributedRelays, employee.id)),
-      ...(await deliverWhatsAppPhones(attributedPhones)),
+      ...waRelays.skips,
+      ...waPhones.skips,
     ];
     const whatsappNotice = formatWhatsAppSkipNotice(skips);
     const missingSend = formatMissingSendTextNotice(
       parsedMetadata.messages ?? [],
     );
+    const messagesSent = [
+      ...new Set([
+        ...attributedRelays.map(
+          (relay) => relay.target.nickname?.trim() || relay.target.name,
+        ),
+        ...waRelays.sentLabels,
+        ...waPhones.sentLabels,
+      ]),
+    ].filter(Boolean);
+    const applySummary = formatTurnApplySummary({
+      listMutations,
+      filingMutations,
+      reminders: {
+        ...reminderResult,
+        removed: [...reminderResult.removed, ...cancelledReminders],
+      },
+      directory: directoryResult,
+      messagesSent,
+      speakerId: employee.id,
+      workerId: digital.id,
+      workerName: assistantSpeaker,
+    });
+    const deliveryFailed = whatsappNotice.length > 0;
+    const confirmPending =
+      reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
+    let workingReply = alignListTypeInReply(turn.reply, listMutations);
+    // Held bulk list deletes are not applied — hide their actions from the reply.
+    if (listPlan.askLabels.length > 0) {
+      workingReply = setReplyLists(workingReply, listPlan.applyLists);
+    }
+    // Empty LLM response must not leak raw JSON / blank bubble to the user.
+    let appliedSummaryInResponse = false;
+    if (!parseLlmReply(workingReply).response.trim()) {
+      const fallback =
+        confirmAsk ||
+        applySummary ||
+        guestMutationNotice ||
+        (metadata.confirm === false
+          ? "ביטלתי את המחיקה."
+          : metadata.confirm === true
+            ? "בוצע."
+            : "");
+      if (fallback) {
+        workingReply = setEngineResponse(workingReply, fallback);
+        appliedSummaryInResponse = Boolean(applySummary && fallback === applySummary);
+      }
+    }
     const notice = [
-      reminderNotice,
+      confirmPending ? "" : confirmAsk,
+      appliedSummaryInResponse ? "" : applySummary,
+      guestMutationNotice,
       missingSend,
       whatsappNotice,
     ]
       .filter(Boolean)
       .join("\n\n");
-    const deliveryFailed = whatsappNotice.length > 0;
-    const confirmPending = reminderPlan.ask.length > 0;
-    let workingReply = alignListTypeInReply(turn.reply, listMutations);
-    if (metadata.query === "report" && !deliveryFailed && !confirmPending) {
-      const reportSections = metadata.reportSections ?? [];
-      const needDoneHistory =
-        reportSections.length === 0 ||
-        reportSections.includes("sends") ||
-        reportSections.includes("reminders");
-      const needMutationHistory =
-        reportSections.length === 0 || reportSections.includes("history");
-      const reportSnapshot = await getEmployeeRecordSnapshot(employee.id, {
-        includeDoneSendHistory: needDoneHistory,
-        includeMutationHistory: needMutationHistory,
-      });
-      const reportText = formatSavedDataReport({
-        snapshot: reportSnapshot,
-        contacts: refreshedContacts,
-        speakerId: employee.id,
-        speakerPhone: employee.phone,
-        speakerName: speaker,
-        sections: reportSections,
-        historyKinds: metadata.reportHistoryKinds ?? [],
-        multiOwner: employee.isOwner === true,
-      });
-      workingReply = setEngineResponse(workingReply, reportText);
-    }
     const alignedSpoken = parseLlmReply(workingReply).response;
     if (alignedSpoken !== parseLlmReply(turn.reply).response) {
       await patchLastAssistantText(conversation.id, alignedSpoken);
     }
     const replaceSpoken = deliveryFailed || confirmPending;
+    const composeNotice = confirmPending ? confirmAsk : notice;
     const reply = composeAssistantReply({
       llmReply: workingReply,
-      notice,
+      notice: composeNotice,
       replaceResponse: replaceSpoken,
     });
-    if (notice) {
+    if (composeNotice) {
       await appendAssistantNotice(
         conversation.id,
-        notice,
+        composeNotice,
         replaceSpoken ? "replace" : "append",
       );
+    }
+    if (confirmPending) {
+      await clearLastAssistantActions(conversation.id);
     }
 
     if (conversation.needsContext) {

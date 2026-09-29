@@ -59,7 +59,7 @@ describe("cancelActiveRemindersMatchingWork", () => {
       actorEmployeeId: "tal-1",
     });
 
-    expect(cancelled).toEqual(["להישקל"]);
+    expect(cancelled.cancelledReminders).toEqual(["להישקל"]);
     expect(reminderUpdate).toHaveBeenCalledTimes(1);
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r-scale" },
@@ -84,7 +84,10 @@ describe("cancelActiveRemindersMatchingWork", () => {
       itemLabel: "להישקל",
     });
 
-    expect(cancelled).toEqual([]);
+    expect(cancelled).toEqual({
+      cancelledReminders: [],
+      removedWorkerTasks: [],
+    });
     expect(reminderUpdate).not.toHaveBeenCalled();
   });
 });

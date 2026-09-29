@@ -104,7 +104,6 @@ vi.mock("../src/database/prisma.js", () => ({
 
 vi.mock("../src/services/audit.service.js", () => ({
   recordAuditEvent: vi.fn(),
-  listRecentMutationHistory: vi.fn().mockResolvedValue([]),
 }));
 
 import {
@@ -120,6 +119,7 @@ import {
   getEmployeeRecordSnapshot,
   updateEmployeeRecord,
   itemIdentity,
+  isPhantomCustomListItem,
   parseAssignmentNote,
 } from "../src/services/employee-records.service.js";
 
@@ -192,6 +192,18 @@ describe("employee records", () => {
     ).toBe("Maya driving lessons");
     expect(deriveCustomListName([{ תאריך: "2026-09-29" }])).toBe("");
     expect(deriveCustomListName([])).toBe("");
+  });
+
+  it("treats list-title placeholders as phantom custom items", () => {
+    const title = "המטרות של הפועל פתח תקווה עד 2030";
+    expect(isPhantomCustomListItem(title, { שנה: title })).toBe(true);
+    expect(isPhantomCustomListItem(title, { list_name: title })).toBe(true);
+    expect(isPhantomCustomListItem(title, { שנה: "", "הישג נדרש": "" })).toBe(
+      true,
+    );
+    expect(
+      isPhantomCustomListItem(title, { שנה: "2027", "הישג נדרש": "אליפות" }),
+    ).toBe(false);
   });
 
   it("rewrites shopping wording when the remove was from tasks", () => {

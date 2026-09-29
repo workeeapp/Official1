@@ -3,6 +3,8 @@ import type { TextareaHTMLAttributes } from "react";
 interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label: string;
   error?: string;
+  /** When true, keep accessible label but hide the visible label text. */
+  hideLabel?: boolean;
 }
 
 export function Textarea({
@@ -10,6 +12,7 @@ export function Textarea({
   label,
   error,
   name,
+  hideLabel = false,
   className = "",
   ...props
 }: TextareaProps) {
@@ -20,7 +23,11 @@ export function Textarea({
     <div className="flex w-full flex-col gap-1.5">
       <label
         htmlFor={inputId}
-        className="text-sm font-medium text-text-primary"
+        className={
+          hideLabel
+            ? "sr-only"
+            : "text-sm font-medium text-text-primary"
+        }
       >
         {label}
       </label>

@@ -38,6 +38,37 @@ export function getDigitalEmployeeDefaults(): DigitalEmployeeDefaults {
   };
 }
 
+/** Lucy's live prompt from DB (fallback: LLM.config). Used for “inherit from Lucy”. */
+export async function getLucyPromptDefaults(
+  userId: string,
+): Promise<DigitalEmployeeDefaults> {
+  await ensureProtectedLucy(userId);
+  const lucy = await prisma.employee.findFirst({
+    where: {
+      userId,
+      kind: "digital",
+      OR: [
+        { isProtected: true },
+        { name: LUCY_NAME },
+        { nickname: LUCY_NAME },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const fileDefaults = getDigitalEmployeeDefaults();
+  if (!lucy) {
+    return fileDefaults;
+  }
+  return {
+    model: lucy.model?.trim() || fileDefaults.model,
+    temperature:
+      typeof lucy.temperature === "number" && Number.isFinite(lucy.temperature)
+        ? lucy.temperature
+        : fileDefaults.temperature,
+    instructions: lucy.instructions?.trim() || fileDefaults.instructions,
+  };
+}
+
 async function ensureProtectedLucy(userId: string): Promise<void> {
   const existing = await prisma.employee.findFirst({
     where: { userId, isProtected: true },
@@ -77,34 +108,8 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
   });
 }
 
-/** Every digital worker inherits Lucy's base prompt (LLM.config). Future add-ons can layer on top. */
-async function syncDigitalEmployeesToLucyBase(userId: string): Promise<void> {
-  const defaults = getDigitalEmployeeDefaults();
-  const digitals = await prisma.employee.findMany({
-    where: { userId, kind: "digital" },
-  });
-  for (const employee of digitals) {
-    if (
-      employee.instructions === defaults.instructions &&
-      employee.model === defaults.model &&
-      employee.temperature === defaults.temperature
-    ) {
-      continue;
-    }
-    await prisma.employee.update({
-      where: { id: employee.id },
-      data: {
-        instructions: defaults.instructions,
-        model: defaults.model,
-        temperature: defaults.temperature,
-      },
-    });
-  }
-}
-
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
-  await syncDigitalEmployeesToLucyBase(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
@@ -154,6 +159,12 @@ async function findOwnedEmployee(userId: string, employeeId: string): Promise<Em
 function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
   if (kind === "digital") {
     const defaults = getDigitalEmployeeDefaults();
+    const model = input.model?.trim() || defaults.model;
+    const temperature =
+      typeof input.temperature === "number" && Number.isFinite(input.temperature)
+        ? input.temperature
+        : defaults.temperature;
+    const instructions = input.instructions?.trim() || defaults.instructions;
     return {
       kind: "digital" as const,
       name: input.name,
@@ -161,9 +172,9 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
       nickname: input.nickname ?? input.name,
       email: null,
       phone: null,
-      model: defaults.model,
-      temperature: defaults.temperature,
-      instructions: defaults.instructions,
+      model,
+      temperature,
+      instructions,
       isOwner: false,
     };
   }

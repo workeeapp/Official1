@@ -34,7 +34,146 @@ export type PendingHoldAction = {
   at: Date;
 };
 
-export type ConversationPendingAction = PendingDeleteAction | PendingHoldAction;
+export type PendingListDeleteAction = {
+  action: "delete_lists";
+  step: "confirm";
+  /** Hebrew labels shown in the confirm ask. */
+  targets: string[];
+  lists: LlmListAction[];
+  at: Date;
+};
+
+export type ConversationPendingAction =
+  | PendingDeleteAction
+  | PendingHoldAction
+  | PendingListDeleteAction;
+
+/** Two or more list removes in one turn require server confirm (like reminder delete). */
+export const BULK_LIST_REMOVE_CONFIRM_MIN = 2;
+
+function listRemoveItemLabel(
+  listType: string,
+  item: Record<string, unknown>,
+): string {
+  const keys =
+    listType === "shopping"
+      ? ["שם פריט", "name", "item_name"]
+      : listType === "tasks"
+        ? ["שם מטלה", "name", "task", "item_name"]
+        : ["name", "שם", "title", "item_name", "שם פריט"];
+  for (const key of keys) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  for (const value of Object.values(item)) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "פריט";
+}
+
+export function countListRemoveItems(lists: LlmListAction[]): number {
+  return lists
+    .filter((row) => row.action === "remove")
+    .reduce((n, row) => n + row.items.length, 0);
+}
+
+export function planListDeletes(input: {
+  lists: LlmListAction[];
+  confirm: boolean | null;
+  stored: ConversationPendingAction | null;
+  now?: Date;
+  timeoutMs?: number;
+}): {
+  applyLists: LlmListAction[];
+  askLabels: string[];
+  nextPending: PendingListDeleteAction | null;
+  cancelled: boolean;
+} {
+  const now = input.now ?? new Date();
+  const timeoutMs = input.timeoutMs ?? PENDING_HOLD_TIMEOUT_MS;
+  let stored =
+    input.stored?.action === "delete_lists" ? input.stored : null;
+  if (stored && now.getTime() - stored.at.getTime() > timeoutMs) {
+    stored = null;
+  }
+
+  const removes = input.lists.filter((row) => row.action === "remove");
+  const other = input.lists.filter((row) => row.action !== "remove");
+  const removeCount = countListRemoveItems(removes);
+
+  if (stored && input.confirm === false) {
+    return {
+      applyLists: other,
+      askLabels: [],
+      nextPending: null,
+      cancelled: true,
+    };
+  }
+
+  if (stored && input.confirm === true) {
+    return {
+      applyLists: [...other, ...stored.lists],
+      askLabels: [],
+      nextPending: null,
+      cancelled: false,
+    };
+  }
+
+  if (removeCount >= BULK_LIST_REMOVE_CONFIRM_MIN) {
+    const labels = removes.flatMap((row) =>
+      row.items.map((item) => listRemoveItemLabel(row.listType, item)),
+    );
+    return {
+      applyLists: other,
+      askLabels: labels,
+      nextPending: {
+        action: "delete_lists",
+        step: "confirm",
+        targets: labels,
+        lists: removes,
+        at: stored?.at ?? now,
+      },
+      cancelled: false,
+    };
+  }
+
+  if (stored && input.confirm === null) {
+    return {
+      applyLists: other,
+      askLabels: stored.targets,
+      nextPending: stored,
+      cancelled: false,
+    };
+  }
+
+  return {
+    applyLists: [...other, ...removes],
+    askLabels: [],
+    nextPending: null,
+    cancelled: false,
+  };
+}
+
+export function formatListDeleteConfirmNotice(
+  labels: string[],
+  cancelled: boolean,
+): string {
+  if (cancelled) {
+    return "ביטלתי את המחיקה.";
+  }
+  if (labels.length === 0) {
+    return "";
+  }
+  if (labels.length === 1) {
+    return `לאשר מחיקה של «${labels[0]}»?`;
+  }
+  const listed = labels.map((name) => `«${name}»`).join(", ");
+  return `לאשר מחיקה של ${labels.length} פריטים (${listed})?`;
+}
 
 export type LlmHold = {
   kind: PendingHoldKind;
@@ -100,6 +239,33 @@ export function conversationPendingFromStored(row: {
       action: "delete_reminder",
       step: "confirm",
       targets,
+      at: row.pendingAt,
+    };
+  }
+
+  if (row.pendingAction === "delete_lists" && row.pendingStep === "confirm") {
+    const payload =
+      row.pendingTargets &&
+      typeof row.pendingTargets === "object" &&
+      !Array.isArray(row.pendingTargets)
+        ? (row.pendingTargets as Record<string, unknown>)
+        : null;
+    const lists = Array.isArray(payload?.lists)
+      ? (payload.lists as LlmListAction[])
+      : [];
+    const targets = Array.isArray(payload?.targets)
+      ? payload.targets.filter(
+          (item): item is string => typeof item === "string" && Boolean(item.trim()),
+        )
+      : [];
+    if (lists.length === 0 || targets.length === 0) {
+      return null;
+    }
+    return {
+      action: "delete_lists",
+      step: "confirm",
+      targets,
+      lists,
       at: row.pendingAt,
     };
   }
@@ -173,6 +339,14 @@ export function pendingToStored(pending: ConversationPendingAction | null): {
       pendingAt: pending.at,
     };
   }
+  if (pending.action === "delete_lists") {
+    return {
+      pendingAction: pending.action,
+      pendingTargets: { targets: pending.targets, lists: pending.lists },
+      pendingStep: pending.step,
+      pendingAt: pending.at,
+    };
+  }
   return {
     pendingAction: pending.action,
     pendingTargets: { need: pending.need, draft: pending.draft },
@@ -205,6 +379,19 @@ export function formatConversationPendingContext(
       "Yes / confirm → metadata.confirm=true and empty reminders.",
       "No / cancel → metadata.confirm=false and empty reminders.",
       "Do not emit messages, lists, or reminder adds while current_step is confirm.",
+    ].join("\n");
+  }
+
+  if (pending.action === "delete_lists") {
+    return [
+      "PENDING_ACTION_STATE:",
+      `current_action: ${pending.action}`,
+      `current_target: ${pending.targets.join(", ")}`,
+      `current_step: ${pending.step}`,
+      "Stay inside this action until the server clears it.",
+      "Yes / confirm → metadata.confirm=true and empty lists.",
+      "No / cancel → metadata.confirm=false and empty lists.",
+      "Do not emit new list adds/updates or messages while current_step is confirm.",
     ].join("\n");
   }
 
@@ -316,6 +503,7 @@ export function resolveNextPending(input: {
   stored: ConversationPendingAction | null;
   hold: LlmHold | null;
   reminderNext: PendingDeleteAction | null;
+  listDeleteNext?: PendingListDeleteAction | null;
   directory: LlmDirectoryAction[];
   lists: LlmListAction[];
   reminders: LlmReminderAction[];
@@ -329,6 +517,9 @@ export function resolveNextPending(input: {
   if (input.reminderNext) {
     return input.reminderNext;
   }
+  if (input.listDeleteNext) {
+    return input.listDeleteNext;
+  }
 
   const freshHold = pendingHoldFromLlm(input.hold);
   if (freshHold) {
@@ -338,6 +529,7 @@ export function resolveNextPending(input: {
   if (
     input.stored &&
     input.stored.action !== "delete_reminder" &&
+    input.stored.action !== "delete_lists" &&
     now.getTime() - input.stored.at.getTime() <= PENDING_HOLD_TIMEOUT_MS
   ) {
     if (

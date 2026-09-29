@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PublicEmployee } from "@workee/shared";
+import { emptyLlmMetadata, type PublicEmployee } from "@workee/shared";
 import {
   fallbackNotificationText,
   formatMissingSendTextNotice,
@@ -442,6 +442,124 @@ describe("employee targets", () => {
         employees,
         amit.id,
       ),
-    ).toEqual([{ phone: "0502222222", text: "היי מהמטה" }]);
+    ).toEqual([{ phone: "0502222222", text: "היי מהמטה", label: "0502222222" }]);
+  });
+
+  it("keeps one shared custom list on the speaker and notifies partners", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "איסוף ילדים מהחוגים",
+            targets: ["עמית", "טל"],
+            items: [{ פעילות: "שחייה" }],
+          },
+        ],
+      },
+    });
+    expect(plan.guestMutationBlocked).toBe(false);
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([amit.id]);
+    expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    expect(plan.applications[0]?.visibility.visibleTo.sort()).toEqual(
+      [amit.id, tal.id].sort(),
+    );
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
+    expect(plan.notifications[0]?.partnerNames).toContain("טל");
+  });
+
+  it("opens an empty shared custom list without inventing a speaker task", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "המטרות של הפועל פתח תקווה עד 2030",
+            targets: ["טל", "עמית"],
+            items: [
+              {
+                שנה: "המטרות של הפועל פתח תקווה עד 2030",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([tal.id]);
+    expect(
+      plan.applications.some((row) =>
+        row.metadata.lists.some((list) => list.listType === "tasks"),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not collapse shopping item sharing when speaker is also in targets", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            targets: ["עמית", "טל"],
+            items: [{ "שם פריט": "חלב" }],
+          },
+        ],
+      },
+    });
+    expect(
+      [...new Set(plan.applications.map((row) => row.employeeId))].sort(),
+    ).toEqual([amit.id, tal.id].sort());
+    expect(
+      plan.applications.some(
+        (row) =>
+          row.employeeId === tal.id &&
+          row.metadata.lists[0]?.listType === "shopping",
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks list and filing mutations from guest speakers", () => {
+    const guest: PublicEmployee = {
+      id: "guest-1",
+      kind: "human",
+      name: "אורח",
+      surname: "",
+      nickname: "אורח …1495",
+      email: null,
+      phone: "0509999999",
+      protected: false,
+      isOwner: false,
+    };
+    const plan = planTargetedActions({
+      actor: guest,
+      employees: [...employees, guest],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            targets: [],
+            items: [{ "שם פריט": "חלב" }],
+          },
+        ],
+      },
+    });
+    expect(plan.guestMutationBlocked).toBe(true);
+    expect(plan.applications).toEqual([]);
+    expect(plan.notifications).toEqual([]);
   });
 });

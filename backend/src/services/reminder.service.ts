@@ -313,10 +313,23 @@ export async function removeReminderAndLinkedWorkerTask(match: {
   userId?: string;
   actorEmployeeId?: string | null;
   label?: string;
-}): Promise<void> {
+}): Promise<
+  Array<{
+    id: string;
+    itemKey: string;
+    itemLabel: string;
+    employeeId: string;
+  }>
+> {
   const workerItemId = match.workerItemId ?? null;
-  if (prisma.employeeListItem?.updateMany) {
-    await prisma.employeeListItem.updateMany({
+  const removedWorkerTasks: Array<{
+    id: string;
+    itemKey: string;
+    itemLabel: string;
+    employeeId: string;
+  }> = [];
+  if (prisma.employeeListItem?.findMany && prisma.employeeListItem?.updateMany) {
+    const doomed = await prisma.employeeListItem.findMany({
       where: {
         deletedAt: null,
         OR: [
@@ -324,11 +337,30 @@ export async function removeReminderAndLinkedWorkerTask(match: {
           ...(workerItemId ? [{ id: workerItemId }] : []),
         ],
       },
-      data: { deletedAt: new Date(), reminderId: null },
+      include: { list: { select: { employeeId: true, listType: true } } },
     });
+    for (const row of doomed) {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const label =
+        (typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()) ||
+        (typeof data.name === "string" && data.name.trim()) ||
+        row.itemKey;
+      removedWorkerTasks.push({
+        id: row.id,
+        itemKey: row.itemKey,
+        itemLabel: label,
+        employeeId: row.list.employeeId,
+      });
+    }
+    if (doomed.length > 0) {
+      await prisma.employeeListItem.updateMany({
+        where: { id: { in: doomed.map((row) => row.id) } },
+        data: { deletedAt: new Date(), reminderId: null },
+      });
+    }
   }
   if (!prisma.reminder?.update) {
-    return;
+    return removedWorkerTasks;
   }
   try {
     await prisma.reminder.update({
@@ -350,10 +382,11 @@ export async function removeReminderAndLinkedWorkerTask(match: {
     }
   } catch (error) {
     if (isMissingTableError(error) || isMissingRecord(error)) {
-      return;
+      return removedWorkerTasks;
     }
     throw error;
   }
+  return removedWorkerTasks;
 }
 
 export async function cancelReminderLinkedToWorkerItem(
@@ -411,14 +444,22 @@ export async function cancelActiveRemindersMatchingWork(input: {
   itemKey: string;
   itemLabel?: string;
   actorEmployeeId?: string | null;
-}): Promise<string[]> {
+}): Promise<{
+  cancelledReminders: string[];
+  removedWorkerTasks: Array<{
+    id: string;
+    itemKey: string;
+    itemLabel: string;
+    employeeId: string;
+  }>;
+}> {
   if (!prisma.reminder?.findMany) {
-    return [];
+    return { cancelledReminders: [], removedWorkerTasks: [] };
   }
   const wantedKey = itemKey(input.itemKey);
   const wantedLabel = (input.itemLabel ?? input.itemKey).trim();
   if (!wantedKey && !wantedLabel) {
-    return [];
+    return { cancelledReminders: [], removedWorkerTasks: [] };
   }
   try {
     const rows = await prisma.reminder.findMany({
@@ -432,25 +473,39 @@ export async function cancelActiveRemindersMatchingWork(input: {
           ? reminderLabelsMatch(row.itemKey, wantedKey)
           : false),
     );
-    const cancelled: string[] = [];
+    const cancelledReminders: string[] = [];
+    const removedWorkerTasks: Array<{
+      id: string;
+      itemKey: string;
+      itemLabel: string;
+      employeeId: string;
+    }> = [];
+    const seenWorker = new Set<string>();
     for (const match of matches) {
       const workerItemId =
         "workerItemId" in match && typeof match.workerItemId === "string"
           ? match.workerItemId
           : null;
-      await removeReminderAndLinkedWorkerTask({
+      const removed = await removeReminderAndLinkedWorkerTask({
         id: match.id,
         workerItemId,
         userId: input.userId,
         actorEmployeeId: input.actorEmployeeId,
         label: match.itemLabel,
       });
-      cancelled.push(match.itemLabel);
+      cancelledReminders.push(match.itemLabel);
+      for (const task of removed) {
+        if (seenWorker.has(task.id)) {
+          continue;
+        }
+        seenWorker.add(task.id);
+        removedWorkerTasks.push(task);
+      }
     }
-    return cancelled;
+    return { cancelledReminders, removedWorkerTasks };
   } catch (error) {
     if (isMissingTableError(error)) {
-      return [];
+      return { cancelledReminders: [], removedWorkerTasks: [] };
     }
     throw error;
   }
@@ -1256,7 +1311,11 @@ export function formatReminderApplyNotice(result: {
     );
   }
   if (result.removed.length > 0) {
-    parts.push(`נמחק: ${result.removed.join(", ")}.`);
+    parts.push(
+      result.removed
+        .map((name) => `ביטלתי את התזכורת «${name}».`)
+        .join(" "),
+    );
   }
   if (result.missed.length > 0) {
     parts.push(`לא נמצאה תזכורת פעילה בשם: ${result.missed.join(", ")}.`);
@@ -1269,25 +1328,9 @@ export async function listReminderRowsForUser(userId: string) {
     return [];
   }
   try {
-    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // Live clocks only — done/cancelled stay in DB but are never loaded into context.
     return await prisma.reminder.findMany({
-      where: {
-        userId,
-        OR: [
-          { status: "active" },
-          {
-            status: "done",
-            OR: [
-              { sentAt: { gte: since } },
-              { sentAt: null, fireAt: { gte: since } },
-            ],
-          },
-          {
-            status: "cancelled",
-            updatedAt: { gte: since },
-          },
-        ],
-      },
+      where: { userId, status: "active" },
       orderBy: { fireAt: "asc" },
     });
   } catch (error) {

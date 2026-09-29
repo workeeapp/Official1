@@ -26,9 +26,7 @@ describe("LLM action schema", () => {
     expect(config.responseFormat?.name).toBe("lucy_metadata_response");
     expect(config.systemMessage).toContain("metadata");
     expect(config.systemMessage).toContain("metadata.query");
-    expect(config.systemMessage).toContain("query report");
-    expect(config.systemMessage).toContain("sections");
-    expect(config.systemMessage).toContain("history");
+    expect(config.systemMessage).toContain("never emit query report");
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");
     expect(config.systemMessage).toContain("git_log");

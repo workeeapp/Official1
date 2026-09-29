@@ -9,7 +9,7 @@ import {
 import {
   createEmployeeForUser,
   deleteEmployeeForUser,
-  getDigitalEmployeeDefaults,
+  getLucyPromptDefaults,
   getEmployeeForUser,
   listEmployeesForUser,
   resolveActingEmployee,
@@ -36,7 +36,8 @@ export async function getDigitalDefaults(req: Request, res: Response): Promise<v
     throw new UnauthorizedError();
   }
 
-  res.status(200).json(getDigitalEmployeeDefaults());
+  // Prefer Lucy's saved prompt so "inherit from Lucy" matches what she actually runs.
+  res.status(200).json(await getLucyPromptDefaults(req.user.id));
 }
 
 export async function getEmployeeRecords(req: Request, res: Response): Promise<void> {

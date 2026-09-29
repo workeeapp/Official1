@@ -92,6 +92,8 @@ model EmployeeList {
   employeeId String             @map("employee_id") @db.Uuid
   listType   String             @map("list_type") @db.VarChar(32)
   name       String             @default("") @db.VarChar(100)
+  scope      String             @default("personal") @db.VarChar(16)
+  visibleTo  Json               @default("[]") @map("visible_to")
   createdAt  DateTime           @default(now()) @map("created_at")
   updatedAt  DateTime           @updatedAt @map("updated_at")
   employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -99,6 +101,7 @@ model EmployeeList {
 
   @@unique([employeeId, listType, name])
   @@index([employeeId])
+  @@index([scope])
   @@map("EmployeeLists")
 }
 
@@ -130,6 +133,8 @@ model EmployeeFiling {
   itemName   String    @map("item_name") @db.VarChar(200)
   itemInfo   String    @map("item_info") @db.Text
   addedById  String?   @map("added_by_id") @db.Uuid
+  scope      String    @default("personal") @db.VarChar(16)
+  visibleTo  Json      @default("[]") @map("visible_to")
   deletedAt  DateTime? @map("deleted_at")
   createdAt  DateTime  @default(now()) @map("created_at")
   updatedAt  DateTime  @updatedAt @map("updated_at")
@@ -138,6 +143,7 @@ model EmployeeFiling {
   @@index([employeeId, itemName])
   @@index([employeeId])
   @@index([deletedAt])
+  @@index([scope])
   @@map("EmployeeFilings")
 }
 

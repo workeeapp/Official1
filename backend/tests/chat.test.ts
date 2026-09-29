@@ -44,10 +44,16 @@ const {
   listFindUnique,
   listCreate,
   itemFindUnique,
+  itemFindFirst,
   itemCreate,
   itemUpdate,
+  itemUpdateMany,
   itemDeleteMany,
   filingFindMany,
+  filingFindFirst,
+  filingCreate,
+  filingUpdate,
+  filingUpdateMany,
   filingUpsert,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
@@ -65,10 +71,16 @@ const {
   listFindUnique: vi.fn(),
   listCreate: vi.fn(),
   itemFindUnique: vi.fn(),
+  itemFindFirst: vi.fn(),
   itemCreate: vi.fn(),
   itemUpdate: vi.fn(),
+  itemUpdateMany: vi.fn(),
   itemDeleteMany: vi.fn(),
   filingFindMany: vi.fn(),
+  filingFindFirst: vi.fn(),
+  filingCreate: vi.fn(),
+  filingUpdate: vi.fn(),
+  filingUpdateMany: vi.fn(),
   filingUpsert: vi.fn(),
 }));
 
@@ -78,7 +90,7 @@ const { createConversation, createResponse } = vi.hoisted(() => ({
 }));
 
 const deliverWhatsAppRelaysMock = vi.hoisted(() =>
-  vi.fn().mockResolvedValue([]),
+  vi.fn().mockResolvedValue({ skips: [], sentLabels: [] }),
 );
 
 vi.mock("../src/services/whatsapp-send.js", async (importOriginal) => {
@@ -164,12 +176,18 @@ vi.mock("../src/database/prisma.js", () => ({
     employeeListItem: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: itemFindUnique,
+      findFirst: itemFindFirst,
       create: itemCreate,
       update: itemUpdate,
+      updateMany: itemUpdateMany,
       deleteMany: itemDeleteMany,
     },
     employeeFiling: {
       findMany: filingFindMany,
+      findFirst: filingFindFirst,
+      create: filingCreate,
+      update: filingUpdate,
+      updateMany: filingUpdateMany,
       upsert: filingUpsert,
     },
     reminder: {
@@ -320,7 +338,10 @@ describe("chat API", () => {
       reply: "Hello from the model",
       raw: { output_text: "Hello from the model" },
     });
-    deliverWhatsAppRelaysMock.mockReset().mockResolvedValue([]);
+    deliverWhatsAppRelaysMock.mockReset().mockResolvedValue({
+      skips: [],
+      sentLabels: [],
+    });
     resetChatStore();
     conversationFindUnique.mockReset().mockImplementation(
       async ({
@@ -471,10 +492,16 @@ describe("chat API", () => {
       name: "",
     });
     itemFindUnique.mockReset().mockResolvedValue(null);
+    itemFindFirst.mockReset().mockResolvedValue(null);
     itemCreate.mockReset().mockResolvedValue({ id: "item-1" });
     itemUpdate.mockReset().mockResolvedValue({ id: "item-1" });
+    itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     itemDeleteMany.mockReset().mockResolvedValue({ count: 1 });
     filingFindMany.mockReset().mockResolvedValue([]);
+    filingFindFirst.mockReset().mockResolvedValue(null);
+    filingCreate.mockReset().mockResolvedValue({ id: "filing-1" });
+    filingUpdate.mockReset();
+    filingUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     filingUpsert.mockReset().mockResolvedValue({ id: "filing-1" });
     messageCreate.mockReset().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       const row = {
@@ -1009,7 +1036,7 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_test_other");
   });
 
-  it("starts a separate conversation per digital employee with shared Lucy LLM settings", async () => {
+  it("starts a separate conversation per digital employee using that worker's DB prompt", async () => {
     const dianaId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const cookie = await login();
     mockOwnedEmployee();
@@ -1073,12 +1100,6 @@ describe("chat API", () => {
     expect(createConversation).toHaveBeenCalledTimes(2);
     expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
-    expect(createResponse.mock.calls[0][0].model).toBe(
-      createResponse.mock.calls[1][0].model,
-    );
-    expect(createResponse.mock.calls[0][0].temperature).toBe(
-      createResponse.mock.calls[1][0].temperature,
-    );
     expect(createResponse.mock.calls[0][0].textFormat).toMatchObject({
       type: "json_schema",
       name: "lucy_metadata_response",
@@ -1088,9 +1109,20 @@ describe("chat API", () => {
       name: "lucy_metadata_response",
     });
     expect(createResponse.mock.calls[1][0].instructions).toContain("You are דיאנה");
-    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+    expect(createResponse.mock.calls[1][0].instructions).toContain(
       "Diana system prompt",
     );
+    expect(createResponse.mock.calls[1][0].instructions).toContain(
+      "Follow ONLY your system instructions above",
+    );
+    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+      "list every capability",
+    );
+    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+      "You support every action",
+    );
+    expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
+    expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
   });
 
   it("includes current employee records in every LLM turn", async () => {
@@ -1216,16 +1248,16 @@ describe("chat API", () => {
         visibleTo: [employeeId],
       },
     });
-    expect(filingUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: {
-          employeeId,
-          itemName: "מספר רכב",
-          itemInfo: "3434343",
-          addedById: employeeId,
-        },
-      }),
-    );
+    expect(filingCreate).toHaveBeenCalledWith({
+      data: {
+        employeeId,
+        itemName: "מספר רכב",
+        itemInfo: "3434343",
+        addedById: employeeId,
+      },
+    });
+    expect(response.body.reply).toContain("הוספתי «חלב» לרשימת הקניות");
+    expect(response.body.reply).toContain("שמרתי תיוק «מספר רכב»");
   });
 
   it("saves a targeted action on the other employee and pushes an assistant notification", async () => {
@@ -1368,7 +1400,7 @@ describe("chat API", () => {
       listType: "shopping",
       name: "",
     });
-    itemFindUnique.mockResolvedValue({
+    itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: "tal-shop",
       itemKey: "קופסת טונה",
@@ -1387,17 +1419,24 @@ describe("chat API", () => {
       .send({ message: "קניתי טונה", employeeId: otherEmployeeId });
 
     expect(response.status).toBe(200);
-    expect(itemDeleteMany).toHaveBeenCalledWith({
-      where: { listId: "tal-shop", itemKey: "קופסת טונה" },
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: {
+        listId: "tal-shop",
+        itemKey: "קופסת טונה",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    expect(itemDeleteMany).toHaveBeenCalledWith({
+    expect(itemUpdateMany).toHaveBeenCalledWith({
       where: {
         itemKey: { contains: "קופסת טונה" },
+        deletedAt: null,
         list: {
           listType: "tasks",
           employeeId: { in: [otherEmployeeId, employeeId] },
         },
       },
+      data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(employeeId);
@@ -1428,7 +1467,7 @@ describe("chat API", () => {
       listType: "shopping",
       name: "",
     });
-    itemFindUnique.mockResolvedValue({
+    itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: "tal-shop",
       itemKey: "קופסת טונה",

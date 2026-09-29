@@ -156,15 +156,21 @@ async function graphErrorDetail(response: Response): Promise<string> {
   }
 }
 
+export type WhatsAppDeliveryResult = {
+  skips: WhatsAppDeliverySkip[];
+  sentLabels: string[];
+};
+
 export async function deliverWhatsAppRelays(
   relays: Array<{ target: PublicEmployee; text: string }>,
   actorId: string,
-): Promise<WhatsAppDeliverySkip[]> {
+): Promise<WhatsAppDeliveryResult> {
   if (getEnv().NODE_ENV === "test" || !getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
-    return [];
+    return { skips: [], sentLabels: [] };
   }
 
   const skips: WhatsAppDeliverySkip[] = [];
+  const sentLabels: string[] = [];
   const sent = new Set<string>();
   for (const relay of relays) {
     if (relay.target.id === actorId || isDigitalEmployee(relay.target)) {
@@ -186,19 +192,22 @@ export async function deliverWhatsAppRelays(
         label,
         reason: result === "no_session" ? "no_session" : "failed",
       });
+    } else {
+      sentLabels.push(label);
     }
   }
-  return skips;
+  return { skips, sentLabels };
 }
 
 export async function deliverWhatsAppPhones(
-  relays: Array<{ phone: string; text: string }>,
-): Promise<WhatsAppDeliverySkip[]> {
+  relays: Array<{ phone: string; text: string; label?: string }>,
+): Promise<WhatsAppDeliveryResult> {
   if (getEnv().NODE_ENV === "test" || !getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
-    return [];
+    return { skips: [], sentLabels: [] };
   }
 
   const skips: WhatsAppDeliverySkip[] = [];
+  const sentLabels: string[] = [];
   const sent = new Set<string>();
   for (const relay of relays) {
     const phone = toWhatsAppAddress(relay.phone);
@@ -206,15 +215,18 @@ export async function deliverWhatsAppPhones(
       continue;
     }
     sent.add(phone);
+    const label = relay.label?.trim() || phone;
     const result = await sendQuietly(phone, relay.text, "WhatsApp phone send failed");
     if (result !== "sent") {
       skips.push({
-        label: phone,
+        label,
         reason: result === "no_session" ? "no_session" : "failed",
       });
+    } else {
+      sentLabels.push(label);
     }
   }
-  return skips;
+  return { skips, sentLabels };
 }
 
 async function sendQuietly(

@@ -24,6 +24,29 @@ describe("parseLlmReply", () => {
     expect(parsed.actions).toEqual([]);
   });
 
+  it("keeps an empty response string empty (never leaks raw JSON)", () => {
+    const raw = JSON.stringify({
+      response: "",
+      metadata: {
+        lists: [],
+        filing: [],
+        messages: [],
+        directory: [],
+        reminders: [],
+        handoff: { worker: "" },
+        query: null,
+        sections: [],
+        history_kinds: [],
+        hold: null,
+        confirm: true,
+      },
+    });
+    const parsed = parseLlmReply(raw);
+    expect(parsed.response).toBe("");
+    expect(parsed.response).not.toContain("metadata");
+    expect(parsed.response).not.toContain("confirm");
+  });
+
   it("ignores a null metadata action", () => {
     const parsed = parseLlmReply(
       JSON.stringify({
@@ -204,68 +227,16 @@ describe("parseLlmReply", () => {
             sections: ["tasks", "קניות", "sends"],
           },
         }),
-      ),
-    ).toMatchObject({
-      query: "report",
-      reportSections: ["tasks", "shopping", "sends"],
-    });
+      ).query,
+    ).toBeNull();
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
           metadata: { query: "report:reminders,filings" },
         }),
-      ),
-    ).toMatchObject({
-      query: "report",
-      reportSections: ["reminders", "filings"],
-    });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: {
-            query: "report",
-            sections: ["history", "מחיקות"],
-          },
-        }),
-      ),
-    ).toMatchObject({
-      query: "report",
-      reportSections: ["history"],
-      reportHistoryKinds: ["remove"],
-    });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: {
-            query: "report",
-            sections: ["history", "shopping"],
-            history_kinds: ["remove", "update"],
-          },
-        }),
-      ),
-    ).toMatchObject({
-      query: "report",
-      reportSections: ["history", "shopping"],
-      reportHistoryKinds: ["remove", "update"],
-    });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: {
-            query: "report",
-            sections: ["מחיקות", "תזכורות"],
-          },
-        }),
-      ),
-    ).toMatchObject({
-      query: "report",
-      reportSections: ["reminders", "history"],
-      reportHistoryKinds: ["remove"],
-    });
+      ).query,
+    ).toBeNull();
     expect(
       parseReplyMetadata(
         JSON.stringify({
@@ -493,6 +464,35 @@ describe("parseLlmReply", () => {
       ).reminders,
     ).toMatchObject([
       { action: "add", item: "חלב", date: "", time: "", everyCount: null },
+    ]);
+  });
+
+  it("accepts a named custom list with empty items (columns only)", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "פתחתי",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "custom",
+                list_name: "המטרות של הפועל פתח תקווה עד 2030",
+                targets: ["טל", "עמית"],
+                items: [],
+              },
+            ],
+          },
+        }),
+      ).lists,
+    ).toEqual([
+      {
+        action: "add",
+        listType: "custom",
+        listName: "המטרות של הפועל פתח תקווה עד 2030",
+        items: [],
+        targets: ["טל", "עמית"],
+      },
     ]);
   });
 });

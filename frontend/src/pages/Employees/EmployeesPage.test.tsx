@@ -261,7 +261,40 @@ describe("Employees page", () => {
     expect(screen.getByLabelText("Instructions")).toHaveValue(
       "You manage lists and filings.",
     );
+    expect(
+      screen.getByRole("button", { name: "Inherit from Lucy" }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  it("lets Inherit from Lucy overwrite the digital prompt fields", async () => {
+    const user = userEvent.setup();
+    digitalDefaultsMock
+      .mockResolvedValueOnce({
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+      })
+      .mockResolvedValueOnce({
+        model: "gpt-4.1",
+        temperature: 0.3,
+        instructions: "Lucy live prompt from DB",
+      });
+    renderEmployees();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    await user.click(screen.getByRole("button", { name: "Workee (digital)" }));
+    await screen.findByLabelText("Instructions");
+
+    await user.clear(screen.getByLabelText("Instructions"));
+    await user.type(screen.getByLabelText("Instructions"), "custom draft");
+    await user.click(screen.getByRole("button", { name: "Inherit from Lucy" }));
+
+    expect(await screen.findByLabelText("Instructions")).toHaveValue(
+      "Lucy live prompt from DB",
+    );
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1");
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0.3);
   });
 
   it("lets Lucy be edited but not deleted", async () => {
@@ -281,6 +314,9 @@ describe("Employees page", () => {
     expect(screen.getByLabelText("Instructions")).toHaveValue(
       "You manage lists and filings.",
     );
+    expect(
+      screen.queryByRole("button", { name: "Inherit from Lucy" }),
+    ).not.toBeInTheDocument();
   });
 
   it("edits a saved item and refreshes the records", async () => {

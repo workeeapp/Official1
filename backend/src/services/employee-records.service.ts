@@ -9,7 +9,7 @@ import type {
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
-import { recordAuditEvent, listRecentMutationHistory } from "./audit.service.js";
+import { recordAuditEvent } from "./audit.service.js";
 import { toPlainJson } from "./llm-client.js";
 import {
   cancelActiveRemindersMatchingWork,
@@ -41,14 +41,6 @@ export interface EmployeeRecordSnapshot {
     scope: ItemScope;
   }>;
   reminders?: ReminderSnapshotRow[];
-  /** Recent cancels/removes/updates (report section history only). */
-  history?: Array<{
-    action: string;
-    summary: string;
-    at: string;
-    entity_type: string;
-    actor?: string | null;
-  }>;
 }
 
 const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
@@ -235,7 +227,7 @@ export function formatEmployeeContext(
 
   return [
     `${label}:`,
-    "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not here — use metadata.query = \"report\" with sections [\"sends\"] when the speaker asks what was already sent.",
+    "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
     JSON.stringify({
       lists: snapshot.lists,
@@ -464,8 +456,6 @@ export async function getEmployeeRecordSnapshot(
   employeeId: string,
   options?: {
     accountOwner?: boolean;
-    includeDoneSendHistory?: boolean;
-    includeMutationHistory?: boolean;
   },
 ): Promise<EmployeeRecordSnapshot> {
   const owner = await prisma.employee.findUnique({
@@ -483,7 +473,9 @@ export async function getEmployeeRecordSnapshot(
     ? { employee: { userId: owner.userId, kind: "human" } }
     : { employeeId };
 
-  const [ownLists, sharedItems, ownFilings, reminderRows, people, history] =
+  // Live data only: soft-deleted list/filing rows stay in DB but are never loaded.
+  // Done/cancelled reminder clocks stay in DB but are never injected into context.
+  const [ownLists, sharedItems, partnerLists, ownFilings, partnerFilings, reminderRows, people] =
     await Promise.all([
     prisma.employeeList.findMany({
       where: listWhere,
@@ -508,20 +500,41 @@ export async function getEmployeeRecordSnapshot(
           },
           orderBy: { createdAt: "asc" },
         }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeList.findMany({
+          where: {
+            scope: "shared",
+            employeeId: { not: employeeId },
+          },
+          include: {
+            employee: { select: { id: true, name: true, nickname: true } },
+            items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+          },
+          orderBy: [{ listType: "asc" }, { name: "asc" }],
+        }),
     prisma.employeeFiling.findMany({
       where: { ...filingWhere, deletedAt: null },
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeFiling.findMany({
+          where: {
+            scope: "shared",
+            deletedAt: null,
+            employeeId: { not: employeeId },
+          },
+          include: { employee: { select: { name: true, nickname: true } } },
+          orderBy: { itemName: "asc" },
+        }),
     owner ? listReminderRowsForUser(owner.userId) : Promise.resolve([]),
     owner
       ? prisma.employee.findMany({
           where: { userId: owner.userId },
           select: { id: true, name: true, nickname: true, surname: true },
         })
-      : Promise.resolve([]),
-    options?.includeMutationHistory === true && owner
-      ? listRecentMutationHistory(owner.userId)
       : Promise.resolve([]),
   ]);
 
@@ -548,6 +561,7 @@ export async function getEmployeeRecordSnapshot(
   }
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
+  const seenPartnerListIds = new Set<string>();
   for (const item of sharedItems) {
     if (!visibleToIncludes(item.visibleTo, employeeId)) {
       continue;
@@ -560,6 +574,37 @@ export async function getEmployeeRecordSnapshot(
     sharedByOwner.set(owner, byType);
     if (item.list.listType === "shopping") {
       rememberShopping(owner, [item]);
+    }
+  }
+
+  for (const list of partnerLists) {
+    if (!visibleToIncludes(list.visibleTo, employeeId)) {
+      continue;
+    }
+    if (seenPartnerListIds.has(list.id)) {
+      continue;
+    }
+    seenPartnerListIds.add(list.id);
+    const owner = list.employee.nickname?.trim() || list.employee.name;
+    const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
+    const bucketKey =
+      list.listType === "custom" && list.name.trim()
+        ? `custom\0${list.name.trim()}`
+        : list.listType;
+    const items = byType.get(bucketKey) ?? [];
+    for (const item of list.items) {
+      items.push(
+        withVisibility(
+          item.data,
+          "shared",
+          owner,
+        ),
+      );
+    }
+    byType.set(bucketKey, items);
+    sharedByOwner.set(owner, byType);
+    if (list.listType === "shopping") {
+      rememberShopping(owner, list.items);
     }
   }
 
@@ -609,9 +654,18 @@ export async function getEmployeeRecordSnapshot(
     .filter((list) => list.items.length > 0);
 
   for (const [owner, byType] of sharedByOwner) {
-    for (const [listType, items] of byType) {
+    for (const [bucketKey, items] of byType) {
+      if (items.length === 0) {
+        continue;
+      }
+      const customSep = bucketKey.indexOf("\0");
+      const listType =
+        customSep >= 0 ? "custom" : bucketKey;
+      const listName =
+        customSep >= 0 ? bucketKey.slice(customSep + 1) : undefined;
       lists.push({
         list_type: listType,
+        ...(listName ? { list_name: listName } : {}),
         owner,
         items,
       });
@@ -622,14 +676,28 @@ export async function getEmployeeRecordSnapshot(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );
 
-  return {
-    lists,
-    filing: ownFilings.map((filing) => ({
+  const filingRows = [
+    ...ownFilings.map((filing) => ({
       item_name: filing.itemName,
       item_info: filing.itemInfo,
       owner: filing.employee.nickname?.trim() || filing.employee.name,
-      scope: "personal" as const,
+      scope: (filing.scope === "shared" ? "shared" : "personal") as
+        | "shared"
+        | "personal",
     })),
+    ...partnerFilings
+      .filter((filing) => visibleToIncludes(filing.visibleTo, employeeId))
+      .map((filing) => ({
+        item_name: filing.itemName,
+        item_info: filing.itemInfo,
+        owner: filing.employee.nickname?.trim() || filing.employee.name,
+        scope: "shared" as const,
+      })),
+  ];
+
+  return {
+    lists,
+    filing: filingRows,
     reminders: reminderRows
       .filter((row) => {
         if (seeAll) {
@@ -638,12 +706,8 @@ export async function getEmployeeRecordSnapshot(
         const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
         return row.ownerId === employeeId || pings.includes(employeeId);
       })
-      .filter(
-        (row) =>
-          options?.includeDoneSendHistory === true || row.status === "active",
-      )
+      .filter((row) => row.status === "active")
       .map((row) => toReminderSnapshotRow(row, names)),
-    ...(options?.includeMutationHistory === true ? { history } : {}),
   };
 }
 
@@ -652,6 +716,7 @@ export interface SharedItemEvent {
   metadata: LlmMetadata;
   listOwnerId: string;
   purchased?: boolean;
+  partnerNames?: string[];
 }
 
 export interface ListItemMutation {
@@ -660,6 +725,17 @@ export interface ListItemMutation {
   employeeId: string;
   listType: string;
   itemKey: string;
+  /** Hebrew product label for the item (not schema jargon). */
+  itemLabel: string;
+  listName?: string;
+  /** Named custom list opened/updated with no real rows (columns only). */
+  listShell?: boolean;
+}
+
+export interface FilingMutation {
+  action: "add" | "update" | "remove";
+  itemName: string;
+  itemInfo: string;
 }
 
 export async function applyEmployeeRecords(
@@ -667,9 +743,19 @@ export async function applyEmployeeRecords(
   metadata: LlmMetadata,
   visibility?: ItemVisibility,
   actorId?: string,
-): Promise<{ events: SharedItemEvent[]; mutations: ListItemMutation[] }> {
+): Promise<{
+  events: SharedItemEvent[];
+  mutations: ListItemMutation[];
+  filingMutations: FilingMutation[];
+  cancelledReminders: string[];
+}> {
   if (metadata.lists.length === 0 && metadata.filing.length === 0) {
-    return { events: [], mutations: [] };
+    return {
+      events: [],
+      mutations: [],
+      filingMutations: [],
+      cancelledReminders: [],
+    };
   }
 
   const resolved: ItemVisibility = visibility ?? {
@@ -680,11 +766,14 @@ export async function applyEmployeeRecords(
   const actor = actorId ?? employeeId;
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
+  const filingMutations: FilingMutation[] = [];
+  const cancelledReminders: string[] = [];
 
   for (const action of metadata.lists) {
     const result = await applyListAction(employeeId, action, resolved, actor);
     events.push(...result.events);
     mutations.push(...result.mutations);
+    cancelledReminders.push(...result.cancelledReminders);
   }
 
   const filingOwner = await prisma.employee.findUnique({
@@ -706,6 +795,13 @@ export async function applyEmployeeRecords(
         },
         data: { deletedAt: new Date() },
       });
+      if (doomed.length > 0) {
+        filingMutations.push({
+          action: "remove",
+          itemName,
+          itemInfo: action.itemInfo,
+        });
+      }
       if (filingOwner) {
         for (const row of doomed) {
           await recordAuditEvent({
@@ -724,9 +820,28 @@ export async function applyEmployeeRecords(
         where: { employeeId, itemName, deletedAt: null },
       });
       if (existingFiling) {
+        const shareFiling =
+          resolved.scope === "shared" || resolved.visibleTo.length > 1;
         await prisma.employeeFiling.update({
           where: { id: existingFiling.id },
-          data: { itemInfo: action.itemInfo },
+          data: {
+            itemInfo: action.itemInfo,
+            ...(shareFiling
+              ? {
+                  scope: "shared",
+                  visibleTo: uniqueIds([
+                    employeeId,
+                    ...resolved.visibleTo,
+                    ...idList(existingFiling.visibleTo),
+                  ]),
+                }
+              : {}),
+          },
+        });
+        filingMutations.push({
+          action: "update",
+          itemName,
+          itemInfo: action.itemInfo,
         });
         if (filingOwner) {
           await recordAuditEvent({
@@ -739,13 +854,23 @@ export async function applyEmployeeRecords(
           });
         }
       } else {
+        const shareFiling =
+          resolved.scope === "shared" || resolved.visibleTo.length > 1;
         const created = await prisma.employeeFiling.create({
           data: {
             employeeId,
             itemName,
             itemInfo: action.itemInfo,
             addedById: resolved.addedById,
+            ...(shareFiling
+              ? { scope: "shared", visibleTo: resolved.visibleTo }
+              : {}),
           },
+        });
+        filingMutations.push({
+          action: "add",
+          itemName,
+          itemInfo: action.itemInfo,
         });
         if (filingOwner) {
           await recordAuditEvent({
@@ -770,7 +895,7 @@ export async function applyEmployeeRecords(
     }
   }
 
-  return { events, mutations };
+  return { events, mutations, filingMutations, cancelledReminders };
 }
 
 export async function applyEmployeeMetadata(
@@ -1066,9 +1191,15 @@ async function applyListAction(
   action: LlmListAction,
   visibility: ItemVisibility,
   actorId: string,
-): Promise<{ events: SharedItemEvent[]; mutations: ListItemMutation[] }> {
+): Promise<{
+  events: SharedItemEvent[];
+  mutations: ListItemMutation[];
+  cancelledReminders: string[];
+}> {
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
+  const cancelledReminders: string[] = [];
+  const seenCascadeTaskIds = new Set<string>();
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, action);
   let listName = resolvedAction.listName.slice(0, 100);
   if (!listName && resolvedAction.listType === "custom") {
@@ -1086,23 +1217,47 @@ async function applyListAction(
       }
     }
   }
-  const list =
-    (await prisma.employeeList.findUnique({
-      where: {
-        employeeId_listType_name: {
-          employeeId,
-          listType: resolvedAction.listType,
-          name: listName,
-        },
+  const listShare =
+    visibility.scope === "shared" &&
+    resolvedAction.listType === "custom" &&
+    Boolean(listName.trim());
+
+  const existingList = await prisma.employeeList.findUnique({
+    where: {
+      employeeId_listType_name: {
+        employeeId,
+        listType: resolvedAction.listType,
+        name: listName,
       },
-    })) ??
+    },
+  });
+  const createdList = !existingList;
+  const list =
+    existingList ??
     (await prisma.employeeList.create({
       data: {
         employeeId,
         listType: resolvedAction.listType,
         name: listName,
+        ...(listShare
+          ? { scope: "shared", visibleTo: visibility.visibleTo }
+          : {}),
       },
     }));
+
+  if (listShare) {
+    await prisma.employeeList.update({
+      where: { id: list.id },
+      data: {
+        scope: "shared",
+        visibleTo: uniqueIds([
+          employeeId,
+          ...visibility.visibleTo,
+          ...idList(list.visibleTo),
+        ]),
+      },
+    });
+  }
 
   // Repair legacy custom rows that were created with an empty name while
   // list_name lived only on the item JSON.
@@ -1129,8 +1284,15 @@ async function applyListAction(
     }
   }
 
+  const itemMutationsBefore = mutations.length;
   for (const rawItem of resolvedAction.items) {
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
+    if (
+      resolvedAction.listType === "custom" &&
+      isPhantomCustomListItem(listName, item)
+    ) {
+      continue;
+    }
     const itemKey =
       itemIdentity(resolvedAction.listType, item) ||
       itemSearchNeedles(resolvedAction.listType, item)[0] ||
@@ -1150,6 +1312,13 @@ async function applyListAction(
           employeeId,
           listType: resolvedAction.listType,
           itemKey: removedKey,
+          itemLabel:
+            ownedItemTitle(
+              resolvedAction.listType,
+              asRecord(existing.data),
+              removedKey,
+            ) || removedKey,
+          listName: resolvedAction.listName || list.name || undefined,
         });
       }
       await prisma.employeeListItem.updateMany({
@@ -1167,12 +1336,27 @@ async function applyListAction(
             existing ? asRecord(existing.data) : item,
             removedKey,
           ) || removedKey;
-        await cancelActiveRemindersMatchingWork({
+        const cascade = await cancelActiveRemindersMatchingWork({
           userId: owner.userId,
           itemKey: removedKey,
           itemLabel: label,
           actorEmployeeId: actorId,
         });
+        cancelledReminders.push(...cascade.cancelledReminders);
+        for (const task of cascade.removedWorkerTasks) {
+          if (seenCascadeTaskIds.has(task.id)) {
+            continue;
+          }
+          seenCascadeTaskIds.add(task.id);
+          mutations.push({
+            action: "remove",
+            itemId: task.id,
+            employeeId: task.employeeId,
+            listType: "tasks",
+            itemKey: task.itemKey,
+            itemLabel: task.itemLabel,
+          });
+        }
       }
       if (owner && existing?.id) {
         await recordAuditEvent({
@@ -1191,15 +1375,29 @@ async function applyListAction(
         actorId,
         itemKey: removedKey,
       });
-      await deleteRelatedAssignmentTasks(
+      const related = await deleteRelatedAssignmentTasks(
         [...new Set([actorId, employeeId, ...watchers])],
         removedKey,
       );
+      for (const task of related) {
+        if (seenCascadeTaskIds.has(task.itemId)) {
+          continue;
+        }
+        seenCascadeTaskIds.add(task.itemId);
+        mutations.push(task);
+      }
       if (removedKey !== itemKey) {
-        await deleteRelatedAssignmentTasks(
+        const relatedAlt = await deleteRelatedAssignmentTasks(
           [...new Set([actorId, employeeId, ...watchers])],
           itemKey,
         );
+        for (const task of relatedAlt) {
+          if (seenCascadeTaskIds.has(task.itemId)) {
+            continue;
+          }
+          seenCascadeTaskIds.add(task.itemId);
+          mutations.push(task);
+        }
       }
       if (watchers.length > 0) {
         events.push({
@@ -1254,6 +1452,13 @@ async function applyListAction(
         employeeId,
         listType: resolvedAction.listType,
         itemKey: existing.itemKey,
+        itemLabel:
+          ownedItemTitle(
+            resolvedAction.listType,
+            asRecord(nextData),
+            itemKey,
+          ) || itemKey,
+        listName: resolvedAction.listName || list.name || undefined,
       });
       if (listOwner) {
         await recordAuditEvent({
@@ -1279,6 +1484,10 @@ async function applyListAction(
         employeeId,
         listType: resolvedAction.listType,
         itemKey,
+        itemLabel:
+          ownedItemTitle(resolvedAction.listType, asRecord(nextData), itemKey) ||
+          itemKey,
+        listName: resolvedAction.listName || list.name || undefined,
       });
       if (listOwner) {
         await recordAuditEvent({
@@ -1311,7 +1520,25 @@ async function applyListAction(
     }
   }
 
-  return { events, mutations };
+  if (
+    resolvedAction.listType === "custom" &&
+    listName.trim() &&
+    resolvedAction.action !== "remove" &&
+    mutations.length === itemMutationsBefore
+  ) {
+    mutations.push({
+      action: createdList ? "add" : "update",
+      itemId: list.id,
+      employeeId,
+      listType: "custom",
+      itemKey: listName,
+      itemLabel: listName,
+      listName,
+      listShell: true,
+    });
+  }
+
+  return { events, mutations, cancelledReminders };
 }
 
 async function resolveListActionAgainstSaved(
@@ -1528,22 +1755,53 @@ async function findAssignmentWatcherIds(
 async function deleteRelatedAssignmentTasks(
   employeeIds: string[],
   itemKey: string,
-): Promise<void> {
+): Promise<ListItemMutation[]> {
   if (employeeIds.length === 0 || !itemKey) {
-    return;
+    return [];
   }
 
-  await prisma.employeeListItem.updateMany({
-    where: {
-      itemKey: { contains: itemKey },
-      deletedAt: null,
-      list: {
-        listType: "tasks",
-        employeeId: { in: employeeIds },
-      },
+  const where = {
+    itemKey: { contains: itemKey },
+    deletedAt: null,
+    list: {
+      listType: "tasks" as const,
+      employeeId: { in: employeeIds },
     },
+  };
+
+  const doomed = await prisma.employeeListItem.findMany({
+    where,
+    include: { list: { select: { employeeId: true, listType: true } } },
+  });
+  const labeled = doomed.filter(
+    (row) => row.list?.listType === "tasks" && Boolean(row.list.employeeId),
+  );
+
+  if (labeled.length > 0) {
+    await prisma.employeeListItem.updateMany({
+      where: { id: { in: labeled.map((row) => row.id) } },
+      data: { deletedAt: new Date(), reminderId: null },
+    });
+    return labeled.map((row) => {
+      const data = asRecord(row.data);
+      return {
+        action: "remove" as const,
+        itemId: row.id,
+        employeeId: row.list.employeeId,
+        listType: "tasks",
+        itemKey: row.itemKey,
+        itemLabel:
+          ownedItemTitle("tasks", data, row.itemKey) || row.itemKey,
+      };
+    });
+  }
+
+  // Fallback when findMany is stubbed / empty: still soft-delete by key.
+  await prisma.employeeListItem.updateMany({
+    where,
     data: { deletedAt: new Date(), reminderId: null },
   });
+  return [];
 }
 
 function withVisibility(
@@ -1635,6 +1893,51 @@ export function deriveCustomListName(
     }
   }
   return "";
+}
+
+/** Drop fake rows where the model stuffed the list title instead of a real entry. */
+export function isPhantomCustomListItem(
+  listName: string,
+  item: Record<string, unknown>,
+): boolean {
+  const name = listName.trim();
+  const metaKeys = new Set(["list_name", "listName", "name", "רשימה"]);
+  const filledEntries = Object.entries(item).filter(([, value]) => {
+    if (value == null) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    return true;
+  });
+  if (filledEntries.length === 0) {
+    return true;
+  }
+  if (filledEntries.every(([key]) => metaKeys.has(key))) {
+    return true;
+  }
+  if (!name) {
+    return false;
+  }
+  const identity = itemIdentity("custom", item);
+  if (!identity || !keysLooselyMatch(identity, name)) {
+    return false;
+  }
+  // Title equals list name and there is no other distinct filled column.
+  const otherValues = filledEntries.filter(([key, value]) => {
+    if (metaKeys.has(key)) {
+      return false;
+    }
+    const text =
+      typeof value === "string"
+        ? value.trim()
+        : typeof value === "number"
+          ? String(value)
+          : "";
+    return text !== "" && !keysLooselyMatch(text, name);
+  });
+  return otherValues.length === 0;
 }
 
 function toOwnedListItem(

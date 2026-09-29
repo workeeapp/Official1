@@ -89,6 +89,7 @@
     "",
     "4. רשימה חדשה:",
     "   - שאל את המשתמש אילו עמודות נדרשות",
+    "   - לאחר מכן שמור list_type custom + list_name; אם עדיין אין שורות אמיתיות → items: [] (ריק). אל תמציא פריט ששמו הוא שם הרשימה.",
     "   - לאחר מכן פעל לפי ההיגיון של הרשימות",
     "",
     "Rules:",
@@ -394,37 +395,6 @@
               },
               "query": {
                 "type": ["string", "null"]
-              },
-              "sections": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "reminders",
-                    "sends",
-                    "tasks",
-                    "shopping",
-                    "filings",
-                    "contacts",
-                    "custom",
-                    "history",
-                    "add",
-                    "update",
-                    "remove",
-                    "fire",
-                    "מחיקות",
-                    "עודכן",
-                    "התווסף",
-                    "נשלח"
-                  ]
-                }
-              },
-              "history_kinds": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": ["add", "update", "remove", "fire"]
-                }
               }
             }
           }
