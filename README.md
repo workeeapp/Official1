@@ -1,6 +1,6 @@
 # Workee
 
-A React frontend, Express API, and PostgreSQL app. Users sign in with a username and password. Sessions use an httpOnly `workee_session` cookie. Chat talks to OpenAI through a digital employee (Lucy by default). WhatsApp Cloud API is an optional inbound channel into the same chat service.
+A React frontend, Express API, and PostgreSQL app. Users sign in with a username and password. Sessions use an httpOnly `workee_session` cookie. Chat talks to OpenAI through a digital employee (Lucy by default; David is available via handoff). WhatsApp Cloud API is an optional inbound channel into the same chat service.
 
 ## Setup
 
@@ -26,20 +26,50 @@ Username: Amit
 Password: ChangeMe123!
 ```
 
-Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and the system message come from `LLM.config.json` (or `LLM.config`). The structured reply schema is `LLM.action.json` (lists, filing, messages, reminders, handoff, query, confirm). David’s voice lives in `LLM.david.json`; both workers emit the same actions.
+Chat needs `OPENAI_API_KEY` in `.env`. Model, temperature, and Lucy’s system message come from `LLM.config.json`. The structured reply schema is `LLM.action.json`. David’s voice lives in `LLM.david.json`. Both workers emit the same action catalog.
 
-The worker understands the speaker, asks until the schema is complete, then emits metadata. The server only applies those fields:
+## How chat works
 
-- `lists` / `filing` / `messages` / `reminders` — write or send
-- `handoff.worker` — switch the WhatsApp session to that digital employee
-- `query: "todos"` / `"self"` / `"reminders"` — which saved data the model should read. The model writes `response`. The server does not replace that text.
-- `confirm: true|false` — apply or drop a pending reminder delete
+The worker understands the speaker, asks until the schema is complete, then emits metadata. The server applies those fields (it does not invent destinations, message bodies, or Hebrew intent via regex).
 
-The engine does not invent a destination or a message body, and does not expand `item: "all"` or read Hebrew clocks. An unknown name without digits is not saved. Delete is one `remove` per item name from this turn’s data. Ping dest is `reminders.ping` or `messages.targets` only. Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+| Metadata | Role |
+|----------|------|
+| `lists` | Shopping, tasks, contacts-list type, or custom lists |
+| `filing` | Durable facts / memory (IDs, family context, preferences). Injected every turn in `EMPLOYEE_SAVED_DATA` |
+| `directory` | Personal phone book (`Contacts`) — not Employees |
+| `messages` | Send **now** on WhatsApp / in-app |
+| `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / recurring) |
+| `query` | `todos` / `self` / `reminders` / `report` (+ optional `sections`) |
+| `confirm` | Apply or drop a pending reminder delete |
+| `handoff.worker` | Switch the conversation to another digital employee |
 
-A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). `sent` is true only when `send_status` is `sent`. Recurring clocks use `repeat` as `once` or `count:unit` for any interval (`30:seconds`, `15:minutes`, `4:hours`, `1:days`, `1:weeks`, `1:months`) or `weekdays:1,3`. Legacy `daily` still means every day.
+**Response text:** normally the model writes `response`. The server may replace or correct it in a few cases: `query: "report"` (formatted status report), failed WhatsApp delivery notices, reminder-delete confirm prompts, and shopping/tasks wording fixes after list apply.
 
-Do not add regex that guesses user intent. Handoff is only a conversation switch.
+**Do not** expand `item: "all"`, parse weekday words in `date`, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+
+## People, visibility, contacts
+
+- **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA`; non-owners see their own.
+- **Contacts** — the speaker’s personal phone book (`metadata.directory`). Resolve message/reminder targets via Employees first, then contacts. Do **not** create Employees for outsiders.
+- WhatsApp inbound from an unknown number may create a temporary guest Employee named `אורח …XXXX`. Guests are hidden from the Employees UI and Chat-as picker.
+
+## Reminders and scheduled sends
+
+A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). Recurring clocks use `repeat` as `once` or `count:unit` (`30:seconds`, `1:days`, …) or `weekdays:1,3`.
+
+- **Fixed copy:** `compose` false/omit; `text` is the final WhatsApp body.
+- **Compose at fire:** `compose: true`; `text` is a brief only; the LLM writes the final body when the clock fires. `last_composed_text` stores the last send so repeats can be avoided.
+- **Compose sources:** optional `compose_source` selects fire-time context. Today `git_log` reads repo commits since `last_report_sha` and summarizes in English (platform-owner recipe; not listed in the general capabilities catalog). Cancel/update like any other reminder.
+- Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways).
+- Reminder **delete** uses server Action State on the conversation (`pending_action` / `pending_targets` / `pending_step`), injected each turn — not LLM memory.
+
+## Status report
+
+`query: "report"` asks for a saved-data digest. Optional `sections`: `reminders`, `sends`, `tasks`, `shopping`, `filings`, `contacts`, `custom`. Empty sections = full report. The **server** formats the Hebrew report from DB.
+
+## Architecture note
+
+Canonical rules live in `.cursor/rules/architecture.mdc` and `.cursor/rules/security.mdc`. Prefer those if this README and the code diverge after a change.
 
 Do not commit `.env` or access tokens.
 
@@ -60,7 +90,7 @@ WhatsApp is a channel into `sendChatMessage`, not a second bot. Inbound texts hi
 
 5. Legal pages Meta may ask for (served by the API): `/privacy`, `/data-deletion`, `/terms`.
 
-On WhatsApp, asking to talk to a worker (any wording) is `metadata.handoff`. Asking which reminders exist is `metadata.query`. A raw phone in `messages.targets` or `reminders.ping` is a WhatsApp destination.
+On WhatsApp, asking to talk to a worker is `metadata.handoff`. A raw phone in `messages.targets` or `reminders.ping` is a WhatsApp destination.
 
 Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound text is skipped unless that number wrote to the business in the last 24 hours (Meta session window). Replies to someone who just wrote always send.
 

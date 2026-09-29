@@ -20,6 +20,7 @@ import {
   ServiceUnavailableError,
 } from "../utils/errors.js";
 import {
+  alignListTypeInReply,
   applyEmployeeRecords,
   formatEmployeeContext,
   formatTeamSchedules,
@@ -65,11 +66,13 @@ import {
   deliverWhatsAppPhones,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
+  setEngineResponse,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
+import { formatSavedDataReport } from "./saved-report.js";
 
 function speakerName(employee: {
   name: string;
@@ -300,14 +303,18 @@ function workerTargetingInstructions(
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text.",
+    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled English digest of code/product changes from git → compose:true, compose_source:\"git_log\", English brief, same ping/time rules. Never invent that clock unprompted.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
-    "Answer in your response from this turn's saved data. The server does not write that answer.",
-    "If the speaker says they bought or already have an item, remove it from their shopping list.",
+    "Full or partial status report (דוח / מה יש לי / תזכורות ומטלות / רק קניות): metadata.query = \"report\". Optional metadata.sections = subset of reminders|sends|tasks|shopping|filings|contacts|custom. Empty sections = full report. Keep response short; the server writes the detailed report.",
+    "Answer in your response from this turn's saved data. The server does not write that answer — except query report (server formats the report) and known false delivery / list-type wording fixes.",
+    "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
+    "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
+    "Durable personal facts (משפחה עם ילדים, העדפות, כתובת…): metadata.filing add_filing without waiting for \"תתיקי\". Do not file one-off chores. Later turns: use filing from EMPLOYEE_SAVED_DATA as memory.",
   ].join("\n");
 }
 
@@ -505,6 +512,27 @@ async function appendAssistantNotice(
   await prisma.chatMessage.update({
     where: { id: last.id },
     data: { text: nextText },
+  });
+}
+
+async function patchLastAssistantText(
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  const last = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!last || last.text === trimmed) {
+    return;
+  }
+  await prisma.chatMessage.update({
+    where: { id: last.id },
+    data: { text: trimmed },
   });
 }
 
@@ -855,13 +883,15 @@ export async function sendChatMessage(input: {
     workerTargetingInstructions(employees, speaker, digital),
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
     "EMPLOYEE_SAVED_DATA is the speaker's saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+    "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, preferences, IDs). It is injected every turn in full — use it when advising (trips, gifts, scheduling). Do not claim you lack a fact that appears there.",
     "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
     employee.isOwner
       ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
       : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
     "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
     "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA.",
-    "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders. The server never replaces your response.",
+    "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Your להזכיר-ל tasks are your reminders.",
+    "Status report / what do I have saved / דוח מצב: metadata.query = \"report\". For a partial report set metadata.sections to one or more of: reminders, sends, tasks, shopping, filings, contacts, custom. Omit sections for the full report. The server formats the detailed report.",
     "If asked what you can do, list every capability. Saved data does not limit that answer.",
     "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
     "query reminders = ping clocks only (active_reminders). Empty clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
@@ -1134,9 +1164,27 @@ export async function sendChatMessage(input: {
       .join("\n\n");
     const deliveryFailed = whatsappNotice.length > 0;
     const confirmPending = reminderPlan.ask.length > 0;
+    let workingReply = alignListTypeInReply(turn.reply, listMutations);
+    if (metadata.query === "report" && !deliveryFailed && !confirmPending) {
+      const reportSnapshot = await getEmployeeRecordSnapshot(employee.id);
+      const reportText = formatSavedDataReport({
+        snapshot: reportSnapshot,
+        contacts: refreshedContacts,
+        speakerId: employee.id,
+        speakerPhone: employee.phone,
+        speakerName: speaker,
+        sections: metadata.reportSections ?? [],
+        multiOwner: employee.isOwner === true,
+      });
+      workingReply = setEngineResponse(workingReply, reportText);
+    }
+    const alignedSpoken = parseLlmReply(workingReply).response;
+    if (alignedSpoken !== parseLlmReply(turn.reply).response) {
+      await patchLastAssistantText(conversation.id, alignedSpoken);
+    }
     const replaceSpoken = deliveryFailed || confirmPending;
     const reply = composeAssistantReply({
-      llmReply: turn.reply,
+      llmReply: workingReply,
       notice,
       replaceResponse: replaceSpoken,
     });

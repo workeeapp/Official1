@@ -70,13 +70,29 @@ export interface LlmReminderAction {
   confirmed: boolean;
   /** When true, text is a brief; final WhatsApp copy is written at fire time. */
   compose: boolean;
+  /** "git_log" = at fire, summarize repo commits since last_report_sha into English. */
+  composeSource: "" | "git_log";
 }
 
 export interface LlmHandoffAction {
   worker: string;
 }
 
-export type LlmQuery = "reminders" | "reminders_sent" | "todos" | "self";
+export type LlmQuery =
+  | "reminders"
+  | "reminders_sent"
+  | "todos"
+  | "self"
+  | "report";
+
+export type ReportSection =
+  | "reminders"
+  | "sends"
+  | "tasks"
+  | "shopping"
+  | "filings"
+  | "contacts"
+  | "custom";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
@@ -86,6 +102,8 @@ export interface LlmMetadata {
   directory?: LlmDirectoryAction[];
   handoff?: LlmHandoffAction | null;
   query?: LlmQuery | null;
+  /** Categories for query=report. Empty/omit = full report. */
+  reportSections?: ReportSection[];
   confirm?: boolean | null;
   targets?: string[];
 }
@@ -116,6 +134,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     directory: [],
     handoff: null,
     query: null,
+    reportSections: [],
     confirm: null,
     targets: [],
   };
@@ -134,6 +153,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     directory: parseDirectoryActions(meta),
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
+    reportSections: parseReportSections(meta),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
     lists: Array.isArray(meta.lists)
@@ -271,7 +291,95 @@ function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
   ) {
     return "self";
   }
+  if (
+    value === "report" ||
+    value === "summary" ||
+    value === "status" ||
+    value === "overview" ||
+    value.startsWith("report:") ||
+    value.startsWith("report=")
+  ) {
+    return "report";
+  }
   return null;
+}
+
+const REPORT_SECTION_ALIASES: Record<string, ReportSection> = {
+  reminders: "reminders",
+  reminder: "reminders",
+  clocks: "reminders",
+  תזכורות: "reminders",
+  תזכורת: "reminders",
+  שעונים: "reminders",
+  sends: "sends",
+  send: "sends",
+  scheduled: "sends",
+  messages: "sends",
+  שליחות: "sends",
+  הודעות: "sends",
+  tasks: "tasks",
+  task: "tasks",
+  todos: "tasks",
+  מטלות: "tasks",
+  משימות: "tasks",
+  shopping: "shopping",
+  shop: "shopping",
+  קניות: "shopping",
+  filings: "filings",
+  filing: "filings",
+  תיוקים: "filings",
+  תיוק: "filings",
+  contacts: "contacts",
+  contact: "contacts",
+  directory: "contacts",
+  "אנשי קשר": "contacts",
+  custom: "custom",
+  lists: "custom",
+  list: "custom",
+  רשימות: "custom",
+};
+
+function normalizeReportSectionToken(raw: string): ReportSection | null {
+  const value = raw.trim().toLowerCase();
+  if (!value || value === "all" || value === "הכל" || value === "כולם") {
+    return null;
+  }
+  return REPORT_SECTION_ALIASES[value] ?? REPORT_SECTION_ALIASES[raw.trim()] ?? null;
+}
+
+export function parseReportSections(meta: Record<string, unknown>): ReportSection[] {
+  const collected: string[] = [];
+  const fromFields = meta.sections ?? meta.report ?? meta.report_sections ?? meta.reportSections;
+  if (Array.isArray(fromFields)) {
+    for (const entry of fromFields) {
+      if (typeof entry === "string" && entry.trim()) {
+        collected.push(entry.trim());
+      }
+    }
+  } else if (typeof fromFields === "string" && fromFields.trim()) {
+    collected.push(
+      ...fromFields.split(/[,+|]/).map((part) => part.trim()).filter(Boolean),
+    );
+  }
+
+  const queryRaw = meta.query ?? meta.show ?? meta.list;
+  if (typeof queryRaw === "string") {
+    const match = queryRaw.trim().match(/^report\s*[=:]\s*(.+)$/i);
+    if (match?.[1]) {
+      collected.push(
+        ...match[1].split(/[,+|]/).map((part) => part.trim()).filter(Boolean),
+      );
+    }
+  }
+
+  const sections: ReportSection[] = [];
+  for (const token of collected) {
+    const section = normalizeReportSectionToken(token);
+    if (section && !sections.includes(section)) {
+      sections.push(section);
+    }
+  }
+  return sections;
 }
 
 function parseConfirm(meta: Record<string, unknown>): boolean | null {
@@ -409,6 +517,13 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
   const time = parseClockField(readText(record, ["time"]));
   const inSeconds = parseInSeconds(record);
 
+  const compose =
+    record.compose === true ||
+    record.compose_at_fire === true ||
+    record.composeAtFire === true ||
+    record.dynamic === true ||
+    parseComposeSource(record) === "git_log";
+
   return {
     action,
     item,
@@ -424,12 +539,33 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     everyUnit: interval?.unit ?? null,
     weekdays: interval?.weekdays ?? null,
     confirmed: record.confirmed === true || record.confirm === true,
-    compose:
-      record.compose === true ||
-      record.compose_at_fire === true ||
-      record.composeAtFire === true ||
-      record.dynamic === true,
+    compose,
+    composeSource: parseComposeSource(record),
   };
+}
+
+function parseComposeSource(
+  record: Record<string, unknown>,
+): "" | "git_log" {
+  const raw = String(
+    record.compose_source ??
+      record.composeSource ??
+      record.source ??
+      record.compose_from ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    raw === "git" ||
+    raw === "git_log" ||
+    raw === "changelog" ||
+    raw === "commits" ||
+    raw === "digest"
+  ) {
+    return "git_log";
+  }
+  return "";
 }
 
 function parseInSeconds(value: Record<string, unknown>): number | null {

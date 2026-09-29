@@ -153,36 +153,12 @@ async function ensureDavidReminderPrompt(userId: string): Promise<void> {
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
   await ensureDavidReminderPrompt(userId);
-  await ensureAccountOwner(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
   });
 
   return employees.map(toPublicEmployee);
-}
-
-async function ensureAccountOwner(userId: string): Promise<void> {
-  const humans = await prisma.employee.findMany({
-    where: { userId, kind: "human" },
-    orderBy: { createdAt: "asc" },
-  });
-  if (humans.length === 0 || humans.some((row) => row.isOwner)) {
-    return;
-  }
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { username: true },
-  });
-  const username = user?.username.trim();
-  const pick =
-    humans.find(
-      (row) => row.nickname?.trim() === username || row.name === username,
-    ) ?? humans[0];
-  await prisma.employee.update({
-    where: { id: pick.id },
-    data: { isOwner: true },
-  });
 }
 
 export async function resolveActingEmployee(userId: string): Promise<PublicEmployee> {

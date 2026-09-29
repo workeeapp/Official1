@@ -109,6 +109,25 @@ export function digitalEmployees<T extends Pick<PublicEmployee, "kind">>(
   return employees.filter((employee) => employee.kind === "digital");
 }
 
+/** WhatsApp inbound auto-created outsider — not a real team member. */
+export function isGuestEmployee(
+  employee: Pick<PublicEmployee, "kind" | "name" | "nickname">,
+): boolean {
+  if (employee.kind === "digital") {
+    return false;
+  }
+  const name = employee.name.trim();
+  const nickname = employee.nickname?.trim() ?? "";
+  return name === "אורח" || nickname === "אורח" || nickname.startsWith("אורח ");
+}
+
+/** Humans shown in Employees / Chat-as (excludes WhatsApp guest shells). */
+export function workspaceHumans<
+  T extends Pick<PublicEmployee, "kind" | "name" | "nickname">,
+>(employees: T[]): T[] {
+  return humanEmployees(employees).filter((employee) => !isGuestEmployee(employee));
+}
+
 export function isProtectedEmployee(
   employee: Pick<PublicEmployee, "protected">,
 ): boolean {

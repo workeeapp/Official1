@@ -140,11 +140,13 @@ describe("employee targets", () => {
     ).toEqual({
       lists: [],
       filing: [],
+      directory: [],
       messages: [],
       reminders: [],
       handoff: null,
       query: null,
       confirm: null,
+      reportSections: [],
       targets: [],
     });
   });

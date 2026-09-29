@@ -9,6 +9,10 @@ type ConversationRow = {
   digitalEmployeeId: string;
   openaiConversationId: string;
   contextInjectedAt: Date | null;
+  pendingAction: string | null;
+  pendingTargets: unknown;
+  pendingStep: string | null;
+  pendingAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -324,7 +328,8 @@ describe("chat API", () => {
         include,
       }: {
         where: {
-          userId_employeeId_digitalEmployeeId: {
+          id?: string;
+          userId_employeeId_digitalEmployeeId?: {
             userId: string;
             employeeId: string;
             digitalEmployeeId: string;
@@ -332,10 +337,20 @@ describe("chat API", () => {
         };
         include?: { messages?: unknown };
       }) => {
-        const pair = where.userId_employeeId_digitalEmployeeId;
-        const found = conversationStore.get(
-          storeKey(pair.userId, pair.employeeId, pair.digitalEmployeeId),
-        );
+        let found: ConversationRow | undefined;
+        if (where.id) {
+          for (const row of conversationStore.values()) {
+            if (row.id === where.id) {
+              found = row;
+              break;
+            }
+          }
+        } else if (where.userId_employeeId_digitalEmployeeId) {
+          const pair = where.userId_employeeId_digitalEmployeeId;
+          found = conversationStore.get(
+            storeKey(pair.userId, pair.employeeId, pair.digitalEmployeeId),
+          );
+        }
         if (!found) {
           return null;
         }
@@ -391,6 +406,10 @@ describe("chat API", () => {
           digitalEmployeeId: data.digitalEmployeeId,
           openaiConversationId: data.openaiConversationId,
           contextInjectedAt: null,
+          pendingAction: null,
+          pendingTargets: null,
+          pendingStep: null,
+          pendingAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -407,7 +426,14 @@ describe("chat API", () => {
         data,
       }: {
         where: { id: string };
-        data: { contextInjectedAt?: Date | null; openaiConversationId?: string };
+        data: {
+          contextInjectedAt?: Date | null;
+          openaiConversationId?: string;
+          pendingAction?: string | null;
+          pendingTargets?: unknown;
+          pendingStep?: string | null;
+          pendingAt?: Date | null;
+        };
       }) => {
         for (const row of conversationStore.values()) {
           if (row.id === where.id) {
@@ -416,6 +442,18 @@ describe("chat API", () => {
             }
             if (data.openaiConversationId) {
               row.openaiConversationId = data.openaiConversationId;
+            }
+            if (data.pendingAction !== undefined) {
+              row.pendingAction = data.pendingAction;
+            }
+            if (data.pendingTargets !== undefined) {
+              row.pendingTargets = data.pendingTargets;
+            }
+            if (data.pendingStep !== undefined) {
+              row.pendingStep = data.pendingStep;
+            }
+            if (data.pendingAt !== undefined) {
+              row.pendingAt = data.pendingAt;
             }
             row.updatedAt = new Date();
             return row;

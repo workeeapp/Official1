@@ -150,7 +150,11 @@ model Reminder {
   pingIds     Json     @default("[]") @map("ping_ids")
   messageText String   @default("") @map("message_text") @db.Text
   composeAtFire Boolean @default(false) @map("compose_at_fire")
+  /** Empty = normal compose brief; "git_log" = summarize repo commits at fire time. */
+  composeSource String @default("") @map("compose_source") @db.VarChar(32)
   lastComposedText String @default("") @map("last_composed_text") @db.Text
+  /** HEAD sha after the last git digest fire (next window starts after this). */
+  lastReportSha String @default("") @map("last_report_sha") @db.VarChar(64)
   status      String   @default("active") @db.VarChar(16)
   sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
   sentAt      DateTime? @map("sent_at")

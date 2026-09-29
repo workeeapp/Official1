@@ -36,8 +36,15 @@ describe("LLM action schema", () => {
     expect(david?.systemMessage).toContain("digits");
     expect(david?.systemMessage).toContain("CONFIRM BEFORE DELETE");
     expect(david?.systemMessage).toContain("query todos");
+    expect(david?.systemMessage).toContain("query report");
     expect(lucy.systemMessage).not.toContain("LLM.david");
     expect(lucy.systemMessage).toContain("דוד");
     expect(lucy.systemMessage).toContain("metadata.query");
+    expect(lucy.systemMessage).toContain("query report");
+    expect(lucy.systemMessage).toContain("sections");
+    expect(lucy.systemMessage).toContain("compose_source");
+    expect(lucy.systemMessage).toContain("git_log");
+    expect(lucy.systemMessage).toContain("PLATFORM INTERNAL");
+    expect(david?.systemMessage).toContain("compose_source");
   });
 });

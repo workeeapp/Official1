@@ -146,6 +146,7 @@ describe("parseLlmReply", () => {
       directory: [],
       handoff: null,
       query: null,
+      reportSections: [],
       confirm: null,
       targets: [],
     });
@@ -192,6 +193,31 @@ describe("parseLlmReply", () => {
         }),
       ).query,
     ).toBe("self");
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: {
+            query: "report",
+            sections: ["tasks", "קניות", "sends"],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      query: "report",
+      reportSections: ["tasks", "shopping", "sends"],
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: { query: "report:reminders,filings" },
+        }),
+      ),
+    ).toMatchObject({
+      query: "report",
+      reportSections: ["reminders", "filings"],
+    });
     expect(
       parseReplyMetadata(
         JSON.stringify({
@@ -279,6 +305,7 @@ describe("parseLlmReply", () => {
         weekdays: null,
         confirmed: false,
         compose: false,
+        composeSource: "",
       },
     ]);
   });
@@ -326,6 +353,35 @@ describe("parseLlmReply", () => {
         item: "לשלוח ברכת בוקר לעמית",
         text: "ברכת בוקר חמה וקצרה",
         compose: true,
+        composeSource: "",
+      },
+    ]);
+  });
+
+  it("reads compose_source git_log as a platform digest clock", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשמור",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח סיכום פיתוח לעמית",
+                time: "09:00",
+                ping: ["עמית"],
+                text: "Summarize product features and bug fixes since the last report in clear English.",
+                compose: true,
+                compose_source: "git_log",
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "git_log",
       },
     ]);
   });

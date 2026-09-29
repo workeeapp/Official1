@@ -61,6 +61,7 @@ export function resolveSpokenMetadata(
     directory: metadata.directory ?? [],
     handoff: metadata.handoff ?? null,
     query: metadata.query ?? null,
+    reportSections: metadata.reportSections ?? [],
     confirm: metadata.confirm ?? null,
     targets: metadata.targets ?? [],
   };

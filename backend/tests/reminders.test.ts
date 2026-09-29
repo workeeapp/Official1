@@ -35,6 +35,7 @@ const milkRemove: LlmReminderAction = {
   weekdays: null,
   confirmed: false,
   compose: false,
+  composeSource: "",
 };
 
 const tal: PublicEmployee = {
@@ -393,6 +394,7 @@ describe("formatActiveRemindersReply", () => {
           owner: "טל",
           text: "",
           compose_at_fire: false,
+          compose_source: "",
           status: "active",
           send_status: "pending",
           sent: false,
@@ -408,6 +410,7 @@ describe("formatActiveRemindersReply", () => {
           owner: "טל",
           text: "",
           compose_at_fire: false,
+          compose_source: "",
           status: "cancelled",
           send_status: "pending",
           sent: false,
@@ -429,6 +432,7 @@ describe("formatTodosReply", () => {
     owner: "טל",
     text: "",
     compose_at_fire: false,
+    compose_source: "",
     status: "active" as const,
     send_status: "pending" as const,
     sent: false,

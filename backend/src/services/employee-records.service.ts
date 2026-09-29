@@ -77,6 +77,119 @@ export function itemIdentity(
   return "";
 }
 
+/** Collect search needles from a list action item (any title field the model used). */
+export function itemSearchNeedles(
+  listType: LlmListType,
+  item: Record<string, unknown>,
+): string[] {
+  const needles = new Set<string>();
+  const primary = itemIdentity(listType, item);
+  if (primary) {
+    needles.add(primary);
+  }
+  for (const candidate of [
+    "shopping",
+    "tasks",
+    "custom",
+    "contacts",
+  ] as LlmListType[]) {
+    const key = itemIdentity(candidate, item);
+    if (key) {
+      needles.add(key);
+    }
+  }
+  for (const value of Object.values(item)) {
+    if (typeof value === "string" && value.trim()) {
+      needles.add(normalizeKey(value));
+    }
+  }
+  return [...needles].filter(Boolean);
+}
+
+export function keysLooselyMatch(stored: string, needle: string): boolean {
+  const a = normalizeKey(stored);
+  const b = normalizeKey(needle);
+  if (!a || !b) {
+    return false;
+  }
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+/**
+ * When the model guesses the wrong list_type on remove/update, prefer the list
+ * where the item actually lives. If several lists match, keep the requested type
+ * when it is among them; otherwise prefer tasks over shopping.
+ */
+export function chooseSavedListType(
+  requested: LlmListType,
+  hitTypes: string[],
+): LlmListType | null {
+  const unique = [...new Set(hitTypes.filter(Boolean))];
+  if (unique.length === 0) {
+    return null;
+  }
+  if (unique.includes(requested)) {
+    return requested;
+  }
+  if (unique.length === 1) {
+    return unique[0] as LlmListType;
+  }
+  if (unique.includes("tasks")) {
+    return "tasks";
+  }
+  if (unique.includes("shopping")) {
+    return "shopping";
+  }
+  return unique[0] as LlmListType;
+}
+
+/** Fix spoken list names when mutations prove shopping vs tasks. */
+export function alignSpokenListType(
+  response: string,
+  mutations: Array<{ action: string; listType: string }>,
+): string {
+  const removes = mutations.filter((row) => row.action === "remove");
+  const types = [...new Set(removes.map((row) => row.listType))];
+  if (types.length !== 1) {
+    return response;
+  }
+  const type = types[0];
+  if (type === "tasks") {
+    return response
+      .replaceAll("מרשימת הקניות", "מרשימת המטלות")
+      .replaceAll("רשימת הקניות", "רשימת המטלות");
+  }
+  if (type === "shopping") {
+    return response
+      .replaceAll("מרשימת המטלות", "מרשימת הקניות")
+      .replaceAll("רשימת המטלות", "רשימת הקניות");
+  }
+  return response;
+}
+
+export function alignListTypeInReply(
+  llmReply: string,
+  mutations: Array<{ action: string; listType: string }>,
+): string {
+  try {
+    const parsed: unknown = JSON.parse(llmReply);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return llmReply;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.response !== "string") {
+      return llmReply;
+    }
+    const next = alignSpokenListType(record.response, mutations);
+    if (next === record.response) {
+      return llmReply;
+    }
+    return JSON.stringify({ ...record, response: next });
+  } catch {
+    return alignSpokenListType(llmReply, mutations);
+  }
+}
+
 export function listItemLabels(
   snapshot: EmployeeRecordSnapshot,
   listType: "shopping" | "tasks",
@@ -112,6 +225,7 @@ export function formatEmployeeContext(
   return [
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders is the current reminder list.",
+    "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
     JSON.stringify({
       lists: snapshot.lists,
       filing: snapshot.filing,
@@ -822,13 +936,14 @@ async function applyListAction(
 ): Promise<{ events: SharedItemEvent[]; mutations: ListItemMutation[] }> {
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
-  const listName = action.listName.slice(0, 100);
+  const resolvedAction = await resolveListActionAgainstSaved(employeeId, action);
+  const listName = resolvedAction.listName.slice(0, 100);
   const list =
     (await prisma.employeeList.findUnique({
       where: {
         employeeId_listType_name: {
           employeeId,
-          listType: action.listType,
+          listType: resolvedAction.listType,
           name: listName,
         },
       },
@@ -836,18 +951,21 @@ async function applyListAction(
     (await prisma.employeeList.create({
       data: {
         employeeId,
-        listType: action.listType,
+        listType: resolvedAction.listType,
         name: listName,
       },
     }));
 
-  for (const item of action.items) {
-    const itemKey = itemIdentity(action.listType, item);
+  for (const item of resolvedAction.items) {
+    const itemKey =
+      itemIdentity(resolvedAction.listType, item) ||
+      itemSearchNeedles(resolvedAction.listType, item)[0] ||
+      "";
     if (!itemKey) {
       continue;
     }
 
-    if (action.action === "remove") {
+    if (resolvedAction.action === "remove") {
       const existing = await findMatchingItem(list.id, itemKey);
       const removedKey = existing?.itemKey ?? itemKey;
       if (existing?.id) {
@@ -856,7 +974,7 @@ async function applyListAction(
           action: "remove",
           itemId: existing.id,
           employeeId,
-          listType: action.listType,
+          listType: resolvedAction.listType,
           itemKey: removedKey,
         });
       }
@@ -884,21 +1002,25 @@ async function applyListAction(
         events.push({
           notifyEmployeeIds: watchers,
           metadata: {
-            lists: [{ ...action, items: [item] }],
+            lists: [{ ...resolvedAction, items: [item] }],
             filing: [],
           },
           listOwnerId: employeeId,
           purchased:
-            action.listType === "shopping" && actorId === employeeId,
+            resolvedAction.listType === "shopping" && actorId === employeeId,
         });
       }
       continue;
     }
 
-    const existing = await findMatchingItem(list.id, itemKey, action.action);
+    const existing = await findMatchingItem(
+      list.id,
+      itemKey,
+      resolvedAction.action,
+    );
     const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
     const nextData = toJsonValue(
-      action.action === "update" && existing
+      resolvedAction.action === "update" && existing
         ? { ...asRecord(existing.data), ...item }
         : item,
     );
@@ -914,7 +1036,7 @@ async function applyListAction(
         where: { id: existing.id },
         data: {
           ...fields,
-          ...(action.action === "update" && itemKey !== existing.itemKey
+          ...(resolvedAction.action === "update" && itemKey !== existing.itemKey
             ? { itemKey }
             : {}),
         },
@@ -923,7 +1045,7 @@ async function applyListAction(
         action: "update",
         itemId: existing.id,
         employeeId,
-        listType: action.listType,
+        listType: resolvedAction.listType,
         itemKey: existing.itemKey,
       });
     } else {
@@ -938,7 +1060,7 @@ async function applyListAction(
         action: "add",
         itemId: created.id,
         employeeId,
-        listType: action.listType,
+        listType: resolvedAction.listType,
         itemKey,
       });
     }
@@ -954,7 +1076,7 @@ async function applyListAction(
       events.push({
         notifyEmployeeIds: watchers,
         metadata: {
-          lists: [{ ...action, items: [item] }],
+          lists: [{ ...resolvedAction, items: [item] }],
           filing: [],
         },
         listOwnerId: employeeId,
@@ -963,6 +1085,65 @@ async function applyListAction(
   }
 
   return { events, mutations };
+}
+
+async function resolveListActionAgainstSaved(
+  employeeId: string,
+  action: LlmListAction,
+): Promise<LlmListAction> {
+  if (action.action !== "remove" && action.action !== "update") {
+    return action;
+  }
+
+  const needles = action.items.flatMap((item) =>
+    itemSearchNeedles(action.listType, item),
+  );
+  if (needles.length === 0) {
+    return action;
+  }
+
+  const lists = await prisma.employeeList.findMany({
+    where: { employeeId },
+    include: { items: true },
+  });
+  const hitTypes: string[] = [];
+  let matchedList:
+    | {
+        listType: string;
+        name: string;
+      }
+    | undefined;
+
+  for (const list of lists) {
+    const hit = list.items.some((row) =>
+      needles.some((needle) => keysLooselyMatch(row.itemKey, needle)),
+    );
+    if (!hit) {
+      continue;
+    }
+    hitTypes.push(list.listType);
+    if (!matchedList || list.listType === action.listType) {
+      matchedList = { listType: list.listType, name: list.name };
+    }
+  }
+
+  const chosen = chooseSavedListType(action.listType, hitTypes);
+  if (!chosen || !matchedList) {
+    return action;
+  }
+
+  const list =
+    lists.find((row) => row.listType === chosen) ??
+    lists.find((row) => row.listType === matchedList.listType);
+  if (!list) {
+    return action;
+  }
+
+  return {
+    ...action,
+    listType: list.listType as LlmListType,
+    listName: list.name,
+  };
 }
 
 async function findMatchingItem(

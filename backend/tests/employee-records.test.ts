@@ -86,7 +86,10 @@ vi.mock("../src/database/prisma.js", () => ({
 }));
 
 import {
+  alignSpokenListType,
   applyEmployeeMetadata,
+  applyEmployeeRecords,
+  chooseSavedListType,
   deleteEmployeeRecord,
   formatEmployeeContext,
   formatTeamSchedules,
@@ -103,7 +106,7 @@ const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 
 describe("employee records", () => {
   beforeEach(() => {
-    listFindMany.mockReset();
+    listFindMany.mockReset().mockResolvedValue([]);
     listFindUnique.mockReset();
     listCreate.mockReset();
     itemFindMany.mockReset().mockResolvedValue([]);
@@ -135,6 +138,74 @@ describe("employee records", () => {
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");
+  });
+
+  it("prefers the saved list type when the model guesses wrong", () => {
+    expect(chooseSavedListType("shopping", ["tasks"])).toBe("tasks");
+    expect(chooseSavedListType("shopping", ["shopping", "tasks"])).toBe(
+      "shopping",
+    );
+    expect(chooseSavedListType("tasks", ["shopping", "tasks"])).toBe("tasks");
+    expect(chooseSavedListType("custom", [])).toBeNull();
+  });
+
+  it("rewrites shopping wording when the remove was from tasks", () => {
+    expect(
+      alignSpokenListType("בתיאבון! הסרתי את «להכין חביתה לילדים» מרשימת הקניות שלך.", [
+        { action: "remove", listType: "tasks" },
+      ]),
+    ).toContain("רשימת המטלות");
+  });
+
+  it("removes a task even when the model labeled it shopping", async () => {
+    const tasksList = {
+      id: "tasks-1",
+      employeeId,
+      listType: "tasks",
+      name: "",
+      items: [
+        {
+          id: "task-1",
+          itemKey: "להכין חביתה לילדים",
+          data: { "שם מטלה": "להכין חביתה לילדים" },
+        },
+      ],
+    };
+    listFindMany.mockResolvedValue([tasksList]);
+    listFindUnique.mockResolvedValue({
+      id: "tasks-1",
+      employeeId,
+      listType: "tasks",
+      name: "",
+    });
+    itemFindUnique.mockResolvedValue(tasksList.items[0]);
+    itemFindMany.mockResolvedValue([]);
+    itemDeleteMany.mockResolvedValue({ count: 1 });
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [
+        {
+          action: "remove",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "להכין חביתה לילדים" }],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(result.mutations).toEqual([
+      expect.objectContaining({
+        action: "remove",
+        listType: "tasks",
+        itemKey: "להכין חביתה לילדים",
+      }),
+    ]);
+    expect(itemDeleteMany).toHaveBeenCalledWith({
+      where: { listId: "tasks-1", itemKey: "להכין חביתה לילדים" },
+    });
+    expect(listCreate).not.toHaveBeenCalled();
   });
 
   it("parses assignment notes for another employee's shopping", () => {
@@ -177,6 +248,8 @@ describe("employee records", () => {
     expect(context).toContain("חלב");
     expect(context).toContain("לקנות מתנה");
     expect(context).toContain("מספר רכב");
+    expect(context).toContain("durable personal facts");
+    expect(context).toContain("filing");
   });
 
   it("formats dated team schedules for meeting conflict checks", () => {

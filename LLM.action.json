@@ -96,6 +96,7 @@
     "- אם פריט כבר קיים – ציין זאת ושאל אם לעדכן.",
     "- אם יש יותר מפריט אחד – הכנס את כולם ל‑metadata.lists[].items.",
     "- אל תפספס אף פריט.",
+    "- shopping = לקנות; tasks = לעשות (להכין חביתה). Done (הכנתי/סיימתי): remove from the list_type in EMPLOYEE_SAVED_DATA. response says מטלות for tasks, קניות for shopping.",
     "",
     "------------------------------------------------------------",
     "MEETINGS (פגישות)",
@@ -164,6 +165,7 @@
     "Examples:",
     "- המשתמש מעלה תמונה: שם הפריט = \"רישיון נהיגה\", מידע נוסף = \"רישיון נהיגה עדכני של אשתי\"",
     "- המשתמש אומר: \"מספר הרכב שלי הוא 3434343\" → שם הפריט = \"מספר רכב\", מידע נוסף = \"מספר הרכב של המרצדס\"",
+    "- Durable personal/family context: \"אנחנו משפחה עם שני ילדים\" → add_filing משפחה + the fact. File stable speaker facts without being asked to save; do not file one-off tasks. EMPLOYEE_SAVED_DATA.filing is injected every turn — use it as memory.",
     "",
     "When a filing action exists:",
     "- Add an object to metadata.filing with all collected details.",
@@ -351,6 +353,10 @@
                     },
                     "text": { "type": "string" },
                     "compose": { "type": "boolean" },
+                    "compose_source": {
+                      "type": "string",
+                      "enum": ["", "git_log"]
+                    },
                     "confirmed": { "type": "boolean" }
                   }
                 }
@@ -360,6 +366,21 @@
               },
               "query": {
                 "type": ["string", "null"]
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "reminders",
+                    "sends",
+                    "tasks",
+                    "shopping",
+                    "filings",
+                    "contacts",
+                    "custom"
+                  ]
+                }
               }
             }
           }

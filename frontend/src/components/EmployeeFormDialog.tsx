@@ -313,10 +313,12 @@ export function EmployeeFormDialog({
                     checked={isOwner}
                     onChange={(event) => setIsOwner(event.target.checked)}
                   />
-                  <span>
+                    <span>
                     Account owner
                     <span className="mt-0.5 block text-text-secondary">
-                      Sees everyone’s lists, tasks, and reminder clocks. Several owners are allowed.
+                      Sees everyone’s lists, tasks, and reminder clocks. Several
+                      owners are allowed — or none (then everyone sees only their
+                      own).
                     </span>
                   </span>
                 </label>

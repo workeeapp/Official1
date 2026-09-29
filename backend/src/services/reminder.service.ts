@@ -31,6 +31,7 @@ export interface ReminderSnapshotRow {
   owner: string;
   text: string;
   compose_at_fire: boolean;
+  compose_source: string;
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -617,6 +618,7 @@ function removeShell(item: string): LlmReminderAction {
     weekdays: null,
     confirmed: false,
     compose: false,
+    composeSource: "",
   };
 }
 
@@ -922,6 +924,14 @@ export async function applyReminders(input: {
         canReuseClock && existing
           ? reminder.compose || existing.composeAtFire
           : reminder.compose;
+      const existingSource =
+        existing && "composeSource" in existing
+          ? String(existing.composeSource ?? "")
+          : "";
+      const nextSource =
+        reminder.composeSource === "git_log" || existingSource === "git_log"
+          ? "git_log"
+          : "";
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -932,7 +942,8 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               pingIds,
               messageText: nextText,
-              composeAtFire: nextCompose,
+              composeAtFire: nextCompose || nextSource === "git_log",
+              composeSource: nextSource,
             },
           })
         : await prisma.reminder.create({
@@ -947,7 +958,8 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               pingIds,
               messageText: nextText,
-              composeAtFire: nextCompose,
+              composeAtFire: nextCompose || nextSource === "git_log",
+              composeSource: nextSource,
             },
           });
       await syncLinkedWorkerTaskClock({
@@ -1196,6 +1208,7 @@ export function toReminderSnapshotRow(
     ownerId: string;
     messageText: string;
     composeAtFire?: boolean;
+    composeSource?: string;
     status: string;
     sendStatus?: string;
     sentAt?: Date | null;
@@ -1217,6 +1230,7 @@ export function toReminderSnapshotRow(
     owner: names.get(row.ownerId) ?? row.ownerId,
     text: row.messageText,
     compose_at_fire: row.composeAtFire === true,
+    compose_source: row.composeSource === "git_log" ? "git_log" : "",
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",
