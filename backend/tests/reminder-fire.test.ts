@@ -18,7 +18,10 @@ vi.mock("../src/config/env.js", () => ({
   getEnv: () => ({ NODE_ENV: "test" }),
 }));
 
-import { settleFiredReminder } from "../src/services/reminder-fire.js";
+import {
+  resolveComposeFireOutbound,
+  settleFiredReminder,
+} from "../src/services/reminder-fire.js";
 
 describe("settleFiredReminder", () => {
   beforeEach(() => {
@@ -55,5 +58,33 @@ describe("settleFiredReminder", () => {
 
     expect(reminderDelete).not.toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalled();
+  });
+});
+
+describe("resolveComposeFireOutbound", () => {
+  it("uses the composed text and marks it for last_composed_text", () => {
+    expect(
+      resolveComposeFireOutbound({
+        brief: "בדיחה על עדות",
+        itemLabel: "לקבל בדיחה",
+        composed: "למה האשכנזי…",
+      }),
+    ).toEqual({
+      body: "למה האשכנזי…",
+      lastComposedToSave: "למה האשכנזי…",
+    });
+  });
+
+  it("falls back to the brief without persisting when compose fails", () => {
+    expect(
+      resolveComposeFireOutbound({
+        brief: "בדיחה חדשה על עדות",
+        itemLabel: "לקבל בדיחה",
+        composed: null,
+      }),
+    ).toEqual({
+      body: "בדיחה חדשה על עדות",
+      lastComposedToSave: null,
+    });
   });
 });

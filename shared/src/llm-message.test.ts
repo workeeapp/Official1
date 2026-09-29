@@ -278,6 +278,7 @@ describe("parseLlmReply", () => {
         everyUnit: null,
         weekdays: null,
         confirmed: false,
+        compose: false,
       },
     ]);
   });
@@ -298,6 +299,34 @@ describe("parseLlmReply", () => {
       ).reminders,
     ).toMatchObject([
       { action: "add", item: "חלב", inSeconds: 20 },
+    ]);
+  });
+
+  it("reads compose:true as compose-at-fire brief mode", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשמור",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח ברכת בוקר לעמית",
+                time: "09:00",
+                ping: ["עמית"],
+                text: "ברכת בוקר חמה וקצרה",
+                compose: true,
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        item: "לשלוח ברכת בוקר לעמית",
+        text: "ברכת בוקר חמה וקצרה",
+        compose: true,
+      },
     ]);
   });
 

@@ -350,6 +350,7 @@
                       "items": { "type": "string" }
                     },
                     "text": { "type": "string" },
+                    "compose": { "type": "boolean" },
                     "confirmed": { "type": "boolean" }
                   }
                 }

@@ -4,6 +4,8 @@ import {
   formatActiveRemindersReply,
   formatTodosReply,
   applyTimeToTaskLabel,
+  canReuseExistingReminderClock,
+  findMatchingActiveReminder,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
@@ -32,6 +34,7 @@ const milkRemove: LlmReminderAction = {
   everyUnit: null,
   weekdays: null,
   confirmed: false,
+  compose: false,
 };
 
 const tal: PublicEmployee = {
@@ -389,6 +392,7 @@ describe("formatActiveRemindersReply", () => {
           ping_ids: [],
           owner: "טל",
           text: "",
+          compose_at_fire: false,
           status: "active",
           send_status: "pending",
           sent: false,
@@ -403,6 +407,7 @@ describe("formatActiveRemindersReply", () => {
           ping_ids: [],
           owner: "טל",
           text: "",
+          compose_at_fire: false,
           status: "cancelled",
           send_status: "pending",
           sent: false,
@@ -423,6 +428,7 @@ describe("formatTodosReply", () => {
     ping_ids: [tal.id],
     owner: "טל",
     text: "",
+    compose_at_fire: false,
     status: "active" as const,
     send_status: "pending" as const,
     sent: false,
@@ -463,6 +469,65 @@ describe("formatTodosReply", () => {
   });
 });
 
+describe("canReuseExistingReminderClock", () => {
+  const base = {
+    action: "update" as const,
+    text: "טל מוסר: שלום",
+    time: "",
+    inSeconds: null,
+    everyCount: null,
+    everyUnit: null,
+    weekdays: null,
+  };
+
+  it("reuses the clock on update even without a new time", () => {
+    expect(canReuseExistingReminderClock(base, true)).toBe(true);
+  });
+
+  it("reuses the clock for a text-only add-shaped edit of an existing send", () => {
+    expect(
+      canReuseExistingReminderClock({ ...base, action: "add" }, true),
+    ).toBe(true);
+  });
+
+  it("does not reuse when there is no existing clock", () => {
+    expect(canReuseExistingReminderClock(base, false)).toBe(false);
+  });
+
+  it("does not treat a new timed add as text-only reuse", () => {
+    expect(
+      canReuseExistingReminderClock(
+        { ...base, action: "add", time: "12:00", text: "היי" },
+        true,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("findMatchingActiveReminder", () => {
+  const rows = [
+    {
+      itemKey: "לשלוח הודעה לעמית",
+      itemLabel: "לשלוח הודעה לעמית",
+      ownerId: "owner-amit",
+    },
+    {
+      itemKey: "לקבל בדיחה בנושא עדות",
+      itemLabel: "לקבל בדיחה בנושא עדות",
+      ownerId: "owner-tal",
+    },
+  ];
+
+  it("matches across owners by label", () => {
+    const hit = findMatchingActiveReminder(rows, "לשלוח הודעה לעמית");
+    expect(hit?.ownerId).toBe("owner-amit");
+  });
+
+  it("returns undefined when nothing matches", () => {
+    expect(findMatchingActiveReminder(rows, "להכין חביתה")).toBeUndefined();
+  });
+});
+
 describe("formatReminderApplyNotice", () => {
   it("says when a reminder was stored or skipped", () => {
     expect(
@@ -500,6 +565,24 @@ describe("formatReminderApplyNotice", () => {
     expect(notice).toContain("יש לך כבר תזכורת אחרת באותה שעה");
     expect(notice).toContain("להזמין כרטיסים");
     expect(notice).not.toContain("לעדכן");
+  });
+
+  it("notes a compose-at-fire brief was stored", () => {
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        saved: [
+          {
+            item: "לשלוח ברכת בוקר לעמית",
+            fireAt: "2026-09-30 09:00",
+            ping: "עמית",
+            composeAtFire: true,
+          },
+        ],
+        skipped: [],
+      }),
+    ).toContain("נשמרה הנחיה להודעה מתוזמנת");
   });
 });
 

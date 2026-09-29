@@ -149,6 +149,8 @@ model Reminder {
   repeat    String   @default("once") @db.VarChar(16)
   pingIds     Json     @default("[]") @map("ping_ids")
   messageText String   @default("") @map("message_text") @db.Text
+  composeAtFire Boolean @default(false) @map("compose_at_fire")
+  lastComposedText String @default("") @map("last_composed_text") @db.Text
   status      String   @default("active") @db.VarChar(16)
   sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
   sentAt      DateTime? @map("sent_at")

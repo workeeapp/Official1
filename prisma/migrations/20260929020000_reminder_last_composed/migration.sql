@@ -1,0 +1,2 @@
+ALTER TABLE "Reminders"
+ADD COLUMN IF NOT EXISTS "last_composed_text" TEXT NOT NULL DEFAULT '';

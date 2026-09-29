@@ -11,11 +11,32 @@ import { publishChatEvent } from "./chat-events.service.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
+import { composeScheduledOutbound } from "./reminder-compose.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+/** Compose-at-fire body: use LLM text when present; else fall back to the brief/label. */
+export function resolveComposeFireOutbound(input: {
+  brief: string;
+  itemLabel: string;
+  composed: string | null | undefined;
+}): { body: string; lastComposedToSave: string | null } {
+  const composed = input.composed?.trim() || "";
+  if (composed) {
+    return {
+      body: composed.slice(0, 4096),
+      lastComposedToSave: composed.slice(0, 4096),
+    };
+  }
+  const brief = input.brief.trim();
+  return {
+    body: brief || input.itemLabel,
+    lastComposedToSave: null,
+  };
 }
 
 function nextFireAt(from: Date, repeat: string, now: Date): Date | null {
@@ -81,6 +102,39 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const dests = pingIds(reminder.pingIds);
     const sendResults: boolean[] = [];
 
+    let outboundBody = reminder.messageText;
+    if (reminder.composeAtFire) {
+      const firstDest = dests[0] ?? "";
+      const firstTarget =
+        employees.find((employee) => employee.id === firstDest) ??
+        employees.find(
+          (employee) => employee.phone && phonesMatch(employee.phone, firstDest),
+        );
+      const recipientName =
+        firstTarget?.nickname?.trim() ||
+        firstTarget?.name ||
+        (looksLikePhone(firstDest) ? firstDest : "הנמען");
+      const composed = await composeScheduledOutbound({
+        brief: reminder.messageText,
+        itemLabel: reminder.itemLabel,
+        actorName,
+        recipientName,
+        previousText: reminder.lastComposedText,
+      });
+      const resolved = resolveComposeFireOutbound({
+        brief: reminder.messageText,
+        itemLabel: reminder.itemLabel,
+        composed,
+      });
+      outboundBody = resolved.body;
+      if (resolved.lastComposedToSave) {
+        await prisma.reminder.update({
+          where: { id: reminder.id },
+          data: { lastComposedText: resolved.lastComposedToSave },
+        });
+      }
+    }
+
     for (const dest of dests) {
       const target =
         employees.find((employee) => employee.id === dest) ??
@@ -93,8 +147,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       const text = formatAttributedOutbound({
         actorName,
         destIsActor,
-        item: reminder.itemLabel,
-        text: reminder.messageText,
+        item: reminder.composeAtFire ? undefined : reminder.itemLabel,
+        text: outboundBody,
       });
 
       if (target && speaker) {

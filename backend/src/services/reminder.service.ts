@@ -30,6 +30,7 @@ export interface ReminderSnapshotRow {
   ping_ids: string[];
   owner: string;
   text: string;
+  compose_at_fire: boolean;
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -47,6 +48,44 @@ function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
     };
   }
   return null;
+}
+
+/** Match an active clock by key/label across the whole account (any owner). */
+export function findMatchingActiveReminder<
+  T extends { itemKey: string; itemLabel: string },
+>(rows: T[], item: string): T | undefined {
+  const key = itemKey(item);
+  if (!key) {
+    return undefined;
+  }
+  return rows.find(
+    (row) =>
+      row.itemKey === key ||
+      reminderLabelsMatch(row.itemLabel, item) ||
+      reminderLabelsMatch(row.itemKey, key),
+  );
+}
+
+/** Text-only / clock update with no new time → keep the saved fireAt, ping, and repeat. */
+export function canReuseExistingReminderClock(
+  reminder: Pick<
+    LlmReminderAction,
+    "action" | "text" | "time" | "inSeconds" | "everyCount" | "everyUnit" | "weekdays"
+  >,
+  hasExisting: boolean,
+): boolean {
+  if (!hasExisting) {
+    return false;
+  }
+  if (reminder.action === "update") {
+    return true;
+  }
+  const hasNewClock =
+    Boolean(reminder.time.trim()) ||
+    Boolean(reminder.inSeconds && reminder.inSeconds > 0) ||
+    Boolean(reminder.everyCount && reminder.everyUnit) ||
+    Boolean(reminder.weekdays && reminder.weekdays.length > 0);
+  return Boolean(reminder.text.trim()) && !hasNewClock;
 }
 
 export function resolveReminderFireAt(
@@ -358,6 +397,31 @@ async function cancelActiveReminder(
   return match.itemLabel;
 }
 
+async function cancelActiveReminderAnyOwner(
+  userId: string,
+  wanted: string,
+): Promise<string | null> {
+  const rows = await prisma.reminder.findMany({
+    where: { userId, status: "active" },
+  });
+  const match = rows.find(
+    (row) =>
+      row.itemKey === itemKey(wanted) || reminderLabelsMatch(row.itemLabel, wanted),
+  );
+  if (!match) {
+    return null;
+  }
+  const workerItemId =
+    "workerItemId" in match && typeof match.workerItemId === "string"
+      ? match.workerItemId
+      : null;
+  await removeReminderAndLinkedWorkerTask({
+    id: match.id,
+    workerItemId,
+  });
+  return match.itemLabel;
+}
+
 function displayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
 }
@@ -552,6 +616,7 @@ function removeShell(item: string): LlmReminderAction {
     everyUnit: null,
     weekdays: null,
     confirmed: false,
+    compose: false,
   };
 }
 
@@ -732,6 +797,7 @@ export async function applyReminders(input: {
     fireAt: string;
     ping?: string;
     sameTimeOthers?: string[];
+    composeAtFire?: boolean;
   }>;
   skipped: Array<{
     item: string;
@@ -750,6 +816,7 @@ export async function applyReminders(input: {
     fireAt: string;
     ping?: string;
     sameTimeOthers?: string[];
+    composeAtFire?: boolean;
   }> = [];
   const skipped: Array<{
     item: string;
@@ -763,13 +830,13 @@ export async function applyReminders(input: {
     return { removed, missed, saved, skipped };
   }
   for (const reminder of input.reminders) {
-    const ownerId = ownerIdFor(reminder, input.employees, input.actor.id);
     const key = itemKey(reminder.item);
     if (!key) {
       continue;
     }
 
     if (reminder.action === "remove") {
+      const ownerId = ownerIdFor(reminder, input.employees, input.actor.id);
       const cancelled = await cancelActiveReminder(
         input.userId,
         ownerId,
@@ -778,30 +845,57 @@ export async function applyReminders(input: {
       if (cancelled) {
         removed.push(cancelled);
       } else {
-        missed.push(reminder.item.trim());
+        // Also try across the account — clocks may be owned by another human.
+        const any = await cancelActiveReminderAnyOwner(
+          input.userId,
+          reminder.item,
+        );
+        if (any) {
+          removed.push(any);
+        } else {
+          missed.push(reminder.item.trim());
+        }
       }
       continue;
     }
 
     const interval = intervalOf(reminder);
-    const fireAt = resolveReminderFireAt(
+    let fireAt = resolveReminderFireAt(
       reminder.date,
       reminder.time,
       new Date(),
       reminder.inSeconds,
       interval,
     );
+
+    const rows = await prisma.reminder.findMany({
+      where: { userId: input.userId, status: "active" },
+    });
+    const existing = findMatchingActiveReminder(rows, reminder.item);
+    // Clocks stay on the speaker who created them; do not re-scope by targets.
+    const ownerId = existing?.ownerId ?? input.actor.id;
+
+    const canReuseClock = canReuseExistingReminderClock(reminder, Boolean(existing));
+
+    if (!fireAt && canReuseClock && existing) {
+      fireAt = existing.fireAt;
+    }
     if (!fireAt) {
       skipped.push({ item: reminder.item.trim(), reason: "no_time" });
       continue;
     }
 
-    const pingIds = resolveReminderPingDestinations(
+    let pingIds = resolveReminderPingDestinations(
       reminder,
       input.employees,
       input.actor.id,
       contacts,
     );
+    if (pingIds.length === 0 && existing && canReuseClock) {
+      pingIds = Array.isArray(existing.pingIds)
+        ? existing.pingIds.map(String)
+        : [];
+    }
     if (pingIds.length === 0) {
       skipped.push({
         item: reminder.item.trim(),
@@ -812,29 +906,33 @@ export async function applyReminders(input: {
     }
 
     try {
-      const rows = await prisma.reminder.findMany({
-        where: { userId: input.userId, status: "active" },
-      });
       const owned = rows.filter((row) => row.ownerId === ownerId);
-      const pool = owned.length > 0 ? owned : rows;
-      const existing = pool.find(
-        (row) =>
-          row.itemKey === key ||
-          reminderLabelsMatch(row.itemLabel, reminder.item) ||
-          reminderLabelsMatch(row.itemKey, key),
-      );
-
-      const label = reminder.item.trim().slice(0, 255);
+      const label = (existing?.itemLabel ?? reminder.item.trim()).slice(0, 255);
+      const nextRepeat = interval
+        ? serializeReminderRepeat(interval)
+        : existing && canReuseClock
+          ? existing.repeat
+          : serializeReminderRepeat(null);
+      const nextText = reminder.text.trim()
+        ? reminder.text.trim().slice(0, 4096)
+        : existing && canReuseClock
+          ? existing.messageText
+          : "";
+      const nextCompose =
+        canReuseClock && existing
+          ? reminder.compose || existing.composeAtFire
+          : reminder.compose;
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
             data: {
               itemLabel: label,
-              listType: reminder.listType,
+              listType: reminder.listType || existing.listType,
               fireAt,
-              repeat: serializeReminderRepeat(interval),
+              repeat: nextRepeat,
               pingIds,
-              messageText: reminder.text.trim().slice(0, 4096),
+              messageText: nextText,
+              composeAtFire: nextCompose,
             },
           })
         : await prisma.reminder.create({
@@ -843,12 +941,13 @@ export async function applyReminders(input: {
               ownerId,
               actorId: input.actor.id,
               itemKey: key,
-              itemLabel: label,
+              itemLabel: reminder.item.trim().slice(0, 255),
               listType: reminder.listType,
               fireAt,
-              repeat: serializeReminderRepeat(interval),
+              repeat: nextRepeat,
               pingIds,
-              messageText: reminder.text.trim().slice(0, 4096),
+              messageText: nextText,
+              composeAtFire: nextCompose,
             },
           });
       await syncLinkedWorkerTaskClock({
@@ -883,6 +982,7 @@ export async function applyReminders(input: {
           .map((id) => formatPingLabel(id, input.employees))
           .join(","),
         ...(sameTimeOthers.length > 0 ? { sameTimeOthers } : {}),
+        ...(nextCompose ? { composeAtFire: true } : {}),
       });
       scheduleSoon(fireAt);
     } catch {
@@ -994,6 +1094,7 @@ export function formatReminderApplyNotice(result: {
     fireAt: string;
     ping?: string;
     sameTimeOthers?: string[];
+    composeAtFire?: boolean;
   }>;
   skipped?: Array<{
     item: string;
@@ -1006,9 +1107,10 @@ export function formatReminderApplyNotice(result: {
     parts.push(
       result.saved
         .map((row) => {
-          const saved = row.ping
-            ? `נשמרה התזכורת «${row.item}» ל-${row.fireAt} (אל ${row.ping}).`
-            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}.`;
+          const kind = row.composeAtFire
+            ? `נשמרה הנחיה להודעה מתוזמנת «${row.item}» ל-${row.fireAt}`
+            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}`;
+          const saved = row.ping ? `${kind} (אל ${row.ping}).` : `${kind}.`;
           const others = (row.sameTimeOthers ?? []).filter(Boolean);
           if (others.length === 0) {
             return saved;
@@ -1093,6 +1195,7 @@ export function toReminderSnapshotRow(
     pingIds: unknown;
     ownerId: string;
     messageText: string;
+    composeAtFire?: boolean;
     status: string;
     sendStatus?: string;
     sentAt?: Date | null;
@@ -1113,6 +1216,7 @@ export function toReminderSnapshotRow(
     ping_ids: pings,
     owner: names.get(row.ownerId) ?? row.ownerId,
     text: row.messageText,
+    compose_at_fire: row.composeAtFire === true,
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",

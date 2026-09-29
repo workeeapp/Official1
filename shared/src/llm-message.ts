@@ -68,6 +68,8 @@ export interface LlmReminderAction {
     | null;
   weekdays: number[] | null;
   confirmed: boolean;
+  /** When true, text is a brief; final WhatsApp copy is written at fire time. */
+  compose: boolean;
 }
 
 export interface LlmHandoffAction {
@@ -422,6 +424,11 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     everyUnit: interval?.unit ?? null,
     weekdays: interval?.weekdays ?? null,
     confirmed: record.confirmed === true || record.confirm === true,
+    compose:
+      record.compose === true ||
+      record.compose_at_fire === true ||
+      record.composeAtFire === true ||
+      record.dynamic === true,
   };
 }
 
@@ -655,7 +662,7 @@ function collectActionDescriptions(metadata: unknown): string[] {
           (part): part is string => typeof part === "string" && part.trim().length > 0,
         );
         descriptions.push(
-          `Remind ${when.join(" ") || "later"}${name ? `: ${name}` : ""}`.trim(),
+          `${item.compose === true ? "Compose" : "Remind"} ${when.join(" ") || "later"}${name ? `: ${name}` : ""}`.trim(),
         );
       }
     }
