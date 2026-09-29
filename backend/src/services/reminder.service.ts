@@ -523,10 +523,6 @@ export function formatPingLabel(
 ): string {
   const employee = employees.find((row) => row.id === value);
   if (employee) {
-    const digits = (employee.phone ?? "").replace(/\D/g, "");
-    if (digits.length >= 4) {
-      return `…${digits.slice(-4)}`;
-    }
     return employee.nickname?.trim() || employee.name;
   }
   const digits = value.replace(/\D/g, "");
@@ -900,7 +896,16 @@ export async function applyReminders(input: {
       input.actor.id,
       contacts,
     );
-    if (pingIds.length === 0 && existing && canReuseClock) {
+    const pingOmitted =
+      reminder.ping.every((part) => !String(part).trim()) &&
+      !(reminder.targets ?? []).some((part) => String(part).trim());
+    // On update, empty ping must keep the existing destination — otherwise
+    // resolve falls back to the speaker and the send goes to the wrong phone.
+    if (existing && canReuseClock && pingOmitted) {
+      pingIds = Array.isArray(existing.pingIds)
+        ? existing.pingIds.map(String)
+        : [];
+    } else if (pingIds.length === 0 && existing && canReuseClock) {
       pingIds = Array.isArray(existing.pingIds)
         ? existing.pingIds.map(String)
         : [];

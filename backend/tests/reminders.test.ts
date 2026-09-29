@@ -9,6 +9,7 @@ import {
   formatJerusalemDateTime,
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
+  formatPingLabel,
   pairWorkerItemsToReminders,
   planReminderWrites,
   reminderLabelsMatch,
@@ -199,6 +200,13 @@ describe("resolveReminderPingDestinations", () => {
         "other",
       ),
     ).toEqual(["0501111111"]);
+  });
+});
+
+describe("formatPingLabel", () => {
+  it("shows the employee name, not masked phone digits", () => {
+    expect(formatPingLabel(tal.id, [tal])).toBe("טל");
+    expect(formatPingLabel("0502222222", [tal])).toBe("…2222");
   });
 });
 
