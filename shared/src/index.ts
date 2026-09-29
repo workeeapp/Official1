@@ -65,6 +65,7 @@ export {
   parseLlmReply,
   parseReplyMetadata,
   parseReportSections,
+  parseReportHistoryKinds,
   parseTargets,
   llmItemLabel,
 } from "./llm-message";
@@ -89,6 +90,7 @@ export type {
   LlmHandoffAction,
   LlmQuery,
   ReportSection,
+  ReportHistoryKind,
   LlmMetadata,
   LlmReminderAction,
   LlmReminderActionName,

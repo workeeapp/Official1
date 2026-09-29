@@ -1,4 +1,4 @@
-import type { ReportSection } from "@workee/shared";
+import type { ReportHistoryKind, ReportSection } from "@workee/shared";
 import { formatReminderIntervalHe } from "@workee/shared";
 import type { SpeakerContact } from "./contact.service.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
@@ -19,6 +19,16 @@ const ALL_SECTIONS: ReportSection[] = [
   "history",
 ];
 
+/** Domains that can scope the history section when requested together. */
+const HISTORY_DOMAIN_SECTIONS: ReportSection[] = [
+  "reminders",
+  "sends",
+  "tasks",
+  "shopping",
+  "filings",
+  "custom",
+];
+
 const SECTION_TITLES: Record<ReportSection, string> = {
   reminders: "תזכורות",
   sends: "שליחות (מתוזמנות והיסטוריה)",
@@ -28,6 +38,22 @@ const SECTION_TITLES: Record<ReportSection, string> = {
   contacts: "אנשי קשר",
   custom: "רשימות מותאמות",
   history: "היסטוריית שינויים (מחיקות/עדכונים)",
+};
+
+const HISTORY_DOMAIN_LABELS: Partial<Record<ReportSection, string>> = {
+  reminders: "תזכורות",
+  sends: "שליחות",
+  tasks: "מטלות",
+  shopping: "קניות",
+  filings: "תיוקים",
+  custom: "רשימות",
+};
+
+const HISTORY_KIND_LABELS: Record<ReportHistoryKind, string> = {
+  add: "הוספות",
+  update: "עדכונים",
+  remove: "מחיקות",
+  fire: "שליחות",
 };
 
 export function normalizeReportSections(
@@ -45,6 +71,20 @@ export function normalizeReportSections(
   return unique.length > 0 ? unique : [...ALL_SECTIONS];
 }
 
+/**
+ * When history is requested with companion domain sections on a partial report,
+ * those domains scope which audit rows appear in history.
+ */
+export function historyFilterDomains(
+  wanted: ReportSection[],
+): ReportSection[] {
+  const isFull = wanted.length === ALL_SECTIONS.length;
+  if (isFull || !wanted.includes("history")) {
+    return [];
+  }
+  return wanted.filter((section) => HISTORY_DOMAIN_SECTIONS.includes(section));
+}
+
 export function formatSavedDataReport(input: {
   snapshot: EmployeeRecordSnapshot;
   contacts: SpeakerContact[];
@@ -52,18 +92,26 @@ export function formatSavedDataReport(input: {
   speakerPhone?: string | null;
   speakerName: string;
   sections?: ReportSection[] | null;
+  historyKinds?: ReportHistoryKind[] | null;
   multiOwner?: boolean;
 }): string {
   const wanted = normalizeReportSections(input.sections);
+  const isFull = wanted.length === ALL_SECTIONS.length;
+  const historyDomains = historyFilterDomains(wanted);
+  const historyKinds = normalizeHistoryKinds(input.historyKinds);
   const blocks: string[] = [];
 
   for (const section of wanted) {
-    const body = formatSection(section, input);
-    blocks.push(
-      body
-        ? `${SECTION_TITLES[section]}:\n${body}`
-        : `${SECTION_TITLES[section]}:\n- אין`,
-    );
+    const body = formatSection(section, {
+      ...input,
+      historyDomains,
+      historyKinds,
+    });
+    const title =
+      section === "history"
+        ? historySectionTitle(historyDomains, historyKinds)
+        : SECTION_TITLES[section];
+    blocks.push(body ? `${title}:\n${body}` : `${title}:\n- אין`);
   }
 
   if (blocks.length === 0) {
@@ -71,11 +119,46 @@ export function formatSavedDataReport(input: {
   }
 
   const heading =
-    wanted.length === ALL_SECTIONS.length
+    isFull
       ? `דו״ח מצב עבור ${input.speakerName}:`
       : `דו״ח חלקי עבור ${input.speakerName}:`;
 
   return [heading, ...blocks].join("\n\n");
+}
+
+function normalizeHistoryKinds(
+  kinds?: ReportHistoryKind[] | null,
+): ReportHistoryKind[] {
+  if (!kinds || kinds.length === 0) {
+    return [];
+  }
+  const unique: ReportHistoryKind[] = [];
+  for (const kind of kinds) {
+    if (
+      (kind === "add" ||
+        kind === "update" ||
+        kind === "remove" ||
+        kind === "fire") &&
+      !unique.includes(kind)
+    ) {
+      unique.push(kind);
+    }
+  }
+  return unique;
+}
+
+function historySectionTitle(
+  domains: ReportSection[],
+  kinds: ReportHistoryKind[],
+): string {
+  const bits = [
+    ...domains.map((domain) => HISTORY_DOMAIN_LABELS[domain]).filter(Boolean),
+    ...kinds.map((kind) => HISTORY_KIND_LABELS[kind]),
+  ];
+  if (bits.length === 0) {
+    return SECTION_TITLES.history;
+  }
+  return `היסטוריית שינויים (${bits.join(" · ")})`;
 }
 
 function formatSection(
@@ -86,6 +169,8 @@ function formatSection(
     speakerId: string;
     speakerPhone?: string | null;
     multiOwner?: boolean;
+    historyDomains?: ReportSection[];
+    historyKinds?: ReportHistoryKind[];
   },
 ): string {
   switch (section) {
@@ -129,7 +214,10 @@ function formatSection(
     case "contacts":
       return formatContactLines(input.contacts);
     case "history":
-      return formatHistoryLines(input.snapshot.history ?? []);
+      return formatHistoryLines(input.snapshot.history ?? [], {
+        domains: input.historyDomains ?? [],
+        kinds: input.historyKinds ?? [],
+      });
     default:
       return "";
   }
@@ -191,11 +279,30 @@ function formatHistoryLines(
     at: string;
     actor?: string | null;
   }>,
+  filters: {
+    domains: ReportSection[];
+    kinds: ReportHistoryKind[];
+  },
 ): string {
-  if (rows.length === 0) {
+  const filtered = rows.filter((row) => {
+    if (
+      filters.domains.length > 0 &&
+      !historyRowMatchesDomains(row, filters.domains)
+    ) {
+      return false;
+    }
+    if (
+      filters.kinds.length > 0 &&
+      !filters.kinds.includes(historyRowKind(row.action, row.summary))
+    ) {
+      return false;
+    }
+    return true;
+  });
+  if (filtered.length === 0) {
     return "";
   }
-  return rows
+  return filtered
     .map((row) => {
       const verb = historyVerb(row.action, row.summary);
       const subject = formatHistorySubject(row.action, row.summary);
@@ -211,30 +318,94 @@ function formatHistoryLines(
     .join("\n");
 }
 
-function historyVerb(action: string, summary: string): string {
+function historyRowKind(action: string, summary: string): ReportHistoryKind {
   if (
     action === "list_remove" ||
     action === "filing_remove" ||
     action === "reminder_cancel"
   ) {
-    return "נמחק";
+    return "remove";
   }
   if (action === "reminder_fire") {
-    return "נשלח";
+    return "fire";
   }
   if (
     action === "list_add" ||
     action === "filing_add" ||
     (action === "reminder_save" && summary.startsWith("add "))
   ) {
-    return "נוסף";
+    return "add";
   }
   if (
     action === "list_update" ||
     action === "filing_update" ||
     (action === "reminder_save" && summary.startsWith("update "))
   ) {
-    return "עודכן";
+    return "update";
+  }
+  return "update";
+}
+
+function historyRowDomain(action: string, summary: string): ReportSection | null {
+  if (action.startsWith("reminder")) {
+    return "reminders";
+  }
+  if (action.startsWith("filing")) {
+    return "filings";
+  }
+  const match = summary.trim().match(
+    /^(add|update|remove|cancel|fire)\s+(\w+)\s*:/i,
+  );
+  const kind = match?.[2]?.toLowerCase() ?? "";
+  if (kind === "shopping") {
+    return "shopping";
+  }
+  if (kind === "tasks") {
+    return "tasks";
+  }
+  if (kind === "custom") {
+    return "custom";
+  }
+  if (kind === "filing") {
+    return "filings";
+  }
+  if (kind === "reminder") {
+    return "reminders";
+  }
+  return null;
+}
+
+function historyRowMatchesDomains(
+  row: { action: string; summary: string },
+  domains: ReportSection[],
+): boolean {
+  const domain = historyRowDomain(row.action, row.summary);
+  if (!domain) {
+    return false;
+  }
+  if (domains.includes(domain)) {
+    return true;
+  }
+  // sends and reminders share Reminder audit rows.
+  if (
+    domain === "reminders" &&
+    (domains.includes("sends") || domains.includes("reminders"))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function historyVerb(action: string, summary: string): string {
+  const kind = historyRowKind(action, summary);
+  if (kind === "remove") {
+    return "נמחק";
+  }
+  if (kind === "fire") {
+    return "נשלח";
+  }
+  if (kind === "add") {
+    return "נוסף";
   }
   return "עודכן";
 }

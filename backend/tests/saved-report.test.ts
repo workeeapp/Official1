@@ -203,16 +203,156 @@ describe("formatSavedDataReport", () => {
 
     expect(text).toContain("בוטל");
     expect(text).toContain("2026-09-29 15:10");
-    expect(text).toContain("היסטוריית שינויים");
+    expect(text).toContain("היסטוריית שינויים (תזכורות)");
     expect(text).toContain("נמחק");
     expect(text).toContain("עודכן");
+    expect(text).toContain("ע״י טל");
+    expect(text).toContain("תזכורת «לקנות מחשבון מדעי»");
+    // Companion reminders scopes history away from shopping rows.
+    expect(text).not.toContain("קניות «חלב»");
+    expect(text).not.toContain("cancel reminder");
+    expect(text).not.toContain("update reminder");
+    expect(text).not.toContain("remove shopping");
+  });
+
+  it("shows unfiltered mutation history when history is alone", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [],
+        filing: [],
+        reminders: [],
+        history: [
+          {
+            action: "reminder_cancel",
+            summary: "cancel reminder: לקנות מחשבון מדעי",
+            at: "2026-09-29 15:10",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "list_remove",
+            summary: "remove shopping: חלב",
+            at: "2026-09-29 14:00",
+            entity_type: "EmployeeListItem",
+            actor: "לוסי",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["history"],
+    });
+
     expect(text).toContain("ע״י טל");
     expect(text).toContain("ע״י לוסי");
     expect(text).toContain("תזכורת «לקנות מחשבון מדעי»");
     expect(text).toContain("קניות «חלב»");
-    expect(text).not.toContain("cancel reminder");
-    expect(text).not.toContain("update reminder");
-    expect(text).not.toContain("remove shopping");
+  });
+
+  it("scopes history to shopping when history+shopping are requested", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [
+          {
+            list_type: "shopping",
+            owner: "טל",
+            items: [{ "שם פריט": "לחם" }],
+          },
+          {
+            list_type: "tasks",
+            owner: "טל",
+            items: [{ "שם מטלה": "להתקשר לרופא" }],
+          },
+        ],
+        filing: [],
+        reminders: [],
+        history: [
+          {
+            action: "list_remove",
+            summary: "remove shopping: חלב",
+            at: "2026-09-29 14:00",
+            entity_type: "EmployeeListItem",
+            actor: "טל",
+          },
+          {
+            action: "list_add",
+            summary: "add tasks: להתקשר לרופא",
+            at: "2026-09-29 13:00",
+            entity_type: "EmployeeListItem",
+            actor: "טל",
+          },
+          {
+            action: "reminder_cancel",
+            summary: "cancel reminder: לשתות מים",
+            at: "2026-09-29 12:00",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["history", "shopping"],
+    });
+
+    expect(text).toContain("היסטוריית שינויים (קניות)");
+    expect(text).toContain("קניות «חלב»");
+    expect(text).not.toContain("מטלה «להתקשר לרופא»");
+    expect(text).not.toContain("תזכורת «לשתות מים»");
+  });
+
+  it("filters reminder history by mutation kind", () => {
+    const text = formatSavedDataReport({
+      snapshot: {
+        lists: [],
+        filing: [],
+        reminders: [],
+        history: [
+          {
+            action: "reminder_save",
+            summary: "add reminder: לשתות מים",
+            at: "2026-09-29 10:00",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "reminder_save",
+            summary: "update reminder: לשתות מים",
+            at: "2026-09-29 11:00",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "reminder_cancel",
+            summary: "cancel reminder: לשתות מים",
+            at: "2026-09-29 12:00",
+            entity_type: "Reminder",
+            actor: "טל",
+          },
+          {
+            action: "list_remove",
+            summary: "remove shopping: חלב",
+            at: "2026-09-29 09:00",
+            entity_type: "EmployeeListItem",
+            actor: "טל",
+          },
+        ],
+      },
+      contacts: [],
+      speakerId,
+      speakerName: "טל",
+      sections: ["history", "reminders"],
+      historyKinds: ["remove"],
+    });
+
+    expect(text).toContain("היסטוריית שינויים (תזכורות · מחיקות)");
+    expect(text).toContain("נמחק");
+    expect(text).toContain("תזכורת «לשתות מים»");
+    expect(text).not.toContain("נוסף");
+    expect(text).not.toContain("עודכן");
+    expect(text).not.toContain("קניות «חלב»");
   });
 
   it("includes done scheduled sends with sent_at and sent body", () => {

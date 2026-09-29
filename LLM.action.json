@@ -378,8 +378,24 @@
                     "shopping",
                     "filings",
                     "contacts",
-                    "custom"
+                    "custom",
+                    "history",
+                    "add",
+                    "update",
+                    "remove",
+                    "fire",
+                    "מחיקות",
+                    "עודכן",
+                    "התווסף",
+                    "נשלח"
                   ]
+                }
+              },
+              "history_kinds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["add", "update", "remove", "fire"]
                 }
               }
             }

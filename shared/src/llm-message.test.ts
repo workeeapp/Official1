@@ -147,6 +147,7 @@ describe("parseLlmReply", () => {
       handoff: null,
       query: null,
       reportSections: [],
+      reportHistoryKinds: [],
       confirm: null,
       targets: [],
     });
@@ -231,6 +232,38 @@ describe("parseLlmReply", () => {
     ).toMatchObject({
       query: "report",
       reportSections: ["history"],
+      reportHistoryKinds: ["remove"],
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: {
+            query: "report",
+            sections: ["history", "shopping"],
+            history_kinds: ["remove", "update"],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      query: "report",
+      reportSections: ["history", "shopping"],
+      reportHistoryKinds: ["remove", "update"],
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "רגע",
+          metadata: {
+            query: "report",
+            sections: ["מחיקות", "תזכורות"],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      query: "report",
+      reportSections: ["reminders", "history"],
+      reportHistoryKinds: ["remove"],
     });
     expect(
       parseReplyMetadata(

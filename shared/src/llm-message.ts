@@ -95,6 +95,9 @@ export type ReportSection =
   | "custom"
   | "history";
 
+/** Mutation kinds for report section "history" (add / update / remove / fire). */
+export type ReportHistoryKind = "add" | "update" | "remove" | "fire";
+
 export interface LlmMetadata {
   lists: LlmListAction[];
   filing: LlmFilingAction[];
@@ -105,6 +108,12 @@ export interface LlmMetadata {
   query?: LlmQuery | null;
   /** Categories for query=report. Empty/omit = full report. */
   reportSections?: ReportSection[];
+  /**
+   * When sections includes history: limit audit rows to these kinds.
+   * Empty/omit = all kinds. Companion domain sections (shopping/tasks/…)
+   * further scope history to that domain.
+   */
+  reportHistoryKinds?: ReportHistoryKind[];
   confirm?: boolean | null;
   targets?: string[];
 }
@@ -136,6 +145,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     handoff: null,
     query: null,
     reportSections: [],
+    reportHistoryKinds: [],
     confirm: null,
     targets: [],
   };
@@ -148,13 +158,15 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
 
   const meta = metadata as Record<string, unknown>;
   const defaultTargets = parseTargets(meta);
+  const reportSections = parseReportSections(meta);
   return {
     messages: parseMessageActions(meta),
     reminders: parseReminderActions(meta),
     directory: parseDirectoryActions(meta),
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
-    reportSections: parseReportSections(meta),
+    reportSections,
+    reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
     lists: Array.isArray(meta.lists)
@@ -339,12 +351,47 @@ const REPORT_SECTION_ALIASES: Record<string, ReportSection> = {
   list: "custom",
   רשימות: "custom",
   history: "history",
-  deleted: "history",
-  deletes: "history",
-  cancelled: "history",
   היסטוריה: "history",
-  מחיקות: "history",
-  נמחק: "history",
+};
+
+const REPORT_HISTORY_KIND_ALIASES: Record<string, ReportHistoryKind> = {
+  add: "add",
+  added: "add",
+  adds: "add",
+  create: "add",
+  created: "add",
+  נוסף: "add",
+  נוספו: "add",
+  התווסף: "add",
+  התווספו: "add",
+  הוספות: "add",
+  update: "update",
+  updated: "update",
+  updates: "update",
+  edit: "update",
+  edited: "update",
+  עודכן: "update",
+  עודכנו: "update",
+  עדכונים: "update",
+  remove: "remove",
+  removed: "remove",
+  removes: "remove",
+  delete: "remove",
+  deleted: "remove",
+  deletes: "remove",
+  cancel: "remove",
+  cancelled: "remove",
+  canceled: "remove",
+  מחיקות: "remove",
+  נמחק: "remove",
+  נמחקו: "remove",
+  בוטל: "remove",
+  בוטלו: "remove",
+  fire: "fire",
+  fired: "fire",
+  sent: "fire",
+  נשלח: "fire",
+  נשלחו: "fire",
 };
 
 function normalizeReportSectionToken(raw: string): ReportSection | null {
@@ -355,9 +402,22 @@ function normalizeReportSectionToken(raw: string): ReportSection | null {
   return REPORT_SECTION_ALIASES[value] ?? REPORT_SECTION_ALIASES[raw.trim()] ?? null;
 }
 
-export function parseReportSections(meta: Record<string, unknown>): ReportSection[] {
+function normalizeReportHistoryKindToken(raw: string): ReportHistoryKind | null {
+  const value = raw.trim().toLowerCase();
+  if (!value) {
+    return null;
+  }
+  return (
+    REPORT_HISTORY_KIND_ALIASES[value] ??
+    REPORT_HISTORY_KIND_ALIASES[raw.trim()] ??
+    null
+  );
+}
+
+function collectReportSectionTokens(meta: Record<string, unknown>): string[] {
   const collected: string[] = [];
-  const fromFields = meta.sections ?? meta.report ?? meta.report_sections ?? meta.reportSections;
+  const fromFields =
+    meta.sections ?? meta.report ?? meta.report_sections ?? meta.reportSections;
   if (Array.isArray(fromFields)) {
     for (const entry of fromFields) {
       if (typeof entry === "string" && entry.trim()) {
@@ -379,15 +439,72 @@ export function parseReportSections(meta: Record<string, unknown>): ReportSectio
       );
     }
   }
+  return collected;
+}
 
+export function parseReportSections(meta: Record<string, unknown>): ReportSection[] {
   const sections: ReportSection[] = [];
-  for (const token of collected) {
+  let sawHistoryKindToken = false;
+  for (const token of collectReportSectionTokens(meta)) {
     const section = normalizeReportSectionToken(token);
-    if (section && !sections.includes(section)) {
-      sections.push(section);
+    if (section) {
+      if (!sections.includes(section)) {
+        sections.push(section);
+      }
+      continue;
+    }
+    if (normalizeReportHistoryKindToken(token)) {
+      sawHistoryKindToken = true;
     }
   }
+  // "מה נמחק" / sections:["מחיקות"] → history with remove filter.
+  if (sawHistoryKindToken && !sections.includes("history")) {
+    sections.push("history");
+  }
   return sections;
+}
+
+export function parseReportHistoryKinds(
+  meta: Record<string, unknown>,
+  sections: ReportSection[] = parseReportSections(meta),
+): ReportHistoryKind[] {
+  const kinds: ReportHistoryKind[] = [];
+  const push = (kind: ReportHistoryKind | null) => {
+    if (kind && !kinds.includes(kind)) {
+      kinds.push(kind);
+    }
+  };
+
+  const fromField =
+    meta.history_kinds ??
+    meta.historyKinds ??
+    meta.report_history_kinds ??
+    meta.reportHistoryKinds;
+  if (Array.isArray(fromField)) {
+    for (const entry of fromField) {
+      if (typeof entry === "string") {
+        push(normalizeReportHistoryKindToken(entry));
+      }
+    }
+  } else if (typeof fromField === "string" && fromField.trim()) {
+    for (const part of fromField.split(/[,+|]/)) {
+      push(normalizeReportHistoryKindToken(part));
+    }
+  }
+
+  for (const token of collectReportSectionTokens(meta)) {
+    // Kind aliases that are also sections (none today) stay as sections only.
+    if (normalizeReportSectionToken(token)) {
+      continue;
+    }
+    push(normalizeReportHistoryKindToken(token));
+  }
+
+  if (kinds.length > 0 && !sections.includes("history")) {
+    // Defensive: kinds without history section are ignored by the reporter.
+    return kinds;
+  }
+  return kinds;
 }
 
 function parseConfirm(meta: Record<string, unknown>): boolean | null {
