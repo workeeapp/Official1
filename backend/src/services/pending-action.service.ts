@@ -377,6 +377,7 @@ export function formatConversationPendingContext(
       "Stay inside this action until the server clears it.",
       "A reminder name from the speaker selects/narrows targets — it is NOT a send or new command.",
       "Yes / confirm → metadata.confirm=true and empty reminders.",
+      "After yes: response must say the reminder(s) were deleted (past tense), naming current_target — never מאשרת/לאשר/confirming language.",
       "No / cancel → metadata.confirm=false and empty reminders.",
       "Do not emit messages, lists, or reminder adds while current_step is confirm.",
     ].join("\n");
@@ -390,6 +391,7 @@ export function formatConversationPendingContext(
       `current_step: ${pending.step}`,
       "Stay inside this action until the server clears it.",
       "Yes / confirm → metadata.confirm=true and empty lists.",
+      "After yes: response must list the deleted items by name from current_target in past tense (e.g. נמחקו הפריטים הבאים מרשימת הקניות: …). Never מאשרת/לאשר/confirming — the yes already confirmed.",
       "No / cancel → metadata.confirm=false and empty lists.",
       "Do not emit new list adds/updates or messages while current_step is confirm.",
     ].join("\n");
