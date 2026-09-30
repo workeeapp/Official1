@@ -72,6 +72,13 @@ export interface EmployeeRecordsResponse {
   groups: EmployeeRecordGroup[];
 }
 
+export interface EmployeeUsageSummary {
+  employeeId: string;
+  conversations: number;
+  interactions: number;
+  totalUsd: number;
+}
+
 export interface EmployeeInput {
   kind?: EmployeeKind;
   name: string;

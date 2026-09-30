@@ -12,6 +12,7 @@ export type {
   EmployeeRecordItem,
   EmployeeRecordGroup,
   EmployeeRecordsResponse,
+  EmployeeUsageSummary,
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,

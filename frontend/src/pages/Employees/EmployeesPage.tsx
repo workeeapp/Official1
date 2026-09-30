@@ -4,6 +4,7 @@ import type {
   EmployeeRecordField,
   EmployeeRecordItem,
   EmployeeRecordsResponse,
+  EmployeeUsageSummary,
   PublicEmployee,
 } from "@workee/shared";
 import { isDigitalEmployee, isProtectedEmployee } from "@workee/shared";
@@ -17,7 +18,11 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@/components/IconButton";
-import { employeeDisplayName, employeeFullName } from "@/services/employee.service";
+import {
+  employeeDisplayName,
+  employeeFullName,
+  formatUsd,
+} from "@/services/employee.service";
 import { ApiError } from "@/types";
 
 type DialogMode = "add" | "update" | null;
@@ -42,6 +47,7 @@ export function EmployeesPage() {
     "idle",
   );
   const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<EmployeeUsageSummary | null>(null);
   const [editingItem, setEditingItem] = useState<EmployeeRecordItem | null>(null);
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordFormError, setRecordFormError] = useState<string | null>(null);
@@ -58,6 +64,7 @@ export function EmployeesPage() {
       setRecords(null);
       setRecordsStatus("idle");
       setRecordsError(null);
+      setUsage(null);
       return;
     }
 
@@ -65,6 +72,12 @@ export function EmployeesPage() {
     const abort = new AbortController();
     setRecordsStatus("loading");
     setRecordsError(null);
+    setUsage(null);
+
+    employeeApi
+      .usage(employeeId, abort.signal)
+      .then(setUsage)
+      .catch(() => setUsage(null));
 
     employeeApi
       .records(employeeId, abort.signal)
@@ -308,6 +321,7 @@ export function EmployeesPage() {
         <EmployeeRecordsPanel
           employee={selectedEmployee}
           records={records}
+          usage={usage}
           status={recordsStatus}
           error={recordsError}
           onEdit={setEditingItem}
@@ -345,6 +359,7 @@ export function EmployeesPage() {
 function EmployeeRecordsPanel({
   employee,
   records,
+  usage,
   status,
   error,
   onEdit,
@@ -352,6 +367,7 @@ function EmployeeRecordsPanel({
 }: {
   employee: PublicEmployee;
   records: EmployeeRecordsResponse | null;
+  usage: EmployeeUsageSummary | null;
   status: "idle" | "loading" | "ready" | "error";
   error: string | null;
   onEdit: (item: EmployeeRecordItem) => void;
@@ -368,6 +384,24 @@ function EmployeeRecordsPanel({
       <h2 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
         {employeeDisplayName(employee)}
       </h2>
+      {usage ? (
+        <p
+          data-testid="employee-usage"
+          className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary"
+        >
+          <span>
+            Number of conversations{" "}
+            <span className="font-semibold text-text-primary">{usage.conversations}</span>{" "}
+            <span title="Interactions">({usage.interactions})</span>
+          </span>
+          <span>
+            Total amount{" "}
+            <span className="font-semibold text-text-primary">
+              {formatUsd(usage.totalUsd)}
+            </span>
+          </span>
+        </p>
+      ) : null}
 
       {status === "loading" ? (
         <p className="mt-4 text-sm text-text-secondary">Loading saved data…</p>

@@ -15,6 +15,7 @@ import {
   resolveActingEmployee,
   updateEmployeeForUser,
 } from "../services/employee.service.js";
+import { getEmployeeUsageSummary } from "../services/llm-usage.service.js";
 import { parseEmployeeIdQuery } from "../validation/chat.validation.js";
 import { parseEmployeeBody, parseRecordFields } from "../validation/employee.validation.js";
 import { UnauthorizedError } from "../utils/errors.js";
@@ -49,6 +50,16 @@ export async function getEmployeeRecords(req: Request, res: Response): Promise<v
   await getEmployeeForUser(req.user.id, employeeId);
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json(records);
+}
+
+export async function getEmployeeUsage(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  const employeeId = parseEmployeeIdQuery(req.params.id);
+  await getEmployeeForUser(req.user.id, employeeId);
+  res.status(200).json(await getEmployeeUsageSummary(req.user.id, employeeId));
 }
 
 export async function updateEmployeeRecordItem(

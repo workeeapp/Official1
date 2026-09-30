@@ -84,9 +84,10 @@ const {
   filingUpsert: vi.fn(),
 }));
 
-const { createConversation, createResponse } = vi.hoisted(() => ({
+const { createConversation, createResponse, usageCreate } = vi.hoisted(() => ({
   createConversation: vi.fn(),
   createResponse: vi.fn(),
+  usageCreate: vi.fn().mockResolvedValue({}),
 }));
 
 const deliverWhatsAppRelaysMock = vi.hoisted(() =>
@@ -197,6 +198,12 @@ vi.mock("../src/database/prisma.js", () => ({
       update: vi.fn(),
       updateMany: vi.fn(),
       delete: vi.fn(),
+    },
+    llmUsage: {
+      create: usageCreate,
+    },
+    llmModelPrice: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   },
 }));
@@ -629,6 +636,45 @@ describe("chat API", () => {
     expect(saved[0].author).toBe("you");
     expect(saved[1].author).toBe("assistant");
     expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
+  });
+
+  it("stores LLM usage for the speaker, worker, and conversation", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    usageCreate.mockClear();
+    createResponse.mockResolvedValue({
+      reply: "Hello from the model",
+      raw: {
+        id: "resp_usage",
+        model: "gpt-4.1-mini-2025-04-14",
+        usage: {
+          input_tokens: 1500,
+          input_tokens_details: { cached_tokens: 1280 },
+          output_tokens: 60,
+          output_tokens_details: { reasoning_tokens: 0 },
+          total_tokens: 1560,
+        },
+      },
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(usageCreate).toHaveBeenCalledOnce();
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({
+      conversationId: expect.any(String),
+      employeeId,
+      digitalEmployeeId: expect.any(String),
+      openaiConversationId: "conv_test_1",
+      responseId: "resp_usage",
+      inputTokens: 1500,
+      outputTokens: 60,
+      cachedTokens: 1280,
+      totalTokens: 1560,
+    });
   });
 
   it("lets Lucy save a reminder without handing off to David", async () => {

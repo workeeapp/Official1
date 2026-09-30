@@ -47,6 +47,7 @@ import {
 import { phonesMatch } from "../utils/phone.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.js";
+import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
   formatReminderConfirmNotice,
@@ -1073,6 +1074,14 @@ export async function sendChatMessage(input: {
     }
     const llmMs = Date.now() - llmStarted;
     const afterLlmStarted = Date.now();
+    await recordLlmUsage({
+      conversationId: conversation.id,
+      employeeId: employee.id,
+      digitalEmployeeId: digital.id,
+      openaiConversationId: conversation.openaiConversationId,
+      model: config.model,
+      turn,
+    });
     await saveTurn({
       conversationId: conversation.id,
       speaker,

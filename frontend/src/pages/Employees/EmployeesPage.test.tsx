@@ -14,7 +14,9 @@ const {
   updateRecordMock,
   deleteRecordMock,
   digitalDefaultsMock,
+  usageMock,
 } = vi.hoisted(() => ({
+  usageMock: vi.fn(),
   meMock: vi.fn(),
   listEmployeesMock: vi.fn(),
   recordsMock: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock("@/services/employee.service", async () => {
       update: vi.fn(),
       remove: vi.fn(),
       records: recordsMock,
+      usage: usageMock,
       updateRecord: updateRecordMock,
       deleteRecord: deleteRecordMock,
     },
@@ -105,6 +108,12 @@ describe("Employees page", () => {
       employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
       groups: [],
     });
+    usageMock.mockReset().mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      conversations: 3,
+      interactions: 17,
+      totalUsd: 0.0021528,
+    });
     updateRecordMock.mockReset();
     deleteRecordMock.mockReset();
     digitalDefaultsMock.mockReset().mockResolvedValue({
@@ -151,6 +160,21 @@ describe("Employees page", () => {
     expect(screen.getByRole("button", { name: "Delete employee" })).toBeEnabled();
     expect(await screen.findByTestId("employee-records")).toHaveTextContent(
       "No lists, tasks, contacts, or filings saved for this employee.",
+    );
+  });
+
+  it("shows conversation count and total LLM cost for the selected employee", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+
+    const usage = await screen.findByTestId("employee-usage");
+    expect(usage).toHaveTextContent("Number of conversations 3 (17)");
+    expect(usage).toHaveTextContent("Total amount $0.0022");
+    expect(usageMock).toHaveBeenCalledWith(
+      "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      expect.any(AbortSignal),
     );
   });
 
