@@ -23,6 +23,7 @@ import {
   employeeFullName,
   formatUsd,
 } from "@/services/employee.service";
+import { WorkeeMark } from "@/components/Logo";
 import { ApiError } from "@/types";
 
 type DialogMode = "add" | "update" | null;
@@ -501,12 +502,13 @@ function EmployeeChip({
         aria-pressed={selected}
         aria-label={`${employeeDisplayName(employee)}, ${fullName}`}
         onClick={onSelect}
-        className={`group relative inline-flex min-h-11 cursor-pointer items-center rounded-full px-3.5 text-sm font-medium transition-colors ${
+        className={`group relative inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-sm font-medium transition-colors ${
           selected
             ? "bg-primary text-white"
             : "bg-primary-light text-primary hover:bg-primary/15"
         }`}
       >
+        {isDigitalEmployee(employee) ? <WorkeeMark inverted={selected} /> : null}
         <span dir="auto">
           {employeeDisplayName(employee)}
           {employee.isOwner ? " · owner" : ""}

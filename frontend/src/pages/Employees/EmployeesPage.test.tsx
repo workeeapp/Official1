@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
@@ -127,11 +127,19 @@ describe("Employees page", () => {
     renderEmployees();
 
     expect(await screen.findByTestId("employees-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("employee-count")).toHaveTextContent("3 employees");
+    expect(await screen.findByText("3 employees")).toBeInTheDocument();
     expect(screen.getByTitle("לוסי · gpt-4.1-mini")).toHaveTextContent("לוסי");
+    expect(
+      within(screen.getByTitle("לוסי · gpt-4.1-mini")).getByTestId("workee-mark"),
+    ).toBeInTheDocument();
     expect(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).toHaveTextContent(
       "עמית",
     );
+    expect(
+      within(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).queryByTestId(
+        "workee-mark",
+      ),
+    ).not.toBeInTheDocument();
     expect(screen.getByTitle("טל דור · tal@example.com · 050-0000002")).toHaveTextContent(
       "טל",
     );
