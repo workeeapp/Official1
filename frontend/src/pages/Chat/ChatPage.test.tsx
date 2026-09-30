@@ -404,9 +404,7 @@ describe("Chat page", () => {
     expect(
       await within(dialog).findByText("Milk was added to the shopping list."),
     ).toBeInTheDocument();
-    expect(within(dialog).getByTestId("chat-action")).toHaveTextContent(
-      "Add to shopping list: milk",
-    );
+    expect(within(dialog).queryByTestId("chat-action")).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/metadata/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/list_type/)).not.toBeInTheDocument();
   });

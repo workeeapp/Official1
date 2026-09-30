@@ -274,9 +274,26 @@ function toListAction(value: unknown): LlmListAction | null {
     : [];
 
   let listName =
-    listType === "custom" ? readText(value, ["list_name", "name", "רשימה"]) : "";
+    listType === "custom" ? readText(value, ["list_name", "רשימה"]) : "";
   if (listType === "custom" && !listName) {
     listName = listNameFromItems(items);
+  }
+  // Models sometimes copy the new row into list_name (or a hallucinated top-level
+  // name). A real row label must not become the list title — keep a distinct
+  // list_name from the item when present (e.g. list_name: "בעיות").
+  if (listType === "custom" && listName && items.length === 1) {
+    const label = itemLabel(items[0]).trim();
+    if (
+      label &&
+      normalizeLooseText(label) === normalizeLooseText(listName) &&
+      !isTitleOnlyListItem(items[0])
+    ) {
+      const fromItem = listNameFromItems(items);
+      listName =
+        fromItem && normalizeLooseText(fromItem) !== normalizeLooseText(label)
+          ? fromItem
+          : "";
+    }
   }
 
   // Named custom lists may open/share with columns only (no rows yet).
@@ -301,6 +318,51 @@ function listNameFromItems(items: Record<string, unknown>[]): string {
     }
   }
   return "";
+}
+
+function normalizeLooseText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Sole title-like cell — opening a named list, not a real data row. */
+function isTitleOnlyListItem(item: unknown): boolean {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return false;
+  }
+  const record = item as Record<string, unknown>;
+  const metaKeys = new Set([
+    "list_name",
+    "listName",
+    "רשימה",
+    "list_type",
+    "listType",
+    "targets",
+  ]);
+  const titleKeys = new Set([
+    "name",
+    "item_name",
+    "שם פריט",
+    "שם",
+    "title",
+    "שם רשימה",
+    "list_title",
+  ]);
+  const filled = Object.entries(record).filter(([key, value]) => {
+    if (metaKeys.has(key)) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    return value != null;
+  });
+  if (filled.length === 0) {
+    return true;
+  }
+  if (filled.length !== 1) {
+    return false;
+  }
+  return titleKeys.has(filled[0][0]);
 }
 
 function parseHandoff(meta: Record<string, unknown>): LlmHandoffAction | null {
@@ -1161,6 +1223,8 @@ function itemLabel(item: unknown): string {
     "שם מטלה",
     "שם פרטי",
     "task",
+    "תיאור",
+    "description",
   ];
 
   for (const key of keys) {
@@ -1170,9 +1234,18 @@ function itemLabel(item: unknown): string {
     }
   }
 
-  const firstText = Object.values(record).find(
-    (value) => typeof value === "string" && value.trim(),
+  const metaKeys = new Set([
+    "list_name",
+    "listName",
+    "רשימה",
+    "list_type",
+    "listType",
+    "targets",
+  ]);
+  const firstText = Object.entries(record).find(
+    ([key, value]) =>
+      !metaKeys.has(key) && typeof value === "string" && value.trim(),
   );
 
-  return typeof firstText === "string" ? firstText.trim() : "";
+  return firstText && typeof firstText[1] === "string" ? firstText[1].trim() : "";
 }

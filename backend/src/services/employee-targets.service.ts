@@ -15,6 +15,13 @@ import { matchContact, type SpeakerContact } from "./contact.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
+/** Existing shared custom list the speaker can see / mutate. */
+export type SharedListRef = {
+  ownerId: string;
+  listName: string;
+  visibleTo: string[];
+};
+
 export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
 }
@@ -213,6 +220,8 @@ export function planTargetedActions(input: {
   employees: PublicEmployee[];
   workers?: PublicEmployee[];
   metadata: LlmMetadata;
+  /** Shared custom lists visible to the actor (owned by anyone on the account). */
+  sharedLists?: SharedListRef[];
 }): {
   applications: Array<{
     employeeId: string;
@@ -252,6 +261,15 @@ export function planTargetedActions(input: {
       .filter((target) => target.id !== input.actor.id)
       .map(employeeDisplayName);
 
+  const partnerLabelFromIds = (ids: string[]) =>
+    ids
+      .filter((id) => id !== input.actor.id)
+      .map((id) => {
+        const employee = input.employees.find((row) => row.id === id);
+        return employee ? employeeDisplayName(employee) : "";
+      })
+      .filter(Boolean);
+
   const addNotification = (
     employeeId: string,
     metadata: LlmMetadata,
@@ -273,8 +291,75 @@ export function planTargetedActions(input: {
   };
 
   for (const list of input.metadata.lists) {
+    const normalizedList = normalizeSharedCustomList(list);
+    const existingSharedMatches = findSharedListsForActor(
+      normalizedList,
+      input.actor.id,
+      input.sharedLists ?? [],
+    );
+    if (existingSharedMatches.length > 0) {
+      // Removes/updates must hit every duplicate shared list with that name
+      // (legacy bugs created one copy per partner). Adds go to one canonical owner.
+      const mutationTargets =
+        normalizedList.action === "remove" ||
+        normalizedList.action === "update"
+          ? existingSharedMatches
+          : [preferSharedList(existingSharedMatches)!];
+      const unionVisibleTo = uniqueIds(
+        mutationTargets.flatMap((row) => [
+          row.ownerId,
+          input.actor.id,
+          ...row.visibleTo,
+        ]),
+      );
+      const notifyMetadata = {
+        lists: [
+          {
+            ...normalizedList,
+            listName: mutationTargets[0]!.listName,
+            targets: [],
+          },
+        ],
+        filing: [],
+      };
+      for (const existingShared of mutationTargets) {
+        const visibleTo = uniqueIds([
+          existingShared.ownerId,
+          input.actor.id,
+          ...existingShared.visibleTo,
+        ]);
+        applications.push({
+          employeeId: existingShared.ownerId,
+          metadata: {
+            lists: [
+              {
+                ...normalizedList,
+                listName: existingShared.listName,
+                targets: [],
+              },
+            ],
+            filing: [],
+          },
+          visibility: {
+            scope: "shared",
+            addedById: input.actor.id,
+            visibleTo,
+          },
+        });
+      }
+      // Re-sharing / touching an existing list with no rows is a no-op for partners.
+      // Only notify when there is a real item mutation (add/update/remove payload).
+      if (normalizedList.items.length > 0 || normalizedList.action !== "add") {
+        const partners = partnerLabelFromIds(unionVisibleTo);
+        for (const partnerId of unionVisibleTo) {
+          addNotification(partnerId, notifyMetadata, partners);
+        }
+      }
+      continue;
+    }
+
     const targets = resolveActionTargets(
-      list.targets,
+      normalizedList.targets,
       input.employees,
       input.actor.id,
       input.workers,
@@ -282,17 +367,17 @@ export function planTargetedActions(input: {
     const others = targets.filter((target) => target.id !== input.actor.id);
     const sharedCollection = isSharedCollectionAction(
       "list",
-      list,
+      normalizedList,
       targets,
       input.actor.id,
-      list.targets,
+      normalizedList.targets,
     );
     const visibility = visibilityFor(
       input.actor.id,
       targets,
-      sharedCollection || others.length > 0 || isAllTarget(list.targets),
+      sharedCollection || others.length > 0 || isAllTarget(normalizedList.targets),
     );
-    const metadata = { lists: [{ ...list, targets: [] }], filing: [] };
+    const metadata = { lists: [{ ...normalizedList, targets: [] }], filing: [] };
 
     if (sharedCollection) {
       // One shared list owned by the speaker; all partners see every item.
@@ -325,11 +410,11 @@ export function planTargetedActions(input: {
     const assignment = assignmentTaskForTargets(
       input.employees,
       humanOthers,
-      list,
-      isAllTarget(list.targets),
+      normalizedList,
+      isAllTarget(normalizedList.targets),
     );
     const jointMeeting =
-      actorIncluded && others.length > 0 && list.listType === "tasks";
+      actorIncluded && others.length > 0 && normalizedList.listType === "tasks";
     if (assignment && !jointMeeting) {
       applications.push({
         employeeId: input.actor.id,
@@ -463,6 +548,137 @@ function customListNameOf(
   return "";
 }
 
+/**
+ * When the model puts the new list title in items (and leaves list_name empty),
+ * treat that as opening a named custom list — not as a row named like the list.
+ * Only collapse when the sole item looks like a list title, not a real row
+ * (e.g. { "תיאור": "…" } must still be saved).
+ */
+function normalizeSharedCustomList(list: LlmListAction): LlmListAction {
+  if (list.listType !== "custom") {
+    return list;
+  }
+  let listName = list.listName?.trim() || customListNameOf(list);
+  if (
+    !listName &&
+    list.items.length === 1 &&
+    looksLikeListTitleOnly(list.items[0])
+  ) {
+    const label = llmItemLabel(list.items[0]).trim();
+    if (label) {
+      return { ...list, listName: label.slice(0, 100), items: [] };
+    }
+  }
+  if (listName && list.items.length === 1) {
+    const label = llmItemLabel(list.items[0]).trim();
+    if (label && normalizeLoose(label) === normalizeLoose(listName)) {
+      // Real add: item carries a distinct list_name (e.g. בעיות) while the model
+      // also copied the row text into the top-level list_name.
+      const fromItem = customListNameOf({ listName: "", items: list.items });
+      if (fromItem && normalizeLoose(fromItem) !== normalizeLoose(label)) {
+        return { ...list, listName: fromItem };
+      }
+      // Title-only / phantom echo of the list title → open named list shell.
+      return { ...list, listName, items: [] };
+    }
+  }
+  if (listName && list.listName?.trim() !== listName) {
+    return { ...list, listName };
+  }
+  return list;
+}
+
+function looksLikeListTitleOnly(item: unknown): boolean {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return false;
+  }
+  const record = item as Record<string, unknown>;
+  const metaKeys = new Set([
+    "list_name",
+    "listName",
+    "רשימה",
+    "list_type",
+    "listType",
+    "targets",
+  ]);
+  const titleKeys = new Set([
+    "name",
+    "item_name",
+    "שם פריט",
+    "שם",
+    "title",
+    "שם רשימה",
+    "list_title",
+  ]);
+  const filled = Object.entries(record).filter(([key, value]) => {
+    if (metaKeys.has(key)) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    return value != null;
+  });
+  if (filled.length === 0) {
+    return true;
+  }
+  if (filled.length !== 1) {
+    return false;
+  }
+  return titleKeys.has(filled[0][0]);
+}
+
+/** Explicit list title, or a sole title-only item used as the new list name. */
+function customListDerivedName(list: LlmListAction): string {
+  const explicit = list.listName?.trim() || customListNameOf(list);
+  if (explicit) {
+    return explicit;
+  }
+  if (
+    list.listType === "custom" &&
+    list.items.length === 1 &&
+    looksLikeListTitleOnly(list.items[0])
+  ) {
+    return llmItemLabel(list.items[0]).trim();
+  }
+  return "";
+}
+
+/**
+ * Empty / title-only custom add = opening a named list shell.
+ * A real row must never count as "opening" just because its label was used as
+ * a fallback title when list_name was missing.
+ */
+function isOpeningCustomList(list: LlmListAction): boolean {
+  if (list.action !== "add") {
+    return false;
+  }
+  const explicit = list.listName?.trim() || customListNameOf(list);
+  if (list.items.length === 0) {
+    return Boolean(explicit);
+  }
+  if (list.items.length !== 1) {
+    return false;
+  }
+  const label = llmItemLabel(list.items[0]).trim();
+  if (!label || !looksLikeListTitleOnly(list.items[0])) {
+    return false;
+  }
+  const derived = explicit || label;
+  return Boolean(derived) && normalizeLoose(label) === normalizeLoose(derived);
+}
+
+/** Prefer a real item mutation over an empty "opened shared list" sibling. */
+function pickPrimaryList(lists: LlmListAction[]): LlmListAction | undefined {
+  if (lists.length === 0) {
+    return undefined;
+  }
+  const withRealItems = lists.find(
+    (row) => row.items.length > 0 && !isOpeningCustomList(row),
+  );
+  return withRealItems ?? lists[0];
+}
+
 function visibilityFor(
   actorId: string,
   targets: PublicEmployee[],
@@ -488,9 +704,11 @@ export function fallbackNotificationText(
   },
 ): string {
   const actorName = employeeDisplayName(actor);
-  const items = collectItemLabels(metadata);
+  const list = pickPrimaryList(metadata.lists);
+  const items = collectItemLabels(
+    list ? { ...metadata, lists: [list] } : metadata,
+  );
   const itemText = items.join(" ו") || "פריט";
-  const list = metadata.lists[0];
   const purchased = options?.purchased ?? options?.completed;
   const yours = options?.recipientIsOwner !== false;
   const ownerList = yours
@@ -507,34 +725,37 @@ export function fallbackNotificationText(
         : `לך ל${partners.slice(0, -1).join(", ")} ו${partners[partners.length - 1]}`;
 
   if (list) {
+    const derivedName = customListDerivedName(list);
     const listTitle =
-      list.listName?.trim() ||
+      derivedName ||
       (list.listType === "shopping"
         ? "קניות"
         : list.listType === "tasks"
           ? "מטלות"
           : "רשימה");
-    const sharedNewList =
-      list.action === "add" &&
-      list.items.length === 0 &&
-      Boolean(list.listName?.trim());
-    // Opening an empty shared list (name only) or first batch of items on a named shared list.
-    if (
-      partners.length > 0 &&
-      list.listName?.trim() &&
-      list.action === "add"
-    ) {
-      if (list.items.length === 0 || sharedNewList) {
-        return `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`;
-      }
-      return `${actorName} הוסיף ${itemText} לרשימה המשותפת «${listTitle}»`;
+    const openingSharedList = isOpeningCustomList(list);
+    // Opening an empty / title-only shared list.
+    if (partners.length > 0 && openingSharedList) {
+      return `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`;
     }
-    if (partners.length > 0 && list.listName?.trim()) {
+    if (list.listType === "custom" && derivedName && !openingSharedList) {
+      if (list.action === "remove") {
+        return `${actorName} מחק ${formatQuotedItems(items)} מרשימת «${listTitle}»`;
+      }
+      if (list.action === "update") {
+        return `${actorName} עדכן ${formatQuotedItems(items)} ברשימת «${listTitle}»`;
+      }
+      return `${actorName} הוסיף ${formatNewItemPhrase(items)} לרשימת «${listTitle}»`;
+    }
+    if (partners.length > 0 && derivedName) {
       if (list.action === "remove") {
         return `${actorName} מחק ${itemText} מהרשימה המשותפת «${listTitle}»`;
       }
       if (list.action === "update") {
         return `${actorName} עדכן ${itemText} ברשימה המשותפת «${listTitle}»`;
+      }
+      if (list.action === "add") {
+        return `${actorName} הוסיף ${itemText} לרשימה המשותפת «${listTitle}»`;
       }
     }
   }
@@ -565,14 +786,21 @@ export function fallbackNotificationText(
   }
 
   if (list?.listType === "custom" || (list?.listName && list.listName.trim())) {
-    const listTitle = list.listName?.trim() || "רשימה";
+    const derivedName = customListDerivedName(list);
+    const listTitle = derivedName || "רשימה";
+    const openingList = isOpeningCustomList(list);
+    if (openingList) {
+      return partners.length > 0
+        ? `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`
+        : `${actorName} פתח רשימה חדשה «${listTitle}»`;
+    }
     if (list.action === "remove") {
-      return `${actorName} מחק ${itemText} מרשימת «${listTitle}»`;
+      return `${actorName} מחק ${formatQuotedItems(items)} מרשימת «${listTitle}»`;
     }
     if (list.action === "update") {
-      return `${actorName} עדכן ${itemText} ברשימת «${listTitle}»`;
+      return `${actorName} עדכן ${formatQuotedItems(items)} ברשימת «${listTitle}»`;
     }
-    return `${actorName} הוסיף ${itemText} לרשימת «${listTitle}»`;
+    return `${actorName} הוסיף ${formatNewItemPhrase(items)} לרשימת «${listTitle}»`;
   }
 
   if (metadata.filing.length > 0) {
@@ -711,11 +939,112 @@ function normalizeName(value: string): string {
 }
 
 function collectItemLabels(metadata: LlmMetadata): string[] {
+  const listName = metadata.lists[0]?.listName?.trim() ?? "";
   const fromLists = metadata.lists.flatMap((list) =>
-    list.items.map(llmItemLabel).filter(Boolean),
+    list.items
+      .map((item) => llmItemLabel(item))
+      .map((label) => label.trim())
+      .filter((label) => label && normalizeLoose(label) !== normalizeLoose(listName)),
   );
   const fromFiling = metadata.filing
     .map((filing) => filing.itemName)
     .filter(Boolean);
   return [...fromLists, ...fromFiling];
+}
+
+function formatNewItemPhrase(items: string[]): string {
+  if (items.length === 0) {
+    return "פריט חדש";
+  }
+  if (items.length === 1) {
+    return `פריט חדש «${items[0]}»`;
+  }
+  return `פריטים חדשים «${items.join("» ו«")}»`;
+}
+
+function formatQuotedItems(items: string[]): string {
+  if (items.length === 0) {
+    return "פריט";
+  }
+  if (items.length === 1) {
+    return `«${items[0]}»`;
+  }
+  return `«${items.join("» ו«")}»`;
+}
+
+function normalizeLoose(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function uniqueIds(ids: Array<string | null | undefined>): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+function findSharedListsForActor(
+  list: Pick<LlmListAction, "listType" | "listName" | "items">,
+  actorId: string,
+  sharedLists: SharedListRef[],
+): SharedListRef[] {
+  if (list.listType !== "custom" || sharedLists.length === 0) {
+    return [];
+  }
+  const needle =
+    list.listName?.trim() ||
+    customListNameOf(list) ||
+    (list.items.length === 1 && looksLikeListTitleOnly(list.items[0])
+      ? llmItemLabel(list.items[0]).trim()
+      : "");
+  if (!needle) {
+    return [];
+  }
+  const normalizedNeedle = normalizeLoose(needle);
+  const matches = sharedLists.filter((row) => {
+    const canSee =
+      row.ownerId === actorId || row.visibleTo.includes(actorId);
+    if (!canSee) {
+      return false;
+    }
+    const name = normalizeLoose(row.listName);
+    return (
+      name === normalizedNeedle ||
+      name.includes(normalizedNeedle) ||
+      normalizedNeedle.includes(name)
+    );
+  });
+  // Prefer exact name, then shortest containing match (avoid grabbing a longer unrelated list).
+  matches.sort((a, b) => {
+    const aExact = normalizeLoose(a.listName) === normalizedNeedle ? 0 : 1;
+    const bExact = normalizeLoose(b.listName) === normalizedNeedle ? 0 : 1;
+    if (aExact !== bExact) {
+      return aExact - bExact;
+    }
+    if (a.listName.length !== b.listName.length) {
+      return a.listName.length - b.listName.length;
+    }
+    // Stable pick among duplicate exact names (legacy one-list-per-partner rows).
+    return a.ownerId.localeCompare(b.ownerId);
+  });
+  return matches;
+}
+
+function preferSharedList(matches: SharedListRef[]): SharedListRef | null {
+  if (matches.length === 0) {
+    return null;
+  }
+  // Prefer the most widely shared copy, then stable owner id.
+  const ranked = [...matches].sort((a, b) => {
+    if (b.visibleTo.length !== a.visibleTo.length) {
+      return b.visibleTo.length - a.visibleTo.length;
+    }
+    return a.ownerId.localeCompare(b.ownerId);
+  });
+  return ranked[0] ?? null;
+}
+
+function findSharedListForActor(
+  list: Pick<LlmListAction, "listType" | "listName" | "items">,
+  actorId: string,
+  sharedLists: SharedListRef[],
+): SharedListRef | null {
+  return preferSharedList(findSharedListsForActor(list, actorId, sharedLists));
 }

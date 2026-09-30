@@ -53,7 +53,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 | `self` | This digital worker’s own lists and reminder jobs (`WORKER_SAVED_DATA`) |
 | `reminders` | Active ping clocks only |
 
-**Response text:** the model writes `response`. The server may still append an apply summary after mutations, correct shopping/tasks wording after list apply, add WhatsApp delivery notices, or show reminder/bulk-delete confirm prompts — it does **not** replace answers with a server-built status report. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …).
+**Response text:** the model writes `response` and that is what the user sees. The server may still correct shopping/tasks wording after list apply, add WhatsApp delivery notices, or show reminder/bulk-delete confirm prompts — it does **not** append a mutation apply summary or replace answers with a server-built status report. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …).
 
 **Do not** expand `item: "all"`, invent reminder clocks from weekday words in free text, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
 
@@ -90,7 +90,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations still append to `AuditEvents` for internal retention; they are not injected into the model.
 - Custom lists must always have a real `EmployeeLists.name`. Prefer the name the speaker already said (or `list_name` on the item); only ask “what should we call this list?” when none exists. Never persist custom rows with an empty name — snapshots derive a title from item `list_name` when repairing legacy rows.
 - **Multi-turn Action State:** reminder delete confirm, bulk list-delete confirm (≥2 removes), and incomplete adds (contacts/lists/reminders/filing) use conversation `pending_*` fields. While asking for a missing required field the model emits `metadata.hold` (kind + need + known draft); the server reinjects `PENDING_ACTION_STATE` next turn so a short reply like «דור» completes the draft instead of losing context. Phone-book saves (אנשי קשר + name + phone) use `metadata.directory` — first name is enough; do not require last name.
-- **Apply feedback:** after the server applies mutations it appends a Hebrew summary of what actually happened (shopping/tasks/custom, filings, reminders, directory, sent messages) so the speaker always sees the real actions — not only the model's free-text claim.
+- **Apply feedback:** the model’s `response` is the user-facing text after saves. The server does not append a Hebrew mutation inventory.
 
 ## Architecture note
 

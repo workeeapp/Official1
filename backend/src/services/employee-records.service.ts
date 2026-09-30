@@ -47,8 +47,37 @@ const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
   tasks: ["שם מטלה", "name", "task", "item_name"],
-  custom: ["name", "שם", "item_name", "שם פריט", "שם החנות", "store", "title"],
+  // Custom lists have dynamic columns — never hardcode field names here.
+  custom: [],
 };
+
+/** List-level metadata that must never become a custom row identity. */
+const CUSTOM_ITEM_META_KEYS = new Set([
+  "list_name",
+  "listName",
+  "רשימה",
+  "list_type",
+  "listType",
+  "targets",
+]);
+
+function customItemDataEntries(
+  item: Record<string, unknown>,
+): Array<[string, unknown]> {
+  return Object.entries(item).filter(([key]) => !CUSTOM_ITEM_META_KEYS.has(key));
+}
+
+function firstCustomDataValue(item: Record<string, unknown>): string {
+  for (const [, value] of customItemDataEntries(item)) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return "";
+}
 
 export function itemIdentity(
   listType: LlmListType,
@@ -60,24 +89,11 @@ export function itemIdentity(
     return normalizeKey([first, last].filter(Boolean).join("|"));
   }
 
-  const fromKeys = normalizeKey(readItemText(item, ITEM_NAME_KEYS[listType]));
-  if (fromKeys) {
-    return fromKeys;
-  }
-
-  // Custom columns (e.g. שם החנות) may not match the built-in title keys.
   if (listType === "custom") {
-    for (const value of Object.values(item)) {
-      if (typeof value === "string" && value.trim()) {
-        return normalizeKey(value);
-      }
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return normalizeKey(String(value));
-      }
-    }
+    return normalizeKey(firstCustomDataValue(item));
   }
 
-  return "";
+  return normalizeKey(readItemText(item, ITEM_NAME_KEYS[listType]));
 }
 
 /** Collect search needles from a list action item (any title field the model used). */
@@ -101,7 +117,7 @@ export function itemSearchNeedles(
       needles.add(key);
     }
   }
-  for (const value of Object.values(item)) {
+  for (const [, value] of customItemDataEntries(item)) {
     if (typeof value === "string" && value.trim()) {
       needles.add(normalizeKey(value));
     }
@@ -191,6 +207,69 @@ export function alignListTypeInReply(
   } catch {
     return alignSpokenListType(llmReply, mutations);
   }
+}
+
+/**
+ * When the model leaves response empty after a successful apply, give the
+ * speaker a short Hebrew confirmation so WhatsApp/UI are not blank.
+ */
+export function formatAppliedMutationFallback(
+  listMutations: ListItemMutation[],
+  filingMutations: FilingMutation[] = [],
+): string {
+  const removes = listMutations.filter(
+    (row) => row.action === "remove" && !row.listShell,
+  );
+  if (removes.length === 1) {
+    const row = removes[0]!;
+    const list =
+      row.listName?.trim() ||
+      (row.listType === "shopping"
+        ? "קניות"
+        : row.listType === "tasks"
+          ? "מטלות"
+          : "הרשימה");
+    return `הסרתי את «${row.itemLabel}» מרשימת «${list}».`;
+  }
+  if (removes.length > 1) {
+    return `הסרתי ${removes.length} פריטים.`;
+  }
+  const updates = listMutations.filter(
+    (row) => row.action === "update" && !row.listShell,
+  );
+  if (updates.length === 1) {
+    const row = updates[0]!;
+    const list = row.listName?.trim() || "הרשימה";
+    return `עדכנתי את «${row.itemLabel}» ברשימת «${list}».`;
+  }
+  if (updates.length > 1) {
+    return `עדכנתי ${updates.length} פריטים.`;
+  }
+  const adds = listMutations.filter(
+    (row) => row.action === "add" && !row.listShell,
+  );
+  if (adds.length === 1) {
+    const row = adds[0]!;
+    const list = row.listName?.trim() || "הרשימה";
+    return `הוספתי את «${row.itemLabel}» לרשימת «${list}».`;
+  }
+  if (adds.length > 1) {
+    return `הוספתי ${adds.length} פריטים.`;
+  }
+  if (filingMutations.length === 1) {
+    const row = filingMutations[0]!;
+    const verb =
+      row.action === "remove"
+        ? "הסרתי תיוק"
+        : row.action === "update"
+          ? "עדכנתי תיוק"
+          : "הוספתי תיוק";
+    return `${verb}: «${row.itemName}».`;
+  }
+  if (listMutations.length > 0 || filingMutations.length > 0) {
+    return "בוצע.";
+  }
+  return "";
 }
 
 export function listItemLabels(
@@ -1217,6 +1296,29 @@ async function applyListAction(
       }
     }
   }
+  // Model sometimes puts the new list title only as the sole title-like item.
+  let itemsForApply = resolvedAction.items;
+  if (
+    !listName &&
+    resolvedAction.listType === "custom" &&
+    resolvedAction.items.length === 1 &&
+    looksLikeListTitleOnlyRecord(asRecord(resolvedAction.items[0]))
+  ) {
+    const label =
+      ownedItemTitle("custom", asRecord(resolvedAction.items[0]), "") ||
+      itemIdentity("custom", asRecord(resolvedAction.items[0]));
+    if (label.trim()) {
+      listName = label.trim().slice(0, 100);
+      itemsForApply = [];
+    }
+  } else if (
+    listName &&
+    resolvedAction.listType === "custom" &&
+    resolvedAction.items.length === 1 &&
+    isPhantomCustomListItem(listName, asRecord(resolvedAction.items[0]))
+  ) {
+    itemsForApply = [];
+  }
   const listShare =
     visibility.scope === "shared" &&
     resolvedAction.listType === "custom" &&
@@ -1285,7 +1387,7 @@ async function applyListAction(
   }
 
   const itemMutationsBefore = mutations.length;
-  for (const rawItem of resolvedAction.items) {
+  for (const rawItem of itemsForApply) {
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
     if (
       resolvedAction.listType === "custom" &&
@@ -1293,36 +1395,52 @@ async function applyListAction(
     ) {
       continue;
     }
-    const itemKey =
-      itemIdentity(resolvedAction.listType, item) ||
-      itemSearchNeedles(resolvedAction.listType, item)[0] ||
-      "";
-    if (!itemKey) {
+    const needles = itemSearchNeedles(resolvedAction.listType, item);
+    const itemKey = itemIdentity(resolvedAction.listType, item) || needles[0] || "";
+    if (!itemKey && needles.length === 0) {
       continue;
     }
 
     if (resolvedAction.action === "remove") {
-      const existing = await findMatchingItem(list.id, itemKey);
-      const removedKey = existing?.itemKey ?? itemKey;
-      if (existing?.id) {
-        await cancelReminderLinkedToWorkerItem(existing.id);
-        mutations.push({
-          action: "remove",
-          itemId: existing.id,
+      const matchNeedles = needles.length > 0 ? needles : [itemKey];
+      let targetListId = list.id;
+      let targetListName = list.name || listName;
+      let existing = await findMatchingItemByNeedles(list.id, matchNeedles);
+      if (!existing?.id && resolvedAction.listType === "custom") {
+        const across = await findCustomItemAcrossEmployeeLists(
           employeeId,
-          listType: resolvedAction.listType,
-          itemKey: removedKey,
-          itemLabel:
-            ownedItemTitle(
-              resolvedAction.listType,
-              asRecord(existing.data),
-              removedKey,
-            ) || removedKey,
-          listName: resolvedAction.listName || list.name || undefined,
-        });
+          matchNeedles,
+          listName,
+        );
+        if (across) {
+          existing = across.item;
+          targetListId = across.listId;
+          targetListName = across.listName || targetListName;
+        }
       }
+      if (!existing?.id) {
+        // Do not soft-delete by a guessed key on the wrong/empty match — that
+        // looked like success in the model reply while nothing changed.
+        continue;
+      }
+      const removedKey = existing.itemKey;
+      await cancelReminderLinkedToWorkerItem(existing.id);
+      mutations.push({
+        action: "remove",
+        itemId: existing.id,
+        employeeId,
+        listType: resolvedAction.listType,
+        itemKey: removedKey,
+        itemLabel:
+          ownedItemTitle(
+            resolvedAction.listType,
+            asRecord(existing.data),
+            removedKey,
+          ) || removedKey,
+        listName: targetListName || resolvedAction.listName || undefined,
+      });
       await prisma.employeeListItem.updateMany({
-        where: { listId: list.id, itemKey: removedKey, deletedAt: null },
+        where: { listId: targetListId, itemKey: removedKey, deletedAt: null },
         data: { deletedAt: new Date(), reminderId: null },
       });
       const owner = await prisma.employee.findUnique({
@@ -1333,7 +1451,7 @@ async function applyListAction(
         const label =
           ownedItemTitle(
             resolvedAction.listType,
-            existing ? asRecord(existing.data) : item,
+            asRecord(existing.data),
             removedKey,
           ) || removedKey;
         const cascade = await cancelActiveRemindersMatchingWork({
@@ -1358,7 +1476,7 @@ async function applyListAction(
           });
         }
       }
-      if (owner && existing?.id) {
+      if (owner) {
         await recordAuditEvent({
           userId: owner.userId,
           actorEmployeeId: actorId,
@@ -1386,7 +1504,7 @@ async function applyListAction(
         seenCascadeTaskIds.add(task.itemId);
         mutations.push(task);
       }
-      if (removedKey !== itemKey) {
+      if (removedKey !== itemKey && itemKey) {
         const relatedAlt = await deleteRelatedAssignmentTasks(
           [...new Set([actorId, employeeId, ...watchers])],
           itemKey,
@@ -1512,7 +1630,13 @@ async function applyListAction(
       events.push({
         notifyEmployeeIds: watchers,
         metadata: {
-          lists: [{ ...resolvedAction, items: [item] }],
+          lists: [
+            {
+              ...resolvedAction,
+              listName: listName || resolvedAction.listName,
+              items: [item],
+            },
+          ],
           filing: [],
         },
         listOwnerId: employeeId,
@@ -1536,6 +1660,27 @@ async function applyListAction(
       listName,
       listShell: true,
     });
+    // Notify partners only when opening a *new* empty shared list — not when
+    // re-touching an existing one (that would look like "added a shared list"
+    // instead of an item mutation that may arrive in the same turn).
+    if (listShare && createdList && visibility.visibleTo.length > 1) {
+      events.push({
+        notifyEmployeeIds: uniqueIds(visibility.visibleTo).filter(
+          (id) => id !== actorId,
+        ),
+        metadata: {
+          lists: [
+            {
+              ...resolvedAction,
+              listName,
+              items: [],
+            },
+          ],
+          filing: [],
+        },
+        listOwnerId: employeeId,
+      });
+    }
   }
 
   return { events, mutations, cancelledReminders };
@@ -1558,46 +1703,73 @@ async function resolveListActionAgainstSaved(
 
   const lists = await prisma.employeeList.findMany({
     where: { employeeId },
-    include: { items: true },
+    include: { items: { where: { deletedAt: null } } },
   });
-  const hitTypes: string[] = [];
-  let matchedList:
-    | {
-        listType: string;
-        name: string;
-      }
-    | undefined;
+  const hits: Array<{ listType: string; name: string }> = [];
 
   for (const list of lists) {
-    const hit = list.items.some((row) =>
-      needles.some((needle) => keysLooselyMatch(row.itemKey, needle)),
-    );
+    const hit = list.items.some((row) => itemRowMatchesNeedles(row, needles));
     if (!hit) {
       continue;
     }
-    hitTypes.push(list.listType);
-    if (!matchedList || list.listType === action.listType) {
-      matchedList = { listType: list.listType, name: list.name };
-    }
+    hits.push({ listType: list.listType, name: list.name });
   }
 
-  const chosen = chooseSavedListType(action.listType, hitTypes);
-  if (!chosen || !matchedList) {
+  if (hits.length === 0) {
     return action;
   }
 
-  const list =
-    lists.find((row) => row.listType === chosen) ??
-    lists.find((row) => row.listType === matchedList.listType);
-  if (!list) {
+  const chosen = chooseSavedListType(
+    action.listType,
+    hits.map((row) => row.listType),
+  );
+  if (!chosen) {
+    return action;
+  }
+
+  const requestedName = action.listName?.trim() ?? "";
+  const sameType = hits.filter((row) => row.listType === chosen);
+  // Prefer the list the model named (e.g. בעיות), never the first custom list
+  // of that type — that bug silently no-op'd shared removes/updates.
+  const matched =
+    (requestedName
+      ? sameType.find(
+          (row) =>
+            normalizeKey(row.name) === normalizeKey(requestedName) ||
+            normalizeKey(row.name).includes(normalizeKey(requestedName)) ||
+            normalizeKey(requestedName).includes(normalizeKey(row.name)),
+        )
+      : undefined) ??
+    sameType.find((row) => row.listType === action.listType) ??
+    sameType[0];
+  if (!matched) {
     return action;
   }
 
   return {
     ...action,
-    listType: list.listType as LlmListType,
-    listName: list.name,
+    listType: chosen,
+    listName: matched.name,
   };
+}
+
+function itemRowMatchesNeedles(
+  row: { itemKey: string; data: unknown },
+  needles: string[],
+): boolean {
+  if (needles.some((needle) => keysLooselyMatch(row.itemKey, needle))) {
+    return true;
+  }
+  const data = asRecord(row.data);
+  return customItemDataEntries(data).some(([, value]) => {
+    if (typeof value === "string" && value.trim()) {
+      return needles.some((needle) => keysLooselyMatch(value, needle));
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return needles.some((needle) => keysLooselyMatch(String(value), needle));
+    }
+    return false;
+  });
 }
 
 async function findMatchingItem(
@@ -1605,23 +1777,32 @@ async function findMatchingItem(
   itemKey: string,
   action?: LlmListAction["action"],
 ) {
-  const exact = await prisma.employeeListItem.findFirst({
-    where: { listId, itemKey, deletedAt: null },
-  });
-  if (exact) {
-    return exact;
+  return findMatchingItemByNeedles(listId, [itemKey], action);
+}
+
+async function findMatchingItemByNeedles(
+  listId: string,
+  needles: string[],
+  action?: LlmListAction["action"],
+) {
+  const clean = needles.map((n) => n.trim()).filter(Boolean);
+  if (clean.length === 0) {
+    return null;
+  }
+  for (const itemKey of clean) {
+    const exact = await prisma.employeeListItem.findFirst({
+      where: { listId, itemKey, deletedAt: null },
+    });
+    if (exact) {
+      return exact;
+    }
   }
 
   const items = await prisma.employeeListItem.findMany({
     where: { listId, deletedAt: null },
   });
   const fuzzy =
-    items.find(
-      (item) =>
-        item.itemKey === itemKey ||
-        item.itemKey.includes(itemKey) ||
-        itemKey.includes(item.itemKey),
-    ) ?? null;
+    items.find((item) => itemRowMatchesNeedles(item, clean)) ?? null;
   if (fuzzy) {
     return fuzzy;
   }
@@ -1629,6 +1810,190 @@ async function findMatchingItem(
     return items[0];
   }
   return null;
+}
+
+async function findCustomItemAcrossEmployeeLists(
+  employeeId: string,
+  needles: string[],
+  preferredListName?: string,
+): Promise<{
+  listId: string;
+  listName: string;
+  item: {
+    id: string;
+    itemKey: string;
+    data: unknown;
+    scope?: string;
+    addedById?: string | null;
+    visibleTo?: unknown;
+  };
+} | null> {
+  const lists = await prisma.employeeList.findMany({
+    where: { employeeId, listType: "custom" },
+    include: { items: { where: { deletedAt: null } } },
+  });
+  const preferred = preferredListName?.trim() ?? "";
+  const ordered = preferred
+    ? [...lists].sort((a, b) => {
+        const aHit =
+          normalizeKey(a.name) === normalizeKey(preferred) ||
+          normalizeKey(a.name).includes(normalizeKey(preferred)) ||
+          normalizeKey(preferred).includes(normalizeKey(a.name))
+            ? 0
+            : 1;
+        const bHit =
+          normalizeKey(b.name) === normalizeKey(preferred) ||
+          normalizeKey(b.name).includes(normalizeKey(preferred)) ||
+          normalizeKey(preferred).includes(normalizeKey(b.name))
+            ? 0
+            : 1;
+        return aHit - bHit;
+      })
+    : lists;
+  for (const row of ordered) {
+    const item = row.items.find((entry) =>
+      itemRowMatchesNeedles(entry, needles),
+    );
+    if (item) {
+      return { listId: row.id, listName: row.name, item };
+    }
+  }
+  return null;
+}
+
+/**
+ * Last-resort custom remove: find the row on any custom list the actor can see
+ * on the account (owned or shared-visible), then soft-delete every matching copy.
+ */
+export async function removeVisibleCustomItems(input: {
+  userId: string;
+  actorId: string;
+  lists: LlmListAction[];
+}): Promise<{
+  events: SharedItemEvent[];
+  mutations: ListItemMutation[];
+  cancelledReminders: string[];
+}> {
+  const events: SharedItemEvent[] = [];
+  const mutations: ListItemMutation[] = [];
+  const cancelledReminders: string[] = [];
+  const removes = input.lists.filter(
+    (row) => row.action === "remove" && row.listType === "custom",
+  );
+  if (removes.length === 0) {
+    return { events, mutations, cancelledReminders };
+  }
+
+  const lists = await prisma.employeeList.findMany({
+    where: {
+      listType: "custom",
+      employee: { userId: input.userId, kind: "human" },
+    },
+    include: {
+      items: { where: { deletedAt: null } },
+      employee: { select: { id: true, userId: true } },
+    },
+  });
+
+  for (const action of removes) {
+    const preferred = action.listName?.trim() ?? "";
+    for (const rawItem of action.items) {
+      const item = asRecord(rawItem);
+      const needles = itemSearchNeedles("custom", item);
+      if (needles.length === 0) {
+        continue;
+      }
+      const candidates = lists.filter((list) => {
+        const visibleTo = idList(list.visibleTo);
+        const canSee =
+          list.employeeId === input.actorId ||
+          (list.scope === "shared" && visibleTo.includes(input.actorId));
+        if (!canSee) {
+          return false;
+        }
+        if (!preferred) {
+          return true;
+        }
+        const name = normalizeKey(list.name);
+        const needle = normalizeKey(preferred);
+        return (
+          name === needle || name.includes(needle) || needle.includes(name)
+        );
+      });
+
+      for (const list of candidates) {
+        const matches = list.items.filter((row) =>
+          itemRowMatchesNeedles(row, needles),
+        );
+        for (const existing of matches) {
+          if (mutations.some((row) => row.itemId === existing.id)) {
+            continue;
+          }
+          await cancelReminderLinkedToWorkerItem(existing.id);
+          await prisma.employeeListItem.updateMany({
+            where: {
+              listId: list.id,
+              itemKey: existing.itemKey,
+              deletedAt: null,
+            },
+            data: { deletedAt: new Date(), reminderId: null },
+          });
+          const label =
+            ownedItemTitle("custom", asRecord(existing.data), existing.itemKey) ||
+            existing.itemKey;
+          mutations.push({
+            action: "remove",
+            itemId: existing.id,
+            employeeId: list.employeeId,
+            listType: "custom",
+            itemKey: existing.itemKey,
+            itemLabel: label,
+            listName: list.name || preferred || undefined,
+          });
+          await recordAuditEvent({
+            userId: list.employee.userId,
+            actorEmployeeId: input.actorId,
+            action: "list_remove",
+            entityType: "EmployeeListItem",
+            entityId: existing.id,
+            summary: `remove custom: ${existing.itemKey}`,
+          });
+          const watchers = uniqueIds([
+            list.employeeId,
+            existing.addedById,
+            ...idList(existing.visibleTo),
+            ...idList(list.visibleTo),
+          ]).filter((id) => id !== input.actorId);
+          if (watchers.length > 0) {
+            events.push({
+              notifyEmployeeIds: watchers,
+              metadata: {
+                lists: [
+                  {
+                    ...action,
+                    listName: list.name,
+                    items: [item],
+                    targets: [],
+                  },
+                ],
+                filing: [],
+              },
+              listOwnerId: list.employeeId,
+            });
+          }
+          const cascade = await cancelActiveRemindersMatchingWork({
+            userId: list.employee.userId,
+            itemKey: existing.itemKey,
+            itemLabel: label,
+            actorEmployeeId: input.actorId,
+          });
+          cancelledReminders.push(...cascade.cancelledReminders);
+        }
+      }
+    }
+  }
+
+  return { events, mutations, cancelledReminders };
 }
 
 function mergeItemVisibility(
@@ -1940,6 +2305,42 @@ export function isPhantomCustomListItem(
   return otherValues.length === 0;
 }
 
+function looksLikeListTitleOnlyRecord(item: Record<string, unknown>): boolean {
+  const metaKeys = new Set([
+    "list_name",
+    "listName",
+    "רשימה",
+    "list_type",
+    "listType",
+    "targets",
+  ]);
+  const titleKeys = new Set([
+    "name",
+    "item_name",
+    "שם פריט",
+    "שם",
+    "title",
+    "שם רשימה",
+    "list_title",
+  ]);
+  const filled = Object.entries(item).filter(([key, value]) => {
+    if (metaKeys.has(key)) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    return value != null;
+  });
+  if (filled.length === 0) {
+    return true;
+  }
+  if (filled.length !== 1) {
+    return false;
+  }
+  return titleKeys.has(filled[0][0]);
+}
+
 function toOwnedListItem(
   listType: string,
   item: { id: string; itemKey?: string; data: unknown; addedById?: string | null; createdAt: Date },
@@ -1969,17 +2370,13 @@ function ownedItemTitle(
     return [first, last].filter(Boolean).join(" ") || fallback;
   }
 
-  const keys = ITEM_NAME_KEYS[listType as LlmListType] ?? ITEM_NAME_KEYS.custom;
-  const titled = readItemText(data, keys);
+  const keys = ITEM_NAME_KEYS[listType as LlmListType] ?? [];
+  const titled = keys.length > 0 ? readItemText(data, keys) : "";
   if (titled) {
     return titled;
   }
   if (listType === "custom") {
-    for (const value of Object.values(data)) {
-      if (typeof value === "string" && value.trim()) {
-        return value.trim();
-      }
-    }
+    return firstCustomDataValue(data) || fallback;
   }
   return fallback;
 }
@@ -1994,7 +2391,10 @@ function ownedItemDetails(
   listType: string,
   data: Record<string, unknown>,
 ): Array<{ label: string; value: string }> {
-  const skip = new Set((TITLE_KEYS[listType] ?? TITLE_KEYS.custom).map((key) => key));
+  const skip = new Set((TITLE_KEYS[listType] ?? []).map((key) => key));
+  for (const key of CUSTOM_ITEM_META_KEYS) {
+    skip.add(key);
+  }
   return Object.entries(data)
     .filter(([key, value]) => !skip.has(key) && value != null && String(value).trim())
     .map(([label, value]) => ({ label, value: String(value) }));

@@ -113,6 +113,7 @@ import {
   chooseSavedListType,
   deleteEmployeeRecord,
   deriveCustomListName,
+  formatAppliedMutationFallback,
   formatEmployeeContext,
   formatTeamSchedules,
   getEmployeeOwnedRecords,
@@ -166,6 +167,105 @@ describe("employee records", () => {
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");
+  });
+
+  it("ignores list_name when identifying a custom row", () => {
+    expect(
+      itemIdentity("custom", {
+        list_name: "בעיות",
+        תיאור: "לבדוק שוב את הפונקציונליות",
+      }),
+    ).toBe("לבדוק שוב את הפונקציונליות");
+    expect(
+      itemIdentity("custom", {
+        list_name: "בעיות",
+        תיאור: "לתמוך ברשימה ריקה",
+      }),
+    ).toBe("לתמוך ברשימה ריקה");
+  });
+
+  it("fills a spoken fallback when remove applied but model left response empty", () => {
+    expect(
+      formatAppliedMutationFallback([
+        {
+          action: "remove",
+          itemId: "1",
+          employeeId: talId,
+          listType: "custom",
+          itemKey: "לבדוק",
+          itemLabel: "לבדוק שוב את הפונקציונליות",
+          listName: "בעיות",
+        },
+      ]),
+    ).toBe('הסרתי את «לבדוק שוב את הפונקציונליות» מרשימת «בעיות».');
+  });
+
+  it("removes a custom row found on another list name for the same owner", async () => {
+    const bugs = {
+      id: "bugs-list",
+      employeeId: talId,
+      listType: "custom",
+      name: "באגים",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    };
+    const stored = {
+      id: "bug-sys",
+      listId: bugs.id,
+      itemKey: "מערכת לא עובדת",
+      data: { תיאור: "מערכת לא עובדת" },
+      scope: "shared",
+      addedById: talId,
+      visibleTo: [talId, employeeId],
+      deletedAt: null,
+    };
+    // Primary lookup uses a different/empty list name first.
+    listFindUnique.mockResolvedValue({
+      id: "empty-list",
+      employeeId: talId,
+      listType: "custom",
+      name: "",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    });
+    listFindMany
+      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]) // resolveListActionAgainstSaved
+      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]); // across-employee search
+    itemFindFirst.mockResolvedValue(null);
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await applyEmployeeRecords(
+      talId,
+      {
+        lists: [
+          {
+            action: "remove",
+            listType: "custom",
+            listName: "באגים",
+            items: [{ תיאור: "מערכת לא עובדת" }],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [talId, employeeId],
+      },
+      employeeId,
+    );
+
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: {
+        listId: bugs.id,
+        itemKey: "מערכת לא עובדת",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
+    expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
   });
 
   it("prefers the saved list type when the model guesses wrong", () => {
@@ -421,7 +521,8 @@ describe("employee records", () => {
         visibleTo: [employeeId],
       },
     });
-    expect(itemUpdateMany).toHaveBeenCalledWith({
+    // Remove of an unmatched item must not soft-delete by guessed key.
+    expect(itemUpdateMany).not.toHaveBeenCalledWith({
       where: { listId: "list-1", itemKey: "לחם", deletedAt: null },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
@@ -783,6 +884,164 @@ describe("employee records", () => {
         listOwnerId: talId,
       },
     ]);
+  });
+
+  it("removes a shared custom row even when the model repeats list_name on the item", async () => {
+    const list = {
+      id: "bugs-list",
+      employeeId: talId,
+      listType: "custom",
+      name: "בעיות",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    };
+    const stored = {
+      id: "bug-1",
+      listId: list.id,
+      itemKey: "לבדוק שוב את הפונקציונליות",
+      data: { תיאור: "לבדוק שוב את הפונקציונליות" },
+      scope: "shared",
+      addedById: talId,
+      visibleTo: [talId, employeeId],
+      deletedAt: null,
+    };
+    listFindUnique.mockResolvedValue(list);
+    listFindMany.mockResolvedValue([
+      {
+        id: "other-custom",
+        employeeId: talId,
+        listType: "custom",
+        name: "חנויות",
+        items: [
+          {
+            id: "store-1",
+            itemKey: "אדידס",
+            data: { "שם החנות": "אדידס" },
+            deletedAt: null,
+          },
+        ],
+      },
+      {
+        ...list,
+        items: [stored],
+      },
+    ]);
+    itemFindFirst.mockResolvedValue(null);
+    itemFindMany.mockResolvedValue([stored]);
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await applyEmployeeRecords(
+      talId,
+      {
+        lists: [
+          {
+            action: "remove",
+            listType: "custom",
+            listName: "בעיות",
+            items: [
+              {
+                list_name: "בעיות",
+                תיאור: "לבדוק שוב את הפונקציונליות",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [talId, employeeId],
+      },
+      employeeId,
+    );
+
+    expect(listFindUnique).toHaveBeenCalledWith({
+      where: {
+        employeeId_listType_name: {
+          employeeId: talId,
+          listType: "custom",
+          name: "בעיות",
+        },
+      },
+    });
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: {
+        listId: list.id,
+        itemKey: "לבדוק שוב את הפונקציונליות",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
+    expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
+  });
+
+  it("updates a shared custom row matched by תיאור, not list_name", async () => {
+    const list = {
+      id: "bugs-list",
+      employeeId: talId,
+      listType: "custom",
+      name: "בעיות",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    };
+    const stored = {
+      id: "bug-2",
+      listId: list.id,
+      itemKey: "לתמוך ברשימה ריקה",
+      data: { תיאור: "לתמוך ברשימה ריקה" },
+      scope: "shared",
+      addedById: talId,
+      visibleTo: [talId, employeeId],
+    };
+    listFindUnique.mockResolvedValue(list);
+    itemFindFirst.mockResolvedValue(null);
+    itemFindMany
+      .mockResolvedValueOnce([stored])
+      .mockResolvedValueOnce([stored]);
+    itemUpdate.mockResolvedValue({ id: stored.id });
+
+    const result = await applyEmployeeRecords(
+      talId,
+      {
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "בעיות",
+            items: [
+              {
+                list_name: "בעיות",
+                תיאור: "לתמוך ברשימה ריקה",
+                סטטוס: "בטיפול",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [talId, employeeId],
+      },
+      employeeId,
+    );
+
+    expect(itemUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: stored.id },
+        data: expect.objectContaining({
+          data: expect.objectContaining({
+            תיאור: "לתמוך ברשימה ריקה",
+            סטטוס: "בטיפול",
+          }),
+        }),
+      }),
+    );
+    expect(result.mutations.some((row) => row.action === "update")).toBe(true);
   });
 
   it("matches a shorter bought name to the saved shared item", async () => {

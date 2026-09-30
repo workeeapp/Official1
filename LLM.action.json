@@ -217,6 +217,10 @@
                         "custom"
                       ]
                     },
+                    "list_name": {
+                      "type": "string",
+                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Never put the new row text here."
+                    },
                     "targets": {
                       "type": "array",
                       "items": {

@@ -1256,8 +1256,8 @@ describe("chat API", () => {
         addedById: employeeId,
       },
     });
-    expect(response.body.reply).toContain("הוספתי «חלב» לרשימת הקניות");
-    expect(response.body.reply).toContain("שמרתי תיוק «מספר רכב»");
+    expect(response.body.reply).toContain("Done.");
+    expect(response.body.reply).not.toContain("הוספתי «חלב»");
   });
 
   it("saves a targeted action on the other employee and pushes an assistant notification", async () => {

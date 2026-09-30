@@ -324,15 +324,6 @@ export function ChatPage() {
                     ) : null}
                   </p>
                 </div>
-                {message.actions?.map((action) => (
-                  <p
-                    key={action}
-                    data-testid="chat-action"
-                    className="rounded-2xl border border-primary/20 bg-surface px-3.5 py-2.5 text-sm leading-6 text-text-primary"
-                  >
-                    {action}
-                  </p>
-                ))}
               </div>
               </div>
               );

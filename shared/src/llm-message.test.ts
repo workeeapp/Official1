@@ -495,4 +495,64 @@ describe("parseLlmReply", () => {
       },
     ]);
   });
+
+  it("does not treat a top-level name as list_name when adding a real row", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "הוספתי",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "custom",
+                name: "לתמוך ברשימה ריקה",
+                targets: [],
+                items: [
+                  {
+                    list_name: "בעיות",
+                    תיאור: "לתמוך ברשימה ריקה",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ).lists,
+    ).toEqual([
+      {
+        action: "add",
+        listType: "custom",
+        listName: "בעיות",
+        items: [
+          {
+            list_name: "בעיות",
+            תיאור: "לתמוך ברשימה ריקה",
+          },
+        ],
+        targets: [],
+      },
+    ]);
+  });
+
+  it("clears list_name when it was copied from the new row text", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "הוספתי",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "custom",
+                list_name: "לתמוך ברשימה ריקה",
+                targets: [],
+                items: [{ תיאור: "לתמוך ברשימה ריקה" }],
+              },
+            ],
+          },
+        }),
+      ).lists[0]?.listName,
+    ).toBe("");
+  });
 });

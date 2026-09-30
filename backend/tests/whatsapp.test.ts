@@ -253,6 +253,24 @@ describe("WhatsApp webhook", () => {
     expect(parsed.response).toBe(fail);
     expect(parsed.response).not.toContain("שלחתי");
   });
+
+  it("appends partner notify skips without erasing a shared-list delete reply", () => {
+    const partnerSkip = formatWhatsAppSkipNotice([
+      { label: "עמית", reason: "no_session" },
+    ]);
+    const spoken = composeAssistantReply({
+      llmReply: JSON.stringify({
+        response: "הסרתי מרשימת «בעיות» את «לבדוק שוב את הפונקציונליות».",
+        metadata: {},
+      }),
+      notice: partnerSkip,
+      // Shared-list partner notify failures must not set replaceResponse.
+      replaceResponse: false,
+    });
+    const parsed = JSON.parse(spoken) as { response: string };
+    expect(parsed.response).toContain("הסרתי מרשימת «בעיות»");
+    expect(parsed.response).toContain("עמית");
+  });
 });
 
 describe("legal pages", () => {

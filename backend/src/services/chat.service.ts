@@ -22,15 +22,16 @@ import {
 import {
   alignListTypeInReply,
   applyEmployeeRecords,
+  formatAppliedMutationFallback,
   formatEmployeeContext,
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  removeVisibleCustomItems,
   type FilingMutation,
   type ListItemMutation,
   type SharedItemEvent,
 } from "./employee-records.service.js";
-import { formatTurnApplySummary } from "./apply-summary.js";
 import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import {
   employeeDisplayName,
@@ -41,6 +42,7 @@ import {
   planTargetedActions,
   resolveRelayMessages,
   resolveSpokenMetadata,
+  type SharedListRef,
 } from "./employee-targets.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { publishChatEvent } from "./chat-events.service.js";
@@ -376,8 +378,8 @@ function workerTargetingInstructions(
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. A single bought item (קניתי חלב) may remove immediately without confirm.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
     "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report.",
-    "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes, and the apply summary of mutations it actually saved.",
-    "After any save/send/remove, keep response short; the server appends what it actually applied (shopping/tasks/reminders/filings/directory/messages).",
+    "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes. It does not append a mutation summary.",
+    "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
     "Durable personal facts (משפחה עם ילדים, העדפות, כתובת…): metadata.filing add_filing without waiting for \"תתיקי\". Do not file one-off chores. Later turns: use filing from EMPLOYEE_SAVED_DATA as memory.",
@@ -550,7 +552,7 @@ async function saveTurn(input: {
         author: "assistant",
         speaker: input.assistantSpeaker,
         text: parsed.response,
-        actions: parsed.actions.length > 0 ? parsed.actions : Prisma.JsonNull,
+        actions: Prisma.JsonNull,
         raw: toJsonValue(packStoredLlmRaw(input.request, input.raw)),
         createdAt: assistantAt,
       },
@@ -730,18 +732,12 @@ async function pushTargetNotification(input: {
     ownerName: input.ownerName,
     partnerNames: input.partnerNames,
   });
-  const actions = parseLlmReply(
-    JSON.stringify({
-      response: text,
-      metadata: input.metadata,
-    }),
-  ).actions;
   const raw = { notification: text };
   const message = await saveAssistantMessage({
     conversationId: conversation.id,
     speaker: input.assistantSpeaker ?? "Assistant",
     text,
-    actions,
+    actions: [],
     raw,
   });
 
@@ -770,11 +766,12 @@ export async function notifySharedItemEvents(input: {
   events: SharedItemEvent[];
   assistantSpeaker?: string;
   digitalEmployeeId: string;
+  alreadyNotifiedIds?: Set<string>;
 }): Promise<{
   notifications: ChatThreadNotification[];
   whatsappSkips: WhatsAppDeliverySkip[];
 }> {
-  const notified = new Set<string>();
+  const notified = new Set<string>(input.alreadyNotifiedIds ?? []);
   const notifications: ChatThreadNotification[] = [];
   const whatsappSkips: WhatsAppDeliverySkip[] = [];
   const eventsByTarget = new Map<string, SharedItemEvent[]>();
@@ -1102,11 +1099,16 @@ export async function sendChatMessage(input: {
       ...metadata,
       lists: listPlan.applyLists,
     };
+    const sharedLists = await listSharedCustomListsForActor(
+      input.userId,
+      employee.id,
+    );
     const plan = planTargetedActions({
       actor: employee,
       employees: humans,
       workers: digitalEmployees(employees),
       metadata: metadataForApply,
+      sharedLists,
     });
     const relays = planRelayDeliveries({
       actor: employee,
@@ -1130,6 +1132,23 @@ export async function sendChatMessage(input: {
       listMutations.push(...applied.mutations);
       filingMutations.push(...applied.filingMutations);
       cancelledReminders.push(...applied.cancelledReminders);
+    }
+    const customRemoves = metadataForApply.lists.filter(
+      (row) => row.action === "remove" && row.listType === "custom",
+    );
+    const removedCustom = listMutations.some(
+      (row) =>
+        row.action === "remove" && row.listType === "custom" && !row.listShell,
+    );
+    if (customRemoves.length > 0 && !removedCustom) {
+      const recovered = await removeVisibleCustomItems({
+        userId: input.userId,
+        actorId: employee.id,
+        lists: customRemoves,
+      });
+      collectedEvents.push(...recovered.events);
+      listMutations.push(...recovered.mutations);
+      cancelledReminders.push(...recovered.cancelledReminders);
     }
     const guestMutationNotice = plan.guestMutationBlocked
       ? "אורחים יכולים לצפות ברשימות ותיוקים משותפים, אבל לא להוסיף, לעדכן או למחוק."
@@ -1231,18 +1250,11 @@ export async function sendChatMessage(input: {
       );
     }
 
-    const sharedNotify = await notifySharedItemEvents({
-      userId: input.userId,
-      actor: employee,
-      employees: humans,
-      events: collectedEvents,
-      assistantSpeaker,
-      digitalEmployeeId: digital.id,
-    });
-    const notifications = sharedNotify.notifications;
-    const notified = new Set(notifications.map((item) => item.employeeId));
-    const sharedWhatsAppSkips = [...sharedNotify.whatsappSkips];
+    const notifications: ChatThreadNotification[] = [];
+    const notified = new Set<string>();
+    const sharedWhatsAppSkips: WhatsAppDeliverySkip[] = [];
 
+    // Prefer plan notifications (named shared lists include partner context + full list payload).
     for (const notification of plan.notifications) {
       if (notified.has(notification.employee.id) || notification.employee.id === employee.id) {
         continue;
@@ -1261,6 +1273,24 @@ export async function sendChatMessage(input: {
       notifications.push(pushed.notification);
       sharedWhatsAppSkips.push(...pushed.whatsappSkips);
     }
+
+    const sharedNotify = await notifySharedItemEvents({
+      userId: input.userId,
+      actor: employee,
+      employees: humans,
+      events: collectedEvents,
+      assistantSpeaker,
+      digitalEmployeeId: digital.id,
+      alreadyNotifiedIds: notified,
+    });
+    for (const notification of sharedNotify.notifications) {
+      if (notified.has(notification.employeeId)) {
+        continue;
+      }
+      notified.add(notification.employeeId);
+      notifications.push(notification);
+    }
+    sharedWhatsAppSkips.push(...sharedNotify.whatsappSkips);
 
     const actorName = speakerName(employee);
     const attributedRelays = outbound.relays.map((relay) => ({
@@ -1300,38 +1330,15 @@ export async function sendChatMessage(input: {
     }
     const waRelays = await deliverWhatsAppRelays(attributedRelays, employee.id);
     const waPhones = await deliverWhatsAppPhones(attributedPhones);
-    const skips = [
-      ...sharedWhatsAppSkips,
-      ...waRelays.skips,
-      ...waPhones.skips,
-    ];
+    // Partner shared-list notify skips must not erase the speaker's spoken reply.
+    // replaceSpoken is only for intentional outbound sends the model claimed to deliver.
+    const outboundSkips = [...waRelays.skips, ...waPhones.skips];
+    const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = formatWhatsAppSkipNotice(skips);
     const missingSend = formatMissingSendTextNotice(
       parsedMetadata.messages ?? [],
     );
-    const messagesSent = [
-      ...new Set([
-        ...attributedRelays.map(
-          (relay) => relay.target.nickname?.trim() || relay.target.name,
-        ),
-        ...waRelays.sentLabels,
-        ...waPhones.sentLabels,
-      ]),
-    ].filter(Boolean);
-    const applySummary = formatTurnApplySummary({
-      listMutations,
-      filingMutations,
-      reminders: {
-        ...reminderResult,
-        removed: [...reminderResult.removed, ...cancelledReminders],
-      },
-      directory: directoryResult,
-      messagesSent,
-      speakerId: employee.id,
-      workerId: digital.id,
-      workerName: assistantSpeaker,
-    });
-    const deliveryFailed = whatsappNotice.length > 0;
+    const deliveryFailed = formatWhatsAppSkipNotice(outboundSkips).length > 0;
     const confirmPending =
       reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
@@ -1340,25 +1347,46 @@ export async function sendChatMessage(input: {
       workingReply = setReplyLists(workingReply, listPlan.applyLists);
     }
     // Empty LLM response must not leak raw JSON / blank bubble to the user.
-    let appliedSummaryInResponse = false;
     if (!parseLlmReply(workingReply).response.trim()) {
       const fallback =
         confirmAsk ||
-        applySummary ||
         guestMutationNotice ||
         (metadata.confirm === false
           ? "ביטלתי את המחיקה."
           : metadata.confirm === true
             ? "בוצע."
-            : "");
+            : "") ||
+        formatAppliedMutationFallback(listMutations, filingMutations);
       if (fallback) {
         workingReply = setEngineResponse(workingReply, fallback);
-        appliedSummaryInResponse = Boolean(applySummary && fallback === applySummary);
       }
     }
+    // Model often claims «הסרתי» even when no row matched — correct that.
+    const requestedCustomRemove = (metadata.lists ?? []).some(
+      (row) => row.action === "remove" && row.listType === "custom",
+    );
+    const appliedCustomRemove = listMutations.some(
+      (row) =>
+        row.action === "remove" && row.listType === "custom" && !row.listShell,
+    );
+    if (requestedCustomRemove && !appliedCustomRemove) {
+      workingReply = setEngineResponse(
+        workingReply,
+        "לא מצאתי את הפריט למחיקה ברשימה.",
+      );
+    } else if (
+      requestedCustomRemove &&
+      appliedCustomRemove &&
+      !parseLlmReply(workingReply).response.trim()
+    ) {
+      workingReply = setEngineResponse(
+        workingReply,
+        formatAppliedMutationFallback(listMutations, filingMutations),
+      );
+    }
+    // Do not append apply-summary lines — the spoken reply is the model's response only.
     const notice = [
       confirmPending ? "" : confirmAsk,
-      appliedSummaryInResponse ? "" : applySummary,
       guestMutationNotice,
       missingSend,
       whatsappNotice,
@@ -1383,9 +1411,8 @@ export async function sendChatMessage(input: {
         replaceSpoken ? "replace" : "append",
       );
     }
-    if (confirmPending) {
-      await clearLastAssistantActions(conversation.id);
-    }
+    // Never show English metadata action chips on the speaker bubble.
+    await clearLastAssistantActions(conversation.id);
 
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
@@ -1429,4 +1456,38 @@ export async function sendChatMessage(input: {
     }
     throw new ServiceUnavailableError();
   }
+}
+
+async function listSharedCustomListsForActor(
+  userId: string,
+  actorId: string,
+): Promise<SharedListRef[]> {
+  const rows = await prisma.employeeList.findMany({
+    where: {
+      listType: "custom",
+      scope: "shared",
+      employee: { userId, kind: "human" },
+    },
+    select: {
+      employeeId: true,
+      name: true,
+      visibleTo: true,
+    },
+  });
+  return rows
+    .map((row) => {
+      const visibleTo = Array.isArray(row.visibleTo)
+        ? row.visibleTo.filter((id): id is string => typeof id === "string")
+        : [];
+      return {
+        ownerId: row.employeeId,
+        listName: row.name,
+        visibleTo: [...new Set([row.employeeId, ...visibleTo])],
+      };
+    })
+    .filter(
+      (row) =>
+        row.listName.trim() &&
+        (row.ownerId === actorId || row.visibleTo.includes(actorId)),
+    );
 }

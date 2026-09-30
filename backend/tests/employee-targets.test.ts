@@ -288,6 +288,399 @@ describe("employee targets", () => {
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
   });
 
+  it("notifies a shared custom-list partner with item and list names", () => {
+    expect(
+      fallbackNotificationText(
+        amit,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "משימות לעבודה",
+              items: [{ תיאור: "להוסיף לתיאור גם מידע כללי" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["טל"] },
+      ),
+    ).toBe(
+      "עמית הוסיף פריט חדש «להוסיף לתיאור גם מידע כללי» לרשימת «משימות לעבודה»",
+    );
+  });
+
+  it("treats a title-only custom item as opening a shared list", () => {
+    expect(
+      fallbackNotificationText(
+        tal,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "",
+              items: [{ "שם פריט": "באגים לתיקון" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["עמית"] },
+      ),
+    ).toBe("טל הוסיף רשימה משותפת לך ולעמית: «באגים לתיקון»");
+  });
+
+  it("opens a shared custom list when the model stuffed the title as the only item", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "",
+            targets: ["טל", "עמית"],
+            items: [{ "שם פריט": "באגים לתיקון" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([tal.id]);
+    expect(plan.applications[0]?.metadata.lists[0]).toMatchObject({
+      listName: "באגים לתיקון",
+      items: [],
+    });
+    expect(plan.notifications).toHaveLength(1);
+    expect(
+      fallbackNotificationText(tal, plan.notifications[0]!.metadata, {
+        partnerNames: plan.notifications[0]!.partnerNames,
+      }),
+    ).toBe("טל הוסיף רשימה משותפת לך ולעמית: «באגים לתיקון»");
+  });
+
+  it("keeps a real custom row when list_name is missing but columns are not a title", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "משימות לעבודה",
+            targets: ["טל", "עמית"],
+            items: [{ תיאור: "להוסיף לתיאור גם מידע כללי" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { תיאור: "להוסיף לתיאור גם מידע כללי" },
+    ]);
+  });
+
+  it("routes a partner add onto the existing shared list owner", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "באגים",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "באגים",
+            targets: [],
+            items: [{ שם: "הבאג בחלון צ'ט" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([tal.id]);
+    expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    expect(plan.applications[0]?.visibility.visibleTo.sort()).toEqual(
+      [tal.id, amit.id].sort(),
+    );
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
+    expect(
+      fallbackNotificationText(amit, plan.notifications[0]!.metadata, {
+        partnerNames: plan.notifications[0]!.partnerNames,
+      }),
+    ).toBe('עמית הוסיף פריט חדש «הבאג בחלון צ\'ט» לרשימת «באגים»');
+  });
+
+  it("removes a shared-list item from every duplicate owner copy", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+        {
+          ownerId: amit.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "remove",
+            listType: "custom",
+            listName: "בעיות",
+            targets: [],
+            items: [{ תיאור: "לבדוק שוב את הפונקציונליות" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [tal.id, amit.id].sort(),
+    );
+    for (const row of plan.applications) {
+      expect(row.metadata.lists[0]).toMatchObject({
+        action: "remove",
+        listName: "בעיות",
+        items: [{ תיאור: "לבדוק שוב את הפונקציונליות" }],
+      });
+    }
+  });
+
+  it("adds onto one canonical shared list when duplicates exist", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: amit.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "בעיות",
+            targets: [],
+            items: [{ תיאור: "פריט חדש" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(amit.id);
+  });
+
+  it("notifies an item add on an existing shared list, not a new list shell", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "בעיות",
+            // Model often re-states partners when adding a row to a shared list.
+            targets: ["טל", "עמית"],
+            items: [
+              {
+                תיאור: "הוספת פריט מצוינת כהוספת רשימה בהודעה",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
+    expect(
+      fallbackNotificationText(tal, plan.notifications[0]!.metadata, {
+        partnerNames: plan.notifications[0]!.partnerNames,
+      }),
+    ).toBe(
+      "טל הוסיף פריט חדש «הוספת פריט מצוינת כהוספת רשימה בהודעה» לרשימת «בעיות»",
+    );
+  });
+
+  it("does not notify partners when re-touching an existing shared list with no rows", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "בעיות",
+            targets: ["טל", "עמית"],
+            items: [],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.notifications).toHaveLength(0);
+  });
+
+  it("prefers a real item mutation when a shell open is merged into the same notice", () => {
+    expect(
+      fallbackNotificationText(
+        tal,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "בעיות",
+              items: [],
+              targets: [],
+            },
+            {
+              action: "add",
+              listType: "custom",
+              listName: "בעיות",
+              items: [
+                {
+                  תיאור: "הוספת פריט מצוינת כהוספת רשימה בהודעה",
+                },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["עמית"] },
+      ),
+    ).toBe(
+      "טל הוסיף פריט חדש «הוספת פריט מצוינת כהוספת רשימה בהודעה» לרשימת «בעיות»",
+    );
+  });
+
+  it("does not use the item text as the list title when list_name is missing", () => {
+    expect(
+      fallbackNotificationText(
+        amit,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "",
+              items: [{ תיאור: "לתמוך ברשימה ריקה" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["טל"] },
+      ),
+    ).not.toContain("לרשימת «לתמוך ברשימה ריקה»");
+  });
+
+  it("keeps בעיות as the list title when adding a row to that shared list", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            // Model stuffed the row into list_name; item list_name has the real title.
+            listName: "לתמוך ברשימה ריקה",
+            targets: [],
+            items: [
+              {
+                list_name: "בעיות",
+                תיאור: "לתמוך ברשימה ריקה",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.listName).toBe("בעיות");
+    expect(
+      fallbackNotificationText(amit, plan.notifications[0]!.metadata, {
+        partnerNames: plan.notifications[0]!.partnerNames,
+      }),
+    ).toBe(
+      "עמית הוסיף פריט חדש «לתמוך ברשימה ריקה» לרשימת «בעיות»",
+    );
+  });
+
+  it("ignores list_name stuffed into the item when labeling shared adds", () => {
+    expect(
+      fallbackNotificationText(amit, {
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "משימות לעבודה",
+            items: [
+              {
+                list_name: "משימות לעבודה",
+                תיאור: "להוסיף לתיאור גם מידע כללי",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      }),
+    ).toBe(
+      "עמית הוסיף פריט חדש «להוסיף לתיאור גם מידע כללי» לרשימת «משימות לעבודה»",
+    );
+  });
+
   it("plans a Lucy message for Tal and a digital employee", () => {
     const lucy: PublicEmployee = {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
