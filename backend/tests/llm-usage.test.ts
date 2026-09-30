@@ -21,14 +21,39 @@ vi.mock("../src/database/prisma.js", () => ({
 import {
   computeLlmCost,
   getEmployeeUsageSummary,
+  getTeamUsageSummary,
   priceModelCandidates,
   recordLlmUsage,
 } from "../src/services/llm-usage.service.js";
 
+describe("getTeamUsageSummary", () => {
+  it("sums every visible employee's amount and the humans-only amount", async () => {
+    usageGroupBy.mockReset().mockImplementation(async ({ by }: { by: string[] }) =>
+      by[0] === "employeeId"
+        ? [
+            { employeeId: "amit", _sum: { costUsd: new Prisma.Decimal("0.006") } },
+            { employeeId: "tal", _sum: { costUsd: new Prisma.Decimal("0.002") } },
+            { employeeId: "guest", _sum: { costUsd: new Prisma.Decimal("0.5") } },
+          ]
+        : [{ digitalEmployeeId: "lucy", _sum: { costUsd: new Prisma.Decimal("0.508") } }],
+    );
+
+    const summary = await getTeamUsageSummary("u1", [
+      { id: "amit", kind: "human", name: "עמית", nickname: "עמית" },
+      { id: "tal", kind: "human", name: "טל", nickname: "טל" },
+      { id: "guest", kind: "human", name: "אורח", nickname: "אורח" },
+      { id: "lucy", kind: "digital", name: "לוסי", nickname: "לוסי" },
+    ]);
+
+    expect(summary.humanEmployeesUsd).toBeCloseTo(0.008);
+    expect(summary.allEmployeesUsd).toBeCloseTo(0.516);
+  });
+});
+
 describe("getEmployeeUsageSummary", () => {
   it("counts each reset session as a conversation and sums cost as speaker or worker", async () => {
     // Same ChatConversation row, reset twice → three OpenAI conversations.
-    usageGroupBy.mockResolvedValue([
+    usageGroupBy.mockReset().mockResolvedValue([
       { openaiConversationId: "conv_a" },
       { openaiConversationId: "conv_b" },
       { openaiConversationId: "conv_c" },

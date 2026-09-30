@@ -6,6 +6,7 @@ import {
   getDigitalDefaults,
   getEmployeeRecords,
   getEmployeeUsage,
+  getTeamUsage,
   listEmployees,
   updateEmployee,
   updateEmployeeRecordItem,
@@ -17,6 +18,7 @@ export const employeeRouter = Router();
 
 employeeRouter.get("/", requireAuth, asyncHandler(listEmployees));
 employeeRouter.get("/digital-defaults", requireAuth, asyncHandler(getDigitalDefaults));
+employeeRouter.get("/usage", requireAuth, asyncHandler(getTeamUsage));
 employeeRouter.get("/:id/records", requireAuth, asyncHandler(getEmployeeRecords));
 employeeRouter.get("/:id/usage", requireAuth, asyncHandler(getEmployeeUsage));
 employeeRouter.patch("/:id/records/:itemId", requireAuth, asyncHandler(updateEmployeeRecordItem));

@@ -6,6 +6,7 @@ import type {
   EmployeeRecordsResponse,
   EmployeeUsageSummary,
   PublicEmployee,
+  TeamUsageSummary,
 } from "@workee/shared";
 import { isDigitalEmployee, isProtectedEmployee } from "@workee/shared";
 import { useEmployees } from "@/hooks/useEmployees";
@@ -49,6 +50,7 @@ export function EmployeesPage() {
   );
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [usage, setUsage] = useState<EmployeeUsageSummary | null>(null);
+  const [teamUsage, setTeamUsage] = useState<TeamUsageSummary | null>(null);
   const [editingItem, setEditingItem] = useState<EmployeeRecordItem | null>(null);
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordFormError, setRecordFormError] = useState<string | null>(null);
@@ -59,6 +61,18 @@ export function EmployeesPage() {
   const canDeleteSelected = Boolean(
     selectedEmployee && !isProtectedEmployee(selectedEmployee),
   );
+
+  useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+    const abort = new AbortController();
+    employeeApi
+      .teamUsage(abort.signal)
+      .then(setTeamUsage)
+      .catch(() => setTeamUsage(null));
+    return () => abort.abort();
+  }, [status, employees]);
 
   useEffect(() => {
     if (!selectedEmployee) {
@@ -224,8 +238,18 @@ export function EmployeesPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-primary">Employees</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
+            <h1 className="mt-2 flex flex-wrap items-baseline gap-x-3 text-xl font-semibold tracking-tight text-text-primary">
               Team
+              {teamUsage ? (
+                <span
+                  data-testid="team-usage"
+                  className="text-sm font-medium text-text-secondary"
+                  title="All employees (human employees only)"
+                >
+                  {formatUsd(teamUsage.allEmployeesUsd)} (
+                  {formatUsd(teamUsage.humanEmployeesUsd)})
+                </span>
+              ) : null}
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">

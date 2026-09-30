@@ -79,6 +79,12 @@ export interface EmployeeUsageSummary {
   totalUsd: number;
 }
 
+/** Sums of the per-employee amounts shown on the Employees screen. */
+export interface TeamUsageSummary {
+  allEmployeesUsd: number;
+  humanEmployeesUsd: number;
+}
+
 export interface EmployeeInput {
   kind?: EmployeeKind;
   name: string;

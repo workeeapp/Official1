@@ -1,5 +1,11 @@
 import { Prisma } from "@prisma/client";
-import type { EmployeeUsageSummary } from "@workee/shared";
+import {
+  digitalEmployees,
+  workspaceHumans,
+  type EmployeeUsageSummary,
+  type PublicEmployee,
+  type TeamUsageSummary,
+} from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { extractUsage, type LlmTurn, type LlmUsage } from "./llm-client.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
@@ -101,6 +107,42 @@ export async function getEmployeeUsageSummary(
     conversations: sessions.length + untracked,
     interactions: totals._count?._all ?? 0,
     totalUsd: totals._sum.costUsd ? Number(totals._sum.costUsd) : 0,
+  };
+}
+
+/**
+ * Each chat's cost appears on both its human speaker and its digital worker, so
+ * `allEmployeesUsd` (sum over every visible employee) counts it twice by design.
+ */
+export async function getTeamUsageSummary(
+  userId: string,
+  employees: Array<Pick<PublicEmployee, "id" | "kind" | "name" | "nickname">>,
+): Promise<TeamUsageSummary> {
+  const humanIds = new Set(workspaceHumans(employees).map((employee) => employee.id));
+  const digitalIds = new Set(digitalEmployees(employees).map((employee) => employee.id));
+  const where = { conversation: { userId } };
+  const [bySpeaker, byWorker] = await Promise.all([
+    prisma.llmUsage.groupBy({ by: ["employeeId"], where, _sum: { costUsd: true } }),
+    prisma.llmUsage.groupBy({ by: ["digitalEmployeeId"], where, _sum: { costUsd: true } }),
+  ]);
+
+  const perEmployee = new Map<string, number>();
+  const add = (id: string, cost: Prisma.Decimal | null) => {
+    perEmployee.set(id, (perEmployee.get(id) ?? 0) + (cost ? Number(cost) : 0));
+  };
+  for (const row of bySpeaker) {
+    add(row.employeeId, row._sum.costUsd);
+  }
+  for (const row of byWorker) {
+    add(row.digitalEmployeeId, row._sum.costUsd);
+  }
+
+  const sum = (ids: Set<string>) =>
+    [...ids].reduce((total, id) => total + (perEmployee.get(id) ?? 0), 0);
+  const humanEmployeesUsd = sum(humanIds);
+  return {
+    allEmployeesUsd: humanEmployeesUsd + sum(digitalIds),
+    humanEmployeesUsd,
   };
 }
 

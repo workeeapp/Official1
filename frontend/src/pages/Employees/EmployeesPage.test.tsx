@@ -15,8 +15,10 @@ const {
   deleteRecordMock,
   digitalDefaultsMock,
   usageMock,
+  teamUsageMock,
 } = vi.hoisted(() => ({
   usageMock: vi.fn(),
+  teamUsageMock: vi.fn(),
   meMock: vi.fn(),
   listEmployeesMock: vi.fn(),
   recordsMock: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("@/services/employee.service", async () => {
       remove: vi.fn(),
       records: recordsMock,
       usage: usageMock,
+      teamUsage: teamUsageMock,
       updateRecord: updateRecordMock,
       deleteRecord: deleteRecordMock,
     },
@@ -114,6 +117,10 @@ describe("Employees page", () => {
       interactions: 17,
       totalUsd: 0.0021528,
     });
+    teamUsageMock.mockReset().mockResolvedValue({
+      allEmployeesUsd: 0.0196,
+      humanEmployeesUsd: 0.0098,
+    });
     updateRecordMock.mockReset();
     deleteRecordMock.mockReset();
     digitalDefaultsMock.mockReset().mockResolvedValue({
@@ -169,6 +176,12 @@ describe("Employees page", () => {
     expect(await screen.findByTestId("employee-records")).toHaveTextContent(
       "No lists, tasks, contacts, or filings saved for this employee.",
     );
+  });
+
+  it("shows the team total and the human-only total next to Team", async () => {
+    renderEmployees();
+
+    expect(await screen.findByTestId("team-usage")).toHaveTextContent("$0.0196 ($0.0098)");
   });
 
   it("shows conversation count and total LLM cost for the selected employee", async () => {

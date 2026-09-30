@@ -13,6 +13,7 @@ export type {
   EmployeeRecordGroup,
   EmployeeRecordsResponse,
   EmployeeUsageSummary,
+  TeamUsageSummary,
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,

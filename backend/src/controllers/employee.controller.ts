@@ -15,7 +15,10 @@ import {
   resolveActingEmployee,
   updateEmployeeForUser,
 } from "../services/employee.service.js";
-import { getEmployeeUsageSummary } from "../services/llm-usage.service.js";
+import {
+  getEmployeeUsageSummary,
+  getTeamUsageSummary,
+} from "../services/llm-usage.service.js";
 import { parseEmployeeIdQuery } from "../validation/chat.validation.js";
 import { parseEmployeeBody, parseRecordFields } from "../validation/employee.validation.js";
 import { UnauthorizedError } from "../utils/errors.js";
@@ -50,6 +53,15 @@ export async function getEmployeeRecords(req: Request, res: Response): Promise<v
   await getEmployeeForUser(req.user.id, employeeId);
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json(records);
+}
+
+export async function getTeamUsage(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  const employees = await listEmployeesForUser(req.user.id);
+  res.status(200).json(await getTeamUsageSummary(req.user.id, employees));
 }
 
 export async function getEmployeeUsage(req: Request, res: Response): Promise<void> {

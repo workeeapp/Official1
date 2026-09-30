@@ -6,6 +6,7 @@ import type {
   EmployeesResponse,
   EmployeeUsageSummary,
   PublicEmployee,
+  TeamUsageSummary,
 } from "@workee/shared";
 import { api } from "./http";
 
@@ -40,6 +41,10 @@ export const employeeApi = {
 
   records(id: string, signal?: AbortSignal): Promise<EmployeeRecordsResponse> {
     return api<EmployeeRecordsResponse>(`/api/employees/${id}/records`, { signal });
+  },
+
+  teamUsage(signal?: AbortSignal): Promise<TeamUsageSummary> {
+    return api<TeamUsageSummary>("/api/employees/usage", { signal });
   },
 
   usage(id: string, signal?: AbortSignal): Promise<EmployeeUsageSummary> {
