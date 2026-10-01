@@ -32,7 +32,7 @@ export async function readGitHeadSha(repoRoot = resolveRepoRoot()): Promise<stri
 
 /**
  * Commits after `sinceSha` (exclusive) up to HEAD.
- * If `sinceSha` is empty, use commits since `sinceDate` when provided, else last 50.
+ * If `sinceSha` is empty, use commits since `sinceDate` when provided, else last N.
  */
 export async function readGitChangelog(input: {
   repoRoot?: string;

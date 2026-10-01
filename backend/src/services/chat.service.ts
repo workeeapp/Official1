@@ -59,6 +59,10 @@ import {
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
+  formatRecentOutboundContext,
+  listRecentReminderOutbounds,
+} from "./recent-outbound.service.js";
+import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
   formatConversationPendingContext,
@@ -268,7 +272,7 @@ function thinSessionEnvelope(input: {
     `Current speaker: ${input.speaker}. You are ${workerName}.`,
     `Known employees: ${names}.`,
     "Follow ONLY your system instructions above for persona and capabilities. Do not invent Lucy's (or any other worker's) catalog if it is not in your prompt.",
-    "EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, and PENDING_ACTION_STATE in this turn's user message are facts — do not invent missing ones.",
+    "EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, RECENT_OUTBOUND, and PENDING_ACTION_STATE in this turn's user message are facts — do not invent missing ones.",
     input.speakerIsOwner
       ? "This speaker is the account owner and may see every human's live saved data in EMPLOYEE_SAVED_DATA."
       : "This speaker is not the account owner — answer only from their own live saved data (plus shared items visible to them).",
@@ -373,7 +377,7 @@ function workerTargetingInstructions(
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text.",
-    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", brief in the language they asked for, ping = recipient (keep ping on text-only updates). Never invent that clock unprompted.",
+    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient (keep on text-only updates), brief in their language as «מאז הדיווח הקודם» / since the last report — never «24 שעות» or a fixed day-long window. Schedule (once/daily/in N minutes) ≠ content window. If asked האם זה סיכום יומי? answer from the clock's repeat, never invent a fixed day-long window. Never invent that clock unprompted.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -388,7 +392,7 @@ function workerTargetingInstructions(
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
-    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר (אני זכר → שם «לשון פנייה», מידע «זכר»), משפחה, כתובת/עיר מגורים, מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. item_description usually = item_name; item_info = the spoken detail. Ask מה התיאור רק אם באמת חסר. One-off chores are not filings. Later turns: use EMPLOYEE_SAVED_DATA.filing (especially לשון פנייה) when speaking/advising.",
+    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה (יש לי שני ילדים → file now, ages may come later via update), כתובת/עיר, מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. Do NOT auto-file soft plans (חושב לנסוע / אולי). item_description usually = item_name. מה התיוקים שלי → explicit saves (codes/docs), not auto-memory unless מה את זוכרת עלי. Later turns: use filing silently when advising/addressing.",
   ].join("\n");
 }
 
@@ -976,6 +980,12 @@ export async function sendChatMessage(input: {
   const speakerContacts = guestSpeaker
     ? []
     : await listContactsForEmployee(input.employeeId);
+  const recentOutbound = guestSpeaker
+    ? []
+    : await listRecentReminderOutbounds({
+        userId: input.userId,
+        employeeId: input.employeeId,
+      });
   const context = [
     formatSessionClockContext(),
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
@@ -989,6 +999,7 @@ export async function sendChatMessage(input: {
         ),
     guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
+    guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
     formatConversationPendingContext(waitingPending),
   ]
     .filter(Boolean)
@@ -1021,10 +1032,13 @@ export async function sendChatMessage(input: {
         "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
         guestSpeaker
           ? ""
-          : "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, address form/לשון פנייה, home address, marital status, education, job/workplace, preferences, IDs). Injected every turn in full — use it when advising and when choosing how to address the speaker. Do not claim you lack a fact that appears there.",
+          : "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently (family, לשון פנייה, job…). מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
         guestSpeaker
           ? ""
           : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+        guestSpeaker
+          ? ""
+          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker. If they ask about מה ששלחת / הסיכום / ההודעה האחרונה, use that text. Do not claim you sent nothing when it is listed. Do not resend unless they ask.",
         guestSpeaker
           ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
           : employee.isOwner

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { reminderUpdate, reminderDelete, reminderFindUnique, itemUpdateMany, itemUpdate } =
+const { reminderUpdate, reminderUpdateMany, reminderDelete, reminderFindUnique, itemUpdateMany, itemUpdate } =
   vi.hoisted(() => ({
     reminderUpdate: vi.fn(),
+    reminderUpdateMany: vi.fn(),
     reminderDelete: vi.fn(),
     reminderFindUnique: vi.fn(),
     itemUpdateMany: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     reminder: {
       update: reminderUpdate,
+      updateMany: reminderUpdateMany,
       delete: reminderDelete,
       findUnique: reminderFindUnique,
     },
@@ -32,9 +34,39 @@ vi.mock("../src/services/audit.service.js", () => ({
 }));
 
 import {
+  claimDueReminder,
   resolveComposeFireOutbound,
   settleFiredReminder,
 } from "../src/services/reminder-fire.js";
+
+describe("claimDueReminder", () => {
+  beforeEach(() => {
+    reminderUpdateMany.mockReset();
+  });
+
+  it("claims a due active row by parking fireAt", async () => {
+    reminderUpdateMany.mockResolvedValue({ count: 1 });
+    const now = new Date("2026-10-01T22:00:00.000Z");
+    await expect(claimDueReminder("clock-1", now)).resolves.toBe(true);
+    expect(reminderUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "clock-1",
+        status: "active",
+        fireAt: { lte: now },
+      },
+      data: {
+        fireAt: new Date(now.getTime() + 120_000),
+      },
+    });
+  });
+
+  it("returns false when another worker already claimed the row", async () => {
+    reminderUpdateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      claimDueReminder("clock-1", new Date("2026-10-01T22:00:00.000Z")),
+    ).resolves.toBe(false);
+  });
+});
 
 describe("settleFiredReminder", () => {
   beforeEach(() => {

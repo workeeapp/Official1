@@ -134,6 +134,25 @@ export async function settleFiredReminder(
   }
 }
 
+export async function claimDueReminder(
+  reminderId: string,
+  now: Date,
+): Promise<boolean> {
+  const claimed = await prisma.reminder.updateMany({
+    where: {
+      id: reminderId,
+      status: "active",
+      fireAt: { lte: now },
+    },
+    data: {
+      // Park past due so a concurrent poll cannot select this row again.
+      // settleFiredReminder overwrites with the real next fireAt / done.
+      fireAt: new Date(now.getTime() + 120_000),
+    },
+  });
+  return claimed.count > 0;
+}
+
 export async function fireDueReminders(now = new Date()): Promise<number> {
   if (getEnv().NODE_ENV === "test" || !prisma.reminder) {
     return 0;
@@ -152,6 +171,12 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
   }
 
   for (const reminder of due) {
+    // Claim before compose/send so concurrent tickers (or two API processes)
+    // cannot fire the same due row twice.
+    if (!(await claimDueReminder(reminder.id, now))) {
+      continue;
+    }
+
     const employees = await listEmployeesForUser(reminder.userId);
     const lucy = employees.find((employee) => isProtectedEmployee(employee));
     const digitals = digitalEmployees(employees);
@@ -182,9 +207,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         try {
           const log = await readGitChangelog({
             sinceSha: reminder.lastReportSha || undefined,
-            sinceDate: reminder.lastReportSha
-              ? undefined
-              : new Date(now.getTime() - 24 * 60 * 60 * 1000),
+            // First fire (no baseline): recent commits by count — not a fixed 24h window.
           });
           headSha = log.headSha;
           gitChangelog = formatGitChangelogForCompose(log.commits);
