@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
+  formatCancelledHoldReply,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
   isPendingHoldCancelText,
+  metadataAfterHoldCancel,
   pendingHoldFromLlm,
   pendingHoldFromMissingMessages,
   pendingToStored,
@@ -59,7 +61,7 @@ describe("pending action hold", () => {
     expect(context).toContain("complete_messages");
     expect(context).toContain("מאיה");
     expect(context).toContain("CANCEL");
-    expect(context).toContain("ביטלתי את השליחה");
+    expect(context).toContain("empty directory/lists/reminders/filing/messages");
 
     expect(
       fillMessagesFromPendingHold(hold, [], "היי"),
@@ -91,6 +93,42 @@ describe("pending action hold", () => {
     expect(isPendingHoldCancelText("אל תשלחי למאיה")).toBe(true);
     expect(isPendingHoldCancelText("היי")).toBe(false);
     expect(isPendingHoldCancelText("לא יודע מה לכתוב")).toBe(false);
+  });
+
+  it("clears all draft domains and picks a cancel reply per hold kind", () => {
+    const hold = pendingHoldFromMissingMessages([
+      { targets: ["מאיה"], text: "" },
+    ]);
+    expect(hold).not.toBeNull();
+    if (!hold) {
+      return;
+    }
+    expect(
+      metadataAfterHoldCancel({
+        directory: [{ action: "add", name: "x", phone: "1" }],
+        lists: [{ action: "add", listType: "shopping", items: ["חלב"] }],
+        reminders: [],
+        filing: [],
+        messages: [{ targets: ["מאיה"], text: "בטל" }],
+        hold: { kind: "messages", need: "text", messages: [] },
+      }),
+    ).toEqual({
+      directory: [],
+      lists: [],
+      reminders: [],
+      filing: [],
+      messages: [],
+      hold: null,
+    });
+    expect(formatCancelledHoldReply(hold)).toBe("ביטלתי את השליחה.");
+    expect(
+      formatCancelledHoldReply({
+        ...hold,
+        action: "complete_filing",
+        need: "description",
+        draft: { filing: [] },
+      }),
+    ).toBe("ביטלתי את התיוק.");
   });
 
   it("keeps the hold until the directory add is completed", () => {

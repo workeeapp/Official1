@@ -71,6 +71,45 @@ export function isAwaitingFieldsHold(
   return Boolean(pending && pending.step === "awaiting_fields");
 }
 
+/** Clear unfinished drafts when the speaker aborts an awaiting_fields hold. */
+export function metadataAfterHoldCancel<T extends {
+  directory?: unknown[];
+  lists?: unknown[];
+  reminders?: unknown[];
+  filing?: unknown[];
+  messages?: unknown[];
+  hold: unknown;
+}>(metadata: T): T {
+  return {
+    ...metadata,
+    directory: [],
+    lists: [],
+    reminders: [],
+    filing: [],
+    messages: [],
+    hold: null,
+  };
+}
+
+export function formatCancelledHoldReply(
+  pending: PendingHoldAction,
+): string {
+  switch (pending.action) {
+    case "complete_messages":
+      return "ביטלתי את השליחה.";
+    case "complete_directory":
+      return "ביטלתי את שמירת איש הקשר.";
+    case "complete_lists":
+      return "ביטלתי את עדכון הרשימה.";
+    case "complete_reminders":
+      return "ביטלתי את הגדרת התזכורת.";
+    case "complete_filing":
+      return "ביטלתי את התיוק.";
+    default:
+      return "ביטלתי.";
+  }
+}
+
 export type PendingHoldKind =
   | "directory"
   | "lists"
@@ -536,7 +575,7 @@ export function formatConversationPendingContext(
     "Never reply לא הבנתי / מה תרצה לעשות to that short reply.",
     "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
-    "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort — metadata.messages=[], hold=null. Do not send. Say you cancelled the send (e.g. ביטלתי את השליחה).",
+    "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort this draft — hold=null and empty directory/lists/reminders/filing/messages. Do not complete the unfinished action. Say you cancelled (e.g. ביטלתי את השליחה / ביטלתי את התיוק).",
     "If still missing something else, emit hold again with the updated draft and the new need.",
     "Do not start an unrelated new request until this hold is completed, cancelled, or the speaker clearly switches topic.",
   ].join("\n");
