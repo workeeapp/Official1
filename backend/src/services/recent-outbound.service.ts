@@ -91,7 +91,7 @@ export function formatRecentOutboundContext(
   }
   return [
     "RECENT_OUTBOUND:",
-    "Messages YOU already sent to this speaker via scheduled reminders (WhatsApp / clock fire). Only the latest delivery is listed. When they refer to מה ששלחת / הסיכום / ההודעה האחרונה, answer from this text. Do NOT resend unless they explicitly ask to send again.",
+    "Messages YOU already sent to this speaker via scheduled reminders (WhatsApp / clock fire). Only the latest delivery is listed. When they refer to מה ששלחת / הסיכום / ההודעה האחרונה, answer from this text. Do NOT resend unless they explicitly ask to send again. Do NOT invent a different recipient for a follow-up send.",
     JSON.stringify(rows),
   ].join("\n");
 }
