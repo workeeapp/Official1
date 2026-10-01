@@ -111,6 +111,34 @@ describe("parseLlmReply", () => {
     expect(parseReplyMetadata(reply).lists[0].targets).toEqual(["טל"]);
   });
 
+  it("reads filing description from metadata (model resolves כמו השם)", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "שמרתי",
+          metadata: {
+            filing: [
+              {
+                action: "add_filing",
+                item_name: "קוד לשער של לבנת",
+                item_info: "1234",
+                item_description: "קוד לשער של לבנת",
+              },
+            ],
+          },
+        }),
+      ).filing,
+    ).toEqual([
+      {
+        action: "add_filing",
+        itemName: "קוד לשער של לבנת",
+        itemInfo: "1234",
+        itemDescription: "קוד לשער של לבנת",
+        targets: [],
+      },
+    ]);
+  });
+
   it("extracts structured list, task, and filing actions", () => {
     expect(
       parseReplyMetadata(
@@ -161,6 +189,7 @@ describe("parseLlmReply", () => {
           action: "add_filing",
           itemName: "מספר רכב",
           itemInfo: "3434343",
+          itemDescription: "",
           targets: [],
         },
       ],

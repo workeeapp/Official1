@@ -38,7 +38,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 | Metadata | Role |
 |----------|------|
 | `lists` | Shopping, tasks (incl. dated meetings), contacts-list type, or custom lists. Optional `targets` for other employees / everyone |
-| `filing` | Durable facts / memory (IDs, family context, preferences). Injected every turn in `EMPLOYEE_SAVED_DATA` |
+| `filing` | Durable facts / memory (IDs, family context, preferences). Fields: `item_name`, `item_description` (תיאור — required on add; model asks if missing; if they say «כמו השם» the **model** sets description = name), optional `item_info`. Injected every turn in `EMPLOYEE_SAVED_DATA` |
 | `directory` | Personal phone book (`Contacts`) — not Employees |
 | `messages` | Send **now** on WhatsApp / in-app |
 | `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / recurring) |
@@ -69,7 +69,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 ## People, visibility, contacts
 
-- **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA` (and the same scope in `TEAM_SCHEDULES`); non-owners see their own.
+- **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA` (and the same scope in `TEAM_SCHEDULES`); non-owners see their own. `WORKER_SAVED_DATA` (the digital worker’s jobs) is scoped the same way for non-owners: only worker tasks tied to the current speaker (`addedBy` / `visibleTo` / linked reminder owner or ping). Owners see the worker’s full job list; guests get no worker block.
 - **Contacts** — the speaker’s personal phone book (`metadata.directory`). Resolve message/reminder targets via Employees first, then contacts. Do **not** create Employees for outsiders.
 - WhatsApp inbound from an unknown number may create a temporary guest Employee named `אורח …XXXX`. Guests are hidden from the Employees UI and Chat-as picker.
 

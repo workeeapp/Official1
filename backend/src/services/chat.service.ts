@@ -388,7 +388,7 @@ function workerTargetingInstructions(
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
-    "Durable personal facts (משפחה עם ילדים, העדפות, כתובת…): metadata.filing add_filing without waiting for \"תתיקי\". Do not file one-off chores. Later turns: use filing from EMPLOYEE_SAVED_DATA as memory.",
+    "Durable personal facts (משפחה עם ילדים, העדפות, כתובת…): metadata.filing add_filing with item_name + item_description (ask מה התיאור של הפריט? if missing; כמו השם → description = name). Optional item_info for the value. Do not file one-off chores. Later turns: use filing (especially item_description) from EMPLOYEE_SAVED_DATA as memory.",
   ].join("\n");
 }
 
@@ -982,7 +982,9 @@ export async function sendChatMessage(input: {
     guestSpeaker
       ? ""
       : formatEmployeeContext(
-          await getEmployeeRecordSnapshot(digital.id),
+          await getEmployeeRecordSnapshot(digital.id, {
+            scopeItemsToViewerId: input.employeeId,
+          }),
           "WORKER_SAVED_DATA",
         ),
     guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),

@@ -41,6 +41,7 @@ export interface EmployeeRecordSnapshot {
   filing: Array<{
     item_name: string;
     item_info: string;
+    item_description: string;
     owner: string;
     scope: ItemScope;
   }>;
@@ -350,7 +351,7 @@ export function formatEmployeeContext(
   return [
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
-    "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
+    "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     JSON.stringify({
       lists: snapshot.lists,
@@ -424,6 +425,75 @@ async function resolveRecordVisibility(
     listWhere: scope,
     filingWhere: scope,
   };
+}
+
+/** True when a digital-worker list item is tied to this human speaker (not someone else). */
+export function workerItemTiedToSpeaker(
+  item: {
+    addedById?: string | null;
+    visibleTo?: unknown;
+    reminderId?: string | null;
+  },
+  speakerId: string,
+  remindersById: Map<string, { ownerId: string; pingIds: unknown }>,
+): boolean {
+  if (item.addedById === speakerId) {
+    return true;
+  }
+  if (visibleToIncludes(item.visibleTo, speakerId)) {
+    return true;
+  }
+  const reminderId = item.reminderId?.trim();
+  if (!reminderId) {
+    return false;
+  }
+  const reminder = remindersById.get(reminderId);
+  if (!reminder) {
+    return false;
+  }
+  if (reminder.ownerId === speakerId) {
+    return true;
+  }
+  const pings = Array.isArray(reminder.pingIds)
+    ? reminder.pingIds.map(String)
+    : [];
+  return pings.includes(speakerId);
+}
+
+async function filterListItemsTiedToSpeaker<
+  T extends {
+    items: Array<{
+      addedById: string | null;
+      visibleTo: unknown;
+      reminderId: string | null;
+    }>;
+  },
+>(lists: T[], speakerId: string): Promise<T[]> {
+  const reminderIds = [
+    ...new Set(
+      lists.flatMap((list) =>
+        list.items
+          .map((item) => item.reminderId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  ];
+  const reminders =
+    reminderIds.length > 0
+      ? await prisma.reminder.findMany({
+          where: { id: { in: reminderIds } },
+          select: { id: true, ownerId: true, pingIds: true },
+        })
+      : [];
+  const remindersById = new Map(
+    reminders.map((row) => [row.id, row] as const),
+  );
+  return lists.map((list) => ({
+    ...list,
+    items: list.items.filter((item) =>
+      workerItemTiedToSpeaker(item, speakerId, remindersById),
+    ),
+  }));
 }
 
 export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
@@ -580,11 +650,17 @@ export async function getEmployeeOwnedRecords(
           id: filing.id,
           kind: "filing" as const,
           title: filing.itemName,
-          details: filing.itemInfo
-            ? [{ label: "Details", value: filing.itemInfo }]
-            : [],
+          details: [
+            ...(filing.itemDescription
+              ? [{ label: "Description", value: filing.itemDescription }]
+              : []),
+            ...(filing.itemInfo
+              ? [{ label: "Details", value: filing.itemInfo }]
+              : []),
+          ],
           fields: [
             { label: "Name", value: filing.itemName },
+            { label: "Description", value: filing.itemDescription ?? "" },
             { label: "Details", value: filing.itemInfo },
           ],
           createdBy:
@@ -650,14 +726,26 @@ export async function getEmployeeRecordSnapshot(
   employeeId: string,
   options?: {
     accountOwner?: boolean;
+    /**
+     * When loading a digital worker for WORKER_SAVED_DATA: keep only list items
+     * tied to this human viewer (unless the viewer is an account owner).
+     */
+    scopeItemsToViewerId?: string;
   },
 ): Promise<EmployeeRecordSnapshot> {
   const { speaker: owner, guestMode, seeAll, listWhere, filingWhere } =
     await resolveRecordVisibility(employeeId, options);
 
+  const viewerScope = options?.scopeItemsToViewerId
+    ? await resolveRecordVisibility(options.scopeItemsToViewerId)
+    : null;
+  if (viewerScope?.guestMode) {
+    return { lists: [], filing: [], reminders: [] };
+  }
+
   // Live data only: soft-deleted list/filing rows stay in DB but are never loaded.
   // Done/cancelled reminder clocks stay in DB but are never injected into context.
-  const [ownLists, sharedItems, partnerLists, ownFilings, partnerFilings, reminderRows, people] =
+  const [ownListsRaw, sharedItems, partnerLists, ownFilings, partnerFilings, reminderRows, people] =
     await Promise.all([
     prisma.employeeList.findMany({
       where: listWhere,
@@ -720,6 +808,13 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
+  const ownLists =
+    viewerScope && !viewerScope.seeAll && options?.scopeItemsToViewerId
+      ? await filterListItemsTiedToSpeaker(
+          ownListsRaw,
+          options.scopeItemsToViewerId,
+        )
+      : ownListsRaw;
   const names = new Map(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );
@@ -906,6 +1001,7 @@ export async function getEmployeeRecordSnapshot(
       .map((filing) => ({
         item_name: filing.itemName,
         item_info: filing.itemInfo,
+        item_description: filing.itemDescription ?? "",
         owner: filing.employee.nickname?.trim() || filing.employee.name,
         scope: (filing.scope === "shared" ? "shared" : "personal") as
           | "shared"
@@ -916,6 +1012,7 @@ export async function getEmployeeRecordSnapshot(
       .map((filing) => ({
         item_name: filing.itemName,
         item_info: filing.itemInfo,
+        item_description: filing.itemDescription ?? "",
         owner: filing.employee.nickname?.trim() || filing.employee.name,
         scope: "shared" as const,
       })),
@@ -967,6 +1064,7 @@ export interface FilingMutation {
   action: "add" | "update" | "remove";
   itemName: string;
   itemInfo: string;
+  itemDescription: string;
 }
 
 export async function applyEmployeeRecords(
@@ -1031,6 +1129,7 @@ export async function applyEmployeeRecords(
           action: "remove",
           itemName,
           itemInfo: action.itemInfo,
+          itemDescription: action.itemDescription,
         });
       }
       if (filingOwner) {
@@ -1047,16 +1146,20 @@ export async function applyEmployeeRecords(
       }
     } else {
       const itemName = action.itemName.slice(0, 200);
+      const itemDescription = action.itemDescription.trim().slice(0, 4000);
       const existingFiling = await prisma.employeeFiling.findFirst({
         where: { employeeId, itemName, deletedAt: null },
       });
       if (existingFiling) {
         const shareFiling =
           resolved.scope === "shared" || resolved.visibleTo.length > 1;
+        const nextDescription =
+          itemDescription || existingFiling.itemDescription || "";
         await prisma.employeeFiling.update({
           where: { id: existingFiling.id },
           data: {
             itemInfo: action.itemInfo,
+            itemDescription: nextDescription,
             ...(shareFiling
               ? {
                   scope: "shared",
@@ -1073,6 +1176,7 @@ export async function applyEmployeeRecords(
           action: "update",
           itemName,
           itemInfo: action.itemInfo,
+          itemDescription: nextDescription,
         });
         if (filingOwner) {
           await recordAuditEvent({
@@ -1085,6 +1189,10 @@ export async function applyEmployeeRecords(
           });
         }
       } else {
+        if (!itemDescription) {
+          // Incomplete add — model should hold and ask for תיאור first.
+          continue;
+        }
         const shareFiling =
           resolved.scope === "shared" || resolved.visibleTo.length > 1;
         const created = await prisma.employeeFiling.create({
@@ -1092,6 +1200,7 @@ export async function applyEmployeeRecords(
             employeeId,
             itemName,
             itemInfo: action.itemInfo,
+            itemDescription,
             addedById: resolved.addedById,
             ...(shareFiling
               ? { scope: "shared", visibleTo: resolved.visibleTo }
@@ -1102,6 +1211,7 @@ export async function applyEmployeeRecords(
           action: "add",
           itemName,
           itemInfo: action.itemInfo,
+          itemDescription,
         });
         if (filingOwner) {
           await recordAuditEvent({

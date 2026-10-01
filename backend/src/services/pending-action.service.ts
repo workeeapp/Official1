@@ -522,7 +522,9 @@ export function holdFulfilledByMetadata(
   if (pending.action === "complete_filing") {
     return meta.filing.some(
       (row) =>
-        row.action === "add_filing" || row.action === "update_filing",
+        (row.action === "add_filing" || row.action === "update_filing") &&
+        Boolean(row.itemName.trim()) &&
+        Boolean(row.itemDescription.trim()),
     );
   }
   if (pending.action === "complete_messages") {

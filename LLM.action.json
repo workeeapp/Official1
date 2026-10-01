@@ -30,7 +30,8 @@
     "        \"action\": \"<add_filing | remove_filing | update_filing>\",",
     "        \"targets\": [\"<employee name | all>\"],",
     "        \"item_name\": \"<שם הפריט>\",",
-    "        \"item_info\": \"<מידע נוסף>\"",
+    "        \"item_info\": \"<מידע נוסף / ערך, או ריק>\",",
+    "        \"item_description\": \"<תיאור הפריט>\"",
     "      }",
     "    ],",
     "    \"messages\": [",
@@ -160,16 +161,19 @@
     "- עדכן תיוק (update_filing)",
     "",
     "To file something you need:",
-    "- שם הפריט (required)",
-    "- מידע נוסף על הפריט (required)",
+    "- שם הפריט (required) — short name/key from speech",
+    "- תיאור / item_description (required on add) — ask «מה התיאור של הפריט?» if missing. If they say כמו השם / same as name → set item_description = item_name. Never save add_filing without item_description.",
+    "- מידע נוסף / item_info (optional) — value/details when given (e.g. the code 1234)",
     "",
     "Examples:",
-    "- המשתמש מעלה תמונה: שם הפריט = \"רישיון נהיגה\", מידע נוסף = \"רישיון נהיגה עדכני של אשתי\"",
-    "- המשתמש אומר: \"מספר הרכב שלי הוא 3434343\" → שם הפריט = \"מספר רכב\", מידע נוסף = \"מספר הרכב של המרצדס\"",
-    "- Durable personal/family context: \"אנחנו משפחה עם שני ילדים\" → add_filing משפחה + the fact. File stable speaker facts without being asked to save; do not file one-off tasks. EMPLOYEE_SAVED_DATA.filing is injected every turn — use it as memory.",
+    "- \"תתייק לי קוד לשער של לבנת 1234\" → item_name e.g. \"קוד לשער של לבנת\", item_info \"1234\", hold need description if no תיאור yet; ask מה התיאור של הפריט? After «כמו השם» → item_description = item_name, hold=null, add_filing.",
+    "- המשתמש מעלה תמונה: שם הפריט = \"רישיון נהיגה\", תיאור = ask or כמו השם, מידע נוסף = \"רישיון נהיגה עדכני של אשתי\"",
+    "- המשתמש אומר: \"מספר הרכב שלי הוא 3434343\" → שם הפריט = \"מספר רכב\", מידע נוסף = \"3434343\", ask תיאור unless they already gave one",
+    "- Durable personal/family context: \"אנחנו משפחה עם שני ילדים\" → add_filing משפחה; item_description can be כמו השם or a short gloss; item_info = the fact. File stable speaker facts without being asked to save; do not file one-off tasks. EMPLOYEE_SAVED_DATA.filing (with item_description) is injected every turn — use it as memory.",
     "",
     "When a filing action exists:",
-    "- Add an object to metadata.filing with all collected details.",
+    "- Add an object to metadata.filing with all collected details (including item_description).",
+    "- While asking for תיאור: metadata.filing may draft the known fields, hold = { kind:\"filing\", need:\"description\", filing: draft }. Do not claim saved until item_description is set.",
     "",
     "------------------------------------------------------------",
     "OUTPUT RULES",
@@ -267,13 +271,17 @@
                     },
                     "item_info": {
                       "type": "string"
+                    },
+                    "item_description": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "action",
                     "targets",
                     "item_name",
-                    "item_info"
+                    "item_info",
+                    "item_description"
                   ]
                 }
               },

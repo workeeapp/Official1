@@ -119,6 +119,7 @@ import {
   getEmployeeOwnedRecords,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  workerItemTiedToSpeaker,
   updateEmployeeRecord,
   itemIdentity,
   isPhantomCustomListItem,
@@ -607,6 +608,7 @@ describe("employee records", () => {
         {
           item_name: "מספר רכב",
           item_info: "3434343",
+          item_description: "רכב שלי",
           owner: "עמית",
           scope: "personal",
         },
@@ -617,6 +619,8 @@ describe("employee records", () => {
     expect(context).toContain("חלב");
     expect(context).toContain("לקנות מתנה");
     expect(context).toContain("מספר רכב");
+    expect(context).toContain("רכב שלי");
+    expect(context).toContain("item_description");
     expect(context).toContain("durable personal facts");
     expect(context).toContain("filing");
   });
@@ -688,6 +692,117 @@ describe("employee records", () => {
     );
   });
 
+  it("ties worker items to a speaker via addedBy, visibleTo, or reminder owner/ping", () => {
+    const reminders = new Map([
+      [
+        "rem-maya",
+        { ownerId: "maya-id", pingIds: ["maya-id"] },
+      ],
+      [
+        "rem-tal",
+        { ownerId: employeeId, pingIds: ["michal-id"] },
+      ],
+    ]);
+    expect(
+      workerItemTiedToSpeaker(
+        {
+          addedById: "maya-id",
+          visibleTo: ["maya-id", "lucy-id"],
+          reminderId: "rem-maya",
+        },
+        employeeId,
+        reminders,
+      ),
+    ).toBe(false);
+    expect(
+      workerItemTiedToSpeaker(
+        {
+          addedById: employeeId,
+          visibleTo: [employeeId, "lucy-id"],
+          reminderId: "rem-tal",
+        },
+        employeeId,
+        reminders,
+      ),
+    ).toBe(true);
+    expect(
+      workerItemTiedToSpeaker(
+        {
+          addedById: "lucy-id",
+          visibleTo: ["lucy-id"],
+          reminderId: "rem-tal",
+        },
+        employeeId,
+        reminders,
+      ),
+    ).toBe(true);
+  });
+
+  it("scopes WORKER_SAVED_DATA items to the current human viewer", async () => {
+    const workerId = "lucy-id";
+    const mayaId = "maya-id";
+    employeeFindUnique
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        kind: "digital",
+        name: "לוסי",
+        nickname: "לוסי",
+        isOwner: false,
+      })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        kind: "human",
+        name: "טל",
+        nickname: "טל",
+        isOwner: false,
+      });
+    listFindMany.mockResolvedValueOnce([
+      {
+        id: "lucy-tasks",
+        listType: "tasks",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: workerId, name: "לוסי", nickname: "לוסי" },
+        items: [
+          {
+            id: "item-maya",
+            itemKey: "להזכיר למאיוש",
+            data: { "שם מטלה": "להזכיר למאיוש לקבוע שיעור" },
+            scope: "shared",
+            addedById: mayaId,
+            visibleTo: [mayaId, workerId],
+            reminderId: "rem-maya",
+            deletedAt: null,
+          },
+          {
+            id: "item-tal",
+            itemKey: "לשלוח הודעה למיכל",
+            data: { "שם מטלה": "לשלוח הודעה למיכל" },
+            scope: "personal",
+            addedById: employeeId,
+            visibleTo: [employeeId],
+            reminderId: "rem-tal",
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+    reminderFindMany.mockResolvedValueOnce([
+      { id: "rem-maya", ownerId: mayaId, pingIds: [mayaId] },
+      { id: "rem-tal", ownerId: employeeId, pingIds: ["michal-id"] },
+    ]);
+
+    const snap = await getEmployeeRecordSnapshot(workerId, {
+      scopeItemsToViewerId: employeeId,
+    });
+    const labels = snap.lists.flatMap((list) =>
+      list.items.map((item) => String(item["שם מטלה"] ?? "")),
+    );
+    expect(labels).toEqual(["לשלוח הודעה למיכל"]);
+    expect(labels.join(" ")).not.toContain("מאיוש");
+  });
+
   it("applies add, update, and remove actions for lists, tasks, and filings", async () => {
     const list = { id: "list-1", employeeId, listType: "shopping", name: "" };
     listFindUnique.mockResolvedValueOnce(null).mockResolvedValue(list);
@@ -748,12 +863,14 @@ describe("employee records", () => {
           action: "add_filing",
           itemName: "מספר רכב",
           itemInfo: "3434343",
+          itemDescription: "מספר רכב",
           targets: [],
         },
         {
           action: "remove_filing",
           itemName: "רישיון ישן",
           itemInfo: "",
+          itemDescription: "",
           targets: [],
         },
       ],
@@ -788,6 +905,7 @@ describe("employee records", () => {
         employeeId,
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "מספר רכב",
         addedById: employeeId,
       },
     });
@@ -926,6 +1044,7 @@ describe("employee records", () => {
       {
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "רכב שלי",
         employee: { name: "עמית", nickname: "עמית" },
       },
     ]);
@@ -943,6 +1062,7 @@ describe("employee records", () => {
         {
           item_name: "מספר רכב",
           item_info: "3434343",
+          item_description: "רכב שלי",
           owner: "עמית",
           scope: "personal",
         },
@@ -1060,6 +1180,7 @@ describe("employee records", () => {
         id: "filing-1",
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "",
         addedById: employeeId,
         createdAt,
         employee: { name: "טל", nickname: "טל" },
@@ -1129,6 +1250,7 @@ describe("employee records", () => {
               details: [{ label: "Details", value: "3434343" }],
               fields: [
                 { label: "Name", value: "מספר רכב" },
+                { label: "Description", value: "" },
                 { label: "Details", value: "3434343" },
               ],
               createdBy: "עמית",

@@ -1,0 +1,36 @@
+---
+description: Model understands → ACTION → engine executes
+alwaysApply: true
+---
+
+# Model → Action → Engine
+
+**The product loop (non-negotiable):**
+
+1. **Model understands** the speaker (Hebrew/English free text).
+2. **Model decides** and emits a structured **ACTION** in `metadata` (lists / filing / messages / reminders / directory / hold / query / confirm / handoff…).
+3. **Engine executes** only what is in that ACTION: validate, persist, inject facts next turn, send WhatsApp, fire clocks, enforce visibility.
+
+Understanding is **never** in the server. The server does not re-interpret the chat message.
+
+## Do
+
+- Put interpretation and product decisions in **prompts** + the shared action schema (`LLM.action.json` / `LLM.config.json` / runtime extras).
+- If something is missing → model asks + `hold` / confirm; engine waits for a complete ACTION.
+- Engine may filter **DB rows** for ownership/`seeAll` before injecting context (facts), and may apply narrow post-apply corrections already allowed by architecture (list-type wording, WhatsApp notices, delete-confirm prompts).
+
+## Do not
+
+- Regex / keyword / string-match the **user utterance** to decide what to do (e.g. «כמו השם», weekdays, “send later”).
+- Engine shortcuts that invent work the model did not emit (`item: "all"`, invent clocks from free text, harvest phones from prose).
+- Server-built status reports that replace the model’s `response` (except the existing narrow corrections above).
+
+## OK on the engine (execution, not understanding)
+
+- Read fields from the ACTION the model already emitted.
+- Refuse incomplete ACTIONs (e.g. filing add without `item_description`).
+- Persist, soft-delete, cascade clocks↔worker tasks, inject `EMPLOYEE_SAVED_DATA` / scoped schedules.
+
+## Quick check
+
+If the feature only works because the server “heard” what the user meant → **wrong**. Teach the model to emit the right ACTION; the engine only runs it.

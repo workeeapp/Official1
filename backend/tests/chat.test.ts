@@ -1198,6 +1198,7 @@ describe("chat API", () => {
       {
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "רכב",
         employee: { name: "עמית", nickname: "עמית" },
       },
     ]);
@@ -1258,6 +1259,7 @@ describe("chat API", () => {
               action: "add_filing",
               item_name: "מספר רכב",
               item_info: "3434343",
+              item_description: "מספר רכב",
             },
           ],
         },
@@ -1299,6 +1301,7 @@ describe("chat API", () => {
         employeeId,
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "מספר רכב",
         addedById: employeeId,
       },
     });

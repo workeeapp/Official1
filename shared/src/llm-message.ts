@@ -21,6 +21,8 @@ export interface LlmFilingAction {
   action: LlmFilingActionName;
   itemName: string;
   itemInfo: string;
+  /** Human description for retrieval; required on add (may equal itemName). */
+  itemDescription: string;
   targets: string[];
 }
 
@@ -943,6 +945,12 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
     action: value.action as LlmFilingActionName,
     itemName,
     itemInfo: readText(value, ["item_info", "מידע נוסף", "info"]),
+    itemDescription: readText(value, [
+      "item_description",
+      "description",
+      "תיאור",
+      "תיאור הפריט",
+    ]),
     targets: parseTargets(value),
   };
 }
@@ -1210,9 +1218,17 @@ function describeFilingAction(filing: Record<string, unknown>): string {
     typeof filing.item_info === "string" && filing.item_info.trim()
       ? filing.item_info.trim()
       : "";
+  const description =
+    typeof filing.item_description === "string" && filing.item_description.trim()
+      ? filing.item_description.trim()
+      : typeof filing["תיאור"] === "string" &&
+          String(filing["תיאור"]).trim()
+        ? String(filing["תיאור"]).trim()
+        : "";
 
-  if (name && info) {
-    return `${verb}: ${name} — ${info}`;
+  if (name && (info || description)) {
+    const extras = [info, description].filter(Boolean).join(" / ");
+    return `${verb}: ${name} — ${extras}`;
   }
 
   if (name) {

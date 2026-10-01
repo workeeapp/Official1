@@ -18,18 +18,18 @@ This is **not** the same as save-time relative labels (`היום` → `2026-10-0
 
 ## Limits (current)
 
-Context is still **preloaded** every turn (`WORKER_SAVED_DATA` included). First-person day answers therefore still rely on the model respecting WHEN prompts for worker/custom-list confusion. A harder design (model declares a fetch/`query`, engine loads only that slice, then answer) is backlog — see `docs/future-considerations.md`.
+`TEAM_SCHEDULES` and `WORKER_SAVED_DATA` use **server visibility gates** (not prompt-only): non-owners only get their own dated tasks / worker jobs tied to them; owners see all; guests omit both. First-person day answers can still mix the speaker’s tasks with **their own** Lucy jobs (relevance) — a harder fetch-action design remains backlog (`docs/future-considerations.md`).
 
 ## Code
 
 | Piece | Role |
 |-------|------|
 | `backend/src/utils/relative-date.ts` — `sessionClock`, `formatSessionClockContext` | Build / format clock facts + first-person filter hint |
-| `backend/src/services/employee-records.service.ts` — `resolveRecordVisibility`, `getTeamSchedules` | Shared ownership gate for saved data + team schedules |
-| `backend/src/services/chat.service.ts` | Prepend `SESSION_CLOCK` to turn context; WHEN/TODAY/SOON prompt lines |
+| `backend/src/services/employee-records.service.ts` — `resolveRecordVisibility`, `getTeamSchedules`, `scopeItemsToViewerId` / `workerItemTiedToSpeaker` | Shared ownership gate; speaker-scoped worker jobs |
+| `backend/src/services/chat.service.ts` | Prepend `SESSION_CLOCK`; WHEN prompts; `WORKER_SAVED_DATA` via `scopeItemsToViewerId` |
 | `LLM.config.json` | Same WHEN/TODAY/SOON guidance for Lucy’s seeded prompt |
 
 ## Tests
 
 - `backend/tests/relative-date.test.ts` — clock parts and context string for a fixed `now`.
-- `backend/tests/employee-records.test.ts` — team schedules format + ownership-scoped `getTeamSchedules` where clause.
+- `backend/tests/employee-records.test.ts` — team schedules format + ownership-scoped `getTeamSchedules`; worker item speaker ties + scoped `WORKER_SAVED_DATA`.

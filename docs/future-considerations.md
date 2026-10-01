@@ -37,6 +37,6 @@ Ideas to consider later — not committed work. Captured from product discussion
 
 ## Retrieval actions (day / status questions)
 
-**Today:** every turn preloads `EMPLOYEE_SAVED_DATA`, `WORKER_SAVED_DATA`, and ownership-scoped `TEAM_SCHEDULES`; the model filters in `response` (SESSION_CLOCK + WHEN prompts). Non-owner team schedules are hard-filtered on the server; mixing speaker day plans with Lucy’s worker jobs is still prompt-soft.
+**Today:** every turn preloads `EMPLOYEE_SAVED_DATA`, ownership-scoped `TEAM_SCHEDULES`, and ownership-scoped `WORKER_SAVED_DATA` (non-owners: only worker jobs tied to the speaker; owners: full worker list). The model still filters timed windows in `response` (SESSION_CLOCK + WHEN prompts). Mixing the speaker’s tasks with **their own** Lucy jobs on «מה אני צריך ביום…» remains prompt-soft.
 
-**Consider later:** real fetch actions — model declares what to load (`query` / retrieval action) → engine fetches that slice → second step answers only from the fetch. Avoids trusting the model to ignore preloaded worker/team blocks on «מה אני צריך ביום…».
+**Consider later:** real fetch actions — model declares what to load (`query` / retrieval action) → engine fetches that slice → second step answers only from the fetch.
