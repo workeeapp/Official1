@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client";
-import type {
-  EmployeeRecordField,
-  EmployeeRecordsResponse,
-  LlmListAction,
-  LlmListType,
-  LlmMetadata,
+import {
+  isGuestEmployee,
+  type EmployeeRecordField,
+  type EmployeeRecordsResponse,
+  type LlmListAction,
+  type LlmListType,
+  type LlmMetadata,
 } from "@workee/shared";
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
@@ -32,6 +33,9 @@ export interface EmployeeRecordSnapshot {
     list_type: string;
     list_name?: string;
     owner: string;
+    scope: ItemScope;
+    /** Partner display names when scope is shared (includes owner). */
+    shared_with?: string[];
     items: Record<string, unknown>[];
   }>;
   filing: Array<{
@@ -65,6 +69,45 @@ function customItemDataEntries(
   item: Record<string, unknown>,
 ): Array<[string, unknown]> {
   return Object.entries(item).filter(([key]) => !CUSTOM_ITEM_META_KEYS.has(key));
+}
+
+/** "שם חדש" / "שם מטלה חדש" / "name new" → base column "שם" / "שם מטלה" / "name". */
+const DRAFT_FIELD_RE = /^(.+?)\s+(חדש|חדשה|new)$/i;
+
+function draftBaseField(key: string): string | null {
+  const match = key.trim().match(DRAFT_FIELD_RE);
+  return match?.[1]?.trim() || null;
+}
+
+/**
+ * Collapse update-draft keys ("X חדש") onto real columns and drop leftovers.
+ * Keeps list display / saved data as current values only — never old + new side by side.
+ */
+export function normalizeListItemData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  const drafts: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(data)) {
+    const base = draftBaseField(key);
+    if (base) {
+      drafts.push([base, value]);
+      continue;
+    }
+    next[key] = value;
+  }
+  for (const [base, value] of drafts) {
+    next[base] = value;
+  }
+  return next;
+}
+
+/** Merge an update patch onto existing item data, collapsing "X חדש" onto X. */
+export function mergeListItemData(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return normalizeListItemData({ ...existing, ...patch });
 }
 
 function firstCustomDataValue(item: Record<string, unknown>): string {
@@ -308,6 +351,7 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Use them as background context in later turns (e.g. trip ideas when a family-with-kids fact is filed). Do not ignore filing when advising.",
+    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     JSON.stringify({
       lists: snapshot.lists,
       filing: snapshot.filing,
@@ -327,26 +371,97 @@ export interface TeamScheduleEntry {
   all_day: boolean;
 }
 
+type RecordSpeaker = {
+  userId: string;
+  isOwner: boolean;
+  kind: string;
+  name: string;
+  nickname: string | null;
+};
+
+/** Human list/filing scope: account-owner sees all humans; everyone else sees self only. */
+type HumanRecordScope =
+  | { employeeId: string }
+  | { employee: { userId: string; kind: "human" } };
+
+/**
+ * Single ownership gate for EMPLOYEE_SAVED_DATA and TEAM_SCHEDULES.
+ * Guests never seeAll. Human is_owner (or accountOwner override) sees all humans on the account.
+ */
+async function resolveRecordVisibility(
+  employeeId: string,
+  options?: { accountOwner?: boolean },
+): Promise<{
+  speaker: RecordSpeaker | null;
+  guestMode: boolean;
+  seeAll: boolean;
+  listWhere: HumanRecordScope;
+  filingWhere: HumanRecordScope;
+}> {
+  const speaker = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: {
+      userId: true,
+      isOwner: true,
+      kind: true,
+      name: true,
+      nickname: true,
+    },
+  });
+  const guestMode = Boolean(speaker && isGuestEmployee(speaker));
+  const seeAll =
+    !guestMode &&
+    (options?.accountOwner === true ||
+      (speaker?.kind !== "digital" && speaker?.isOwner === true));
+  const scope: HumanRecordScope =
+    seeAll && speaker
+      ? { employee: { userId: speaker.userId, kind: "human" } }
+      : { employeeId };
+  return {
+    speaker,
+    guestMode,
+    seeAll,
+    listWhere: scope,
+    filingWhere: scope,
+  };
+}
+
 export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
   if (entries.length === 0) {
     return [
       "TEAM_SCHEDULES:",
-      "No dated tasks or meetings are currently saved for any employee.",
+      "No dated tasks or meetings are currently visible for this speaker.",
     ].join("\n");
   }
 
   return [
     "TEAM_SCHEDULES:",
-    "Dated tasks and meetings only. Do not reveal other employees' shopping or filings from this.",
+    "Dated tasks/meetings visible under the same ownership rules as EMPLOYEE_SAVED_DATA (owners: all humans; non-owners: speaker only). For conflict checks and «מה יש לX ביום…» when that person is in scope.",
+    "Each row has owner — that person owns the item. For «מה אני צריך לעשות / מה יש לי» use ONLY the current speaker's rows from EMPLOYEE_SAVED_DATA (and their active_reminders) — do NOT list other owners as the speaker's work.",
     JSON.stringify(entries),
   ].join("\n");
 }
 
-export async function getTeamSchedules(userId: string): Promise<TeamScheduleEntry[]> {
+/**
+ * Same visibility gate as EMPLOYEE_SAVED_DATA (`resolveRecordVisibility` / seeAll).
+ * Pass the speaker employee id — never dump every human's dated tasks for a non-owner.
+ */
+export async function getTeamSchedules(
+  employeeId: string,
+  options?: { accountOwner?: boolean },
+): Promise<TeamScheduleEntry[]> {
+  const { speaker, guestMode, listWhere } = await resolveRecordVisibility(
+    employeeId,
+    options,
+  );
+  if (!speaker || guestMode) {
+    return [];
+  }
+
   const lists = await prisma.employeeList.findMany({
     where: {
       listType: "tasks",
-      employee: { userId },
+      ...listWhere,
     },
     include: {
       employee: { select: { name: true, nickname: true } },
@@ -537,20 +652,8 @@ export async function getEmployeeRecordSnapshot(
     accountOwner?: boolean;
   },
 ): Promise<EmployeeRecordSnapshot> {
-  const owner = await prisma.employee.findUnique({
-    where: { id: employeeId },
-    select: { userId: true, isOwner: true, kind: true },
-  });
-  const seeAll =
-    options?.accountOwner === true ||
-    (owner?.kind !== "digital" && owner?.isOwner === true);
-
-  const listWhere = seeAll && owner
-    ? { employee: { userId: owner.userId, kind: "human" } }
-    : { employeeId };
-  const filingWhere = seeAll && owner
-    ? { employee: { userId: owner.userId, kind: "human" } }
-    : { employeeId };
+  const { speaker: owner, guestMode, seeAll, listWhere, filingWhere } =
+    await resolveRecordVisibility(employeeId, options);
 
   // Live data only: soft-deleted list/filing rows stay in DB but are never loaded.
   // Done/cancelled reminder clocks stay in DB but are never injected into context.
@@ -617,6 +720,10 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
+  const names = new Map(
+    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
+  );
+
   const currentShopping = new Map<string, Set<string>>();
   const rememberShopping = (owner: string, items: Array<{ data: unknown; itemKey?: string }>) => {
     const keys = currentShopping.get(owner) ?? new Set<string>();
@@ -669,7 +776,9 @@ export async function getEmployeeRecordSnapshot(
     const bucketKey =
       list.listType === "custom" && list.name.trim()
         ? `custom\0${list.name.trim()}`
-        : list.listType;
+        : list.listType === "custom"
+          ? `custom\0${deriveCustomListName(list.items.map((item) => asRecord(item.data))) || list.id}`
+          : list.listType;
     const items = byType.get(bucketKey) ?? [];
     for (const item of list.items) {
       items.push(
@@ -705,65 +814,103 @@ export async function getEmployeeRecordSnapshot(
     });
   }
 
-  const lists = ownLists
-    .map((list) => {
-      const derivedName =
-        list.name.trim() ||
-        (list.listType === "custom"
-          ? deriveCustomListName(list.items.map((item) => asRecord(item.data)))
-          : "");
-      return {
-        list_type: list.listType,
-        ...(derivedName ? { list_name: derivedName } : {}),
-        owner: list.employee.nickname?.trim() || list.employee.name,
-        items: list.items
-          .filter(
-            (item) =>
-              !isOrphanAssignment(asRecord(item.data), currentShopping),
-          )
-          .map((item) =>
-            withVisibility(
-              item.data,
-              item.scope,
-              list.employee.nickname?.trim() || list.employee.name,
-            ),
-          ),
-      };
-    })
-    .filter((list) => list.items.length > 0);
+  const lists: EmployeeRecordSnapshot["lists"] = [];
+  const seenListKeys = new Set<string>();
+  const pushSnapshotList = (
+    entry: EmployeeRecordSnapshot["lists"][number] | null,
+  ) => {
+    if (!entry) {
+      return;
+    }
+    const key = `${entry.owner}\0${entry.list_type}\0${entry.list_name ?? ""}`;
+    if (seenListKeys.has(key)) {
+      return;
+    }
+    seenListKeys.add(key);
+    lists.push(entry);
+  };
 
+  for (const list of ownLists) {
+    // Guests only see lists shared with them — never personal shopping/tasks.
+    if (guestMode && list.scope !== "shared") {
+      continue;
+    }
+    pushSnapshotList(
+      toListSnapshotEntry({
+        listType: list.listType,
+        listName: list.name,
+        ownerId: list.employee.id,
+        ownerName: list.employee.nickname?.trim() || list.employee.name,
+        scope: list.scope === "shared" ? "shared" : "personal",
+        visibleTo: list.visibleTo,
+        items: list.items,
+        currentShopping,
+        names,
+      }),
+    );
+  }
+
+  for (const list of partnerLists) {
+    if (!visibleToIncludes(list.visibleTo, employeeId)) {
+      continue;
+    }
+    pushSnapshotList(
+      toListSnapshotEntry({
+        listType: list.listType,
+        listName: list.name,
+        ownerId: list.employee.id,
+        ownerName: list.employee.nickname?.trim() || list.employee.name,
+        scope: "shared",
+        visibleTo: list.visibleTo,
+        items: list.items,
+        currentShopping,
+        names,
+      }),
+    );
+  }
+
+  // Item-level shared shopping/tasks on someone else's personal list (legacy path).
   for (const [owner, byType] of sharedByOwner) {
     for (const [bucketKey, items] of byType) {
       if (items.length === 0) {
         continue;
       }
       const customSep = bucketKey.indexOf("\0");
-      const listType =
-        customSep >= 0 ? "custom" : bucketKey;
+      const listType = customSep >= 0 ? "custom" : bucketKey;
       const listName =
         customSep >= 0 ? bucketKey.slice(customSep + 1) : undefined;
+      // Skip if we already emitted this named custom/shared list from partnerLists/ownLists.
+      const already = lists.some(
+        (row) =>
+          row.owner === owner &&
+          row.list_type === listType &&
+          (row.list_name ?? "") === (listName ?? ""),
+      );
+      if (already) {
+        continue;
+      }
       lists.push({
         list_type: listType,
         ...(listName ? { list_name: listName } : {}),
         owner,
+        scope: "shared",
+        shared_with: [owner],
         items,
       });
     }
   }
 
-  const names = new Map(
-    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
-  );
-
   const filingRows = [
-    ...ownFilings.map((filing) => ({
-      item_name: filing.itemName,
-      item_info: filing.itemInfo,
-      owner: filing.employee.nickname?.trim() || filing.employee.name,
-      scope: (filing.scope === "shared" ? "shared" : "personal") as
-        | "shared"
-        | "personal",
-    })),
+    ...ownFilings
+      .filter((filing) => !guestMode || filing.scope === "shared")
+      .map((filing) => ({
+        item_name: filing.itemName,
+        item_info: filing.itemInfo,
+        owner: filing.employee.nickname?.trim() || filing.employee.name,
+        scope: (filing.scope === "shared" ? "shared" : "personal") as
+          | "shared"
+          | "personal",
+      })),
     ...partnerFilings
       .filter((filing) => visibleToIncludes(filing.visibleTo, employeeId))
       .map((filing) => ({
@@ -777,16 +924,21 @@ export async function getEmployeeRecordSnapshot(
   return {
     lists,
     filing: filingRows,
-    reminders: reminderRows
-      .filter((row) => {
-        if (seeAll) {
-          return true;
-        }
-        const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
-        return row.ownerId === employeeId || pings.includes(employeeId);
-      })
-      .filter((row) => row.status === "active")
-      .map((row) => toReminderSnapshotRow(row, names)),
+    // Guests do not get reminder clocks — shared-list Q&A only.
+    reminders: guestMode
+      ? []
+      : reminderRows
+          .filter((row) => {
+            if (seeAll) {
+              return true;
+            }
+            const pings = Array.isArray(row.pingIds)
+              ? row.pingIds.map(String)
+              : [];
+            return row.ownerId === employeeId || pings.includes(employeeId);
+          })
+          .filter((row) => row.status === "active")
+          .map((row) => toReminderSnapshotRow(row, names)),
   };
 }
 
@@ -1006,10 +1158,7 @@ async function updateOwnedListItem(
   actorId: string,
 ): Promise<SharedItemEvent[]> {
   const listType = existing.list.listType as LlmListType;
-  const nextData = {
-    ...asRecord(existing.data),
-    ...fieldsToData(fields),
-  };
+  const nextData = mergeListItemData(asRecord(existing.data), fieldsToData(fields));
   const nextKey = itemIdentity(listType, nextData) || existing.itemKey;
   if (!ownedItemTitle(listType, nextData, nextKey)) {
     throw new ValidationError("Item name is required", { name: "Item name is required" });
@@ -1258,11 +1407,10 @@ async function mutationEvents(input: {
 function mutationAudience(
   ownerId: string,
   actorId: string,
-  item: { addedById?: string | null; visibleTo?: unknown },
+  item: { scope?: string; addedById?: string | null; visibleTo?: unknown },
 ): string[] {
-  return uniqueIds([ownerId, item.addedById, ...idList(item.visibleTo)]).filter(
-    (id) => id !== actorId,
-  );
+  // Same rule as chat plan: only real share partners, never everyone in a personal row.
+  return sharedAudience(item, ownerId, actorId);
 }
 
 async function applyListAction(
@@ -1538,11 +1686,16 @@ async function applyListAction(
       resolvedAction.action,
     );
     const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
-    const nextData = toJsonValue(
+    const nextDataRecord =
       resolvedAction.action === "update" && existing
-        ? { ...asRecord(existing.data), ...item }
-        : item,
-    );
+        ? mergeListItemData(asRecord(existing.data), item)
+        : normalizeListItemData(item);
+    const nextData = toJsonValue(nextDataRecord);
+    const nextItemKey =
+      itemIdentity(resolvedAction.listType, nextDataRecord) ||
+      itemKey ||
+      existing?.itemKey ||
+      "";
     const fields = {
       data: nextData,
       scope: resolvedVisibility.scope,
@@ -1559,8 +1712,10 @@ async function applyListAction(
         where: { id: existing.id },
         data: {
           ...fields,
-          ...(resolvedAction.action === "update" && itemKey !== existing.itemKey
-            ? { itemKey }
+          ...(resolvedAction.action === "update" &&
+          nextItemKey &&
+          nextItemKey !== existing.itemKey
+            ? { itemKey: nextItemKey }
             : {}),
         },
       });
@@ -1573,9 +1728,9 @@ async function applyListAction(
         itemLabel:
           ownedItemTitle(
             resolvedAction.listType,
-            asRecord(nextData),
-            itemKey,
-          ) || itemKey,
+            nextDataRecord,
+            nextItemKey || itemKey,
+          ) || nextItemKey || itemKey,
         listName: resolvedAction.listName || list.name || undefined,
       });
       if (listOwner) {
@@ -1592,7 +1747,7 @@ async function applyListAction(
       const created = await prisma.employeeListItem.create({
         data: {
           listId: list.id,
-          itemKey,
+          itemKey: nextItemKey || itemKey,
           ...fields,
         },
       });
@@ -1601,9 +1756,14 @@ async function applyListAction(
         itemId: created.id,
         employeeId,
         listType: resolvedAction.listType,
-        itemKey,
+        itemKey: nextItemKey || itemKey,
         itemLabel:
-          ownedItemTitle(resolvedAction.listType, asRecord(nextData), itemKey) ||
+          ownedItemTitle(
+            resolvedAction.listType,
+            nextDataRecord,
+            nextItemKey || itemKey,
+          ) ||
+          nextItemKey ||
           itemKey,
         listName: resolvedAction.listName || list.name || undefined,
       });
@@ -1614,7 +1774,7 @@ async function applyListAction(
           action: "list_add",
           entityType: "EmployeeListItem",
           entityId: created.id,
-          summary: `add ${resolvedAction.listType}: ${itemKey}`,
+          summary: `add ${resolvedAction.listType}: ${nextItemKey || itemKey}`,
         });
       }
     }
@@ -2169,13 +2329,83 @@ async function deleteRelatedAssignmentTasks(
   return [];
 }
 
+function sharedWithNames(
+  ownerId: string,
+  visibleTo: unknown,
+  names: Map<string, string>,
+): string[] {
+  const ordered = uniqueIds([ownerId, ...idList(visibleTo)]);
+  return ordered
+    .map((id) => names.get(id) ?? "")
+    .filter((name) => Boolean(name));
+}
+
+function toListSnapshotEntry(input: {
+  listType: string;
+  listName: string;
+  ownerId: string;
+  ownerName: string;
+  scope: ItemScope;
+  visibleTo: unknown;
+  items: Array<{ id?: string; data: unknown; scope?: string; itemKey?: string }>;
+  currentShopping: Map<string, Set<string>>;
+  names: Map<string, string>;
+}): EmployeeRecordSnapshot["lists"][number] | null {
+  const derivedName =
+    input.listName.trim() ||
+    (input.listType === "custom"
+      ? deriveCustomListName(input.items.map((item) => asRecord(item.data)))
+      : "");
+  const items = input.items
+    .filter(
+      (item) =>
+        input.listType !== "tasks" ||
+        !isOrphanAssignment(asRecord(item.data), input.currentShopping),
+    )
+    .map((item) =>
+      withVisibility(
+        item.data,
+        item.scope === "shared" || input.scope === "shared"
+          ? "shared"
+          : "personal",
+        input.ownerName,
+      ),
+    );
+  // Keep named custom lists and any shared list even when empty so Lucy can
+  // answer "do we have X?" / "show shared lists" without inventing.
+  if (items.length === 0) {
+    const keepEmpty =
+      Boolean(derivedName) &&
+      (input.scope === "shared" || input.listType === "custom");
+    if (!keepEmpty) {
+      return null;
+    }
+  }
+  return {
+    list_type: input.listType,
+    ...(derivedName ? { list_name: derivedName } : {}),
+    owner: input.ownerName,
+    scope: input.scope,
+    ...(input.scope === "shared"
+      ? {
+          shared_with: sharedWithNames(
+            input.ownerId,
+            input.visibleTo,
+            input.names,
+          ),
+        }
+      : {}),
+    items,
+  };
+}
+
 function withVisibility(
   data: unknown,
   scope: string,
   owner: string,
 ): Record<string, unknown> {
   return {
-    ...asRecord(data),
+    ...normalizeListItemData(asRecord(data)),
     scope,
     owner,
   };
@@ -2252,7 +2482,9 @@ export function deriveCustomListName(
         ? item.list_name.trim()
         : typeof item.listName === "string"
           ? item.listName.trim()
-          : "";
+          : typeof item["שם הרשימה"] === "string"
+            ? item["שם הרשימה"].trim()
+            : "";
     if (name) {
       return name.slice(0, 100);
     }
@@ -2347,7 +2579,7 @@ function toOwnedListItem(
   names: Map<string, string>,
   ownerName: string,
 ): EmployeeRecordsResponse["groups"][number]["items"][number] {
-  const data = asRecord(item.data);
+  const data = normalizeListItemData(asRecord(item.data));
   return {
     id: item.id,
     kind: "list",

@@ -98,6 +98,15 @@ if (Test-ApiPort) {
 }
 
 Set-Location $root
+Write-Log "Applying DB migrations"
+try {
+  npm run db:deploy
+  if ($LASTEXITCODE -ne 0) {
+    throw "db:deploy exited $LASTEXITCODE"
+  }
+} catch {
+  Write-Log $_
+}
 Write-Log "Starting API"
 while ($true) {
   Keep-Awake

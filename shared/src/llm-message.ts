@@ -37,7 +37,12 @@ export interface LlmDirectoryAction {
   phone: string;
 }
 
-export type LlmHoldKind = "directory" | "lists" | "reminders" | "filing";
+export type LlmHoldKind =
+  | "directory"
+  | "lists"
+  | "reminders"
+  | "filing"
+  | "messages";
 
 /** Draft kept while asking for a missing required field (server PENDING_ACTION_STATE). */
 export interface LlmHold {
@@ -47,6 +52,7 @@ export interface LlmHold {
   lists: LlmListAction[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
+  messages: LlmMessageAction[];
 }
 
 export type LlmReminderActionName = "add" | "remove" | "update";
@@ -206,15 +212,16 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     : [];
   const reminders = parseReminderActions(meta);
   const directory = parseDirectoryActions(meta);
+  const messages = parseMessageActions(meta);
   return {
-    messages: parseMessageActions(meta),
+    messages,
     reminders,
     directory,
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
-    hold: parseHold(meta, { directory, lists, reminders, filing }),
+    hold: parseHold(meta, { directory, lists, reminders, filing, messages }),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
     lists,
@@ -615,6 +622,7 @@ const HOLD_KINDS = new Set<LlmHoldKind>([
   "lists",
   "reminders",
   "filing",
+  "messages",
 ]);
 
 function parseHold(
@@ -624,6 +632,7 @@ function parseHold(
     lists: LlmListAction[];
     reminders: LlmReminderAction[];
     filing: LlmFilingAction[];
+    messages: LlmMessageAction[];
   },
 ): LlmHold | null {
   const raw = meta.hold ?? meta.pending_hold ?? meta.pendingHold;
@@ -657,6 +666,7 @@ function parseHold(
 
   const nestedDirectory = parseDirectoryActions(record);
   const nestedReminders = parseReminderActions(record);
+  const nestedMessages = parseMessageActions(record);
   const nestedLists = Array.isArray(record.lists)
     ? record.lists.flatMap((entry) => {
         const action = toListAction(entry);
@@ -676,12 +686,15 @@ function parseHold(
   const reminders =
     nestedReminders.length > 0 ? nestedReminders : fallback.reminders;
   const filing = nestedFiling.length > 0 ? nestedFiling : fallback.filing;
+  const messages =
+    nestedMessages.length > 0 ? nestedMessages : fallback.messages;
 
   if (
     directory.length === 0 &&
     lists.length === 0 &&
     reminders.length === 0 &&
-    filing.length === 0
+    filing.length === 0 &&
+    messages.length === 0
   ) {
     return null;
   }
@@ -693,6 +706,7 @@ function parseHold(
     lists,
     reminders,
     filing,
+    messages,
   };
 }
 
@@ -902,14 +916,16 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
   }
 
   const record = value as Record<string, unknown>;
+  const targets = parseTargets(record);
   const text = readText(record, ["text", "message", "body", "תוכן"]);
-  if (!text) {
+  // Allow targets + empty text so "what to send?" can hold a draft.
+  if (!text && targets.length === 0) {
     return null;
   }
 
   return {
     text,
-    targets: parseTargets(record),
+    targets,
   };
 }
 

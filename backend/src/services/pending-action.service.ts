@@ -2,6 +2,7 @@ import type {
   LlmDirectoryAction,
   LlmFilingAction,
   LlmListAction,
+  LlmMessageAction,
   LlmReminderAction,
 } from "@workee/shared";
 import {
@@ -15,14 +16,16 @@ export type PendingHoldKind =
   | "directory"
   | "lists"
   | "reminders"
-  | "filing";
+  | "filing"
+  | "messages";
 
 export type PendingHoldAction = {
   action:
     | "complete_directory"
     | "complete_lists"
     | "complete_reminders"
-    | "complete_filing";
+    | "complete_filing"
+    | "complete_messages";
   step: "awaiting_fields";
   need: string;
   draft: {
@@ -30,6 +33,7 @@ export type PendingHoldAction = {
     lists?: LlmListAction[];
     reminders?: LlmReminderAction[];
     filing?: LlmFilingAction[];
+    messages?: LlmMessageAction[];
   };
   at: Date;
 };
@@ -182,6 +186,7 @@ export type LlmHold = {
   lists: LlmListAction[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
+  messages?: LlmMessageAction[];
 };
 
 const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {
@@ -189,6 +194,7 @@ const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {
   lists: "complete_lists",
   reminders: "complete_reminders",
   filing: "complete_filing",
+  messages: "complete_messages",
 };
 
 export function pendingHoldFromLlm(hold: LlmHold | null | undefined): PendingHoldAction | null {
@@ -199,11 +205,13 @@ export function pendingHoldFromLlm(hold: LlmHold | null | undefined): PendingHol
   if (!need) {
     return null;
   }
+  const messages = hold.messages ?? [];
   const draft = {
     ...(hold.directory.length > 0 ? { directory: hold.directory } : {}),
     ...(hold.lists.length > 0 ? { lists: hold.lists } : {}),
     ...(hold.reminders.length > 0 ? { reminders: hold.reminders } : {}),
     ...(hold.filing.length > 0 ? { filing: hold.filing } : {}),
+    ...(messages.length > 0 ? { messages } : {}),
   };
   if (Object.keys(draft).length === 0) {
     return null;
@@ -215,6 +223,71 @@ export function pendingHoldFromLlm(hold: LlmHold | null | undefined): PendingHol
     draft,
     at: new Date(),
   };
+}
+
+/** When the speaker named a recipient but left message text empty. */
+export function pendingHoldFromMissingMessages(
+  messages: LlmMessageAction[],
+): PendingHoldAction | null {
+  const drafts = messages.filter(
+    (row) => row.targets.length > 0 && !row.text.trim(),
+  );
+  if (drafts.length === 0) {
+    return null;
+  }
+  return {
+    action: "complete_messages",
+    step: "awaiting_fields",
+    need: "text",
+    draft: { messages: drafts },
+    at: new Date(),
+  };
+}
+
+/**
+ * If we are waiting for send text and the model did not emit a complete message,
+ * use the speaker's short reply as the body for the held targets.
+ */
+export function fillMessagesFromPendingHold(
+  pending: ConversationPendingAction | null,
+  messages: LlmMessageAction[],
+  speakerText: string,
+): LlmMessageAction[] | null {
+  if (
+    !pending ||
+    pending.action !== "complete_messages" ||
+    pending.step !== "awaiting_fields"
+  ) {
+    return null;
+  }
+  const already = messages.filter(
+    (row) => row.targets.length > 0 && row.text.trim(),
+  );
+  if (already.length > 0) {
+    return null;
+  }
+  const body = speakerText.trim();
+  if (!body) {
+    return null;
+  }
+  const lower = body.toLowerCase();
+  if (
+    lower === "לא" ||
+    lower === "בטל" ||
+    lower === "ביטול" ||
+    lower === "cancel" ||
+    lower === "no"
+  ) {
+    return null;
+  }
+  const drafts = pending.draft.messages ?? [];
+  if (drafts.length === 0) {
+    return null;
+  }
+  return drafts.map((row) => ({
+    targets: row.targets,
+    text: body,
+  }));
 }
 
 export function conversationPendingFromStored(row: {
@@ -275,7 +348,8 @@ export function conversationPendingFromStored(row: {
     (row.pendingAction === "complete_directory" ||
       row.pendingAction === "complete_lists" ||
       row.pendingAction === "complete_reminders" ||
-      row.pendingAction === "complete_filing")
+      row.pendingAction === "complete_filing" ||
+      row.pendingAction === "complete_messages")
   ) {
     const payload =
       row.pendingTargets &&
@@ -308,6 +382,9 @@ export function conversationPendingFromStored(row: {
           : undefined,
         filing: Array.isArray(draftRaw.filing)
           ? (draftRaw.filing as LlmFilingAction[])
+          : undefined,
+        messages: Array.isArray(draftRaw.messages)
+          ? (draftRaw.messages as LlmMessageAction[])
           : undefined,
       },
       at: row.pendingAt,
@@ -403,9 +480,10 @@ export function formatConversationPendingContext(
     `current_step: ${pending.step}`,
     `missing_field: ${pending.need}`,
     `known_draft: ${JSON.stringify(pending.draft)}`,
-    "The speaker's short reply fills missing_field for this draft — a name, time, number, or yes/no.",
+    "The speaker's short reply fills missing_field for this draft — a name, time, number, message body, or yes/no.",
     "Never reply לא הבנתי / מה תרצה לעשות to that short reply.",
-    "Complete the draft: emit the finished metadata (directory/lists/reminders/filing) with hold=null.",
+    "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
+    "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
     "If still missing something else, emit hold again with the updated draft and the new need.",
     "Do not start an unrelated new request until this hold is completed or the speaker clearly switches topic.",
   ].join("\n");
@@ -418,6 +496,7 @@ export function holdFulfilledByMetadata(
     lists: LlmListAction[];
     reminders: LlmReminderAction[];
     filing: LlmFilingAction[];
+    messages?: LlmMessageAction[];
     hold: LlmHold | null;
   },
 ): boolean {
@@ -446,6 +525,11 @@ export function holdFulfilledByMetadata(
         row.action === "add_filing" || row.action === "update_filing",
     );
   }
+  if (pending.action === "complete_messages") {
+    return (meta.messages ?? []).some(
+      (row) => row.targets.length > 0 && Boolean(row.text.trim()),
+    );
+  }
   return false;
 }
 
@@ -464,6 +548,14 @@ export function hasUnrelatedWorkWhileHold(input: {
   }
   if (holdFulfilledByMetadata(input.pending, input)) {
     return false;
+  }
+  if (input.pending.action === "complete_messages") {
+    return (
+      input.directory.length > 0 ||
+      input.lists.length > 0 ||
+      input.reminders.length > 0 ||
+      input.filing.length > 0
+    );
   }
   if (
     input.messages.some(
@@ -540,6 +632,7 @@ export function resolveNextPending(input: {
         lists: input.lists,
         reminders: input.reminders,
         filing: input.filing,
+        messages: input.messages,
         hold: input.hold,
       })
     ) {

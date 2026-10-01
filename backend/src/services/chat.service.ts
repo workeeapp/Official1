@@ -2,6 +2,7 @@ import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
   digitalEmployees,
   humanEmployees,
+  isGuestEmployee,
   parseLlmReply,
   parseReplyMetadata,
   type ChatHistoryResponse,
@@ -45,6 +46,7 @@ import {
   type SharedListRef,
 } from "./employee-targets.service.js";
 import { phonesMatch } from "../utils/phone.js";
+import { formatSessionClockContext } from "../utils/relative-date.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.js";
 import { recordLlmUsage } from "./llm-usage.service.js";
@@ -58,8 +60,10 @@ import {
 } from "./reminder.service.js";
 import {
   conversationPendingFromStored,
+  fillMessagesFromPendingHold,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
+  pendingHoldFromMissingMessages,
   pendingToStored,
   planListDeletes,
   resolveNextPending,
@@ -355,7 +359,7 @@ function workerTargetingInstructions(
     "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
     "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
-    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. Example: תשלחי הודעה לעמית המערכת למעלה → messages to עמית now (text from המערכת למעלה); do NOT ask מה תרצה שאשלח. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. Empty messages and reminders only while you must ask.",
+    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. Example: תשלחי הודעה לעמית המערכת למעלה → messages to עמית now (text from המערכת למעלה); do NOT ask מה תרצה שאשלח. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי) → send that text, hold=null — never ask again.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
@@ -378,7 +382,8 @@ function workerTargetingInstructions(
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. In response say the reminder(s) were deleted (past tense), naming them — never מאשרת/לאשר confirming language. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. In response: past tense that items were deleted, list every name from PENDING_ACTION_STATE current_target (e.g. נמחקו הפריטים הבאים מרשימת הקניות: …). Never מאשרת/לאשר/confirming — yes already confirmed. A single bought item (קניתי חלב) may remove immediately without confirm.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
-    "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report. Format lists as short intro + one • item per line — not a paragraph.",
+    "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): leave query empty. Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. TEAM_SCHEDULES / WORKER_SAVED_DATA only when they ask about another person by name, or what YOU (Lucy) still need to do. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
+    "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report. Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Exact list_name matches only.",
     "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes. It does not append a mutation summary.",
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
@@ -967,15 +972,21 @@ export async function sendChatMessage(input: {
   const waitingPending = await loadPendingAction(conversation.id);
   const waitingDeletes =
     waitingPending?.action === "delete_reminder" ? waitingPending : null;
-  const speakerContacts = await listContactsForEmployee(input.employeeId);
+  const guestSpeaker = isGuestEmployee(employee);
+  const speakerContacts = guestSpeaker
+    ? []
+    : await listContactsForEmployee(input.employeeId);
   const context = [
+    formatSessionClockContext(),
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
-    formatEmployeeContext(
-      await getEmployeeRecordSnapshot(digital.id),
-      "WORKER_SAVED_DATA",
-    ),
-    formatSpeakerContacts(speakerContacts),
-    formatTeamSchedules(await getTeamSchedules(input.userId)),
+    guestSpeaker
+      ? ""
+      : formatEmployeeContext(
+          await getEmployeeRecordSnapshot(digital.id),
+          "WORKER_SAVED_DATA",
+        ),
+    guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),
+    guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     formatConversationPendingContext(waitingPending),
   ]
     .filter(Boolean)
@@ -985,40 +996,89 @@ export async function sendChatMessage(input: {
     employees,
     loadLlmConfig().systemMessage,
   );
+  const guestModeInstructions = guestSpeaker
+    ? [
+        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are still לוסי.",
+        "Never say אני אורחת / אני רק אורחת / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
+        "Allowed ONLY: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
+        "Forbidden: weather, chitchat, advice, jokes, shopping adds, tasks, reminders, messages, directory, filings, anything not about those shared lists.",
+        "Off-topic (הים גלי / מה שלומך / ספרי בדיחה / anything outside shared lists) → response exactly or nearly: «אני יכולה לעזור רק עם הרשימות ששותפו איתך.» Empty lists/filing/reminders/messages/directory.",
+        "Add/update/delete/buy/remind/send while guest → response: «אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות.» Empty metadata arrays.",
+        "lists/filing/reminders/directory/messages must always stay []. Do not invent private data.",
+      ].join("\n")
+    : "";
   const instructions = attachLucyEngine
     ? [
         config.systemMessage,
         `The user is chatting as ${speaker}.`,
-        workerTargetingInstructions(employees, speaker, digital),
-        "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
-        "EMPLOYEE_SAVED_DATA is the speaker's saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
-        "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, preferences, IDs). It is injected every turn in full — use it when advising (trips, gifts, scheduling). Do not claim you lack a fact that appears there.",
-        "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
-        employee.isOwner
-          ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
-          : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
-        "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
-        "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA. Format: short intro + one • item per line (e.g. ברשימת הקניות שלך:\\n• חלב\\n• שוקו). Not a paragraph.",
-        "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): leave query empty. Answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
-        "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Worker להזכיר-ל / לשלוח-הודעה jobs count as your reminder work. List jobs one • per line.",
+        guestModeInstructions ||
+          workerTargetingInstructions(employees, speaker, digital),
+        guestSpeaker
+          ? "GUEST MODE: shared-list Q&A only. Never claim you (Lucy) are the guest. Off-topic → «אני יכולה לעזור רק עם הרשימות ששותפו איתך.»"
+          : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
+        "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+        guestSpeaker
+          ? ""
+          : "filing inside EMPLOYEE_SAVED_DATA is durable memory (family, preferences, IDs). It is injected every turn in full — use it when advising (trips, gifts, scheduling). Do not claim you lack a fact that appears there.",
+        guestSpeaker
+          ? ""
+          : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+        guestSpeaker
+          ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
+          : employee.isOwner
+            ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
+            : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
+        guestSpeaker
+          ? ""
+          : "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
+        guestSpeaker
+          ? ""
+          : "If asked what the speaker still needs to buy, use only shopping in EMPLOYEE_SAVED_DATA. Format: short intro + one • item per line (e.g. ברשימת הקניות שלך:\\n• חלב\\n• שוקו). Not a paragraph.",
+        guestSpeaker
+          ? ""
+          : "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): leave query empty. Answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
+        guestSpeaker
+          ? ""
+          : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from WORKER_SAVED_DATA. Worker להזכיר-ל / לשלוח-הודעה jobs count as your reminder work. List jobs one • per line.",
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (query, sections, clocks, metadata, list_name).",
         "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Never emit query report — the server no longer formats reports. Use short intro + one • item per line; never a dense paragraph.",
-        "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA in response — one • line per item. Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata.",
-        "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
-        "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
-        "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → delete confirm only (delete_reminder or delete_lists — not a send). current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true and empty reminders/lists; in response report past-tense deletion naming current_target (נמחקו… / מחקתי את התזכורת…) — never מאשרת/לאשר. No → confirm=false. Do not start unrelated work until the server clears the state.",
-        "If asked what you can do, list every capability. Saved data does not limit that answer.",
+        "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): leave query empty. SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. Ask about X by name / what YOU need → that block. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
+        "הציגי את הרשימות שלי / show my lists: one block per list — header (list_name + shared_with if shared), then • items with CURRENT field values only; blank line between lists. Never one run-on paragraph. Empty → «ריקה».",
+        "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA — one • line per item with the live value only (never «שם + שם חדש» / update drafts). Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata. items=[] → say the list is empty.",
+        "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. Exact list_name for יש רשימת X (בעיות ≠ באגים).",
+        "Bold in response: single *asterisks* only (WhatsApp). Never **double** asterisks.",
+        guestSpeaker
+          ? ""
+          : "lists update: put the NEW value under the real column name (שם / שם מטלה / …). Never emit \"שם חדש\" or \"X חדש\" as a separate key.",
+        guestSpeaker
+          ? ""
+          : "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
+        guestSpeaker
+          ? ""
+          : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
+        guestSpeaker
+          ? ""
+          : "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → delete confirm only (delete_reminder or delete_lists — not a send). current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true and empty reminders/lists; in response report past-tense deletion naming current_target (נמחקו… / מחקתי את התזכורת…) — never מאשרת/לאשר. No → confirm=false. Do not start unrelated work until the server clears the state.",
+        guestSpeaker
+          ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
+          : "If asked what you can do, list every capability. Saved data does not limit that answer.",
         "Ignore older shopping lists, tasks, or reminders from earlier turns when they conflict with EMPLOYEE_SAVED_DATA.",
-        "query reminders = ping clocks only (active_reminders). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+        guestSpeaker
+          ? ""
+          : "query reminders = ping clocks only (active_reminders). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
       ]
         .filter(Boolean)
         .join("\n\n")
-    : [config.systemMessage, thinSessionEnvelope({
-        employees,
-        speaker,
-        worker: digital,
-        speakerIsOwner: employee.isOwner === true,
-      })]
+    : [
+        config.systemMessage,
+        guestModeInstructions,
+        thinSessionEnvelope({
+          employees,
+          speaker,
+          worker: digital,
+          speakerIsOwner: employee.isOwner === true,
+        }),
+      ]
         .filter(Boolean)
         .join("\n\n");
   const message = [
@@ -1093,12 +1153,28 @@ export async function sendChatMessage(input: {
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
-    const metadata = resolveSpokenMetadata(
+    let metadata = resolveSpokenMetadata(
       input.message,
       parsedMetadata,
       humans,
       employee.id,
     );
+    let serverFilledSendText = "";
+    if (!guestSpeaker) {
+      const filledMessages = fillMessagesFromPendingHold(
+        waitingPending,
+        metadata.messages ?? [],
+        input.message,
+      );
+      if (filledMessages) {
+        serverFilledSendText = input.message.trim();
+        metadata = {
+          ...metadata,
+          messages: filledMessages,
+          hold: null,
+        };
+      }
+    }
     const listPlan = planListDeletes({
       lists: metadata.lists ?? [],
       confirm: metadata.confirm ?? null,
@@ -1123,7 +1199,9 @@ export async function sendChatMessage(input: {
       actor: employee,
       sender: digital,
       employees,
-      messages: resolveRelayMessages(parsedMetadata.messages ?? []),
+      messages: guestSpeaker
+        ? []
+        : resolveRelayMessages(metadata.messages ?? []),
     });
 
     const collectedEvents: SharedItemEvent[] = [];
@@ -1159,9 +1237,16 @@ export async function sendChatMessage(input: {
       listMutations.push(...recovered.mutations);
       cancelledReminders.push(...recovered.cancelledReminders);
     }
-    const guestMutationNotice = plan.guestMutationBlocked
-      ? "אורחים יכולים לצפות ברשימות ותיוקים משותפים, אבל לא להוסיף, לעדכן או למחוק."
-      : "";
+    const guestMutationNotice =
+      guestSpeaker &&
+      ((metadata.lists?.length ?? 0) > 0 ||
+        (metadata.filing?.length ?? 0) > 0 ||
+        (metadata.reminders?.length ?? 0) > 0 ||
+        (metadata.directory?.length ?? 0) > 0 ||
+        (parsedMetadata.messages?.length ?? 0) > 0 ||
+        plan.guestMutationBlocked)
+        ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
+        : "";
     const abandonPending = Boolean(
       waitingDeletes &&
         hasUnrelatedWorkWhilePending({
@@ -1173,21 +1258,21 @@ export async function sendChatMessage(input: {
         }),
     );
     const reminderPlan = planReminderWrites(
-      metadata.reminders ?? [],
+      guestSpeaker ? [] : metadata.reminders ?? [],
       metadata.confirm ?? null,
       waitingDeletes,
       { abandonPending },
     );
     const nextPending = resolveNextPending({
       stored: waitingPending,
-      hold: metadata.hold ?? null,
+      hold: guestSpeaker ? null : metadata.hold ?? null,
       reminderNext: reminderPlan.nextPending,
       listDeleteNext: listPlan.nextPending,
-      directory: metadata.directory ?? [],
-      lists: metadata.lists ?? [],
-      reminders: metadata.reminders ?? [],
-      filing: metadata.filing ?? [],
-      messages: metadata.messages ?? [],
+      directory: guestSpeaker ? [] : metadata.directory ?? [],
+      lists: guestSpeaker ? [] : metadata.lists ?? [],
+      reminders: guestSpeaker ? [] : metadata.reminders ?? [],
+      filing: guestSpeaker ? [] : metadata.filing ?? [],
+      messages: guestSpeaker ? [] : metadata.messages ?? [],
       confirm: metadata.confirm ?? null,
     });
     await savePendingAction(conversation.id, nextPending);
@@ -1198,11 +1283,13 @@ export async function sendChatMessage(input: {
       reminders: reminderPlan.apply,
       contacts: speakerContacts,
     });
-    const directoryResult = await applyDirectoryActions({
-      userId: input.userId,
-      ownerEmployeeId: employee.id,
-      actions: metadata.directory ?? [],
-    });
+    const directoryResult = guestSpeaker
+      ? { saved: [], removed: [] }
+      : await applyDirectoryActions({
+          userId: input.userId,
+          ownerEmployeeId: employee.id,
+          actions: metadata.directory ?? [],
+        });
     const refreshedContacts =
       directoryResult.saved.length > 0 || directoryResult.removed.length > 0
         ? await listContactsForEmployee(employee.id)
@@ -1243,13 +1330,13 @@ export async function sendChatMessage(input: {
       .join("\n");
 
     const phoneRelays = planPhoneRelays(
-      parsedMetadata.messages ?? [],
+      guestSpeaker ? [] : metadata.messages ?? [],
       employees,
       employee.id,
       refreshedContacts,
     );
     const outbound = planOutboundSends({
-      relays,
+      relays: guestSpeaker ? [] : relays,
       phones: phoneRelays,
     });
     if (outbound.held) {
@@ -1344,9 +1431,13 @@ export async function sendChatMessage(input: {
     const outboundSkips = [...waRelays.skips, ...waPhones.skips];
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = formatWhatsAppSkipNotice(skips);
-    const missingSend = formatMissingSendTextNotice(
-      parsedMetadata.messages ?? [],
-    );
+    const missingSend = formatMissingSendTextNotice(metadata.messages ?? []);
+    if (!guestSpeaker && missingSend) {
+      const sendHold = pendingHoldFromMissingMessages(metadata.messages ?? []);
+      if (sendHold) {
+        await savePendingAction(conversation.id, sendHold);
+      }
+    }
     const deliveryFailed = formatWhatsAppSkipNotice(outboundSkips).length > 0;
     const confirmPending =
       reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
@@ -1394,6 +1485,20 @@ export async function sendChatMessage(input: {
       );
     }
     // Do not append apply-summary lines — the spoken reply is the model's response only.
+    if (serverFilledSendText) {
+      const dests = (metadata.messages ?? [])
+        .flatMap((row) => row.targets)
+        .map((name) => name.trim())
+        .filter(Boolean);
+      const destLabel =
+        dests.length === 1 ? `ל«${dests[0]}»` : dests.length > 1 ? "להם" : "";
+      workingReply = setEngineResponse(
+        workingReply,
+        destLabel
+          ? `שלחתי ${destLabel}: «${serverFilledSendText}».`
+          : `שלחתי: «${serverFilledSendText}».`,
+      );
+    }
     const notice = [
       confirmPending ? "" : confirmAsk,
       guestMutationNotice,
@@ -1474,13 +1579,14 @@ async function listSharedCustomListsForActor(
   const rows = await prisma.employeeList.findMany({
     where: {
       listType: "custom",
-      scope: "shared",
       employee: { userId, kind: "human" },
+      OR: [{ employeeId: actorId }, { scope: "shared" }],
     },
     select: {
       employeeId: true,
       name: true,
       visibleTo: true,
+      scope: true,
     },
   });
   return rows
@@ -1488,15 +1594,18 @@ async function listSharedCustomListsForActor(
       const visibleTo = Array.isArray(row.visibleTo)
         ? row.visibleTo.filter((id): id is string => typeof id === "string")
         : [];
+      const scope = row.scope === "shared" ? "shared" : "personal";
       return {
         ownerId: row.employeeId,
         listName: row.name,
         visibleTo: [...new Set([row.employeeId, ...visibleTo])],
+        scope: scope as "personal" | "shared",
       };
     })
     .filter(
       (row) =>
         row.listName.trim() &&
-        (row.ownerId === actorId || row.visibleTo.includes(actorId)),
+        (row.ownerId === actorId ||
+          (row.scope === "shared" && row.visibleTo.includes(actorId))),
     );
 }

@@ -118,9 +118,12 @@ import {
   formatTeamSchedules,
   getEmployeeOwnedRecords,
   getEmployeeRecordSnapshot,
+  getTeamSchedules,
   updateEmployeeRecord,
   itemIdentity,
   isPhantomCustomListItem,
+  mergeListItemData,
+  normalizeListItemData,
   parseAssignmentNote,
 } from "../src/services/employee-records.service.js";
 
@@ -151,7 +154,13 @@ describe("employee records", () => {
     filingDelete.mockReset();
     filingDeleteMany.mockReset();
     employeeFindMany.mockReset().mockResolvedValue([]);
-    employeeFindUnique.mockReset().mockResolvedValue({ userId: "user-1" });
+    employeeFindUnique.mockReset().mockResolvedValue({
+      userId: "user-1",
+      kind: "human",
+      name: "טל",
+      nickname: null,
+      isOwner: false,
+    });
     reminderFindMany.mockReset().mockResolvedValue([]);
     reminderFindFirst.mockReset().mockResolvedValue(null);
     reminderUpdate.mockReset();
@@ -167,6 +176,200 @@ describe("employee records", () => {
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");
+  });
+
+  it("collapses update-draft keys onto the real column", () => {
+    expect(
+      mergeListItemData(
+        { שם: "להוריד את הגרסה" },
+        { שם: "להוריד את הגרסה", "שם חדש": "לא להוריד את הגרסה" },
+      ),
+    ).toEqual({ שם: "לא להוריד את הגרסה" });
+    expect(
+      normalizeListItemData({
+        שם: "ישן",
+        "שם חדש": "חדש",
+        הערה: "נשאר",
+      }),
+    ).toEqual({ שם: "חדש", הערה: "נשאר" });
+    expect(
+      mergeListItemData({ "שם מטלה": "ישן" }, { "שם מטלה חדש": "חדש" }),
+    ).toEqual({ "שם מטלה": "חדש" });
+  });
+
+  it("on lists update, stores only the new name (not שם + שם חדש)", async () => {
+    const list = {
+      id: "bugs-list",
+      employeeId: talId,
+      listType: "custom",
+      name: "באגים",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    };
+    const stored = {
+      id: "bug-1",
+      itemKey: "להוריד את הגרסה",
+      data: { שם: "להוריד את הגרסה" },
+      scope: "shared",
+      addedById: talId,
+      visibleTo: [talId, employeeId],
+      deletedAt: null,
+    };
+    listFindUnique.mockResolvedValue(list);
+    itemFindMany.mockResolvedValue([stored]);
+    itemFindFirst.mockResolvedValue(stored);
+    itemUpdate.mockResolvedValue({ id: "bug-1" });
+
+    await applyEmployeeMetadata(
+      talId,
+      {
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "באגים",
+            items: [
+              {
+                שם: "להוריד את הגרסה",
+                "שם חדש": "לא להוריד את הגרסה",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      undefined,
+      talId,
+    );
+
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "bug-1" },
+      data: expect.objectContaining({
+        itemKey: "לא להוריד את הגרסה",
+        data: { שם: "לא להוריד את הגרסה" },
+      }),
+    });
+  });
+
+  it("snapshot hides leftover שם חדש draft keys", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        id: "bugs-list",
+        employeeId: talId,
+        listType: "custom",
+        name: "באגים",
+        scope: "shared",
+        visibleTo: [talId, employeeId],
+        employee: { id: talId, name: "טל", nickname: null },
+        items: [
+          {
+            id: "bug-1",
+            itemKey: "להוריד את הגרסה",
+            data: {
+              שם: "להוריד את הגרסה",
+              "שם חדש": "לא להוריד את הגרסה",
+            },
+            scope: "shared",
+            addedById: talId,
+            visibleTo: [talId, employeeId],
+          },
+        ],
+      },
+    ]);
+    employeeFindMany.mockResolvedValue([
+      { id: talId, name: "טל", nickname: null },
+      { id: employeeId, name: "עמית", nickname: null },
+    ]);
+    filingFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([]);
+
+    const snapshot = await getEmployeeRecordSnapshot(talId);
+    expect(snapshot.lists[0]?.items[0]).toEqual(
+      expect.objectContaining({
+        שם: "לא להוריד את הגרסה",
+        scope: "shared",
+        owner: "טל",
+      }),
+    );
+    expect(snapshot.lists[0]?.items[0]).not.toHaveProperty("שם חדש");
+  });
+
+  it("guest snapshot excludes personal shopping and keeps shared partner lists", async () => {
+    const guestId = "449eb6c9-14b8-44e4-b6d5-988bab53b396";
+    employeeFindUnique.mockResolvedValue({
+      userId: "user-1",
+      kind: "human",
+      name: "אורח",
+      nickname: "מיכל",
+      isOwner: false,
+    });
+    listFindMany
+      .mockResolvedValueOnce([
+        {
+          id: "guest-shop",
+          employeeId: guestId,
+          listType: "shopping",
+          name: "",
+          scope: "personal",
+          visibleTo: [],
+          employee: { id: guestId, name: "אורח", nickname: "מיכל" },
+          items: [
+            {
+              data: { "שם פריט": "ביצים" },
+              scope: "personal",
+              itemKey: "ביצים",
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "maya-lessons",
+          employeeId: talId,
+          listType: "custom",
+          name: "שיעורי הנהיגה של מאיה",
+          scope: "shared",
+          visibleTo: [talId, guestId],
+          employee: { id: talId, name: "טל", nickname: "טל" },
+          items: [
+            {
+              data: { שם: "שיעור 1" },
+              scope: "shared",
+              itemKey: "שיעור 1",
+            },
+          ],
+        },
+      ]);
+    itemFindMany.mockResolvedValue([]);
+    employeeFindMany.mockResolvedValue([
+      { id: guestId, name: "אורח", nickname: "מיכל" },
+      { id: talId, name: "טל", nickname: "טל" },
+    ]);
+    filingFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([
+      {
+        id: "rem-1",
+        ownerId: guestId,
+        status: "active",
+        item: "לקנות ביצים",
+        pingIds: [guestId],
+      },
+    ]);
+
+    const snapshot = await getEmployeeRecordSnapshot(guestId);
+    expect(snapshot.lists).toEqual([
+      expect.objectContaining({
+        list_type: "custom",
+        list_name: "שיעורי הנהיגה של מאיה",
+        scope: "shared",
+        owner: "טל",
+      }),
+    ]);
+    expect(snapshot.lists.some((row) => row.list_type === "shopping")).toBe(
+      false,
+    );
+    expect(snapshot.reminders).toEqual([]);
   });
 
   it("ignores list_name when identifying a custom row", () => {
@@ -290,6 +493,9 @@ describe("employee records", () => {
     expect(
       deriveCustomListName([{ listName: "Maya driving lessons", paid: "no" }]),
     ).toBe("Maya driving lessons");
+    expect(
+      deriveCustomListName([{ "שם הרשימה": "משימות לעבודה", שם: "פריט" }]),
+    ).toBe("משימות לעבודה");
     expect(deriveCustomListName([{ תאריך: "2026-09-29" }])).toBe("");
     expect(deriveCustomListName([])).toBe("");
   });
@@ -427,8 +633,59 @@ describe("employee records", () => {
     ]);
 
     expect(schedules).toContain("TEAM_SCHEDULES");
+    expect(schedules).toContain("same ownership rules");
     expect(schedules).toContain("טל");
     expect(schedules).toContain("10:00");
+  });
+
+  it("scopes team schedules with the same ownership gate as saved data", async () => {
+    listFindMany.mockResolvedValueOnce([
+      {
+        listType: "tasks",
+        employee: { name: "טל", nickname: null },
+        items: [
+          {
+            itemKey: "פגישה שלי",
+            data: { "שם מטלה": "פגישה שלי", "תאריך לביצוע": "יום שלישי" },
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+
+    const nonOwner = await getTeamSchedules(employeeId);
+    expect(listFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { listType: "tasks", employeeId },
+      }),
+    );
+    expect(nonOwner).toEqual([
+      {
+        owner: "טל",
+        item_name: "פגישה שלי",
+        date: "יום שלישי",
+        time: null,
+        all_day: false,
+      },
+    ]);
+
+    employeeFindUnique.mockResolvedValueOnce({
+      userId: "user-1",
+      kind: "human",
+      name: "טל",
+      nickname: null,
+      isOwner: true,
+    });
+    listFindMany.mockResolvedValueOnce([]);
+    await getTeamSchedules(employeeId);
+    expect(listFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          listType: "tasks",
+          employee: { userId: "user-1", kind: "human" },
+        },
+      }),
+    );
   });
 
   it("applies add, update, and remove actions for lists, tasks, and filings", async () => {
@@ -659,7 +916,9 @@ describe("employee records", () => {
       {
         listType: "tasks",
         name: "",
-        employee: { name: "עמית", nickname: "עמית" },
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
         items: [{ data: { "שם מטלה": "לקנות מתנה" }, scope: "personal" }],
       },
     ]);
@@ -676,6 +935,7 @@ describe("employee records", () => {
         {
           list_type: "tasks",
           owner: "עמית",
+          scope: "personal",
           items: [{ "שם מטלה": "לקנות מתנה", scope: "personal", owner: "עמית" }],
         },
       ],
@@ -688,6 +948,71 @@ describe("employee records", () => {
         },
       ],
       reminders: [],
+    });
+  });
+
+  it("includes empty shared custom lists with shared_with partners", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        id: "bugs",
+        listType: "custom",
+        name: "בעיות",
+        scope: "shared",
+        visibleTo: [employeeId, talId],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+        items: [],
+      },
+    ]);
+    employeeFindMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: "עמית" },
+      { id: talId, name: "טל", nickname: "טל" },
+    ]);
+    filingFindMany.mockResolvedValue([]);
+
+    await expect(getEmployeeRecordSnapshot(employeeId)).resolves.toEqual({
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "בעיות",
+          owner: "עמית",
+          scope: "shared",
+          shared_with: ["עמית", "טל"],
+          items: [],
+        },
+      ],
+      filing: [],
+      reminders: [],
+    });
+  });
+
+  it("derives list_name from שם הרשימה when the list row name is empty", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        listType: "custom",
+        name: "",
+        scope: "shared",
+        visibleTo: [employeeId, talId],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+        items: [
+          {
+            data: { "שם הרשימה": "משימות לעבודה", שם: "לטפל באורח" },
+            scope: "shared",
+          },
+        ],
+      },
+    ]);
+    employeeFindMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: "עמית" },
+      { id: talId, name: "טל", nickname: "טל" },
+    ]);
+    filingFindMany.mockResolvedValue([]);
+
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    expect(snap.lists[0]).toMatchObject({
+      list_type: "custom",
+      list_name: "משימות לעבודה",
+      scope: "shared",
+      shared_with: ["עמית", "טל"],
     });
   });
 
@@ -820,7 +1145,9 @@ describe("employee records", () => {
       {
         listType: "tasks",
         name: "",
-        employee: { name: "עמית", nickname: "עמית" },
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
         items: [
           {
             data: { "שם מטלה": "טל צריך לקנות קופסת טונה" },

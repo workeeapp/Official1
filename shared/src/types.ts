@@ -129,7 +129,7 @@ export function isGuestEmployee(
   if (employee.kind === "digital") {
     return false;
   }
-  const name = employee.name.trim();
+  const name = (employee.name ?? "").trim();
   const nickname = employee.nickname?.trim() ?? "";
   return name === "אורח" || nickname === "אורח" || nickname.startsWith("אורח ");
 }

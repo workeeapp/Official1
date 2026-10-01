@@ -14,6 +14,7 @@ npm run db:seed
 npm run dev
 ```
 
+`npm run dev` also runs `predev` → `prisma migrate deploy`, so pending schema migrations are applied before the API/frontend start.
 Or point `DATABASE_URL` at an existing PostgreSQL database. `docker-compose.yml` publishes Postgres on **5432**. If that port is taken, remap the container (this repo’s local box uses **5435**) and set `DATABASE_URL` to match.
 
 - Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
@@ -59,15 +60,16 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 ## Lists, meetings, sharing
 
-- **Shopping** = things to buy. **Tasks** = work to do (including meetings with date/time). Dated tasks also appear in `TEAM_SCHEDULES` so the worker can see other people’s calendar rows without their private shopping.
+- **Shopping** = things to buy. **Tasks** = work to do (including meetings with date/time). Dated tasks also appear in `TEAM_SCHEDULES` under the **same ownership gate** as `EMPLOYEE_SAVED_DATA` (`resolveRecordVisibility`): owners see every human’s dated tasks; non-owners see only their own. Guests get no team schedule block.
 - **Custom lists** = named lists with user-defined columns. When asked to show a list (e.g. שיעורי נהיגה של מאיה), answer with the **items and their fields**, not only the owner’s name.
-- **Dates:** store concrete `YYYY-MM-DD` (Asia/Jerusalem). Exact labels `היום` / `מחר` / `אתמול` (and today/tomorrow/yesterday) are resolved on save — do not leave the word היום in saved data.
+- **Dates (save):** store concrete `YYYY-MM-DD` (Asia/Jerusalem). Exact labels `היום` / `מחר` / `אתמול` (and today/tomorrow/yesterday) are resolved on save — do not leave the word היום in saved data.
+- **Dates (ask):** each chat turn injects `SESSION_CLOCK` (`current_date`, `current_time`, timezone Asia/Jerusalem). Questions like «מה לעשות היום / בעוד שעתיים / השבוע» are answered by the model filtering against that clock — the server does **not** pre-filter rows or build a status report. For **אני / שלי**, use only the speaker’s personal tasks + their active reminders in `EMPLOYEE_SAVED_DATA` — not `WORKER_SAVED_DATA` and not other people’s schedule rows. Empty timed windows should be spoken in plain Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה), not jargon like «מטלות מתוזמנות».
 - On remove/update, the server resolves `list_type` from where the item actually lives. If the spoken reply says קניות for a tasks item, the reply is corrected to מטלות (and the reverse).
 - List/filing actions may target another human or `כולם`. Shared shopping changes can notify the other person’s assistant thread when someone buys or updates an item.
 
 ## People, visibility, contacts
 
-- **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA`; non-owners see their own.
+- **Employees** — humans and digital workers on the account. `is_owner` marks account owners (any number, including zero). Owners see every human’s lists/tasks/filings/clocks in `EMPLOYEE_SAVED_DATA` (and the same scope in `TEAM_SCHEDULES`); non-owners see their own.
 - **Contacts** — the speaker’s personal phone book (`metadata.directory`). Resolve message/reminder targets via Employees first, then contacts. Do **not** create Employees for outsiders.
 - WhatsApp inbound from an unknown number may create a temporary guest Employee named `אורח …XXXX`. Guests are hidden from the Employees UI and Chat-as picker.
 

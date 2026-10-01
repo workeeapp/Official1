@@ -15,12 +15,18 @@ import { matchContact, type SpeakerContact } from "./contact.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
-/** Existing shared custom list the speaker can see / mutate. */
+/** Existing custom list the speaker can see / mutate (personal or shared). */
 export type SharedListRef = {
   ownerId: string;
   listName: string;
   visibleTo: string[];
+  /** Defaults to "shared" when omitted (older call sites / tests). */
+  scope?: "personal" | "shared";
 };
+
+function listScopeOf(row: SharedListRef): "personal" | "shared" {
+  return row.scope === "personal" ? "personal" : "shared";
+}
 
 export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
@@ -174,6 +180,11 @@ export function planPhoneRelays(
         phone = normalizePhoneDigits(raw);
         label = phone;
       } else {
+        // Named employees are delivered via relay WhatsApp — do not also
+        // send through the contacts book when the same person appears there.
+        if (matchEmployee(raw, employees)) {
+          continue;
+        }
         const contact = matchContact(raw, contacts);
         if (!contact) {
           continue;
@@ -182,6 +193,16 @@ export function planPhoneRelays(
         label = contact.name;
       }
       if (!phone || seen.has(phone)) {
+        continue;
+      }
+      // Same phone as a workspace human already covered by relay delivery.
+      const employeeWithPhone = employees.find(
+        (employee) =>
+          employee.id !== actorId &&
+          employee.phone &&
+          phonesMatch(employee.phone, phone),
+      );
+      if (employeeWithPhone) {
         continue;
       }
       seen.add(phone);
@@ -292,26 +313,20 @@ export function planTargetedActions(input: {
 
   for (const list of input.metadata.lists) {
     const normalizedList = normalizeSharedCustomList(list);
-    const existingSharedMatches = findSharedListsForActor(
+    const existingListMatches = findExistingCustomListsForActor(
       normalizedList,
       input.actor.id,
       input.sharedLists ?? [],
     );
-    if (existingSharedMatches.length > 0) {
+    if (existingListMatches.length > 0) {
       // Removes/updates must hit every duplicate shared list with that name
       // (legacy bugs created one copy per partner). Adds go to one canonical owner.
+      // Audience is always from DB scope/visibleTo — never from this turn's LLM targets.
       const mutationTargets =
         normalizedList.action === "remove" ||
         normalizedList.action === "update"
-          ? existingSharedMatches
-          : [preferSharedList(existingSharedMatches)!];
-      const unionVisibleTo = uniqueIds(
-        mutationTargets.flatMap((row) => [
-          row.ownerId,
-          input.actor.id,
-          ...row.visibleTo,
-        ]),
-      );
+          ? existingListMatches
+          : [preferSharedList(existingListMatches)!];
       const notifyMetadata = {
         lists: [
           {
@@ -322,36 +337,45 @@ export function planTargetedActions(input: {
         ],
         filing: [],
       };
-      for (const existingShared of mutationTargets) {
-        const visibleTo = uniqueIds([
-          existingShared.ownerId,
-          input.actor.id,
-          ...existingShared.visibleTo,
-        ]);
+      for (const existingList of mutationTargets) {
+        const scope = listScopeOf(existingList);
+        const visibleTo =
+          scope === "shared"
+            ? uniqueIds([
+                existingList.ownerId,
+                input.actor.id,
+                ...existingList.visibleTo,
+              ])
+            : uniqueIds([existingList.ownerId]);
         applications.push({
-          employeeId: existingShared.ownerId,
+          employeeId: existingList.ownerId,
           metadata: {
             lists: [
               {
                 ...normalizedList,
-                listName: existingShared.listName,
+                listName: existingList.listName,
                 targets: [],
               },
             ],
             filing: [],
           },
           visibility: {
-            scope: "shared",
+            scope,
             addedById: input.actor.id,
             visibleTo,
           },
         });
       }
       // Re-sharing / touching an existing list with no rows is a no-op for partners.
-      // Only notify when there is a real item mutation (add/update/remove payload).
+      // Only notify real shared-list partners from DB (not personal lists, not LLM targets).
       if (normalizedList.items.length > 0 || normalizedList.action !== "add") {
-        const partners = partnerLabelFromIds(unionVisibleTo);
-        for (const partnerId of unionVisibleTo) {
+        const notifyIds = uniqueIds(
+          mutationTargets
+            .filter((row) => listScopeOf(row) === "shared")
+            .flatMap((row) => [row.ownerId, ...row.visibleTo]),
+        );
+        const partners = partnerLabelFromIds(notifyIds);
+        for (const partnerId of notifyIds) {
           addNotification(partnerId, notifyMetadata, partners);
         }
       }
@@ -980,12 +1004,13 @@ function uniqueIds(ids: Array<string | null | undefined>): string[] {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-function findSharedListsForActor(
+/** Exact name match only — substring matching caused wrong-partner notifies. */
+function findExistingCustomListsForActor(
   list: Pick<LlmListAction, "listType" | "listName" | "items">,
   actorId: string,
-  sharedLists: SharedListRef[],
+  knownLists: SharedListRef[],
 ): SharedListRef[] {
-  if (list.listType !== "custom" || sharedLists.length === 0) {
+  if (list.listType !== "custom" || knownLists.length === 0) {
     return [];
   }
   const needle =
@@ -998,30 +1023,20 @@ function findSharedListsForActor(
     return [];
   }
   const normalizedNeedle = normalizeLoose(needle);
-  const matches = sharedLists.filter((row) => {
+  const matches = knownLists.filter((row) => {
     const canSee =
       row.ownerId === actorId || row.visibleTo.includes(actorId);
     if (!canSee) {
       return false;
     }
-    const name = normalizeLoose(row.listName);
-    return (
-      name === normalizedNeedle ||
-      name.includes(normalizedNeedle) ||
-      normalizedNeedle.includes(name)
-    );
+    return normalizeLoose(row.listName) === normalizedNeedle;
   });
-  // Prefer exact name, then shortest containing match (avoid grabbing a longer unrelated list).
   matches.sort((a, b) => {
-    const aExact = normalizeLoose(a.listName) === normalizedNeedle ? 0 : 1;
-    const bExact = normalizeLoose(b.listName) === normalizedNeedle ? 0 : 1;
-    if (aExact !== bExact) {
-      return aExact - bExact;
+    const scopeRank = (row: SharedListRef) =>
+      listScopeOf(row) === "shared" ? 0 : 1;
+    if (scopeRank(a) !== scopeRank(b)) {
+      return scopeRank(a) - scopeRank(b);
     }
-    if (a.listName.length !== b.listName.length) {
-      return a.listName.length - b.listName.length;
-    }
-    // Stable pick among duplicate exact names (legacy one-list-per-partner rows).
     return a.ownerId.localeCompare(b.ownerId);
   });
   return matches;
@@ -1031,8 +1046,13 @@ function preferSharedList(matches: SharedListRef[]): SharedListRef | null {
   if (matches.length === 0) {
     return null;
   }
-  // Prefer the most widely shared copy, then stable owner id.
+  // Prefer shared over personal, then widest visibleTo, then stable owner id.
   const ranked = [...matches].sort((a, b) => {
+    const aShared = listScopeOf(a) === "shared" ? 0 : 1;
+    const bShared = listScopeOf(b) === "shared" ? 0 : 1;
+    if (aShared !== bShared) {
+      return aShared - bShared;
+    }
     if (b.visibleTo.length !== a.visibleTo.length) {
       return b.visibleTo.length - a.visibleTo.length;
     }
@@ -1046,5 +1066,7 @@ function findSharedListForActor(
   actorId: string,
   sharedLists: SharedListRef[],
 ): SharedListRef | null {
-  return preferSharedList(findSharedListsForActor(list, actorId, sharedLists));
+  return preferSharedList(
+    findExistingCustomListsForActor(list, actorId, sharedLists),
+  );
 }

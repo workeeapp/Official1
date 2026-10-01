@@ -15,6 +15,58 @@ export function jerusalemYmd(now = new Date()): string {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/** Local wall-clock HH:mm in Asia/Jerusalem. */
+export function jerusalemHm(now = new Date()): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Jerusalem",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.hour}:${parts.minute}`;
+}
+
+export type SessionClock = {
+  timezone: "Asia/Jerusalem";
+  currentDate: string;
+  currentTime: string;
+  nowIso: string;
+};
+
+/** Facts for the model to answer "today / in 2 hours / this week" against saved rows. */
+export function sessionClock(now = new Date()): SessionClock {
+  return {
+    timezone: "Asia/Jerusalem",
+    currentDate: jerusalemYmd(now),
+    currentTime: jerusalemHm(now),
+    nowIso: now.toISOString(),
+  };
+}
+
+/**
+ * Injected every chat turn. The model filters EMPLOYEE_SAVED_DATA / schedules /
+ * reminders vs this clock — the server does not pre-filter for "today" questions.
+ */
+export function formatSessionClockContext(now = new Date()): string {
+  const clock = sessionClock(now);
+  return [
+    "SESSION_CLOCK:",
+    `timezone: ${clock.timezone}`,
+    `current_date: ${clock.currentDate}`,
+    `current_time: ${clock.currentTime}`,
+    `now_iso: ${clock.nowIso}`,
+    "Use this clock when the speaker asks what is due today, tomorrow, this week/month, in N hours/days, or similar.",
+    "Compare date/time fields for the question's subject only: אני/שלי → speaker personal tasks + their active_reminders in EMPLOYEE_SAVED_DATA. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
+    "Answer in response only — leave query empty (never query report). The server does not filter the rows for you.",
+    "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה) — never jargon like מטלות מתוזמנות.",
+  ].join("\n");
+}
+
 function shiftJerusalemYmd(now: Date, dayDelta: number): string {
   const [year, month, day] = jerusalemYmd(now).split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + dayDelta));

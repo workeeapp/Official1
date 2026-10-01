@@ -322,7 +322,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["directory", "lists", "reminders", "filing"]
+                    "enum": ["directory", "lists", "reminders", "filing", "messages"]
                   },
                   "need": { "type": "string" },
                   "directory": {
@@ -342,7 +342,21 @@
                   },
                   "lists": { "type": "array", "items": { "type": "object" } },
                   "reminders": { "type": "array", "items": { "type": "object" } },
-                  "filing": { "type": "array", "items": { "type": "object" } }
+                  "filing": { "type": "array", "items": { "type": "object" } },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "targets": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        },
+                        "text": { "type": "string" }
+                      },
+                      "required": ["targets", "text"]
+                    }
+                  }
                 }
               },
               "handoff": {

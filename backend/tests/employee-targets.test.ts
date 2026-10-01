@@ -495,6 +495,104 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.employeeId).toBe(amit.id);
   });
 
+  it("does not notify partners when updating a personal custom list even if LLM targets include them", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "שיעורי נהיגה של מאיה",
+          visibleTo: [tal.id],
+          scope: "personal",
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "שיעורי נהיגה של מאיה",
+            // Model wrongly re-states teammates as targets.
+            targets: ["טל", "עמית"],
+            items: [{ שיעור: "שיעור 5" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.visibility.scope).toBe("personal");
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual([tal.id]);
+    expect(plan.notifications).toHaveLength(0);
+  });
+
+  it("does not match an unrelated shared list by substring name", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "שיעורי",
+          visibleTo: [tal.id, amit.id],
+          scope: "shared",
+        },
+        {
+          ownerId: tal.id,
+          listName: "שיעורי נהיגה של מאיה",
+          visibleTo: [tal.id],
+          scope: "personal",
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "שיעורי נהיגה של מאיה",
+            targets: ["טל", "עמית"],
+            items: [{ שיעור: "שיעור 6" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications[0]?.visibility.scope).toBe("personal");
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([]);
+  });
+
+  it("notifies only DB partners of a shared list, ignoring extra LLM targets", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+          scope: "shared",
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "בעיות",
+            targets: ["טל", "עמית", "שני"],
+            items: [{ תיאור: "עודכן" }],
+          },
+        ],
+      },
+    });
+    expect(plan.notifications.map((row) => row.employee.id).sort()).toEqual(
+      [amit.id].sort(),
+    );
+  });
+
   it("notifies an item add on an existing shared list, not a new list shell", () => {
     const plan = planTargetedActions({
       actor: tal,
@@ -836,6 +934,17 @@ describe("employee targets", () => {
         amit.id,
       ),
     ).toEqual([{ phone: "0502222222", text: "היי מהמטה", label: "0502222222" }]);
+  });
+
+  it("does not double-send when the recipient is both an employee and a contact", () => {
+    expect(
+      planPhoneRelays(
+        [{ targets: ["טל"], text: "שלום" }],
+        employees,
+        amit.id,
+        [{ id: "c1", name: "טל", phone: "0501111111" }],
+      ),
+    ).toEqual([]);
   });
 
   it("keeps one shared custom list on the speaker and notifies partners", () => {

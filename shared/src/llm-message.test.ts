@@ -240,6 +240,28 @@ describe("parseLlmReply", () => {
     expect(
       parseReplyMetadata(
         JSON.stringify({
+          response: "מה לשלוח למאיה?",
+          metadata: {
+            messages: [{ targets: ["מאיה"], text: "" }],
+            hold: {
+              kind: "messages",
+              need: "text",
+              messages: [{ targets: ["מאיה"], text: "" }],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      messages: [{ targets: ["מאיה"], text: "" }],
+      hold: {
+        kind: "messages",
+        need: "text",
+        messages: [{ targets: ["מאיה"], text: "" }],
+      },
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
           response: "מה שם המשפחה?",
           metadata: {
             hold: {

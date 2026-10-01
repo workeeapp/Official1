@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatSessionClockContext,
+  jerusalemHm,
   jerusalemYmd,
   normalizeRelativeDatesInRecord,
   resolveRelativeDateLabel,
+  sessionClock,
 } from "../src/utils/relative-date.js";
 
 describe("relative-date", () => {
@@ -31,5 +34,26 @@ describe("relative-date", () => {
       תאריך: jerusalemYmd(noonUtc),
       נושא: "חניה",
     });
+  });
+
+  it("builds a Jerusalem session clock for ask-time filtering", () => {
+    const clock = sessionClock(noonUtc);
+    expect(clock.timezone).toBe("Asia/Jerusalem");
+    expect(clock.currentDate).toBe(jerusalemYmd(noonUtc));
+    expect(clock.currentTime).toBe(jerusalemHm(noonUtc));
+    expect(clock.currentTime).toMatch(/^\d{2}:\d{2}$/);
+    expect(clock.nowIso).toBe(noonUtc.toISOString());
+  });
+
+  it("formats SESSION_CLOCK context for the model", () => {
+    const text = formatSessionClockContext(noonUtc);
+    expect(text).toContain("SESSION_CLOCK:");
+    expect(text).toContain(`current_date: ${jerusalemYmd(noonUtc)}`);
+    expect(text).toContain(`current_time: ${jerusalemHm(noonUtc)}`);
+    expect(text).toContain("Asia/Jerusalem");
+    expect(text).toContain("does not filter the rows for you");
+    expect(text).toContain("מטלות מתוזמנות");
+    expect(text).toContain("אני/שלי");
+    expect(text).toContain("WORKER_SAVED_DATA");
   });
 });

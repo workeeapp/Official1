@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   conversationPendingFromStored,
+  fillMessagesFromPendingHold,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
   pendingHoldFromLlm,
+  pendingHoldFromMissingMessages,
   pendingToStored,
   planListDeletes,
   resolveNextPending,
@@ -43,6 +45,39 @@ describe("pending action hold", () => {
     expect(context).toContain("שם משפחה");
     expect(context).toContain("יואב");
     expect(context).toContain("Never reply לא הבנתי");
+  });
+
+  it("holds a missing WhatsApp body and fills it from the short reply", () => {
+    const hold = pendingHoldFromMissingMessages([
+      { targets: ["מאיה"], text: "" },
+    ]);
+    expect(hold?.action).toBe("complete_messages");
+    expect(hold?.draft.messages).toEqual([{ targets: ["מאיה"], text: "" }]);
+
+    const context = formatConversationPendingContext(hold);
+    expect(context).toContain("complete_messages");
+    expect(context).toContain("מאיה");
+
+    expect(
+      fillMessagesFromPendingHold(hold, [], "היי"),
+    ).toEqual([{ targets: ["מאיה"], text: "היי" }]);
+    expect(
+      fillMessagesFromPendingHold(hold, [{ targets: ["מאיה"], text: "היי" }], "היי"),
+    ).toBeNull();
+    expect(fillMessagesFromPendingHold(hold, [], "בטל")).toBeNull();
+
+    const completed = resolveNextPending({
+      stored: hold,
+      hold: null,
+      reminderNext: null,
+      directory: [],
+      lists: [],
+      reminders: [],
+      filing: [],
+      messages: [{ targets: ["מאיה"], text: "היי" }],
+      confirm: null,
+    });
+    expect(completed).toBeNull();
   });
 
   it("keeps the hold until the directory add is completed", () => {
