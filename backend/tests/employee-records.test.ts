@@ -623,6 +623,7 @@ describe("employee records", () => {
     expect(context).toContain("item_description");
     expect(context).toContain("durable personal facts");
     expect(context).toContain("filing");
+    expect(context).toContain("LIVE FACTS THIS TURN");
   });
 
   it("formats dated team schedules for meeting conflict checks", () => {

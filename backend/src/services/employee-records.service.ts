@@ -351,6 +351,7 @@ export function formatEmployeeContext(
   return [
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
+    "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel PENDING_ACTION_STATE / hold drafts (send text, confirm delete, missing phone/time) — those stay active until completed.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     JSON.stringify({
@@ -808,13 +809,18 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
-  const ownLists =
+  const ownListsScoped =
     viewerScope && !viewerScope.seeAll && options?.scopeItemsToViewerId
       ? await filterListItemsTiedToSpeaker(
           ownListsRaw,
           options.scopeItemsToViewerId,
         )
       : ownListsRaw;
+  // After viewer scoping, drop empty list shells so day/self answers cannot latch onto stale list types.
+  const ownLists =
+    viewerScope && !viewerScope.seeAll && options?.scopeItemsToViewerId
+      ? ownListsScoped.filter((list) => list.items.length > 0)
+      : ownListsScoped;
   const names = new Map(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );

@@ -55,5 +55,6 @@ describe("relative-date", () => {
     expect(text).toContain("מטלות מתוזמנות");
     expect(text).toContain("אני/שלי");
     expect(text).toContain("WORKER_SAVED_DATA");
+    expect(text).toContain("מה את");
   });
 });
