@@ -398,6 +398,7 @@ describe("parseLlmReply", () => {
         confirmed: false,
         compose: false,
         composeSource: "",
+        composeLookbackHours: 0,
       },
     ]);
   });
@@ -465,6 +466,7 @@ describe("parseLlmReply", () => {
                 text: "Summarize product features and bug fixes since the last report in clear English.",
                 compose: true,
                 compose_source: "git_log",
+                compose_lookback_hours: 168,
               },
             ],
           },
@@ -474,8 +476,33 @@ describe("parseLlmReply", () => {
       {
         compose: true,
         composeSource: "git_log",
+        composeLookbackHours: 168,
       },
     ]);
+  });
+
+  it("reads fractional compose_lookback_hours for short windows", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "סיכום 5 דקות",
+                in: 10,
+                ping: ["טל"],
+                text: "Summarize code changes from the last 5 minutes.",
+                compose: true,
+                compose_source: "git_log",
+                compose_lookback_hours: 0.083,
+              },
+            ],
+          },
+        }),
+      ).reminders[0]?.composeLookbackHours,
+    ).toBeCloseTo(0.083, 3);
   });
 
   it("reads structured every_count and weekdays", () => {

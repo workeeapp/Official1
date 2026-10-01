@@ -425,6 +425,7 @@
                       "type": "string",
                       "enum": ["", "git_log"]
                     },
+                    "compose_lookback_hours": { "type": "number" },
                     "confirmed": { "type": "boolean" }
                   }
                 }

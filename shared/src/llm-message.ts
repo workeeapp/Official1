@@ -90,8 +90,13 @@ export interface LlmReminderAction {
   confirmed: boolean;
   /** When true, text is a brief; final WhatsApp copy is written at fire time. */
   compose: boolean;
-  /** "git_log" = at fire, summarize repo commits since last_report_sha into English. */
+  /** "git_log" = at fire, summarize repo commits for the digest window. */
   composeSource: "" | "git_log";
+  /**
+   * Hours of git history for windowed digests.
+   * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
+   */
+  composeLookbackHours: number;
 }
 
 export interface LlmHandoffAction {
@@ -860,7 +865,34 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     confirmed: record.confirmed === true || record.confirm === true,
     compose,
     composeSource: parseComposeSource(record),
+    composeLookbackHours: parseComposeLookbackHours(record),
   };
+}
+
+function parseComposeLookbackHours(record: Record<string, unknown>): number {
+  const minutesRaw =
+    record.compose_lookback_minutes ?? record.composeLookbackMinutes;
+  if (typeof minutesRaw === "number" && Number.isFinite(minutesRaw) && minutesRaw > 0) {
+    return Math.min(minutesRaw / 60, 24 * 90);
+  }
+  if (typeof minutesRaw === "string" && /^\d+(\.\d+)?$/.test(minutesRaw.trim())) {
+    const minutes = Number(minutesRaw.trim());
+    return minutes > 0 ? Math.min(minutes / 60, 24 * 90) : 0;
+  }
+
+  const raw =
+    record.compose_lookback_hours ??
+    record.composeLookbackHours ??
+    record.lookback_hours ??
+    record.lookbackHours;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.min(raw, 24 * 90);
+  }
+  if (typeof raw === "string" && /^\d+(\.\d+)?$/.test(raw.trim())) {
+    const hours = Number(raw.trim());
+    return hours > 0 ? Math.min(hours, 24 * 90) : 0;
+  }
+  return 0;
 }
 
 function parseComposeSource(

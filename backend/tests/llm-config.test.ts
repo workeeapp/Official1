@@ -32,7 +32,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("git_log");
     expect(config.systemMessage).toContain("PLATFORM INTERNAL");
     expect(config.systemMessage).toContain("since the last report");
-    expect(config.systemMessage).toContain("NEVER put «24 שעות»");
+    expect(config.systemMessage).toContain("compose_lookback_hours");
+    expect(config.systemMessage).toContain("last_report_sha");
     expect(config.systemMessage).toContain("RECENT_OUTBOUND");
   });
 });

@@ -37,6 +37,7 @@ const milkRemove: LlmReminderAction = {
   confirmed: false,
   compose: false,
   composeSource: "",
+  composeLookbackHours: 0,
 };
 
 const tal: PublicEmployee = {
@@ -405,6 +406,7 @@ describe("formatActiveRemindersReply", () => {
           text: "",
           compose_at_fire: false,
           compose_source: "",
+          compose_lookback_hours: 0,
           status: "active",
           send_status: "pending",
           sent: false,
@@ -423,6 +425,7 @@ describe("formatActiveRemindersReply", () => {
           text: "",
           compose_at_fire: false,
           compose_source: "",
+          compose_lookback_hours: 0,
           status: "cancelled",
           send_status: "pending",
           sent: false,
@@ -447,6 +450,7 @@ describe("formatTodosReply", () => {
     text: "",
     compose_at_fire: false,
     compose_source: "",
+    compose_lookback_hours: 0,
     status: "active" as const,
     send_status: "pending" as const,
     sent: false,

@@ -40,6 +40,8 @@ export interface ReminderSnapshotRow {
   sent_text: string;
   compose_at_fire: boolean;
   compose_source: string;
+  /** Git digest content window in hours (0 = since-last-report for recurring). */
+  compose_lookback_hours: number;
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -760,6 +762,7 @@ function removeShell(item: string): LlmReminderAction {
     confirmed: false,
     compose: false,
     composeSource: "",
+    composeLookbackHours: 0,
   };
 }
 
@@ -1082,6 +1085,24 @@ export async function applyReminders(input: {
         reminder.composeSource === "git_log" || existingSource === "git_log"
           ? "git_log"
           : "";
+      const existingLookback =
+        existing && "composeLookbackHours" in existing
+          ? Number(
+              (existing as { composeLookbackHours?: number }).composeLookbackHours ??
+                0,
+            )
+          : 0;
+      const nextLookback =
+        nextSource === "git_log"
+          ? reminder.composeLookbackHours > 0
+            ? reminder.composeLookbackHours
+            : canReuseClock && existingLookback > 0
+              ? existingLookback
+              : // One-shot digests default to a week window so they never stamp last_report_sha.
+                nextRepeat === "once"
+                ? 168
+                : 0
+          : 0;
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -1094,6 +1115,7 @@ export async function applyReminders(input: {
               messageText: nextText,
               composeAtFire: nextCompose || nextSource === "git_log",
               composeSource: nextSource,
+              composeLookbackHours: nextLookback,
             },
           })
         : await prisma.reminder.create({
@@ -1110,6 +1132,7 @@ export async function applyReminders(input: {
               messageText: nextText,
               composeAtFire: nextCompose || nextSource === "git_log",
               composeSource: nextSource,
+              composeLookbackHours: nextLookback,
             },
           });
       await syncLinkedWorkerTaskClock({
@@ -1369,6 +1392,7 @@ export function toReminderSnapshotRow(
     messageText: string;
     composeAtFire?: boolean;
     composeSource?: string;
+    composeLookbackHours?: number;
     lastComposedText?: string | null;
     status: string;
     sendStatus?: string;
@@ -1392,6 +1416,12 @@ export function toReminderSnapshotRow(
         : row.updatedAt && row.status !== "active"
           ? formatJerusalemDateTime(row.updatedAt)
           : null;
+  const lookback =
+    typeof row.composeLookbackHours === "number" &&
+    Number.isFinite(row.composeLookbackHours) &&
+    row.composeLookbackHours > 0
+      ? row.composeLookbackHours
+      : 0;
   return {
     item: row.itemLabel,
     list_type: row.listType,
@@ -1405,6 +1435,7 @@ export function toReminderSnapshotRow(
     sent_text: lastComposed || text,
     compose_at_fire: row.composeAtFire === true,
     compose_source: row.composeSource === "git_log" ? "git_log" : "",
+    compose_lookback_hours: lookback,
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",

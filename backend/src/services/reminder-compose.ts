@@ -8,8 +8,10 @@ export async function composeScheduledOutbound(input: {
   actorName: string;
   recipientName: string;
   previousText?: string;
-  /** When set, summarize these commits into an English product digest. */
+  /** When set, summarize these commits into a product digest. */
   gitChangelog?: string;
+  /** Human label for the commit window (e.g. last 7 days / since last report). */
+  gitWindowLabel?: string;
 }): Promise<string | null> {
   const brief = input.brief.trim() || input.itemLabel.trim();
   const gitLog = input.gitChangelog?.trim() ?? "";
@@ -30,12 +32,19 @@ export async function composeScheduledOutbound(input: {
       temperature: isGitDigest ? 0.4 : 1,
       instructions: isGitDigest
         ? [
-            "You write one outbound WhatsApp message in English.",
+            "You write one outbound WhatsApp message.",
             "Output ONLY the message body. No JSON, no quotes, no preamble.",
-            "Summarize product/user-facing changes: features, bug fixes, behavior.",
-            "Keep it clear and moderately detailed — not a raw git log, not dump of SHAs/paths/diffs.",
-            "Use 2–6 short bullets or short paragraphs. Do not invent changes absent from the commit list.",
+            "Language: follow the brief (Hebrew or English). If unclear, use the brief's language; default English.",
+            "Summarize product/user-facing changes from the commit notes: features, bug fixes, behavior.",
+            "Coverage rules (important):",
+            "- Prefer completeness over brevity when several distinct capabilities appear.",
+            "- Use 4–10 short bullets when needed; one distinct capability per bullet.",
+            "- Do NOT merge unrelated features into one vague line.",
+            "- If commits mention injecting scheduled/reminder outbound into chat context, session clock / today-tomorrow-week day plans, cancel holds, privacy/visibility, filings memory — call those out explicitly.",
+            "- Do not invent changes absent from the commit list.",
+            "Keep it readable WhatsApp text — not SHAs, not a raw git log dump.",
             "Address the recipient in second person when natural.",
+            "Respect the stated time window label when framing the intro (e.g. since last report / last 7 days).",
           ].join("\n")
         : [
             "You write one outbound WhatsApp message.",
@@ -51,13 +60,14 @@ export async function composeScheduledOutbound(input: {
             `Sender: ${input.actorName || "someone"}`,
             `Recipient: ${input.recipientName || "teammate"}`,
             `Clock label: ${input.itemLabel || "dev digest"}`,
-            `Brief: ${brief || "Summarize what we shipped since the last report in clear English."}`,
+            `Brief: ${brief || "Summarize what we shipped in the window below."}`,
+            `Time window: ${input.gitWindowLabel || "recent commits"}`,
             "Commit notes (internal source — do not paste verbatim as a log):",
             gitLog,
             input.previousText?.trim()
-              ? `Previous digest (avoid repeating the same wording):\n${input.previousText.trim()}`
+              ? `Previous digest (avoid repeating the same wording when covering overlapping commits):\n${input.previousText.trim()}`
               : "No previous digest on file.",
-            "Write the WhatsApp digest now.",
+            "Write the WhatsApp digest now. Cover distinct capabilities from the commits.",
           ].join("\n")
         : [
             `Sender: ${input.actorName || "מישהו"}`,

@@ -204,6 +204,8 @@ model Reminder {
   composeAtFire Boolean @default(false) @map("compose_at_fire")
   /** Empty = normal compose brief; "git_log" = summarize repo commits at fire time. */
   composeSource String @default("") @map("compose_source") @db.VarChar(32)
+  /** Hours of git history for windowed digests (0 = recurring since-last-report mode). Supports fractions (e.g. 0.083 ≈ 5 minutes). */
+  composeLookbackHours Float @default(0) @map("compose_lookback_hours")
   lastComposedText String @default("") @map("last_composed_text") @db.Text
   /** HEAD sha after the last git digest fire (next window starts after this). */
   lastReportSha String @default("") @map("last_report_sha") @db.VarChar(64)

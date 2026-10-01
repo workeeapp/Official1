@@ -15,6 +15,7 @@ import { composeScheduledOutbound } from "./reminder-compose.js";
 import {
   formatGitChangelogForCompose,
   readGitChangelog,
+  resolveGitDigestWindow,
 } from "./git-changelog.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
@@ -202,24 +203,40 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
 
       let gitChangelog: string | undefined;
       let headSha = "";
+      let advanceLastReportSha = false;
+      let gitWindowLabel = "";
       const isGitDigest = reminder.composeSource === "git_log";
       if (isGitDigest) {
         try {
+          const lookbackHours =
+            typeof reminder.composeLookbackHours === "number"
+              ? reminder.composeLookbackHours
+              : 0;
+          const window = resolveGitDigestWindow({
+            repeat: reminder.repeat,
+            lastReportSha: reminder.lastReportSha,
+            lookbackHours,
+            now,
+          });
+          advanceLastReportSha = window.advanceLastReportSha;
+          gitWindowLabel = window.windowLabel;
           const log = await readGitChangelog({
-            sinceSha: reminder.lastReportSha || undefined,
-            // First fire (no baseline): recent commits by count — not a fixed 24h window.
+            sinceSha: window.sinceSha,
+            sinceDate: window.sinceDate,
           });
           headSha = log.headSha;
           gitChangelog = formatGitChangelogForCompose(log.commits);
           if (!gitChangelog) {
             outboundBody =
-              "No new product changes since the last report.";
+              "No new product changes in that window.";
             skipSend = false;
             await prisma.reminder.update({
               where: { id: reminder.id },
               data: {
                 lastComposedText: outboundBody,
-                ...(headSha ? { lastReportSha: headSha } : {}),
+                ...(advanceLastReportSha && headSha
+                  ? { lastReportSha: headSha }
+                  : {}),
               },
             });
           }
@@ -242,6 +259,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           recipientName,
           previousText: reminder.lastComposedText,
           gitChangelog,
+          gitWindowLabel,
         });
         const resolved = resolveComposeFireOutbound({
           brief: reminder.messageText,
@@ -249,14 +267,16 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           composed,
         });
         outboundBody = resolved.body;
-        if (resolved.lastComposedToSave || headSha) {
+        if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
           await prisma.reminder.update({
             where: { id: reminder.id },
             data: {
               ...(resolved.lastComposedToSave
                 ? { lastComposedText: resolved.lastComposedToSave }
                 : {}),
-              ...(headSha ? { lastReportSha: headSha } : {}),
+              ...(advanceLastReportSha && headSha
+                ? { lastReportSha: headSha }
+                : {}),
             },
           });
         }
