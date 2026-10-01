@@ -67,6 +67,8 @@ import {
   fillMessagesFromPendingHold,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
+  isAwaitingFieldsHold,
+  isPendingHoldCancelText,
   pendingHoldFromMissingMessages,
   pendingToStored,
   planListDeletes,
@@ -363,7 +365,7 @@ function workerTargetingInstructions(
     "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
     "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
-    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. Example: תשלחי הודעה לעמית המערכת למעלה → messages to עמית now (text from המערכת למעלה); do NOT ask מה תרצה שאשלח. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי) → send that text, hold=null — never ask again.",
+    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. Example: תשלחי הודעה לעמית המערכת למעלה → messages to עמית now (text from המערכת למעלה); do NOT ask מה תרצה שאשלח. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי) → send that text, hold=null — never ask again. Cancel (לא / בטל / אל תשלחי / cancel) → messages=[], hold=null; say ביטלתי את השליחה — do not send the cancel words.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
@@ -1074,7 +1076,7 @@ export async function sendChatMessage(input: {
           : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
         guestSpeaker
           ? ""
-          : "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → delete confirm only (delete_reminder or delete_lists — not a send). current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Yes → confirm=true and empty reminders/lists; in response report past-tense deletion naming current_target (נמחקו… / מחקתי את התזכורת…) — never מאשרת/לאשר. No → confirm=false. Do not start unrelated work until the server clears the state.",
+          : "If PENDING_ACTION_STATE is present: stay inside that action. current_step=confirm → delete confirm only (delete_reminder or delete_lists — not a send). current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Cancel that draft (לא / בטל / אל תשלחי / cancel / בעצם לא) → hold=null, empty the unfinished arrays (messages=[] if complete_messages); do not send cancel words as the body. Yes → confirm=true and empty reminders/lists; in response report past-tense deletion naming current_target (נמחקו… / מחקתי את התזכורת…) — never מאשרת/לאשר. No → confirm=false. Do not start unrelated work until the server clears the state.",
         guestSpeaker
           ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
           : "If asked what you can do, list every capability. Saved data does not limit that answer.",
@@ -1176,7 +1178,20 @@ export async function sendChatMessage(input: {
       employee.id,
     );
     let serverFilledSendText = "";
-    if (!guestSpeaker) {
+    let cancelledAwaitingHold = false;
+    if (
+      !guestSpeaker &&
+      isAwaitingFieldsHold(waitingPending) &&
+      isPendingHoldCancelText(input.message)
+    ) {
+      cancelledAwaitingHold = true;
+      metadata = {
+        ...metadata,
+        messages: [],
+        hold: null,
+      };
+    }
+    if (!guestSpeaker && !cancelledAwaitingHold) {
       const filledMessages = fillMessagesFromPendingHold(
         waitingPending,
         metadata.messages ?? [],
@@ -1215,9 +1230,10 @@ export async function sendChatMessage(input: {
       actor: employee,
       sender: digital,
       employees,
-      messages: guestSpeaker
-        ? []
-        : resolveRelayMessages(metadata.messages ?? []),
+      messages:
+        guestSpeaker || cancelledAwaitingHold
+          ? []
+          : resolveRelayMessages(metadata.messages ?? []),
     });
 
     const collectedEvents: SharedItemEvent[] = [];
@@ -1280,15 +1296,15 @@ export async function sendChatMessage(input: {
       { abandonPending },
     );
     const nextPending = resolveNextPending({
-      stored: waitingPending,
-      hold: guestSpeaker ? null : metadata.hold ?? null,
+      stored: cancelledAwaitingHold ? null : waitingPending,
+      hold: guestSpeaker || cancelledAwaitingHold ? null : metadata.hold ?? null,
       reminderNext: reminderPlan.nextPending,
       listDeleteNext: listPlan.nextPending,
       directory: guestSpeaker ? [] : metadata.directory ?? [],
       lists: guestSpeaker ? [] : metadata.lists ?? [],
       reminders: guestSpeaker ? [] : metadata.reminders ?? [],
       filing: guestSpeaker ? [] : metadata.filing ?? [],
-      messages: guestSpeaker ? [] : metadata.messages ?? [],
+      messages: guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
       confirm: metadata.confirm ?? null,
     });
     await savePendingAction(conversation.id, nextPending);
@@ -1346,13 +1362,13 @@ export async function sendChatMessage(input: {
       .join("\n");
 
     const phoneRelays = planPhoneRelays(
-      guestSpeaker ? [] : metadata.messages ?? [],
+      guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
       employees,
       employee.id,
       refreshedContacts,
     );
     const outbound = planOutboundSends({
-      relays: guestSpeaker ? [] : relays,
+      relays: guestSpeaker || cancelledAwaitingHold ? [] : relays,
       phones: phoneRelays,
     });
     if (outbound.held) {
@@ -1513,6 +1529,16 @@ export async function sendChatMessage(input: {
         destLabel
           ? `שלחתי ${destLabel}: «${serverFilledSendText}».`
           : `שלחתי: «${serverFilledSendText}».`,
+      );
+    }
+    if (
+      cancelledAwaitingHold &&
+      waitingPending &&
+      waitingPending.action === "complete_messages"
+    ) {
+      workingReply = setEngineResponse(
+        workingReply,
+        "ביטלתי את השליחה.",
       );
     }
     const notice = [

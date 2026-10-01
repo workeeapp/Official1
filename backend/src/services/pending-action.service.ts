@@ -12,6 +12,65 @@ import {
 
 export const PENDING_HOLD_TIMEOUT_MS = PENDING_DELETE_TIMEOUT_MS;
 
+/** Explicit abort of an awaiting_fields hold (send body, missing phone, etc.). */
+export function isPendingHoldCancelText(text: string): boolean {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,״"']/g, "")
+    .replace(/\s+/g, " ");
+  if (!normalized) {
+    return false;
+  }
+  const exact = new Set([
+    "לא",
+    "בטל",
+    "ביטול",
+    "תבטל",
+    "תבטלי",
+    "cancel",
+    "no",
+    "לא תודה",
+    "בעצם לא",
+    "שכחי מזה",
+    "תשכחי מזה",
+    "never mind",
+    "forget it",
+    "dont send",
+    "don't send",
+    "do not send",
+  ]);
+  if (exact.has(normalized)) {
+    return true;
+  }
+  const prefixes = [
+    "אל תשלח",
+    "אל תשלחי",
+    "לא לשלוח",
+    "תבטל את",
+    "תבטלי את",
+    "בטלי את",
+    "בטל את",
+    "בעצם לא",
+    "don't send",
+    "do not send",
+    "never mind",
+  ];
+  return prefixes.some(
+    (prefix) =>
+      normalized === prefix ||
+      normalized.startsWith(`${prefix} `) ||
+      normalized.startsWith(`${prefix}את`) ||
+      normalized.startsWith(`${prefix}את `),
+  );
+}
+
+export function isAwaitingFieldsHold(
+  pending: ConversationPendingAction | null,
+): pending is PendingHoldAction {
+  return Boolean(pending && pending.step === "awaiting_fields");
+}
+
 export type PendingHoldKind =
   | "directory"
   | "lists"
@@ -270,14 +329,7 @@ export function fillMessagesFromPendingHold(
   if (!body) {
     return null;
   }
-  const lower = body.toLowerCase();
-  if (
-    lower === "לא" ||
-    lower === "בטל" ||
-    lower === "ביטול" ||
-    lower === "cancel" ||
-    lower === "no"
-  ) {
+  if (isPendingHoldCancelText(body)) {
     return null;
   }
   const drafts = pending.draft.messages ?? [];
@@ -484,8 +536,9 @@ export function formatConversationPendingContext(
     "Never reply לא הבנתי / מה תרצה לעשות to that short reply.",
     "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
+    "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort — metadata.messages=[], hold=null. Do not send. Say you cancelled the send (e.g. ביטלתי את השליחה).",
     "If still missing something else, emit hold again with the updated draft and the new need.",
-    "Do not start an unrelated new request until this hold is completed or the speaker clearly switches topic.",
+    "Do not start an unrelated new request until this hold is completed, cancelled, or the speaker clearly switches topic.",
   ].join("\n");
 }
 

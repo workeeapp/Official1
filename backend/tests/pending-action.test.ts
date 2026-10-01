@@ -4,6 +4,7 @@ import {
   fillMessagesFromPendingHold,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
+  isPendingHoldCancelText,
   pendingHoldFromLlm,
   pendingHoldFromMissingMessages,
   pendingToStored,
@@ -57,6 +58,8 @@ describe("pending action hold", () => {
     const context = formatConversationPendingContext(hold);
     expect(context).toContain("complete_messages");
     expect(context).toContain("מאיה");
+    expect(context).toContain("CANCEL");
+    expect(context).toContain("ביטלתי את השליחה");
 
     expect(
       fillMessagesFromPendingHold(hold, [], "היי"),
@@ -65,6 +68,8 @@ describe("pending action hold", () => {
       fillMessagesFromPendingHold(hold, [{ targets: ["מאיה"], text: "היי" }], "היי"),
     ).toBeNull();
     expect(fillMessagesFromPendingHold(hold, [], "בטל")).toBeNull();
+    expect(fillMessagesFromPendingHold(hold, [], "אל תשלחי")).toBeNull();
+    expect(fillMessagesFromPendingHold(hold, [], "בעצם לא")).toBeNull();
 
     const completed = resolveNextPending({
       stored: hold,
@@ -78,6 +83,14 @@ describe("pending action hold", () => {
       confirm: null,
     });
     expect(completed).toBeNull();
+  });
+
+  it("recognizes cancel phrases for awaiting message holds", () => {
+    expect(isPendingHoldCancelText("בטל")).toBe(true);
+    expect(isPendingHoldCancelText("אל תשלחי")).toBe(true);
+    expect(isPendingHoldCancelText("אל תשלחי למאיה")).toBe(true);
+    expect(isPendingHoldCancelText("היי")).toBe(false);
+    expect(isPendingHoldCancelText("לא יודע מה לכתוב")).toBe(false);
   });
 
   it("keeps the hold until the directory add is completed", () => {
