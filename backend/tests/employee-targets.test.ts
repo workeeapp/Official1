@@ -174,7 +174,7 @@ describe("employee targets", () => {
     expect(resolveActionTargets(["כולם"], employees, amit.id)).toEqual(employees);
   });
 
-  it("plans Tal's shopping item, Amit's assignment note, and a notification", () => {
+  it("plans Tal's shopping item and a notification without a speaker assignment note", () => {
     const plan = planTargetedActions({
       actor: amit,
       employees,
@@ -192,32 +192,22 @@ describe("employee targets", () => {
       },
     });
 
-    expect(plan.applications).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          employeeId: tal.id,
-          metadata: expect.objectContaining({
-            lists: [
-              expect.objectContaining({
-                listType: "shopping",
-                items: [{ "שם פריט": "חלב" }],
-              }),
-            ],
-          }),
+    expect(plan.applications).toEqual([
+      expect.objectContaining({
+        employeeId: tal.id,
+        metadata: expect.objectContaining({
+          lists: [
+            expect.objectContaining({
+              listType: "shopping",
+              items: [{ "שם פריט": "חלב" }],
+            }),
+          ],
         }),
-        expect.objectContaining({
-          employeeId: amit.id,
-          metadata: expect.objectContaining({
-            lists: [
-              expect.objectContaining({
-                listType: "tasks",
-                items: [{ "שם מטלה": "טל צריך לקנות חלב" }],
-              }),
-            ],
-          }),
-        }),
-      ]),
-    );
+      }),
+    ]);
+    expect(
+      plan.applications.some((item) => item.employeeId === amit.id),
+    ).toBe(false);
     expect(plan.notifications).toEqual([
       expect.objectContaining({
         employee: tal,
@@ -265,10 +255,12 @@ describe("employee targets", () => {
         item.metadata.lists.some(
           (list) =>
             list.listType === "tasks" &&
-            list.items.some((entry) => entry["שם מטלה"] === "כולם צריכים לקנות חלב וגבינה"),
+            list.items.some((entry) =>
+              String(entry["שם מטלה"] ?? "").includes("צריכים לקנות"),
+            ),
         ),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("builds a fallback notification for Tal's assistant", () => {
@@ -285,6 +277,24 @@ describe("employee targets", () => {
         ],
         filing: [],
       }),
+    ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
+    expect(
+      fallbackNotificationText(
+        amit,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["טל"] },
+      ),
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
   });
 

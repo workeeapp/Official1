@@ -51,5 +51,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
     expect(config.systemMessage).toContain("PERSONAL TASK vs SHARED CUSTOM");
     expect(config.systemMessage).toContain("משימות לעבודה");
+    expect(config.systemMessage).toContain("AFTER ASSIGN");
+    expect(config.systemMessage).toContain("גם אליך");
+    expect(config.systemMessage).toContain("ping Michal only");
   });
 });

@@ -484,28 +484,6 @@ export function planTargetedActions(input: {
         addNotification(target.id, metadata, partnerLabel(targets));
       }
     }
-
-    const actorIncluded = mutateTargets.some(
-      (target) => target.id === input.actor.id,
-    );
-    const humanOthers = others.filter(
-      (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
-    );
-    const assignment = assignmentTaskForTargets(
-      input.employees,
-      humanOthers,
-      normalizedList,
-      isAllTarget(normalizedList.targets),
-    );
-    const jointMeeting =
-      actorIncluded && others.length > 0 && normalizedList.listType === "tasks";
-    if (assignment && !jointMeeting) {
-      applications.push({
-        employeeId: input.actor.id,
-        metadata: { lists: [assignment], filing: [] },
-        visibility: visibilityFor(input.actor.id, [input.actor], false),
-      });
-    }
   }
 
   for (const filing of input.metadata.filing) {
@@ -549,23 +527,6 @@ export function planTargetedActions(input: {
       if (!isDigitalEmployee(target)) {
         addNotification(target.id, metadata, partnerLabel(targets));
       }
-    }
-
-    const humanOthers = others.filter(
-      (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
-    );
-    const assignment = assignmentTaskForFiling(
-      input.employees,
-      humanOthers,
-      filing,
-      isAllTarget(filing.targets),
-    );
-    if (assignment) {
-      applications.push({
-        employeeId: input.actor.id,
-        metadata: { lists: [assignment], filing: [] },
-        visibility: visibilityFor(input.actor.id, [input.actor], false),
-      });
     }
   }
 
@@ -829,8 +790,9 @@ export function fallbackNotificationText(
         : list.listType === "tasks"
           ? "מטלות"
           : "רשימה");
-    const openingSharedList = isOpeningCustomList(list);
-    // Opening an empty / title-only shared list.
+    const openingSharedList =
+      list.listType === "custom" && isOpeningCustomList(list);
+    // Opening an empty / title-only shared custom list.
     if (partners.length > 0 && openingSharedList) {
       return `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`;
     }
@@ -928,74 +890,6 @@ export function fallbackNotificationText(
   }
 
   return `${actorName} עדכן מידע אצלך: ${itemText}`;
-}
-
-function assignmentTaskForTargets(
-  _employees: PublicEmployee[],
-  others: PublicEmployee[],
-  list: LlmListAction,
-  targetedAll: boolean,
-): LlmListAction | null {
-  if (others.length === 0) {
-    return null;
-  }
-  // Named custom lists are shared collections (or personal custom rows) — never
-  // invent a speaker task like «עמית: שם הרשימה».
-  if (list.listType === "custom") {
-    return null;
-  }
-
-  const targetLabel = targetLabelFor(others, targetedAll);
-  const plural = targetedAll || others.length > 1;
-  const items = list.items.map(llmItemLabel).filter(Boolean);
-  const itemText = items.join(" ו") || "פריט";
-  const verb =
-    list.action === "remove" ? "להסיר" : list.action === "update" ? "לעדכן" : "לקנות";
-  const name =
-    list.listType === "shopping"
-      ? `${targetLabel} ${plural ? "צריכים" : "צריך"} ${verb} ${itemText}`
-      : `${targetLabel} ${plural ? "קיבלו" : "קיבל"} מטלה: ${itemText}`;
-
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [{ "שם מטלה": name }],
-    targets: [],
-  };
-}
-
-function assignmentTaskForFiling(
-  _employees: PublicEmployee[],
-  others: PublicEmployee[],
-  filing: LlmFilingAction,
-  targetedAll: boolean,
-): LlmListAction | null {
-  if (others.length === 0) {
-    return null;
-  }
-
-  const targetLabel = targetLabelFor(others, targetedAll);
-  const plural = targetedAll || others.length > 1;
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [
-      {
-        "שם מטלה": `${targetLabel} ${plural ? "קיבלו" : "קיבל"} תיוק: ${filing.itemName}`,
-      },
-    ],
-    targets: [],
-  };
-}
-
-function targetLabelFor(others: PublicEmployee[], targetedAll: boolean): string {
-  if (targetedAll) {
-    return "כולם";
-  }
-
-  return others.map(employeeDisplayName).join(" ו");
 }
 
 function isAllTarget(rawTargets: string[]): boolean {
