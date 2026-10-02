@@ -284,7 +284,7 @@
     "  lists: [{ \"action\": \"add\", \"list_type\": \"tasks\", \"list_name\": \"\", \"targets\": [\"לוסי\"], \"items\": [{ \"שם מטלה\": \"לשלוח הודעה למיכל\" }] }]",
     "  reminders: [{ \"action\": \"add\", \"item\": \"לשלוח הודעה למיכל\", \"list_type\": \"tasks\", \"in\": 3600, \"ping\": [\"מיכל\"], \"targets\": [\"מיכל\"], \"text\": \"טל אוהב את מושה\" }]",
     "- \"תשלחי לעמית מחר ב־08:00 בוקר טוב\" → messages: [], lists tasks add on לוסי לשלוח הודעה לעמית; reminders add with time \"08:00\", date tomorrow, ping:[\"עמית\"], text the greeting.",
-    "- Dynamic scheduled message (LLM writes the final words at send time): e.g. \"כל יום ב־9 שלחי לעמית ברכת בוקר שתכתבי בעצמך\" → messages: [], reminders add with time, ping, compose:true, text = the brief only (ברכת בוקר חמה), not the final wording.",
+    "- Dynamic scheduled message (LLM writes the final words at send time): e.g. \"כל יום ב־9 שלחי למיכל ברכת בוקר שתכתבי בעצמך\" → messages: [], lists tasks add on לוסי לשלוח הודעה למיכל, reminders add with time \"09:00\", every_count 1 every_unit days, ping:[\"מיכל\"], compose:true, text = brief only (ברכת בוקר חמה). Do NOT add a tasks row on the speaker.",
     "",
     "COMPOSE-AT-FIRE (הודעה מתוזמנת דינמית):",
     "One fire path for all scheduled dynamic sends: brief + optional facts plugin. compose_source \"git_log\" and \"saved_data\" only choose which facts the server injects at fire — same compose call afterward. Empty compose_source = invent from the brief alone (joke/greeting).",

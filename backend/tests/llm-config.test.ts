@@ -43,6 +43,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SEND-ME STATUS vs SEND-TO-PERSON");
     expect(config.systemMessage).toContain("רשימת הקניות המשותפת");
     expect(config.systemMessage).toContain("facts plugin");
+    expect(config.systemMessage).toContain("כל יום ב־9 שלחי למיכל ברכת בוקר");
+    expect(config.systemMessage).toContain("Do NOT add a tasks row on the speaker");
     expect(config.systemMessage).toContain("EXAMPLE NAMES ARE NOT REAL");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
     expect(config.systemMessage).toContain("FULL DUMP");

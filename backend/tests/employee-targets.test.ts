@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyLlmMetadata, type PublicEmployee } from "@workee/shared";
 import {
+  dropSpeakerTaskAddsForOutboundClocks,
   fallbackNotificationText,
   formatMissingSendTextNotice,
   planPhoneRelays,
@@ -213,6 +214,150 @@ describe("employee targets", () => {
         employee: tal,
       }),
     ]);
+  });
+
+  it("drops a speaker task add when the same turn only clocks an outbound send", () => {
+    const lucy: PublicEmployee = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+    };
+    const stripped = dropSpeakerTaskAddsForOutboundClocks({
+      actorId: amit.id,
+      employees,
+      workers: [lucy],
+      reminders: [
+        {
+          action: "add",
+          item: "לשלוח הודעה למיכל",
+          listType: "tasks",
+          date: "",
+          time: "09:00",
+          repeat: "1:days",
+          ping: ["מיכל"],
+          targets: ["מיכל"],
+          text: "ברכת בוקר חמה",
+          inSeconds: null,
+          everyCount: 1,
+          everyUnit: "days",
+          weekdays: null,
+          confirmed: false,
+          compose: true,
+          composeSource: "",
+          composeLookbackHours: 0,
+        },
+      ],
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+          targets: ["עמית"],
+        },
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+          targets: ["לוסי"],
+        },
+      ],
+    });
+    expect(stripped).toEqual([
+      expect.objectContaining({
+        targets: ["לוסי"],
+      }),
+    ]);
+
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+            targets: ["עמית"],
+          },
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+            targets: ["לוסי"],
+          },
+        ],
+        reminders: [
+          {
+            action: "add",
+            item: "לשלוח הודעה למיכל",
+            listType: "tasks",
+            date: "",
+            time: "09:00",
+            repeat: "1:days",
+            ping: ["טל"],
+            targets: ["טל"],
+            text: "ברכת בוקר חמה",
+            inSeconds: null,
+            everyCount: 1,
+            everyUnit: "days",
+            weekdays: null,
+            confirmed: false,
+            compose: true,
+            composeSource: "",
+            composeLookbackHours: 0,
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([lucy.id]);
+  });
+
+  it("keeps a speaker self-nudge task when the clock pings the speaker", () => {
+    const lists = dropSpeakerTaskAddsForOutboundClocks({
+      actorId: amit.id,
+      employees,
+      reminders: [
+        {
+          action: "add",
+          item: "לשתות מים",
+          listType: "tasks",
+          date: "",
+          time: "",
+          repeat: "once",
+          ping: ["עמית"],
+          targets: ["עמית"],
+          text: "",
+          inSeconds: 3600,
+          everyCount: null,
+          everyUnit: null,
+          weekdays: null,
+          confirmed: false,
+          compose: false,
+          composeSource: "",
+          composeLookbackHours: 0,
+        },
+      ],
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "לשתות מים" }],
+          targets: [],
+        },
+      ],
+    });
+    expect(lists).toHaveLength(1);
   });
 
   it("applies an everyone action to each employee", () => {

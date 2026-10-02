@@ -33,6 +33,94 @@ export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
 }
 
+/**
+ * Same-turn guard: outbound clocks (ping only other people) must not also
+ * land a tasks add on the speaker. Self-nudges (ping includes speaker / empty
+ * ping) are unchanged. Worker tasks (targets digital) stay.
+ */
+export function dropSpeakerTaskAddsForOutboundClocks(input: {
+  lists: LlmListAction[];
+  reminders: LlmReminderAction[];
+  actorId: string;
+  employees: PublicEmployee[];
+  workers?: PublicEmployee[];
+}): LlmListAction[] {
+  if (
+    !reminderAddsPingOthersOnly({
+      reminders: input.reminders,
+      actorId: input.actorId,
+      employees: input.employees,
+      workers: input.workers,
+    })
+  ) {
+    return input.lists;
+  }
+
+  const kept: LlmListAction[] = [];
+  for (const list of input.lists) {
+    if (list.action !== "add" || list.listType !== "tasks") {
+      kept.push(list);
+      continue;
+    }
+    const targets = resolveActionTargets(
+      list.targets,
+      input.employees,
+      input.actorId,
+      input.workers,
+    );
+    const withoutSpeaker = targets.filter(
+      (target) => target.id !== input.actorId,
+    );
+    if (withoutSpeaker.length === targets.length) {
+      kept.push(list);
+      continue;
+    }
+    if (withoutSpeaker.length === 0) {
+      continue;
+    }
+    kept.push({
+      ...list,
+      targets: withoutSpeaker.map(employeeDisplayName),
+    });
+  }
+  return kept;
+}
+
+function reminderAddsPingOthersOnly(input: {
+  reminders: LlmReminderAction[];
+  actorId: string;
+  employees: PublicEmployee[];
+  workers?: PublicEmployee[];
+}): boolean {
+  const pool = [...input.employees, ...(input.workers ?? [])];
+  return input.reminders.some((row) => {
+    if (row.action !== "add") {
+      return false;
+    }
+    const raw = [...row.ping, ...row.targets]
+      .map((name) => name.trim())
+      .filter(Boolean);
+    // Empty ping falls back to the speaker → self-nudge / own clock, not outbound-only.
+    if (raw.length === 0) {
+      return false;
+    }
+    let matchedOther = false;
+    for (const token of raw) {
+      const employee = matchEmployee(token, pool);
+      if (employee) {
+        if (employee.id === input.actorId) {
+          return false;
+        }
+        matchedOther = true;
+        continue;
+      }
+      // Contact name, raw phone, or unresolved label — still an outbound destination.
+      matchedOther = true;
+    }
+    return matchedOther;
+  });
+}
+
 /** Same-turn reminder clocks that ping this employee (by name). */
 export function reminderTargetsEmployee(
   reminder: LlmReminderAction,
@@ -371,7 +459,15 @@ export function planTargetedActions(input: {
     notificationBuckets.set(employeeId, current);
   };
 
-  for (const list of input.metadata.lists) {
+  const lists = dropSpeakerTaskAddsForOutboundClocks({
+    lists: input.metadata.lists,
+    reminders: input.metadata.reminders ?? [],
+    actorId: input.actor.id,
+    employees: input.employees,
+    workers: input.workers,
+  });
+
+  for (const list of lists) {
     const normalizedList = normalizeSharedCustomList(list);
     const existingListMatches = findExistingCustomListsForActor(
       normalizedList,
