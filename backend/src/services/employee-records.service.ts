@@ -11,6 +11,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.j
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { stripJobMeta } from "./job-meta.js";
 import { toPlainJson } from "./llm-client.js";
 import {
   cancelActiveRemindersMatchingWork,
@@ -2521,7 +2522,7 @@ function withVisibility(
   owner: string,
 ): Record<string, unknown> {
   return {
-    ...normalizeListItemData(asRecord(data)),
+    ...stripJobMeta(normalizeListItemData(asRecord(data))),
     scope,
     owner,
   };

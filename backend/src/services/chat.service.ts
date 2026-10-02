@@ -2,6 +2,7 @@ import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
   digitalEmployees,
   humanEmployees,
+  isDigitalEmployee,
   isGuestEmployee,
   parseLlmReply,
   parseReplyMetadata,
@@ -47,6 +48,16 @@ import {
 } from "./employee-targets.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { formatSessionClockContext } from "../utils/relative-date.js";
+import {
+  answerOpenJobForPair,
+  applyJobActions,
+  correctMisaddressedJobReply,
+  createJobsFromRelays,
+  formatOpenJobsContext,
+  listOpenJobsForViewer,
+  meetingListsForAnswers,
+  sweepJobNudgesForRemovedItems,
+} from "./jobs.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.js";
 import { recordLlmUsage } from "./llm-usage.service.js";
@@ -267,6 +278,47 @@ export function shouldAttachLucyRuntimeEngine(
   return promptsEqual(own, fileSystemMessage);
 }
 
+/**
+ * Jobs you hold for one person about another: open on expects_reply, answered or
+ * closed through metadata.jobs, reported back to the asker by the server.
+ * Shipped here (not in the seeded prompt) so Lucy and every worker that inherits
+ * her prompt get the same rules without a stored-prompt edit.
+ */
+/**
+ * Jobs are bookkeeping around a turn that already happened — the reply is
+ * written and the relay is out. A job problem must never fail the turn.
+ */
+async function withoutFailingTurn<T>(
+  label: string,
+  run: () => Promise<T>,
+): Promise<T | null> {
+  try {
+    return await run();
+  } catch (error) {
+    recordWhatsAppEvent(label, error instanceof Error ? error.message : "unknown");
+    return null;
+  }
+}
+
+const OPEN_JOBS_RULES = [
+  "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
+  "ask_summary = what the speaker wants from them, in the speaker's own words, WITHOUT the recipient's name: «לתאם פגישת עבודה ליום שלישי» / «אם קנית חלב?» — not «לתאם פגישה עם ערן».",
+  "Example: עמית אומר «תתאמי פגישת עבודה עם ערן ליום שלישי בשעה 10» → messages: [{ \"targets\": [\"ערן\"], \"text\": \"עמית מבקש לתאם איתך פגישת עבודה ביום שלישי ב-10:00. מתאים לך שעה זו כדי שאקבע?\", \"expects_reply\": true, \"ask_summary\": \"לתאם פגישת עבודה ביום שלישי ב-10:00\" }], lists: []. The text states the slot AND ends with a yes/no question (מתאים לך…? / נוח לך שעה זו?). A statement alone is not enough. The server opens the job task on you — never add a lists task for it yourself. This is the only exception to «a tell/send never becomes a task» besides scheduled sends.",
+  "MEETING SLOT FIRST: תתאמי פגישה עם X needs a date+time (or all-day) BEFORE you message X. Speaker omitted them → ask the speaker in response, messages=[], lists=[]. Never ping X with «באיזה תאריך ושעה נוח לך?» while you still lack the slot, and never ask X for a time the speaker already gave. Follow-up «מחר ב-10» → now message X WITH that slot (expects_reply true, ask_summary includes מחר ב-10:00). If OPEN_JOBS already has this pair, still send that update message; do not invent a second job.",
+  "OPEN_JOBS (injected when present) lists the jobs you still owe for THIS speaker: job_id, asker, subject, ask, task, viewer_is, state, raisable. Only those exist — never invent one. Several rows can be open at once, and each jobs action copies the job_id of the one row it changes. Never omit job_id when more than one row is listed. Two possible rows → ASK which, and do not counter or answer yet. If OPEN_JOBS has rows you DO have work: say so even when WORKER_SAVED_DATA is empty, and never answer «אין לי מטלות».",
+  "PHRASING per viewer — a job row also appears in WORKER_SAVED_DATA as «לבדוק עם X: …»; never read that label out loud as-is. viewer_is=subject (you are talking TO the person being asked) → second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». viewer_is=asker → third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)». Never say «לבדוק עם ערן» to ערן himself.",
+  "ANSWER: a short reply from the subject (כן / לא / הכל בסדר תודה / תגידי לו ש…) answers the job whose ask it matches → metadata.jobs [{ action:\"answer\", job_id, answer_text: their words, report_text: your sentence for the asker }]. «לו / לה / להם» = that job's asker; «זה / על זה» = that job's ask. Two possible jobs → ASK which. Do NOT emit messages for the report — the server delivers report_text. report_text speaks about the subject in third person and quotes the ask, e.g. «ערן מוסר הכל בסדר, תודה — בקשר לשאלה שביקשת ממני לשאול אותו «מה שלומך?»». report_text is NEVER for the current speaker: if you are talking to the asker, leave it empty and use messages to reach the subject. If you are talking to the subject, report_text goes to the asker.",
+  "WHO HEARS WHAT: response is only for the person in front of you. After you message someone else, response confirms the send in second person to the asker — «שלחתי לערן שאתה שואל אם קנית חלב.» Never put the recipient's line in response (not «ערן, עמית שואל…», not the messages.text). After the subject answers, response to THEM is only a short ack — «אעדכן את עמית.» The report sentence exists only in report_text; never copy it into response.",
+  "COUNTER: the subject names a DIFFERENT slot than the one in ask (מתאים לי 15:00 instead of 11:00) → metadata.jobs [{ action:\"counter\", job_id, answer_text: the new slot in their words («יום חמישי ב-14:00»), date: that day as YYYY-MM-DD from SESSION_CLOCK, time: \"14:00\", report_text: «ערן רוצה לשנות את מועד הפגישה ליום חמישי בשעה 14:00. האם לאשר?» }], messages=[], lists=[]. date and time are required. The server keeps ONE job, flips who must answer, and delivers report_text to them. Do not book yet. כן / מאשר / אוקיי on a book_on_yes job → answer AND lists add the meeting (תאריך לביצוע=book_date, שעה לביצוע=book_time, targets=both people). «לא כרגע» is snooze, not counter. A full refusal → decline.",
+  "BOOK A MEETING when the job's ask is to schedule/coordinate (לתאם פגישה / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself (פגישת עבודה — not לבדוק עם…). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. hold=null — do NOT confirm_share; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
+  "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
+  "PROGRESS (אתאם איתו מחר / a counter-offer / לא כרגע) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable.",
+  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while a hold/confirm is unfinished, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
+  "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
+  "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
+  "query self: include OPEN_JOBS rows next to WORKER_SAVED_DATA, phrased for the viewer — to the asker «לבדוק עם ערן מה שלומו», to the subject «לבדוק מה שלומך (משימה מעמית)». Never say job / job_id / expects_reply / OPEN_JOBS in response.",
+].join("\n");
+
 function thinSessionEnvelope(input: {
   employees: PublicEmployee[];
   speaker: string;
@@ -344,6 +396,10 @@ function workerTargetingInstructions(
   const workerName = speakerName(worker);
   const names = employees.map(employeeDisplayName).join(", ");
   const feminine = worker.protected || workerName.includes("לוסי");
+  const coworkers = digitalEmployees(employees)
+    .filter((row) => row.id !== worker.id)
+    .map(employeeDisplayName)
+    .join(", ");
   return [
     `Known employees: ${names}.`,
     `Current speaker: ${speaker}. You are ${workerName}.`,
@@ -384,6 +440,9 @@ function workerTargetingInstructions(
       : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
     `Handoff only if they want to speak with another digital employee. metadata.handoff = { "worker": "<their name>" }. ${feminine ? "Confirm feminine: מעבירה אותך ל«שם»." : "Confirm masculine: מעביר אותך ל«שם»."} Messages are not a conversation switch.`,
     "If they ask which digital workers exist, name them from Known employees. No handoff unless they chose one.",
+    coworkers
+      ? `ASK A DIGITAL CO-WORKER (${coworkers}): «תשאלי את <worker> …» / «תבדקי עם <worker> …» → metadata.messages to that worker with expects_reply:true, text = the question with the speaker's name. Not a handoff. The server asks them right now and adds their answer under your response — so response is only a short line that you asked them, e.g. «שאלתי את <worker>:». Never write or guess their answer yourself.`
+      : "",
     "One sentence can be several actions. Fill every array that applies.",
     `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder.`,
     `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: every_count + every_unit. NEVER ask for WhatsApp if the name is Known.`,
@@ -961,6 +1020,12 @@ export async function sendChatMessage(input: {
   digitalEmployeeId?: string;
   skipHandoffFollow?: boolean;
   pendingWorkerItems?: WorkerTaskRef[];
+  /**
+   * Set when another digital worker is asking this one on the speaker's behalf.
+   * The turn runs and is billed on the worker↔worker conversation; the speaker
+   * still decides permissions and saved data.
+   */
+  consult?: { fromWorkerId: string; fromWorkerName: string };
 }): Promise<{
   reply: string;
   raw: unknown;
@@ -988,9 +1053,20 @@ export async function sendChatMessage(input: {
   const config = llmConfigForDigital(digital);
   const speaker = speakerName(employee);
   const assistantSpeaker = speakerName(digital);
+  const consultFrom = input.consult?.fromWorkerName.trim() ?? "";
+  const turnSpeaker = consultFrom ? `${consultFrom} (בשם ${speaker})` : speaker;
+  const consultEnvelope = consultFrom
+    ? [
+        `CONSULT: ${consultFrom} is another digital worker on this team. ${consultFrom} is asking you on behalf of ${speaker}, who is the speaker for permissions and saved data.`,
+        `Answer the question fully and directly in response. Your response is passed back to ${consultFrom} and shown to ${speaker} as your answer — write it so ${speaker} can read it as is.`,
+        `Do not handoff and do not message ${consultFrom} back. If you lack what you need to answer, say what is missing in response.`,
+        `This conversation with ${consultFrom} is shared by everyone ${consultFrom} asks for. Earlier turns may have been on behalf of other people — answer only for ${speaker}, from this turn's data, and never reveal another person's details.`,
+      ].join("\n")
+    : "";
+  const conversationOwnerId = input.consult?.fromWorkerId ?? input.employeeId;
   let conversation = await getOrCreateConversation(
     input.userId,
-    input.employeeId,
+    conversationOwnerId,
     digital.id,
   );
   const waitingPending = await loadPendingAction(conversation.id);
@@ -1006,6 +1082,14 @@ export async function sendChatMessage(input: {
         userId: input.userId,
         employeeId: input.employeeId,
       });
+  const openJobs = guestSpeaker
+    ? []
+    : ((await withoutFailingTurn("job_list_failed", () =>
+        listOpenJobsForViewer({
+          digitalEmployeeId: digital.id,
+          viewerId: input.employeeId,
+        }),
+      )) ?? []);
   const context = [
     formatSessionClockContext(),
     formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
@@ -1020,6 +1104,7 @@ export async function sendChatMessage(input: {
     guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
+    guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
     formatConversationPendingContext(waitingPending),
   ]
     .filter(Boolean)
@@ -1046,6 +1131,8 @@ export async function sendChatMessage(input: {
         `The user is chatting as ${speaker}.`,
         guestModeInstructions ||
           workerTargetingInstructions(employees, speaker, digital),
+        guestSpeaker ? "" : OPEN_JOBS_RULES,
+        consultEnvelope,
         guestSpeaker
           ? "GUEST MODE: shared-list Q&A only. Never claim you (Lucy) are the guest. Off-topic → «אני יכולה לעזור רק עם הרשימות ששותפו איתך.»"
           : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
@@ -1103,6 +1190,9 @@ export async function sendChatMessage(input: {
         guestSpeaker
           ? ""
           : "query reminders = ping clocks only (active_reminders). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+        guestSpeaker
+          ? ""
+          : "LAST CHECK before you answer: every entry in metadata.messages must have all four fields — targets, text, expects_reply, ask_summary. expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -1115,12 +1205,13 @@ export async function sendChatMessage(input: {
           worker: digital,
           speakerIsOwner: employee.isOwner === true,
         }),
+        consultEnvelope,
       ]
         .filter(Boolean)
         .join("\n\n");
   const message = [
     context,
-    `${speaker}: ${input.message}`,
+    `${turnSpeaker}: ${input.message}`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1173,7 +1264,7 @@ export async function sendChatMessage(input: {
     const afterLlmStarted = Date.now();
     await recordLlmUsage({
       conversationId: conversation.id,
-      employeeId: employee.id,
+      employeeId: conversationOwnerId,
       digitalEmployeeId: digital.id,
       openaiConversationId: conversation.openaiConversationId,
       model: config.model,
@@ -1181,7 +1272,7 @@ export async function sendChatMessage(input: {
     });
     await saveTurn({
       conversationId: conversation.id,
-      speaker,
+      speaker: turnSpeaker,
       assistantSpeaker,
       message: input.message,
       reply: turn.reply,
@@ -1259,6 +1350,15 @@ export async function sendChatMessage(input: {
       });
       if (alignedLists !== metadata.lists) {
         metadata = { ...metadata, lists: alignedLists };
+      }
+    }
+    if (!guestSpeaker && !cancelledAwaitingHold) {
+      const booked = meetingListsForAnswers(openJobs, metadata.jobs ?? []);
+      const alreadyBooked = (metadata.lists ?? []).some(
+        (row) => row.action === "add" && row.listType === "tasks",
+      );
+      if (booked.length > 0 && !alreadyBooked) {
+        metadata = { ...metadata, lists: [...(metadata.lists ?? []), ...booked] };
       }
     }
     const listPlan = planListDeletes({
@@ -1430,6 +1530,33 @@ export async function sendChatMessage(input: {
       "reminder_apply",
       `worker=${digital.name} query=${metadata.query ?? "none"} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
     );
+    const jobResult = guestSpeaker
+      ? null
+      : await withoutFailingTurn("job_apply_failed", () =>
+          applyJobActions({
+            userId: input.userId,
+            digitalEmployeeId: digital.id,
+            speaker: { id: employee.id, name: speakerName(employee) },
+            actions: metadata.jobs ?? [],
+            jobs: openJobs,
+          }),
+        );
+    // Removing a job task through lists.remove must also drop its follow-up clock.
+    await withoutFailingTurn("job_sweep_failed", () =>
+      sweepJobNudgesForRemovedItems({
+        userId: input.userId,
+        actorId: employee.id,
+        itemIds: listMutations
+          .filter(
+            (row) =>
+              row.action === "remove" &&
+              row.employeeId === digital.id &&
+              row.listType === "tasks" &&
+              row.itemId,
+          )
+          .map((row) => row.itemId),
+      }),
+    );
     const confirmAsk = [
       formatReminderConfirmNotice(
         reminderPlan.ask,
@@ -1519,10 +1646,82 @@ export async function sendChatMessage(input: {
         text: row.text,
       }),
     }));
+    // A question to another digital worker is a job like any other, but that worker
+    // answers now: open the job, run its turn, report, close. Consulted workers never
+    // consult again, so this cannot loop.
+    const consultRelays =
+      guestSpeaker || consultFrom
+        ? []
+        : outbound.relays.filter(
+            (relay, index, all) =>
+              isDigitalEmployee(relay.target) &&
+              relay.expectsReply !== false &&
+              relay.target.id !== digital.id &&
+              all.findIndex((row) => row.target.id === relay.target.id) === index,
+          );
+    const consulted = new Set(consultRelays.map((relay) => relay.target.id));
+    // Open a job for every relay the asker expects something back from, after the
+    // relay actually went out, so the answer can be bound and reported later.
+    // Relaying through a worker means the asker is waiting, so the job opens
+    // unless the model marked the message as pure information.
+    if (!guestSpeaker) {
+      await withoutFailingTurn("job_open_failed", () =>
+        createJobsFromRelays({
+          userId: input.userId,
+          digitalEmployeeId: digital.id,
+          asker: { id: employee.id, name: actorName },
+          deliveries: outbound.relays
+            .filter(
+              (relay) =>
+                relay.expectsReply !== false &&
+                (!isDigitalEmployee(relay.target) || consulted.has(relay.target.id)) &&
+                relay.target.id !== employee.id,
+            )
+            .map((relay) => ({
+              subjectId: relay.target.id,
+              subjectName: speakerName(relay.target),
+              text: relay.text,
+              ask: relay.askSummary ?? "",
+            })),
+        }),
+      );
+    }
+    const consultAnswers: string[] = [];
+    for (const relay of consultRelays) {
+      const workerName = speakerName(relay.target);
+      const answer = await withoutFailingTurn("worker_consult_failed", () =>
+        sendChatMessage({
+          userId: input.userId,
+          message: relay.text,
+          employeeId: employee.id,
+          digitalEmployeeId: relay.target.id,
+          skipHandoffFollow: true,
+          consult: { fromWorkerId: digital.id, fromWorkerName: assistantSpeaker },
+        }),
+      );
+      notifications.push(...(answer?.notifications ?? []));
+      const said = answer ? parseLlmReply(answer.reply).response.trim() : "";
+      if (!said) {
+        consultAnswers.push(
+          `לא הצלחתי לקבל תשובה מ${workerName} — המשימה נשארת פתוחה אצלי.`,
+        );
+        continue;
+      }
+      consultAnswers.push(`${workerName} עונה: ${said}`);
+      await withoutFailingTurn("job_answer_failed", () =>
+        answerOpenJobForPair({
+          userId: input.userId,
+          digitalEmployeeId: digital.id,
+          askerId: employee.id,
+          subjectId: relay.target.id,
+          answer: said,
+        }),
+      );
+    }
     const relayed = new Set<string>();
     for (const relay of attributedRelays) {
       const key = `${relay.employeeId}:${relay.digitalEmployeeId}`;
-      if (relayed.has(key)) {
+      if (relayed.has(key) || consulted.has(relay.target.id)) {
         continue;
       }
       relayed.add(key);
@@ -1536,6 +1735,26 @@ export async function sendChatMessage(input: {
         }),
       );
     }
+    // Reports back to the asker: Lucy's own words about the subject, not a
+    // forwarded relay, so they skip the "מאת X" attribution.
+    const jobReports = (jobResult?.reports ?? []).flatMap((report) => {
+      const target = employees.find((row) => row.id === report.employeeId);
+      return target && !isDigitalEmployee(target) && target.id !== employee.id
+        ? [{ target, text: report.text }]
+        : [];
+    });
+    for (const report of jobReports) {
+      notifications.push(
+        await pushRelayMessage({
+          userId: input.userId,
+          employeeId: report.target.id,
+          digitalEmployeeId: digital.id,
+          speaker: assistantSpeaker,
+          text: report.text,
+        }),
+      );
+    }
+    await deliverWhatsAppRelays(jobReports, employee.id);
     const waRelays = await deliverWhatsAppRelays(attributedRelays, employee.id);
     const waPhones = await deliverWhatsAppPhones(attributedPhones);
     // Partner shared-list notify skips must not erase the speaker's spoken reply.
@@ -1554,6 +1773,28 @@ export async function sendChatMessage(input: {
     const confirmPending =
       reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
+    const misaddressed = correctMisaddressedJobReply({
+      response: parseLlmReply(workingReply).response,
+      relays: outbound.relays
+        .filter((relay) => relay.target.id !== employee.id)
+        .map((relay) => ({
+          targetName: speakerName(relay.target),
+          text: relay.text,
+        })),
+      reports: jobReports.map((report) => ({
+        toName: speakerName(report.target),
+        text: report.text,
+      })),
+    });
+    if (misaddressed) {
+      workingReply = setEngineResponse(workingReply, misaddressed);
+    }
+    if (jobResult && jobResult.askWhich.length > 1) {
+      workingReply = setEngineResponse(
+        workingReply,
+        `על איזו משימה?\n${jobResult.askWhich.map((ask) => `• ${ask}`).join("\n")}`,
+      );
+    }
     // Held bulk list deletes are not applied — hide their actions from the reply.
     if (listPlan.askLabels.length > 0) {
       workingReply = setReplyLists(workingReply, listPlan.applyLists);
@@ -1641,7 +1882,12 @@ export async function sendChatMessage(input: {
       await patchLastAssistantText(conversation.id, alignedSpoken);
     }
     const replaceSpoken = deliveryFailed || confirmPending;
-    const composeNotice = confirmPending ? confirmAsk : notice;
+    const composeNotice = [
+      consultAnswers.join("\n\n"),
+      confirmPending ? confirmAsk : notice,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const reply = composeAssistantReply({
       llmReply: workingReply,
       notice: composeNotice,
@@ -1660,7 +1906,7 @@ export async function sendChatMessage(input: {
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
     }
-    if (!input.skipHandoffFollow) {
+    if (!input.skipHandoffFollow && !consultFrom) {
       const next = matchHandoffWorker(
         parsedMetadata.handoff?.worker,
         digitalEmployees(employees),

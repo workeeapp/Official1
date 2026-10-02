@@ -29,6 +29,38 @@ export interface LlmFilingAction {
 export interface LlmMessageAction {
   targets: string[];
   text: string;
+  /**
+   * The recipient is expected to answer. The server opens a job on the digital
+   * worker so the answer can be bound later and reported back to the asker.
+   */
+  expectsReply?: boolean;
+  /** The asker's question in their own words, quoted back when reporting. */
+  askSummary?: string;
+}
+
+export type LlmJobActionName =
+  | "answer"
+  | "decline"
+  | "progress"
+  | "counter"
+  | "snooze"
+  | "clear_clock"
+  | "close";
+
+/** Lifecycle of an open job the digital worker holds for one person about another. */
+export interface LlmJobAction {
+  action: LlmJobActionName;
+  jobId: string;
+  /** What the subject said (answer / decline reason / progress note). */
+  answerText: string;
+  /** Sentence to deliver to the other person. On answer/decline that is the asker. On counter it is the approval question for whoever must answer next. Empty = server writes a plain line. */
+  reportText: string;
+  /** Snooze clock: HH:mm. On counter, the proposed meeting time. */
+  time: string;
+  /** Snooze clock: seconds from now. */
+  in: number | null;
+  /** Counter only: the proposed meeting date, YYYY-MM-DD. */
+  date?: string;
 }
 
 export type LlmDirectoryActionName = "add" | "remove";
@@ -131,6 +163,8 @@ export interface LlmMetadata {
   messages?: LlmMessageAction[];
   reminders?: LlmReminderAction[];
   directory?: LlmDirectoryAction[];
+  /** Lifecycle updates for jobs listed in OPEN_JOBS this turn. */
+  jobs?: LlmJobAction[];
   handoff?: LlmHandoffAction | null;
   query?: LlmQuery | null;
   /** Categories for query=report. Empty/omit = full report. */
@@ -158,6 +192,16 @@ const FILING_ACTIONS = new Set<LlmFilingActionName>([
   "update_filing",
 ]);
 
+const JOB_ACTIONS = new Set<LlmJobActionName>([
+  "answer",
+  "decline",
+  "progress",
+  "counter",
+  "snooze",
+  "clear_clock",
+  "close",
+]);
+
 const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "update"]);
 const REMINDER_REPEATS = new Set<LlmReminderRepeat>([
   "once",
@@ -174,6 +218,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     messages: [],
     reminders: [],
     directory: [],
+    jobs: [],
     handoff: null,
     query: null,
     reportSections: [],
@@ -227,6 +272,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     messages,
     reminders,
     directory,
+    jobs: parseJobActions(meta),
     handoff: parseHandoff(meta),
     query: parseQuery(meta),
     reportSections,
@@ -970,10 +1016,63 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
     return null;
   }
 
+  const rawExpectsReply = record.expects_reply ?? record.expectsReply;
+  const expectsReply =
+    rawExpectsReply === true ? true : rawExpectsReply === false ? false : undefined;
+  const askSummary = readText(record, [
+    "ask_summary",
+    "askSummary",
+    "question",
+    "שאלה",
+  ]);
   return {
     text,
     targets,
+    ...(expectsReply !== undefined ? { expectsReply } : {}),
+    ...(askSummary ? { askSummary } : {}),
   };
+}
+
+function parseJobActions(meta: Record<string, unknown>): LlmJobAction[] {
+  if (!Array.isArray(meta.jobs)) {
+    return [];
+  }
+  return meta.jobs.flatMap((entry) => {
+    const action = toJobAction(entry);
+    return action ? [action] : [];
+  });
+}
+
+function toJobAction(value: unknown): LlmJobAction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.action === "string" ? record.action.trim() : "";
+  if (!JOB_ACTIONS.has(name as LlmJobActionName)) {
+    return null;
+  }
+  const jobId = readText(record, ["job_id", "jobId", "id"]);
+  return {
+    action: name as LlmJobActionName,
+    jobId,
+    answerText: readText(record, [
+      "answer_text",
+      "answerText",
+      "answer",
+      "text",
+      "תשובה",
+    ]),
+    reportText: readText(record, ["report_text", "reportText", "report"]),
+    time: parseClockField(readText(record, ["time", "at", "שעה"])),
+    in: parseInSeconds(record),
+    date: calendarDate(readText(record, ["date", "on", "תאריך"])),
+  };
+}
+
+function calendarDate(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? value.trim() : "";
 }
 
 function toFilingAction(value: unknown): LlmFilingAction | null {

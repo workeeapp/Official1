@@ -9,7 +9,12 @@ export type AuditAction =
   | "filing_remove"
   | "reminder_save"
   | "reminder_cancel"
-  | "reminder_fire";
+  | "reminder_fire"
+  | "job_open"
+  | "job_answer"
+  | "job_decline"
+  | "job_counter"
+  | "job_close";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;

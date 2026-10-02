@@ -196,6 +196,7 @@ describe("parseLlmReply", () => {
       messages: [],
       reminders: [],
       directory: [],
+      jobs: [],
       handoff: null,
       query: null,
       reportSections: [],
@@ -343,6 +344,93 @@ describe("parseLlmReply", () => {
     ]);
     expect(parseLlmReply(reply).actions).toEqual([
       "Send message for טל: עמית שואל מה שלומך?\nמה לענות לו ?",
+    ]);
+  });
+
+  it("reads expects_reply and the asker's question off a relayed message", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "שלחתי לערן",
+          metadata: {
+            messages: [
+              {
+                targets: ["ערן"],
+                text: "עמית שואל אם קנית חלב?",
+                expects_reply: true,
+                ask_summary: "אם קנית חלב?",
+              },
+            ],
+          },
+        }),
+      ).messages,
+    ).toEqual([
+      {
+        targets: ["ערן"],
+        text: "עמית שואל אם קנית חלב?",
+        expectsReply: true,
+        askSummary: "אם קנית חלב?",
+      },
+    ]);
+  });
+
+  it("keeps a job action that forgot its id and drops unknown actions", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "מסרתי לעמית",
+        metadata: {
+          jobs: [
+            {
+              action: "answer",
+              job_id: "job-1",
+              answer_text: "כן, קניתי",
+              report_text: "ערן מוסר שכן",
+            },
+            { action: "snooze", job_id: "job-2", in: 600 },
+            { action: "snooze", job_id: "job-3", time: "19:30" },
+            { action: "answer", answer_text: "כן" },
+            { action: "explode", job_id: "job-4" },
+          ],
+        },
+      }),
+    );
+    expect(parsed.jobs).toEqual([
+      {
+        action: "answer",
+        jobId: "job-1",
+        answerText: "כן, קניתי",
+        reportText: "ערן מוסר שכן",
+        time: "",
+        in: null,
+        date: "",
+      },
+      {
+        action: "snooze",
+        jobId: "job-2",
+        answerText: "",
+        reportText: "",
+        time: "",
+        in: 600,
+        date: "",
+      },
+      {
+        action: "snooze",
+        jobId: "job-3",
+        answerText: "",
+        reportText: "",
+        time: "19:30",
+        in: null,
+        date: "",
+      },
+      {
+        action: "answer",
+        jobId: "",
+        answerText: "כן",
+        reportText: "",
+        time: "",
+        in: null,
+        date: "",
+      },
     ]);
   });
 

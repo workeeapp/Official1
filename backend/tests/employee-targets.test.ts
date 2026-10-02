@@ -144,6 +144,7 @@ describe("employee targets", () => {
       directory: [],
       messages: [],
       reminders: [],
+      jobs: [],
       handoff: null,
       query: null,
       confirm: null,
@@ -1096,6 +1097,42 @@ describe("employee targets", () => {
         digitalEmployeeId: diana.id,
         target: diana,
         text: "עמית שואל מה מחיר הטיסה ?",
+      },
+    ]);
+  });
+
+  it("carries expects_reply and the asker's question to the delivery", () => {
+    const lucy: PublicEmployee = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+    };
+    expect(
+      planRelayDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: [...employees, lucy],
+        messages: [
+          {
+            targets: ["טל"],
+            text: "עמית שואל אם קנית חלב?",
+            expectsReply: true,
+            askSummary: "אם קנית חלב?",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        employeeId: tal.id,
+        digitalEmployeeId: lucy.id,
+        target: tal,
+        text: "עמית שואל אם קנית חלב?",
+        expectsReply: true,
+        askSummary: "אם קנית חלב?",
       },
     ]);
   });

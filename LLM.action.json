@@ -37,13 +37,27 @@
     "    \"messages\": [",
     "      {",
     "        \"targets\": [\"<employee name | all>\"],",
-    "        \"text\": \"<הודעה מנוסחת לנמען>\"",
+    "        \"text\": \"<הודעה מנוסחת לנמען>\",",
+    "        \"expects_reply\": false,",
+    "        \"ask_summary\": \"\"",
+    "      }",
+    "    ],",
+    "    \"jobs\": [",
+    "      {",
+    "        \"action\": \"<answer | decline | progress | counter | snooze | clear_clock | close>\",",
+    "        \"job_id\": \"<job_id from OPEN_JOBS>\",",
+    "        \"answer_text\": \"<what the speaker said>\",",
+    "        \"report_text\": \"<sentence to deliver to the asker>\",",
+    "        \"time\": \"<HH:mm or empty>\",",
+    "        \"date\": \"<YYYY-MM-DD on counter, else empty>\",",
+    "        \"in\": null",
     "      }",
     "    ]",
     "  }",
     "}",
     "",
-    "If no actions exist, metadata.lists = [], metadata.filing = [], and metadata.messages = [].",
+    "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id.",
     "",
     "------------------------------------------------------------",
     "CAPABILITIES (זהה לכל עובד)",
@@ -301,6 +315,7 @@
               },
               "messages": {
                 "type": "array",
+                "description": "Messages to relay for the speaker. EVERY entry must include all four fields: targets, text, expects_reply, ask_summary.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -312,12 +327,50 @@
                     },
                     "text": {
                       "type": "string"
+                    },
+                    "expects_reply": {
+                      "type": "boolean",
+                      "description": "True whenever the speaker is waiting for something back from the recipient — an answer, an agreement, or an action (a question, a check, or a request to do/arrange something). False only for pure information with nothing coming back. True opens an open job so the answer can be reported back later."
+                    },
+                    "ask_summary": {
+                      "type": "string",
+                      "description": "What the speaker wants from them, in the speaker's own words (e.g. אם קנית חלב? / לתאם פגישת עבודה ליום שלישי). Quoted back when reporting. Empty when expects_reply is false."
                     }
                   },
                   "required": [
                     "targets",
-                    "text"
+                    "text",
+                    "expects_reply",
+                    "ask_summary"
                   ]
+                }
+              },
+              "jobs": {
+                "type": "array",
+                "description": "Lifecycle updates for jobs listed in OPEN_JOBS this turn. Always reference an existing job_id — never open a second task row for the same job.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "answer",
+                        "decline",
+                        "progress",
+                        "counter",
+                        "snooze",
+                        "clear_clock",
+                        "close"
+                      ]
+                    },
+                    "time": { "type": "string" },
+                    "in": { "type": ["number", "null"] },
+                    "date": {
+                      "type": "string",
+                      "description": "Counter only. Proposed meeting date as YYYY-MM-DD from SESSION_CLOCK. Empty otherwise."
+                    }
+                  },
+                  "required": ["action", "job_id"]
                 }
               },
               "directory": {

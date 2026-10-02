@@ -221,6 +221,7 @@ export function resolveSpokenMetadata(
     messages: metadata.messages ?? [],
     reminders: metadata.reminders ?? [],
     directory: metadata.directory ?? [],
+    jobs: metadata.jobs ?? [],
     handoff: metadata.handoff ?? null,
     query: metadata.query ?? null,
     reportSections: metadata.reportSections ?? [],
@@ -262,12 +263,16 @@ export function planRelayDeliveries(input: {
   digitalEmployeeId: string;
   target: PublicEmployee;
   text: string;
+  expectsReply?: boolean;
+  askSummary?: string;
 }> {
   const deliveries: Array<{
     employeeId: string;
     digitalEmployeeId: string;
     target: PublicEmployee;
     text: string;
+    expectsReply?: boolean;
+    askSummary?: string;
   }> = [];
   const seen = new Set<string>();
 
@@ -297,6 +302,10 @@ export function planRelayDeliveries(input: {
         digitalEmployeeId,
         target,
         text: action.text,
+        ...(action.expectsReply !== undefined
+          ? { expectsReply: action.expectsReply }
+          : {}),
+        ...(action.askSummary ? { askSummary: action.askSummary } : {}),
       });
     }
   }

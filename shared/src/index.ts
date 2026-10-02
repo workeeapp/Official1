@@ -92,6 +92,8 @@ export type {
   LlmHandoffAction,
   LlmHold,
   LlmHoldKind,
+  LlmJobAction,
+  LlmJobActionName,
   LlmQuery,
   ReportSection,
   ReportHistoryKind,
