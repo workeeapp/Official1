@@ -65,6 +65,8 @@ import {
 import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
+  fillListsFromPendingHold,
+  alignListTargetsWithMessageRecipients,
   formatCancelledHoldReply,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
@@ -345,7 +347,8 @@ function workerTargetingInstructions(
     "You support every action: lists, meetings, filing, messages, reminders, query, confirm, and handoff.",
     'If the speaker assigns an action to another employee or to everyone, set targets on that action to those names or ["all"]. The server will not infer targets from the sentence.',
     'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"] (assign — no tell/send verb).',
-    'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW with that buy request; lists=[]. Then in response you may offer a shared shopping list with טל; only add lists after they say yes.',
+    'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW; lists=[]. Offer shared shopping; hold kind=lists need=confirm_share with draft targets [speaker,\"טל\"]. On כן the server applies that draft — never private speaker shopping.',
+    'Example: "תגידי לטל ולעמית לקנות ביצים" → messages to both; hold confirm_share targets speaker+טל+עמית.',
     'Example: "תגידי לטל להכין מצגת" / "תגידי למיכל שיש פגישה ב־10" / "תגידי לעמית שהקוד 1234" → messages NOW; lists/filing=[] until they accept an offer to save.',
     'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders.',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
@@ -361,7 +364,7 @@ function workerTargetingInstructions(
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
     `Scheduled dictated send: (1) reminders add with ping + text + in/time. (2) lists tasks add targeting yourself (${workerName}) — לשלוח הודעה ל<name> (same item label as the clock). That is YOUR job for query self. (3) messages = []. Do not put shopping/tasks on the speaker unless they also asked to buy or remember their own work.`,
     "Write metadata.messages[].text / reminders.text for the recipient, in second person, and mention the speaker by name.",
-    "Do not turn a send/check/tell request into a list or task unless they also asked to add one — except the worker task required for a scheduled send above. After tell-to-buy/task/meeting/filing: send first; offer matching save only in response text (arrays empty until yes). After a speaker timed task without תזכיר לי: save the task and offer a reminder in response — do not auto-add reminders.",
+    "Do not turn a send/check/tell request into a list or task unless they also asked to add one — except the worker task required for a scheduled send above. After tell-to-buy/task/meeting/filing: send first; offer ONLY a shared/partnered save with the people you messaged (never the speaker's private shopping/tasks alone). On yes → lists/filing with targets including those people (+ speaker for shared). After a speaker timed task without תזכיר לי: save the task and offer a reminder in response — do not auto-add reminders.",
     "messages.targets and reminders.ping may be employee names, SPEAKER_CONTACTS names, or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
@@ -394,7 +397,7 @@ function workerTargetingInstructions(
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. In response: past tense that items were deleted, list every name from PENDING_ACTION_STATE current_target (e.g. נמחקו הפריטים הבאים מרשימת הקניות: …). Never מאשרת/לאשר/confirming — yes already confirmed. A single bought item (קניתי חלב) may remove immediately without confirm.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
     "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): leave query empty. Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (not the same as hold/PENDING_ACTION_STATE follow-ups). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
-    "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report. Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Exact list_name matches only.",
+    "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report. Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Exact list_name matches only. כל מה ששמור עלי / סיכום מלא → full dump of shopping, tasks, custom lists, active reminders, filings+memory, contacts — not tasks alone.",
     "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes. It does not append a mutation summary.",
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
@@ -1064,9 +1067,10 @@ export async function sendChatMessage(input: {
           ? ""
           : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, set metadata.query = \"self\" and answer from THIS turn's WORKER_SAVED_DATA only. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. PENDING_ACTION_STATE / hold drafts are unrelated and stay active. List jobs one • per line.",
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (query, sections, clocks, metadata, list_name).",
-        "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Never emit query report — the server no longer formats reports. Use short intro + one • item per line; never a dense paragraph.",
+        "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Never emit query report — the server no longer formats reports. Use short intro + one • item per line; never a dense paragraph. כל מה ששמור / סיכום מלא → FULL DUMP layout (all sections), not tasks only.",
         "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): leave query empty. SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — not hold/PENDING follow-ups like היי after מה תרצה שאשלח). Ask about X by name → that person's visible rows. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
         "הציגי את הרשימות שלי / show my lists: one block per list — header (list_name + shared_with if shared), then • items with CURRENT field values only; blank line between lists. Never one run-on paragraph. Empty → «ריקה».",
+        "FULL DUMP / כל מה ששמור עלי / סיכום מלא / everything saved about me: leave query empty. From THIS turn's EMPLOYEE_SAVED_DATA (+ SPEAKER_CONTACTS): cover shopping, tasks/meetings, each custom list, active_reminders, all filing (explicit + memory), contacts — every section even if empty (say ריק). Do not answer with tasks only. • bullets; no schema jargon.",
         "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA — one • line per item with the live value only (never «שם + שם חדש» / update drafts). Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata. items=[] → say the list is empty.",
         "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. Exact list_name for יש רשימת X (בעיות ≠ באגים).",
         "Bold in response: single *asterisks* only (WhatsApp). Never **double** asterisks.",
@@ -1205,6 +1209,32 @@ export async function sendChatMessage(input: {
           messages: filledMessages,
           hold: null,
         };
+      }
+    }
+    if (!guestSpeaker && !cancelledAwaitingHold) {
+      const filledLists = fillListsFromPendingHold(
+        waitingPending,
+        metadata.lists ?? [],
+        input.message,
+        metadata.confirm ?? null,
+      );
+      if (filledLists) {
+        metadata = {
+          ...metadata,
+          lists: filledLists,
+          hold: null,
+          confirm: null,
+        };
+      }
+    }
+    if (!guestSpeaker && !cancelledAwaitingHold) {
+      const alignedLists = alignListTargetsWithMessageRecipients({
+        lists: metadata.lists ?? [],
+        messages: metadata.messages ?? [],
+        speakerName: employeeDisplayName(employee),
+      });
+      if (alignedLists !== metadata.lists) {
+        metadata = { ...metadata, lists: alignedLists };
       }
     }
     const listPlan = planListDeletes({

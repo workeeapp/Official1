@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
+  fillListsFromPendingHold,
+  alignListTargetsWithMessageRecipients,
   formatCancelledHoldReply,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
+  isConfirmHoldNeed,
+  isPendingHoldAcceptText,
   isPendingHoldCancelText,
   metadataAfterHoldCancel,
   pendingHoldFromLlm,
@@ -85,6 +89,84 @@ describe("pending action hold", () => {
       confirm: null,
     });
     expect(completed).toBeNull();
+  });
+
+  it("applies confirm_share list drafts on yes even if the model emits private shopping", () => {
+    const hold = pendingHoldFromLlm({
+      kind: "lists",
+      need: "confirm_share",
+      directory: [],
+      lists: [
+        {
+          action: "add",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "ביצים" }],
+          targets: ["מיכל", "טל"],
+        },
+      ],
+      reminders: [],
+      filing: [],
+      messages: [],
+    });
+    expect(hold?.action).toBe("complete_lists");
+    expect(isConfirmHoldNeed("confirm_share")).toBe(true);
+    expect(isPendingHoldAcceptText("כן")).toBe(true);
+
+    expect(
+      fillListsFromPendingHold(
+        hold,
+        [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "ביצים" }],
+            targets: [],
+          },
+        ],
+        "כן",
+        null,
+      ),
+    ).toEqual([
+      {
+        action: "add",
+        listType: "shopping",
+        listName: "",
+        items: [{ "שם פריט": "ביצים" }],
+        targets: ["מיכל", "טל"],
+      },
+    ]);
+
+    expect(
+      fillListsFromPendingHold(hold, [], "בטל", null),
+    ).toBeNull();
+  });
+
+  it("aligns empty shopping targets with same-turn message recipients", () => {
+    expect(
+      alignListTargetsWithMessageRecipients({
+        speakerName: "מיכל",
+        messages: [{ targets: ["טל"], text: "תקני ביצים" }],
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "ביצים" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        action: "add",
+        listType: "shopping",
+        listName: "",
+        items: [{ "שם פריט": "ביצים" }],
+        targets: ["מיכל", "טל"],
+      },
+    ]);
   });
 
   it("recognizes cancel phrases for awaiting message holds", () => {

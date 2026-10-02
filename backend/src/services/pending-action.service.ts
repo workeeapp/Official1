@@ -65,6 +65,58 @@ export function isPendingHoldCancelText(text: string): boolean {
   );
 }
 
+/** Hold.need values that mean yes/no confirm (not a free-text field fill). */
+export function isConfirmHoldNeed(need: string): boolean {
+  const normalized = need.trim().toLowerCase().replace(/\s+/g, "_");
+  return (
+    normalized === "confirm" ||
+    normalized === "confirm_share" ||
+    normalized === "confirm_save" ||
+    normalized.startsWith("confirm_") ||
+    normalized.includes("confirm")
+  );
+}
+
+/** Short accept for confirm-style holds (כן / yes) — not cancel. */
+export function isPendingHoldAcceptText(text: string): boolean {
+  if (isPendingHoldCancelText(text)) {
+    return false;
+  }
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,״"']/g, "")
+    .replace(/\s+/g, " ");
+  if (!normalized) {
+    return false;
+  }
+  const exact = new Set([
+    "כן",
+    "כן בבקשה",
+    "כן תוסיפי",
+    "כן תוסיף",
+    "כן שמרי",
+    "בבקשה",
+    "תוסיפי",
+    "תוסיף",
+    "שמרי",
+    "שמור",
+    "ok",
+    "okay",
+    "yes",
+    "yep",
+    "sure",
+  ]);
+  if (exact.has(normalized)) {
+    return true;
+  }
+  return (
+    normalized.startsWith("כן ") ||
+    normalized.startsWith("yes ") ||
+    normalized.startsWith("ok ")
+  );
+}
+
 export function isAwaitingFieldsHold(
   pending: ConversationPendingAction | null,
 ): pending is PendingHoldAction {
@@ -381,6 +433,85 @@ export function fillMessagesFromPendingHold(
   }));
 }
 
+/**
+ * Confirm-style lists hold (e.g. shared shopping after tell): on yes / confirm /
+ * model list emit, apply the stored draft lists so private speaker-only saves lose.
+ */
+export function fillListsFromPendingHold(
+  pending: ConversationPendingAction | null,
+  lists: LlmListAction[],
+  speakerText: string,
+  confirm: boolean | null,
+): LlmListAction[] | null {
+  if (
+    !pending ||
+    pending.action !== "complete_lists" ||
+    pending.step !== "awaiting_fields" ||
+    !isConfirmHoldNeed(pending.need)
+  ) {
+    return null;
+  }
+  const draftLists = pending.draft.lists ?? [];
+  if (draftLists.length === 0) {
+    return null;
+  }
+  if (confirm === false || isPendingHoldCancelText(speakerText)) {
+    return null;
+  }
+  const modelListed = lists.some(
+    (row) =>
+      (row.action === "add" || row.action === "update") && row.items.length > 0,
+  );
+  const accepted =
+    confirm === true ||
+    isPendingHoldAcceptText(speakerText) ||
+    modelListed;
+  if (!accepted) {
+    return null;
+  }
+  return draftLists;
+}
+
+/**
+ * Same-turn guard: shopping/tasks add with empty targets while messages name
+ * recipients → attach those recipients (plus optional speaker label) as targets.
+ */
+export function alignListTargetsWithMessageRecipients(input: {
+  lists: LlmListAction[];
+  messages: LlmMessageAction[];
+  speakerName?: string;
+}): LlmListAction[] {
+  const recipients = [
+    ...new Set(
+      input.messages.flatMap((row) =>
+        row.targets.map((name) => name.trim()).filter(Boolean),
+      ),
+    ),
+  ];
+  if (recipients.length === 0 || input.lists.length === 0) {
+    return input.lists;
+  }
+  const speaker = input.speakerName?.trim() ?? "";
+  let changed = false;
+  const next = input.lists.map((row) => {
+    if (row.action !== "add" && row.action !== "update") {
+      return row;
+    }
+    if (row.listType !== "shopping" && row.listType !== "tasks") {
+      return row;
+    }
+    if (row.targets.length > 0) {
+      return row;
+    }
+    changed = true;
+    const targets = speaker
+      ? [...new Set([speaker, ...recipients])]
+      : recipients;
+    return { ...row, targets };
+  });
+  return changed ? next : input.lists;
+}
+
 export function conversationPendingFromStored(row: {
   pendingAction: string | null;
   pendingTargets: unknown;
@@ -575,6 +706,7 @@ export function formatConversationPendingContext(
     "Never reply לא הבנתי / מה תרצה לעשות to that short reply.",
     "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
+    "If current_action is complete_lists and missing_field is confirm / confirm_share: Yes / confirm=true → apply known_draft.lists (shared targets included). Do not replace with the speaker's private list. The server prefers known_draft lists on accept.",
     "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort this draft — hold=null and empty directory/lists/reminders/filing/messages. Do not complete the unfinished action. Say you cancelled (e.g. ביטלתי את השליחה / ביטלתי את התיוק).",
     "If still missing something else, emit hold again with the updated draft and the new need.",
     "Do not start an unrelated new request until this hold is completed, cancelled, or the speaker clearly switches topic.",

@@ -36,6 +36,11 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("last_report_sha");
     expect(config.systemMessage).toContain("RECENT_OUTBOUND");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
+    expect(config.systemMessage).toContain("FULL DUMP");
+    expect(config.systemMessage).toContain("כל מה ששמור");
+    expect(config.systemMessage).toContain("רשימת קניות משותפת");
+    expect(config.systemMessage).toContain("confirm_share");
+    expect(config.systemMessage).toContain("FORBIDDEN: «לרשימת הקניות שלך»");
     expect(config.systemMessage).toContain("TELL vs ASSIGN");
     expect(config.systemMessage).toContain("תגידי לטל לקנות");
     expect(config.systemMessage).toContain("TIMED TASK WITHOUT CLOCK");
