@@ -62,5 +62,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("AFTER ASSIGN");
     expect(config.systemMessage).toContain("גם אליך");
     expect(config.systemMessage).toContain("ping Michal only");
+    expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
+    expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
   });
 });
