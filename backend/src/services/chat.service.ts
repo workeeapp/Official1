@@ -1045,7 +1045,7 @@ export async function sendChatMessage(input: {
           : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
         guestSpeaker
           ? ""
-          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker. If they ask about מה ששלחת / הסיכום / ההודעה האחרונה, use that text. Do not claim you sent nothing when it is listed. Do not resend unless they ask. Do not invent another recipient (e.g. עמית) for a follow-up.",
+          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker. If they ask about מה ששלחת / הסיכום / ההודעה האחרונה, use that text. Do not claim you sent nothing when it is listed. Do not resend unless they ask. Do not invent another recipient (e.g. עמית) for a follow-up. Snooze / תזכיר לי שוב / את זה / בעוד X about that block → NEW self-nudge for this speaker from RECENT_OUTBOUND.item/text (three ACTIONS: their task, your להזכיר job, reminders add). Bare «בעוד שעה» right after that outbound = snooze the same item. Do not revive the old done clock — add a new one. Missing delay → ASK מתי?",
         guestSpeaker
           ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
           : employee.isOwner
