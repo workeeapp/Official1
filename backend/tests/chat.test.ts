@@ -88,11 +88,13 @@ const {
   filingUpsert: vi.fn(),
 }));
 
-const { createConversation, createResponse, usageCreate } = vi.hoisted(() => ({
-  createConversation: vi.fn(),
-  createResponse: vi.fn(),
-  usageCreate: vi.fn().mockResolvedValue({}),
-}));
+const { createConversation, createResponse, appendAssistantMessage, usageCreate } =
+  vi.hoisted(() => ({
+    createConversation: vi.fn(),
+    createResponse: vi.fn(),
+    appendAssistantMessage: vi.fn(),
+    usageCreate: vi.fn().mockResolvedValue({}),
+  }));
 
 const deliverWhatsAppRelaysMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ skips: [], sentLabels: [] }),
@@ -577,9 +579,11 @@ describe("chat API", () => {
         return { count: data.length };
       },
     );
+    appendAssistantMessage.mockReset().mockResolvedValue(undefined);
     setLlmClientForTests({
       createConversation,
       createResponse,
+      appendAssistantMessage,
     });
     app = createApp();
   });
@@ -887,6 +891,10 @@ describe("chat API", () => {
     expect(consult.message).toContain("לוסי (בשם");
     expect(response.body.reply).toContain("שאלתי את דיאנה:");
     expect(response.body.reply).toContain("דיאנה עונה: כן, יש טיסה ב-08:00 וב-14:30.");
+    expect(appendAssistantMessage).toHaveBeenCalledWith(
+      "conv_lucy",
+      "דיאנה עונה: כן, יש טיסה ב-08:00 וב-14:30.",
+    );
     expect(itemCreate).toHaveBeenCalledOnce();
     expect(JSON.stringify(itemCreate.mock.calls[0][0].data.data)).toContain(
       "לבדוק עם דיאנה: אם יש טיסות ביום ראשון?",

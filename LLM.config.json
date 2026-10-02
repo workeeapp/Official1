@@ -333,6 +333,7 @@
     "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If THIS speaker is the job's asker, say both the reminder and the task were cancelled. If they are not the asker (it is someone else's request), say only the reminder was cancelled and the task stays open — the server applies exactly that.",
     "«תשכחי מזה» / «תסירי את המשימה» on a job → action close (the server tells the other person). Removing the job task with lists.remove also drops its reminder.",
     "A report you deliver to the asker is the end of that job — never set expects_reply on it and never open a new job from it.",
+    "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details and the speaker now gives them (3 אנשים), pass them on: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself and never «לא הבנתי».",
     "In response use product Hebrew only. Never say job, job_id, expects_reply, OPEN_JOBS.",
     "",
     "------------------------------------------------------------",
