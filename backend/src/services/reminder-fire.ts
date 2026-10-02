@@ -12,20 +12,7 @@ import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
 import { composeScheduledOutbound } from "./reminder-compose.js";
-import {
-  formatGitChangelogForCompose,
-  readGitChangelog,
-  resolveGitDigestWindow,
-} from "./git-changelog.js";
-import {
-  formatEmployeeContext,
-  getEmployeeRecordSnapshot,
-} from "./employee-records.service.js";
-import {
-  formatSpeakerContacts,
-  listContactsForEmployee,
-} from "./contact.service.js";
-import { formatSessionClockContext } from "../utils/relative-date.js";
+import { loadComposeFacts } from "./compose-facts.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -210,115 +197,61 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         firstTarget?.name ||
         (looksLikePhone(firstDest) ? firstDest : "הנמען");
 
-      let gitChangelog: string | undefined;
-      let headSha = "";
       let advanceLastReportSha = false;
-      let gitWindowLabel = "";
-      let savedDataContext: string | undefined;
-      const isGitDigest = reminder.composeSource === "git_log";
-      const isSavedData = reminder.composeSource === "saved_data";
-      if (isGitDigest) {
-        try {
-          const lookbackHours =
+      let headSha = "";
+      let factsBundle: Awaited<ReturnType<typeof loadComposeFacts>> | undefined;
+      try {
+        const subjectId =
+          firstTarget?.id ?? reminder.actorId ?? reminder.ownerId;
+        factsBundle = await loadComposeFacts({
+          composeSource: reminder.composeSource ?? "",
+          subjectEmployeeId: subjectId,
+          repeat: reminder.repeat,
+          lastReportSha: reminder.lastReportSha,
+          lookbackHours:
             typeof reminder.composeLookbackHours === "number"
               ? reminder.composeLookbackHours
-              : 0;
-          const window = resolveGitDigestWindow({
-            repeat: reminder.repeat,
-            lastReportSha: reminder.lastReportSha,
-            lookbackHours,
-            now,
-          });
-          advanceLastReportSha = window.advanceLastReportSha;
-          gitWindowLabel = window.windowLabel;
-          const log = await readGitChangelog({
-            sinceSha: window.sinceSha,
-            sinceDate: window.sinceDate,
-          });
-          headSha = log.headSha;
-          gitChangelog = formatGitChangelogForCompose(log.commits);
-          if (!gitChangelog) {
-            outboundBody =
-              "No new product changes in that window.";
-            skipSend = false;
-            await prisma.reminder.update({
-              where: { id: reminder.id },
-              data: {
-                lastComposedText: outboundBody,
-                ...(advanceLastReportSha && headSha
-                  ? { lastReportSha: headSha }
-                  : {}),
-              },
-            });
-          }
-        } catch (error) {
-          recordWhatsAppEvent(
-            "reminder_git_log_fail",
-            error instanceof Error ? error.message : "unknown",
-          );
-          skipSend = true;
-          await settleFiredReminder(reminder, now, "failed");
-          continue;
-        }
-      } else if (isSavedData) {
-        try {
-          const subjectId =
-            firstTarget?.id ??
-            reminder.actorId ??
-            reminder.ownerId;
-          const snapshot = await getEmployeeRecordSnapshot(subjectId);
-          const contacts = await listContactsForEmployee(subjectId);
-          savedDataContext = [
-            formatEmployeeContext(snapshot),
-            formatSpeakerContacts(contacts),
-          ]
-            .filter(Boolean)
-            .join("\n\n");
-        } catch (error) {
-          recordWhatsAppEvent(
-            "reminder_saved_data_fail",
-            error instanceof Error ? error.message : "unknown",
-          );
-          skipSend = true;
-          await settleFiredReminder(reminder, now, "failed");
-          continue;
-        }
+              : 0,
+          now,
+        });
+        advanceLastReportSha = Boolean(factsBundle.advanceLastReportSha);
+        headSha = factsBundle.headSha ?? "";
+      } catch (error) {
+        recordWhatsAppEvent(
+          "reminder_compose_facts_fail",
+          error instanceof Error ? error.message : "unknown",
+        );
+        skipSend = true;
+        await settleFiredReminder(reminder, now, "failed");
+        continue;
       }
 
-      if (
-        (!isGitDigest || gitChangelog) &&
-        (!isSavedData || savedDataContext !== undefined)
-      ) {
-        const composed = await composeScheduledOutbound({
-          brief: reminder.messageText,
-          itemLabel: reminder.itemLabel,
-          actorName,
-          recipientName,
-          previousText: reminder.lastComposedText,
-          gitChangelog,
-          gitWindowLabel,
-          savedDataContext,
-          sessionClock: isSavedData ? formatSessionClockContext() : undefined,
+      const composed = await composeScheduledOutbound({
+        brief: reminder.messageText,
+        itemLabel: reminder.itemLabel,
+        actorName,
+        recipientName,
+        previousText: reminder.lastComposedText,
+        facts: factsBundle,
+      });
+      const resolved = resolveComposeFireOutbound({
+        brief: reminder.messageText,
+        itemLabel: reminder.itemLabel,
+        composed,
+      });
+      outboundBody = resolved.body;
+      if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
+        await prisma.reminder.update({
+          where: { id: reminder.id },
+          data: {
+            ...(resolved.lastComposedToSave
+              ? { lastComposedText: resolved.lastComposedToSave }
+              : {}),
+            ...(advanceLastReportSha && headSha
+              ? { lastReportSha: headSha }
+              : {}),
+          },
         });
-        const resolved = resolveComposeFireOutbound({
-          brief: reminder.messageText,
-          itemLabel: reminder.itemLabel,
-          composed,
-        });
-        outboundBody = resolved.body;
-        if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
-          await prisma.reminder.update({
-            where: { id: reminder.id },
-            data: {
-              ...(resolved.lastComposedToSave
-                ? { lastComposedText: resolved.lastComposedToSave }
-                : {}),
-              ...(advanceLastReportSha && headSha
-                ? { lastReportSha: headSha }
-                : {}),
-            },
-          });
-        }
       }
     }
 
