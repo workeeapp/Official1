@@ -316,6 +316,7 @@ const OPEN_JOBS_RULES = [
   "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while a hold/confirm is unfinished, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
   "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
+  "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
   "When listing YOUR work: include OPEN_JOBS rows next to WORKER_SAVED_DATA, phrased for the viewer — to the asker «לבדוק עם ערן מה שלומו», to the subject «לבדוק מה שלומך (משימה מעמית)». Never say job / job_id / expects_reply / OPEN_JOBS in response.",
 ].join("\n");
 
@@ -1712,6 +1713,12 @@ export async function sendChatMessage(input: {
         continue;
       }
       consultAnswers.push(`${workerName} עונה: ${said}`);
+      await withoutFailingTurn("consult_memory_failed", async () => {
+        await client.appendAssistantMessage?.(
+          conversation.openaiConversationId,
+          `${workerName} עונה: ${said}`,
+        );
+      });
       await withoutFailingTurn("job_answer_failed", () =>
         answerOpenJobForPair({
           userId: input.userId,

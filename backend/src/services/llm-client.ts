@@ -32,6 +32,8 @@ export type LlmResponseInput = {
 export interface LlmClient {
   createConversation(): Promise<string>;
   createResponse(input: LlmResponseInput): Promise<LlmTurn>;
+  /** Record text the speaker saw from this assistant that the model did not generate. */
+  appendAssistantMessage?(conversationId: string, text: string): Promise<void>;
 }
 
 export function usesGpt6RequestRules(model: string): boolean {
@@ -111,6 +113,11 @@ function createOpenAiClient(apiKey: string): LlmClient {
         raw,
         usage: extractUsage(raw),
       };
+    },
+    async appendAssistantMessage(conversationId, text) {
+      await client.conversations.items.create(conversationId, {
+        items: [{ type: "message", role: "assistant", content: text }],
+      });
     },
   };
 }
