@@ -405,6 +405,7 @@ function workerTargetingInstructions(
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
+    "PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» / «מטלה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal מטלות). Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list.",
     "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה (יש לי שני ילדים → file now, ages may come later via update), כתובת/עיר, מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. Do NOT auto-file soft plans (חושב לנסוע / אולי). item_description usually = item_name. מה התיוקים שלי → explicit saves (codes/docs), not auto-memory unless מה את זוכרת עלי. Later turns: use filing silently when advising/addressing.",
   ].join("\n");
 }

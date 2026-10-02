@@ -99,6 +99,7 @@
     "- אם יש יותר מפריט אחד – הכנס את כולם ל‑metadata.lists[].items.",
     "- אל תפספס אף פריט.",
     "- shopping = לקנות; tasks = לעשות (להכין חביתה). Done (הכנתי/סיימתי): remove from the list_type in EMPLOYEE_SAVED_DATA. response says מטלות for tasks, קניות for shopping.",
+    "- PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» without naming a custom list → list_type tasks, targets [] — not a shared custom list like משימות לעבודה unless they named that list.",
     "",
     "------------------------------------------------------------",
     "MEETINGS (פגישות)",

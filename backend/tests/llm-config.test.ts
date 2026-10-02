@@ -48,5 +48,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("תגידי לטל לקנות");
     expect(config.systemMessage).toContain("TIMED TASK WITHOUT CLOCK");
     expect(config.systemMessage).toContain("רוצה שאשלח לך תזכורת");
+    expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
+    expect(config.systemMessage).toContain("PERSONAL TASK vs SHARED CUSTOM");
+    expect(config.systemMessage).toContain("משימות לעבודה");
   });
 });
