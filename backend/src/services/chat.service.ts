@@ -109,7 +109,7 @@ function toJsonValue(value: unknown): Prisma.InputJsonValue | typeof Prisma.Json
   return toPlainJson(value) as Prisma.InputJsonValue;
 }
 
-export const CONVERSATION_IDLE_MS = 60 * 60 * 1000;
+export const CONVERSATION_IDLE_MS = 24 * 60 * 60 * 1000;
 
 function emptyHistory(
   employeeId: string,
@@ -344,7 +344,10 @@ function workerTargetingInstructions(
     `Current speaker: ${speaker}. You are ${workerName}.`,
     "You support every action: lists, meetings, filing, messages, reminders, query, confirm, and handoff.",
     'If the speaker assigns an action to another employee or to everyone, set targets on that action to those names or ["all"]. The server will not infer targets from the sentence.',
-    'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"].',
+    'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"] (assign — no tell/send verb).',
+    'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW with that buy request; lists=[]. Then in response you may offer a shared shopping list with טל; only add lists after they say yes.',
+    'Example: "תגידי לטל להכין מצגת" / "תגידי למיכל שיש פגישה ב־10" / "תגידי לעמית שהקוד 1234" → messages NOW; lists/filing=[] until they accept an offer to save.',
+    'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders.',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
     `Example: "שמור פגישה עם טל ביום ראשון בשעה 10" → tasks add, targets: ["${speaker}", "טל"].`,
@@ -358,7 +361,7 @@ function workerTargetingInstructions(
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
     `Scheduled dictated send: (1) reminders add with ping + text + in/time. (2) lists tasks add targeting yourself (${workerName}) — לשלוח הודעה ל<name> (same item label as the clock). That is YOUR job for query self. (3) messages = []. Do not put shopping/tasks on the speaker unless they also asked to buy or remember their own work.`,
     "Write metadata.messages[].text / reminders.text for the recipient, in second person, and mention the speaker by name.",
-    "Do not turn a send/check request into a list or task unless they also asked to add one — except the worker task required for a scheduled send above.",
+    "Do not turn a send/check/tell request into a list or task unless they also asked to add one — except the worker task required for a scheduled send above. After tell-to-buy/task/meeting/filing: send first; offer matching save only in response text (arrays empty until yes). After a speaker timed task without תזכיר לי: save the task and offer a reminder in response — do not auto-add reminders.",
     "messages.targets and reminders.ping may be employee names, SPEAKER_CONTACTS names, or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
@@ -367,7 +370,7 @@ function workerTargetingInstructions(
     "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
     "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
-    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. Example: תשלחי הודעה לעמית המערכת למעלה → messages to עמית now (text from המערכת למעלה); do NOT ask מה תרצה שאשלח. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי) → send that text, hold=null — never ask again. Cancel any awaiting hold (לא / בטל / אל תשלחי / cancel) → empty unfinished arrays + hold=null; do not use cancel words as the missing field.",
+    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. תגידי לטל לקנות… / תשלחי הודעה לעמית המערכת למעלה → messages NOW; do NOT ask מה תרצה שאשלח or האם זו הודעה או רשימת קניות. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי / זו ההודעה / כן תשלחי) → send that text, hold=null — never ask again. Cancel any awaiting hold (לא / בטל / אל תשלחי / cancel) → empty unfinished arrays + hold=null; do not use cancel words as the missing field.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."

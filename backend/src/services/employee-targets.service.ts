@@ -7,6 +7,7 @@ import {
   type LlmListAction,
   type LlmMessageAction,
   type LlmMetadata,
+  type LlmReminderAction,
   type PublicEmployee,
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
@@ -30,6 +31,65 @@ function listScopeOf(row: SharedListRef): "personal" | "shared" {
 
 export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
+}
+
+/** Same-turn reminder clocks that ping this employee (by name). */
+export function reminderTargetsEmployee(
+  reminder: LlmReminderAction,
+  employee: PublicEmployee,
+): boolean {
+  const names = [...reminder.ping, ...reminder.targets]
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) {
+    return false;
+  }
+  const candidates = [
+    employee.nickname,
+    employee.name,
+    employeeDisplayName(employee),
+  ]
+    .map((name) => name?.trim().toLowerCase() ?? "")
+    .filter(Boolean);
+  return candidates.some((candidate) => names.includes(candidate));
+}
+
+/** Hebrew clause appended to task notifies when a linked clock exists. */
+export function formatLinkedReminderHint(
+  reminders: LlmReminderAction[],
+): string {
+  const clock = reminders.find(
+    (row) => row.action === "add" || row.action === "update",
+  );
+  if (!clock) {
+    return "";
+  }
+  if (typeof clock.inSeconds === "number" && clock.inSeconds > 0) {
+    const seconds = clock.inSeconds;
+    if (seconds < 90) {
+      return ", ותזכורת בעוד דקה";
+    }
+    if (seconds < 3600) {
+      const minutes = Math.max(1, Math.round(seconds / 60));
+      return `, ותזכורת בעוד ${minutes} דקות`;
+    }
+    if (seconds === 3600) {
+      return ", ותזכורת בעוד שעה";
+    }
+    if (seconds % 3600 === 0) {
+      return `, ותזכורת בעוד ${seconds / 3600} שעות`;
+    }
+    const minutes = Math.round(seconds / 60);
+    return `, ותזכורת בעוד ${minutes} דקות`;
+  }
+  const time = clock.time?.trim() ?? "";
+  if (time) {
+    const date = clock.date?.trim() ?? "";
+    return date
+      ? `, ותזכורת ב־${date} ב־${time}`
+      : `, ותזכורת ב־${time}`;
+  }
+  return ", ותזכורת";
 }
 
 export function resolveActionTargets(
@@ -514,15 +574,27 @@ export function planTargetedActions(input: {
     notifications: [...notificationBuckets.entries()].flatMap(
       ([employeeId, bucket]) => {
         const employee = input.employees.find((item) => item.id === employeeId);
-        return employee
-          ? [
-              {
-                employee,
-                metadata: bucket.metadata,
-                partnerNames: bucket.partnerNames,
-              },
-            ]
-          : [];
+        if (!employee) {
+          return [];
+        }
+        const linkedReminders = (input.metadata.reminders ?? []).filter(
+          (reminder) =>
+            (reminder.action === "add" || reminder.action === "update") &&
+            reminderTargetsEmployee(reminder, employee),
+        );
+        return [
+          {
+            employee,
+            metadata: {
+              ...bucket.metadata,
+              reminders: [
+                ...(bucket.metadata.reminders ?? []),
+                ...linkedReminders,
+              ],
+            },
+            partnerNames: bucket.partnerNames,
+          },
+        ];
       },
     ),
     guestMutationBlocked: false,
@@ -804,9 +876,10 @@ export function fallbackNotificationText(
     if (list.action === "update") {
       return `${actorName} עדכן מטלה: ${itemText}`;
     }
+    const reminderHint = formatLinkedReminderHint(metadata.reminders ?? []);
     return yours
-      ? `${actorName} הוסיף לך מטלה: ${itemText}`
-      : `${actorName} הוסיף מטלה ${ownerList}: ${itemText}`.trim();
+      ? `${actorName} הוסיף לך מטלה: ${itemText}${reminderHint}`
+      : `${actorName} הוסיף מטלה ${ownerList}: ${itemText}${reminderHint}`.trim();
   }
 
   if (list?.listType === "custom" || (list?.listName && list.listName.trim())) {

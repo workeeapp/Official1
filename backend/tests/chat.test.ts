@@ -1001,7 +1001,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(2);
+    ageStoredConversation(25);
     createConversation.mockResolvedValue("conv_idle");
 
     const history = await request(app)
@@ -1022,7 +1022,7 @@ describe("chat API", () => {
     expect(createConversation).toHaveBeenCalledTimes(2);
   });
 
-  it("starts a new OpenAI conversation after an hour of idle chat", async () => {
+  it("starts a new OpenAI conversation after a day of idle chat", async () => {
     const cookie = await login();
     mockOwnedEmployee();
 
@@ -1031,7 +1031,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(2);
+    ageStoredConversation(25);
     createConversation.mockResolvedValue("conv_idle_send");
     createResponse.mockResolvedValue({
       reply: "After idle",

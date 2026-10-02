@@ -288,6 +288,103 @@ describe("employee targets", () => {
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
   });
 
+  it("appends a linked reminder clock to a task notification", () => {
+    expect(
+      fallbackNotificationText(tal, {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "ללכת לקוסמטיקאית" }],
+            targets: [],
+          },
+        ],
+        reminders: [
+          {
+            action: "add",
+            item: "להזכיר למיכל ללכת לקוסמטיקאית",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "once",
+            ping: ["מיכל"],
+            targets: ["מיכל"],
+            text: "",
+            inSeconds: 3600,
+            everyCount: null,
+            everyUnit: null,
+            weekdays: null,
+            confirmed: false,
+            compose: false,
+            composeSource: "",
+            composeLookbackHours: 0,
+          },
+        ],
+      }),
+    ).toBe(
+      "טל הוסיף לך מטלה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
+    );
+  });
+
+  it("attaches same-turn reminders onto the targeted person's notify metadata", () => {
+    const michal: PublicEmployee = {
+      id: "michal-1",
+      name: "מיכל",
+      surname: "",
+      nickname: "מיכל",
+      email: null,
+      phone: null,
+    };
+    const plan = planTargetedActions({
+      actor: tal,
+      employees: [tal, michal],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "ללכת לקוסמטיקאית" }],
+            targets: ["מיכל"],
+          },
+        ],
+        reminders: [
+          {
+            action: "add",
+            item: "להזכיר למיכל ללכת לקוסמטיקאית",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "once",
+            ping: ["מיכל"],
+            targets: ["מיכל"],
+            text: "",
+            inSeconds: 3600,
+            everyCount: null,
+            everyUnit: null,
+            weekdays: null,
+            confirmed: false,
+            compose: false,
+            composeSource: "",
+            composeLookbackHours: 0,
+          },
+        ],
+      },
+    });
+    const notify = plan.notifications.find((row) => row.employee.id === michal.id);
+    expect(notify?.metadata.reminders).toHaveLength(1);
+    expect(
+      fallbackNotificationText(tal, notify!.metadata, {
+        recipientIsOwner: true,
+      }),
+    ).toBe(
+      "טל הוסיף לך מטלה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
+    );
+  });
+
   it("notifies a shared custom-list partner with item and list names", () => {
     expect(
       fallbackNotificationText(

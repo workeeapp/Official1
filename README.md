@@ -66,6 +66,8 @@ The worker understands the speaker, asks until the schema is complete, then emit
 - **Dates (ask):** each chat turn injects `SESSION_CLOCK` (`current_date`, `current_time`, timezone Asia/Jerusalem). Questions like «מה לעשות היום / בעוד שעתיים / השבוע» are answered by the model filtering against that clock — the server does **not** pre-filter rows or build a status report. For **אני / שלי**, use only the speaker’s personal tasks + their active reminders in `EMPLOYEE_SAVED_DATA` — not `WORKER_SAVED_DATA` and not other people’s schedule rows. Empty timed windows should be spoken in plain Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה), not jargon like «מטלות מתוזמנות».
 - On remove/update, the server resolves `list_type` from where the item actually lives. If the spoken reply says קניות for a tasks item, the reply is corrected to מטלות (and the reverse).
 - List/filing actions may target another human or `כולם`. Shared shopping changes can notify the other person’s assistant thread when someone buys or updates an item.
+- **Tell vs assign:** «תגידי / תשלחי ל־X …» with content after the name → `messages` now (not a list/filing save). After send, the model may *offer* a matching shared list/task/filing in `response` only; arrays stay empty until they say yes. Plain assign («טל צריך לקנות…» / «תוסיפי לטל…») still goes to lists.
+- **Timed personal task:** saving «אני צריך … מחר ב־08:00» as a tasks row should *offer* a reminder clock in `response` — do not auto-create `reminders` unless they asked for a nudge or accepted the offer.
 
 ## People, visibility, contacts
 
@@ -75,7 +77,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 ## App UI
 
-- **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy or any other digital). Guests are omitted from Chat-as.
+- **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy or any other digital). Guests are omitted from Chat-as. History is per `(Chat as, Chat with)` thread; after **24 hours** idle the server rotates the conversation and **deletes** stored chat messages (OpenAI context resets too).
 - **Employees** — CRUD for humans and digital workers (guests hidden); optional owner flag.
 - **Dashboard** — signed-in home. **WhatsApp** — webhook/flow status for operators.
 
@@ -89,6 +91,7 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - **Recent outbound context:** after a reminder fires, the next chat turns inject `RECENT_OUTBOUND` (latest sent body for that speaker) so the model can answer «לגבי מה ששלחת» without re-sending WhatsApp.
 - Reminder **update/match** searches all active clocks on the account (any owner), then keeps the existing row’s `owner_id`.
 - Self-nudges are several actions: work on the speaker, a task on the digital worker, and a reminder clock. Worker task ↔ clock are linked (`ON DELETE CASCADE` both ways). On cancel, the model should also remove the speaker wrapper item when it matches that nudge (or ask if it looks like independent work). Removing a shopping/task item also cancels active clocks that match the same work by key/label (speaker wrapper is not FK-linked to the clock).
+- **Remind someone else** is the same three-action pattern (task on them, worker «להזכיר ל…» job, clock with `ping` = them). When that same turn notifies them about the new task, the server notify text also mentions the linked clock (e.g. «הוסיף לך מטלה: …, ותזכורת בעוד שעה») — from the ACTION fields, not from re-parsing speech.
 - After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for retention. Soft-deleted list/filing rows and done/cancelled clocks **stay in the DB** but are **never** loaded into `EMPLOYEE_SAVED_DATA` — live/active data only.
 - Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations still append to `AuditEvents` for internal retention; they are not injected into the model.
 - Custom lists must always have a real `EmployeeLists.name`. Prefer the name the speaker already said (or `list_name` on the item); only ask “what should we call this list?” when none exists. Never persist custom rows with an empty name — snapshots derive a title from item `list_name` when repairing legacy rows.
