@@ -202,7 +202,49 @@ describe("createJobsFromRelays", () => {
     );
   });
 
-  it("never opens a second job for the same asker and subject; updates the ask instead", async () => {
+  it("opens a second job when the same people already have a different ask", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "job-1",
+        data: {
+          "שם מטלה": "לבדוק עם ערן: לתאם פגישה ליום שלישי ב-12:00",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: ERAN,
+            subjectName: "ערן",
+            ask: "לתאם פגישה ליום שלישי ב-12:00",
+            state: "open",
+            createdAt: "2026-10-02T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+    itemCreate.mockResolvedValue({ id: "job-2" });
+    const created = await createJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      deliveries: [
+        {
+          subjectId: ERAN,
+          subjectName: "ערן",
+          text: "עמית שואל מה שלומך?",
+          ask: "מה שלומו",
+        },
+      ],
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0].id).toBe("job-2");
+    expect(itemCreate).toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(itemCreate.mock.calls[0][0].data.data[JOB_META_KEY].ask).toBe(
+      "מה שלומו",
+    );
+  });
+
+  it("skips a second row when the same ask is already open", async () => {
     itemFindMany.mockResolvedValue([
       {
         id: "job-1",
@@ -229,6 +271,44 @@ describe("createJobsFromRelays", () => {
         {
           subjectId: ERAN,
           subjectName: "ערן",
+          text: "עמית מבקש לתאם איתך פגישה.",
+          ask: "לתאם פגישה",
+        },
+      ],
+    });
+    expect(created).toEqual([]);
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("updates the existing job when this turn already progressed that row", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "job-1",
+        data: {
+          "שם מטלה": "לבדוק עם ערן: לתאם פגישה",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: ERAN,
+            subjectName: "ערן",
+            ask: "לתאם פגישה",
+            state: "progress",
+            createdAt: "2026-10-02T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+    const created = await createJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      reuseJobIds: ["job-1"],
+      deliveries: [
+        {
+          subjectId: ERAN,
+          subjectName: "ערן",
           text: "עמית מבקש לתאם איתך פגישה מחר ב-10:00.",
           ask: "לתאם פגישה מחר ב-10:00",
         },
@@ -242,7 +322,7 @@ describe("createJobsFromRelays", () => {
     );
   });
 
-  it("does not open a second job when the pair is already open in the other direction", async () => {
+  it("does not open a second job when the same ask is already open in the other direction", async () => {
     itemFindMany.mockResolvedValue([
       {
         id: "job-1",
@@ -277,6 +357,46 @@ describe("createJobsFromRelays", () => {
     expect(created).toEqual([]);
     expect(itemCreate).not.toHaveBeenCalled();
     expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("opens a new job when the reverse pair is open with a different ask", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "job-1",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: יום שלישי ב-15:00",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: ERAN,
+            askerName: "ערן",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "יום שלישי ב-15:00",
+            state: "open",
+            createdAt: "2026-10-02T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+    itemCreate.mockResolvedValue({ id: "job-2" });
+    const created = await createJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      deliveries: [
+        {
+          subjectId: ERAN,
+          subjectName: "ערן",
+          text: "עמית שואל מה שלומך?",
+          ask: "מה שלומו",
+        },
+      ],
+    });
+    expect(created).toHaveLength(1);
+    expect(itemCreate).toHaveBeenCalled();
+    expect(itemCreate.mock.calls[0][0].data.data[JOB_META_KEY].ask).toBe(
+      "מה שלומו",
+    );
   });
 
   it("never opens a job on the asker themselves", async () => {
@@ -487,6 +607,7 @@ describe("applyJobActions", () => {
     expect(result.answered).toEqual([]);
     expect(result.closed).toEqual([]);
     expect(result.reports).toEqual([]);
+    expect(result.progressed).toEqual(["job-1"]);
     const patched = itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY];
     expect(patched.state).toBe("progress");
     expect(patched.progress).toBe("אקנה מחר");

@@ -29,6 +29,8 @@ export interface JobApplyResult {
   closed: string[];
   snoozed: Array<{ jobId: string; fireAt: Date }>;
   cleared: string[];
+  /** Job ids this turn marked progress — a later relay may reuse that row. */
+  progressed: string[];
   /** Asks the speaker must choose among when a job action had no job_id. */
   askWhich: string[];
 }
@@ -54,12 +56,27 @@ function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return toPlainJson(value) as Prisma.InputJsonValue;
 }
 
-function pairKey(left: string, right: string): string {
-  return [left, right].sort().join(":");
-}
-
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
+}
+
+function asksMatch(left: string, right: string): boolean {
+  const a = normalizeKey(left);
+  const b = normalizeKey(right);
+  return Boolean(a) && a === b;
+}
+
+/** Same two people, either direction — used only to skip an identical ask. */
+function samePeople(
+  leftAsker: string,
+  leftSubject: string,
+  rightAsker: string,
+  rightSubject: string,
+): boolean {
+  return (
+    (leftAsker === rightAsker && leftSubject === rightSubject) ||
+    (leftAsker === rightSubject && leftSubject === rightAsker)
+  );
 }
 
 async function tasksListIdFor(employeeId: string): Promise<string | null> {
@@ -77,6 +94,8 @@ async function tasksListIdFor(employeeId: string): Promise<string | null> {
 
 /**
  * Open one job per relayed question the asker expects an answer to.
+ * Several jobs may be open for the same two people; only an identical ask
+ * is skipped. A job this turn already progressed may reuse that row.
  * The row lives on the digital worker and is visible to both people.
  */
 export async function createJobsFromRelays(input: {
@@ -89,6 +108,7 @@ export async function createJobsFromRelays(input: {
     text: string;
     ask: string;
   }>;
+  reuseJobIds?: string[];
 }): Promise<OpenJobRow[]> {
   if (input.deliveries.length === 0) {
     return [];
@@ -100,48 +120,68 @@ export async function createJobsFromRelays(input: {
   const live = await prisma.employeeListItem.findMany({
     where: { listId, deletedAt: null },
   });
-  const openForPair = new Map<
-    string,
-    { id: string; meta: JobMeta; data: Record<string, unknown> }
-  >();
+  const openJobs: Array<{
+    id: string;
+    meta: JobMeta;
+    data: Record<string, unknown>;
+  }> = [];
   for (const row of live) {
     const data = asRecord(row.data);
     const meta = jobMetaFrom(data);
     if (meta?.kind !== "job") {
       continue;
     }
-    openForPair.set(pairKey(meta.askerId, meta.subjectId), {
-      id: row.id,
-      meta,
-      data,
-    });
+    openJobs.push({ id: row.id, meta, data });
   }
+  const reuse = new Set(input.reuseJobIds ?? []);
   const created: OpenJobRow[] = [];
   for (const delivery of input.deliveries) {
     if (delivery.subjectId === input.asker.id) {
       continue;
     }
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
-    const existing = openForPair.get(pairKey(input.asker.id, delivery.subjectId));
-    const sameDirection = existing?.meta.askerId === input.asker.id;
-    if (existing) {
-      if (sameDirection && ask && ask !== existing.meta.ask) {
-        const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
-        try {
-          await prisma.employeeListItem.update({
-            where: { id: existing.id },
-            data: {
-              itemKey: normalizeKey(label),
-              data: toJsonValue({
-                ...existing.data,
-                [TASK_NAME_KEY]: label,
-                [JOB_META_KEY]: { ...existing.meta, ask },
-              }),
-            },
-          });
-        } catch {
-          /* keep the existing row */
-        }
+    const duplicate = openJobs.find(
+      (job) =>
+        asksMatch(job.meta.ask, ask) &&
+        samePeople(
+          job.meta.askerId,
+          job.meta.subjectId,
+          input.asker.id,
+          delivery.subjectId,
+        ),
+    );
+    if (duplicate) {
+      continue;
+    }
+    const reusable = openJobs.filter(
+      (job) =>
+        reuse.has(job.id) &&
+        job.meta.askerId === input.asker.id &&
+        job.meta.subjectId === delivery.subjectId,
+    );
+    if (reusable.length === 1) {
+      const existing = reusable[0];
+      const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
+      try {
+        await prisma.employeeListItem.update({
+          where: { id: existing.id },
+          data: {
+            itemKey: normalizeKey(label),
+            data: toJsonValue({
+              ...existing.data,
+              [TASK_NAME_KEY]: label,
+              [JOB_META_KEY]: { ...existing.meta, ask },
+            }),
+          },
+        });
+        existing.meta = { ...existing.meta, ask };
+        existing.data = {
+          ...existing.data,
+          [TASK_NAME_KEY]: label,
+          [JOB_META_KEY]: existing.meta,
+        };
+      } catch {
+        /* keep the existing row */
       }
       continue;
     }
@@ -171,6 +211,7 @@ export async function createJobsFromRelays(input: {
         continue;
       }
       created.push({ id: row.id, label, meta });
+      openJobs.push({ id: row.id, meta, data: { [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta } });
       await recordAuditEvent({
         userId: input.userId,
         actorEmployeeId: input.asker.id,
@@ -205,7 +246,7 @@ export async function answerOpenJobForPair(input: {
   const live = await prisma.employeeListItem.findMany({
     where: { listId, deletedAt: null },
   });
-  const row = (live ?? []).find((item) => {
+  const matches = (live ?? []).filter((item) => {
     const meta = jobMetaFrom(item.data);
     return (
       meta?.kind === "job" &&
@@ -213,6 +254,11 @@ export async function answerOpenJobForPair(input: {
       meta.subjectId === input.subjectId
     );
   });
+  const row = matches.sort((left, right) => {
+    const leftAt = left.createdAt instanceof Date ? left.createdAt.getTime() : 0;
+    const rightAt = right.createdAt instanceof Date ? right.createdAt.getTime() : 0;
+    return rightAt - leftAt;
+  })[0];
   const meta = row ? jobMetaFrom(row.data) : null;
   if (!row || !meta) {
     return null;
@@ -581,6 +627,7 @@ export async function applyJobActions(input: {
     closed: [],
     snoozed: [],
     cleared: [],
+    progressed: [],
     askWhich: [],
   };
   if (input.actions.length === 0 || input.jobs.length === 0) {
@@ -638,6 +685,7 @@ export async function applyJobActions(input: {
           state: "progress",
           progress: action.answerText,
         });
+        result.progressed.push(job.id);
         continue;
       }
       if (action.action === "counter") {
