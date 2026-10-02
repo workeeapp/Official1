@@ -90,8 +90,11 @@ export interface LlmReminderAction {
   confirmed: boolean;
   /** When true, text is a brief; final WhatsApp copy is written at fire time. */
   compose: boolean;
-  /** "git_log" = at fire, summarize repo commits for the digest window. */
-  composeSource: "" | "git_log";
+  /**
+   * "git_log" = summarize repo commits at fire.
+   * "saved_data" = answer the brief from live EMPLOYEE_SAVED_DATA at fire.
+   */
+  composeSource: "" | "git_log" | "saved_data";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
@@ -846,7 +849,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     record.compose_at_fire === true ||
     record.composeAtFire === true ||
     record.dynamic === true ||
-    parseComposeSource(record) === "git_log";
+    parseComposeSource(record) === "git_log" ||
+    parseComposeSource(record) === "saved_data";
 
   return {
     action,
@@ -897,7 +901,7 @@ function parseComposeLookbackHours(record: Record<string, unknown>): number {
 
 function parseComposeSource(
   record: Record<string, unknown>,
-): "" | "git_log" {
+): "" | "git_log" | "saved_data" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -915,6 +919,15 @@ function parseComposeSource(
     raw === "digest"
   ) {
     return "git_log";
+  }
+  if (
+    raw === "saved_data" ||
+    raw === "saved" ||
+    raw === "employee_saved_data" ||
+    raw === "status" ||
+    raw === "snapshot"
+  ) {
+    return "saved_data";
   }
   return "";
 }

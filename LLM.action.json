@@ -424,7 +424,7 @@
                     "compose": { "type": "boolean" },
                     "compose_source": {
                       "type": "string",
-                      "enum": ["", "git_log"]
+                      "enum": ["", "git_log", "saved_data"]
                     },
                     "compose_lookback_hours": { "type": "number" },
                     "confirmed": { "type": "boolean" }

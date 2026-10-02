@@ -12,14 +12,20 @@ export async function composeScheduledOutbound(input: {
   gitChangelog?: string;
   /** Human label for the commit window (e.g. last 7 days / since last report). */
   gitWindowLabel?: string;
+  /** Live EMPLOYEE_SAVED_DATA (+ contacts) for status / list answers at fire. */
+  savedDataContext?: string;
+  /** Asia/Jerusalem clock label for "today/tomorrow" briefs. */
+  sessionClock?: string;
 }): Promise<string | null> {
   const brief = input.brief.trim() || input.itemLabel.trim();
   const gitLog = input.gitChangelog?.trim() ?? "";
-  if (!brief && !gitLog) {
+  const savedData = input.savedDataContext?.trim() ?? "";
+  if (!brief && !gitLog && !savedData) {
     return null;
   }
 
   const isGitDigest = Boolean(gitLog);
+  const isSavedData = Boolean(savedData) && !isGitDigest;
 
   try {
     const client = getLlmClient();
@@ -29,7 +35,7 @@ export async function composeScheduledOutbound(input: {
     const turn = await client.createResponse({
       conversationId,
       model: config.model,
-      temperature: isGitDigest ? 0.4 : 1,
+      temperature: isGitDigest || isSavedData ? 0.4 : 1,
       instructions: isGitDigest
         ? [
             "You write one outbound WhatsApp message.",
@@ -46,15 +52,28 @@ export async function composeScheduledOutbound(input: {
             "Address the recipient in second person when natural.",
             "Respect the stated time window label when framing the intro (e.g. since last report / last 7 days).",
           ].join("\n")
-        : [
-            "You write one outbound WhatsApp message.",
-            "Output ONLY the message body in Hebrew (unless the brief asks another language).",
-            "No JSON, no quotes, no preamble, no numbering.",
-            "Second person to the recipient when it is a message to them. For a joke to the speaker, just tell the joke.",
-            "Follow the brief; do not invent a different task.",
-            "Every run must be NEW. Never repeat a previous joke or the same punchline.",
-            "If the brief says בדיחה / עדות and does not mention בית משפט / משפט / עד בבית משפט: treat עדות as ethnic communities (אשכנזים, ספרדים, מזרחים, תימנים, etc.) — NOT courtroom testimony.",
-          ].join("\n"),
+        : isSavedData
+          ? [
+              "You write one outbound WhatsApp message.",
+              "Output ONLY the message body. No JSON, no quotes, no preamble, no schema jargon.",
+              "Language: follow the brief (Hebrew or English). Default Hebrew if unclear.",
+              "Answer ONLY from the saved-data facts below (and SESSION_CLOCK for today/tomorrow/weekday).",
+              "Follow the brief: tasks / shopping / full dump / what X needs on a day — filter accordingly.",
+              "For אני/שלי about the recipient: only THEIR own rows (owner matches them).",
+              "For another named person: only that owner's visible rows.",
+              "Format: short intro + one • item per line. Empty → one plain sentence that there is nothing.",
+              "Do not invent items. Do not claim you saved/updated/sent anything else — this turn is answer-only.",
+              "Bold with single *asterisks* when useful (WhatsApp).",
+            ].join("\n")
+          : [
+              "You write one outbound WhatsApp message.",
+              "Output ONLY the message body in Hebrew (unless the brief asks another language).",
+              "No JSON, no quotes, no preamble, no numbering.",
+              "Second person to the recipient when it is a message to them. For a joke to the speaker, just tell the joke.",
+              "Follow the brief; do not invent a different task.",
+              "Every run must be NEW. Never repeat a previous joke or the same punchline.",
+              "If the brief says בדיחה / עדות and does not mention בית משפט / משפט / עד בבית משפט: treat עדות as ethnic communities (אשכנזים, ספרדים, מזרחים, תימנים, etc.) — NOT courtroom testimony.",
+            ].join("\n"),
       message: isGitDigest
         ? [
             `Sender: ${input.actorName || "someone"}`,
@@ -69,17 +88,33 @@ export async function composeScheduledOutbound(input: {
               : "No previous digest on file.",
             "Write the WhatsApp digest now. Cover distinct capabilities from the commits.",
           ].join("\n")
-        : [
-            `Sender: ${input.actorName || "מישהו"}`,
-            `Recipient: ${input.recipientName || "הנמען"}`,
-            `Clock label: ${input.itemLabel || "הודעה מתוזמנת"}`,
-            `Brief / instruction: ${brief}`,
-            input.previousText?.trim()
-              ? `Do NOT repeat or lightly rephrase this previous send:\n${input.previousText.trim()}`
-              : "No previous send on file — invent a fresh one.",
-            `Freshness token (vary your wording): ${freshness}`,
-            "Write the final message now.",
-          ].join("\n"),
+        : isSavedData
+          ? [
+              `Sender: ${input.actorName || "מישהו"}`,
+              `Recipient: ${input.recipientName || "הנמען"}`,
+              `Clock label: ${input.itemLabel || "סטטוס מתוזמן"}`,
+              `Brief / question to answer now: ${brief || "מה שמור לי עכשיו?"}`,
+              input.sessionClock?.trim()
+                ? `SESSION_CLOCK:\n${input.sessionClock.trim()}`
+                : "SESSION_CLOCK: Asia/Jerusalem (use now for today/tomorrow).",
+              "Saved facts (internal — answer from these only):",
+              savedData,
+              input.previousText?.trim()
+                ? `Previous status send (vary wording if overlapping):\n${input.previousText.trim()}`
+                : "No previous status send on file.",
+              "Write the WhatsApp answer now.",
+            ].join("\n")
+          : [
+              `Sender: ${input.actorName || "מישהו"}`,
+              `Recipient: ${input.recipientName || "הנמען"}`,
+              `Clock label: ${input.itemLabel || "הודעה מתוזמנת"}`,
+              `Brief / instruction: ${brief}`,
+              input.previousText?.trim()
+                ? `Do NOT repeat or lightly rephrase this previous send:\n${input.previousText.trim()}`
+                : "No previous send on file — invent a fresh one.",
+              `Freshness token (vary your wording): ${freshness}`,
+              "Write the final message now.",
+            ].join("\n"),
     });
     const text = turn.reply.trim();
     if (!text) {
@@ -87,7 +122,7 @@ export async function composeScheduledOutbound(input: {
     }
     recordWhatsAppEvent(
       "reminder_compose_ok",
-      `item=${input.itemLabel.slice(0, 40)} chars=${text.length} git=${isGitDigest}`,
+      `item=${input.itemLabel.slice(0, 40)} chars=${text.length} git=${isGitDigest} saved=${isSavedData}`,
     );
     return text.slice(0, 4096);
   } catch (error) {

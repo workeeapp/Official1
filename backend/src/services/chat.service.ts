@@ -392,6 +392,7 @@ function workerTargetingInstructions(
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text.",
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily); hold kind=reminders need=time with git_log draft; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
+    "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר) → compose:true, compose_source:\"saved_data\", ping=named recipient, brief=the question; need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -1357,10 +1358,11 @@ export async function sendChatMessage(input: {
       messages: guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
       confirm: metadata.confirm ?? null,
     });
-    const incompleteGitDigests = (metadata.reminders ?? []).filter(
+    const incompleteComposeClocks = (metadata.reminders ?? []).filter(
       (row) =>
         row.action === "add" &&
-        row.composeSource === "git_log" &&
+        (row.composeSource === "git_log" ||
+          row.composeSource === "saved_data") &&
         !row.time.trim() &&
         !(typeof row.inSeconds === "number" && row.inSeconds > 0) &&
         !(row.everyCount && row.everyUnit) &&
@@ -1370,13 +1372,13 @@ export async function sendChatMessage(input: {
       !guestSpeaker &&
       !cancelledAwaitingHold &&
       !nextPending &&
-      incompleteGitDigests.length > 0
+      incompleteComposeClocks.length > 0
         ? pendingHoldFromLlm({
             kind: "reminders",
             need: "time",
             directory: [],
             lists: [],
-            reminders: incompleteGitDigests,
+            reminders: incompleteComposeClocks,
             filing: [],
             messages: [],
           })
@@ -1614,7 +1616,7 @@ export async function sendChatMessage(input: {
     const noTimeSkipped = reminderResult.skipped.some(
       (row) => row.reason === "no_time",
     );
-    if (noTimeSkipped || incompleteGitDigests.length > 0) {
+    if (noTimeSkipped || incompleteComposeClocks.length > 0) {
       workingReply = setEngineResponse(
         workingReply,
         "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",

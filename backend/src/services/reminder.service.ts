@@ -1084,7 +1084,10 @@ export async function applyReminders(input: {
       const nextSource =
         reminder.composeSource === "git_log" || existingSource === "git_log"
           ? "git_log"
-          : "";
+          : reminder.composeSource === "saved_data" ||
+              existingSource === "saved_data"
+            ? "saved_data"
+            : "";
       const existingLookback =
         existing && "composeLookbackHours" in existing
           ? Number(
@@ -1103,6 +1106,8 @@ export async function applyReminders(input: {
                 ? 168
                 : 0
           : 0;
+      const composeAtFire =
+        nextCompose || nextSource === "git_log" || nextSource === "saved_data";
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -1113,7 +1118,7 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               pingIds,
               messageText: nextText,
-              composeAtFire: nextCompose || nextSource === "git_log",
+              composeAtFire,
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
             },
@@ -1130,7 +1135,7 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               pingIds,
               messageText: nextText,
-              composeAtFire: nextCompose || nextSource === "git_log",
+              composeAtFire,
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
             },
@@ -1434,7 +1439,12 @@ export function toReminderSnapshotRow(
     last_composed_text: lastComposed,
     sent_text: lastComposed || text,
     compose_at_fire: row.composeAtFire === true,
-    compose_source: row.composeSource === "git_log" ? "git_log" : "",
+    compose_source:
+      row.composeSource === "git_log"
+        ? "git_log"
+        : row.composeSource === "saved_data"
+          ? "saved_data"
+          : "",
     compose_lookback_hours: lookback,
     status: row.status,
     send_status: sendStatus,

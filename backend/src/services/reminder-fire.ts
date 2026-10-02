@@ -17,6 +17,15 @@ import {
   readGitChangelog,
   resolveGitDigestWindow,
 } from "./git-changelog.js";
+import {
+  formatEmployeeContext,
+  getEmployeeRecordSnapshot,
+} from "./employee-records.service.js";
+import {
+  formatSpeakerContacts,
+  listContactsForEmployee,
+} from "./contact.service.js";
+import { formatSessionClockContext } from "../utils/relative-date.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -205,7 +214,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       let headSha = "";
       let advanceLastReportSha = false;
       let gitWindowLabel = "";
+      let savedDataContext: string | undefined;
       const isGitDigest = reminder.composeSource === "git_log";
+      const isSavedData = reminder.composeSource === "saved_data";
       if (isGitDigest) {
         try {
           const lookbackHours =
@@ -249,9 +260,35 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           await settleFiredReminder(reminder, now, "failed");
           continue;
         }
+      } else if (isSavedData) {
+        try {
+          const subjectId =
+            firstTarget?.id ??
+            reminder.actorId ??
+            reminder.ownerId;
+          const snapshot = await getEmployeeRecordSnapshot(subjectId);
+          const contacts = await listContactsForEmployee(subjectId);
+          savedDataContext = [
+            formatEmployeeContext(snapshot),
+            formatSpeakerContacts(contacts),
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+        } catch (error) {
+          recordWhatsAppEvent(
+            "reminder_saved_data_fail",
+            error instanceof Error ? error.message : "unknown",
+          );
+          skipSend = true;
+          await settleFiredReminder(reminder, now, "failed");
+          continue;
+        }
       }
 
-      if (!isGitDigest || gitChangelog) {
+      if (
+        (!isGitDigest || gitChangelog) &&
+        (!isSavedData || savedDataContext !== undefined)
+      ) {
         const composed = await composeScheduledOutbound({
           brief: reminder.messageText,
           itemLabel: reminder.itemLabel,
@@ -260,6 +297,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           previousText: reminder.lastComposedText,
           gitChangelog,
           gitWindowLabel,
+          savedDataContext,
+          sessionClock: isSavedData ? formatSessionClockContext() : undefined,
         });
         const resolved = resolveComposeFireOutbound({
           brief: reminder.messageText,

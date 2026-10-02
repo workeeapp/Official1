@@ -481,6 +481,36 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads compose_source saved_data as a live status clock", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח כל בוקר",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח סטטוס יומי",
+                time: "08:00",
+                every_count: 1,
+                every_unit: "days",
+                ping: ["טל"],
+                text: "מה יש לי היום במטלות ובתזכורות",
+                compose: true,
+                compose_source: "saved_data",
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "saved_data",
+      },
+    ]);
+  });
+
   it("reads fractional compose_lookback_hours for short windows", () => {
     expect(
       parseReplyMetadata(
