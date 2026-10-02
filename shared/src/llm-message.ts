@@ -38,6 +38,16 @@ export interface LlmMessageAction {
   expectsReply?: boolean;
   /** The asker's question in their own words, quoted back when reporting. */
   askSummary?: string;
+  /** The ask is to set up a meeting/call at this slot; a yes books it for both people. */
+  book?: LlmMessageBook;
+}
+
+export interface LlmMessageBook {
+  title: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** HH:mm */
+  time: string;
 }
 
 export type LlmJobActionName =
@@ -1009,12 +1019,27 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
     "question",
     "שאלה",
   ]);
+  const book = toMessageBook(record.book);
   return {
     text,
     targets,
     ...(expectsReply !== undefined ? { expectsReply } : {}),
     ...(askSummary ? { askSummary } : {}),
+    ...(book ? { book } : {}),
   };
+}
+
+function toMessageBook(value: unknown): LlmMessageBook | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const date = readText(record, ["date"]);
+  const time = parseClockField(readText(record, ["time"]));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) {
+    return null;
+  }
+  return { title: readText(record, ["title", "name"]), date, time };
 }
 
 function parseJobActions(meta: Record<string, unknown>): LlmJobAction[] {

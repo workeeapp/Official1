@@ -401,6 +401,28 @@ describe("createJobsFromRelays", () => {
     );
   });
 
+  it("stores the booking slot on the job so a plain yes can book it", async () => {
+    await createJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      deliveries: [
+        {
+          subjectId: ERAN,
+          subjectName: "ערן",
+          text: "עמית מבקש לתאם איתך שיחת עדכון מחר ב-08:00. מתאים לך?",
+          ask: "לתאם שיחת עדכון מחר ב-08:00",
+          book: { title: "שיחת עדכון", date: "2026-10-04", time: "08:00" },
+        },
+      ],
+    });
+    const meta = itemCreate.mock.calls[0][0].data.data[JOB_META_KEY];
+    expect(meta.needsBook).toBe(true);
+    expect(meta.bookDate).toBe("2026-10-04");
+    expect(meta.bookTime).toBe("08:00");
+    expect(meta.bookTitle).toBe("שיחת עדכון");
+  });
+
   it("never opens a job on the asker themselves", async () => {
     const created = await createJobsFromRelays({
       userId: "u1",
@@ -796,6 +818,39 @@ describe("applyJobActions", () => {
         ],
       },
     ]);
+  });
+
+  it("books the titled meeting for both people on a plain yes", () => {
+    const lists = meetingListsForAnswers(
+      [
+        jobRow({
+          ask: "לתאם שיחת עדכון מחר ב-08:00",
+          needsBook: true,
+          bookDate: "2026-10-04",
+          bookTime: "08:00",
+          bookTitle: "שיחת עדכון",
+        }),
+      ],
+      [
+        {
+          action: "answer",
+          jobId: "job-1",
+          answerText: "כן",
+          reportText: "",
+          time: "",
+          date: "",
+          in: null,
+        },
+      ],
+    );
+    expect(lists).toHaveLength(1);
+    expect(lists[0].targets).toEqual(["עמית", "ערן"]);
+    expect(lists[0].items[0]).toEqual({
+      "שם מטלה": "שיחת עדכון",
+      "תאריך לביצוע": "2026-10-04",
+      "שעה לביצוע": "08:00",
+      "יום שלם": false,
+    });
   });
 
   it("ignores a counter that names no new slot", async () => {

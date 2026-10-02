@@ -38,6 +38,8 @@ export interface JobMeta {
   bookDate?: string;
   /** HH:mm captured on the counter. */
   bookTime?: string;
+  /** Meeting title saved on both lists when it is booked. */
+  bookTitle?: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -92,6 +94,9 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
       : {}),
     ...(typeof meta.bookTime === "string" && meta.bookTime
       ? { bookTime: meta.bookTime }
+      : {}),
+    ...(typeof meta.bookTitle === "string" && meta.bookTitle
+      ? { bookTitle: meta.bookTitle }
       : {}),
   };
 }

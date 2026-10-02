@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { LlmJobAction, LlmListAction } from "@workee/shared";
+import type { LlmJobAction, LlmListAction, LlmMessageBook } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { JOB_META_KEY, jobMetaFrom, type JobMeta } from "./job-meta.js";
@@ -66,6 +66,18 @@ function asksMatch(left: string, right: string): boolean {
   return Boolean(a) && a === b;
 }
 
+function bookFields(book: LlmMessageBook | undefined): Partial<JobMeta> {
+  if (!book) {
+    return {};
+  }
+  return {
+    needsBook: true,
+    bookDate: book.date,
+    bookTime: book.time,
+    ...(book.title.trim() ? { bookTitle: book.title.trim() } : {}),
+  };
+}
+
 /** Same two people, either direction — used only to skip an identical ask. */
 function samePeople(
   leftAsker: string,
@@ -107,6 +119,7 @@ export async function createJobsFromRelays(input: {
     subjectName: string;
     text: string;
     ask: string;
+    book?: LlmMessageBook;
   }>;
   reuseJobIds?: string[];
 }): Promise<OpenJobRow[]> {
@@ -162,6 +175,11 @@ export async function createJobsFromRelays(input: {
     if (reusable.length === 1) {
       const existing = reusable[0];
       const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
+      const nextMeta: JobMeta = {
+        ...existing.meta,
+        ask,
+        ...bookFields(delivery.book),
+      };
       try {
         await prisma.employeeListItem.update({
           where: { id: existing.id },
@@ -170,11 +188,11 @@ export async function createJobsFromRelays(input: {
             data: toJsonValue({
               ...existing.data,
               [TASK_NAME_KEY]: label,
-              [JOB_META_KEY]: { ...existing.meta, ask },
+              [JOB_META_KEY]: nextMeta,
             }),
           },
         });
-        existing.meta = { ...existing.meta, ask };
+        existing.meta = nextMeta;
         existing.data = {
           ...existing.data,
           [TASK_NAME_KEY]: label,
@@ -195,6 +213,7 @@ export async function createJobsFromRelays(input: {
       ask,
       state: "open",
       createdAt: new Date().toISOString(),
+      ...bookFields(delivery.book),
     };
     try {
       const row = await prisma.employeeListItem.create({
@@ -332,7 +351,7 @@ export function meetingListsForAnswers(
       targets,
       items: [
         {
-          "שם מטלה": "פגישה",
+          "שם מטלה": job.meta.bookTitle || "פגישה",
           "תאריך לביצוע": job.meta.bookDate,
           "שעה לביצוע": job.meta.bookTime,
           "יום שלם": false,
@@ -370,6 +389,7 @@ export function formatOpenJobsContext(
           book_on_yes: true,
           ...(job.meta.bookDate ? { book_date: job.meta.bookDate } : {}),
           ...(job.meta.bookTime ? { book_time: job.meta.bookTime } : {}),
+          ...(job.meta.bookTitle ? { book_title: job.meta.bookTitle } : {}),
         }
       : {}),
     opened_at: job.meta.createdAt,
@@ -382,7 +402,7 @@ export function formatOpenJobsContext(
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
-    "book_on_yes=true: the person who must answer is approving a new meeting slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item פגישה with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from book_date and book_time when you forget the list.",
+    "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from these fields when you forget the list.",
     JSON.stringify(rows),
   ].join("\n");
 }
