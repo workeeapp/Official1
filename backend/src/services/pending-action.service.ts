@@ -472,6 +472,77 @@ export function fillListsFromPendingHold(
   return draftLists;
 }
 
+function reminderDraftHasClock(row: LlmReminderAction): boolean {
+  return (
+    Boolean(row.time?.trim()) ||
+    Boolean(row.inSeconds && row.inSeconds > 0) ||
+    Boolean(row.everyCount && row.everyUnit) ||
+    Boolean(row.weekdays && row.weekdays.length > 0)
+  );
+}
+
+function isReminderTimeHoldNeed(need: string): boolean {
+  const normalized = need.trim().toLowerCase();
+  return (
+    normalized === "time" ||
+    normalized === "מתי" ||
+    normalized.includes("time") ||
+    normalized.includes("מתי") ||
+    normalized.includes("שעה") ||
+    isConfirmHoldNeed(need)
+  );
+}
+
+/**
+ * Time hold for reminders (e.g. git digest without a clock): «עכשיו» → short in;
+ * or keep waiting until the model emits a complete clock.
+ */
+export function fillRemindersFromPendingHold(
+  pending: ConversationPendingAction | null,
+  reminders: LlmReminderAction[],
+  speakerText: string,
+): LlmReminderAction[] | null {
+  if (
+    !pending ||
+    pending.action !== "complete_reminders" ||
+    pending.step !== "awaiting_fields" ||
+    !isReminderTimeHoldNeed(pending.need)
+  ) {
+    return null;
+  }
+  const draft = pending.draft.reminders ?? [];
+  if (draft.length === 0) {
+    return null;
+  }
+  if (isPendingHoldCancelText(speakerText)) {
+    return null;
+  }
+  if (reminders.some((row) => row.action === "add" && reminderDraftHasClock(row))) {
+    return null;
+  }
+  const normalized = speakerText
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,״"']/g, "")
+    .replace(/\s+/g, " ");
+  const nowish =
+    normalized === "עכשיו" ||
+    normalized === "now" ||
+    normalized === "מיד" ||
+    normalized.startsWith("עכשיו ") ||
+    normalized.startsWith("now ");
+  if (!nowish) {
+    return null;
+  }
+  return draft.map((row) => ({
+    ...row,
+    action: "add" as const,
+    inSeconds:
+      typeof row.inSeconds === "number" && row.inSeconds > 0 ? row.inSeconds : 5,
+    time: "",
+  }));
+}
+
 /**
  * Same-turn guard: shopping/tasks add with empty targets while messages name
  * recipients → attach those recipients (plus optional speaker label) as targets.
@@ -707,6 +778,7 @@ export function formatConversationPendingContext(
     "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
     "If current_action is complete_lists and missing_field is confirm / confirm_share: Yes / confirm=true → apply known_draft.lists (shared targets included). Do not replace with the speaker's private list. The server prefers known_draft lists on accept.",
+    "If current_action is complete_reminders and missing_field is time / מתי: the short reply sets the clock — «עכשיו» / now → send soon; or emit reminders add with in/time from their words. Do not claim אשלח until a clock exists.",
     "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort this draft — hold=null and empty directory/lists/reminders/filing/messages. Do not complete the unfinished action. Say you cancelled (e.g. ביטלתי את השליחה / ביטלתי את התיוק).",
     "If still missing something else, emit hold again with the updated draft and the new need.",
     "Do not start an unrelated new request until this hold is completed, cancelled, or the speaker clearly switches topic.",
@@ -739,9 +811,15 @@ export function holdFulfilledByMetadata(
     );
   }
   if (pending.action === "complete_reminders") {
-    return meta.reminders.some(
-      (row) => row.action === "add" || row.action === "update",
-    );
+    return meta.reminders.some((row) => {
+      if (row.action === "update") {
+        return true;
+      }
+      if (row.action !== "add") {
+        return false;
+      }
+      return reminderDraftHasClock(row);
+    });
   }
   if (pending.action === "complete_filing") {
     return meta.filing.some(

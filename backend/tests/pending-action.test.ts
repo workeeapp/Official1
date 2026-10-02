@@ -4,6 +4,7 @@ import {
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
   alignListTargetsWithMessageRecipients,
+  fillRemindersFromPendingHold,
   formatCancelledHoldReply,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
@@ -167,6 +168,48 @@ describe("pending action hold", () => {
         targets: ["מיכל", "טל"],
       },
     ]);
+  });
+
+  it("fills a git-digest time hold when the speaker says עכשיו", () => {
+    const hold = pendingHoldFromLlm({
+      kind: "reminders",
+      need: "time",
+      directory: [],
+      lists: [],
+      reminders: [
+        {
+          action: "add",
+          item: "לשלוח סיכום שינויי קוד",
+          listType: "tasks",
+          date: "",
+          time: "",
+          repeat: "once",
+          ping: ["טל"],
+          targets: ["טל"],
+          text: "Summarize code changes since the last report.",
+          inSeconds: null,
+          everyCount: null,
+          everyUnit: null,
+          weekdays: null,
+          confirmed: false,
+          compose: true,
+          composeSource: "git_log",
+          composeLookbackHours: 168,
+        },
+      ],
+      filing: [],
+      messages: [],
+    });
+    expect(
+      fillRemindersFromPendingHold(hold, [], "עכשיו"),
+    ).toMatchObject([
+      {
+        composeSource: "git_log",
+        inSeconds: 5,
+        ping: ["טל"],
+      },
+    ]);
+    expect(fillRemindersFromPendingHold(hold, [], "מחר בבוקר")).toBeNull();
   });
 
   it("recognizes cancel phrases for awaiting message holds", () => {

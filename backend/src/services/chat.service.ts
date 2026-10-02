@@ -52,6 +52,7 @@ import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.j
 import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
+  formatReminderApplyNotice,
   formatReminderConfirmNotice,
   hasUnrelatedWorkWhilePending,
   linkRemindersToWorkerTasks,
@@ -66,6 +67,7 @@ import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
+  fillRemindersFromPendingHold,
   alignListTargetsWithMessageRecipients,
   formatCancelledHoldReply,
   formatConversationPendingContext,
@@ -73,6 +75,7 @@ import {
   isAwaitingFieldsHold,
   isPendingHoldCancelText,
   metadataAfterHoldCancel,
+  pendingHoldFromLlm,
   pendingHoldFromMissingMessages,
   pendingToStored,
   planListDeletes,
@@ -387,7 +390,7 @@ function workerTargetingInstructions(
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text.",
-    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
+    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily); hold kind=reminders need=time with git_log draft; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -1228,6 +1231,20 @@ export async function sendChatMessage(input: {
       }
     }
     if (!guestSpeaker && !cancelledAwaitingHold) {
+      const filledReminders = fillRemindersFromPendingHold(
+        waitingPending,
+        metadata.reminders ?? [],
+        input.message,
+      );
+      if (filledReminders) {
+        metadata = {
+          ...metadata,
+          reminders: filledReminders,
+          hold: null,
+        };
+      }
+    }
+    if (!guestSpeaker && !cancelledAwaitingHold) {
       const alignedLists = alignListTargetsWithMessageRecipients({
         lists: metadata.lists ?? [],
         messages: metadata.messages ?? [],
@@ -1338,7 +1355,31 @@ export async function sendChatMessage(input: {
       messages: guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
       confirm: metadata.confirm ?? null,
     });
-    await savePendingAction(conversation.id, nextPending);
+    const incompleteGitDigests = (metadata.reminders ?? []).filter(
+      (row) =>
+        row.action === "add" &&
+        row.composeSource === "git_log" &&
+        !row.time.trim() &&
+        !(typeof row.inSeconds === "number" && row.inSeconds > 0) &&
+        !(row.everyCount && row.everyUnit) &&
+        !(row.weekdays && row.weekdays.length > 0),
+    );
+    const pendingAfterGit =
+      !guestSpeaker &&
+      !cancelledAwaitingHold &&
+      !nextPending &&
+      incompleteGitDigests.length > 0
+        ? pendingHoldFromLlm({
+            kind: "reminders",
+            need: "time",
+            directory: [],
+            lists: [],
+            reminders: incompleteGitDigests,
+            filing: [],
+            messages: [],
+          })
+        : nextPending;
+    await savePendingAction(conversation.id, pendingAfterGit);
     const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
@@ -1568,11 +1609,22 @@ export async function sendChatMessage(input: {
         formatCancelledHoldReply(waitingPending),
       );
     }
+    const noTimeSkipped = reminderResult.skipped.some(
+      (row) => row.reason === "no_time",
+    );
+    if (noTimeSkipped || incompleteGitDigests.length > 0) {
+      workingReply = setEngineResponse(
+        workingReply,
+        "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",
+      );
+    }
+    const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const notice = [
       confirmPending ? "" : confirmAsk,
       guestMutationNotice,
       missingSend,
       whatsappNotice,
+      noTimeSkipped ? "" : reminderApplyNotice,
     ]
       .filter(Boolean)
       .join("\n\n");

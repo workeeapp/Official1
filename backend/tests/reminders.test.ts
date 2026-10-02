@@ -569,7 +569,7 @@ describe("formatReminderApplyNotice", () => {
         saved: [],
         skipped: [{ item: "חלב", reason: "no_time" }],
       }),
-    ).toContain("חסר זמן תזכורת");
+    ).toContain("מתי לשלוח");
   });
 
   it("notes another active clock at the same time without blocking", () => {

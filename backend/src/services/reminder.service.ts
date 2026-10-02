@@ -1328,7 +1328,7 @@ export function formatReminderApplyNotice(result: {
               ? row.dest
                 ? `אין לי מספר ל«${row.dest}». מה המספר?`
                 : `אין לי מספר ליעד. מה המספר?`
-            : `לא נשמרה «${row.item}» — חסר זמן תזכורת (שעה או in).`,
+            : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
         )
         .join(" "),
     );
