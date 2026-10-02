@@ -374,6 +374,38 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads a booking slot off a relayed message and drops an incomplete one", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "שלחתי לערן",
+        metadata: {
+          messages: [
+            {
+              targets: ["ערן"],
+              text: "עמית מבקש לתאם איתך שיחת עדכון מחר ב-08:00. מתאים לך?",
+              expects_reply: true,
+              ask_summary: "לתאם שיחת עדכון מחר ב-08:00",
+              book: { title: "שיחת עדכון", date: "2026-10-04", time: "8:00" },
+            },
+            {
+              targets: ["טל"],
+              text: "עמית שואל מה שלומך?",
+              expects_reply: true,
+              ask_summary: "מה שלומך?",
+              book: { title: "x", date: "מחר", time: "08:00" },
+            },
+          ],
+        },
+      }),
+    ).messages;
+    expect(parsed[0].book).toEqual({
+      title: "שיחת עדכון",
+      date: "2026-10-04",
+      time: "08:00",
+    });
+    expect(parsed[1].book).toBeUndefined();
+  });
+
   it("keeps a job action that forgot its id and drops unknown actions", () => {
     const parsed = parseReplyMetadata(
       JSON.stringify({

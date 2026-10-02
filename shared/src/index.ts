@@ -87,6 +87,7 @@ export type {
   LlmListActionName,
   LlmListType,
   LlmMessageAction,
+  LlmMessageBook,
   LlmDirectoryAction,
   LlmDirectoryActionName,
   LlmHandoffAction,

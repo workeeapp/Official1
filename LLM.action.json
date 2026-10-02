@@ -39,7 +39,8 @@
     "        \"targets\": [\"<employee name | all>\"],",
     "        \"text\": \"<הודעה מנוסחת לנמען>\",",
     "        \"expects_reply\": false,",
-    "        \"ask_summary\": \"\"",
+    "        \"ask_summary\": \"\",",
+    "        \"book\": { \"title\": \"<שיחת עדכון / פגישה>\", \"date\": \"<YYYY-MM-DD>\", \"time\": \"<HH:mm>\" }",
     "      }",
     "    ],",
     "    \"jobs\": [",
@@ -335,6 +336,16 @@
                     "ask_summary": {
                       "type": "string",
                       "description": "What the speaker wants from them, in the speaker's own words (e.g. אם קנית חלב? / לתאם פגישת עבודה ליום שלישי). Quoted back when reporting. Empty when expects_reply is false."
+                    },
+                    "book": {
+                      "type": "object",
+                      "description": "Only when the ask is to set up something both people do together at a slot (פגישה / שיחה / שיחת עדכון). On a yes the server saves it on both people's tasks. Omit otherwise.",
+                      "properties": {
+                        "title": { "type": "string" },
+                        "date": { "type": "string", "description": "YYYY-MM-DD" },
+                        "time": { "type": "string", "description": "HH:mm" }
+                      },
+                      "required": ["title", "date", "time"]
                     }
                   },
                   "required": [
