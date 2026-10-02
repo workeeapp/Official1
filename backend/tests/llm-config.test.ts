@@ -35,6 +35,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("compose_lookback_hours");
     expect(config.systemMessage).toContain("last_report_sha");
     expect(config.systemMessage).toContain("RECENT_OUTBOUND");
+    expect(config.systemMessage).toContain("AFTER A CODE DIGEST");
+    expect(config.systemMessage).toContain("EXAMPLE NAMES ARE NOT REAL");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
