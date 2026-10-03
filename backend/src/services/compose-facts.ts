@@ -81,6 +81,7 @@ export async function loadComposeFacts(input: {
     const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
     const contacts = await listContactsForEmployee(input.subjectEmployeeId);
     const facts = [
+      "FILTER RULE: If the brief names a shared-list partner («עם עמית» / «עם מיכל» / shared with X), answer with ONLY scope=shared lists whose shared_with includes that person. Never dump every shared list. Match partner names, not list titles.",
       formatEmployeeContext(snapshot),
       formatSpeakerContacts(contacts),
     ]

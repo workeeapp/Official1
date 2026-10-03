@@ -100,10 +100,11 @@ function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
   }
   if (kind === "saved_data") {
     return [
-      "Saved-data status: follow the brief (tasks / shopping / shared list / what X needs on a day / full dump).",
+      "Saved-data status: follow the brief exactly (tasks / shopping / shared list with a named partner / what X needs on a day / full dump).",
+      "SHARED WITH A NAMED PERSON (critical): if the brief says הרשימה/רשימות משותפת/ות עם <name> / shared list with <name>, include ONLY lists where scope=shared AND that name appears in shared_with. Match the partner, NOT list_name. Example: «שיעורי הנהיגה של מאיה» shared only with מיכל must NOT appear when the brief asks for lists shared with עמית. If several lists share with that partner, list each under its own header. If none → one sentence that there are none with them.",
       "For אני/שלי about the recipient: only THEIR own rows (owner matches them).",
-      "For another named person: only that owner's visible rows.",
-      "Format: short intro + one • item per line. Empty → one plain sentence that there is nothing.",
+      "For another named person (מה מיכל צריכה): only that owner's visible rows.",
+      "Format: short intro + one • item per line (or list header + • items). Empty → one plain sentence that there is nothing.",
       "No schema jargon (list_name, metadata, …).",
     ];
   }

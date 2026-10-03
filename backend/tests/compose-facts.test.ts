@@ -77,6 +77,8 @@ describe("loadComposeFacts", () => {
       repeat: "once",
     });
     expect(bundle.kind).toBe("saved_data");
+    expect(bundle.facts).toContain("FILTER RULE");
+    expect(bundle.facts).toContain("shared_with");
     expect(bundle.facts).toContain("EMPLOYEE_SAVED_DATA");
     expect(bundle.facts).toContain("חלב");
     expect(bundle.sessionClock).toContain("SESSION_CLOCK");
