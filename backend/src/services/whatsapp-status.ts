@@ -1,6 +1,10 @@
 import type { WhatsAppStatusResponse } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import {
+  countRecentOpsFailures,
+  listRecentOpsFailures,
+} from "./ops-monitor.service.js";
+import {
   lastWhatsAppInboundAt,
   listWhatsAppEvents,
 } from "./whatsapp-log.js";
@@ -20,6 +24,8 @@ export async function getWhatsAppStatus(): Promise<WhatsAppStatusResponse> {
   const webhookMismatch =
     urls.length > 0 &&
     urls.some((url) => !url.startsWith("https://wa.workee.site/"));
+  const recentFailures = await listRecentOpsFailures(15);
+  const failuresLastHour = await countRecentOpsFailures(60 * 60 * 1000);
 
   return {
     expectedWebhook: expected,
@@ -29,6 +35,13 @@ export async function getWhatsAppStatus(): Promise<WhatsAppStatusResponse> {
     hasAccessToken: Boolean(env.WHATSAPP_ACCESS_TOKEN?.trim()),
     lastInboundAt: lastWhatsAppInboundAt(),
     events: listWhatsAppEvents(),
+    recentFailures: recentFailures.map((row) => ({
+      at: row.at,
+      step: row.step,
+      detail: row.detail,
+    })),
+    failuresLastHour,
+    opsAlertConfigured: Boolean(env.OPS_ALERT_PHONES?.trim()),
   };
 }
 

@@ -20,6 +20,13 @@ const envSchema = z.object({
   WHATSAPP_APP_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
+  /**
+   * POC ops alerts: comma/space-separated E.164-ish phones to WhatsApp on repeated failures.
+   * Empty = log failures only (no outbound alert).
+   */
+  OPS_ALERT_PHONES: z.string().optional(),
+  /** Minutes between alerts for the same alertKey (default 30). */
+  OPS_ALERT_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(30),
 });
 
 export type Env = z.infer<typeof envSchema>;

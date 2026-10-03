@@ -261,6 +261,25 @@ model WhatsAppProcessedMessage {
   @@map("WhatsAppProcessedMessages")
 }
 
+/**
+ * POC ops monitor: durable failure / alert rows (survives API restart).
+ * In-memory WhatsApp flow log stays for live UI; failures are also stored here.
+ */
+model OpsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  /** failure | alert_sent */
+  kind      String   @db.VarChar(32)
+  /** Grouping key for cooldown (e.g. chat_failed, send_fail). */
+  alertKey  String   @map("alert_key") @db.VarChar(64)
+  step      String   @db.VarChar(64)
+  detail    String   @default("") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([kind, alertKey, createdAt])
+  @@index([createdAt])
+  @@map("OpsEvents")
+}
+
 // Personal phone book for a human employee (POC). Later: ownerEmployeeId null = business-wide.
 model Contact {
   id               String   @id @default(uuid()) @db.Uuid
