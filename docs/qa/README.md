@@ -47,7 +47,7 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 |------:|-------|-------------|----------------|--------|
 | 1 | N/A (frozen ACTION) | Apply function only | DB / mocks | Done (matrix + inventory) |
 | 2 | N/A | UI only (API mocked) | Screen / UX | Done (matrix + inventory) |
-| 3 | Fake fixed ACTION | Full chat API | HTTP + DB + message saved | Not started |
+| 3 | Fake fixed ACTION | Full chat API | HTTP + DB + message saved | Done (matrix + chat Phase 3 cases) |
 | 4 | Real Lucy | Thin harness | metadata constraints | Catalog seeded |
 | 5 | Live / mostly live | Full stack | Journey still works | Not started |
 
@@ -57,6 +57,7 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 |-----|------------|
 | [phase-1-engine-matrix.md](./phase-1-engine-matrix.md) | Phase 1 coverage grid (domain × add/update/remove) |
 | [phase-2-ui-matrix.md](./phase-2-ui-matrix.md) | Phase 2 coverage grid (screen × states) |
+| [phase-3-api-matrix.md](./phase-3-api-matrix.md) | Phase 3 chat API + mocked LLM journeys |
 | [test-inventory.md](./test-inventory.md) | Full numbered list of every `it(...)` title |
 | [journeys-catalog.md](./journeys-catalog.md) | Phase 4 utterance → ACTION seeds |
 | [last-ci-report.md](./last-ci-report.md) | Latest CI report as markdown |

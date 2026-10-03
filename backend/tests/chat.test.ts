@@ -57,6 +57,8 @@ const {
   filingUpdate,
   filingUpdateMany,
   filingUpsert,
+  contactUpsert,
+  contactDeleteMany,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
   findFirst: vi.fn(),
@@ -86,6 +88,8 @@ const {
   filingUpdate: vi.fn(),
   filingUpdateMany: vi.fn(),
   filingUpsert: vi.fn(),
+  contactUpsert: vi.fn(),
+  contactDeleteMany: vi.fn(),
 }));
 
 const { createConversation, createResponse, appendAssistantMessage, usageCreate } =
@@ -197,6 +201,11 @@ vi.mock("../src/database/prisma.js", () => ({
       update: filingUpdate,
       updateMany: filingUpdateMany,
       upsert: filingUpsert,
+    },
+    contact: {
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: (...args: unknown[]) => contactUpsert(...args),
+      deleteMany: (...args: unknown[]) => contactDeleteMany(...args),
     },
     reminder: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -519,6 +528,13 @@ describe("chat API", () => {
     filingUpdate.mockReset();
     filingUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     filingUpsert.mockReset().mockResolvedValue({ id: "filing-1" });
+    contactUpsert.mockReset().mockResolvedValue({
+      id: "c1",
+      name: "מיכל",
+      phone: "972541111111",
+      kind: "personal",
+    });
+    contactDeleteMany.mockReset().mockResolvedValue({ count: 1 });
     messageCreate.mockReset().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       const row = {
         id: crypto.randomUUID(),
@@ -1778,5 +1794,205 @@ describe("chat API", () => {
     expect(response.body.notifications[0].message.text).toBe(
       "עמית מודה לך על הטיסה",
     );
+  });
+
+  it("Phase 3: applies remove_filing from mocked LLM (not lists.remove)", async () => {
+    const liveFiling = {
+      id: "filing-email",
+      itemName: "קוד לכניסה לחשבון אימייל",
+      itemInfo: "123",
+      itemDescription: "קוד לכניסה לחשבון אימייל",
+      employee: { name: "עמית", nickname: "עמית" },
+      employeeId,
+      scope: "personal",
+      visibleTo: [employeeId],
+      deletedAt: null,
+    };
+    filingFindMany.mockResolvedValue([liveFiling]);
+    filingUpdateMany.mockResolvedValue({ count: 1 });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "מחקתי את קוד הכניסה לחשבון האימייל.",
+        metadata: {
+          lists: [],
+          filing: [
+            {
+              action: "remove_filing",
+              item_name: "קוד כניסה לחשבון אימייל",
+              item_info: "",
+              item_description: "",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "removed filing" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "מחק קוד כניסה לחשבון אימייל", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("מחקתי");
+    expect(filingUpdateMany).toHaveBeenCalledWith({
+      where: {
+        employeeId,
+        itemName: "קוד לכניסה לחשבון אימייל",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(itemUpdateMany).not.toHaveBeenCalled();
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(
+      messageStore.some(
+        (row) =>
+          row.author === "assistant" && row.text.includes("מחקתי"),
+      ),
+    ).toBe(true);
+  });
+
+  it("Phase 3: applies update_filing from mocked LLM onto a live filing", async () => {
+    filingFindMany.mockResolvedValue([
+      {
+        id: "filing-email",
+        itemName: "קוד לכניסה לחשבון אימייל",
+        itemInfo: "123",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+        employee: { name: "עמית", nickname: "עמית" },
+        employeeId,
+        scope: "personal",
+        visibleTo: [employeeId],
+        deletedAt: null,
+      },
+    ]);
+    filingFindFirst.mockResolvedValue({
+      id: "filing-email",
+      itemName: "קוד לכניסה לחשבון אימייל",
+      itemInfo: "123",
+      itemDescription: "קוד לכניסה לחשבון אימייל",
+      visibleTo: [employeeId],
+      scope: "personal",
+    });
+    filingUpdate.mockResolvedValue({ id: "filing-email" });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "עדכנתי את הקוד ל־999.",
+        metadata: {
+          lists: [],
+          filing: [
+            {
+              action: "update_filing",
+              item_name: "קוד כניסה לחשבון אימייל",
+              item_info: "999",
+              item_description: "",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "updated filing" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "שנה את הקוד ל־999", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(filingUpdate).toHaveBeenCalledWith({
+      where: { id: "filing-email" },
+      data: {
+        itemInfo: "999",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+      },
+    });
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(response.body.reply).toContain("999");
+  });
+
+  it("Phase 3: applies directory.add from mocked LLM onto the speaker phone book", async () => {
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שמרתי את מיכל בספר הטלפונים.",
+        metadata: {
+          lists: [],
+          filing: [],
+          directory: [
+            { action: "add", name: "מיכל", phone: "054-1111111" },
+          ],
+        },
+      }),
+      raw: { output_text: "saved contact" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תוסיפי את מיכל 054-1111111", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(contactUpsert).toHaveBeenCalled();
+    expect(response.body.reply).toMatch(/מיכל/);
+  });
+
+  it("Phase 3: applies a single shopping remove immediately from mocked LLM", async () => {
+    listFindUnique.mockResolvedValue({
+      id: "list-shop",
+      employeeId,
+      listType: "shopping",
+      name: "",
+    });
+    itemFindFirst.mockResolvedValue({
+      id: "item-milk",
+      listId: "list-shop",
+      itemKey: "חלב",
+      data: { "שם פריט": "חלב" },
+      deletedAt: null,
+    });
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "הסרתי את החלב מהקניות.",
+        metadata: {
+          lists: [
+            {
+              action: "remove",
+              list_type: "shopping",
+              items: [{ "שם פריט": "חלב" }],
+            },
+          ],
+          filing: [],
+        },
+      }),
+      raw: { output_text: "removed milk" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "קניתי חלב", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(itemUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deletedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(response.body.reply).toContain("חלב");
   });
 });
