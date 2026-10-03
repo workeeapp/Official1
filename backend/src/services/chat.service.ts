@@ -390,6 +390,33 @@ export async function requireDigitalChatPartner(
   return digital;
 }
 
+/**
+ * Phase 4 model eval: Lucy system prompt as live chat attaches for an owner
+ * speaker (file/DB worker prompt + targeting + filing/contacts runtime lines).
+ * No Prisma — corpus injects EMPLOYEE_SAVED_DATA in the user message.
+ */
+export function buildLucyModelEvalInstructions(input: {
+  employees: PublicEmployee[];
+  speaker: string;
+  worker: PublicEmployee;
+}): string {
+  const config = llmConfigForDigital(input.worker);
+  return [
+    config.systemMessage,
+    workerTargetingInstructions(input.employees, input.speaker, input.worker),
+    OPEN_JOBS_RULES,
+    "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+    "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently. Do not claim you lack a fact that appears there.",
+    "FILING REMOVE: מחק/תמחק a code/address/doc that appears under EMPLOYEE_SAVED_DATA.filing (*תיוקים*) → remove_filing with EXACT item_name from that JSON. lists=[]. Never lists.remove for filings.",
+    "FILING UPDATE: שנה/עדכני a filing value → update_filing with EXACT item_name from EMPLOYEE_SAVED_DATA.filing + new item_info. lists=[]. Never lists.update for filings.",
+    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+    "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks.",
+    "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function workerTargetingInstructions(
   employees: PublicEmployee[],
   speaker: string,

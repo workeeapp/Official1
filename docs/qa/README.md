@@ -36,6 +36,16 @@ You’re not checking that Postgres deleted the row (Phase 1). You’re checking
 
 Corpus tags: `happy` · `action-confusion` · `hallucination-boundaries` · `safety-rails`.
 
+**Runner:** `docs/qa/phase-4-corpus.json` → live Lucy (`OPENAI_API_KEY`) → soft pass-rate on metadata constraints (default ≥70%). Not merge CI.
+
+```bash
+npm run test:model-eval -w backend
+```
+
+Optional: `MODEL_EVAL_CASES=filing-remove-email-code,list-buy-milk`. Writes `docs/qa/phase-4-last-eval.json`. Nightly / on-demand: Actions → **Model eval (Phase 4)**.
+
+Constraint unit tests (no API) run in normal `npm test -w backend`.
+
 ### Phase 5 — live smoke
 Mainly a **thin end-to-end smoke** test.
 
@@ -48,7 +58,7 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 | 1 | N/A (frozen ACTION) | Apply function only | DB / mocks | Done (matrix + inventory) |
 | 2 | N/A | UI only (API mocked) | Screen / UX | Done (matrix + inventory) |
 | 3 | Fake fixed ACTION | Full chat API | HTTP + DB + message saved | Done (matrix + chat Phase 3 cases) |
-| 4 | Real Lucy | Thin harness | metadata constraints | Catalog seeded |
+| 4 | Real Lucy | Thin harness | metadata constraints | Done (corpus + runner + nightly workflow) |
 | 5 | Live / mostly live | Full stack | Journey still works | Not started |
 
 ## Doc index
@@ -59,7 +69,9 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 | [phase-2-ui-matrix.md](./phase-2-ui-matrix.md) | Phase 2 coverage grid (screen × states) |
 | [phase-3-api-matrix.md](./phase-3-api-matrix.md) | Phase 3 chat API + mocked LLM journeys |
 | [test-inventory.md](./test-inventory.md) | Full numbered list of every `it(...)` title |
-| [journeys-catalog.md](./journeys-catalog.md) | Phase 4 utterance → ACTION seeds |
+| [journeys-catalog.md](./journeys-catalog.md) | Phase 4 utterance → ACTION seeds (human) |
+| [phase-4-corpus.json](./phase-4-corpus.json) | Phase 4 machine corpus + constraints |
+| [phase-4-model-matrix.md](./phase-4-model-matrix.md) | Phase 4 matrix + how to run |
 | [last-ci-report.md](./last-ci-report.md) | Latest CI report as markdown |
 | [reports/](./reports/) | Vitest **HTML** reports (`backend/` · `frontend/` · `shared/`) — open via `npx vite preview --outDir docs/qa/reports/backend` |
 

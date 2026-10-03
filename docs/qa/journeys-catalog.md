@@ -23,5 +23,5 @@ Tags: `happy` | `action-confusion` | `hallucination-boundaries` | `safety-rails`
 ## How to use
 
 - **Phase 1:** take the Pass-if ACTION, call apply, assert DB.
-- **Phase 4:** run utterance + setup against live Lucy; soft pass-rate on constraints (not exact `response` text).
+- **Phase 4:** run utterance + setup against live Lucy; soft pass-rate on constraints (not exact `response` text). Machine corpus: [`phase-4-corpus.json`](./phase-4-corpus.json). Runner: `npm run test:model-eval -w backend`.
 - **Phase 3:** mock LLM to return the Pass-if ACTION; hit `POST /api/chat`.

@@ -1,0 +1,58 @@
+name: Model eval (Phase 4)
+
+# Live Lucy routing eval — soft pass-rate on metadata constraints.
+# Not merge CI. Needs repo secret OPENAI_API_KEY.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: Optional comma-separated case ids (empty = full corpus)
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: model-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+env:
+  CI: "true"
+  NODE_ENV: test
+  DATABASE_URL: postgresql://workee:workee@localhost:5432/workee_test
+  AUTH_SECRET: test-auth-secret-that-is-at-least-32-chars
+  CLIENT_ORIGIN: http://localhost:5173
+  PORT: "3001"
+
+jobs:
+  model-eval:
+    name: phase-4-model-eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Run Phase 4 model eval
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MODEL_EVAL_CASES: ${{ github.event.inputs.cases }}
+        run: npm run test:model-eval -w backend
+      - name: Upload eval report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-4-model-eval-report
+          path: docs/qa/phase-4-last-eval.json
+          if-no-files-found: ignore

@@ -158,4 +158,10 @@ Runs shared + backend + frontend Vitest (no live Lucy / OpenAI).
 
 **Strategy (5 phases):** see [`docs/qa/README.md`](docs/qa/README.md) — engine → UI → API+mocked LLM → model eval → live smoke.
 
+Phase 4 live Lucy eval (needs `OPENAI_API_KEY`, not merge CI):
+
+```bash
+npm run test:model-eval -w backend
+```
+
 **CI:** [`.github/workflows/test.yml`](.github/workflows/test.yml) — three jobs (`shared` / `backend` / `frontend`), Checks report per case, JUnit artifacts. On demand: Actions → **Test** → **Run workflow**. **Re-run failed jobs** retries failed packages only.
