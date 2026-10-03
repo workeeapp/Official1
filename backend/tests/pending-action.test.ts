@@ -423,8 +423,8 @@ describe("planListDeletes", () => {
       step: "confirm",
       targets: ["להוריד את הכלב", "לטפל בתקלות"],
     });
-    expect(formatListDeleteConfirmNotice(planned.askLabels, false)).toContain(
-      "לאשר מחיקה",
+    expect(formatListDeleteConfirmNotice(planned.askLabels, false)).toBe(
+      "לאשר מחיקה של 2 פריטים?\n• להוריד את הכלב\n• לטפל בתקלות",
     );
   });
 

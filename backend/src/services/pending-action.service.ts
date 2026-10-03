@@ -340,8 +340,8 @@ export function formatListDeleteConfirmNotice(
   if (labels.length === 1) {
     return `לאשר מחיקה של «${labels[0]}»?`;
   }
-  const listed = labels.map((name) => `«${name}»`).join(", ");
-  return `לאשר מחיקה של ${labels.length} פריטים (${listed})?`;
+  const bullets = labels.map((name) => `• ${name}`).join("\n");
+  return `לאשר מחיקה של ${labels.length} פריטים?\n${bullets}`;
 }
 
 const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {

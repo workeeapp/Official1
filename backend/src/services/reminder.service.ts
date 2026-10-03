@@ -923,7 +923,8 @@ export function formatReminderConfirmNotice(
   if (names.length === 1) {
     return `למחוק את «${names[0]}»?`;
   }
-  return `למחוק את אלה: ${names.join(", ")}?`;
+  const bullets = names.map((name) => `• ${name}`).join("\n");
+  return `למחוק את אלה?\n${bullets}`;
 }
 
 export async function applyReminders(input: {
