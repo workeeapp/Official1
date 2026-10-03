@@ -40,6 +40,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SEND BODY MODE");
     expect(config.systemMessage).toContain("CONTENT / CONVERSATION REFERENCE");
     expect(config.systemMessage).toContain("מה שדיברנו");
+    expect(config.systemMessage).toContain("REMIND ABOUT A DISCUSSED ITEM");
+    expect(config.systemMessage).toContain("מה תרצה שאזכיר לך");
     expect(config.systemMessage).toContain("AFTER A CODE DIGEST");
     expect(config.systemMessage).toContain("GIT DIGEST CLOCK REQUIRED");
     expect(config.systemMessage).toContain("SCHEDULED SAVED-DATA STATUS");

@@ -224,6 +224,12 @@ export interface WhatsAppStatusResponse {
   hasAccessToken: boolean;
   lastInboundAt: string | null;
   events: WhatsAppFlowEvent[];
+  /** Durable failures (OpsEvents) — survives API restart. */
+  recentFailures?: WhatsAppFlowEvent[];
+  /** Failures recorded in the last hour. */
+  failuresLastHour?: number;
+  /** Ops WhatsApp alert phones configured. */
+  opsAlertConfigured?: boolean;
 }
 
 export function chatThreadKey(employeeId: string, digitalEmployeeId: string): string {

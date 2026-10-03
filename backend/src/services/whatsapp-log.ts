@@ -1,4 +1,5 @@
 import type { WhatsAppFlowEvent } from "@workee/shared";
+import { isOpsFailureStep, noteOpsFailure } from "./ops-monitor.service.js";
 
 const MAX_EVENTS = 80;
 const events: WhatsAppFlowEvent[] = [];
@@ -18,6 +19,11 @@ export function recordWhatsAppEvent(step: string, detail = ""): WhatsAppFlowEven
     events.length = MAX_EVENTS;
   }
   console.log(`WhatsApp flow ${step}${event.detail ? ` ${event.detail}` : ""}`);
+  if (isOpsFailureStep(event.step)) {
+    void noteOpsFailure(event).catch(() => {
+      /* never break the chat/WhatsApp path */
+    });
+  }
   return event;
 }
 
