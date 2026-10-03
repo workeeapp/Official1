@@ -66,6 +66,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ping Michal only");
     expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
     expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
+    expect(config.systemMessage).toContain("FULL DUMP TRIGGERS");
+    expect(config.systemMessage).toContain("FULL DUMP — NOT these");
+    expect(config.systemMessage).toContain("סכמי לי");
+    expect(config.systemMessage).toContain("קניות משותפות — עם");
+    expect(config.systemMessage).toContain("SHOPPING BOTH PERSONAL AND SHARED");
+    expect(config.systemMessage).toContain("רשימות אישיות");
+    expect(config.systemMessage).toContain("יש לך קוטג׳ לקנות");
     expect(config.systemMessage).toContain("SHARED WITH A NAMED PERSON");
     expect(config.systemMessage).toContain("שיעורי הנהיגה של מאיה");
     expect(config.systemMessage).toContain("APPLY FEEDBACK (layout)");

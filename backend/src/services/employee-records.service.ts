@@ -358,7 +358,7 @@ export function formatEmployeeContext(
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel PENDING_ACTION_STATE / hold drafts (send text, confirm delete, missing phone/time) — those stay active until completed.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
-    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Shopping: personal vs shared may appear as separate list rows and/or items with scope=shared (+ shared_with on the item when known) — in FULL DUMP split *קניות שלי* vs *קניות משותפות — עם X*.",
     JSON.stringify({
       lists: snapshot.lists,
       filing: snapshot.filing,
@@ -861,7 +861,14 @@ export async function getEmployeeRecordSnapshot(
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
     const items = byType.get(item.list.listType) ?? [];
-    items.push(withVisibility(item.data, "shared", owner));
+    items.push(
+      withVisibility(
+        item.data,
+        "shared",
+        owner,
+        sharedWithNames(item.list.employee.id, item.visibleTo, names),
+      ),
+    );
     byType.set(item.list.listType, items);
     sharedByOwner.set(owner, byType);
     if (item.list.listType === "shopping") {
@@ -892,6 +899,7 @@ export async function getEmployeeRecordSnapshot(
           item.data,
           "shared",
           owner,
+          sharedWithNames(list.employee.id, item.visibleTo ?? list.visibleTo, names),
         ),
       );
     }
@@ -2468,7 +2476,13 @@ function toListSnapshotEntry(input: {
   ownerName: string;
   scope: ItemScope;
   visibleTo: unknown;
-  items: Array<{ id?: string; data: unknown; scope?: string; itemKey?: string }>;
+  items: Array<{
+    id?: string;
+    data: unknown;
+    scope?: string;
+    itemKey?: string;
+    visibleTo?: unknown;
+  }>;
   currentShopping: Map<string, Set<string>>;
   names: Map<string, string>;
 }): EmployeeRecordSnapshot["lists"][number] | null {
@@ -2483,15 +2497,23 @@ function toListSnapshotEntry(input: {
         input.listType !== "tasks" ||
         !isOrphanAssignment(asRecord(item.data), input.currentShopping),
     )
-    .map((item) =>
-      withVisibility(
-        item.data,
+    .map((item) => {
+      const itemScope =
         item.scope === "shared" || input.scope === "shared"
           ? "shared"
-          : "personal",
-        input.ownerName,
-      ),
-    );
+          : "personal";
+      const itemVisibleTo =
+        "visibleTo" in item && item.visibleTo !== undefined
+          ? item.visibleTo
+          : input.scope === "shared"
+            ? input.visibleTo
+            : undefined;
+      const partners =
+        itemScope === "shared"
+          ? sharedWithNames(input.ownerId, itemVisibleTo ?? input.visibleTo, input.names)
+          : [];
+      return withVisibility(item.data, itemScope, input.ownerName, partners);
+    });
   // Keep named custom lists and any shared list even when empty so Lucy can
   // answer "do we have X?" / "show shared lists" without inventing.
   if (items.length === 0) {
@@ -2524,11 +2546,15 @@ function withVisibility(
   data: unknown,
   scope: string,
   owner: string,
+  sharedWith: string[] = [],
 ): Record<string, unknown> {
   return {
     ...stripJobMeta(normalizeListItemData(asRecord(data))),
     scope,
     owner,
+    ...(scope === "shared" && sharedWith.length > 0
+      ? { shared_with: sharedWith }
+      : {}),
   };
 }
 
