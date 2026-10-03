@@ -18,6 +18,11 @@ import {
   startWhatsAppTyping,
   WHATSAPP_SEND_FALLBACK_HE,
 } from "./whatsapp-send.js";
+import {
+  claimWhatsAppMessageId,
+  getWhatsAppActiveDigitalId,
+  setWhatsAppActiveDigital,
+} from "./whatsapp-session.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -110,9 +115,6 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
   return messages;
 }
 
-const recentInboundIds = new Set<string>();
-const whatsappWorkerByPhone = new Map<string, string>();
-
 export async function handleInboundWhatsAppTexts(
   messages: InboundWhatsAppText[],
 ): Promise<void> {
@@ -122,15 +124,8 @@ export async function handleInboundWhatsAppTexts(
   }
 
   for (const message of messages) {
-    if (recentInboundIds.has(message.messageId)) {
+    if (!(await claimWhatsAppMessageId(message.messageId))) {
       continue;
-    }
-    recentInboundIds.add(message.messageId);
-    if (recentInboundIds.size > 200) {
-      const first = recentInboundIds.values().next().value;
-      if (first) {
-        recentInboundIds.delete(first);
-      }
     }
 
     const stopTyping = startWhatsAppTyping(message.messageId);
@@ -140,7 +135,7 @@ export async function handleInboundWhatsAppTexts(
       const employees = await listEmployeesForUser(speaker.userId);
       const digitals = digitalEmployees(employees);
       const digital =
-        sessionDigital(message.from, digitals) ??
+        (await sessionDigital(message.from, digitals)) ??
         digitals.find((employee) => employee.protected) ??
         digitals[0];
       if (!digital) {
@@ -158,7 +153,7 @@ export async function handleInboundWhatsAppTexts(
       });
       const handoff =
         parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
-      applyWhatsAppHandoff(message.from, handoff, digitals);
+      await applyWhatsAppHandoff(message.from, handoff, digitals);
       if (handoff && handoff !== digital.name) {
         recordWhatsAppEvent("handoff", `worker=${handoff}`);
       }
@@ -197,11 +192,11 @@ export async function handleInboundWhatsAppTexts(
   }
 }
 
-export function applyWhatsAppHandoff(
+export async function applyWhatsAppHandoff(
   from: string,
   workerName: string | undefined,
   digitals: PublicEmployee[],
-): PublicEmployee | undefined {
+): Promise<PublicEmployee | undefined> {
   if (!workerName?.trim()) {
     return undefined;
   }
@@ -209,15 +204,15 @@ export function applyWhatsAppHandoff(
   if (!matched) {
     return undefined;
   }
-  whatsappWorkerByPhone.set(from, matched.id);
+  await setWhatsAppActiveDigital(from, matched.id);
   return matched;
 }
 
-function sessionDigital(
+async function sessionDigital(
   from: string,
   digitals: PublicEmployee[],
-): PublicEmployee | undefined {
-  const id = whatsappWorkerByPhone.get(from);
+): Promise<PublicEmployee | undefined> {
+  const id = await getWhatsAppActiveDigitalId(from);
   return id ? digitals.find((employee) => employee.id === id) : undefined;
 }
 

@@ -20,11 +20,19 @@ import {
   recordWhatsAppEvent,
   resetWhatsAppEvents,
 } from "../src/services/whatsapp-log.js";
+
+vi.mock("../src/services/whatsapp-session.js", () => ({
+  claimWhatsAppMessageId: vi.fn(async () => true),
+  getWhatsAppActiveDigitalId: vi.fn(async () => undefined),
+  setWhatsAppActiveDigital: vi.fn(async () => undefined),
+}));
+
 import {
   applyWhatsAppHandoff,
   extractInboundTexts,
   phonesMatch,
 } from "../src/services/whatsapp.service.js";
+import { setWhatsAppActiveDigital } from "../src/services/whatsapp-session.js";
 
 describe("WhatsApp webhook", () => {
   beforeEach(() => {
@@ -112,7 +120,7 @@ describe("WhatsApp webhook", () => {
     expect(sessionOpenAt(new Date("2026-09-23T12:00:00.000Z"), now)).toBe(false);
   });
 
-  it("applies an LLM handoff to a digital worker", () => {
+  it("applies an LLM handoff to a digital worker", async () => {
     const lucy = {
       id: "lucy",
       name: "לוסי",
@@ -130,13 +138,19 @@ describe("WhatsApp webhook", () => {
       protected: false,
     };
     const digitals = [lucy, david] as never;
-    expect(applyWhatsAppHandoff("972500000001", "דוד", digitals)?.id).toBe(
+    expect((await applyWhatsAppHandoff("972500000001", "דוד", digitals))?.id).toBe(
       "david",
     );
-    expect(applyWhatsAppHandoff("972500000001", "הליצן", digitals)?.id).toBe(
+    expect(
+      (await applyWhatsAppHandoff("972500000001", "הליצן", digitals))?.id,
+    ).toBe("david");
+    expect(
+      await applyWhatsAppHandoff("972500000001", undefined, digitals),
+    ).toBeUndefined();
+    expect(setWhatsAppActiveDigital).toHaveBeenCalledWith(
+      "972500000001",
       "david",
     );
-    expect(applyWhatsAppHandoff("972500000001", undefined, digitals)).toBeUndefined();
   });
 
   it("extracts inbound text messages and ignores status updates", () => {

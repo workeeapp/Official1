@@ -1,6 +1,10 @@
 import { createApp } from "./app.js";
 import { getEnv } from "./config/env.js";
 import { prisma } from "./database/prisma.js";
+import {
+  startChatEventListener,
+  stopChatEventListener,
+} from "./services/chat-events.service.js";
 import { startReminderTicker } from "./services/reminder-fire.js";
 
 async function main(): Promise<void> {
@@ -11,10 +15,12 @@ async function main(): Promise<void> {
     console.log(`API listening on http://localhost:${env.PORT}`);
   });
   startReminderTicker();
+  await startChatEventListener();
 
   const shutdown = async (signal: string) => {
     console.log(`Received ${signal}, shutting down`);
     server.close(async () => {
+      await stopChatEventListener();
       await prisma.$disconnect();
       process.exit(0);
     });

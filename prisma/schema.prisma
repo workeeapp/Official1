@@ -43,6 +43,7 @@ model Employee {
   ownedReminders           Reminder[]         @relation("ReminderOwner")
   actedReminders           Reminder[]         @relation("ReminderActor")
   contacts                 Contact[]
+  whatsappInboundSessions  WhatsAppInbound[]
 
   @@index([userId])
   @@map("Employees")
@@ -242,10 +243,22 @@ model AuditEvent {
 }
 
 model WhatsAppInbound {
-  phone         String   @id @db.VarChar(32)
-  lastInboundAt DateTime @map("last_inbound_at")
+  phone                   String    @id @db.VarChar(32)
+  lastInboundAt           DateTime  @map("last_inbound_at")
+  activeDigitalEmployeeId String?   @map("active_digital_employee_id") @db.Uuid
+  activeDigitalEmployee   Employee? @relation(fields: [activeDigitalEmployeeId], references: [id], onDelete: SetNull)
 
+  @@index([activeDigitalEmployeeId])
   @@map("WhatsAppInbounds")
+}
+
+/** Meta inbound wamid dedup — atomic claim across API instances. */
+model WhatsAppProcessedMessage {
+  messageId String   @id @map("message_id") @db.VarChar(128)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("WhatsAppProcessedMessages")
 }
 
 // Personal phone book for a human employee (POC). Later: ownerEmployeeId null = business-wide.
