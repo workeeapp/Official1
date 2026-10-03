@@ -144,6 +144,32 @@ describe("pending action hold", () => {
     ).toBeNull();
   });
 
+  it("applies confirm hold with a custom list remove draft on כן", () => {
+    const removeDraft = {
+      action: "remove" as const,
+      listType: "custom" as const,
+      listName: "משימות לעבודה",
+      items: [{ שם: "להוסיף לתיוקים — מידע כללי" }],
+      targets: [] as string[],
+    };
+    const hold = pendingHoldFromLlm({
+      kind: "lists",
+      need: "confirm",
+      directory: [],
+      lists: [removeDraft],
+      reminders: [],
+      filing: [],
+      messages: [],
+    });
+    expect(isConfirmHoldNeed("confirm")).toBe(true);
+    expect(fillListsFromPendingHold(hold, [], "כן", true)).toEqual([
+      removeDraft,
+    ]);
+    expect(fillListsFromPendingHold(hold, [], "כן", null)).toEqual([
+      removeDraft,
+    ]);
+  });
+
   it("aligns empty shopping targets with same-turn message recipients", () => {
     expect(
       alignListTargetsWithMessageRecipients({
@@ -451,6 +477,28 @@ describe("planListDeletes", () => {
     });
     expect(planned.applyLists).toHaveLength(1);
     expect(planned.askLabels).toEqual([]);
+    expect(planned.nextPending).toBeNull();
+  });
+
+  it("applies model hold removes on confirm=true without delete_lists pending", () => {
+    const removes = [
+      {
+        action: "remove" as const,
+        listType: "tasks" as const,
+        listName: "",
+        targets: [] as string[],
+        items: [
+          { "שם מטלה": "לאסוף את יואב" },
+          { "שם מטלה": "לבדוק משהו" },
+        ],
+      },
+    ];
+    const planned = planListDeletes({
+      lists: removes,
+      confirm: true,
+      stored: null,
+    });
+    expect(planned.applyLists).toEqual(removes);
     expect(planned.nextPending).toBeNull();
   });
 

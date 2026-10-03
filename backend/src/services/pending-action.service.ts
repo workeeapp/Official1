@@ -1,6 +1,7 @@
 import type {
   LlmDirectoryAction,
   LlmFilingAction,
+  LlmHold,
   LlmListAction,
   LlmMessageAction,
   LlmReminderAction,
@@ -9,6 +10,11 @@ import {
   PENDING_DELETE_TIMEOUT_MS,
   type PendingDeleteAction,
 } from "./reminder.service.js";
+
+/** Hold payload from the model — messages may be omitted on older drafts. */
+export type LlmHoldInput = Omit<LlmHold, "messages"> & {
+  messages?: LlmMessageAction[];
+};
 
 export const PENDING_HOLD_TIMEOUT_MS = PENDING_DELETE_TIMEOUT_MS;
 
@@ -125,13 +131,20 @@ export function isAwaitingFieldsHold(
 
 /** Clear unfinished drafts when the speaker aborts an awaiting_fields hold. */
 export function metadataAfterHoldCancel<T extends {
-  directory?: unknown[];
-  lists?: unknown[];
-  reminders?: unknown[];
-  filing?: unknown[];
-  messages?: unknown[];
-  hold: unknown;
-}>(metadata: T): T {
+  directory?: LlmDirectoryAction[];
+  lists?: LlmListAction[];
+  reminders?: LlmReminderAction[];
+  filing?: LlmFilingAction[];
+  messages?: LlmMessageAction[];
+  hold?: LlmHoldInput | null;
+}>(metadata: T): T & {
+  directory: [];
+  lists: [];
+  reminders: [];
+  filing: [];
+  messages: [];
+  hold: null;
+} {
   return {
     ...metadata,
     directory: [],
@@ -258,6 +271,7 @@ export function planListDeletes(input: {
   const removes = input.lists.filter((row) => row.action === "remove");
   const other = input.lists.filter((row) => row.action !== "remove");
   const removeCount = countListRemoveItems(removes);
+  const needsConfirm = removeCount >= BULK_LIST_REMOVE_CONFIRM_MIN;
 
   if (stored && input.confirm === false) {
     return {
@@ -268,16 +282,17 @@ export function planListDeletes(input: {
     };
   }
 
-  if (stored && input.confirm === true) {
+  // Yes after delete_lists pending OR after a confirm-hold that filled removes.
+  if (input.confirm === true) {
     return {
-      applyLists: [...other, ...stored.lists],
+      applyLists: [...other, ...(stored?.lists ?? removes)],
       askLabels: [],
       nextPending: null,
       cancelled: false,
     };
   }
 
-  if (removeCount >= BULK_LIST_REMOVE_CONFIRM_MIN) {
+  if (needsConfirm && removeCount > 0) {
     const labels = removes.flatMap((row) =>
       row.items.map((item) => listRemoveItemLabel(row.listType, item)),
     );
@@ -329,16 +344,6 @@ export function formatListDeleteConfirmNotice(
   return `לאשר מחיקה של ${labels.length} פריטים (${listed})?`;
 }
 
-export type LlmHold = {
-  kind: PendingHoldKind;
-  need: string;
-  directory: LlmDirectoryAction[];
-  lists: LlmListAction[];
-  reminders: LlmReminderAction[];
-  filing: LlmFilingAction[];
-  messages?: LlmMessageAction[];
-};
-
 const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {
   directory: "complete_directory",
   lists: "complete_lists",
@@ -347,7 +352,9 @@ const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {
   messages: "complete_messages",
 };
 
-export function pendingHoldFromLlm(hold: LlmHold | null | undefined): PendingHoldAction | null {
+export function pendingHoldFromLlm(
+  hold: LlmHoldInput | null | undefined,
+): PendingHoldAction | null {
   if (!hold) {
     return null;
   }
@@ -460,7 +467,10 @@ export function fillListsFromPendingHold(
   }
   const modelListed = lists.some(
     (row) =>
-      (row.action === "add" || row.action === "update") && row.items.length > 0,
+      (row.action === "add" ||
+        row.action === "update" ||
+        row.action === "remove") &&
+      row.items.length > 0,
   );
   const accepted =
     confirm === true ||

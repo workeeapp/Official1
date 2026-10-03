@@ -179,6 +179,10 @@ export function keysLooselyMatch(stored: string, needle: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
 }
 
+export function normalizeKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
+}
+
 /**
  * When the model guesses the wrong list_type on remove/update, prefer the list
  * where the item actually lives. If several lists match, keep the requested type
@@ -2782,10 +2786,6 @@ function readItemText(item: Record<string, unknown>, keys: string[]): string {
   }
 
   return "";
-}
-
-function normalizeKey(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

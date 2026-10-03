@@ -315,7 +315,7 @@ const OPEN_JOBS_RULES = [
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / a counter-offer / לא כרגע) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable.",
   "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while a hold/confirm is unfinished, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
-  "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
+  "SNOOZE (vs plain self-nudge): «תזכירי לי בעוד 10 דקות» / «בערב» / bare «בעוד X» right after you raised a job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm; lists=[], reminders=[]. Server creates the clock AND its «להזכיר ל…» task — FORBIDDEN: three-action self-nudge or a second worker task for this job. Unrelated remind while a job is open («תזכירי לי לקנות חלב») → plain Self-nudge, not jobs.snooze. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
   "query self: include OPEN_JOBS rows next to WORKER_SAVED_DATA, phrased for the viewer — to the asker «לבדוק עם ערן מה שלומו», to the subject «לבדוק מה שלומך (משימה מעמית)». Never say job / job_id / expects_reply / OPEN_JOBS in response.",
@@ -446,7 +446,7 @@ function workerTargetingInstructions(
       ? `ASK A DIGITAL CO-WORKER (${coworkers}): «תשאלי את <worker> …» / «תבדקי עם <worker> …» → metadata.messages to that worker with expects_reply:true, text = the question with the speaker's name. Not a handoff. The server asks them right now and adds their answer under your response — so response is only a short line that you asked them, e.g. «שאלתי את <worker>:». Never write or guess their answer yourself.`
       : "",
     "One sentence can be several actions. Fill every array that applies.",
-    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder.`,
+    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock) for NEW work only: (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. EXCEPTION: if OPEN_JOBS has a row and «תזכירי לי / בעוד X / על זה» is about that raised/open job → ONLY jobs.snooze (see OPEN JOBS); never the three actions.`,
     `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: every_count + every_unit. NEVER ask for WhatsApp if the name is Known.`,
     "REMIND CLOCK vs APPOINTMENT: «בעוד שעתיים» = `in` for the clock. «יש לה תור ב־22:00» = task context (optional שעה on their task) — do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared משימות לעבודה for a remind.",
     "NO META ON LISTS: complaints about your timing/questions → response only, empty lists. Never dump bug/meta text onto משימות לעבודה or any shared list.",
@@ -463,6 +463,8 @@ function workerTargetingInstructions(
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. In response say the reminder(s) were deleted (past tense), naming them — never מאשרת/לאשר confirming language. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. In response: past tense that items were deleted, list every name from PENDING_ACTION_STATE current_target (e.g. נמחקו הפריטים הבאים מרשימת הקניות: …). Never מאשרת/לאשר/confirming — yes already confirmed. A single bought item (קניתי חלב) may remove immediately without confirm.",
+    "SINGLE NAMED/SHARED LIST REMOVE: one row on custom/shared (משימות לעבודה) → lists.remove now (exact list_name + item). FORBIDDEN: homemade «למחוק משם?» then «כן» with confirm=true + empty lists (deletes nothing). Optional ask → hold need=confirm with remove draft; on כן confirm=true or re-emit remove. Never claim נמחק without lists.remove / PENDING delete_lists.",
+    "DELETE ALL EXCEPT KEEP: «תמחק הכל פרט ל־X» / «תשאיר רק X» → lists.remove every OTHER row on that named list — never remove X. Hold those removes if asking; on כן apply them.",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
     "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): leave query empty. Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (not the same as hold/PENDING_ACTION_STATE follow-ups). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
     "Status / דוח / what someone needs to buy or do / show a list: leave query empty. Answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Never emit query report. Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Prefer exact list_name; if several similar names and unsure which, ask before mutating. כל מה ששמור עלי / סיכום מלא → full dump of shopping, tasks, custom lists, active reminders, filings+memory, contacts — not tasks alone.",
@@ -1322,11 +1324,15 @@ export async function sendChatMessage(input: {
         metadata.confirm ?? null,
       );
       if (filledLists) {
+        const filledRemoves = filledLists.some(
+          (row) => row.action === "remove" && row.items.length > 0,
+        );
         metadata = {
           ...metadata,
           lists: filledLists,
           hold: null,
-          confirm: null,
+          // So planListDeletes applies hold removes instead of re-holding bulk.
+          confirm: filledRemoves ? true : null,
         };
       }
     }
@@ -1824,15 +1830,27 @@ export async function sendChatMessage(input: {
         workingReply = setEngineResponse(workingReply, fallback);
       }
     }
-    // Model often claims «הסרתי» even when no row matched — correct that.
+    // Model often claims «הסרתי/נמחק» with no applied remove (e.g. כן + empty lists) — correct that.
     const requestedCustomRemove = (metadata.lists ?? []).some(
       (row) => row.action === "remove" && row.listType === "custom",
+    );
+    const appliedListRemove = listMutations.some(
+      (row) => row.action === "remove" && !row.listShell,
     );
     const appliedCustomRemove = listMutations.some(
       (row) =>
         row.action === "remove" && row.listType === "custom" && !row.listShell,
     );
-    if (requestedCustomRemove && !appliedCustomRemove) {
+    const spokenReply = parseLlmReply(workingReply).response;
+    const claimedListDelete =
+      /(?:^|[\s«"'])(?:נמחק|נמחקו|מחקתי|הסרתי)/.test(spokenReply) ||
+      /הפריט\s+[«"].+[»"]\s+.*(?:נמחק|הוסר)/.test(spokenReply);
+    if (
+      (requestedCustomRemove && !appliedCustomRemove) ||
+      (claimedListDelete &&
+        !appliedListRemove &&
+        reminderResult.removed.length === 0)
+    ) {
       workingReply = setEngineResponse(
         workingReply,
         "לא מצאתי את הפריט למחיקה ברשימה.",
@@ -1840,7 +1858,7 @@ export async function sendChatMessage(input: {
     } else if (
       requestedCustomRemove &&
       appliedCustomRemove &&
-      !parseLlmReply(workingReply).response.trim()
+      !spokenReply.trim()
     ) {
       workingReply = setEngineResponse(
         workingReply,

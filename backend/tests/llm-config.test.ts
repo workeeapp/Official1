@@ -47,6 +47,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("Do NOT add a tasks row on the speaker");
     expect(config.systemMessage).toContain("EXAMPLE NAMES ARE NOT REAL");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
+    expect(config.systemMessage).toContain("JOB vs PLAIN REMIND");
+    expect(config.systemMessage).toContain("SNOOZE (vs plain self-nudge)");
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
@@ -64,5 +66,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ping Michal only");
     expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
     expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
+    expect(config.systemMessage).toContain("SINGLE NAMED/SHARED LIST REMOVE");
+    expect(config.systemMessage).toContain("DELETE ALL EXCEPT KEEP");
   });
 });
