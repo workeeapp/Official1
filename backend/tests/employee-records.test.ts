@@ -111,6 +111,7 @@ import {
   applyEmployeeMetadata,
   applyEmployeeRecords,
   chooseSavedListType,
+  resolveFilingItemName,
   deleteEmployeeRecord,
   deriveCustomListName,
   formatAppliedMutationFallback,
@@ -481,6 +482,22 @@ describe("employee records", () => {
     expect(chooseSavedListType("custom", [])).toBeNull();
   });
 
+  it("resolves filing remove names with slight Hebrew wording drift", () => {
+    const names = [
+      "קוד לכניסה לחשבון אימייל",
+      "קוד לשער אצל לבנת",
+      "כתובת מרב",
+    ];
+    expect(resolveFilingItemName("קוד לכניסה לחשבון אימייל", names)).toBe(
+      "קוד לכניסה לחשבון אימייל",
+    );
+    expect(resolveFilingItemName("קוד כניסה לחשבון אימייל", names)).toBe(
+      "קוד לכניסה לחשבון אימייל",
+    );
+    expect(resolveFilingItemName("קוד לשער", names)).toBe("קוד לשער אצל לבנת");
+    expect(resolveFilingItemName("קוד", names)).toBeNull();
+  });
+
   it("derives a custom list title from item list_name when the list row name is empty", () => {
     expect(
       deriveCustomListName([
@@ -832,7 +849,9 @@ describe("employee records", () => {
     itemFindMany.mockResolvedValue([]);
     filingFindFirst.mockResolvedValue(null);
     filingCreate.mockResolvedValue({ id: "filing-1" });
-    filingFindMany.mockResolvedValue([{ id: "filing-old" }]);
+    filingFindMany.mockResolvedValue([
+      { id: "filing-old", itemName: "רישיון ישן" },
+    ]);
     filingUpdateMany.mockResolvedValue({ count: 1 });
 
     await applyEmployeeMetadata(employeeId, {

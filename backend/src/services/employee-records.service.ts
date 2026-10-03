@@ -183,6 +183,50 @@ export function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
 }
 
+/** Loose Hebrew filing-name key: drop leading ל on tokens so «קוד כניסה» matches «קוד לכניסה». */
+export function filingLooseKey(value: string): string {
+  return normalizeKey(value)
+    .split(" ")
+    .map((token) => token.replace(/^ל/, ""))
+    .join("");
+}
+
+/**
+ * Resolve remove/update filing item_name from EMPLOYEE_SAVED_DATA names.
+ * Exact → loose Hebrew key → unique includes. Ambiguous → null.
+ */
+export function resolveFilingItemName(
+  requested: string,
+  existingNames: string[],
+): string | null {
+  const needle = normalizeKey(requested ?? "");
+  const names = existingNames.filter(
+    (name): name is string => typeof name === "string" && name.trim().length > 0,
+  );
+  if (!needle || names.length === 0) {
+    return null;
+  }
+  const exact = names.find((name) => normalizeKey(name) === needle);
+  if (exact) {
+    return exact;
+  }
+  const looseNeedle = filingLooseKey(requested);
+  const looseHits = names.filter(
+    (name) => filingLooseKey(name) === looseNeedle,
+  );
+  if (looseHits.length === 1) {
+    return looseHits[0];
+  }
+  const includeHits = names.filter((name) => {
+    const key = normalizeKey(name);
+    return key.includes(needle) || needle.includes(key);
+  });
+  if (includeHits.length === 1) {
+    return includeHits[0];
+  }
+  return null;
+}
+
 /**
  * When the model guesses the wrong list_type on remove/update, prefer the list
  * where the item actually lives. If several lists match, keep the requested type
@@ -1130,7 +1174,15 @@ export async function applyEmployeeRecords(
   });
   for (const action of metadata.filing) {
     if (action.action === "remove_filing") {
-      const itemName = action.itemName.slice(0, 200);
+      const requestedName = action.itemName.slice(0, 200);
+      const liveNames = (
+        await prisma.employeeFiling.findMany({
+          where: { employeeId, deletedAt: null },
+          select: { itemName: true },
+        })
+      ).map((row) => row.itemName);
+      const itemName =
+        resolveFilingItemName(requestedName, liveNames) ?? requestedName;
       const doomed = await prisma.employeeFiling.findMany({
         where: { employeeId, itemName, deletedAt: null },
         select: { id: true },
@@ -1164,8 +1216,19 @@ export async function applyEmployeeRecords(
         }
       }
     } else {
-      const itemName = action.itemName.slice(0, 200);
+      const requestedName = action.itemName.slice(0, 200);
       const itemDescription = action.itemDescription.trim().slice(0, 4000);
+      const liveNames = (
+        await prisma.employeeFiling.findMany({
+          where: { employeeId, deletedAt: null },
+          select: { itemName: true },
+        })
+      ).map((row) => row.itemName);
+      // update_filing: same loose name resolve as remove. add_filing: exact name only.
+      const itemName =
+        action.action === "update_filing"
+          ? (resolveFilingItemName(requestedName, liveNames) ?? requestedName)
+          : requestedName;
       const existingFiling = await prisma.employeeFiling.findFirst({
         where: { employeeId, itemName, deletedAt: null },
       });
@@ -1193,7 +1256,7 @@ export async function applyEmployeeRecords(
         });
         filingMutations.push({
           action: "update",
-          itemName,
+          itemName: existingFiling.itemName,
           itemInfo: action.itemInfo,
           itemDescription: nextDescription,
         });
@@ -1204,9 +1267,12 @@ export async function applyEmployeeRecords(
             action: "filing_update",
             entityType: "EmployeeFiling",
             entityId: existingFiling.id,
-            summary: `update filing: ${itemName}`,
+            summary: `update filing: ${existingFiling.itemName}`,
           });
         }
+      } else if (action.action === "update_filing") {
+        // No matching live filing — do not invent a new row on update.
+        continue;
       } else {
         if (!itemDescription) {
           // Incomplete add — model should hold and ask for תיאור first.

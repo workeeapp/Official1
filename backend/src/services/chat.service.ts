@@ -1183,6 +1183,15 @@ export async function sendChatMessage(input: {
           : "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently (family, לשון פנייה, job…). מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
         guestSpeaker
           ? ""
+          : "FILING LOOKUP / VALUE: match asks to item_name or item_description. מה הקוד / מה המספר / מה הערך → reply with item_info ONLY. Never volunteer item_description unless they ask מה התיוק / פירוט / מה התיאור / הציגי את התיוק.",
+        guestSpeaker
+          ? ""
+          : "FILING REMOVE: מחק/תמחק a code/address/doc that appears under EMPLOYEE_SAVED_DATA.filing (*תיוקים*) → remove_filing with EXACT item_name from that JSON. lists=[]. Never lists.remove for filings.",
+        guestSpeaker
+          ? ""
+          : "FILING UPDATE: שנה/עדכני a filing value → update_filing with EXACT item_name from EMPLOYEE_SAVED_DATA.filing + new item_info. lists=[]. Never lists.update for filings.",
+        guestSpeaker
+          ? ""
           : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
         guestSpeaker
           ? ""
@@ -1906,7 +1915,8 @@ export async function sendChatMessage(input: {
       (requestedCustomRemove && !appliedCustomRemove) ||
       (claimedListDelete &&
         !appliedListRemove &&
-        reminderResult.removed.length === 0)
+        reminderResult.removed.length === 0 &&
+        !filingMutations.some((row) => row.action === "remove"))
     ) {
       workingReply = setEngineResponse(
         workingReply,

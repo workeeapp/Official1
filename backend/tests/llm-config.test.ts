@@ -79,6 +79,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SHARED WITH A NAMED PERSON");
     expect(config.systemMessage).toContain("שיעורי הנהיגה של מאיה");
     expect(config.systemMessage).toContain("stop after the first shared list");
+    expect(config.systemMessage).toContain("FILING VALUE ANSWERS");
+    expect(config.systemMessage).toContain("item_info only");
+    expect(config.systemMessage).toContain("FILING REMOVE");
+    expect(config.systemMessage).toContain("remove_filing");
+    expect(config.systemMessage).toContain("FILING UPDATE");
+    expect(config.systemMessage).toContain("update_filing");
     expect(config.systemMessage).toContain("APPLY FEEDBACK (layout)");
     expect(config.systemMessage).toContain("נמחקו מהמטלות");
     expect(config.systemMessage).toContain("SINGLE NAMED/SHARED LIST REMOVE");
