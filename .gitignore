@@ -7,4 +7,5 @@ dist/
 .tools/
 .data/
 frontend/.vite/
+**/test-results/
 node_modules

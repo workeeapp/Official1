@@ -17,12 +17,18 @@ on:
           - backend
           - frontend
 
-# One group per event so a manual re-run does not cancel the push job (and vice versa).
 concurrency:
   group: test-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write
+
 env:
+  CI: "true"
   NODE_ENV: test
   DATABASE_URL: postgresql://workee:workee@localhost:5432/workee_test
   AUTH_SECRET: test-auth-secret-that-is-at-least-32-chars
@@ -42,7 +48,25 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
-      - run: npm test -w shared
+      - name: Run tests
+        run: npm test -w shared
+      - name: Publish test report
+        uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: shared tests
+          path: shared/test-results/junit.xml
+          reporter: java-junit
+          list-suites: all
+          list-tests: all
+          fail-on-error: false
+      - name: Upload JUnit XML
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-junit
+          path: shared/test-results/junit.xml
+          if-no-files-found: ignore
 
   backend:
     name: backend
@@ -57,7 +81,25 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npm test -w backend
+      - name: Run tests
+        run: npm test -w backend
+      - name: Publish test report
+        uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: backend tests
+          path: backend/test-results/junit.xml
+          reporter: java-junit
+          list-suites: all
+          list-tests: all
+          fail-on-error: false
+      - name: Upload JUnit XML
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: backend/test-results/junit.xml
+          if-no-files-found: ignore
 
   frontend:
     name: frontend
@@ -71,4 +113,22 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
-      - run: npm test -w frontend
+      - name: Run tests
+        run: npm test -w frontend
+      - name: Publish test report
+        uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: frontend tests
+          path: frontend/test-results/junit.xml
+          reporter: java-junit
+          list-suites: all
+          list-tests: all
+          fail-on-error: false
+      - name: Upload JUnit XML
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-junit
+          path: frontend/test-results/junit.xml
+          if-no-files-found: ignore

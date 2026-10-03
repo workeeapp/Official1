@@ -156,4 +156,4 @@ npm test
 
 Runs shared + backend + frontend Vitest (no live Lucy / OpenAI).
 
-**CI:** GitHub Actions workflow [`.github/workflows/test.yml`](.github/workflows/test.yml) runs the same suite on push/PR as three jobs (`shared` / `backend` / `frontend`). You can also run it **on demand**: Actions → **Test** → **Run workflow**. If only some jobs fail, use **Re-run failed jobs** (re-runs those packages only — not individual Vitest `it()` cases).
+**CI:** GitHub Actions workflow [`.github/workflows/test.yml`](.github/workflows/test.yml) runs three jobs (`shared` / `backend` / `frontend`). Each job publishes a **Checks** report with every case pass/fail (plus a job Summary) and uploads the JUnit XML artifact. Run on demand: Actions → **Test** → **Run workflow**. Use **Re-run failed jobs** to retry only failed packages.
