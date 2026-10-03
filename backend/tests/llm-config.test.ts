@@ -37,6 +37,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("RECENT_OUTBOUND");
     expect(config.systemMessage).toContain("CORRECT / CLARIFY A JUST-SENT RELAY");
     expect(config.systemMessage).toContain("שלחתי הבהרה");
+    expect(config.systemMessage).toContain("SEND BODY MODE");
+    expect(config.systemMessage).toContain("CONTENT / CONVERSATION REFERENCE");
+    expect(config.systemMessage).toContain("מה שדיברנו");
     expect(config.systemMessage).toContain("AFTER A CODE DIGEST");
     expect(config.systemMessage).toContain("GIT DIGEST CLOCK REQUIRED");
     expect(config.systemMessage).toContain("SCHEDULED SAVED-DATA STATUS");
