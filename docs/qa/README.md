@@ -2,8 +2,9 @@
 
 | Doc | Phase |
 |-----|-------|
-| [phase-1-engine-matrix.md](./phase-1-engine-matrix.md) | Engine ACTION → DB |
-| [phase-2-ui-matrix.md](./phase-2-ui-matrix.md) | UI + mocked API (Vitest / Testing Library) |
+| [phase-1-engine-matrix.md](./phase-1-engine-matrix.md) | Engine ACTION → DB (coverage grid) |
+| [phase-2-ui-matrix.md](./phase-2-ui-matrix.md) | UI + mocked API (coverage grid) |
+| [test-inventory.md](./test-inventory.md) | Full list of every `it(...)` title |
 | [journeys-catalog.md](./journeys-catalog.md) | Utterance → ACTION seeds (Phase 4) |
 
 ## Worktree note (`Official1-qa-phase1`)
@@ -26,3 +27,5 @@ Run Phase 1 tests:
 ```powershell
 npm test --workspace backend -- employee-records.test.ts directory-apply.test.ts contact.test.ts
 ```
+
+**CI:** on push/PR and on demand via Actions → Test → Run workflow (see `.github/workflows/test.yml`).

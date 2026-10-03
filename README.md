@@ -153,3 +153,7 @@ restarts the keeper in the current terminal. Log: `%LOCALAPPDATA%\Workee\keep-up
 ```bash
 npm test
 ```
+
+Runs shared + backend + frontend Vitest (no live Lucy / OpenAI).
+
+**CI:** GitHub Actions workflow [`.github/workflows/test.yml`](.github/workflows/test.yml) runs the same suite on push/PR. You can also run it **on demand**: Actions → **Test** → **Run workflow** (optional suite: all / shared / backend / frontend).
