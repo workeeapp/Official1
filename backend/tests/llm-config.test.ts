@@ -66,6 +66,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ping Michal only");
     expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
     expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
+    expect(config.systemMessage).toContain("SAME Lucy chat answer path");
     expect(config.systemMessage).toContain("הרשימה המשותפת עם עמית");
     expect(config.systemMessage).toContain("FULL DUMP TRIGGERS");
     expect(config.systemMessage).toContain("FULL DUMP — NOT these");

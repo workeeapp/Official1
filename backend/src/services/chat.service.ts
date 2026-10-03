@@ -455,7 +455,7 @@ function workerTargetingInstructions(
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily); hold kind=reminders need=time with git_log draft; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
-    "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר / תשלחי לי בעוד 10 שניות את רשימת הקניות המשותפת עם מיכל / שלחי לי את הרשימה המשותפת עם עמית בעוד 10 שניות) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said שלחי לי, brief=the question INCLUDING the partner («עם עמית»); «עם מיכל/עמית» is the shared-list partner NOT the WhatsApp target; at fire ONLY lists whose shared_with includes that partner — never every shared list; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
+    "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / תשלחי לי בעוד 10 שניות את הרשימה המשותפת עם עמית) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when שלחי לי, brief=the live question (include עם X). At fire the server uses the SAME Lucy chat answer path as typing it now — not a separate compose model. messages=[]. Need a real clock. FORBIDDEN: deferred list mutations. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -627,10 +627,32 @@ async function saveTurn(input: {
   reply: string;
   raw: unknown;
   request: unknown;
+  /** Scheduled status fire: persist only the assistant answer (no fake user line). */
+  assistantOnly?: boolean;
 }): Promise<void> {
   const parsed = parseLlmReply(input.reply);
   const userAt = new Date();
   const assistantAt = new Date(userAt.getTime() + 1);
+
+  if (input.assistantOnly) {
+    const packed = packStoredLlmRaw(input.request, input.raw);
+    await prisma.chatMessage.create({
+      data: {
+        conversationId: input.conversationId,
+        author: "assistant",
+        speaker: input.assistantSpeaker,
+        text: parsed.response,
+        actions: Prisma.JsonNull,
+        raw: toJsonValue({
+          scheduledStatus: true,
+          brief: input.message,
+          ...(packed && typeof packed === "object" ? packed : {}),
+        }),
+        createdAt: assistantAt,
+      },
+    });
+    return;
+  }
 
   await prisma.chatMessage.createMany({
     data: [
@@ -1031,6 +1053,11 @@ export async function sendChatMessage(input: {
    * still decides permissions and saved data.
    */
   consult?: { fromWorkerId: string; fromWorkerName: string };
+  /**
+   * Fire-time saved_data clock: same Lucy answer path as a live ask, but
+   * read-only (no mutations) and no fake user bubble in chat history.
+   */
+  scheduledStatus?: boolean;
 }): Promise<{
   reply: string;
   raw: unknown;
@@ -1130,12 +1157,21 @@ export async function sendChatMessage(input: {
         "lists/filing/reminders/directory/messages must always stay []. Do not invent private data.",
       ].join("\n")
     : "";
+  const scheduledStatusInstructions = input.scheduledStatus
+    ? [
+        "SCHEDULED STATUS DELIVERY: The speaker previously asked to receive this answer at a set time. Treat the user line as that live ask NOW.",
+        "Answer from THIS turn's EMPLOYEE_SAVED_DATA (+ SPEAKER_CONTACTS) exactly as you would in a normal chat turn for the same words.",
+        "READ-ONLY: metadata.lists=[], filing=[], reminders=[], directory=[], messages=[], jobs=[]; hold=null; confirm=null; handoff=null. response = the full WhatsApp body only.",
+        "SHARED WITH A NAMED PERSON: «רשימה/רשימות משותפת/ות עם X» → ONLY lists whose shared_with includes X — never every shared list.",
+      ].join("\n")
+    : "";
   const instructions = attachLucyEngine
     ? [
         config.systemMessage,
         `The user is chatting as ${speaker}.`,
         guestModeInstructions ||
           workerTargetingInstructions(employees, speaker, digital),
+        scheduledStatusInstructions,
         guestSpeaker ? "" : OPEN_JOBS_RULES,
         consultEnvelope,
         guestSpeaker
@@ -1205,6 +1241,7 @@ export async function sendChatMessage(input: {
     : [
         config.systemMessage,
         guestModeInstructions,
+        scheduledStatusInstructions,
         thinSessionEnvelope({
           employees,
           speaker,
@@ -1284,6 +1321,7 @@ export async function sendChatMessage(input: {
       reply: turn.reply,
       raw: turn.raw,
       request: openaiRequest,
+      assistantOnly: Boolean(input.scheduledStatus),
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
@@ -1293,9 +1331,25 @@ export async function sendChatMessage(input: {
       humans,
       employee.id,
     );
+    if (input.scheduledStatus) {
+      // Same answer brain as live chat — never apply mutations on a clock fire.
+      metadata = {
+        ...metadata,
+        lists: [],
+        filing: [],
+        reminders: [],
+        directory: [],
+        messages: [],
+        jobs: [],
+        hold: null,
+        confirm: null,
+        handoff: null,
+      };
+    }
     let serverFilledSendText = "";
     let cancelledAwaitingHold = false;
     if (
+      !input.scheduledStatus &&
       !guestSpeaker &&
       isAwaitingFieldsHold(waitingPending) &&
       isPendingHoldCancelText(input.message)
@@ -1303,7 +1357,7 @@ export async function sendChatMessage(input: {
       cancelledAwaitingHold = true;
       metadata = metadataAfterHoldCancel(metadata);
     }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
+    if (!input.scheduledStatus && !guestSpeaker && !cancelledAwaitingHold) {
       const filledMessages = fillMessagesFromPendingHold(
         waitingPending,
         metadata.messages ?? [],
@@ -1318,7 +1372,7 @@ export async function sendChatMessage(input: {
         };
       }
     }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
+    if (!input.scheduledStatus && !guestSpeaker && !cancelledAwaitingHold) {
       const filledLists = fillListsFromPendingHold(
         waitingPending,
         metadata.lists ?? [],
@@ -1338,7 +1392,7 @@ export async function sendChatMessage(input: {
         };
       }
     }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
+    if (!input.scheduledStatus && !guestSpeaker && !cancelledAwaitingHold) {
       const filledReminders = fillRemindersFromPendingHold(
         waitingPending,
         metadata.reminders ?? [],
@@ -1936,7 +1990,21 @@ export async function sendChatMessage(input: {
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
     }
-    if (!input.skipHandoffFollow && !consultFrom) {
+    if (input.scheduledStatus) {
+      const last = await prisma.chatMessage.findFirst({
+        where: { conversationId: conversation.id, author: "assistant" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (last) {
+        publishChatEvent(input.userId, input.employeeId, digital.id, {
+          employeeId: input.employeeId,
+          digitalEmployeeId: digital.id,
+          message: toThreadMessage(last),
+          raw: { scheduledStatus: true },
+        });
+      }
+    }
+    if (!input.skipHandoffFollow && !consultFrom && !input.scheduledStatus) {
       const next = matchHandoffWorker(
         parsedMetadata.handoff?.worker,
         digitalEmployees(employees),

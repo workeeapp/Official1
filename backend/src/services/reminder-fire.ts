@@ -17,6 +17,11 @@ import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
 
+/** Compose sources that answer via the live Lucy chat path at fire (not thin compose). */
+export function usesChatPathForComposeSource(composeSource: string): boolean {
+  return composeSource.trim() === "saved_data";
+}
+
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
@@ -185,6 +190,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
 
     let outboundBody = reminder.messageText;
     let skipSend = false;
+    /** When saved_data answers via sendChatMessage, that turn already persisted the assistant bubble. */
+    let chatAlreadyPersistedFor: string | null = null;
     if (reminder.composeAtFire) {
       const firstDest = dests[0] ?? "";
       const firstTarget =
@@ -196,15 +203,59 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         firstTarget?.nickname?.trim() ||
         firstTarget?.name ||
         (looksLikePhone(firstDest) ? firstDest : "הנמען");
+      const subjectId =
+        firstTarget?.id ?? reminder.actorId ?? reminder.ownerId;
+      const composeSource = (reminder.composeSource ?? "").trim();
 
+      if (usesChatPathForComposeSource(composeSource) && speaker && subjectId) {
+        // Same Lucy answer path as a live ask — not the thin compose LLM.
+        try {
+          const { sendChatMessage } = await import("./chat.service.js");
+          const { parseLlmReply } = await import("@workee/shared");
+          const brief =
+            reminder.messageText.trim() || reminder.itemLabel.trim();
+          const turn = await sendChatMessage({
+            userId: reminder.userId,
+            employeeId: subjectId,
+            digitalEmployeeId: speaker.id,
+            message: brief,
+            scheduledStatus: true,
+            skipHandoffFollow: true,
+          });
+          const spoken = parseLlmReply(turn.reply).response.trim();
+          const resolved = resolveComposeFireOutbound({
+            brief: reminder.messageText,
+            itemLabel: reminder.itemLabel,
+            composed: spoken || null,
+          });
+          outboundBody = resolved.body;
+          chatAlreadyPersistedFor = subjectId;
+          if (resolved.lastComposedToSave) {
+            await prisma.reminder.update({
+              where: { id: reminder.id },
+              data: { lastComposedText: resolved.lastComposedToSave },
+            });
+          }
+          recordWhatsAppEvent(
+            "reminder_saved_data_chat",
+            `item=${reminder.itemLabel.slice(0, 40)} chars=${outboundBody.length}`,
+          );
+        } catch (error) {
+          recordWhatsAppEvent(
+            "reminder_saved_data_chat_fail",
+            error instanceof Error ? error.message : "unknown",
+          );
+          skipSend = true;
+          await settleFiredReminder(reminder, now, "failed");
+          continue;
+        }
+      } else {
       let advanceLastReportSha = false;
       let headSha = "";
       let factsBundle: Awaited<ReturnType<typeof loadComposeFacts>> | undefined;
       try {
-        const subjectId =
-          firstTarget?.id ?? reminder.actorId ?? reminder.ownerId;
         factsBundle = await loadComposeFacts({
-          composeSource: reminder.composeSource ?? "",
+          composeSource,
           subjectEmployeeId: subjectId,
           repeat: reminder.repeat,
           lastReportSha: reminder.lastReportSha,
@@ -253,6 +304,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           },
         });
       }
+      }
     }
 
     if (skipSend) {
@@ -275,7 +327,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         text: outboundBody,
       });
 
-      if (target && speaker) {
+      if (target && speaker && target.id !== chatAlreadyPersistedFor) {
         const conversation = await prisma.chatConversation.findUnique({
           where: {
             userId_employeeId_digitalEmployeeId: {

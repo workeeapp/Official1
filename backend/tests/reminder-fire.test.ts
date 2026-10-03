@@ -37,7 +37,16 @@ import {
   claimDueReminder,
   resolveComposeFireOutbound,
   settleFiredReminder,
+  usesChatPathForComposeSource,
 } from "../src/services/reminder-fire.js";
+
+describe("usesChatPathForComposeSource", () => {
+  it("routes saved_data through the live Lucy chat path", () => {
+    expect(usesChatPathForComposeSource("saved_data")).toBe(true);
+    expect(usesChatPathForComposeSource(" git_log ")).toBe(false);
+    expect(usesChatPathForComposeSource("")).toBe(false);
+  });
+});
 
 describe("claimDueReminder", () => {
   beforeEach(() => {
