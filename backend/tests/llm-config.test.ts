@@ -66,6 +66,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ping Michal only");
     expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
     expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
+    expect(config.systemMessage).toContain("SHARED WITH A NAMED PERSON");
+    expect(config.systemMessage).toContain("שיעורי הנהיגה של מאיה");
     expect(config.systemMessage).toContain("APPLY FEEDBACK (layout)");
     expect(config.systemMessage).toContain("נמחקו מהמטלות");
     expect(config.systemMessage).toContain("SINGLE NAMED/SHARED LIST REMOVE");
