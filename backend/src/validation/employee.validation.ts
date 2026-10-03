@@ -71,6 +71,7 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     nickname: optionalText(record.nickname),
     email: optionalText(record.email),
     phone: optionalText(record.phone),
+    isOwner: record.isOwner === true,
   };
 }
 

@@ -7,6 +7,7 @@
     "frontend"
   ],
   "scripts": {
+    "predev": "prisma migrate deploy",
     "dev": "concurrently -n api,web -c blue,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "build": "npm run build -w backend && npm run build -w frontend",
     "test": "npm run test -w shared && npm run test -w backend && npm run test -w frontend",
@@ -15,7 +16,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "user:create": "tsx backend/src/scripts/create-user.ts"
+    "user:create": "tsx backend/src/scripts/create-user.ts",
+    "keep-up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/keep-workee-up.ps1",
+    "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

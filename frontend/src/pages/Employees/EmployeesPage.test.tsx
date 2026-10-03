@@ -1,22 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
 import { EmployeesPage } from "./EmployeesPage";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { ApiError } from "@/types";
 
 const {
   meMock,
   listEmployeesMock,
+  createEmployeeMock,
   recordsMock,
   updateRecordMock,
   deleteRecordMock,
   digitalDefaultsMock,
+  usageMock,
+  teamUsageMock,
 } = vi.hoisted(() => ({
+  usageMock: vi.fn(),
+  teamUsageMock: vi.fn(),
   meMock: vi.fn(),
   listEmployeesMock: vi.fn(),
+  createEmployeeMock: vi.fn(),
   recordsMock: vi.fn(),
   updateRecordMock: vi.fn(),
   deleteRecordMock: vi.fn(),
@@ -40,10 +47,12 @@ vi.mock("@/services/employee.service", async () => {
     employeeApi: {
       list: listEmployeesMock,
       digitalDefaults: digitalDefaultsMock,
-      create: vi.fn(),
+      create: createEmployeeMock,
       update: vi.fn(),
       remove: vi.fn(),
       records: recordsMock,
+      usage: usageMock,
+      teamUsage: teamUsageMock,
       updateRecord: updateRecordMock,
       deleteRecord: deleteRecordMock,
     },
@@ -105,8 +114,27 @@ describe("Employees page", () => {
       employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
       groups: [],
     });
+    usageMock.mockReset().mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      conversations: 3,
+      interactions: 17,
+      totalUsd: 0.0021528,
+    });
+    teamUsageMock.mockReset().mockResolvedValue({
+      allEmployeesUsd: 0.0196,
+      humanEmployeesUsd: 0.0098,
+    });
     updateRecordMock.mockReset();
     deleteRecordMock.mockReset();
+    createEmployeeMock.mockReset().mockResolvedValue({
+      id: "new-person",
+      kind: "human" as const,
+      name: "דנה",
+      surname: "לוי",
+      nickname: "דנה",
+      email: "dana@example.com",
+      phone: "050-0000003",
+    });
     digitalDefaultsMock.mockReset().mockResolvedValue({
       model: "gpt-4.1-mini",
       temperature: 0,
@@ -118,11 +146,19 @@ describe("Employees page", () => {
     renderEmployees();
 
     expect(await screen.findByTestId("employees-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("employee-count")).toHaveTextContent("3 employees");
+    expect(await screen.findByText("3 employees")).toBeInTheDocument();
     expect(screen.getByTitle("לוסי · gpt-4.1-mini")).toHaveTextContent("לוסי");
+    expect(
+      within(screen.getByTitle("לוסי · gpt-4.1-mini")).getByTestId("workee-mark"),
+    ).toBeInTheDocument();
     expect(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).toHaveTextContent(
       "עמית",
     );
+    expect(
+      within(screen.getByTitle("עמית חתן · amit@example.com · 050-0000001")).queryByTestId(
+        "workee-mark",
+      ),
+    ).not.toBeInTheDocument();
     expect(screen.getByTitle("טל דור · tal@example.com · 050-0000002")).toHaveTextContent(
       "טל",
     );
@@ -151,6 +187,27 @@ describe("Employees page", () => {
     expect(screen.getByRole("button", { name: "Delete employee" })).toBeEnabled();
     expect(await screen.findByTestId("employee-records")).toHaveTextContent(
       "No lists, tasks, contacts, or filings saved for this employee.",
+    );
+  });
+
+  it("shows the team total and the human-only total next to Team", async () => {
+    renderEmployees();
+
+    expect(await screen.findByTestId("team-usage")).toHaveTextContent("$0.0196 ($0.0098)");
+  });
+
+  it("shows conversation count and total LLM cost for the selected employee", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+
+    const usage = await screen.findByTestId("employee-usage");
+    expect(usage).toHaveTextContent("Number of conversations 3 (17)");
+    expect(usage).toHaveTextContent("Total amount $0.0022");
+    expect(usageMock).toHaveBeenCalledWith(
+      "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      expect.any(AbortSignal),
     );
   });
 
@@ -261,7 +318,40 @@ describe("Employees page", () => {
     expect(screen.getByLabelText("Instructions")).toHaveValue(
       "You manage lists and filings.",
     );
+    expect(
+      screen.getByRole("button", { name: "Inherit from Lucy" }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  });
+
+  it("lets Inherit from Lucy overwrite the digital prompt fields", async () => {
+    const user = userEvent.setup();
+    digitalDefaultsMock
+      .mockResolvedValueOnce({
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "You manage lists and filings.",
+      })
+      .mockResolvedValueOnce({
+        model: "gpt-4.1",
+        temperature: 0.3,
+        instructions: "Lucy live prompt from DB",
+      });
+    renderEmployees();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    await user.click(screen.getByRole("button", { name: "Workee (digital)" }));
+    await screen.findByLabelText("Instructions");
+
+    await user.clear(screen.getByLabelText("Instructions"));
+    await user.type(screen.getByLabelText("Instructions"), "custom draft");
+    await user.click(screen.getByRole("button", { name: "Inherit from Lucy" }));
+
+    expect(await screen.findByLabelText("Instructions")).toHaveValue(
+      "Lucy live prompt from DB",
+    );
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1");
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0.3);
   });
 
   it("lets Lucy be edited but not deleted", async () => {
@@ -281,6 +371,9 @@ describe("Employees page", () => {
     expect(screen.getByLabelText("Instructions")).toHaveValue(
       "You manage lists and filings.",
     );
+    expect(
+      screen.queryByRole("button", { name: "Inherit from Lucy" }),
+    ).not.toBeInTheDocument();
   });
 
   it("edits a saved item and refreshes the records", async () => {
@@ -395,5 +488,142 @@ describe("Employees page", () => {
       await screen.findByText("No lists, tasks, contacts, or filings saved for this employee."),
     ).toBeInTheDocument();
     confirm.mockRestore();
+  });
+
+  it("shows an error when the employees list fails to load", async () => {
+    listEmployeesMock.mockRejectedValue(
+      new ApiError("SERVICE_UNAVAILABLE", "Unable to load employees.", 503),
+    );
+    renderEmployees();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Unable to load employees.",
+    );
+  });
+
+  it("shows an empty-state message when there are no employees", async () => {
+    listEmployeesMock.mockResolvedValue({ count: 0, employees: [] });
+    renderEmployees();
+
+    expect(await screen.findByText("No employees yet.")).toBeInTheDocument();
+    expect(screen.getByText("0 employees")).toBeInTheDocument();
+  });
+
+  it("creates a person and refreshes the list", async () => {
+    const user = userEvent.setup();
+    listEmployeesMock
+      .mockResolvedValueOnce({
+        count: 3,
+        employees: [
+          {
+            id: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+            kind: "digital" as const,
+            protected: true,
+            name: "לוסי",
+            surname: "",
+            nickname: "לוסי",
+            email: null,
+            phone: null,
+            model: "gpt-4.1-mini",
+            temperature: 0,
+            instructions: "You manage lists and filings.",
+          },
+          {
+            id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+            name: "עמית",
+            surname: "חתן",
+            nickname: "עמית",
+            email: "amit@example.com",
+            phone: "050-0000001",
+          },
+          {
+            id: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+            name: "טל",
+            surname: "דור",
+            nickname: "טל",
+            email: "tal@example.com",
+            phone: "050-0000002",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        count: 4,
+        employees: [
+          {
+            id: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+            kind: "digital" as const,
+            protected: true,
+            name: "לוסי",
+            surname: "",
+            nickname: "לוסי",
+            email: null,
+            phone: null,
+            model: "gpt-4.1-mini",
+            temperature: 0,
+            instructions: "You manage lists and filings.",
+          },
+          {
+            id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+            name: "עמית",
+            surname: "חתן",
+            nickname: "עמית",
+            email: "amit@example.com",
+            phone: "050-0000001",
+          },
+          {
+            id: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+            name: "טל",
+            surname: "דור",
+            nickname: "טל",
+            email: "tal@example.com",
+            phone: "050-0000002",
+          },
+          {
+            id: "new-person",
+            kind: "human" as const,
+            name: "דנה",
+            surname: "לוי",
+            nickname: "דנה",
+            email: "dana@example.com",
+            phone: "050-0000003",
+          },
+        ],
+      });
+    renderEmployees();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    await user.click(screen.getByRole("button", { name: "Person" }));
+    await user.type(screen.getByLabelText("Name"), "דנה");
+    await user.type(screen.getByLabelText("Surname"), "לוי");
+    await user.type(screen.getByLabelText("Nickname"), "דנה");
+    await user.type(screen.getByLabelText("Email"), "dana@example.com");
+    await user.type(screen.getByLabelText("Phone"), "050-0000003");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(createEmployeeMock).toHaveBeenCalledWith({
+      kind: "human",
+      name: "דנה",
+      surname: "לוי",
+      nickname: "דנה",
+      email: "dana@example.com",
+      phone: "050-0000003",
+      isOwner: false,
+    });
+    expect(await screen.findByText("4 employees")).toBeInTheDocument();
+    expect(screen.getByTitle(/דנה לוי/)).toBeInTheDocument();
+  });
+
+  it("shows an error when saved records fail to load", async () => {
+    recordsMock.mockRejectedValue(
+      new ApiError("SERVICE_UNAVAILABLE", "Unable to load saved employee data.", 503),
+    );
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Unable to load saved employee data.",
+    );
   });
 });

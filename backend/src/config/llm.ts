@@ -8,7 +8,17 @@ const llmConfigSchema = z.object({
   systemMessage: z.string().trim().min(1),
 });
 
-export type LlmConfig = z.infer<typeof llmConfigSchema>;
+export type LlmJsonSchemaFormat = {
+  type: "json_schema";
+  name: string;
+  schema: Record<string, unknown>;
+  strict?: boolean;
+  description?: string;
+};
+
+export type LlmConfig = z.infer<typeof llmConfigSchema> & {
+  responseFormat?: LlmJsonSchemaFormat;
+};
 
 const CANDIDATES = [
   "LLM.config",
@@ -17,6 +27,8 @@ const CANDIDATES = [
   "../LLM.config.json",
 ];
 
+const ACTION_CANDIDATES = ["LLM.action.json", "../LLM.action.json"];
+
 export function loadLlmConfig(cwd = process.cwd()): LlmConfig {
   const errors: string[] = [];
 
@@ -24,11 +36,14 @@ export function loadLlmConfig(cwd = process.cwd()): LlmConfig {
     const path = resolve(cwd, relativePath);
     try {
       const parsed = llmConfigSchema.safeParse(
-        parseLlmConfigText(readFileSync(path, "utf8")),
+        normalizeLlmConfig(parseLlmConfigText(readFileSync(path, "utf8"))),
       );
 
       if (parsed.success) {
-        return parsed.data;
+        const responseFormat = loadLlmResponseFormat(cwd);
+        return responseFormat
+          ? { ...parsed.data, responseFormat }
+          : parsed.data;
       }
 
       errors.push(
@@ -46,6 +61,92 @@ export function loadLlmConfig(cwd = process.cwd()): LlmConfig {
 
   const detail = errors.length > 0 ? errors.join(" | ") : "file not found";
   throw new Error(`Invalid LLM configuration: ${detail}`);
+}
+
+export function loadLlmResponseFormat(
+  cwd = process.cwd(),
+): LlmJsonSchemaFormat | undefined {
+  for (const relativePath of ACTION_CANDIDATES) {
+    const path = resolve(cwd, relativePath);
+    try {
+      const format = toResponsesJsonSchemaFormat(
+        JSON.parse(readFileSync(path, "utf8")),
+      );
+      if (format) {
+        return format;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
+      throw new Error(
+        `Invalid LLM action: ${path}: ${error instanceof Error ? error.message : "invalid JSON"}`,
+      );
+    }
+  }
+
+  return undefined;
+}
+
+function toResponsesJsonSchemaFormat(raw: unknown): LlmJsonSchemaFormat | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const responseFormat =
+    record.response_format &&
+    typeof record.response_format === "object" &&
+    !Array.isArray(record.response_format)
+      ? (record.response_format as Record<string, unknown>)
+      : record;
+
+  if (responseFormat.type !== "json_schema") {
+    return undefined;
+  }
+
+  const nested =
+    responseFormat.json_schema &&
+    typeof responseFormat.json_schema === "object" &&
+    !Array.isArray(responseFormat.json_schema)
+      ? (responseFormat.json_schema as Record<string, unknown>)
+      : responseFormat;
+
+  if (
+    typeof nested.name !== "string" ||
+    !nested.name.trim() ||
+    !nested.schema ||
+    typeof nested.schema !== "object" ||
+    Array.isArray(nested.schema)
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: "json_schema",
+    name: nested.name.trim(),
+    schema: nested.schema as Record<string, unknown>,
+    ...(typeof nested.strict === "boolean" ? { strict: nested.strict } : {}),
+    ...(typeof nested.description === "string"
+      ? { description: nested.description }
+      : {}),
+  };
+}
+
+function normalizeLlmConfig(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return raw;
+  }
+
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.systemMessage)) {
+    return raw;
+  }
+
+  return {
+    ...record,
+    systemMessage: record.systemMessage.map((line) => String(line)).join("\n"),
+  };
 }
 
 function parseLlmConfigText(text: string): unknown {

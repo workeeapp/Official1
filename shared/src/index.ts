@@ -12,14 +12,19 @@ export type {
   EmployeeRecordItem,
   EmployeeRecordGroup,
   EmployeeRecordsResponse,
+  EmployeeUsageSummary,
+  TeamUsageSummary,
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,
+  ChatReplyTiming,
   ChatThreadNotification,
   ChatMessageAuthor,
   ChatThreadMessage,
   ChatHistoryResponse,
   ChatLiveEvent,
+  WhatsAppFlowEvent,
+  WhatsAppStatusResponse,
 } from "./types";
 export {
   USERNAME_MIN_LENGTH,
@@ -49,7 +54,10 @@ export {
   isDigitalEmployee,
   humanEmployees,
   digitalEmployees,
+  isGuestEmployee,
+  workspaceHumans,
   isProtectedEmployee,
+  isAccountOwner,
   chatThreadKey,
 } from "./types";
 export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
@@ -58,9 +66,20 @@ export {
   parseLlmMetadata,
   parseLlmReply,
   parseReplyMetadata,
+  parseReportSections,
+  parseReportHistoryKinds,
   parseTargets,
   llmItemLabel,
 } from "./llm-message";
+export {
+  addReminderInterval,
+  formatReminderIntervalHe,
+  nextWeekdayFireAt,
+  parseReminderInterval,
+  parseStoredRepeat,
+  serializeReminderRepeat,
+} from "./reminder-interval";
+export type { ReminderInterval, ReminderIntervalUnit } from "./reminder-interval";
 export type {
   LlmFilingAction,
   LlmFilingActionName,
@@ -68,6 +87,20 @@ export type {
   LlmListActionName,
   LlmListType,
   LlmMessageAction,
+  LlmMessageBook,
+  LlmDirectoryAction,
+  LlmDirectoryActionName,
+  LlmHandoffAction,
+  LlmHold,
+  LlmHoldKind,
+  LlmJobAction,
+  LlmJobActionName,
+  LlmQuery,
+  ReportSection,
+  ReportHistoryKind,
   LlmMetadata,
+  LlmReminderAction,
+  LlmReminderActionName,
+  LlmReminderRepeat,
   ParsedLlmMessage,
 } from "./llm-message";

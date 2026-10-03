@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 export const chatRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 40,
+  skip: () => process.env.NODE_ENV === "test",
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -16,6 +17,7 @@ export const chatRateLimiter = rateLimit({
 export const loginRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
+  skip: () => process.env.NODE_ENV === "test",
   standardHeaders: true,
   legacyHeaders: false,
   message: {

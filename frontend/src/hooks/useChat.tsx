@@ -36,6 +36,7 @@ interface ChatContextValue {
   setChatWithId: (id: string) => void;
   threads: Record<string, ChatMessage[]>;
   rawResponses: Record<string, unknown>;
+  rawRequests: Record<string, unknown>;
   sendingEmployeeId: string | null;
   historyLoadingId: string | null;
   resetting: boolean;
@@ -58,6 +59,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [chatWithId, setChatWithIdState] = useState("");
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({});
   const [rawResponses, setRawResponses] = useState<Record<string, unknown>>({});
+  const [rawRequests, setRawRequests] = useState<Record<string, unknown>>({});
   const [sendingEmployeeId, setSendingEmployeeId] = useState<string | null>(null);
   const [historyLoadingId, setHistoryLoadingId] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
@@ -87,7 +89,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       chatApi
         .history(employeeId, digitalEmployeeId, abort.signal)
         .then((history) => {
-          applyHistory(threadId, history, conversationIdsRef.current, setThreads, setRawResponses);
+          applyHistory(
+            threadId,
+            history,
+            conversationIdsRef.current,
+            setThreads,
+            setRawResponses,
+            setRawRequests,
+          );
         })
         .catch((caught) => {
           if (caught instanceof ApiError && caught.code === "ABORTED") {
@@ -195,7 +204,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abortRef.current = abort;
 
       try {
-        const { reply, raw } = await chatApi.send(
+        const { reply, raw, request, timing } = await chatApi.send(
           {
             message: input.text,
             employeeId: input.employeeId,
@@ -218,12 +227,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               text: parsed.response,
               createdAt: new Date().toISOString(),
               actions: parsed.actions,
+              llmMs: timing?.llmMs,
+              afterLlmMs: timing?.afterLlmMs,
             },
           ],
         }));
         setRawResponses((current) => ({
           ...current,
           [threadId]: raw ?? reply,
+        }));
+        setRawRequests((current) => ({
+          ...current,
+          [threadId]: request,
         }));
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === "ABORTED") {
@@ -269,6 +284,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         delete next[threadId];
         return next;
       });
+      setRawRequests((current) => {
+        const next = { ...current };
+        delete next[threadId];
+        return next;
+      });
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -292,6 +312,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setChatWithId,
       threads,
       rawResponses,
+      rawRequests,
       sendingEmployeeId,
       historyLoadingId,
       resetting,
@@ -307,6 +328,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setChatWithId,
       threads,
       rawResponses,
+      rawRequests,
       sendingEmployeeId,
       historyLoadingId,
       resetting,
@@ -326,6 +348,7 @@ function applyHistory(
   knownIds: Record<string, KnownConversation>,
   setThreads: Dispatch<SetStateAction<Record<string, ChatMessage[]>>>,
   setRawResponses: Dispatch<SetStateAction<Record<string, unknown>>>,
+  setRawRequests: Dispatch<SetStateAction<Record<string, unknown>>>,
 ): void {
   const known = knownIds[threadId];
   if (isStaleHistory(known, history)) {
@@ -380,6 +403,30 @@ function applyHistory(
       [threadId]: raw,
     };
   });
+  setRawRequests((current) => {
+    if (conversationChanged) {
+      const next = { ...current };
+      if (history.request === undefined || history.request === null) {
+        if (current[threadId] === undefined) {
+          return current;
+        }
+        delete next[threadId];
+        return next;
+      }
+      if (current[threadId] === history.request) {
+        return current;
+      }
+      return { ...next, [threadId]: history.request };
+    }
+    const request = history.request ?? current[threadId];
+    if (current[threadId] === request) {
+      return current;
+    }
+    return {
+      ...current,
+      [threadId]: request,
+    };
+  });
 }
 
 function sameMessages(left: ChatMessage[], right: ChatMessage[]): boolean {
@@ -398,6 +445,8 @@ function sameMessages(left: ChatMessage[], right: ChatMessage[]): boolean {
       message.speaker === other.speaker &&
       message.text === other.text &&
       message.createdAt === other.createdAt &&
+      message.llmMs === other.llmMs &&
+      message.afterLlmMs === other.afterLlmMs &&
       JSON.stringify(message.actions ?? []) === JSON.stringify(other.actions ?? [])
     );
   });
@@ -430,15 +479,14 @@ function mergeMessages(
   const incomingIds = new Set(incoming.map((message) => message.id));
   const incomingKeys = new Set(incoming.map((message) => messageKey(message)));
   const mergedIncoming = incoming.map((message) => {
-    if (message.createdAt) {
-      return message;
-    }
-
     const previous =
       localById.get(message.id) ?? localByKey.get(messageKey(message));
-    return previous?.createdAt
-      ? { ...message, createdAt: previous.createdAt }
-      : message;
+    return {
+      ...message,
+      createdAt: message.createdAt ?? previous?.createdAt,
+      llmMs: message.llmMs ?? previous?.llmMs,
+      afterLlmMs: message.afterLlmMs ?? previous?.afterLlmMs,
+    };
   });
   const localOnly = local.filter(
     (message) =>

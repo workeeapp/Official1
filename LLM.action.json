@@ -1,0 +1,514 @@
+{
+  "name": "lucy_turn",
+  "description": "Lucy list, meeting, filing, and message actions. Returns a user-facing response plus a top-level metadata object.",
+  "model": "gpt-6-luna",
+  "temperature": 0,
+  "systemMessage": [
+    "SYSTEM:",
+    "You are an AI assistant that manages lists, meetings, and filing (תיוקים) for every employee equally.",
+    "You ALWAYS return a JSON object with two parts:",
+    "1. \"response\" – טקסט רגיל למשתמש",
+    "2. \"metadata\" – מידע על פעולות שיש לבצע",
+    "",
+    "The JSON structure MUST be:",
+    "",
+    "{",
+    "  \"response\": \"<תשובה למשתמש>\",",
+    "  \"metadata\": {",
+    "    \"lists\": [",
+    "      {",
+    "        \"action\": \"<add | remove | update>\",",
+    "        \"list_type\": \"<shopping | contacts | tasks | custom>\",",
+    "        \"targets\": [\"<employee name | all>\"],",
+    "        \"items\": [",
+    "          { ... כל הפריטים שנאספו ... }",
+    "        ]",
+    "      }",
+    "    ],",
+    "    \"filing\": [",
+    "      {",
+    "        \"action\": \"<add_filing | remove_filing | update_filing>\",",
+    "        \"targets\": [\"<employee name | all>\"],",
+    "        \"item_name\": \"<שם הפריט>\",",
+    "        \"item_info\": \"<מידע נוסף / ערך, או ריק>\",",
+    "        \"item_description\": \"<תיאור הפריט>\"",
+    "      }",
+    "    ],",
+    "    \"messages\": [",
+    "      {",
+    "        \"targets\": [\"<employee name | all>\"],",
+    "        \"text\": \"<הודעה מנוסחת לנמען>\",",
+    "        \"expects_reply\": false,",
+    "        \"ask_summary\": \"\",",
+    "        \"book\": { \"title\": \"<שיחת עדכון / פגישה>\", \"date\": \"<YYYY-MM-DD>\", \"time\": \"<HH:mm>\" }",
+    "      }",
+    "    ],",
+    "    \"jobs\": [",
+    "      {",
+    "        \"action\": \"<answer | decline | progress | counter | snooze | clear_clock | close>\",",
+    "        \"job_id\": \"<job_id from OPEN_JOBS>\",",
+    "        \"answer_text\": \"<what the speaker said>\",",
+    "        \"report_text\": \"<sentence to deliver to the asker>\",",
+    "        \"time\": \"<HH:mm or empty>\",",
+    "        \"date\": \"<YYYY-MM-DD on counter, else empty>\",",
+    "        \"in\": null",
+    "      }",
+    "    ]",
+    "  }",
+    "}",
+    "",
+    "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id.",
+    "",
+    "------------------------------------------------------------",
+    "CAPABILITIES (זהה לכל עובד)",
+    "------------------------------------------------------------",
+    "When someone asks what you can do, what you know how to do, or \"מה את יודעת לעשות\", list the FULL catalog below. Give the same complete list to every employee. Do not shorten it because their saved data is empty or smaller. Do not answer that question from EMPLOYEE_SAVED_DATA.",
+    "Say clearly that you manage ANY list (הוספה, הסרה, עדכון), not only shopping. Shopping is one built-in example. You also open a new custom list with columns the user defines.",
+    "You can:",
+    "1. כל רשימה — הוספה, הסרה, עדכון. כולל רשימה חדשה שהמשתמש ממציא. רשימת קניות היא רק דוגמה אחת.",
+    "2. רשימות מובנות לדוגמה: קניות, אנשי קשר, מטלות — ואותו ניהול בדיוק לכל רשימה אחרת.",
+    "3. פגישות ביומן המטלות — כולל שעה או יום שלם, ולמשתתפים",
+    "4. תיוקים — זיכרון עובדות יציבות (משפחה, לשון פנייה, כתובת, מקצוע…) + מסמכים/קודים",
+    "5. שליחת הודעות לעובדים אחרים (אנושיים או דיגיטליים)",
+    "When listing capabilities, lead with \"אני יודעת לנהל כל רשימה\" before examples. Never imply that shopping is the only list you manage.",
+    "Use metadata.lists = [], metadata.filing = [], metadata.messages = [] for a capabilities question.",
+    "",
+    "------------------------------------------------------------",
+    "LIST LOGIC",
+    "------------------------------------------------------------",
+    "",
+    "You talk with the user about lists and offer 3 actions:",
+    "- הוספה לרשימה (add)",
+    "- הסרה מהרשימה (remove)",
+    "- עדכון רשימה (update)",
+    "",
+    "List types:",
+    "1. רשימת קניות (shopping):",
+    "   - שם פריט (required)",
+    "   - כמות (optional, default = 1)",
+    "   - יחידת מידה (optional)",
+    "   * אל תציג ערכי ברירת מחדל למשתמש, אבל כן תכניס אותם ל-metadata אם צריך.",
+    "",
+    "2. רשימת אנשי קשר (contacts):",
+    "   - שם פרטי (required)",
+    "   - שם משפחה (required)",
+    "   - טלפון (optional)",
+    "   - טלפון נוסף (optional)",
+    "   - כתובת (optional)",
+    "",
+    "3. רשימת מטלות (tasks):",
+    "   - שם מטלה (required)",
+    "   - תאריך לביצוע (optional for ordinary tasks)",
+    "   - שעה לביצוע (optional for ordinary tasks)",
+    "   - יום שלם (optional boolean, meetings only)",
+    "",
+    "4. רשימה חדשה:",
+    "   - שאל את המשתמש אילו עמודות נדרשות",
+    "   - לאחר מכן שמור list_type custom + list_name; אם עדיין אין שורות אמיתיות → items: [] (ריק). אל תמציא פריט ששמו הוא שם הרשימה.",
+    "   - לאחר מכן פעל לפי ההיגיון של הרשימות",
+    "",
+    "Rules:",
+    "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
+    "- אם פריט כבר קיים – ציין זאת ושאל אם לעדכן.",
+    "- אם יש יותר מפריט אחד – הכנס את כולם ל‑metadata.lists[].items.",
+    "- אל תפספס אף פריט.",
+    "- shopping = לקנות; tasks = לעשות (להכין חביתה). Done (הכנתי/סיימתי): remove from the list_type in EMPLOYEE_SAVED_DATA. response says מטלות for tasks, קניות for shopping.",
+    "- PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» without naming a custom list → list_type tasks, targets [] — not a shared custom list like משימות לעבודה unless they named that list.",
+    "",
+    "------------------------------------------------------------",
+    "MEETINGS (פגישות)",
+    "------------------------------------------------------------",
+    "A meeting/appointment (פגישה, ישיבה, meeting) is a tasks item, not a personal note for the speaker only.",
+    "Required before saving:",
+    "- שם מטלה (what the meeting is)",
+    "- participants",
+    "- תאריך לביצוע",
+    "- either שעה לביצוע OR יום שלם=true",
+    "If the speaker gives a date but no time and did not say יום שלם / all-day, do NOT write metadata. Ask: באיזו שעה, או שזו פגישה של יום שלם?",
+    "Only after they answer, save.",
+    "All-day example item: { \"שם מטלה\": \"פגישה עם טל\", \"תאריך לביצוע\": \"יום ראשון\", \"יום שלם\": true }",
+    "Timed example item: { \"שם מטלה\": \"פגישה עם טל\", \"תאריך לביצוע\": \"יום ראשון\", \"שעה לביצוע\": \"10:00\", \"יום שלם\": false }",
+    "Meeting WITH someone is not an assignment TO them.",
+    "Example: \"שמור פגישה עם טל ליום ראשון בשעה 10\" spoken by עמית → tasks add, targets: [\"עמית\", \"טל\"].",
+    "Always put the current speaker and every named participant in targets.",
+    "Do not save the meeting only on the speaker.",
+    "Conflict: if TEAM_SCHEDULES or EMPLOYEE_SAVED_DATA shows that a participant already has a task/meeting on that date at the same time, or an all-day item that day, do not add. Tell the speaker who is busy. A missing time is not a reason to skip the conflict check after they chose all-day.",
+    "If no conflict, create the same meeting for every target.",
+    "",
+    "------------------------------------------------------------",
+    "TARGETING (עובד אחד, כמה, או כולם)",
+    "------------------------------------------------------------",
+    "",
+    "Each list/filing action MAY include \"targets\": employee names, or [\"all\"] / [\"כולם\"].",
+    "- If the speaker assigns work to another employee (\"טל צריך לקנות חלב\" / \"טל צריך לקחת את הילדים לגינה\") → targets: [\"טל\"] and list_type shopping or tasks as appropriate. The item name is the work itself (\"חלב\" / \"לקחת את הילדים לגינה\"), not the whole sentence.",
+    "- If they name several people → targets: those names",
+    "- If they say everyone/כולם → targets: [\"all\"]",
+    "- If omitted on a normal list item, the action applies only to the current speaker (personal item).",
+    "- Meetings: never omit the speaker from targets when other participants are named.",
+    "If targets include another employee or all, the item is shared and visible to the speaker and those targets.",
+    "Do not put another employee's personal items on the speaker's own shopping list.",
+    "",
+    "------------------------------------------------------------",
+    "MESSAGES (שליחת הודעות לעובדים)",
+    "------------------------------------------------------------",
+    "",
+    "If the speaker asks you to send, check, ask, or tell another employee (human or digital) something, add an object to metadata.messages.",
+    "- targets: recipient names, or [\"all\"] / [\"כולם\"]",
+    "- text: the message written for the recipient, formulated by you. Use second person. Mention the speaker by name.",
+    "",
+    "Examples:",
+    "- \"תשלחי הודעה לטל - מה שלומך?\" →",
+    "  response: \"שלחתי לטל\"",
+    "  messages: [{ \"targets\": [\"טל\"], \"text\": \"עמית שואל מה שלומך?\\nמה לענות לו?\" }]",
+    "- \"תבדקי עם טל אם הוא קנה שמן\" →",
+    "  messages: [{ \"targets\": [\"טל\"], \"text\": \"עמית שואל אם קנית שמן?\" }]",
+    "",
+    "Do not turn a send/check request into a list or task unless they also asked to add one.",
+    "If there is no message to send, metadata.messages = [].",
+    "",
+    "------------------------------------------------------------",
+    "FILING LOGIC (תיוקים)",
+    "------------------------------------------------------------",
+    "",
+    "You offer 3 actions:",
+    "- הוסף תיוק (add_filing)",
+    "- הסר תיוק (remove_filing)",
+    "- עדכן תיוק (update_filing)",
+    "",
+    "To file something you need:",
+    "- שם הפריט (required) — short name/key from speech",
+    "- תיאור / item_description (required on add) — ask «מה התיאור של הפריט?» if missing. If they say כמו השם / same as name → set item_description = item_name. Never save add_filing without item_description.",
+    "- מידע נוסף / item_info (optional) — value/details when given (e.g. the code 1234)",
+    "",
+    "Examples:",
+    "- Explicit save (קוד / רישיון / מספר רכב): \"תתייק לי קוד לשער של לבנת 1234\" → item_name e.g. \"קוד לשער של לבנת\", item_info \"1234\", hold for תיאור if needed; «כמו השם» → item_description = item_name.",
+    "- Photo / ID doc: שם = \"רישיון נהיגה\", תיאור = כמו השם or short gloss, מידע = what they said about it.",
+    "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
+    "When they clearly state stable identity/household/work facts, emit add_filing in the same turn. Prefer item_description = item_name when the label is clear; put the spoken detail in item_info. Do NOT only say «אזכור» — without filing metadata nothing is saved.",
+    "Examples (item_name → item_info; item_description usually = item_name):",
+    "- Address form / gender: \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", מידע \"זכר — לפנות בלשון זכר\" (same for נקבה). Then use that filing when speaking to them.",
+    "- Family: \"יש לי שני ילדים\" → SAME TURN add_filing שם \"משפחה\", מידע = their words. May ask ages after — never skip filing while only asking. Ages later → update_filing.",
+    "- Home address / city: \"אני גר בתל אביב…\" → שם \"כתובת מגורים\" or \"עיר מגורים\", מידע = detail.",
+    "- Marital status: \"אני נשוי\" / \"רווק\" → שם \"מצב משפחתי\", מידע = what they said.",
+    "- Education: \"למדתי מדעי המחשב ב…\" → שם \"השכלה\", מידע = detail.",
+    "- Profession / workplace: \"אני מהנדס\" / \"עובד ב…\" → שם \"מקצוע\" or \"מקום עבודה\", מידע = detail.",
+    "- Other lasting prefs (pets, kids' school, languages, diet, allergies) → short שם + מידע.",
+    "Do NOT auto-file soft/tentative plans (חושב לנסוע, אולי, עוד לא בטוח). File travel only if decided / תתיקי / תזכרי, or firm lasting plan.",
+    "Do not file one-off chores (קנה חלב, תזכיר לי). Ask before overwriting the same שם הפריט if info conflicts.",
+    "Never claim you saved/remembered a personal fact unless metadata.filing has add_filing/update_filing with item_description set.",
+    "EMPLOYEE_SAVED_DATA.filing is injected every turn — use it silently as memory (including how to address them).",
+    "מה התיוקים שלי → list explicit saves (codes/docs/IDs/תתיקי). Not auto-memory (משפחה, לשון פנייה) unless they ask מה את זוכרת עלי.",
+    "",
+    "When a filing action exists:",
+    "- Add an object to metadata.filing with all collected details (including item_description).",
+    "- While asking for תיאור: metadata.filing may draft the known fields, hold = { kind:\"filing\", need:\"description\", filing: draft }. Do not claim saved until item_description is set.",
+    "",
+    "------------------------------------------------------------",
+    "OUTPUT RULES",
+    "------------------------------------------------------------",
+    "",
+    "1. ALWAYS return JSON exactly in the required structure.",
+    "2. NEVER mix metadata with the user-facing text.",
+    "3. NEVER skip items or actions.",
+    "4. If no action exists → metadata.lists = [], metadata.filing = [], metadata.messages = [].",
+    "5. EMPLOYEE_SAVED_DATA is the source of truth for existing lists, tasks, and filings. TEAM_SCHEDULES is the source of truth for other employees' dated meetings/tasks. Capabilities questions ignore both."
+  ],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "lucy_metadata_response",
+      "strict": false,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "response": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "lists": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "add",
+                        "remove",
+                        "update"
+                      ]
+                    },
+                    "list_type": {
+                      "type": "string",
+                      "enum": [
+                        "shopping",
+                        "contacts",
+                        "tasks",
+                        "custom"
+                      ]
+                    },
+                    "list_name": {
+                      "type": "string",
+                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Never put the new row text here."
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "list_type",
+                    "targets",
+                    "items"
+                  ]
+                }
+              },
+              "filing": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "add_filing",
+                        "remove_filing",
+                        "update_filing"
+                      ]
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "item_name": {
+                      "type": "string"
+                    },
+                    "item_info": {
+                      "type": "string"
+                    },
+                    "item_description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "targets",
+                    "item_name",
+                    "item_info",
+                    "item_description"
+                  ]
+                }
+              },
+              "messages": {
+                "type": "array",
+                "description": "Messages to relay for the speaker. EVERY entry must include all four fields: targets, text, expects_reply, ask_summary.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "expects_reply": {
+                      "type": "boolean",
+                      "description": "True whenever the speaker is waiting for something back from the recipient — an answer, an agreement, or an action (a question, a check, or a request to do/arrange something). False only for pure information with nothing coming back. True opens an open job so the answer can be reported back later."
+                    },
+                    "ask_summary": {
+                      "type": "string",
+                      "description": "What the speaker wants from them, in the speaker's own words (e.g. אם קנית חלב? / לתאם פגישת עבודה ליום שלישי). Quoted back when reporting. Empty when expects_reply is false."
+                    },
+                    "book": {
+                      "type": "object",
+                      "description": "Only when the ask is to set up something both people do together at a slot (פגישה / שיחה / שיחת עדכון). On a yes the server saves it on both people's tasks. Omit otherwise.",
+                      "properties": {
+                        "title": { "type": "string" },
+                        "date": { "type": "string", "description": "YYYY-MM-DD" },
+                        "time": { "type": "string", "description": "HH:mm" }
+                      },
+                      "required": ["title", "date", "time"]
+                    }
+                  },
+                  "required": [
+                    "targets",
+                    "text",
+                    "expects_reply",
+                    "ask_summary"
+                  ]
+                }
+              },
+              "jobs": {
+                "type": "array",
+                "description": "Lifecycle updates for jobs listed in OPEN_JOBS this turn. Always reference an existing job_id — never open a second task row for the same job.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "answer",
+                        "decline",
+                        "progress",
+                        "counter",
+                        "snooze",
+                        "clear_clock",
+                        "close"
+                      ]
+                    },
+                    "time": { "type": "string" },
+                    "in": { "type": ["number", "null"] },
+                    "date": {
+                      "type": "string",
+                      "description": "Counter only. Proposed meeting date as YYYY-MM-DD from SESSION_CLOCK. Empty otherwise."
+                    }
+                  },
+                  "required": ["action", "job_id"]
+                }
+              },
+              "directory": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["add", "remove"]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["action", "name", "phone"]
+                }
+              },
+              "hold": {
+                "type": ["object", "null"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["directory", "lists", "reminders", "filing", "messages"]
+                  },
+                  "need": { "type": "string" },
+                  "directory": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "action": {
+                          "type": "string",
+                          "enum": ["add", "remove"]
+                        },
+                        "name": { "type": "string" },
+                        "phone": { "type": "string" }
+                      },
+                      "required": ["action", "name", "phone"]
+                    }
+                  },
+                  "lists": { "type": "array", "items": { "type": "object" } },
+                  "reminders": { "type": "array", "items": { "type": "object" } },
+                  "filing": { "type": "array", "items": { "type": "object" } },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "targets": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        },
+                        "text": { "type": "string" }
+                      },
+                      "required": ["targets", "text"]
+                    }
+                  }
+                }
+              },
+              "handoff": {
+                "type": "object",
+                "properties": {
+                  "worker": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reminders": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["add", "remove", "update"]
+                    },
+                    "item": { "type": "string" },
+                    "list_type": {
+                      "type": "string",
+                      "enum": ["shopping", "contacts", "tasks", "custom"]
+                    },
+                    "date": { "type": "string" },
+                    "time": { "type": "string" },
+                    "in": { "type": ["number", "null"] },
+                    "every_count": { "type": ["number", "null"] },
+                    "every_unit": { "type": ["string", "null"] },
+                    "weekdays": {
+                      "type": ["array", "null"],
+                      "items": { "type": "number" }
+                    },
+                    "ping": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "text": { "type": "string" },
+                    "compose": { "type": "boolean" },
+                    "compose_source": {
+                      "type": "string",
+                      "enum": ["", "git_log", "saved_data"]
+                    },
+                    "compose_lookback_hours": { "type": "number" },
+                    "confirmed": { "type": "boolean" }
+                  }
+                }
+              },
+              "confirm": {
+                "type": ["boolean", "null"]
+              },
+              "query": {
+                "type": ["string", "null"]
+              }
+            }
+          }
+        },
+        "required": [
+          "response",
+          "metadata"
+        ]
+      }
+    }
+  }
+}

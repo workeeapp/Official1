@@ -4,7 +4,9 @@ import type {
   EmployeeRecordField,
   EmployeeRecordsResponse,
   EmployeesResponse,
+  EmployeeUsageSummary,
   PublicEmployee,
+  TeamUsageSummary,
 } from "@workee/shared";
 import { api } from "./http";
 
@@ -41,6 +43,14 @@ export const employeeApi = {
     return api<EmployeeRecordsResponse>(`/api/employees/${id}/records`, { signal });
   },
 
+  teamUsage(signal?: AbortSignal): Promise<TeamUsageSummary> {
+    return api<TeamUsageSummary>("/api/employees/usage", { signal });
+  },
+
+  usage(id: string, signal?: AbortSignal): Promise<EmployeeUsageSummary> {
+    return api<EmployeeUsageSummary>(`/api/employees/${id}/usage`, { signal });
+  },
+
   updateRecord(
     employeeId: string,
     itemId: string,
@@ -72,4 +82,14 @@ export function employeeFullName(employee: PublicEmployee): string {
 
 export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
+}
+
+/** Per-turn LLM costs are fractions of a cent, so small totals keep up to 4 decimals. */
+export function formatUsd(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: amount > 0 && amount < 1 ? 4 : 2,
+  }).format(amount);
 }

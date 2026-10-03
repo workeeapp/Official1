@@ -1,25 +1,191 @@
 import {
   emptyLlmMetadata,
   isDigitalEmployee,
+  isGuestEmployee,
   llmItemLabel,
   type LlmFilingAction,
   type LlmListAction,
   type LlmMessageAction,
+  type LlmMessageBook,
   type LlmMetadata,
+  type LlmReminderAction,
   type PublicEmployee,
 } from "@workee/shared";
+import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import type { ItemVisibility } from "./employee-records.service.js";
+import { matchContact, type SpeakerContact } from "./contact.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
+/** Existing custom list the speaker can see / mutate (personal or shared). */
+export type SharedListRef = {
+  ownerId: string;
+  listName: string;
+  visibleTo: string[];
+  /** Defaults to "shared" when omitted (older call sites / tests). */
+  scope?: "personal" | "shared";
+};
+
+function listScopeOf(row: SharedListRef): "personal" | "shared" {
+  return row.scope === "personal" ? "personal" : "shared";
+}
+
 export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
+}
+
+/**
+ * Same-turn guard: outbound clocks (ping only other people) must not also
+ * land a tasks add on the speaker. Self-nudges (ping includes speaker / empty
+ * ping) are unchanged. Worker tasks (targets digital) stay.
+ */
+export function dropSpeakerTaskAddsForOutboundClocks(input: {
+  lists: LlmListAction[];
+  reminders: LlmReminderAction[];
+  actorId: string;
+  employees: PublicEmployee[];
+  workers?: PublicEmployee[];
+}): LlmListAction[] {
+  if (
+    !reminderAddsPingOthersOnly({
+      reminders: input.reminders,
+      actorId: input.actorId,
+      employees: input.employees,
+      workers: input.workers,
+    })
+  ) {
+    return input.lists;
+  }
+
+  const kept: LlmListAction[] = [];
+  for (const list of input.lists) {
+    if (list.action !== "add" || list.listType !== "tasks") {
+      kept.push(list);
+      continue;
+    }
+    const targets = resolveActionTargets(
+      list.targets,
+      input.employees,
+      input.actorId,
+      input.workers,
+    );
+    const withoutSpeaker = targets.filter(
+      (target) => target.id !== input.actorId,
+    );
+    if (withoutSpeaker.length === targets.length) {
+      kept.push(list);
+      continue;
+    }
+    if (withoutSpeaker.length === 0) {
+      continue;
+    }
+    kept.push({
+      ...list,
+      targets: withoutSpeaker.map(employeeDisplayName),
+    });
+  }
+  return kept;
+}
+
+function reminderAddsPingOthersOnly(input: {
+  reminders: LlmReminderAction[];
+  actorId: string;
+  employees: PublicEmployee[];
+  workers?: PublicEmployee[];
+}): boolean {
+  const pool = [...input.employees, ...(input.workers ?? [])];
+  return input.reminders.some((row) => {
+    if (row.action !== "add") {
+      return false;
+    }
+    const raw = [...row.ping, ...row.targets]
+      .map((name) => name.trim())
+      .filter(Boolean);
+    // Empty ping falls back to the speaker → self-nudge / own clock, not outbound-only.
+    if (raw.length === 0) {
+      return false;
+    }
+    let matchedOther = false;
+    for (const token of raw) {
+      const employee = matchEmployee(token, pool);
+      if (employee) {
+        if (employee.id === input.actorId) {
+          return false;
+        }
+        matchedOther = true;
+        continue;
+      }
+      // Contact name, raw phone, or unresolved label — still an outbound destination.
+      matchedOther = true;
+    }
+    return matchedOther;
+  });
+}
+
+/** Same-turn reminder clocks that ping this employee (by name). */
+export function reminderTargetsEmployee(
+  reminder: LlmReminderAction,
+  employee: PublicEmployee,
+): boolean {
+  const names = [...reminder.ping, ...reminder.targets]
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) {
+    return false;
+  }
+  const candidates = [
+    employee.nickname,
+    employee.name,
+    employeeDisplayName(employee),
+  ]
+    .map((name) => name?.trim().toLowerCase() ?? "")
+    .filter(Boolean);
+  return candidates.some((candidate) => names.includes(candidate));
+}
+
+/** Hebrew clause appended to task notifies when a linked clock exists. */
+export function formatLinkedReminderHint(
+  reminders: LlmReminderAction[],
+): string {
+  const clock = reminders.find(
+    (row) => row.action === "add" || row.action === "update",
+  );
+  if (!clock) {
+    return "";
+  }
+  if (typeof clock.inSeconds === "number" && clock.inSeconds > 0) {
+    const seconds = clock.inSeconds;
+    if (seconds < 90) {
+      return ", ותזכורת בעוד דקה";
+    }
+    if (seconds < 3600) {
+      const minutes = Math.max(1, Math.round(seconds / 60));
+      return `, ותזכורת בעוד ${minutes} דקות`;
+    }
+    if (seconds === 3600) {
+      return ", ותזכורת בעוד שעה";
+    }
+    if (seconds % 3600 === 0) {
+      return `, ותזכורת בעוד ${seconds / 3600} שעות`;
+    }
+    const minutes = Math.round(seconds / 60);
+    return `, ותזכורת בעוד ${minutes} דקות`;
+  }
+  const time = clock.time?.trim() ?? "";
+  if (time) {
+    const date = clock.date?.trim() ?? "";
+    return date
+      ? `, ותזכורת ב־${date} ב־${time}`
+      : `, ותזכורת ב־${time}`;
+  }
+  return ", ותזכורת";
 }
 
 export function resolveActionTargets(
   rawTargets: string[],
   employees: PublicEmployee[],
   actorId: string,
+  extras: PublicEmployee[] = [],
 ): PublicEmployee[] {
   const actor = employees.find((employee) => employee.id === actorId);
   const fallback = actor ? [actor] : [];
@@ -32,9 +198,10 @@ export function resolveActionTargets(
     return employees;
   }
 
+  const pool = [...employees, ...extras];
   const matched = new Map<string, PublicEmployee>();
   for (const raw of rawTargets) {
-    const employee = matchEmployee(raw, employees);
+    const employee = matchEmployee(raw, pool);
     if (employee) {
       matched.set(employee.id, employee);
     }
@@ -43,155 +210,48 @@ export function resolveActionTargets(
   return matched.size > 0 ? [...matched.values()] : fallback;
 }
 
-export function inferTargetsFromMessage(
-  message: string,
-  employees: PublicEmployee[],
-  actorId: string,
-): string[] {
-  if (/(כולם|כל אחד|כל העובדים)/.test(message) || ALL_TARGET_TOKENS.test(message.trim())) {
-    return ["all"];
-  }
-
-  const mentioned: string[] = [];
-  for (const employee of employees) {
-    if (employee.id === actorId) {
-      continue;
-    }
-    const aliases = [
-      employee.nickname,
-      employee.name,
-      `${employee.name} ${employee.surname}`,
-      employeeDisplayName(employee),
-    ].filter((value): value is string => Boolean(value && value.trim()));
-
-    if (aliases.some((alias) => message.includes(alias.trim()))) {
-      mentioned.push(employeeDisplayName(employee));
-    }
-  }
-
-  return mentioned;
-}
-
 export function resolveSpokenMetadata(
-  message: string,
+  _message: string,
   metadata: LlmMetadata,
-  employees: PublicEmployee[],
-  actorId: string,
+  _employees?: PublicEmployee[],
+  _actorId?: string,
 ): LlmMetadata {
-  const inferred = inferTargetsFromMessage(message, employees, actorId);
-  const lists = metadata.lists.map((list) =>
-    retargetListAction(list, inferred, employees, actorId),
-  );
-  const filing = metadata.filing.map((entry) =>
-    entry.targets.length > 0 ? entry : { ...entry, targets: inferred },
-  );
-  const hasTargetedWork =
-    lists.some((list) => list.targets.length > 0) ||
-    filing.some((entry) => entry.targets.length > 0);
-
-  const messages = metadata.messages ?? [];
-
-  if (hasTargetedWork || inferred.length === 0 || !looksLikeAssignment(message)) {
-    return { lists, filing, messages };
-  }
-
-  const synthesized = synthesizeAssignment(message, inferred);
-  return synthesized
-    ? { lists: [...lists, synthesized], filing, messages }
-    : { lists, filing, messages };
-}
-
-export function looksLikeRelayMessage(message: string): boolean {
-  return (
-    /תשלח(?:י)?(?:\s+הודעה)?\s+ל/.test(message) ||
-    /תבדק(?:י)?\s+עם/.test(message) ||
-    /(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\s+ל/.test(message) ||
-    /(?:תשאלי?|שאלי?)\s+את/.test(message)
-  );
+  return {
+    lists: metadata.lists,
+    filing: metadata.filing,
+    messages: metadata.messages ?? [],
+    reminders: metadata.reminders ?? [],
+    directory: metadata.directory ?? [],
+    jobs: metadata.jobs ?? [],
+    handoff: metadata.handoff ?? null,
+    query: metadata.query ?? null,
+    reportSections: metadata.reportSections ?? [],
+    confirm: metadata.confirm ?? null,
+    targets: metadata.targets ?? [],
+  };
 }
 
 export function resolveRelayMessages(
-  message: string,
   actions: LlmMessageAction[],
-  employees: PublicEmployee[],
-  actorId: string,
 ): LlmMessageAction[] {
-  const inferred = inferTargetsFromMessage(message, employees, actorId);
-  const filled = actions
-    .map((action) => ({
-      text: action.text.trim(),
-      targets: action.targets.length > 0 ? action.targets : inferred,
-    }))
-    .filter((action) => action.text.length > 0 && action.targets.length > 0);
-
-  if (filled.length > 0) {
-    return filled;
-  }
-
-  if (inferred.length === 0 || !looksLikeRelayMessage(message)) {
-    return [];
-  }
-
-  const actor = employees.find((employee) => employee.id === actorId);
-  return [
-    {
-      targets: inferred,
-      text: fallbackRelayText(
-        actor ? employeeDisplayName(actor) : "מישהו",
-        message,
-        inferred,
-      ),
-    },
-  ];
+  return actions.filter(
+    (action) => action.text.trim().length > 0 && action.targets.length > 0,
+  );
 }
 
-export function fallbackRelayText(
-  actorName: string,
-  userMessage: string,
-  targetNames: string[],
+export function formatMissingSendTextNotice(
+  actions: LlmMessageAction[],
 ): string {
-  const intent = extractRelayIntent(userMessage, targetNames)
-    .replace(/\?+$/g, "")
-    .trim();
-  const checking = /תבדק|אם\s+/.test(userMessage);
-  if (checking) {
-    const asked = intent
-      .replace(/^אם\s+/, "")
-      .replace(/הוא\s+/g, "")
-      .replace(/היא\s+/g, "")
-      .replace(/קנתה/g, "קנית")
-      .replace(/קנה/g, "קנית");
-    return `${actorName} שואל אם ${asked} ?`;
+  const dests = actions
+    .filter((action) => action.targets.length > 0 && !action.text.trim())
+    .flatMap((action) => action.targets.map((target) => target.trim()))
+    .filter(Boolean);
+  if (dests.length === 0) {
+    return "";
   }
-
-  return `${actorName} שואל ${intent} ?\nמה לענות לו ?`;
-}
-
-function extractRelayIntent(message: string, targetNames: string[]): string {
-  const escaped = targetNames
-    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|");
-  const name = escaped || "\\S+";
-  let text = message.trim();
-  const patterns = [
-    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s*[-–:]\\s*`, "u"),
-    new RegExp(`^תשלח(?:י)?(?:\\s+הודעה)?\\s+ל(?:${name})\\s+`, "u"),
-    new RegExp(`^תבדק(?:י)?\\s+עם\\s+(?:${name})\\s+`, "u"),
-    new RegExp(
-      `^(?:תגיד(?:י)?|תודיע(?:י)?|תעביר(?:י)?)\\s+ל(?:${name})\\s*[-–:]?\\s*`,
-      "u",
-    ),
-    new RegExp(`^(?:תשאלי?|שאלי?)\\s+את\\s+(?:${name})\\s+`, "u"),
-  ];
-
-  for (const pattern of patterns) {
-    if (pattern.test(text)) {
-      text = text.replace(pattern, "");
-      break;
-    }
-  }
-
-  return text.trim() || message.trim();
+  return dests.length === 1
+    ? `מה לשלוח ל«${dests[0]}»? אפשר גם שלום.`
+    : `מה לשלוח? אפשר גם שלום.`;
 }
 
 export function planRelayDeliveries(input: {
@@ -204,12 +264,18 @@ export function planRelayDeliveries(input: {
   digitalEmployeeId: string;
   target: PublicEmployee;
   text: string;
+  expectsReply?: boolean;
+  askSummary?: string;
+  book?: LlmMessageBook;
 }> {
   const deliveries: Array<{
     employeeId: string;
     digitalEmployeeId: string;
     target: PublicEmployee;
     text: string;
+    expectsReply?: boolean;
+    askSummary?: string;
+    book?: LlmMessageBook;
   }> = [];
   const seen = new Set<string>();
 
@@ -239,7 +305,69 @@ export function planRelayDeliveries(input: {
         digitalEmployeeId,
         target,
         text: action.text,
+        ...(action.expectsReply !== undefined
+          ? { expectsReply: action.expectsReply }
+          : {}),
+        ...(action.askSummary ? { askSummary: action.askSummary } : {}),
+        ...(action.book ? { book: action.book } : {}),
       });
+    }
+  }
+
+  return deliveries;
+}
+
+export function planPhoneRelays(
+  messages: LlmMessageAction[],
+  employees: PublicEmployee[],
+  actorId?: string,
+  contacts: SpeakerContact[] = [],
+): Array<{ phone: string; text: string; label: string }> {
+  const deliveries: Array<{ phone: string; text: string; label: string }> = [];
+  const seen = new Set<string>();
+
+  for (const action of messages) {
+    if (!action.text.trim()) {
+      continue;
+    }
+    for (const raw of action.targets) {
+      let phone = "";
+      let label = raw.trim();
+      if (looksLikePhone(raw)) {
+        const matched = matchEmployee(raw, employees);
+        if (matched && matched.id !== actorId) {
+          continue;
+        }
+        phone = normalizePhoneDigits(raw);
+        label = phone;
+      } else {
+        // Named employees are delivered via relay WhatsApp — do not also
+        // send through the contacts book when the same person appears there.
+        if (matchEmployee(raw, employees)) {
+          continue;
+        }
+        const contact = matchContact(raw, contacts);
+        if (!contact) {
+          continue;
+        }
+        phone = normalizePhoneDigits(contact.phone);
+        label = contact.name;
+      }
+      if (!phone || seen.has(phone)) {
+        continue;
+      }
+      // Same phone as a workspace human already covered by relay delivery.
+      const employeeWithPhone = employees.find(
+        (employee) =>
+          employee.id !== actorId &&
+          employee.phone &&
+          phonesMatch(employee.phone, phone),
+      );
+      if (employeeWithPhone) {
+        continue;
+      }
+      seen.add(phone);
+      deliveries.push({ phone, text: action.text, label });
     }
   }
 
@@ -269,184 +397,201 @@ function resolveNamedRelayTargets(
   return [...matched.values()];
 }
 
-function retargetListAction(
-  list: LlmListAction,
-  inferred: string[],
-  employees: PublicEmployee[],
-  actorId: string,
-): LlmListAction {
-  const fromItems = inferTargetsFromItemLabels(list.items, employees, actorId);
-  const targets =
-    list.targets.length > 0
-      ? list.targets
-      : fromItems.length > 0
-        ? fromItems
-        : inferred;
-  if (targets.length === 0) {
-    return list;
-  }
-
-  return {
-    ...list,
-    targets,
-    items: list.items.map((item) => stripAssigneePrefix(item, employees, actorId)),
-  };
-}
-
-function inferTargetsFromItemLabels(
-  items: Record<string, unknown>[],
-  employees: PublicEmployee[],
-  actorId: string,
-): string[] {
-  const found = new Set<string>();
-  for (const item of items) {
-    const parsed = parseAssigneePrefix(llmItemLabel(item), employees, actorId);
-    if (parsed) {
-      found.add(parsed.target);
-    }
-  }
-  return [...found];
-}
-
-function parseAssigneePrefix(
-  text: string,
-  employees: PublicEmployee[],
-  actorId: string,
-): { target: string; rest: string } | null {
-  const match = text.trim().match(/^(.+?)\s+צרי(?:ך|כה|כים)\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const employee = matchEmployee(match[1], employees);
-  if (!employee || employee.id === actorId) {
-    return null;
-  }
-
-  return {
-    target: employeeDisplayName(employee),
-    rest: match[2].trim(),
-  };
-}
-
-function stripAssigneePrefix(
-  item: Record<string, unknown>,
-  employees: PublicEmployee[],
-  actorId: string,
-): Record<string, unknown> {
-  const parsed = parseAssigneePrefix(llmItemLabel(item), employees, actorId);
-  if (!parsed) {
-    return item;
-  }
-
-  const next = { ...item };
-  for (const key of ["שם מטלה", "שם פריט", "name", "task", "item_name"]) {
-    if (typeof next[key] === "string") {
-      next[key] = parsed.rest;
-    }
-  }
-  return next;
-}
-
-function looksLikeAssignment(message: string): boolean {
-  const trimmed = message.trim();
-  return (
-    /צרי(?:ך|כה|כים)\s+\S+/.test(trimmed) &&
-    !/^(מה|איזה|האם|למה|כמה)(?:\s|$)/.test(trimmed) &&
-    !/[?？]/.test(trimmed)
-  );
-}
-
-function synthesizeAssignment(
-  message: string,
-  inferred: string[],
-): LlmListAction | null {
-  const match = message.trim().match(/צרי(?:ך|כה|כים)\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-
-  const rest = match[1].trim();
-  if (!rest) {
-    return null;
-  }
-
-  if (/^לקנות\b/.test(rest)) {
-    return {
-      action: "add",
-      listType: "shopping",
-      listName: "",
-      items: [{ "שם פריט": rest.replace(/^לקנות\s+/, "") }],
-      targets: inferred,
-    };
-  }
-
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [{ "שם מטלה": rest }],
-    targets: inferred,
-  };
-}
-
 export function planTargetedActions(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
+  workers?: PublicEmployee[];
   metadata: LlmMetadata;
+  /** Shared custom lists visible to the actor (owned by anyone on the account). */
+  sharedLists?: SharedListRef[];
 }): {
   applications: Array<{
     employeeId: string;
     metadata: LlmMetadata;
     visibility: ItemVisibility;
   }>;
-  notifications: Array<{ employee: PublicEmployee; metadata: LlmMetadata }>;
+  notifications: Array<{
+    employee: PublicEmployee;
+    metadata: LlmMetadata;
+    partnerNames: string[];
+  }>;
+  /** Guest speakers may view shared data but cannot mutate lists/filings. */
+  guestMutationBlocked: boolean;
 } {
   const applications: Array<{
     employeeId: string;
     metadata: LlmMetadata;
     visibility: ItemVisibility;
   }> = [];
-  const notificationBuckets = new Map<string, LlmMetadata>();
+  const notificationBuckets = new Map<
+    string,
+    { metadata: LlmMetadata; partnerNames: string[] }
+  >();
 
-  const addNotification = (employeeId: string, metadata: LlmMetadata) => {
+  const wantsMutation =
+    input.metadata.lists.length > 0 || input.metadata.filing.length > 0;
+  if (wantsMutation && isGuestEmployee(input.actor)) {
+    return {
+      applications: [],
+      notifications: [],
+      guestMutationBlocked: true,
+    };
+  }
+
+  const partnerLabel = (targets: PublicEmployee[]) =>
+    targets
+      .filter((target) => target.id !== input.actor.id)
+      .map(employeeDisplayName);
+
+  const partnerLabelFromIds = (ids: string[]) =>
+    ids
+      .filter((id) => id !== input.actor.id)
+      .map((id) => {
+        const employee = input.employees.find((row) => row.id === id);
+        return employee ? employeeDisplayName(employee) : "";
+      })
+      .filter(Boolean);
+
+  const addNotification = (
+    employeeId: string,
+    metadata: LlmMetadata,
+    partners: string[],
+  ) => {
     if (employeeId === input.actor.id) {
       return;
     }
-    const current = notificationBuckets.get(employeeId) ?? emptyLlmMetadata();
-    current.lists.push(...metadata.lists);
-    current.filing.push(...metadata.filing);
+    const current = notificationBuckets.get(employeeId) ?? {
+      metadata: emptyLlmMetadata(),
+      partnerNames: [],
+    };
+    current.metadata.lists.push(...metadata.lists);
+    current.metadata.filing.push(...metadata.filing);
+    current.partnerNames = [
+      ...new Set([...current.partnerNames, ...partners]),
+    ];
     notificationBuckets.set(employeeId, current);
   };
 
-  for (const list of input.metadata.lists) {
-    const targets = resolveActionTargets(
-      list.targets,
-      input.employees,
-      input.actor.id,
-    );
-    const others = targets.filter((target) => target.id !== input.actor.id);
-    const shared = others.length > 0 || isAllTarget(list.targets);
-    const visibility = visibilityFor(input.actor.id, targets, shared);
-    const metadata = { lists: [{ ...list, targets: [] }], filing: [] };
+  const lists = dropSpeakerTaskAddsForOutboundClocks({
+    lists: input.metadata.lists,
+    reminders: input.metadata.reminders ?? [],
+    actorId: input.actor.id,
+    employees: input.employees,
+    workers: input.workers,
+  });
 
-    for (const target of targets) {
-      applications.push({ employeeId: target.id, metadata, visibility });
-      addNotification(target.id, metadata);
+  for (const list of lists) {
+    const normalizedList = normalizeSharedCustomList(list);
+    const existingListMatches = findExistingCustomListsForActor(
+      normalizedList,
+      input.actor.id,
+      input.sharedLists ?? [],
+    );
+    if (existingListMatches.length > 0) {
+      // Removes/updates must hit every duplicate shared list with that name
+      // (legacy bugs created one copy per partner). Adds go to one canonical owner.
+      // Audience is always from DB scope/visibleTo — never from this turn's LLM targets.
+      const mutationTargets =
+        normalizedList.action === "remove" ||
+        normalizedList.action === "update"
+          ? existingListMatches
+          : [preferSharedList(existingListMatches)!];
+      const notifyMetadata = {
+        lists: [
+          {
+            ...normalizedList,
+            listName: mutationTargets[0]!.listName,
+            targets: [],
+          },
+        ],
+        filing: [],
+      };
+      for (const existingList of mutationTargets) {
+        const scope = listScopeOf(existingList);
+        const visibleTo =
+          scope === "shared"
+            ? uniqueIds([
+                existingList.ownerId,
+                input.actor.id,
+                ...existingList.visibleTo,
+              ])
+            : uniqueIds([existingList.ownerId]);
+        applications.push({
+          employeeId: existingList.ownerId,
+          metadata: {
+            lists: [
+              {
+                ...normalizedList,
+                listName: existingList.listName,
+                targets: [],
+              },
+            ],
+            filing: [],
+          },
+          visibility: {
+            scope,
+            addedById: input.actor.id,
+            visibleTo,
+          },
+        });
+      }
+      // Re-sharing / touching an existing list with no rows is a no-op for partners.
+      // Only notify real shared-list partners from DB (not personal lists, not LLM targets).
+      if (normalizedList.items.length > 0 || normalizedList.action !== "add") {
+        const notifyIds = uniqueIds(
+          mutationTargets
+            .filter((row) => listScopeOf(row) === "shared")
+            .flatMap((row) => [row.ownerId, ...row.visibleTo]),
+        );
+        const partners = partnerLabelFromIds(notifyIds);
+        for (const partnerId of notifyIds) {
+          addNotification(partnerId, notifyMetadata, partners);
+        }
+      }
+      continue;
     }
 
-    const assignment = assignmentTaskForTargets(
+    const targets = resolveActionTargets(
+      normalizedList.targets,
       input.employees,
-      others,
-      list,
-      isAllTarget(list.targets),
+      input.actor.id,
+      input.workers,
     );
-    if (assignment) {
+    const others = targets.filter((target) => target.id !== input.actor.id);
+    const sharedCollection = isSharedCollectionAction(
+      "list",
+      normalizedList,
+      targets,
+      input.actor.id,
+      normalizedList.targets,
+    );
+    const visibility = visibilityFor(
+      input.actor.id,
+      targets,
+      sharedCollection || others.length > 0 || isAllTarget(normalizedList.targets),
+    );
+    const metadata = { lists: [{ ...normalizedList, targets: [] }], filing: [] };
+
+    if (sharedCollection) {
+      // One shared list owned by the speaker; all partners see every item.
       applications.push({
         employeeId: input.actor.id,
-        metadata: { lists: [assignment], filing: [] },
-        visibility: visibilityFor(input.actor.id, [input.actor], false),
+        metadata,
+        visibility,
       });
+      const partners = partnerLabel(targets);
+      for (const target of others) {
+        addNotification(target.id, metadata, partners);
+      }
+      continue;
+    }
+
+    const mutateTargets = targets.filter((target) => !isGuestEmployee(target));
+    for (const target of mutateTargets) {
+      applications.push({ employeeId: target.id, metadata, visibility });
+      if (!isDigitalEmployee(target)) {
+        addNotification(target.id, metadata, partnerLabel(targets));
+      }
     }
   }
 
@@ -455,41 +600,249 @@ export function planTargetedActions(input: {
       filing.targets,
       input.employees,
       input.actor.id,
+      input.workers,
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
-    const shared = others.length > 0 || isAllTarget(filing.targets);
-    const visibility = visibilityFor(input.actor.id, targets, shared);
+    const sharedCollection = isSharedCollectionAction(
+      "filing",
+      null,
+      targets,
+      input.actor.id,
+      filing.targets,
+    );
+    const visibility = visibilityFor(
+      input.actor.id,
+      targets,
+      sharedCollection || others.length > 0 || isAllTarget(filing.targets),
+    );
     const metadata = { lists: [], filing: [{ ...filing, targets: [] }] };
 
-    for (const target of targets) {
-      applications.push({ employeeId: target.id, metadata, visibility });
-      addNotification(target.id, metadata);
-    }
-
-    const assignment = assignmentTaskForFiling(
-      input.employees,
-      others,
-      filing,
-      isAllTarget(filing.targets),
-    );
-    if (assignment) {
+    if (sharedCollection) {
       applications.push({
         employeeId: input.actor.id,
-        metadata: { lists: [assignment], filing: [] },
-        visibility: visibilityFor(input.actor.id, [input.actor], false),
+        metadata,
+        visibility,
       });
+      const partners = partnerLabel(targets);
+      for (const target of others) {
+        addNotification(target.id, metadata, partners);
+      }
+      continue;
+    }
+
+    const mutateTargets = targets.filter((target) => !isGuestEmployee(target));
+    for (const target of mutateTargets) {
+      applications.push({ employeeId: target.id, metadata, visibility });
+      if (!isDigitalEmployee(target)) {
+        addNotification(target.id, metadata, partnerLabel(targets));
+      }
     }
   }
 
   return {
     applications,
     notifications: [...notificationBuckets.entries()].flatMap(
-      ([employeeId, metadata]) => {
+      ([employeeId, bucket]) => {
         const employee = input.employees.find((item) => item.id === employeeId);
-        return employee ? [{ employee, metadata }] : [];
+        if (!employee) {
+          return [];
+        }
+        const linkedReminders = (input.metadata.reminders ?? []).filter(
+          (reminder) =>
+            (reminder.action === "add" || reminder.action === "update") &&
+            reminderTargetsEmployee(reminder, employee),
+        );
+        return [
+          {
+            employee,
+            metadata: {
+              ...bucket.metadata,
+              reminders: [
+                ...(bucket.metadata.reminders ?? []),
+                ...linkedReminders,
+              ],
+            },
+            partnerNames: bucket.partnerNames,
+          },
+        ];
       },
     ),
+    guestMutationBlocked: false,
   };
+}
+
+/** Named shared list / shared filing only — does not replace item-level targets sharing. */
+export function isSharedCollectionAction(
+  kind: "list" | "filing",
+  list: Pick<LlmListAction, "listType" | "listName" | "items"> | null,
+  targets: PublicEmployee[],
+  actorId: string,
+  rawTargets: string[],
+): boolean {
+  const hasActor = targets.some((target) => target.id === actorId);
+  const hasOther = targets.some((target) => target.id !== actorId);
+  if (!hasActor || (!hasOther && !isAllTarget(rawTargets))) {
+    return false;
+  }
+  if (kind === "filing") {
+    return true;
+  }
+  // Keep shopping/tasks/item-level sharing and meetings on the existing per-target path.
+  // Shared *list* objects are named custom lists co-owned with partners.
+  return Boolean(list && list.listType === "custom" && customListNameOf(list));
+}
+
+function customListNameOf(
+  list: Pick<LlmListAction, "listName" | "items">,
+): string {
+  const direct = list.listName?.trim() ?? "";
+  if (direct) {
+    return direct;
+  }
+  for (const raw of list.items) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      continue;
+    }
+    const record = raw as Record<string, unknown>;
+    for (const key of ["list_name", "listName", "רשימה"] as const) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim().slice(0, 100);
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * When the model puts the new list title in items (and leaves list_name empty),
+ * treat that as opening a named custom list — not as a row named like the list.
+ * Only collapse when the sole item looks like a list title, not a real row
+ * (e.g. { "תיאור": "…" } must still be saved).
+ */
+function normalizeSharedCustomList(list: LlmListAction): LlmListAction {
+  if (list.listType !== "custom") {
+    return list;
+  }
+  let listName = list.listName?.trim() || customListNameOf(list);
+  if (
+    !listName &&
+    list.items.length === 1 &&
+    looksLikeListTitleOnly(list.items[0])
+  ) {
+    const label = llmItemLabel(list.items[0]).trim();
+    if (label) {
+      return { ...list, listName: label.slice(0, 100), items: [] };
+    }
+  }
+  if (listName && list.items.length === 1) {
+    const label = llmItemLabel(list.items[0]).trim();
+    if (label && normalizeLoose(label) === normalizeLoose(listName)) {
+      // Real add: item carries a distinct list_name (e.g. בעיות) while the model
+      // also copied the row text into the top-level list_name.
+      const fromItem = customListNameOf({ listName: "", items: list.items });
+      if (fromItem && normalizeLoose(fromItem) !== normalizeLoose(label)) {
+        return { ...list, listName: fromItem };
+      }
+      // Title-only / phantom echo of the list title → open named list shell.
+      return { ...list, listName, items: [] };
+    }
+  }
+  if (listName && list.listName?.trim() !== listName) {
+    return { ...list, listName };
+  }
+  return list;
+}
+
+function looksLikeListTitleOnly(item: unknown): boolean {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return false;
+  }
+  const record = item as Record<string, unknown>;
+  const metaKeys = new Set([
+    "list_name",
+    "listName",
+    "רשימה",
+    "list_type",
+    "listType",
+    "targets",
+  ]);
+  const titleKeys = new Set([
+    "name",
+    "item_name",
+    "שם פריט",
+    "שם",
+    "title",
+    "שם רשימה",
+    "list_title",
+  ]);
+  const filled = Object.entries(record).filter(([key, value]) => {
+    if (metaKeys.has(key)) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+    return value != null;
+  });
+  if (filled.length === 0) {
+    return true;
+  }
+  if (filled.length !== 1) {
+    return false;
+  }
+  return titleKeys.has(filled[0][0]);
+}
+
+/** Explicit list title, or a sole title-only item used as the new list name. */
+function customListDerivedName(list: LlmListAction): string {
+  const explicit = list.listName?.trim() || customListNameOf(list);
+  if (explicit) {
+    return explicit;
+  }
+  if (
+    list.listType === "custom" &&
+    list.items.length === 1 &&
+    looksLikeListTitleOnly(list.items[0])
+  ) {
+    return llmItemLabel(list.items[0]).trim();
+  }
+  return "";
+}
+
+/**
+ * Empty / title-only custom add = opening a named list shell.
+ * A real row must never count as "opening" just because its label was used as
+ * a fallback title when list_name was missing.
+ */
+function isOpeningCustomList(list: LlmListAction): boolean {
+  if (list.action !== "add") {
+    return false;
+  }
+  const explicit = list.listName?.trim() || customListNameOf(list);
+  if (list.items.length === 0) {
+    return Boolean(explicit);
+  }
+  if (list.items.length !== 1) {
+    return false;
+  }
+  const label = llmItemLabel(list.items[0]).trim();
+  if (!label || !looksLikeListTitleOnly(list.items[0])) {
+    return false;
+  }
+  const derived = explicit || label;
+  return Boolean(derived) && normalizeLoose(label) === normalizeLoose(derived);
+}
+
+/** Prefer a real item mutation over an empty "opened shared list" sibling. */
+function pickPrimaryList(lists: LlmListAction[]): LlmListAction | undefined {
+  if (lists.length === 0) {
+    return undefined;
+  }
+  const withRealItems = lists.find(
+    (row) => row.items.length > 0 && !isOpeningCustomList(row),
+  );
+  return withRealItems ?? lists[0];
 }
 
 function visibilityFor(
@@ -513,12 +866,15 @@ export function fallbackNotificationText(
     purchased?: boolean;
     recipientIsOwner?: boolean;
     ownerName?: string;
+    partnerNames?: string[];
   },
 ): string {
   const actorName = employeeDisplayName(actor);
-  const items = collectItemLabels(metadata);
+  const list = pickPrimaryList(metadata.lists);
+  const items = collectItemLabels(
+    list ? { ...metadata, lists: [list] } : metadata,
+  );
   const itemText = items.join(" ו") || "פריט";
-  const list = metadata.lists[0];
   const purchased = options?.purchased ?? options?.completed;
   const yours = options?.recipientIsOwner !== false;
   const ownerList = yours
@@ -526,6 +882,50 @@ export function fallbackNotificationText(
     : options?.ownerName
       ? `של ${options.ownerName}`
       : "";
+  const partners = (options?.partnerNames ?? []).filter(Boolean);
+  const partnerPhrase =
+    partners.length === 0
+      ? ""
+      : partners.length === 1
+        ? `לך ול${partners[0]}`
+        : `לך ל${partners.slice(0, -1).join(", ")} ו${partners[partners.length - 1]}`;
+
+  if (list) {
+    const derivedName = customListDerivedName(list);
+    const listTitle =
+      derivedName ||
+      (list.listType === "shopping"
+        ? "קניות"
+        : list.listType === "tasks"
+          ? "מטלות"
+          : "רשימה");
+    const openingSharedList =
+      list.listType === "custom" && isOpeningCustomList(list);
+    // Opening an empty / title-only shared custom list.
+    if (partners.length > 0 && openingSharedList) {
+      return `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`;
+    }
+    if (list.listType === "custom" && derivedName && !openingSharedList) {
+      if (list.action === "remove") {
+        return `${actorName} מחק ${formatQuotedItems(items)} מרשימת «${listTitle}»`;
+      }
+      if (list.action === "update") {
+        return `${actorName} עדכן ${formatQuotedItems(items)} ברשימת «${listTitle}»`;
+      }
+      return `${actorName} הוסיף ${formatNewItemPhrase(items)} לרשימת «${listTitle}»`;
+    }
+    if (partners.length > 0 && derivedName) {
+      if (list.action === "remove") {
+        return `${actorName} מחק ${itemText} מהרשימה המשותפת «${listTitle}»`;
+      }
+      if (list.action === "update") {
+        return `${actorName} עדכן ${itemText} ברשימה המשותפת «${listTitle}»`;
+      }
+      if (list.action === "add") {
+        return `${actorName} הוסיף ${itemText} לרשימה המשותפת «${listTitle}»`;
+      }
+    }
+  }
 
   if (list?.listType === "shopping") {
     if (list.action === "remove") {
@@ -547,13 +947,46 @@ export function fallbackNotificationText(
     if (list.action === "update") {
       return `${actorName} עדכן מטלה: ${itemText}`;
     }
+    const reminderHint = formatLinkedReminderHint(metadata.reminders ?? []);
     return yours
-      ? `${actorName} הוסיף לך מטלה: ${itemText}`
-      : `${actorName} הוסיף מטלה ${ownerList}: ${itemText}`.trim();
+      ? `${actorName} הוסיף לך מטלה: ${itemText}${reminderHint}`
+      : `${actorName} הוסיף מטלה ${ownerList}: ${itemText}${reminderHint}`.trim();
+  }
+
+  if (list?.listType === "custom" || (list?.listName && list.listName.trim())) {
+    const derivedName = customListDerivedName(list);
+    const listTitle = derivedName || "רשימה";
+    const openingList = isOpeningCustomList(list);
+    if (openingList) {
+      return partners.length > 0
+        ? `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`
+        : `${actorName} פתח רשימה חדשה «${listTitle}»`;
+    }
+    if (list.action === "remove") {
+      return `${actorName} מחק ${formatQuotedItems(items)} מרשימת «${listTitle}»`;
+    }
+    if (list.action === "update") {
+      return `${actorName} עדכן ${formatQuotedItems(items)} ברשימת «${listTitle}»`;
+    }
+    return `${actorName} הוסיף ${formatNewItemPhrase(items)} לרשימת «${listTitle}»`;
   }
 
   if (metadata.filing.length > 0) {
     const filing = metadata.filing[0];
+    if (partners.length > 0) {
+      const verb =
+        filing.action === "remove_filing"
+          ? "מחק"
+          : filing.action === "update_filing"
+            ? "עדכן"
+            : "הוסיף";
+      if (filing.action === "add_filing") {
+        return `${actorName} ${verb} תיוק משותף ${partnerPhrase}: «${filing.itemName}»`;
+      }
+      return `${actorName} ${verb} פריט בתיוק המשותף «${filing.itemName}»${
+        filing.itemInfo?.trim() ? `: ${filing.itemInfo.trim()}` : ""
+      }`;
+    }
     const verb =
       filing.action === "remove_filing"
         ? "הסיר תיוק"
@@ -568,71 +1001,6 @@ export function fallbackNotificationText(
   return `${actorName} עדכן מידע אצלך: ${itemText}`;
 }
 
-function assignmentTaskForTargets(
-  _employees: PublicEmployee[],
-  others: PublicEmployee[],
-  list: LlmListAction,
-  targetedAll: boolean,
-): LlmListAction | null {
-  if (others.length === 0) {
-    return null;
-  }
-
-  const targetLabel = targetLabelFor(others, targetedAll);
-  const plural = targetedAll || others.length > 1;
-  const items = list.items.map(llmItemLabel).filter(Boolean);
-  const itemText = items.join(" ו") || "פריט";
-  const verb =
-    list.action === "remove" ? "להסיר" : list.action === "update" ? "לעדכן" : "לקנות";
-  const name =
-    list.listType === "shopping"
-      ? `${targetLabel} ${plural ? "צריכים" : "צריך"} ${verb} ${itemText}`
-      : list.listType === "tasks"
-        ? `${targetLabel} ${plural ? "קיבלו" : "קיבל"} מטלה: ${itemText}`
-        : `${targetLabel}: ${itemText}`;
-
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [{ "שם מטלה": name }],
-    targets: [],
-  };
-}
-
-function assignmentTaskForFiling(
-  _employees: PublicEmployee[],
-  others: PublicEmployee[],
-  filing: LlmFilingAction,
-  targetedAll: boolean,
-): LlmListAction | null {
-  if (others.length === 0) {
-    return null;
-  }
-
-  const targetLabel = targetLabelFor(others, targetedAll);
-  const plural = targetedAll || others.length > 1;
-  return {
-    action: "add",
-    listType: "tasks",
-    listName: "",
-    items: [
-      {
-        "שם מטלה": `${targetLabel} ${plural ? "קיבלו" : "קיבל"} תיוק: ${filing.itemName}`,
-      },
-    ],
-    targets: [],
-  };
-}
-
-function targetLabelFor(others: PublicEmployee[], targetedAll: boolean): string {
-  if (targetedAll) {
-    return "כולם";
-  }
-
-  return others.map(employeeDisplayName).join(" ו");
-}
-
 function isAllTarget(rawTargets: string[]): boolean {
   return rawTargets.some((target) => ALL_TARGET_TOKENS.test(target.trim()));
 }
@@ -642,7 +1010,7 @@ function matchEmployee(
   employees: PublicEmployee[],
 ): PublicEmployee | undefined {
   const needle = normalizeName(raw);
-  return employees.find((employee) => {
+  const byName = employees.find((employee) => {
     const aliases = [
       employee.nickname,
       employee.name,
@@ -655,6 +1023,15 @@ function matchEmployee(
 
     return aliases.includes(needle);
   });
+  if (byName) {
+    return byName;
+  }
+  if (!looksLikePhone(raw)) {
+    return undefined;
+  }
+  return employees.find(
+    (employee) => employee.phone && phonesMatch(employee.phone, raw),
+  );
 }
 
 function normalizeName(value: string): string {
@@ -662,11 +1039,110 @@ function normalizeName(value: string): string {
 }
 
 function collectItemLabels(metadata: LlmMetadata): string[] {
+  const listName = metadata.lists[0]?.listName?.trim() ?? "";
   const fromLists = metadata.lists.flatMap((list) =>
-    list.items.map(llmItemLabel).filter(Boolean),
+    list.items
+      .map((item) => llmItemLabel(item))
+      .map((label) => label.trim())
+      .filter((label) => label && normalizeLoose(label) !== normalizeLoose(listName)),
   );
   const fromFiling = metadata.filing
     .map((filing) => filing.itemName)
     .filter(Boolean);
   return [...fromLists, ...fromFiling];
+}
+
+function formatNewItemPhrase(items: string[]): string {
+  if (items.length === 0) {
+    return "פריט חדש";
+  }
+  if (items.length === 1) {
+    return `פריט חדש «${items[0]}»`;
+  }
+  return `פריטים חדשים «${items.join("» ו«")}»`;
+}
+
+function formatQuotedItems(items: string[]): string {
+  if (items.length === 0) {
+    return "פריט";
+  }
+  if (items.length === 1) {
+    return `«${items[0]}»`;
+  }
+  return `«${items.join("» ו«")}»`;
+}
+
+function normalizeLoose(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function uniqueIds(ids: Array<string | null | undefined>): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+/** Exact name match only — substring matching caused wrong-partner notifies. */
+function findExistingCustomListsForActor(
+  list: Pick<LlmListAction, "listType" | "listName" | "items">,
+  actorId: string,
+  knownLists: SharedListRef[],
+): SharedListRef[] {
+  if (list.listType !== "custom" || knownLists.length === 0) {
+    return [];
+  }
+  const needle =
+    list.listName?.trim() ||
+    customListNameOf(list) ||
+    (list.items.length === 1 && looksLikeListTitleOnly(list.items[0])
+      ? llmItemLabel(list.items[0]).trim()
+      : "");
+  if (!needle) {
+    return [];
+  }
+  const normalizedNeedle = normalizeLoose(needle);
+  const matches = knownLists.filter((row) => {
+    const canSee =
+      row.ownerId === actorId || row.visibleTo.includes(actorId);
+    if (!canSee) {
+      return false;
+    }
+    return normalizeLoose(row.listName) === normalizedNeedle;
+  });
+  matches.sort((a, b) => {
+    const scopeRank = (row: SharedListRef) =>
+      listScopeOf(row) === "shared" ? 0 : 1;
+    if (scopeRank(a) !== scopeRank(b)) {
+      return scopeRank(a) - scopeRank(b);
+    }
+    return a.ownerId.localeCompare(b.ownerId);
+  });
+  return matches;
+}
+
+function preferSharedList(matches: SharedListRef[]): SharedListRef | null {
+  if (matches.length === 0) {
+    return null;
+  }
+  // Prefer shared over personal, then widest visibleTo, then stable owner id.
+  const ranked = [...matches].sort((a, b) => {
+    const aShared = listScopeOf(a) === "shared" ? 0 : 1;
+    const bShared = listScopeOf(b) === "shared" ? 0 : 1;
+    if (aShared !== bShared) {
+      return aShared - bShared;
+    }
+    if (b.visibleTo.length !== a.visibleTo.length) {
+      return b.visibleTo.length - a.visibleTo.length;
+    }
+    return a.ownerId.localeCompare(b.ownerId);
+  });
+  return ranked[0] ?? null;
+}
+
+function findSharedListForActor(
+  list: Pick<LlmListAction, "listType" | "listName" | "items">,
+  actorId: string,
+  sharedLists: SharedListRef[],
+): SharedListRef | null {
+  return preferSharedList(
+    findExistingCustomListsForActor(list, actorId, sharedLists),
+  );
 }

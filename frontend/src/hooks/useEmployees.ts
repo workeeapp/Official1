@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   digitalEmployees,
-  humanEmployees,
+  workspaceHumans,
   type EmployeeInput,
   type PublicEmployee,
 } from "@workee/shared";
@@ -22,11 +22,14 @@ interface EmployeesState {
 }
 
 function toVisibleState(employees: PublicEmployee[]) {
+  const table = workspaceHumans(employees);
+  const digitals = digitalEmployees(employees);
+  const visible = [...table, ...digitals];
   return {
-    employees,
-    tableEmployees: humanEmployees(employees),
-    digitalEmployees: digitalEmployees(employees),
-    count: employees.length,
+    employees: visible,
+    tableEmployees: table,
+    digitalEmployees: digitals,
+    count: visible.length,
   };
 }
 

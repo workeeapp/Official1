@@ -96,6 +96,13 @@ describe("Chat page", () => {
     sendMock.mockReset().mockResolvedValue({
       reply: "Hello from the assistant",
       raw: { output_text: "Hello from the assistant" },
+      request: {
+        model: "gpt-4.1",
+        conversation: "conv_1",
+        input: "hi",
+        instructions: "You are לוסי.",
+      },
+      timing: { llmMs: 1240, afterLlmMs: 80 },
     });
     historyMock.mockReset().mockImplementation(async (employeeId: string) => ({
       employeeId,
@@ -163,6 +170,9 @@ describe("Chat page", () => {
     expect(
       within(screen.getByTestId("chat-messages")).getByText("saved reply"),
     ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("chat-messages")).getByText("saved reply"),
+    ).toHaveAttribute("dir", "auto");
     expect(within(screen.getByTestId("chat-messages")).getByText("לוסי")).toBeInTheDocument();
     expect(within(screen.getByTestId("chat-messages")).queryByText("Assistant")).not.toBeInTheDocument();
     expect(screen.getByTestId("llm-complete-response")).toHaveTextContent(
@@ -265,7 +275,20 @@ describe("Chat page", () => {
     );
 
     expect(await screen.findByTestId("chat-page")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-messages").className).toMatch(/h-\[22\.5rem\]/);
     expect(screen.getByTestId("chat-messages").className).toMatch(/overflow-y-auto/);
+    expect(
+      screen
+        .getByTestId("chat-dialog")
+        .compareDocumentPosition(screen.getByTestId("llm-complete-response")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByTestId("llm-complete-response")
+        .compareDocumentPosition(screen.getByTestId("llm-complete-request")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(await screen.findByTestId("new-conversation")).toHaveTextContent(
       "New conversation",
     );
@@ -281,8 +304,10 @@ describe("Chat page", () => {
       within(screen.getByTestId("chat-with")).getByRole("option", { name: "לוסי" }),
     ).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Message"), "hi");
+    const composer = screen.getByLabelText("Message");
+    await user.type(composer, "hi");
     await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.getByLabelText("Message")).toHaveFocus();
 
     expect(sendMock).toHaveBeenCalledWith(
       {
@@ -303,6 +328,12 @@ describe("Chat page", () => {
     expect(screen.getByTestId("llm-complete-response")).toHaveTextContent(
       "Hello from the assistant",
     );
+    expect(screen.getByTestId("llm-complete-request")).toHaveTextContent(
+      "You are לוסי.",
+    );
+    expect(screen.getByTestId("chat-llm-timing")).toHaveTextContent(
+      "LLM 1.2s · שרת 80ms",
+    );
 
     historyMock.mockResolvedValue({
       employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
@@ -315,12 +346,14 @@ describe("Chat page", () => {
           author: "you",
           speaker: "עמית",
           text: "hi",
+          createdAt: new Date().toISOString(),
         },
         {
           id: "server-2",
           author: "assistant",
           speaker: "לוסי",
           text: "Hello from the assistant",
+          createdAt: new Date().toISOString(),
         },
       ],
       raw: { output_text: "Hello from the assistant" },
@@ -332,6 +365,9 @@ describe("Chat page", () => {
     });
     expect(screen.getByText("היום")).toBeInTheDocument();
     expect(screen.getAllByTestId("chat-time").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("chat-llm-timing")).toHaveTextContent(
+      "LLM 1.2s · שרת 80ms",
+    );
   });
 
   it("shows only the JSON response in the dialog and an action when present", async () => {
@@ -368,9 +404,7 @@ describe("Chat page", () => {
     expect(
       await within(dialog).findByText("Milk was added to the shopping list."),
     ).toBeInTheDocument();
-    expect(within(dialog).getByTestId("chat-action")).toHaveTextContent(
-      "Add to shopping list: milk",
-    );
+    expect(within(dialog).queryByTestId("chat-action")).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/metadata/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/list_type/)).not.toBeInTheDocument();
   });

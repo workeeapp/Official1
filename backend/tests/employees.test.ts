@@ -150,7 +150,7 @@ describe("employees API", () => {
     expect(response.body.employee.phone).toBe("050-1111111");
   });
 
-  it("creates a digital employee with model settings", async () => {
+  it("creates a digital employee with the submitted prompt and model", async () => {
     findUnique.mockResolvedValue({
       id: userId,
       username: "Amit",
@@ -158,20 +158,13 @@ describe("employees API", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    create.mockResolvedValue({
+    create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
       id: "66666666-6666-4666-8666-666666666666",
       userId,
-      kind: "digital",
-      name: "לוסי",
-      surname: "",
-      nickname: "לוסי",
-      email: null,
-      phone: null,
-      model: "gpt-4.1-mini",
-      temperature: 0,
-      instructions: "You manage lists and filings.",
+      isProtected: false,
       createdAt: new Date(),
-    });
+      ...data,
+    }));
 
     const loginResponse = await request(app)
       .post("/api/auth/login")
@@ -182,26 +175,27 @@ describe("employees API", () => {
       .set("Cookie", cookieHeader(loginResponse))
       .send({
         kind: "digital",
-        name: "לוסי",
-        model: "gpt-4.1-mini",
-        temperature: 0,
-        instructions: "You manage lists and filings.",
+        name: "דיאנה",
+        model: "gpt-4.1",
+        temperature: 0.4,
+        instructions: "Diana custom system prompt",
       });
 
     expect(response.status).toBe(201);
     expect(response.body.employee).toMatchObject({
       kind: "digital",
-      name: "לוסי",
-      model: "gpt-4.1-mini",
-      temperature: 0,
-      instructions: "You manage lists and filings.",
+      name: "דיאנה",
+      model: "gpt-4.1",
+      temperature: 0.4,
+      instructions: "Diana custom system prompt",
     });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         kind: "digital",
-        model: "gpt-4.1-mini",
-        temperature: 0,
-        instructions: "You manage lists and filings.",
+        name: "דיאנה",
+        model: "gpt-4.1",
+        temperature: 0.4,
+        instructions: "Diana custom system prompt",
       }),
     });
   });
@@ -244,13 +238,28 @@ describe("employees API", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("returns digital employee defaults from LLM config", async () => {
+  it("returns digital defaults from Lucy's saved prompt when present", async () => {
     findUnique.mockResolvedValue({
       id: userId,
       username: "Amit",
       passwordHash,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+    findFirst.mockResolvedValue({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      userId,
+      kind: "digital",
+      isProtected: true,
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      model: "gpt-4.1",
+      temperature: 0.2,
+      instructions: "Lucy DB prompt for inherit",
+      createdAt: new Date(),
     });
 
     const loginResponse = await request(app)
@@ -262,9 +271,11 @@ describe("employees API", () => {
       .set("Cookie", cookieHeader(loginResponse));
 
     expect(response.status).toBe(200);
-    expect(response.body.model).toBeTruthy();
-    expect(typeof response.body.temperature).toBe("number");
-    expect(response.body.instructions).toContain("metadata");
+    expect(response.body).toMatchObject({
+      model: "gpt-4.1",
+      temperature: 0.2,
+      instructions: "Lucy DB prompt for inherit",
+    });
   });
 
   it("returns saved records for an owned employee", async () => {

@@ -25,6 +25,7 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     temperature: employee.temperature,
     instructions: employee.instructions,
     protected: employee.isProtected,
+    isOwner: kind === "human" ? employee.isOwner : false,
   };
 }
 
@@ -37,12 +38,42 @@ export function getDigitalEmployeeDefaults(): DigitalEmployeeDefaults {
   };
 }
 
+/** Lucy's live prompt from DB (fallback: LLM.config). Used for “inherit from Lucy”. */
+export async function getLucyPromptDefaults(
+  userId: string,
+): Promise<DigitalEmployeeDefaults> {
+  await ensureProtectedLucy(userId);
+  const lucy = await prisma.employee.findFirst({
+    where: {
+      userId,
+      kind: "digital",
+      OR: [
+        { isProtected: true },
+        { name: LUCY_NAME },
+        { nickname: LUCY_NAME },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  const fileDefaults = getDigitalEmployeeDefaults();
+  if (!lucy) {
+    return fileDefaults;
+  }
+  return {
+    model: lucy.model?.trim() || fileDefaults.model,
+    temperature:
+      typeof lucy.temperature === "number" && Number.isFinite(lucy.temperature)
+        ? lucy.temperature
+        : fileDefaults.temperature,
+    instructions: lucy.instructions?.trim() || fileDefaults.instructions,
+  };
+}
+
 async function ensureProtectedLucy(userId: string): Promise<void> {
   const existing = await prisma.employee.findFirst({
     where: { userId, isProtected: true },
   });
   if (existing) {
-    await refreshProtectedLucyInstructions(existing);
     return;
   }
 
@@ -57,10 +88,6 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
     await prisma.employee.update({
       where: { id: namedLucy.id },
       data: { isProtected: true },
-    });
-    await refreshProtectedLucyInstructions({
-      ...namedLucy,
-      isProtected: true,
     });
     return;
   }
@@ -78,22 +105,6 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
       temperature: defaults.temperature,
       instructions: defaults.instructions,
     },
-  });
-}
-
-async function refreshProtectedLucyInstructions(employee: Employee): Promise<void> {
-  const current = employee.instructions ?? "";
-  if (current.includes('"messages"')) {
-    return;
-  }
-  if (!current.includes("If no action exists → metadata.lists")) {
-    return;
-  }
-
-  const defaults = getDigitalEmployeeDefaults();
-  await prisma.employee.update({
-    where: { id: employee.id },
-    data: { instructions: defaults.instructions },
   });
 }
 
@@ -147,21 +158,29 @@ async function findOwnedEmployee(userId: string, employeeId: string): Promise<Em
 
 function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
   if (kind === "digital") {
+    const defaults = getDigitalEmployeeDefaults();
+    const model = input.model?.trim() || defaults.model;
+    const temperature =
+      typeof input.temperature === "number" && Number.isFinite(input.temperature)
+        ? input.temperature
+        : defaults.temperature;
+    const instructions = input.instructions?.trim() || defaults.instructions;
     return {
-      kind: "digital",
+      kind: "digital" as const,
       name: input.name,
       surname: input.surname?.trim() || "",
       nickname: input.nickname ?? input.name,
       email: null,
       phone: null,
-      model: input.model ?? null,
-      temperature: input.temperature ?? null,
-      instructions: input.instructions ?? null,
+      model,
+      temperature,
+      instructions,
+      isOwner: false,
     };
   }
 
   return {
-    kind: "human",
+    kind: "human" as const,
     name: input.name,
     surname: input.surname ?? "",
     nickname: input.nickname ?? null,
@@ -170,6 +189,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
     model: null,
     temperature: null,
     instructions: null,
+    isOwner: input.isOwner === true,
   };
 }
 
@@ -178,11 +198,12 @@ export async function createEmployeeForUser(
   input: EmployeeInput,
 ): Promise<PublicEmployee> {
   const kind = input.kind === "digital" ? "digital" : "human";
+  const data = persistEmployeeData(input, kind);
   const employee = await prisma.employee.create({
     data: {
       userId,
       isProtected: false,
-      ...persistEmployeeData(input, kind),
+      ...data,
     },
   });
 
@@ -196,10 +217,11 @@ export async function updateEmployeeForUser(
 ): Promise<PublicEmployee> {
   const existing = await findOwnedEmployee(userId, employeeId);
   const kind = existing.kind === "digital" ? "digital" : "human";
+  const data = persistEmployeeData(input, kind);
 
   const employee = await prisma.employee.update({
     where: { id: employeeId },
-    data: persistEmployeeData(input, kind),
+    data,
   });
 
   return toPublicEmployee(employee);

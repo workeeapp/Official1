@@ -9,6 +9,10 @@ type ConversationRow = {
   digitalEmployeeId: string;
   openaiConversationId: string;
   contextInjectedAt: Date | null;
+  pendingAction: string | null;
+  pendingTargets: unknown;
+  pendingStep: string | null;
+  pendingAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -38,13 +42,23 @@ const {
   messageFindFirst,
   listFindMany,
   listFindUnique,
+  listFindFirst,
   listCreate,
+  itemFindMany,
   itemFindUnique,
+  itemFindFirst,
   itemCreate,
   itemUpdate,
+  itemUpdateMany,
   itemDeleteMany,
   filingFindMany,
+  filingFindFirst,
+  filingCreate,
+  filingUpdate,
+  filingUpdateMany,
   filingUpsert,
+  contactUpsert,
+  contactDeleteMany,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
   findFirst: vi.fn(),
@@ -59,19 +73,46 @@ const {
   messageFindFirst: vi.fn(),
   listFindMany: vi.fn(),
   listFindUnique: vi.fn(),
+  listFindFirst: vi.fn(),
   listCreate: vi.fn(),
+  itemFindMany: vi.fn(),
   itemFindUnique: vi.fn(),
+  itemFindFirst: vi.fn(),
   itemCreate: vi.fn(),
   itemUpdate: vi.fn(),
+  itemUpdateMany: vi.fn(),
   itemDeleteMany: vi.fn(),
   filingFindMany: vi.fn(),
+  filingFindFirst: vi.fn(),
+  filingCreate: vi.fn(),
+  filingUpdate: vi.fn(),
+  filingUpdateMany: vi.fn(),
   filingUpsert: vi.fn(),
+  contactUpsert: vi.fn(),
+  contactDeleteMany: vi.fn(),
 }));
 
-const { createConversation, createResponse } = vi.hoisted(() => ({
-  createConversation: vi.fn(),
-  createResponse: vi.fn(),
-}));
+const { createConversation, createResponse, appendAssistantMessage, usageCreate } =
+  vi.hoisted(() => ({
+    createConversation: vi.fn(),
+    createResponse: vi.fn(),
+    appendAssistantMessage: vi.fn(),
+    usageCreate: vi.fn().mockResolvedValue({}),
+  }));
+
+const deliverWhatsAppRelaysMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ skips: [], sentLabels: [] }),
+);
+
+vi.mock("../src/services/whatsapp-send.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/whatsapp-send.js")>();
+  return {
+    ...actual,
+    deliverWhatsAppRelays: (...args: unknown[]) =>
+      deliverWhatsAppRelaysMock(...args),
+  };
+});
 
 const conversationStore = new Map<string, ConversationRow>();
 const messageStore: MessageRow[] = [];
@@ -104,6 +145,9 @@ vi.mock("../src/database/prisma.js", () => ({
     employee: {
       findFirst,
       findMany,
+      findUnique: vi.fn().mockResolvedValue({
+        userId: "11111111-1111-4111-8111-111111111111",
+      }),
       update: vi.fn(),
       create: vi.fn().mockResolvedValue({
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -125,22 +169,57 @@ vi.mock("../src/database/prisma.js", () => ({
       create: messageCreate,
       createMany: messageCreateMany,
       deleteMany: messageDeleteMany,
+      update: vi.fn().mockImplementation(
+        async ({ where, data }: { where: { id: string }; data: { text?: string } }) => {
+          const row = messageStore.find((message) => message.id === where.id);
+          if (row && data.text !== undefined) {
+            row.text = data.text;
+          }
+          return row ?? { id: where.id, ...data };
+        },
+      ),
     },
     employeeList: {
       findMany: listFindMany,
       findUnique: listFindUnique,
+      findFirst: listFindFirst,
       create: listCreate,
     },
     employeeListItem: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: itemFindMany,
       findUnique: itemFindUnique,
+      findFirst: itemFindFirst,
       create: itemCreate,
       update: itemUpdate,
+      updateMany: itemUpdateMany,
       deleteMany: itemDeleteMany,
     },
     employeeFiling: {
       findMany: filingFindMany,
+      findFirst: filingFindFirst,
+      create: filingCreate,
+      update: filingUpdate,
+      updateMany: filingUpdateMany,
       upsert: filingUpsert,
+    },
+    contact: {
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: (...args: unknown[]) => contactUpsert(...args),
+      deleteMany: (...args: unknown[]) => contactDeleteMany(...args),
+    },
+    reminder: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      delete: vi.fn(),
+    },
+    llmUsage: {
+      create: usageCreate,
+    },
+    llmModelPrice: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   },
 }));
@@ -153,6 +232,7 @@ const userId = "11111111-1111-4111-8111-111111111111";
 const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 const otherEmployeeId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
 const lucyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const davidId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 let passwordHash: string;
 let app: ReturnType<typeof createApp>;
@@ -281,6 +361,10 @@ describe("chat API", () => {
       reply: "Hello from the model",
       raw: { output_text: "Hello from the model" },
     });
+    deliverWhatsAppRelaysMock.mockReset().mockResolvedValue({
+      skips: [],
+      sentLabels: [],
+    });
     resetChatStore();
     conversationFindUnique.mockReset().mockImplementation(
       async ({
@@ -288,7 +372,8 @@ describe("chat API", () => {
         include,
       }: {
         where: {
-          userId_employeeId_digitalEmployeeId: {
+          id?: string;
+          userId_employeeId_digitalEmployeeId?: {
             userId: string;
             employeeId: string;
             digitalEmployeeId: string;
@@ -296,10 +381,20 @@ describe("chat API", () => {
         };
         include?: { messages?: unknown };
       }) => {
-        const pair = where.userId_employeeId_digitalEmployeeId;
-        const found = conversationStore.get(
-          storeKey(pair.userId, pair.employeeId, pair.digitalEmployeeId),
-        );
+        let found: ConversationRow | undefined;
+        if (where.id) {
+          for (const row of conversationStore.values()) {
+            if (row.id === where.id) {
+              found = row;
+              break;
+            }
+          }
+        } else if (where.userId_employeeId_digitalEmployeeId) {
+          const pair = where.userId_employeeId_digitalEmployeeId;
+          found = conversationStore.get(
+            storeKey(pair.userId, pair.employeeId, pair.digitalEmployeeId),
+          );
+        }
         if (!found) {
           return null;
         }
@@ -355,6 +450,10 @@ describe("chat API", () => {
           digitalEmployeeId: data.digitalEmployeeId,
           openaiConversationId: data.openaiConversationId,
           contextInjectedAt: null,
+          pendingAction: null,
+          pendingTargets: null,
+          pendingStep: null,
+          pendingAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -371,7 +470,14 @@ describe("chat API", () => {
         data,
       }: {
         where: { id: string };
-        data: { contextInjectedAt?: Date | null; openaiConversationId?: string };
+        data: {
+          contextInjectedAt?: Date | null;
+          openaiConversationId?: string;
+          pendingAction?: string | null;
+          pendingTargets?: unknown;
+          pendingStep?: string | null;
+          pendingAt?: Date | null;
+        };
       }) => {
         for (const row of conversationStore.values()) {
           if (row.id === where.id) {
@@ -380,6 +486,18 @@ describe("chat API", () => {
             }
             if (data.openaiConversationId) {
               row.openaiConversationId = data.openaiConversationId;
+            }
+            if (data.pendingAction !== undefined) {
+              row.pendingAction = data.pendingAction;
+            }
+            if (data.pendingTargets !== undefined) {
+              row.pendingTargets = data.pendingTargets;
+            }
+            if (data.pendingStep !== undefined) {
+              row.pendingStep = data.pendingStep;
+            }
+            if (data.pendingAt !== undefined) {
+              row.pendingAt = data.pendingAt;
             }
             row.updatedAt = new Date();
             return row;
@@ -390,6 +508,8 @@ describe("chat API", () => {
     );
     listFindMany.mockReset().mockResolvedValue([]);
     listFindUnique.mockReset().mockResolvedValue(null);
+    listFindFirst.mockReset().mockRejectedValue(new Error("not mocked"));
+    itemFindMany.mockReset().mockResolvedValue([]);
     listCreate.mockReset().mockResolvedValue({
       id: "list-1",
       employeeId,
@@ -397,11 +517,24 @@ describe("chat API", () => {
       name: "",
     });
     itemFindUnique.mockReset().mockResolvedValue(null);
+    itemFindFirst.mockReset().mockResolvedValue(null);
     itemCreate.mockReset().mockResolvedValue({ id: "item-1" });
     itemUpdate.mockReset().mockResolvedValue({ id: "item-1" });
+    itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     itemDeleteMany.mockReset().mockResolvedValue({ count: 1 });
     filingFindMany.mockReset().mockResolvedValue([]);
+    filingFindFirst.mockReset().mockResolvedValue(null);
+    filingCreate.mockReset().mockResolvedValue({ id: "filing-1" });
+    filingUpdate.mockReset();
+    filingUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     filingUpsert.mockReset().mockResolvedValue({ id: "filing-1" });
+    contactUpsert.mockReset().mockResolvedValue({
+      id: "c1",
+      name: "מיכל",
+      phone: "972541111111",
+      kind: "personal",
+    });
+    contactDeleteMany.mockReset().mockResolvedValue({ count: 1 });
     messageCreate.mockReset().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       const row = {
         id: crypto.randomUUID(),
@@ -462,9 +595,11 @@ describe("chat API", () => {
         return { count: data.length };
       },
     );
+    appendAssistantMessage.mockReset().mockResolvedValue(undefined);
     setLlmClientForTests({
       createConversation,
       createResponse,
+      appendAssistantMessage,
     });
     app = createApp();
   });
@@ -501,10 +636,20 @@ describe("chat API", () => {
       .send({ message: "hi", employeeId });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       reply: "Hello from the model",
       raw: { output_text: "Hello from the model" },
       notifications: [],
+    });
+    expect(response.body.request).toMatchObject({
+      model: expect.any(String),
+      conversation: "conv_test_1",
+      input: expect.stringContaining("hi"),
+      instructions: expect.any(String),
+    });
+    expect(response.body.timing).toEqual({
+      llmMs: expect.any(Number),
+      afterLlmMs: expect.any(Number),
     });
     expect(createConversation).toHaveBeenCalledOnce();
     expect(createResponse).toHaveBeenCalledOnce();
@@ -518,6 +663,292 @@ describe("chat API", () => {
     expect(saved[0].author).toBe("you");
     expect(saved[1].author).toBe("assistant");
     expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
+  });
+
+  it("stores LLM usage for the speaker, worker, and conversation", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    usageCreate.mockClear();
+    createResponse.mockResolvedValue({
+      reply: "Hello from the model",
+      raw: {
+        id: "resp_usage",
+        model: "gpt-4.1-mini-2025-04-14",
+        usage: {
+          input_tokens: 1500,
+          input_tokens_details: { cached_tokens: 1280 },
+          output_tokens: 60,
+          output_tokens_details: { reasoning_tokens: 0 },
+          total_tokens: 1560,
+        },
+      },
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(usageCreate).toHaveBeenCalledOnce();
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({
+      conversationId: expect.any(String),
+      employeeId,
+      digitalEmployeeId: expect.any(String),
+      openaiConversationId: "conv_test_1",
+      responseId: "resp_usage",
+      inputTokens: 1500,
+      outputTokens: 60,
+      cachedTokens: 1280,
+      totalTokens: 1560,
+    });
+  });
+
+  it("lets Lucy save a reminder without handing off to David", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שמרתי תזכורת לחלב",
+        metadata: {
+          lists: [],
+          filing: [],
+          messages: [],
+          reminders: [{ action: "add", item: "לקנות חלב", in: 20, time: "" }],
+        },
+      }),
+      raw: {},
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תזכירי לי לקנות חלב בעוד 20 שניות", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledOnce();
+    expect(createResponse.mock.calls[0][0].instructions).toContain(
+      "Do not handoff for a reminder",
+    );
+  });
+
+  it("follows a handoff when the speaker asks to talk to David", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    findMany.mockResolvedValue([
+      ...tableEmployees(),
+      {
+        id: davidId,
+        userId,
+        kind: "digital",
+        isProtected: false,
+        name: "דוד",
+        surname: "",
+        nickname: "דוד",
+        email: null,
+        phone: null,
+        model: "gpt-4.1-mini",
+        temperature: 0,
+        instructions: "Reminders",
+        createdAt: new Date(),
+      },
+    ]);
+    const previousFindFirst = findFirst.getMockImplementation();
+    findFirst.mockImplementation(async (args: { where: { id?: string; isProtected?: boolean } }) => {
+      if (args.where.id === davidId) {
+        return {
+          id: davidId,
+          userId,
+          kind: "digital",
+          isProtected: false,
+          name: "דוד",
+          surname: "",
+          nickname: "דוד",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "Reminders",
+          createdAt: new Date(),
+        };
+      }
+      return previousFindFirst?.(args);
+    });
+    createConversation
+      .mockResolvedValueOnce("conv_lucy")
+      .mockResolvedValueOnce("conv_david");
+    createResponse
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "מעבירה אותך לדוד",
+          metadata: {
+            lists: [],
+            filing: [],
+            messages: [],
+            handoff: { worker: "דוד" },
+          },
+        }),
+        raw: {},
+      })
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "שמרתי",
+          metadata: {
+            reminders: [{ action: "add", item: "חלב", in: 20 }],
+          },
+        }),
+        raw: {},
+      });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "אני רוצה לדבר עם דוד", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_david");
+  });
+
+  it("asks a digital co-worker now and adds her answer to Lucy's reply", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    const diana = {
+      id: davidId,
+      userId,
+      kind: "digital",
+      isProtected: false,
+      name: "דיאנה",
+      surname: "",
+      nickname: "דיאנה",
+      email: null,
+      phone: null,
+      model: "gpt-4.1-mini",
+      temperature: 0,
+      instructions: "Travel agent",
+      createdAt: new Date(),
+    };
+    findMany.mockResolvedValue([...tableEmployees(), diana]);
+    const previousFindFirst = findFirst.getMockImplementation();
+    findFirst.mockImplementation(async (args: { where: { id?: string } }) =>
+      args.where.id === davidId ? diana : previousFindFirst?.(args),
+    );
+    listFindFirst.mockResolvedValue({ id: "lucy-tasks" });
+    const jobRows: Array<{ id: string; data: unknown }> = [];
+    itemCreate.mockImplementation(async ({ data }: { data: { data: unknown } }) => {
+      const row = { id: "job-1", data: data.data };
+      jobRows.push(row);
+      return row;
+    });
+    itemFindMany.mockImplementation(async (args: { where?: { listId?: string } }) =>
+      args?.where?.listId === "lucy-tasks" ? jobRows : [],
+    );
+    createConversation
+      .mockResolvedValueOnce("conv_lucy")
+      .mockResolvedValueOnce("conv_diana");
+    createResponse
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "שאלתי את דיאנה:",
+          metadata: {
+            lists: [],
+            filing: [],
+            messages: [
+              {
+                targets: ["דיאנה"],
+                text: "עמית שואל אם יש טיסות ביום ראשון?",
+                expects_reply: true,
+                ask_summary: "אם יש טיסות ביום ראשון?",
+              },
+            ],
+          },
+        }),
+        raw: {},
+      })
+      .mockResolvedValueOnce({
+        reply: JSON.stringify({
+          response: "כן, יש טיסה ב-08:00 וב-14:30.",
+          metadata: { lists: [], filing: [], messages: [] },
+        }),
+        raw: {},
+        usage: {
+          responseId: "resp_diana",
+          model: "gpt-4.1-mini",
+          inputTokens: 100,
+          outputTokens: 10,
+          cachedTokens: 0,
+          reasoningTokens: 0,
+          totalTokens: 110,
+          raw: {},
+        },
+      });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תשאלי את דיאנה אם יש טיסות ביום ראשון?", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    const consult = createResponse.mock.calls[1][0];
+    expect(consult.conversationId).toBe("conv_diana");
+    expect(conversationStore.has(storeKey(userId, lucyId, davidId))).toBe(true);
+    expect(conversationStore.has(storeKey(userId, employeeId, davidId))).toBe(false);
+    expect(usageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          responseId: "resp_diana",
+          employeeId: lucyId,
+          digitalEmployeeId: davidId,
+        }),
+      }),
+    );
+    expect(consult.instructions).toContain("CONSULT: לוסי");
+    expect(consult.message).toContain("לוסי (בשם");
+    expect(response.body.reply).toContain("שאלתי את דיאנה:");
+    expect(response.body.reply).toContain("דיאנה עונה: כן, יש טיסה ב-08:00 וב-14:30.");
+    expect(appendAssistantMessage).toHaveBeenCalledWith(
+      "conv_lucy",
+      "דיאנה עונה: כן, יש טיסה ב-08:00 וב-14:30.",
+    );
+    expect(itemCreate).toHaveBeenCalledOnce();
+    expect(JSON.stringify(itemCreate.mock.calls[0][0].data.data)).toContain(
+      "לבדוק עם דיאנה: אם יש טיסות ביום ראשון?",
+    );
+    expect(itemUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "job-1", deletedAt: null },
+        data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+      }),
+    );
+  });
+
+  it("rotates the OpenAI conversation when the request is too large", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createConversation
+      .mockResolvedValueOnce("conv_test_1")
+      .mockResolvedValueOnce("conv_after_429");
+    createResponse
+      .mockRejectedValueOnce(
+        new Error(
+          "429 Request too large for gpt-4.1 on tokens per min (TPM): Limit 30000, Requested 30046.",
+        ),
+      )
+      .mockResolvedValueOnce({
+        reply: "After rotate",
+        raw: { output_text: "After rotate" },
+      });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "hi", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toBe("After rotate");
+    expect(createResponse).toHaveBeenCalledTimes(2);
+    expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_after_429");
   });
 
   it("reuses the same conversation for the same user and employee", async () => {
@@ -540,7 +971,7 @@ describe("chat API", () => {
       .send({ message: "how are you", employeeId });
 
     expect(second.status).toBe(200);
-    expect(second.body).toEqual({
+    expect(second.body).toMatchObject({
       reply: "Second reply",
       raw: { output_text: "Second reply" },
       notifications: [],
@@ -605,6 +1036,10 @@ describe("chat API", () => {
       createdAt: expect.any(String),
     });
     expect(history.body.raw).toEqual({ output_text: "Hello from the model" });
+    expect(history.body.request).toMatchObject({
+      conversation: "conv_test_1",
+      input: expect.stringContaining("hi"),
+    });
   });
 
   it("returns empty history when the employee has no conversation", async () => {
@@ -623,6 +1058,7 @@ describe("chat API", () => {
       startedAt: null,
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
   });
@@ -659,6 +1095,7 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
 
@@ -673,6 +1110,7 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
 
@@ -703,7 +1141,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(2);
+    ageStoredConversation(25);
     createConversation.mockResolvedValue("conv_idle");
 
     const history = await request(app)
@@ -718,12 +1156,13 @@ describe("chat API", () => {
       startedAt: expect.any(String),
       messages: [],
       raw: null,
+      request: null,
       isNew: true,
     });
     expect(createConversation).toHaveBeenCalledTimes(2);
   });
 
-  it("starts a new OpenAI conversation after an hour of idle chat", async () => {
+  it("starts a new OpenAI conversation after a day of idle chat", async () => {
     const cookie = await login();
     mockOwnedEmployee();
 
@@ -732,7 +1171,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(2);
+    ageStoredConversation(25);
     createConversation.mockResolvedValue("conv_idle_send");
     createResponse.mockResolvedValue({
       reply: "After idle",
@@ -773,7 +1212,7 @@ describe("chat API", () => {
       .send({ message: "hello", employeeId: otherEmployeeId });
 
     expect(other.status).toBe(200);
-    expect(other.body).toEqual({
+    expect(other.body).toMatchObject({
       reply: "Reply for Tal",
       raw: { output_text: "Reply for Tal" },
       notifications: [],
@@ -783,7 +1222,7 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_test_other");
   });
 
-  it("starts a separate conversation and uses each digital employee's LLM settings", async () => {
+  it("starts a separate conversation per digital employee using that worker's DB prompt", async () => {
     const dianaId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const cookie = await login();
     mockOwnedEmployee();
@@ -846,15 +1285,30 @@ describe("chat API", () => {
     expect(diana.status).toBe(200);
     expect(createConversation).toHaveBeenCalledTimes(2);
     expect(createResponse.mock.calls[0][0].conversationId).toBe("conv_test_1");
-    expect(createResponse.mock.calls[0][0].model).toBe("gpt-4.1-mini");
-    expect(createResponse.mock.calls[0][0].temperature).toBe(0);
-    expect(createResponse.mock.calls[0][0].instructions).toContain(
-      "You manage lists and filings.",
-    );
     expect(createResponse.mock.calls[1][0].conversationId).toBe("conv_diana");
+    expect(createResponse.mock.calls[0][0].textFormat).toMatchObject({
+      type: "json_schema",
+      name: "lucy_metadata_response",
+    });
+    expect(createResponse.mock.calls[1][0].textFormat).toMatchObject({
+      type: "json_schema",
+      name: "lucy_metadata_response",
+    });
+    expect(createResponse.mock.calls[1][0].instructions).toContain("You are דיאנה");
+    expect(createResponse.mock.calls[1][0].instructions).toContain(
+      "Diana system prompt",
+    );
+    expect(createResponse.mock.calls[1][0].instructions).toContain(
+      "Follow ONLY your system instructions above",
+    );
+    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+      "list every capability",
+    );
+    expect(createResponse.mock.calls[1][0].instructions).not.toContain(
+      "You support every action",
+    );
     expect(createResponse.mock.calls[1][0].model).toBe("gpt-4.1");
     expect(createResponse.mock.calls[1][0].temperature).toBe(0.4);
-    expect(createResponse.mock.calls[1][0].instructions).toContain("Diana system prompt");
   });
 
   it("includes current employee records in every LLM turn", async () => {
@@ -884,6 +1338,7 @@ describe("chat API", () => {
       {
         itemName: "מספר רכב",
         itemInfo: "3434343",
+        itemDescription: "רכב",
         employee: { name: "עמית", nickname: "עמית" },
       },
     ]);
@@ -897,11 +1352,12 @@ describe("chat API", () => {
       .send({ message: "hi", employeeId });
 
     const firstInstructions = createResponse.mock.calls[0][0].instructions as string;
+    const firstMessage = createResponse.mock.calls[0][0].message as string;
     expect(firstInstructions).toContain("EMPLOYEE_SAVED_DATA");
-    expect(firstInstructions).toContain("חלב");
-    expect(firstInstructions).toContain("לקנות מתנה");
-    expect(firstInstructions).toContain("מספר רכב");
-    expect(createResponse.mock.calls[0][0].message).toContain("עמית: hi");
+    expect(firstMessage).toContain("חלב");
+    expect(firstMessage).toContain("לקנות מתנה");
+    expect(firstMessage).toContain("מספר רכב");
+    expect(firstMessage).toContain("עמית: hi");
 
     createResponse.mockResolvedValue({
       reply: "Second reply",
@@ -943,6 +1399,7 @@ describe("chat API", () => {
               action: "add_filing",
               item_name: "מספר רכב",
               item_info: "3434343",
+              item_description: "מספר רכב",
             },
           ],
         },
@@ -979,16 +1436,17 @@ describe("chat API", () => {
         visibleTo: [employeeId],
       },
     });
-    expect(filingUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: {
-          employeeId,
-          itemName: "מספר רכב",
-          itemInfo: "3434343",
-          addedById: employeeId,
-        },
-      }),
-    );
+    expect(filingCreate).toHaveBeenCalledWith({
+      data: {
+        employeeId,
+        itemName: "מספר רכב",
+        itemInfo: "3434343",
+        itemDescription: "מספר רכב",
+        addedById: employeeId,
+      },
+    });
+    expect(response.body.reply).toContain("Done.");
+    expect(response.body.reply).not.toContain("הוספתי «חלב»");
   });
 
   it("saves a targeted action on the other employee and pushes an assistant notification", async () => {
@@ -1030,16 +1488,7 @@ describe("chat API", () => {
         visibleTo: [employeeId, otherEmployeeId],
       },
     });
-    expect(itemCreate).toHaveBeenCalledWith({
-      data: {
-        listId: "list-1",
-        itemKey: "טל צריך לקנות חלב",
-        data: { "שם מטלה": "טל צריך לקנות חלב" },
-        scope: "personal",
-        addedById: employeeId,
-        visibleTo: [employeeId],
-      },
-    });
+    expect(itemCreate).toHaveBeenCalledTimes(1);
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
     expect(response.body.notifications[0].message.text).toBe(
@@ -1047,7 +1496,7 @@ describe("chat API", () => {
     );
   });
 
-  it("saves a spoken task for Tal even when the LLM omitted targets", async () => {
+  it("saves a task for Tal only when the LLM set targets", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
         response: "הוספתי מטלה: טל צריך לקחת מחר בבוקר את הילדים לגינה.",
@@ -1058,9 +1507,10 @@ describe("chat API", () => {
               list_type: "tasks",
               items: [
                 {
-                  "שם מטלה": "טל צריך לקחת מחר בבוקר את הילדים לגינה",
+                  "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה",
                 },
               ],
+              targets: ["טל"],
             },
           ],
           filing: [],
@@ -1096,6 +1546,15 @@ describe("chat API", () => {
     expect(response.body.notifications[0].message.text).toBe(
       "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
     );
+    expect(deliverWhatsAppRelaysMock).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          target: expect.objectContaining({ id: otherEmployeeId }),
+          text: "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
+        }),
+      ],
+      employeeId,
+    );
   });
 
   it("notifies the person who added a shared item when the owner buys it", async () => {
@@ -1121,7 +1580,7 @@ describe("chat API", () => {
       listType: "shopping",
       name: "",
     });
-    itemFindUnique.mockResolvedValue({
+    itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: "tal-shop",
       itemKey: "קופסת טונה",
@@ -1140,17 +1599,24 @@ describe("chat API", () => {
       .send({ message: "קניתי טונה", employeeId: otherEmployeeId });
 
     expect(response.status).toBe(200);
-    expect(itemDeleteMany).toHaveBeenCalledWith({
-      where: { listId: "tal-shop", itemKey: "קופסת טונה" },
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: {
+        listId: "tal-shop",
+        itemKey: "קופסת טונה",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    expect(itemDeleteMany).toHaveBeenCalledWith({
+    expect(itemUpdateMany).toHaveBeenCalledWith({
       where: {
         itemKey: { contains: "קופסת טונה" },
+        deletedAt: null,
         list: {
           listType: "tasks",
           employeeId: { in: [otherEmployeeId, employeeId] },
         },
       },
+      data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(employeeId);
@@ -1181,7 +1647,7 @@ describe("chat API", () => {
       listType: "shopping",
       name: "",
     });
-    itemFindUnique.mockResolvedValue({
+    itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: "tal-shop",
       itemKey: "קופסת טונה",
@@ -1246,7 +1712,7 @@ describe("chat API", () => {
     );
   });
 
-  it("relays a check to Tal even when the LLM omitted messages", async () => {
+  it("does not relay when the LLM omitted messages", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
         response: "בדקתי עם טל",
@@ -1267,14 +1733,10 @@ describe("chat API", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.notifications).toHaveLength(1);
-    expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
-    expect(response.body.notifications[0].message.text).toBe(
-      "עמית שואל אם קנית שמן ?",
-    );
+    expect(response.body.notifications).toHaveLength(0);
   });
 
-  it("delivers a relayed message to a digital employee on the speaker thread", async () => {
+  it("delivers a pure-info message to a digital employee on the speaker thread", async () => {
     const dianaId = "8bbbe1a2-c4c1-4edc-9d87-fe5ac740c1f4";
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
@@ -1285,7 +1747,9 @@ describe("chat API", () => {
           messages: [
             {
               targets: ["דיאנה"],
-              text: "עמית שואל מה מחיר הטיסה ?",
+              text: "עמית מודה לך על הטיסה",
+              expects_reply: false,
+              ask_summary: "",
             },
           ],
         },
@@ -1318,16 +1782,217 @@ describe("chat API", () => {
       .post("/api/chat/messages")
       .set("Cookie", cookie)
       .send({
-        message: "תשלחי הודעה לדיאנה - מה מחיר הטיסה ?",
+        message: "תגידי לדיאנה תודה על הטיסה",
         employeeId,
       });
 
     expect(response.status).toBe(200);
+    expect(createResponse).toHaveBeenCalledOnce();
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(employeeId);
     expect(response.body.notifications[0].digitalEmployeeId).toBe(dianaId);
     expect(response.body.notifications[0].message.text).toBe(
-      "עמית שואל מה מחיר הטיסה ?",
+      "עמית מודה לך על הטיסה",
     );
+  });
+
+  it("Phase 3: applies remove_filing from mocked LLM (not lists.remove)", async () => {
+    const liveFiling = {
+      id: "filing-email",
+      itemName: "קוד לכניסה לחשבון אימייל",
+      itemInfo: "123",
+      itemDescription: "קוד לכניסה לחשבון אימייל",
+      employee: { name: "עמית", nickname: "עמית" },
+      employeeId,
+      scope: "personal",
+      visibleTo: [employeeId],
+      deletedAt: null,
+    };
+    filingFindMany.mockResolvedValue([liveFiling]);
+    filingUpdateMany.mockResolvedValue({ count: 1 });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "מחקתי את קוד הכניסה לחשבון האימייל.",
+        metadata: {
+          lists: [],
+          filing: [
+            {
+              action: "remove_filing",
+              item_name: "קוד כניסה לחשבון אימייל",
+              item_info: "",
+              item_description: "",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "removed filing" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "מחק קוד כניסה לחשבון אימייל", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("מחקתי");
+    expect(filingUpdateMany).toHaveBeenCalledWith({
+      where: {
+        employeeId,
+        itemName: "קוד לכניסה לחשבון אימייל",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(itemUpdateMany).not.toHaveBeenCalled();
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(
+      messageStore.some(
+        (row) =>
+          row.author === "assistant" && row.text.includes("מחקתי"),
+      ),
+    ).toBe(true);
+  });
+
+  it("Phase 3: applies update_filing from mocked LLM onto a live filing", async () => {
+    filingFindMany.mockResolvedValue([
+      {
+        id: "filing-email",
+        itemName: "קוד לכניסה לחשבון אימייל",
+        itemInfo: "123",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+        employee: { name: "עמית", nickname: "עמית" },
+        employeeId,
+        scope: "personal",
+        visibleTo: [employeeId],
+        deletedAt: null,
+      },
+    ]);
+    filingFindFirst.mockResolvedValue({
+      id: "filing-email",
+      itemName: "קוד לכניסה לחשבון אימייל",
+      itemInfo: "123",
+      itemDescription: "קוד לכניסה לחשבון אימייל",
+      visibleTo: [employeeId],
+      scope: "personal",
+    });
+    filingUpdate.mockResolvedValue({ id: "filing-email" });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "עדכנתי את הקוד ל־999.",
+        metadata: {
+          lists: [],
+          filing: [
+            {
+              action: "update_filing",
+              item_name: "קוד כניסה לחשבון אימייל",
+              item_info: "999",
+              item_description: "",
+            },
+          ],
+        },
+      }),
+      raw: { output_text: "updated filing" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "שנה את הקוד ל־999", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(filingUpdate).toHaveBeenCalledWith({
+      where: { id: "filing-email" },
+      data: {
+        itemInfo: "999",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+      },
+    });
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(response.body.reply).toContain("999");
+  });
+
+  it("Phase 3: applies directory.add from mocked LLM onto the speaker phone book", async () => {
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "שמרתי את מיכל בספר הטלפונים.",
+        metadata: {
+          lists: [],
+          filing: [],
+          directory: [
+            { action: "add", name: "מיכל", phone: "054-1111111" },
+          ],
+        },
+      }),
+      raw: { output_text: "saved contact" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תוסיפי את מיכל 054-1111111", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(contactUpsert).toHaveBeenCalled();
+    expect(response.body.reply).toMatch(/מיכל/);
+  });
+
+  it("Phase 3: applies a single shopping remove immediately from mocked LLM", async () => {
+    listFindUnique.mockResolvedValue({
+      id: "list-shop",
+      employeeId,
+      listType: "shopping",
+      name: "",
+    });
+    itemFindFirst.mockResolvedValue({
+      id: "item-milk",
+      listId: "list-shop",
+      itemKey: "חלב",
+      data: { "שם פריט": "חלב" },
+      deletedAt: null,
+    });
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "הסרתי את החלב מהקניות.",
+        metadata: {
+          lists: [
+            {
+              action: "remove",
+              list_type: "shopping",
+              items: [{ "שם פריט": "חלב" }],
+            },
+          ],
+          filing: [],
+        },
+      }),
+      raw: { output_text: "removed milk" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "קניתי חלב", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(itemUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deletedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(response.body.reply).toContain("חלב");
   });
 });

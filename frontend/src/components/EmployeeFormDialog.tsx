@@ -38,12 +38,14 @@ export function EmployeeFormDialog({
   const [nickname, setNickname] = useState(employee?.nickname ?? "");
   const [email, setEmail] = useState(employee?.email ?? "");
   const [phone, setPhone] = useState(employee?.phone ?? "");
+  const [isOwner, setIsOwner] = useState(employee?.isOwner === true);
   const [model, setModel] = useState(employee?.model ?? "");
   const [temperature, setTemperature] = useState(
     employee?.temperature != null ? String(employee.temperature) : "0",
   );
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
+  const [inheriting, setInheriting] = useState(false);
   const [touched, setTouched] = useState({
     name: false,
     surname: false,
@@ -54,6 +56,27 @@ export function EmployeeFormDialog({
     temperature: false,
     instructions: false,
   });
+
+  async function inheritFromLucy() {
+    setInheriting(true);
+    setDefaultsError(null);
+    try {
+      const defaults = await employeeApi.digitalDefaults();
+      setModel(defaults.model);
+      setTemperature(String(defaults.temperature));
+      setInstructions(defaults.instructions);
+      setTouched((current) => ({
+        ...current,
+        model: true,
+        temperature: true,
+        instructions: true,
+      }));
+    } catch {
+      setDefaultsError("Unable to load Lucy's prompt.");
+    } finally {
+      setInheriting(false);
+    }
+  }
 
   useEffect(() => {
     if (mode !== "add" || kind !== "digital" || employee) {
@@ -150,6 +173,7 @@ export function EmployeeFormDialog({
       nickname: nickname.trim(),
       email: email.trim(),
       phone: phone.trim(),
+      isOwner,
     });
   }
 
@@ -256,16 +280,44 @@ export function EmployeeFormDialog({
                   }
                   onChange={(event) => setTemperature(event.target.value)}
                 />
-                <Textarea
-                  name="employee-instructions"
-                  label="Instructions"
-                  value={instructions}
-                  error={visibleErrors.instructions}
-                  onBlur={() =>
-                    setTouched((current) => ({ ...current, instructions: true }))
-                  }
-                  onChange={(event) => setInstructions(event.target.value)}
-                />
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <p className="text-sm font-medium text-text-primary">
+                      Instructions
+                    </p>
+                    {employee?.protected ? null : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="sm:w-auto"
+                        disabled={inheriting || submitting}
+                        onClick={() => {
+                          void inheritFromLucy();
+                        }}
+                      >
+                        {inheriting ? "Loading…" : "Inherit from Lucy"}
+                      </Button>
+                    )}
+                  </div>
+                  <Textarea
+                    id="employee-instructions"
+                    name="employee-instructions"
+                    label="Instructions"
+                    hideLabel
+                    value={instructions}
+                    error={visibleErrors.instructions}
+                    onBlur={() =>
+                      setTouched((current) => ({ ...current, instructions: true }))
+                    }
+                    onChange={(event) => setInstructions(event.target.value)}
+                  />
+                  <p className="text-xs text-text-secondary">
+                    Saved per worker and loaded from the database at chat time.
+                    {employee?.protected
+                      ? null
+                      : " Use Inherit from Lucy to copy Lucy's current prompt."}
+                  </p>
+                </div>
               </>
             ) : (
               <>
@@ -303,6 +355,23 @@ export function EmployeeFormDialog({
                   onBlur={() => setTouched((current) => ({ ...current, phone: true }))}
                   onChange={(event) => setPhone(event.target.value)}
                 />
+                <label className="flex items-start gap-2 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    name="employee-is-owner"
+                    className="mt-1"
+                    checked={isOwner}
+                    onChange={(event) => setIsOwner(event.target.checked)}
+                  />
+                    <span>
+                    Account owner
+                    <span className="mt-0.5 block text-text-secondary">
+                      Sees everyone’s lists, tasks, and reminder clocks. Several
+                      owners are allowed — or none (then everyone sees only their
+                      own).
+                    </span>
+                  </span>
+                </label>
               </>
             )}
             {defaultsError ? (

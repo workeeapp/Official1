@@ -4,7 +4,9 @@ import type {
   EmployeeRecordField,
   EmployeeRecordItem,
   EmployeeRecordsResponse,
+  EmployeeUsageSummary,
   PublicEmployee,
+  TeamUsageSummary,
 } from "@workee/shared";
 import { isDigitalEmployee, isProtectedEmployee } from "@workee/shared";
 import { useEmployees } from "@/hooks/useEmployees";
@@ -17,7 +19,12 @@ import {
   PlusIcon,
   TrashIcon,
 } from "@/components/IconButton";
-import { employeeDisplayName, employeeFullName } from "@/services/employee.service";
+import {
+  employeeDisplayName,
+  employeeFullName,
+  formatUsd,
+} from "@/services/employee.service";
+import { WorkeeMark } from "@/components/Logo";
 import { ApiError } from "@/types";
 
 type DialogMode = "add" | "update" | null;
@@ -42,6 +49,8 @@ export function EmployeesPage() {
     "idle",
   );
   const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<EmployeeUsageSummary | null>(null);
+  const [teamUsage, setTeamUsage] = useState<TeamUsageSummary | null>(null);
   const [editingItem, setEditingItem] = useState<EmployeeRecordItem | null>(null);
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordFormError, setRecordFormError] = useState<string | null>(null);
@@ -54,10 +63,23 @@ export function EmployeesPage() {
   );
 
   useEffect(() => {
+    if (status !== "ready") {
+      return;
+    }
+    const abort = new AbortController();
+    employeeApi
+      .teamUsage(abort.signal)
+      .then(setTeamUsage)
+      .catch(() => setTeamUsage(null));
+    return () => abort.abort();
+  }, [status, employees]);
+
+  useEffect(() => {
     if (!selectedEmployee) {
       setRecords(null);
       setRecordsStatus("idle");
       setRecordsError(null);
+      setUsage(null);
       return;
     }
 
@@ -65,6 +87,12 @@ export function EmployeesPage() {
     const abort = new AbortController();
     setRecordsStatus("loading");
     setRecordsError(null);
+    setUsage(null);
+
+    employeeApi
+      .usage(employeeId, abort.signal)
+      .then(setUsage)
+      .catch(() => setUsage(null));
 
     employeeApi
       .records(employeeId, abort.signal)
@@ -210,8 +238,18 @@ export function EmployeesPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-primary">Employees</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
+            <h1 className="mt-2 flex flex-wrap items-baseline gap-x-3 text-xl font-semibold tracking-tight text-text-primary">
               Team
+              {teamUsage ? (
+                <span
+                  data-testid="team-usage"
+                  className="text-sm font-medium text-text-secondary"
+                  title="All employees (human employees only)"
+                >
+                  {formatUsd(teamUsage.allEmployeesUsd)} (
+                  {formatUsd(teamUsage.humanEmployeesUsd)})
+                </span>
+              ) : null}
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -308,6 +346,7 @@ export function EmployeesPage() {
         <EmployeeRecordsPanel
           employee={selectedEmployee}
           records={records}
+          usage={usage}
           status={recordsStatus}
           error={recordsError}
           onEdit={setEditingItem}
@@ -345,6 +384,7 @@ export function EmployeesPage() {
 function EmployeeRecordsPanel({
   employee,
   records,
+  usage,
   status,
   error,
   onEdit,
@@ -352,6 +392,7 @@ function EmployeeRecordsPanel({
 }: {
   employee: PublicEmployee;
   records: EmployeeRecordsResponse | null;
+  usage: EmployeeUsageSummary | null;
   status: "idle" | "loading" | "ready" | "error";
   error: string | null;
   onEdit: (item: EmployeeRecordItem) => void;
@@ -368,6 +409,24 @@ function EmployeeRecordsPanel({
       <h2 className="mt-2 text-xl font-semibold tracking-tight text-text-primary">
         {employeeDisplayName(employee)}
       </h2>
+      {usage ? (
+        <p
+          data-testid="employee-usage"
+          className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary"
+        >
+          <span>
+            Number of conversations{" "}
+            <span className="font-semibold text-text-primary">{usage.conversations}</span>{" "}
+            <span title="Interactions">({usage.interactions})</span>
+          </span>
+          <span>
+            Total amount{" "}
+            <span className="font-semibold text-text-primary">
+              {formatUsd(usage.totalUsd)}
+            </span>
+          </span>
+        </p>
+      ) : null}
 
       {status === "loading" ? (
         <p className="mt-4 text-sm text-text-secondary">Loading saved data…</p>
@@ -467,13 +526,17 @@ function EmployeeChip({
         aria-pressed={selected}
         aria-label={`${employeeDisplayName(employee)}, ${fullName}`}
         onClick={onSelect}
-        className={`group relative inline-flex min-h-11 cursor-pointer items-center rounded-full px-3.5 text-sm font-medium transition-colors ${
+        className={`group relative inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-sm font-medium transition-colors ${
           selected
             ? "bg-primary text-white"
             : "bg-primary-light text-primary hover:bg-primary/15"
         }`}
       >
-        <span dir="auto">{employeeDisplayName(employee)}</span>
+        {isDigitalEmployee(employee) ? <WorkeeMark inverted={selected} /> : null}
+        <span dir="auto">
+          {employeeDisplayName(employee)}
+          {employee.isOwner ? " · owner" : ""}
+        </span>
         <span
           role="tooltip"
           className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-text-primary px-2.5 py-1 text-xs font-medium text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"

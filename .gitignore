@@ -7,3 +7,7 @@ dist/
 .tools/
 .data/
 frontend/.vite/
+**/test-results/
+docs/qa/reports/
+docs/qa/phase-4-last-eval.json
+node_modules

@@ -15,6 +15,7 @@ model User {
   updatedAt    DateTime   @updatedAt @map("updated_at")
   employees         Employee[]
   chatConversations ChatConversation[]
+  contacts          Contact[]
 
   @@map("Users")
 }
@@ -32,12 +33,17 @@ model Employee {
   temperature  Float?
   instructions String?  @db.Text
   isProtected  Boolean  @default(false) @map("is_protected")
+  isOwner      Boolean  @default(false) @map("is_owner")
   createdAt    DateTime @default(now()) @map("created_at")
   user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   chatConversations        ChatConversation[] @relation("ConversationSpeaker")
   digitalChatConversations ChatConversation[] @relation("ConversationPartner")
   lists                    EmployeeList[]
   filings                  EmployeeFiling[]
+  ownedReminders           Reminder[]         @relation("ReminderOwner")
+  actedReminders           Reminder[]         @relation("ReminderActor")
+  contacts                 Contact[]
+  whatsappInboundSessions  WhatsAppInbound[]
 
   @@index([userId])
   @@map("Employees")
@@ -49,6 +55,10 @@ model ChatConversation {
   employeeId           String        @map("employee_id") @db.Uuid
   digitalEmployeeId    String        @map("digital_employee_id") @db.Uuid
   openaiConversationId String        @map("openai_conversation_id") @db.VarChar(255)
+  pendingAction        String?       @map("pending_action") @db.VarChar(32)
+  pendingTargets       Json?         @map("pending_targets")
+  pendingStep          String?       @map("pending_step") @db.VarChar(32)
+  pendingAt            DateTime?     @map("pending_at")
   createdAt            DateTime      @default(now()) @map("created_at")
   updatedAt            DateTime      @updatedAt @map("updated_at")
   user                 User          @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -56,6 +66,7 @@ model ChatConversation {
   digitalEmployee      Employee      @relation("ConversationPartner", fields: [digitalEmployeeId], references: [id], onDelete: Cascade)
   contextInjectedAt    DateTime?     @map("context_injected_at")
   messages             ChatMessage[]
+  llmUsages            LlmUsage[]
 
   @@unique([userId, employeeId, digitalEmployeeId])
   @@index([userId])
@@ -78,11 +89,53 @@ model ChatMessage {
   @@map("ChatMessages")
 }
 
+model LlmUsage {
+  id                   String           @id @default(uuid()) @db.Uuid
+  conversationId       String           @map("conversation_id") @db.Uuid
+  employeeId           String           @map("employee_id") @db.Uuid
+  digitalEmployeeId    String           @map("digital_employee_id") @db.Uuid
+  openaiConversationId String           @map("openai_conversation_id") @db.VarChar(255)
+  responseId           String?          @map("response_id") @db.VarChar(255)
+  model                String           @db.VarChar(100)
+  inputTokens          Int              @default(0) @map("input_tokens")
+  outputTokens         Int              @default(0) @map("output_tokens")
+  cachedTokens         Int              @default(0) @map("cached_tokens")
+  reasoningTokens      Int              @default(0) @map("reasoning_tokens")
+  totalTokens          Int              @default(0) @map("total_tokens")
+  costUsd              Decimal?         @map("cost_usd") @db.Decimal(14, 8)
+  priceModel           String?          @map("price_model") @db.VarChar(100)
+  usage                Json?
+  createdAt            DateTime         @default(now()) @map("created_at")
+  conversation         ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([employeeId, createdAt])
+  @@index([digitalEmployeeId, createdAt])
+  @@map("LlmUsages")
+}
+
+/// USD per 1M tokens (standard tier). `input_tokens` from OpenAI includes cached tokens.
+model LlmModelPrice {
+  id                 String   @id @default(uuid()) @db.Uuid
+  model              String   @unique @db.VarChar(100)
+  inputPer1m         Decimal  @map("input_usd_per_1m") @db.Decimal(12, 6)
+  cachedInputPer1m   Decimal  @map("cached_input_usd_per_1m") @db.Decimal(12, 6)
+  cacheWritePer1m    Decimal? @map("cache_write_usd_per_1m") @db.Decimal(12, 6)
+  outputPer1m        Decimal  @map("output_usd_per_1m") @db.Decimal(12, 6)
+  currency           String   @default("USD") @db.VarChar(3)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("LlmModelPrices")
+}
+
 model EmployeeList {
   id         String             @id @default(uuid()) @db.Uuid
   employeeId String             @map("employee_id") @db.Uuid
   listType   String             @map("list_type") @db.VarChar(32)
   name       String             @default("") @db.VarChar(100)
+  scope      String             @default("personal") @db.VarChar(16)
+  visibleTo  Json               @default("[]") @map("visible_to")
   createdAt  DateTime           @default(now()) @map("created_at")
   updatedAt  DateTime           @updatedAt @map("updated_at")
   employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -90,6 +143,7 @@ model EmployeeList {
 
   @@unique([employeeId, listType, name])
   @@index([employeeId])
+  @@index([scope])
   @@map("EmployeeLists")
 }
 
@@ -101,26 +155,127 @@ model EmployeeListItem {
   scope      String       @default("personal") @db.VarChar(16)
   addedById  String?      @map("added_by_id") @db.Uuid
   visibleTo  Json         @default("[]") @map("visible_to")
+  deletedAt  DateTime?    @map("deleted_at")
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
-  list       EmployeeList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  list          EmployeeList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  reminderId    String?      @unique @map("reminder_id") @db.Uuid
+  reminderClock Reminder?    @relation("ClockOwnsTask", fields: [reminderId], references: [id], onDelete: Cascade)
+  ownedClock    Reminder?    @relation("TaskOwnsClock")
 
-  @@unique([listId, itemKey])
+  @@index([listId, itemKey])
   @@index([scope])
+  @@index([deletedAt])
   @@map("EmployeeListItems")
 }
 
 model EmployeeFiling {
-  id         String   @id @default(uuid()) @db.Uuid
-  employeeId String   @map("employee_id") @db.Uuid
-  itemName   String   @map("item_name") @db.VarChar(200)
-  itemInfo   String   @map("item_info") @db.Text
-  addedById  String?  @map("added_by_id") @db.Uuid
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id              String    @id @default(uuid()) @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  itemName        String    @map("item_name") @db.VarChar(200)
+  itemInfo        String    @map("item_info") @db.Text
+  itemDescription String    @default("") @map("item_description") @db.Text
+  addedById       String?   @map("added_by_id") @db.Uuid
+  scope           String    @default("personal") @db.VarChar(16)
+  visibleTo       Json      @default("[]") @map("visible_to")
+  deletedAt       DateTime? @map("deleted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@unique([employeeId, itemName])
+  @@index([employeeId, itemName])
   @@index([employeeId])
+  @@index([deletedAt])
+  @@index([scope])
   @@map("EmployeeFilings")
+}
+
+model Reminder {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  ownerId   String   @map("owner_id") @db.Uuid
+  actorId   String   @map("actor_id") @db.Uuid
+  itemKey   String   @map("item_key") @db.VarChar(255)
+  itemLabel String   @map("item_label") @db.VarChar(255)
+  listType  String   @map("list_type") @db.VarChar(32)
+  fireAt    DateTime @map("fire_at")
+  repeat    String   @default("once") @db.VarChar(16)
+  pingIds     Json     @default("[]") @map("ping_ids")
+  messageText String   @default("") @map("message_text") @db.Text
+  composeAtFire Boolean @default(false) @map("compose_at_fire")
+  /** Empty = normal compose brief; "git_log" = summarize repo commits at fire time. */
+  composeSource String @default("") @map("compose_source") @db.VarChar(32)
+  /** Hours of git history for windowed digests (0 = recurring since-last-report mode). Supports fractions (e.g. 0.083 ≈ 5 minutes). */
+  composeLookbackHours Float @default(0) @map("compose_lookback_hours")
+  lastComposedText String @default("") @map("last_composed_text") @db.Text
+  /** HEAD sha after the last git digest fire (next window starts after this). */
+  lastReportSha String @default("") @map("last_report_sha") @db.VarChar(64)
+  status      String   @default("active") @db.VarChar(16)
+  sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
+  sentAt      DateTime? @map("sent_at")
+  workerItemId String?   @unique @map("worker_item_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  owner     Employee @relation("ReminderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  actor     Employee @relation("ReminderActor", fields: [actorId], references: [id], onDelete: Restrict)
+  workerItem EmployeeListItem? @relation("TaskOwnsClock", fields: [workerItemId], references: [id], onDelete: Cascade)
+  ownedTask  EmployeeListItem? @relation("ClockOwnsTask")
+
+  @@index([userId, status, fireAt])
+  @@index([ownerId, itemKey])
+  @@map("Reminders")
+}
+
+model AuditEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  actorEmployeeId  String?  @map("actor_employee_id") @db.Uuid
+  action           String   @db.VarChar(64)
+  entityType       String   @map("entity_type") @db.VarChar(64)
+  entityId         String?  @map("entity_id") @db.Uuid
+  summary          String   @db.VarChar(500)
+  detail           Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@map("AuditEvents")
+}
+
+model WhatsAppInbound {
+  phone                   String    @id @db.VarChar(32)
+  lastInboundAt           DateTime  @map("last_inbound_at")
+  activeDigitalEmployeeId String?   @map("active_digital_employee_id") @db.Uuid
+  activeDigitalEmployee   Employee? @relation(fields: [activeDigitalEmployeeId], references: [id], onDelete: SetNull)
+
+  @@index([activeDigitalEmployeeId])
+  @@map("WhatsAppInbounds")
+}
+
+/** Meta inbound wamid dedup — atomic claim across API instances. */
+model WhatsAppProcessedMessage {
+  messageId String   @id @map("message_id") @db.VarChar(128)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("WhatsAppProcessedMessages")
+}
+
+// Personal phone book for a human employee (POC). Later: ownerEmployeeId null = business-wide.
+model Contact {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  ownerEmployeeId  String   @map("owner_employee_id") @db.Uuid
+  name             String   @db.VarChar(100)
+  phone            String   @db.VarChar(32)
+  kind             String   @default("personal") @db.VarChar(32)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  owner            Employee @relation(fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerEmployeeId, phone])
+  @@index([userId])
+  @@index([ownerEmployeeId, name])
+  @@map("Contacts")
 }

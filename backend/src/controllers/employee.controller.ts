@@ -9,12 +9,16 @@ import {
 import {
   createEmployeeForUser,
   deleteEmployeeForUser,
-  getDigitalEmployeeDefaults,
+  getLucyPromptDefaults,
   getEmployeeForUser,
   listEmployeesForUser,
   resolveActingEmployee,
   updateEmployeeForUser,
 } from "../services/employee.service.js";
+import {
+  getEmployeeUsageSummary,
+  getTeamUsageSummary,
+} from "../services/llm-usage.service.js";
 import { parseEmployeeIdQuery } from "../validation/chat.validation.js";
 import { parseEmployeeBody, parseRecordFields } from "../validation/employee.validation.js";
 import { UnauthorizedError } from "../utils/errors.js";
@@ -36,7 +40,8 @@ export async function getDigitalDefaults(req: Request, res: Response): Promise<v
     throw new UnauthorizedError();
   }
 
-  res.status(200).json(getDigitalEmployeeDefaults());
+  // Prefer Lucy's saved prompt so "inherit from Lucy" matches what she actually runs.
+  res.status(200).json(await getLucyPromptDefaults(req.user.id));
 }
 
 export async function getEmployeeRecords(req: Request, res: Response): Promise<void> {
@@ -48,6 +53,25 @@ export async function getEmployeeRecords(req: Request, res: Response): Promise<v
   await getEmployeeForUser(req.user.id, employeeId);
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json(records);
+}
+
+export async function getTeamUsage(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  const employees = await listEmployeesForUser(req.user.id);
+  res.status(200).json(await getTeamUsageSummary(req.user.id, employees));
+}
+
+export async function getEmployeeUsage(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  const employeeId = parseEmployeeIdQuery(req.params.id);
+  await getEmployeeForUser(req.user.id, employeeId);
+  res.status(200).json(await getEmployeeUsageSummary(req.user.id, employeeId));
 }
 
 export async function updateEmployeeRecordItem(
@@ -71,13 +95,15 @@ export async function updateEmployeeRecordItem(
     employees.find((employee) => isProtectedEmployee(employee)) ??
     employees.find((employee) => employee.kind === "digital");
   const notifications = digital
-    ? await notifySharedItemEvents({
-        userId: req.user.id,
-        actor,
-        employees: humanEmployees(employees),
-        events,
-        digitalEmployeeId: digital.id,
-      })
+    ? (
+        await notifySharedItemEvents({
+          userId: req.user.id,
+          actor,
+          employees: humanEmployees(employees),
+          events,
+          digitalEmployeeId: digital.id,
+        })
+      ).notifications
     : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });
@@ -103,13 +129,15 @@ export async function deleteEmployeeRecordItem(
     employees.find((employee) => isProtectedEmployee(employee)) ??
     employees.find((employee) => employee.kind === "digital");
   const notifications = digital
-    ? await notifySharedItemEvents({
-        userId: req.user.id,
-        actor,
-        employees: humanEmployees(employees),
-        events,
-        digitalEmployeeId: digital.id,
-      })
+    ? (
+        await notifySharedItemEvents({
+          userId: req.user.id,
+          actor,
+          employees: humanEmployees(employees),
+          events,
+          digitalEmployeeId: digital.id,
+        })
+      ).notifications
     : [];
   const records = await getEmployeeOwnedRecords(employeeId);
   res.status(200).json({ records, notifications });
