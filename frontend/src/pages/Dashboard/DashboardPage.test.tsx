@@ -10,12 +10,15 @@ import { WhatsAppPage } from "@/pages/WhatsApp/WhatsAppPage";
 import { LoginPage } from "@/pages/Login/LoginPage";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
-const { loginMock, meMock, logoutMock, listEmployeesMock } = vi.hoisted(() => ({
-  loginMock: vi.fn(),
-  meMock: vi.fn(),
-  logoutMock: vi.fn(),
-  listEmployeesMock: vi.fn(),
-}));
+const { loginMock, meMock, logoutMock, listEmployeesMock, whatsappStatusMock } = vi.hoisted(
+  () => ({
+    loginMock: vi.fn(),
+    meMock: vi.fn(),
+    logoutMock: vi.fn(),
+    listEmployeesMock: vi.fn(),
+    whatsappStatusMock: vi.fn(),
+  }),
+);
 
 vi.mock("@/services/auth.service", () => ({
   authApi: {
@@ -37,11 +40,27 @@ vi.mock("@/services/employee.service", async () => {
       update: vi.fn(),
       remove: vi.fn(),
       records: vi.fn().mockResolvedValue({ employeeId: "", groups: [] }),
+      usage: vi.fn().mockResolvedValue({
+        employeeId: "",
+        conversations: 0,
+        interactions: 0,
+        totalUsd: 0,
+      }),
+      teamUsage: vi.fn().mockResolvedValue({
+        allEmployeesUsd: 0,
+        humanEmployeesUsd: 0,
+      }),
       updateRecord: vi.fn(),
       deleteRecord: vi.fn(),
     },
   };
 });
+
+vi.mock("@/services/whatsapp.service", () => ({
+  whatsappApi: {
+    status: whatsappStatusMock,
+  },
+}));
 
 function renderDashboard(extraRoutes = false) {
   return renderApp(
@@ -63,6 +82,15 @@ describe("Dashboard page", () => {
     loginMock.mockReset();
     meMock.mockReset();
     logoutMock.mockReset().mockResolvedValue({ ok: true });
+    whatsappStatusMock.mockReset().mockResolvedValue({
+      expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaWabaWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaAppWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      webhookMismatch: false,
+      hasAccessToken: true,
+      lastInboundAt: null,
+      events: [],
+    });
     listEmployeesMock.mockReset().mockResolvedValue({
       count: 2,
       employees: [
@@ -127,6 +155,19 @@ describe("Dashboard page", () => {
 
     expect(await screen.findByTestId("chat-page")).toBeInTheDocument();
     expect(screen.getByLabelText("Chat As")).toBeInTheDocument();
+  });
+
+  it("opens the WhatsApp screen from the WhatsApp tab", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(await screen.findByRole("link", { name: "WhatsApp" }));
+
+    expect(await screen.findByTestId("whatsapp-page")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "WhatsApp" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("logs the user out and returns to login", async () => {

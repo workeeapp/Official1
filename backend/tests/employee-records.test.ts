@@ -498,6 +498,174 @@ describe("employee records", () => {
     expect(resolveFilingItemName("קוד", names)).toBeNull();
   });
 
+  it("updates a filing when update_filing uses slight Hebrew name drift", async () => {
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+    filingFindMany.mockResolvedValue([
+      { itemName: "קוד לכניסה לחשבון אימייל" },
+    ]);
+    filingFindFirst.mockResolvedValue({
+      id: "filing-email",
+      itemName: "קוד לכניסה לחשבון אימייל",
+      itemInfo: "123",
+      itemDescription: "קוד לכניסה לחשבון אימייל",
+      visibleTo: [employeeId],
+      scope: "personal",
+    });
+    filingUpdate.mockResolvedValue({ id: "filing-email" });
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "update_filing",
+          itemName: "קוד כניסה לחשבון אימייל",
+          itemInfo: "999",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+
+    expect(filingFindFirst).toHaveBeenCalledWith({
+      where: {
+        employeeId,
+        itemName: "קוד לכניסה לחשבון אימייל",
+        deletedAt: null,
+      },
+    });
+    expect(filingUpdate).toHaveBeenCalledWith({
+      where: { id: "filing-email" },
+      data: {
+        itemInfo: "999",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+      },
+    });
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(result.filingMutations).toEqual([
+      {
+        action: "update",
+        itemName: "קוד לכניסה לחשבון אימייל",
+        itemInfo: "999",
+        itemDescription: "קוד לכניסה לחשבון אימייל",
+      },
+    ]);
+  });
+
+  it("does not create a filing when update_filing matches nothing", async () => {
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+    filingFindMany.mockResolvedValue([{ itemName: "קוד לשער אצל לבנת" }]);
+    filingFindFirst.mockResolvedValue(null);
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "update_filing",
+          itemName: "קוד כניסה לחשבון אימייל",
+          itemInfo: "999",
+          itemDescription: "תיאור",
+          targets: [],
+        },
+      ],
+    });
+
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(filingUpdate).not.toHaveBeenCalled();
+    expect(result.filingMutations).toEqual([]);
+  });
+
+  it("soft-deletes a filing when remove_filing uses slight Hebrew name drift", async () => {
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+    filingFindMany.mockResolvedValue([
+      { id: "filing-email", itemName: "קוד לכניסה לחשבון אימייל" },
+    ]);
+    filingUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "remove_filing",
+          itemName: "קוד כניסה לחשבון אימייל",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+
+    expect(filingUpdateMany).toHaveBeenCalledWith({
+      where: {
+        employeeId,
+        itemName: "קוד לכניסה לחשבון אימייל",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(itemUpdateMany).not.toHaveBeenCalled();
+    expect(result.filingMutations).toEqual([
+      {
+        action: "remove",
+        itemName: "קוד לכניסה לחשבון אימייל",
+        itemInfo: "",
+        itemDescription: "",
+      },
+    ]);
+  });
+
+  it("does not soft-delete when remove_filing matches nothing", async () => {
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+    filingFindMany
+      .mockResolvedValueOnce([{ itemName: "קוד לשער אצל לבנת" }])
+      .mockResolvedValueOnce([]);
+    filingUpdateMany.mockResolvedValue({ count: 0 });
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "remove_filing",
+          itemName: "קוד כניסה לחשבון אימייל",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+
+    expect(filingUpdateMany).toHaveBeenCalledWith({
+      where: {
+        employeeId,
+        itemName: "קוד כניסה לחשבון אימייל",
+        deletedAt: null,
+      },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(result.filingMutations).toEqual([]);
+  });
+
+  it("refuses add_filing when item_description is empty", async () => {
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+    filingFindMany.mockResolvedValue([]);
+    filingFindFirst.mockResolvedValue(null);
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "add_filing",
+          itemName: "קוד כניסה",
+          itemInfo: "1234",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(result.filingMutations).toEqual([]);
+  });
+
   it("derives a custom list title from item list_name when the list row name is empty", () => {
     expect(
       deriveCustomListName([
