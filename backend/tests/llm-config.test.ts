@@ -70,6 +70,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("הרשימה המשותפת עם עמית");
     expect(config.systemMessage).toContain("FULL DUMP TRIGGERS");
     expect(config.systemMessage).toContain("FULL DUMP — NOT these");
+    expect(config.systemMessage).toContain("FULL DUMP COMPLETENESS");
     expect(config.systemMessage).toContain("סכמי לי");
     expect(config.systemMessage).toContain("קניות משותפות — עם");
     expect(config.systemMessage).toContain("SHOPPING BOTH PERSONAL AND SHARED");
@@ -77,6 +78,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("יש לך קוטג׳ לקנות");
     expect(config.systemMessage).toContain("SHARED WITH A NAMED PERSON");
     expect(config.systemMessage).toContain("שיעורי הנהיגה של מאיה");
+    expect(config.systemMessage).toContain("stop after the first shared list");
     expect(config.systemMessage).toContain("APPLY FEEDBACK (layout)");
     expect(config.systemMessage).toContain("נמחקו מהמטלות");
     expect(config.systemMessage).toContain("SINGLE NAMED/SHARED LIST REMOVE");
