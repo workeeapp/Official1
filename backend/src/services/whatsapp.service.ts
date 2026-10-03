@@ -12,7 +12,12 @@ import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import { sendWhatsAppText, startWhatsAppTyping } from "./whatsapp-send.js";
+import {
+  sendWhatsAppReplyOrFallback,
+  sendWhatsAppText,
+  startWhatsAppTyping,
+  WHATSAPP_SEND_FALLBACK_HE,
+} from "./whatsapp-send.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -160,16 +165,32 @@ export async function handleInboundWhatsAppTexts(
       const reply = parseLlmReply(turn.reply).response.trim();
       recordWhatsAppEvent("llm_ok", `replyChars=${reply.length}`);
       if (reply) {
-        const sendResult = await sendWhatsAppText(message.from, reply, {
+        const delivery = await sendWhatsAppReplyOrFallback(message.from, reply, {
           ignoreSession: true,
         });
-        recordWhatsAppEvent("reply_send", `result=${sendResult}`);
+        recordWhatsAppEvent(
+          "reply_send",
+          `result=${delivery.result}${delivery.usedFallback ? " fallback=1" : ""}`,
+        );
       }
     } catch (error) {
       recordWhatsAppEvent(
         "reply_failed",
         error instanceof Error ? error.message : "unknown",
       );
+      try {
+        const fallbackResult = await sendWhatsAppText(
+          message.from,
+          WHATSAPP_SEND_FALLBACK_HE,
+          { ignoreSession: true, maxAttempts: 2 },
+        );
+        recordWhatsAppEvent(
+          "reply_fallback",
+          `after=exception result=${fallbackResult}`,
+        );
+      } catch {
+        /* Meta still down — nothing more on this channel */
+      }
     } finally {
       stopTyping();
     }

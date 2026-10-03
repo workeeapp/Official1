@@ -7,12 +7,51 @@ import { hasWhatsAppSession } from "./whatsapp-window.js";
 
 export type WhatsAppTextResult = "sent" | "no_session" | "failed";
 
+/** Spoken when the real reply could not be delivered after retries. */
+export const WHATSAPP_SEND_FALLBACK_HE =
+  "לא הצלחתי לשלוח את התשובה בגלל תקלה זמנית בוואטסאפ. שלחי שוב בבקשה ואנסה שוב.";
+
 export interface WhatsAppDeliverySkip {
   label: string;
   reason: "no_session" | "failed" | "no_phone";
 }
 
 const TYPING_REFRESH_MS = 20_000;
+
+/** Initial try + retries for transient Graph blips (e.g. OAuth #2 unavailable). */
+const SEND_MAX_ATTEMPTS = 4;
+/** Pause before attempt 2 / 3 / 4. */
+const SEND_RETRY_DELAYS_MS = [800, 2000, 4000] as const;
+
+export function isTransientWhatsAppSendFailure(
+  status: number,
+  detail: string,
+): boolean {
+  if (status === 429 || status === 408 || status >= 500) {
+    return true;
+  }
+  if (/\b131047\b/.test(detail)) {
+    return false;
+  }
+  if (status === 401 || status === 403) {
+    return false;
+  }
+  // Meta OAuthException (#2) Service temporarily unavailable — seen on reply sends.
+  if (/\bcode=2\b/.test(detail) || /\(#2\)/.test(detail)) {
+    return true;
+  }
+  if (/temporarily unavailable|try again later|service unavailable/i.test(detail)) {
+    return true;
+  }
+  return false;
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export function whatsappTypingBody(messageId: string): {
   messaging_product: "whatsapp";
@@ -89,7 +128,12 @@ export function startWhatsAppTyping(messageId: string): () => void {
 export async function sendWhatsAppText(
   to: string,
   text: string,
-  options?: { ignoreSession?: boolean },
+  options?: {
+    ignoreSession?: boolean;
+    sleepFn?: (ms: number) => Promise<void>;
+    /** Cap attempts (default SEND_MAX_ATTEMPTS). Useful for short fallbacks. */
+    maxAttempts?: number;
+  },
 ): Promise<WhatsAppTextResult> {
   const env = getEnv();
   const token = env.WHATSAPP_ACCESS_TOKEN?.trim();
@@ -108,35 +152,102 @@ export async function sendWhatsAppText(
     return "no_session";
   }
 
-  const response = await fetch(
-    `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: destination,
-        type: "text",
-        text: { body: text.slice(0, 4096), preview_url: false },
-      }),
-    },
+  const wait = options?.sleepFn ?? sleep;
+  const maxAttempts = Math.max(
+    1,
+    Math.min(options?.maxAttempts ?? SEND_MAX_ATTEMPTS, SEND_MAX_ATTEMPTS),
   );
+  const body = JSON.stringify({
+    messaging_product: "whatsapp",
+    to: destination,
+    type: "text",
+    text: { body: text.slice(0, 4096), preview_url: false },
+  });
+  const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
 
-  if (!response.ok) {
-    const detail = await graphErrorDetail(response);
-    const result = /\b131047\b/.test(detail) ? "no_session" : "failed";
-    recordWhatsAppEvent(
-      "send_fail",
-      `status=${response.status} result=${result} ${detail}`.trim(),
-    );
-    return result;
+  let lastResult: WhatsAppTextResult = "failed";
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, { method: "POST", headers, body });
+      if (response.ok) {
+        const suffix =
+          attempt > 1 ? ` after_retry=${attempt - 1}` : "";
+        recordWhatsAppEvent(
+          "send_ok",
+          `to=…${destination.slice(-4)}${suffix}`,
+        );
+        return "sent";
+      }
+
+      const detail = await graphErrorDetail(response);
+      const result = /\b131047\b/.test(detail) ? "no_session" : "failed";
+      lastResult = result;
+      const transient =
+        result === "failed" &&
+        isTransientWhatsAppSendFailure(response.status, detail);
+      recordWhatsAppEvent(
+        transient && attempt < maxAttempts ? "send_retry" : "send_fail",
+        `status=${response.status} result=${result} attempt=${attempt}/${maxAttempts} ${detail}`.trim(),
+      );
+      if (!transient || attempt >= maxAttempts) {
+        return result;
+      }
+    } catch (error) {
+      lastResult = "failed";
+      const message = error instanceof Error ? error.message : "unknown";
+      const canRetry = attempt < maxAttempts;
+      recordWhatsAppEvent(
+        canRetry ? "send_retry" : "send_fail",
+        `network attempt=${attempt}/${maxAttempts} ${message}`.trim(),
+      );
+      if (!canRetry) {
+        return "failed";
+      }
+    }
+
+    const delay = SEND_RETRY_DELAYS_MS[attempt - 1] ?? SEND_RETRY_DELAYS_MS.at(-1)!;
+    await wait(delay);
   }
 
-  recordWhatsAppEvent("send_ok", `to=…${destination.slice(-4)}`);
-  return "sent";
+  return lastResult;
+}
+
+/**
+ * Send the assistant reply to WhatsApp. If it still fails after retries, try once
+ * more with a short Hebrew notice so the speaker is not left with silence.
+ */
+export async function sendWhatsAppReplyOrFallback(
+  to: string,
+  reply: string,
+  options?: { ignoreSession?: boolean; sleepFn?: (ms: number) => Promise<void> },
+): Promise<{ result: WhatsAppTextResult; usedFallback: boolean }> {
+  const text = reply.trim();
+  if (!text) {
+    return { result: "failed", usedFallback: false };
+  }
+
+  const result = await sendWhatsAppText(to, text, options);
+  if (result === "sent") {
+    return { result, usedFallback: false };
+  }
+
+  const fallbackResult = await sendWhatsAppText(to, WHATSAPP_SEND_FALLBACK_HE, {
+    ...options,
+    // Short notice: fewer waits if Graph is still flaky.
+    maxAttempts: 2,
+  });
+  recordWhatsAppEvent(
+    "reply_fallback",
+    `after=${result} result=${fallbackResult}`,
+  );
+  return {
+    result: fallbackResult,
+    usedFallback: true,
+  };
 }
 
 async function graphErrorDetail(response: Response): Promise<string> {

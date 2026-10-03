@@ -7,7 +7,11 @@ import {
   composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
+  isTransientWhatsAppSendFailure,
+  sendWhatsAppReplyOrFallback,
+  sendWhatsAppText,
   sendWhatsAppTyping,
+  WHATSAPP_SEND_FALLBACK_HE,
   whatsappTypingBody,
 } from "../src/services/whatsapp-send.js";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
@@ -169,6 +173,140 @@ describe("WhatsApp webhook", () => {
     });
 
     expect(response.status).toBe(503);
+  });
+
+  it("sends a Hebrew fallback when the real reply keeps failing", async () => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "EAATestToken";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456";
+    resetEnvCache();
+    resetWhatsAppEvents();
+
+    const bodies: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const raw = typeof init?.body === "string" ? init.body : "";
+      bodies.push(raw);
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 2,
+            type: "OAuthException",
+            message: "(#2) Service temporarily unavailable",
+          },
+        }),
+        { status: 400 },
+      );
+    });
+
+    const delivery = await sendWhatsAppReplyOrFallback(
+      "972501234567",
+      "לאשר מחיקה של 2 פריטים?",
+      {
+        ignoreSession: true,
+        sleepFn: async () => {},
+      },
+    );
+
+    expect(delivery.usedFallback).toBe(true);
+    expect(delivery.result).toBe("failed");
+    expect(bodies.some((body) => body.includes("לאשר מחיקה"))).toBe(true);
+    expect(bodies.some((body) => body.includes(WHATSAPP_SEND_FALLBACK_HE))).toBe(
+      true,
+    );
+    expect(listWhatsAppEvents().some((e) => e.step === "reply_fallback")).toBe(
+      true,
+    );
+
+    fetchSpy.mockRestore();
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    resetEnvCache();
+  });
+
+  it("retries transient Graph failures then succeeds", async () => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "EAATestToken";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456";
+    resetEnvCache();
+    resetWhatsAppEvents();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      if (fetchSpy.mock.calls.length < 3) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 2,
+              type: "OAuthException",
+              message: "(#2) Service temporarily unavailable",
+            },
+          }),
+          { status: 400 },
+        );
+      }
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.ok" }] }), {
+        status: 200,
+      });
+    });
+
+    const sleeps: number[] = [];
+    const result = await sendWhatsAppText("972501234567", "שלום", {
+      ignoreSession: true,
+      sleepFn: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    expect(result).toBe("sent");
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([800, 2000]);
+    expect(listWhatsAppEvents().some((e) => e.step === "send_retry")).toBe(true);
+    expect(listWhatsAppEvents().some((e) => e.step === "send_ok")).toBe(true);
+
+    fetchSpy.mockRestore();
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    resetEnvCache();
+  });
+
+  it("does not retry permanent no_session Graph errors", async () => {
+    process.env.WHATSAPP_ACCESS_TOKEN = "EAATestToken";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456";
+    resetEnvCache();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 131047, type: "OAuthException", message: "re-engage" },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    const result = await sendWhatsAppText("972501234567", "שלום", {
+      ignoreSession: true,
+      sleepFn: async () => {
+        throw new Error("should not sleep");
+      },
+    });
+
+    expect(result).toBe("no_session");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    fetchSpy.mockRestore();
+    delete process.env.WHATSAPP_ACCESS_TOKEN;
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    resetEnvCache();
+  });
+
+  it("classifies Meta #2 as transient and 131047 as permanent", () => {
+    expect(
+      isTransientWhatsAppSendFailure(
+        400,
+        "code=2 type=OAuthException (#2) Service temporarily unavailable",
+      ),
+    ).toBe(true);
+    expect(
+      isTransientWhatsAppSendFailure(400, "code=131047 type=OAuthException"),
+    ).toBe(false);
+    expect(isTransientWhatsAppSendFailure(503, "code=1")).toBe(true);
   });
 
   it("marks the inbound message read and shows typing", () => {
