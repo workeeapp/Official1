@@ -60,12 +60,12 @@ jobs:
           list-suites: all
           list-tests: all
           fail-on-error: false
-      - name: Upload JUnit XML
+      - name: Upload test report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: shared-junit
-          path: shared/test-results/junit.xml
+          name: shared-test-report
+          path: shared/test-results/
           if-no-files-found: ignore
 
   backend:
@@ -93,12 +93,12 @@ jobs:
           list-suites: all
           list-tests: all
           fail-on-error: false
-      - name: Upload JUnit XML
+      - name: Upload test report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: backend-junit
-          path: backend/test-results/junit.xml
+          name: backend-test-report
+          path: backend/test-results/
           if-no-files-found: ignore
 
   frontend:
@@ -125,10 +125,10 @@ jobs:
           list-suites: all
           list-tests: all
           fail-on-error: false
-      - name: Upload JUnit XML
+      - name: Upload test report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-junit
-          path: frontend/test-results/junit.xml
+          name: frontend-test-report
+          path: frontend/test-results/
           if-no-files-found: ignore

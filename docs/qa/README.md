@@ -59,6 +59,8 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 | [phase-2-ui-matrix.md](./phase-2-ui-matrix.md) | Phase 2 coverage grid (screen × states) |
 | [test-inventory.md](./test-inventory.md) | Full numbered list of every `it(...)` title |
 | [journeys-catalog.md](./journeys-catalog.md) | Phase 4 utterance → ACTION seeds |
+| [last-ci-report.md](./last-ci-report.md) | Latest CI report as markdown |
+| [reports/](./reports/) | Vitest **HTML** reports (`backend/` · `frontend/` · `shared/`) — open via `npx vite preview --outDir docs/qa/reports/backend` |
 
 ## Running tests
 
@@ -66,6 +68,6 @@ Not full coverage or exact Hebrew wording — a handful of paths before/after a 
 npm test
 ```
 
-**CI:** push/PR + on-demand (Actions → **Test** → **Run workflow**). Three jobs (`shared` / `backend` / `frontend`). Each publishes a Checks report (per-case pass/fail) and a JUnit artifact. **Re-run failed jobs** retries failed packages only — not individual Vitest cases.
+**CI:** push/PR + on-demand (Actions → **Test** → **Run workflow**). Three jobs (`shared` / `backend` / `frontend`). Each publishes a Checks Summary, and uploads a **`*-test-report`** artifact (`index.html` + JUnit). Download the artifact and open with `npx vite preview --outDir <extracted-folder>` (raw `file://` often fails for Vitest HTML).
 
 See also root [README.md](../../README.md#tests).

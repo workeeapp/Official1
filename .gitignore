@@ -8,4 +8,5 @@ dist/
 .data/
 frontend/.vite/
 **/test-results/
+docs/qa/reports/
 node_modules
