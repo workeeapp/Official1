@@ -6,15 +6,17 @@ Branch: `test/qa-phase-1-engine` (worktree). Product runtime stays on `feat/mult
 
 | Domain | add | update | remove | Notes / gaps |
 |--------|-----|--------|--------|--------------|
-| shopping | covered | covered | covered | `employee-records.test.ts` |
-| tasks | covered | covered | covered | type correction shopping↔tasks |
-| custom list | covered | covered | covered | shared + partner notify cases |
+| shopping | covered | covered | covered | `employee-records.test.ts` — no silent type rewrite |
+| tasks | covered | covered | covered | ACTION `list_type` wins; reply wording may still fix קניות↔מטלות |
+| custom list | covered | covered | covered | shared + partner notify from **DB**; no cross-list fuzzy remove |
 | filing | covered (+ refuse empty description) | covered (loose name + miss) | covered (exact + loose + miss) | rename `item_name` = intentional gap |
 | reminders | covered | covered | covered | confirm bulk in `reminders.test.ts` / `pending-action.test.ts` |
 | directory | covered (`directory-apply.test.ts`) | **N/A (no ACTION)** | covered | phone change = remove+add |
 | jobs | N/A (lifecycle) | progress/snooze… | clear via lists | not CRUD rows |
 | messages | send only | N/A | N/A | by design |
 | bulk list delete | N/A | N/A | covered | ≥2 removes → `delete_lists` confirm hold |
+| no-guess share targets | N/A | N/A | covered | empty list targets stay empty — no message/top-level inherit (`llm-message` / pending-action) |
+| no-guess list match | covered | covered | covered | exact ACTION only; miss = no-op; personal beats same-named shared on empty targets |
 
 ## Engine cases added on this branch
 

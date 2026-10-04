@@ -100,5 +100,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("נמחקו מהמטלות");
     expect(config.systemMessage).toContain("SINGLE NAMED/SHARED LIST REMOVE");
     expect(config.systemMessage).toContain("DELETE ALL EXCEPT KEEP");
+    expect(config.systemMessage).toContain("EXACT LIST OR ASK");
+    expect(config.systemMessage).toContain("TARGETS ON LISTS");
+    expect(config.systemMessage).toContain("server will NOT fix a wrong list_name");
+    expect(config.systemMessage).toContain("top-level metadata.targets");
   });
 });

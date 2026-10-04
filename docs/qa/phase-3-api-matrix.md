@@ -20,9 +20,11 @@ Diff vs Phase 1: same known ACTION, but full chat pipe (auth → parse → apply
 - Bulk `delete_lists` confirm round-trip through chat API
 - WhatsApp webhook inbound → same mocked LLM → apply (channel glue)
 - Reminder save/cancel via chat API end-to-end
+- Phase 3 chat stub for personal shopping + same-turn message (targets must stay `[]` — engine unit covered)
 
 ## Not Phase 3
 
 - Live Lucy routing → Phase 4  
 - Playwright / staging smoke → Phase 5  
 - Apply-only unit → Phase 1  
+- Exact-list-or-ask **prompt** behavior → Phase 4 (`list-ambiguous-name-ask`)  
