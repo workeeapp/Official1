@@ -56,7 +56,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 **Response text:** the model writes `response` and that is what the user sees. The server may still correct shopping/tasks wording after list apply, add WhatsApp delivery notices, or show reminder/bulk-delete confirm prompts — it does **not** append a mutation apply summary or replace answers with a server-built status report. Spoken replies must stay in product Hebrew — never expose schema/code words (`list_name`, `list_type`, `metadata`, `EMPLOYEE_SAVED_DATA`, …). A **full dump** ask («כל מה ששמור עלי» / «סיכום מלא») should list shopping, tasks/meetings, custom lists, active reminders, filings+memory, and contacts from this turn’s saved data — not tasks alone.
 
-**Do not** expand `item: "all"`, invent reminder clocks from weekday words in free text, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל ביקש לתזכר אותך`).
+**Do not** expand `item: "all"`, invent reminder clocks from weekday words in free text, or harvest phones from free text. Unknown people need digits (or a saved contact name). Outbound to someone else is attributed (`מאת טל` / `טל מבקש/ת להזכיר לך`).
 
 ## Lists, meetings, sharing
 

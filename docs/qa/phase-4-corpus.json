@@ -311,6 +311,24 @@
       ]
     },
     {
+      "id": "self-nudge-with-volunteered-phone",
+      "tag": "happy",
+      "utterance": "תזכירי לי בסביבות 14:00 לדבר עם רב פס הטלפון שלהם לווטסאפ הוא 0508087073",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "directory_has_action",
+          "action": "add",
+          "nameIncludes": "רב פס",
+          "phoneIncludes": "0508087073"
+        },
+        {
+          "type": "reminders_has_action",
+          "action": "add"
+        }
+      ]
+    },
+    {
       "id": "directory-remove-michal",
       "tag": "happy",
       "utterance": "תמחקי את מיכל מספר הטלפונים",

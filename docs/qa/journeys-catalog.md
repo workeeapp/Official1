@@ -17,6 +17,7 @@ Tags: `happy` | `action-confusion` | `hallucination-boundaries` | `safety-rails`
 | dump-what-saved | hallucination-boundaries | מה שמור לי | mixed live rows | answer from `EMPLOYEE_SAVED_DATA`; no invent; no `query: report` |
 | no-invented-clock | hallucination-boundaries | תזכיר לי משהו (vague) | — | hold/ask for time+text; no invented `reminders.add` with fake clock |
 | directory-add-michal | happy | תוסיפי את מיכל 054-1111111 | — | `directory.add` name+phone |
+| self-nudge-with-volunteered-phone | happy | תזכירי לי בסביבות 14:00 לדבר עם רב פס … 0508087073 | — | `directory.add` + self-nudge reminders |
 | directory-remove-michal | happy | תמחקי את מיכל מספר הטלפונים | contact מיכל | `directory.remove` |
 | reminder-cancel-named | happy | בטל את התזכורת לחלב | active clock | `reminders.remove` + confirm path as product requires |
 
