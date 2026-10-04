@@ -277,6 +277,20 @@ describe("planReminderWrites", () => {
     expect(first.ask).toEqual([milkRemove]);
     expect(first.nextPending?.targets).toEqual(["חלב"]);
     expect(formatReminderConfirmNotice(first.ask, false, false)).toContain("חלב");
+    expect(formatReminderConfirmNotice(first.ask, false, false)).toMatch(
+      /לבטל את התזכורת/,
+    );
+    expect(formatReminderConfirmNotice(first.ask, false, false)).toMatch(
+      /לא יימחקו/,
+    );
+    expect(
+      formatReminderConfirmNotice(first.ask, false, false, {
+        repeatsByItem: new Map([["חלב", "10:seconds"]]),
+      }),
+    ).toMatch(/כל 10 שניות/);
+    expect(formatReminderConfirmNotice(first.ask, false, false)).toMatch(
+      /הפריט או המטלה לא יימחקו/,
+    );
 
     const second = planReminderWrites([], true, first.nextPending);
     expect(second.apply.map((row) => row.item)).toEqual(["חלב"]);

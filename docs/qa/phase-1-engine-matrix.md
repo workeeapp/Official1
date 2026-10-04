@@ -17,6 +17,7 @@ Branch: `test/qa-phase-1-engine` (worktree). Product runtime stays on `feat/mult
 | bulk list delete | N/A | N/A | covered | ≥2 removes → `delete_lists` confirm hold |
 | no-guess share targets | N/A | N/A | covered | empty list targets stay empty — no message/top-level inherit (`llm-message` / pending-action) |
 | no-guess list match | covered | covered | covered | exact ACTION only; miss = no-op; personal beats same-named shared on empty targets |
+| filtered multi delete (model) | N/A | Phase 4 corpus | engine confirm same as bulk | prompt: delete all matches when count/plural named; no «לאיזו» |
 
 ## Engine cases added on this branch
 

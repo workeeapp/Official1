@@ -59,6 +59,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("רב פס");
     expect(config.systemMessage).toContain("HEBREW PERSON / GENDER ON RELAYS");
     expect(config.systemMessage).toContain("מבקשת להזכיר לך");
+    expect(config.systemMessage).toContain("RECURRING SELF-NUDGE / UNTIL DONE");
+    expect(config.systemMessage).toContain("לנדנד עד שיקנה");
+    expect(config.systemMessage).toContain("תפסיקי");
+    expect(config.systemMessage).toContain("Keep the speaker shopping/task row");
+    expect(config.systemMessage).toContain("SELF-NUDGE vs CONTACT THEM");
+    expect(config.systemMessage).toContain("הופ און");
     expect(config.systemMessage).toContain("SNOOZE (vs plain self-nudge)");
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
@@ -104,5 +110,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("TARGETS ON LISTS");
     expect(config.systemMessage).toContain("server will NOT fix a wrong list_name");
     expect(config.systemMessage).toContain("top-level metadata.targets");
+    expect(config.systemMessage).toContain("FILTERED MULTI DELETE");
+    expect(config.systemMessage).toContain("תמחקי את 2 המטלות של רב פס");
+    expect(config.systemMessage).toContain("לאילו מ־");
   });
 });
