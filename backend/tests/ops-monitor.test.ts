@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isNonAlertableOpsDetail,
   isOpsFailureStep,
   opsAlertKey,
 } from "../src/services/ops-monitor.service.js";
@@ -25,5 +26,20 @@ describe("ops monitor helpers", () => {
         "429 You have no credits remaining. Add credits…",
       ),
     ).toBe("llm_credits");
+  });
+
+  it("collapses reply_failed with chat failures under chat_llm", () => {
+    expect(opsAlertKey("reply_failed", "Service temporarily unavailable")).toBe(
+      "chat_llm",
+    );
+  });
+
+  it("does not WhatsApp-alert Meta allow-list errors", () => {
+    expect(
+      isNonAlertableOpsDetail(
+        "status=400 code=131030 Recipient phone number not in allowed list",
+      ),
+    ).toBe(true);
+    expect(isNonAlertableOpsDetail("status=500 upstream")).toBe(false);
   });
 });

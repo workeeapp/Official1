@@ -8,7 +8,7 @@ Lightweight monitoring for the local / self-hosted Workee stack. Goal: notice Lu
 |-------|----------------|---------|
 | `GET /api/health` | Process up + Postgres `SELECT 1`. Reports whether OpenAI / WhatsApp / ops phones are **configured** (no live LLM or WhatsApp calls). | Use an **external** uptime ping (UptimeRobot, cron on another machine). Health alone cannot WhatsApp you if the API is dead. |
 | Durable failures (`OpsEvents`) | Steps matching fail/error (e.g. `chat_failed`, `send_fail`) from the WhatsApp/chat flow logger. Survives API restart. | Shown on **WhatsApp** page (banner + list). |
-| Ops WhatsApp alert | Same failures, rate-limited per `alertKey` (e.g. `llm_credits`, `chat_llm`). | Optional WhatsApp text to `OPS_ALERT_PHONES` via Meta Cloud API (`ignoreSession`). |
+| Ops WhatsApp alert | Same failures, rate-limited per `alertKey` (e.g. `llm_credits`, `chat_llm`). Cooldown is claimed before send so concurrent failures do not spam. Meta allow-list errors (`131030`) are logged but not alerted. Ops alert sends use `muteOps` so a bad ops phone cannot cascade more alerts. | Optional WhatsApp text to `OPS_ALERT_PHONES` via Meta Cloud API (`ignoreSession`). |
 
 **Not in scope for health:** hitting `/api/chat`, employees CRUD, or sending WhatsApp on every probe. That would cost money, need auth, and mutate state. Full journeys stay in CI / Phase 5 smoke.
 

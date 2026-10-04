@@ -22,13 +22,28 @@ export function opsAlertKey(step: string, detail = ""): string {
   if (blob.includes("credit") || blob.includes("429")) {
     return "llm_credits";
   }
-  if (blob.includes("chat_") || blob.includes("llm")) {
+  // One chat outage often logs chat_failed + reply_failed — same alert.
+  if (
+    blob.includes("chat_") ||
+    blob.includes("llm") ||
+    step.trim().toLowerCase() === "reply_failed"
+  ) {
     return "chat_llm";
   }
   if (blob.includes("send")) {
     return "whatsapp_send";
   }
   return step.trim().toLowerCase().slice(0, 64) || "unknown";
+}
+
+/** Meta sandbox / allow-list — real for that number, not an app outage. */
+export function isNonAlertableOpsDetail(detail: string): boolean {
+  const blob = detail.toLowerCase();
+  return (
+    blob.includes("131030") ||
+    blob.includes("not in allowed list") ||
+    blob.includes("recipient phone number not in")
+  );
 }
 
 function alertPhones(): string[] {
@@ -50,6 +65,9 @@ function cooldownMs(): number {
   const minutes = getEnv().OPS_ALERT_COOLDOWN_MINUTES ?? 30;
   return Math.max(1, minutes) * 60_000;
 }
+
+/** Same-process guard — concurrent failures must not each claim+send. */
+const alertingKeys = new Set<string>();
 
 export async function listRecentOpsFailures(limit = 20): Promise<
   Array<{
@@ -111,6 +129,10 @@ export async function noteOpsFailure(event: WhatsAppFlowEvent): Promise<void> {
     }
   }
 
+  if (isNonAlertableOpsDetail(detail)) {
+    return;
+  }
+
   await maybeSendOpsAlert({
     alertKey,
     step: event.step,
@@ -126,10 +148,16 @@ async function maybeSendOpsAlert(input: {
   at: string;
 }): Promise<void> {
   const phones = alertPhones();
-  if (phones.length === 0 || !prisma.opsEvent?.findFirst) {
+  if (phones.length === 0 || !prisma.opsEvent?.findFirst || !prisma.opsEvent?.create) {
     return;
   }
 
+  if (alertingKeys.has(input.alertKey)) {
+    return;
+  }
+  alertingKeys.add(input.alertKey);
+
+  try {
   const since = new Date(Date.now() - cooldownMs());
   const recentAlert = await prisma.opsEvent.findFirst({
     where: {
@@ -140,6 +168,20 @@ async function maybeSendOpsAlert(input: {
     orderBy: { createdAt: "desc" },
   });
   if (recentAlert) {
+    return;
+  }
+
+  // Claim the cooldown slot BEFORE sending so concurrent failures cannot spam.
+  try {
+    await prisma.opsEvent.create({
+      data: {
+        kind: "alert_sent",
+        alertKey: input.alertKey,
+        step: "ops_alert_claim",
+        detail: `claim key=${input.alertKey}`.slice(0, 500),
+      },
+    });
+  } catch {
     return;
   }
 
@@ -166,6 +208,7 @@ async function maybeSendOpsAlert(input: {
       const result = await sendWhatsAppText(phone, body, {
         ignoreSession: true,
         maxAttempts: 2,
+        muteOps: true,
       });
       if (result === "sent") {
         sent += 1;
@@ -193,4 +236,7 @@ async function maybeSendOpsAlert(input: {
     /* ignore */
   }
   recordWhatsAppEvent("ops_alert_sent", `key=${input.alertKey} phones=${sent}`);
+  } finally {
+    alertingKeys.delete(input.alertKey);
+  }
 }
