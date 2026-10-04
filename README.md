@@ -130,6 +130,8 @@ Two laptops can run the web app on different branches with their own Postgres. T
 
 Signed-in **WhatsApp** tab (and `GET /api/whatsapp/status`) shows the flow log: webhook POST, inbound, LLM, send, and whether Meta’s WABA `override_callback_uri` still points at a dead `trycloudflare.com` URL. Tokens are never returned.
 
+**Ops monitoring (POC):** durable failure rows + optional WhatsApp alerts to `OPS_ALERT_PHONES`, and a cheap `GET /api/health` (DB + config flags — not every route). See [`docs/ops-monitoring.md`](docs/ops-monitoring.md).
+
 After pulling schema changes, stop the API and run `npx prisma migrate deploy` (and `npx prisma generate` if the client is locked).
 
 ## Stay up on this machine (Windows)

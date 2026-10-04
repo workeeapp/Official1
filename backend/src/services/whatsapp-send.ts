@@ -133,6 +133,8 @@ export async function sendWhatsAppText(
     sleepFn?: (ms: number) => Promise<void>;
     /** Cap attempts (default SEND_MAX_ATTEMPTS). Useful for short fallbacks. */
     maxAttempts?: number;
+    /** Ops alert path — log under ops_* so send_fail cannot re-alert. */
+    muteOps?: boolean;
   },
 ): Promise<WhatsAppTextResult> {
   const env = getEnv();
@@ -169,6 +171,10 @@ export async function sendWhatsAppText(
     "Content-Type": "application/json",
   };
 
+  const stepOk = options?.muteOps ? "ops_send_ok" : "send_ok";
+  const stepRetry = options?.muteOps ? "ops_send_retry" : "send_retry";
+  const stepFail = options?.muteOps ? "ops_send_fail" : "send_fail";
+
   let lastResult: WhatsAppTextResult = "failed";
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -177,7 +183,7 @@ export async function sendWhatsAppText(
         const suffix =
           attempt > 1 ? ` after_retry=${attempt - 1}` : "";
         recordWhatsAppEvent(
-          "send_ok",
+          stepOk,
           `to=…${destination.slice(-4)}${suffix}`,
         );
         return "sent";
@@ -190,7 +196,7 @@ export async function sendWhatsAppText(
         result === "failed" &&
         isTransientWhatsAppSendFailure(response.status, detail);
       recordWhatsAppEvent(
-        transient && attempt < maxAttempts ? "send_retry" : "send_fail",
+        transient && attempt < maxAttempts ? stepRetry : stepFail,
         `status=${response.status} result=${result} attempt=${attempt}/${maxAttempts} ${detail}`.trim(),
       );
       if (!transient || attempt >= maxAttempts) {
@@ -201,7 +207,7 @@ export async function sendWhatsAppText(
       const message = error instanceof Error ? error.message : "unknown";
       const canRetry = attempt < maxAttempts;
       recordWhatsAppEvent(
-        canRetry ? "send_retry" : "send_fail",
+        canRetry ? stepRetry : stepFail,
         `network attempt=${attempt}/${maxAttempts} ${message}`.trim(),
       );
       if (!canRetry) {

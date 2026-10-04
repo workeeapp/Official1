@@ -56,6 +56,9 @@ describe("WhatsApp page", () => {
           detail: "fields=messages inbound=0",
         },
       ],
+      recentFailures: [],
+      failuresLastHour: 0,
+      opsAlertConfigured: false,
     });
   });
 
@@ -68,6 +71,35 @@ describe("WhatsApp page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("webhook_post")).toBeInTheDocument();
     expect(screen.getByText("fields=messages inbound=0")).toBeInTheDocument();
+  });
+
+  it("shows a durable failures banner when failures exist", async () => {
+    statusMock.mockResolvedValue({
+      expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaWabaWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaAppWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      webhookMismatch: false,
+      hasAccessToken: true,
+      lastInboundAt: null,
+      events: [],
+      failuresLastHour: 3,
+      opsAlertConfigured: true,
+      recentFailures: [
+        {
+          at: "2026-10-03T20:00:00.000Z",
+          step: "chat_failed",
+          detail: "429 You have no credits remaining",
+        },
+      ],
+    });
+
+    renderWhatsApp();
+
+    expect(await screen.findByTestId("ops-failures-banner")).toHaveTextContent(
+      /3 failures in the last hour/i,
+    );
+    expect(screen.getByText("Durable failures")).toBeInTheDocument();
+    expect(screen.getByText("chat_failed")).toBeInTheDocument();
   });
 
   it("shows aligned webhooks without a mismatch alert", async () => {
