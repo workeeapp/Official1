@@ -580,7 +580,7 @@ async function openNudge(input: {
       repeat: "once",
       pingIds: toJsonValue([input.job.meta.subjectId]),
       messageText: input.job.meta.askerName
-        ? `${input.job.meta.askerName} מחכה לתשובה: ${input.job.meta.ask}`
+        ? `${input.job.meta.askerName} מבקש/ת להזכיר לך: ${input.job.meta.ask}`
         : input.job.meta.ask,
     },
   });

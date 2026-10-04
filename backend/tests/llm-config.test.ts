@@ -55,6 +55,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("EXAMPLE NAMES ARE NOT REAL");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
     expect(config.systemMessage).toContain("JOB vs PLAIN REMIND");
+    expect(config.systemMessage).toContain("VOLUNTEERED CONTACT PHONE");
+    expect(config.systemMessage).toContain("רב פס");
+    expect(config.systemMessage).toContain("HEBREW PERSON / GENDER ON RELAYS");
+    expect(config.systemMessage).toContain("מבקשת להזכיר לך");
     expect(config.systemMessage).toContain("SNOOZE (vs plain self-nudge)");
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");

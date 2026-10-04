@@ -17,6 +17,7 @@ Branch: `test/qa-phase-2-ui` (same QA track).
 | dump-what-saved | hallucination-boundaries | מה שמור לי | no `query:report`; answer mentions live facts |
 | no-invented-clock | hallucination-boundaries | תזכיר לי משהו | no invented clock; hold/ask |
 | directory-add-michal | happy | תוסיפי את מיכל 054-… | `directory.add` |
+| self-nudge-with-volunteered-phone | happy | תזכירי לי… לדבר עם רב פס + טלפון | `directory.add` + `reminders.add` |
 | directory-remove-michal | happy | תמחקי את מיכל… | `directory.remove` |
 | reminder-cancel-named | happy | בטל את התזכורת לחלב | `reminders.remove` or hold/confirm |
 

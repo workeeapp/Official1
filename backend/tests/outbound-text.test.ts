@@ -32,7 +32,7 @@ describe("formatAttributedOutbound", () => {
         item: "להביא חלב",
         text: "",
       }),
-    ).toBe("טל ביקש לתזכר אותך\nתזכורת: להביא חלב");
+    ).toBe("טל מבקש/ת להזכיר לך\nתזכורת: להביא חלב");
   });
 
   it("keeps a dictated message to self or a digital worker as the message", () => {

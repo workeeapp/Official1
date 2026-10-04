@@ -39,5 +39,5 @@ export function formatAttributedOutbound(input: {
   if (isDictatedSend) {
     return `מאת ${input.actorName}: ${dictated}`;
   }
-  return `${input.actorName} ביקש לתזכר אותך\n${ping}`;
+  return `${input.actorName} מבקש/ת להזכיר לך\n${ping}`;
 }
