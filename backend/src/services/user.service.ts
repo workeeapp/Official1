@@ -8,6 +8,7 @@ export function toPublicUser(user: User): PublicUser {
   return {
     id: user.id,
     username: user.username,
+    isAdmin: user.isAdmin === true,
   };
 }
 

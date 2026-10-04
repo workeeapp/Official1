@@ -7,7 +7,7 @@ import {
 import type { PublicEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
-import { ServiceUnavailableError } from "../utils/errors.js";
+import { ServiceUnavailableError, opsErrorDetail } from "../utils/errors.js";
 import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
@@ -42,7 +42,9 @@ export interface InboundWhatsAppText {
 export function verifyWhatsAppWebhook(query: WhatsAppVerifyQuery): string {
   const expected = getEnv().WHATSAPP_VERIFY_TOKEN?.trim();
   if (!expected) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "whatsapp_verify_token_missing",
+    });
   }
 
   if (query.mode !== "subscribe" || query.token !== expected || !query.challenge) {
@@ -139,7 +141,9 @@ export async function handleInboundWhatsAppTexts(
         digitals.find((employee) => employee.protected) ??
         digitals[0];
       if (!digital) {
-        throw new ServiceUnavailableError();
+        throw new ServiceUnavailableError(undefined, {
+          detail: "no_digital_employee",
+        });
       }
       recordWhatsAppEvent(
         "chat_start",
@@ -169,10 +173,7 @@ export async function handleInboundWhatsAppTexts(
         );
       }
     } catch (error) {
-      recordWhatsAppEvent(
-        "reply_failed",
-        error instanceof Error ? error.message : "unknown",
-      );
+      recordWhatsAppEvent("reply_failed", opsErrorDetail(error));
       try {
         const fallbackResult = await sendWhatsAppText(
           message.from,
@@ -266,7 +267,9 @@ async function resolveWhatsAppSpeaker(from: string): Promise<{
 
   const fallbackUser = users[0];
   if (!fallbackUser) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "no_account_user_for_whatsapp_guest",
+    });
   }
 
   const created = await createEmployeeForUser(fallbackUser.id, {

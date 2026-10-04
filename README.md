@@ -20,10 +20,10 @@ Or point `DATABASE_URL` at an existing PostgreSQL database. `docker-compose.yml`
 - Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
 - API: [http://localhost:3001](http://localhost:3001) (`PORT`; local override may use **3003**)
 
-Seeded user (from `.env` `SEED_*`):
+Seeded login user(s) from `.env` `SEED_USERNAME` (comma-separated OK) + `SEED_PASSWORD`:
 
 ```text
-Username: Amit
+Username: Amit   (and Tal if listed in SEED_USERNAME)
 Password: ChangeMe123!
 ```
 
@@ -130,7 +130,7 @@ Two laptops can run the web app on different branches with their own Postgres. T
 
 Signed-in **WhatsApp** tab (and `GET /api/whatsapp/status`) shows the flow log: webhook POST, inbound, LLM, send, and whether Meta’s WABA `override_callback_uri` still points at a dead `trycloudflare.com` URL. Tokens are never returned.
 
-**Ops monitoring (POC):** durable failure rows + optional WhatsApp alerts to `OPS_ALERT_PHONES`, and a cheap `GET /api/health` (DB + config flags — not every route). See [`docs/ops-monitoring.md`](docs/ops-monitoring.md).
+**Ops monitoring (POC):** durable failure rows + optional WhatsApp alerts to `OPS_ALERT_PHONES`, and a cheap `GET /api/health` (DB + config flags — not every route). UI lives on the **Admin** tab (monitoring + code changes) for logins listed in `SEED_ADMIN_USERNAMES` (`Users.is_admin`). Lucy chat digests are refused (`זה לא נתמך.`). See [`docs/ops-monitoring.md`](docs/ops-monitoring.md).
 
 After pulling schema changes, stop the API and run `npx prisma migrate deploy` (and `npx prisma generate` if the client is locked).
 

@@ -124,6 +124,7 @@ import {
   updateEmployeeRecord,
   itemIdentity,
   isPhantomCustomListItem,
+  keysLooselyMatch,
   mergeListItemData,
   normalizeListItemData,
   parseAssignmentNote,
@@ -178,6 +179,15 @@ describe("employee records", () => {
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");
+  });
+
+  it("keysLooselyMatch: exact, qty suffix, and head-noun — not generic meeting titles", () => {
+    expect(keysLooselyMatch("חלב", "חלב")).toBe(true);
+    expect(keysLooselyMatch("חלב 3%", "חלב")).toBe(true);
+    expect(keysLooselyMatch("קופסת טונה", "טונה")).toBe(true);
+    expect(keysLooselyMatch("פגישה עם נגב", "פגישה")).toBe(false);
+    expect(keysLooselyMatch("פגישה עם טל", "פגישה")).toBe(false);
+    expect(keysLooselyMatch("פגישה", "פגישה עם נגב")).toBe(false);
   });
 
   it("collapses update-draft keys onto the real column", () => {
@@ -1521,6 +1531,60 @@ describe("employee records", () => {
         listOwnerId: talId,
       },
     ]);
+  });
+
+  it("does not fuzzy-update a longer meeting title on add (no third-party notify leak)", async () => {
+    const shaniId = "shani-1";
+    const list = {
+      id: "amit-tasks",
+      employeeId,
+      listType: "tasks",
+      name: "",
+    };
+    listFindUnique.mockResolvedValue(list);
+    // No exact «פגישה» row — only the older longer meeting.
+    itemFindFirst.mockResolvedValue(null);
+    itemFindMany.mockResolvedValue([
+      {
+        id: "old-negev",
+        listId: list.id,
+        itemKey: "פגישה עם נגב",
+        data: { "שם מטלה": "פגישה עם נגב" },
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [employeeId, talId],
+        deletedAt: null,
+      },
+    ]);
+    itemCreate.mockResolvedValue({ id: "new-meeting" });
+    employeeFindUnique.mockResolvedValue({ userId: "user-1" });
+
+    const events = await applyEmployeeMetadata(
+      employeeId,
+      {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "פגישה" }],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "shared",
+        addedById: shaniId,
+        visibleTo: [shaniId, employeeId],
+      },
+      shaniId,
+    );
+
+    expect(itemCreate).toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
+    expect(events[0]?.notifyEmployeeIds).not.toContain(talId);
   });
 
   it("removes a shared custom row even when the model repeats list_name on the item", async () => {

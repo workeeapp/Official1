@@ -30,12 +30,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");
     expect(config.systemMessage).toContain("git_log");
-    expect(config.systemMessage).toContain("PLATFORM INTERNAL");
-    expect(config.systemMessage).toContain("FORBIDDEN to ask למי לשלוח");
-    expect(config.systemMessage).toContain("תשלחי אליי");
-    expect(config.systemMessage).toContain("since the last report");
-    expect(config.systemMessage).toContain("compose_lookback_hours");
-    expect(config.systemMessage).toContain("last_report_sha");
+    expect(config.systemMessage).toContain("CODE DIGEST NOT SUPPORTED");
+    expect(config.systemMessage).toContain("זה לא נתמך");
     expect(config.systemMessage).toContain("RECENT_OUTBOUND");
     expect(config.systemMessage).toContain("CORRECT / CLARIFY A JUST-SENT RELAY");
     expect(config.systemMessage).toContain("שלחתי הבהרה");
@@ -45,7 +41,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("REMIND ABOUT A DISCUSSED ITEM");
     expect(config.systemMessage).toContain("מה תרצה שאזכיר לך");
     expect(config.systemMessage).toContain("AFTER A CODE DIGEST");
-    expect(config.systemMessage).toContain("GIT DIGEST CLOCK REQUIRED");
+    expect(config.systemMessage).toContain("GIT DIGEST NOT VIA CHAT");
     expect(config.systemMessage).toContain("SEND WITHOUT TIME");
     expect(config.systemMessage).toContain("in:5");
     expect(config.systemMessage).toContain("SCHEDULED SAVED-DATA STATUS");

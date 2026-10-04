@@ -5,6 +5,20 @@
 
 Coverage grids stay in the phase matrices. This file is the full numbered list of every `it(...)`.
 
+## Ops / Admin (current — not in the Phase 2 snapshot above)
+
+| Area | File | Cases (approx.) |
+|------|------|------:|
+| Ops alert helpers | [`ops-monitor.test.ts`](../../backend/tests/ops-monitor.test.ts) | 7 |
+| Root-cause ops detail | [`errors.test.ts`](../../backend/tests/errors.test.ts) | 7 |
+| Admin API + services | [`admin.test.ts`](../../backend/tests/admin.test.ts) | 7 |
+| Digest refuse prompt | [`llm-config.test.ts`](../../backend/tests/llm-config.test.ts) | includes CODE DIGEST |
+| Monitoring view | [`monitoring-view.test.ts`](../../frontend/src/pages/Admin/monitoring-view.test.ts) | 4 |
+| Admin page UI | [`AdminPage.test.tsx`](../../frontend/src/pages/Admin/AdminPage.test.tsx) | 4 |
+| WhatsApp without ops UI | [`WhatsAppPage.test.tsx`](../../frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx) | 5 |
+
+Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
+
 ## Contents
 
 | # | Area | File | Cases |
@@ -24,7 +38,7 @@ Coverage grids stay in the phase matrices. This file is the full numbered list o
 | 2.3 | UI | [`ChatPage.test.tsx`](../../frontend/src/pages/Chat/ChatPage.test.tsx) | 17 |
 | 2.4 | UI | [`chatTime.test.ts`](../../frontend/src/pages/Chat/chatTime.test.ts) | 2 |
 | 2.5 | UI | [`EmployeesPage.test.tsx`](../../frontend/src/pages/Employees/EmployeesPage.test.tsx) | 15 |
-| 2.6 | UI | [`WhatsAppPage.test.tsx`](../../frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx) | 4 |
+| 2.6 | UI | [`WhatsAppPage.test.tsx`](../../frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx) | 5 |
 
 ---
 

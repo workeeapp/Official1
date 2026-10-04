@@ -21,10 +21,15 @@ const envSchema = z.object({
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
   /**
-   * POC ops alerts: comma/space-separated E.164-ish phones to WhatsApp on repeated failures.
-   * Empty = log failures only (no outbound alert).
+   * POC ops alerts: comma/space-separated E.164-ish phones to WhatsApp on failures.
+   * Empty = never outbound (even if mode is critical/all).
    */
   OPS_ALERT_PHONES: z.string().optional(),
+  /**
+   * off = never WhatsApp (default). critical = only system-down (e.g. DB).
+   * all = alertable app failures (still skips Meta allow-list noise).
+   */
+  OPS_ALERT_MODE: z.enum(["off", "critical", "all"]).default("off"),
   /** Minutes between alerts for the same alertKey (default 30). */
   OPS_ALERT_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(30),
 });

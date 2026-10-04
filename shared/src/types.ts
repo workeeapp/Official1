@@ -1,6 +1,60 @@
 export interface PublicUser {
   id: string;
   username: string;
+  /** Platform Admin tab /api/admin — not the same as Employee.isOwner. */
+  isAdmin?: boolean;
+}
+
+export interface AdminMonitoringResponse {
+  health: {
+    status: "ok" | "degraded";
+    db: boolean;
+    openaiConfigured: boolean;
+    whatsappConfigured: boolean;
+    opsAlertConfigured: boolean;
+    /** off | critical | all — WhatsApp ops alerts. */
+    opsAlertMode?: "off" | "critical" | "all";
+  };
+  failuresLastHour: number;
+  recentFailures: Array<{
+    at: string;
+    step: string;
+    detail: string;
+    alertKey?: string;
+  }>;
+}
+
+export interface AdminCodeChangeCommit {
+  sha: string;
+  subject: string;
+  body: string;
+  files: string[];
+}
+
+export interface AdminCodeChangesResponse {
+  headSha: string;
+  lookbackHours: number;
+  commits: AdminCodeChangeCommit[];
+  summaryText: string;
+}
+
+/** Login users for Admin grant/revoke — not Employees. */
+export interface AdminUserRow {
+  id: string;
+  username: string;
+  isAdmin: boolean;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserRow[];
+}
+
+export interface AdminSetAdminRequest {
+  isAdmin: boolean;
+}
+
+export interface AdminSetAdminResponse {
+  user: AdminUserRow;
 }
 
 export interface AuthUserResponse {

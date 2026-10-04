@@ -14,6 +14,9 @@ export function isOpsFailureStep(step: string): boolean {
   if (!trimmed || trimmed.startsWith(OPS_STEP_PREFIX)) {
     return false;
   }
+  if (/system_db_down|system_down/i.test(trimmed)) {
+    return true;
+  }
   return FAILURE_STEP_RE.test(trimmed);
 }
 
@@ -33,6 +36,9 @@ export function opsAlertKey(step: string, detail = ""): string {
   if (blob.includes("send")) {
     return "whatsapp_send";
   }
+  if (isCriticalSystemFailure(step, detail)) {
+    return "system_critical";
+  }
   return step.trim().toLowerCase().slice(0, 64) || "unknown";
 }
 
@@ -44,6 +50,46 @@ export function isNonAlertableOpsDetail(detail: string): boolean {
     blob.includes("not in allowed list") ||
     blob.includes("recipient phone number not in")
   );
+}
+
+/**
+ * System-down / infrastructure — used when OPS_ALERT_MODE=critical.
+ * Chat credits / Meta send failures are not "system down".
+ */
+export function isCriticalSystemFailure(step: string, detail = ""): boolean {
+  const blob = `${step} ${detail}`.trim().toLowerCase();
+  if (
+    blob.includes("system_down") ||
+    blob.includes("db_down") ||
+    blob.includes("db_fail") ||
+    blob.includes("database") ||
+    blob.includes("prisma") ||
+    /\bp1001\b|\bp1002\b|\bp1017\b/.test(blob) ||
+    blob.includes("econnrefused") ||
+    blob.includes("connection refused") ||
+    blob.includes("can't reach database") ||
+    blob.includes("cannot reach database")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function shouldWhatsAppAlertFailure(
+  step: string,
+  detail: string,
+  mode = getEnv().OPS_ALERT_MODE,
+): boolean {
+  if (mode === "off") {
+    return false;
+  }
+  if (isNonAlertableOpsDetail(detail)) {
+    return false;
+  }
+  if (mode === "critical") {
+    return isCriticalSystemFailure(step, detail);
+  }
+  return true;
 }
 
 function alertPhones(): string[] {
@@ -129,7 +175,7 @@ export async function noteOpsFailure(event: WhatsAppFlowEvent): Promise<void> {
     }
   }
 
-  if (isNonAlertableOpsDetail(detail)) {
+  if (!shouldWhatsAppAlertFailure(event.step, detail)) {
     return;
   }
 
@@ -138,6 +184,18 @@ export async function noteOpsFailure(event: WhatsAppFlowEvent): Promise<void> {
     step: event.step,
     detail,
     at: event.at,
+  });
+}
+
+/**
+ * Record DB / process-level outage while the API can still WhatsApp.
+ * Use from health when Postgres fails (OPS_ALERT_MODE=critical|all).
+ */
+export async function noteOpsSystemDown(detail: string): Promise<void> {
+  await noteOpsFailure({
+    at: new Date().toISOString(),
+    step: "system_db_down",
+    detail: detail.slice(0, 500) || "database unreachable",
   });
 }
 

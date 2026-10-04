@@ -79,7 +79,12 @@ describe("user service", () => {
     expect(publicUser).toEqual({
       id: sampleUser.id,
       username: "Amit",
+      isAdmin: false,
     });
     expect(publicUser).not.toHaveProperty("passwordHash");
+  });
+
+  it("marks seeded admins in the public user shape", () => {
+    expect(toPublicUser({ ...sampleUser, isAdmin: true }).isAdmin).toBe(true);
   });
 });

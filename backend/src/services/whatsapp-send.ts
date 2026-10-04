@@ -141,12 +141,16 @@ export async function sendWhatsAppText(
   const token = env.WHATSAPP_ACCESS_TOKEN?.trim();
   const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID?.trim();
   if (!token || !phoneNumberId) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "whatsapp_not_configured",
+    });
   }
 
   const destination = toWhatsAppAddress(to);
   if (!destination) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "invalid_destination_phone",
+    });
   }
 
   if (!options?.ignoreSession && !(await hasWhatsAppSession(destination))) {
