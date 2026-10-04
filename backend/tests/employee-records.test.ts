@@ -415,7 +415,7 @@ describe("employee records", () => {
     ).toBe('הסרתי את «לבדוק שוב את הפונקציונליות» מרשימת «בעיות».');
   });
 
-  it("removes a custom row found on another list name for the same owner", async () => {
+  it("removes a custom row on the exact named list for the same owner", async () => {
     const bugs = {
       id: "bugs-list",
       employeeId: talId,
@@ -434,20 +434,8 @@ describe("employee records", () => {
       visibleTo: [talId, employeeId],
       deletedAt: null,
     };
-    // Primary lookup uses a different/empty list name first.
-    listFindUnique.mockResolvedValue({
-      id: "empty-list",
-      employeeId: talId,
-      listType: "custom",
-      name: "",
-      scope: "shared",
-      visibleTo: [talId, employeeId],
-    });
-    listFindMany
-      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]) // resolveListActionAgainstSaved
-      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]); // across-employee search
-    itemFindFirst.mockResolvedValue(null);
-    itemFindMany.mockResolvedValue([]);
+    listFindUnique.mockResolvedValue(bugs);
+    itemFindFirst.mockResolvedValue(stored);
     itemUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await applyEmployeeRecords(
@@ -483,8 +471,8 @@ describe("employee records", () => {
     expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
   });
 
-  it("prefers the saved list type when the model guesses wrong", () => {
-    expect(chooseSavedListType("shopping", ["tasks"])).toBe("tasks");
+  it("does not rewrite list_type from other saved lists", () => {
+    expect(chooseSavedListType("shopping", ["tasks"])).toBeNull();
     expect(chooseSavedListType("shopping", ["shopping", "tasks"])).toBe(
       "shopping",
     );
@@ -716,31 +704,16 @@ describe("employee records", () => {
     ).toContain("רשימת המטלות");
   });
 
-  it("removes a task even when the model labeled it shopping", async () => {
-    const tasksList = {
-      id: "tasks-1",
+  it("keeps the ACTION list_type on remove — does not rewrite shopping to tasks", async () => {
+    const shoppingList = {
+      id: "shop-1",
       employeeId,
-      listType: "tasks",
+      listType: "shopping",
       name: "",
-      items: [
-        {
-          id: "task-1",
-          itemKey: "להכין חביתה לילדים",
-          data: { "שם מטלה": "להכין חביתה לילדים" },
-        },
-      ],
     };
-    listFindMany.mockResolvedValue([tasksList]);
-    listFindUnique.mockResolvedValue({
-      id: "tasks-1",
-      employeeId,
-      listType: "tasks",
-      name: "",
-    });
-    itemFindUnique.mockResolvedValue(tasksList.items[0]);
-    itemFindFirst.mockResolvedValue(tasksList.items[0]);
+    listFindUnique.mockResolvedValue(shoppingList);
+    itemFindFirst.mockResolvedValue(null);
     itemFindMany.mockResolvedValue([]);
-    itemUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await applyEmployeeRecords(employeeId, {
       lists: [
@@ -755,22 +728,8 @@ describe("employee records", () => {
       filing: [],
     });
 
-    expect(result.mutations).toEqual([
-      expect.objectContaining({
-        action: "remove",
-        listType: "tasks",
-        itemKey: "להכין חביתה לילדים",
-      }),
-    ]);
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: "tasks-1",
-        itemKey: "להכין חביתה לילדים",
-        deletedAt: null,
-      },
-      data: { deletedAt: expect.any(Date), reminderId: null },
-    });
-    expect(listCreate).not.toHaveBeenCalled();
+    expect(result.mutations).toEqual([]);
+    expect(itemUpdateMany).not.toHaveBeenCalled();
   });
 
   it("parses assignment notes for another employee's shopping", () => {
@@ -1113,24 +1072,23 @@ describe("employee records", () => {
     });
   });
 
-  it("updates the only task when the new name does not match the stored key", async () => {
+  it("does not update the only task when the new name does not match the stored key", async () => {
     const list = { id: "lucy-tasks", employeeId, listType: "tasks", name: "" };
     listFindUnique.mockResolvedValue(list);
     itemFindUnique.mockResolvedValue(null);
-    itemFindMany
-      .mockResolvedValueOnce([
-        {
-          id: "task-1",
-          listId: list.id,
-          itemKey: "להזכיר לעמית לבדוק מייל",
-          data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
-          scope: "personal",
-          addedById: employeeId,
-          visibleTo: [employeeId],
-        },
-      ])
-      .mockResolvedValue([]);
-    itemUpdate.mockResolvedValue({ id: "task-1" });
+    itemFindFirst.mockResolvedValue(null);
+    itemFindMany.mockResolvedValue([
+      {
+        id: "task-1",
+        listId: list.id,
+        itemKey: "להזכיר לעמית לבדוק מייל",
+        data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
+        scope: "personal",
+        addedById: employeeId,
+        visibleTo: [employeeId],
+      },
+    ]);
+    itemCreate.mockResolvedValue({ id: "task-2" });
 
     await applyEmployeeMetadata(employeeId, {
       lists: [
@@ -1145,16 +1103,8 @@ describe("employee records", () => {
       filing: [],
     });
 
+    expect(itemUpdate).not.toHaveBeenCalled();
     expect(itemCreate).not.toHaveBeenCalled();
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "task-1" },
-      data: expect.objectContaining({
-        itemKey: "להזכיר לטל לבדוק מייל",
-        data: expect.objectContaining({
-          "שם מטלה": "להזכיר לטל לבדוק מייל",
-        }),
-      }),
-    });
   });
 
   it("notifies watchers and clears assignment tasks when the owner buys a shared item", async () => {
@@ -1792,7 +1742,7 @@ describe("employee records", () => {
     });
   });
 
-  it("notifies assignment watchers when a bought item was not marked shared", async () => {
+  it("does not notify by assignment-key guess when a bought item was personal", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
     listFindUnique.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
@@ -1825,8 +1775,7 @@ describe("employee records", () => {
       talId,
     );
 
-    expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
-    expect(events[0]?.purchased).toBe(true);
+    expect(events).toEqual([]);
   });
 
   it("notifies watchers when a shared item is updated from employee records", async () => {

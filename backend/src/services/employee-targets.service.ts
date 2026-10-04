@@ -495,7 +495,20 @@ export function planTargetedActions(input: {
         normalizedList.action === "remove" ||
         normalizedList.action === "update"
           ? existingListMatches
-          : [preferSharedList(existingListMatches)!];
+          : (() => {
+              const picked = pickExistingListForAdd(
+                existingListMatches,
+                input.actor.id,
+                normalizedList.targets,
+                input.employees,
+                input.workers,
+              );
+              return picked ? [picked] : [];
+            })();
+      if (mutationTargets.length === 0) {
+        // Ambiguous personal+shared same name (or no safe pick) → miss, do not guess.
+        continue;
+      }
       const notifyMetadata = {
         lists: [
           {
@@ -1137,12 +1150,80 @@ function preferSharedList(matches: SharedListRef[]): SharedListRef | null {
   return ranked[0] ?? null;
 }
 
+/**
+ * When personal and shared lists share an exact name, do not auto-prefer shared.
+ * Empty / self-only targets → actor's personal list if present.
+ * Partner targets → the single shared list that already includes those partners.
+ * Otherwise miss (null).
+ */
+function pickExistingListForAdd(
+  matches: SharedListRef[],
+  actorId: string,
+  rawTargets: string[],
+  employees: PublicEmployee[],
+  workers?: PublicEmployee[],
+): SharedListRef | null {
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length === 1) {
+    return matches[0]!;
+  }
+
+  const resolved = resolveActionTargets(
+    rawTargets,
+    employees,
+    actorId,
+    workers,
+  );
+  const others = resolved.filter((row) => row.id !== actorId);
+  const selfOnly =
+    rawTargets.length === 0 ||
+    (others.length === 0 && !isAllTarget(rawTargets));
+
+  if (selfOnly) {
+    const personal =
+      matches.find(
+        (row) => listScopeOf(row) === "personal" && row.ownerId === actorId,
+      ) ?? matches.find((row) => listScopeOf(row) === "personal");
+    if (personal) {
+      return personal;
+    }
+    // Legacy: several shared copies of the same name, no personal twin → one canonical.
+    if (matches.every((row) => listScopeOf(row) === "shared")) {
+      return preferSharedList(matches);
+    }
+    return null;
+  }
+
+  const shared = matches.filter((row) => listScopeOf(row) === "shared");
+  if (shared.length === 0) {
+    return null;
+  }
+  if (isAllTarget(rawTargets)) {
+    return shared.length === 1 ? shared[0]! : preferSharedList(shared);
+  }
+
+  const partnerIds = others.map((row) => row.id);
+  const covering = shared.filter((row) => {
+    const audience = new Set([row.ownerId, ...row.visibleTo]);
+    return partnerIds.every((id) => audience.has(id));
+  });
+  if (covering.length === 1) {
+    return covering[0]!;
+  }
+  return null;
+}
+
 function findSharedListForActor(
   list: Pick<LlmListAction, "listType" | "listName" | "items">,
   actorId: string,
   sharedLists: SharedListRef[],
 ): SharedListRef | null {
-  return preferSharedList(
+  return pickExistingListForAdd(
     findExistingCustomListsForActor(list, actorId, sharedLists),
+    actorId,
+    [],
+    [],
   );
 }
