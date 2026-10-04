@@ -31,6 +31,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("compose_source");
     expect(config.systemMessage).toContain("git_log");
     expect(config.systemMessage).toContain("PLATFORM INTERNAL");
+    expect(config.systemMessage).toContain("FORBIDDEN to ask למי לשלוח");
+    expect(config.systemMessage).toContain("תשלחי אליי");
     expect(config.systemMessage).toContain("since the last report");
     expect(config.systemMessage).toContain("compose_lookback_hours");
     expect(config.systemMessage).toContain("last_report_sha");
@@ -44,6 +46,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("מה תרצה שאזכיר לך");
     expect(config.systemMessage).toContain("AFTER A CODE DIGEST");
     expect(config.systemMessage).toContain("GIT DIGEST CLOCK REQUIRED");
+    expect(config.systemMessage).toContain("SEND WITHOUT TIME");
+    expect(config.systemMessage).toContain("in:5");
     expect(config.systemMessage).toContain("SCHEDULED SAVED-DATA STATUS");
     expect(config.systemMessage).toContain("saved_data");
     expect(config.systemMessage).toContain("תוסיפי לי בעוד שעה מטלה");
