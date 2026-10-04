@@ -5,7 +5,6 @@ const productTabs = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/employees", label: "Employees" },
   { to: "/chat", label: "Chat" },
-  { to: "/whatsapp", label: "WhatsApp" },
 ] as const;
 
 export function AppNav() {

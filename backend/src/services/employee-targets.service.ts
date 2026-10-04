@@ -884,9 +884,14 @@ export function fallbackNotificationText(
 ): string {
   const actorName = employeeDisplayName(actor);
   const list = pickPrimaryList(metadata.lists);
-  const items = collectItemLabels(
-    list ? { ...metadata, lists: [list] } : metadata,
-  );
+  const items =
+    list?.action === "update"
+      ? collectUpdateItemLabels(
+          list ? { ...metadata, lists: [list] } : metadata,
+        )
+      : collectItemLabels(
+          list ? { ...metadata, lists: [list] } : metadata,
+        );
   const itemText = items.join(" ו") || "פריט";
   const purchased = options?.purchased ?? options?.completed;
   const yours = options?.recipientIsOwner !== false;
@@ -902,6 +907,15 @@ export function fallbackNotificationText(
       : partners.length === 1
         ? `לך ול${partners[0]}`
         : `לך ל${partners.slice(0, -1).join(", ")} ו${partners[partners.length - 1]}`;
+  // Non-owner watcher on shared shopping (e.g. Michal on Tal↔Michal list) → שלכם.
+  // List owner notified about a change on their own shopping → שלך (even if partners are named).
+  const sharedShopping = options?.recipientIsOwner === false;
+  const shoppingWhere = sharedShopping
+    ? "ברשימת הקניות המשותפת שלכם"
+    : `ברשימת הקניות ${ownerList}`.trim();
+  const shoppingFrom = sharedShopping
+    ? "מהרשימת הקניות המשותפת שלכם"
+    : `מרשימת הקניות ${ownerList}`.trim();
 
   if (list) {
     const derivedName = customListDerivedName(list);
@@ -945,12 +959,12 @@ export function fallbackNotificationText(
       if (purchased) {
         return `${actorName} קנה ${itemText}`;
       }
-      return `${actorName} הסיר ${itemText} מרשימת הקניות ${ownerList}`.trim();
+      return `${actorName} הסיר ${itemText} ${shoppingFrom}`.trim();
     }
     if (list.action === "update") {
-      return `${actorName} עדכן ${itemText} ברשימת הקניות ${ownerList}`.trim();
+      return `${actorName} עדכן ${itemText} ${shoppingWhere}`.trim();
     }
-    return `${actorName} הוסיף ${itemText} לרשימת הקניות ${ownerList}`.trim();
+    return `${actorName} הוסיף ${itemText} ל${shoppingWhere.replace(/^ב/, "")}`.trim();
   }
 
   if (list?.listType === "tasks") {
@@ -1063,6 +1077,61 @@ function collectItemLabels(metadata: LlmMetadata): string[] {
     .map((filing) => filing.itemName)
     .filter(Boolean);
   return [...fromLists, ...fromFiling];
+}
+
+/** Update drafts: «שם פריט» + «שם פריט חדש» → «גבינה לבנה לגבינה סקי». */
+function collectUpdateItemLabels(metadata: LlmMetadata): string[] {
+  const listName = metadata.lists[0]?.listName?.trim() ?? "";
+  const fromLists = metadata.lists.flatMap((list) =>
+    list.items
+      .map((item) => formatUpdateItemChange(item))
+      .map((label) => label.trim())
+      .filter((label) => label && normalizeLoose(label) !== normalizeLoose(listName)),
+  );
+  const fromFiling = metadata.filing
+    .map((filing) => filing.itemName)
+    .filter(Boolean);
+  return [...fromLists, ...fromFiling];
+}
+
+const UPDATE_DRAFT_RE = /^(.+?)\s+(חדש|חדשה|new)$/i;
+
+function formatUpdateItemChange(item: unknown): string {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+  const record = item as Record<string, unknown>;
+  const drafts: Array<{ base: string; next: string }> = [];
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+    const match = key.trim().match(UPDATE_DRAFT_RE);
+    if (match?.[1]) {
+      drafts.push({ base: match[1].trim(), next: value.trim() });
+    }
+  }
+  if (drafts.length === 0) {
+    return llmItemLabel(item);
+  }
+  // Prefer the shopping/task title draft when several "X חדש" keys exist.
+  const preferred =
+    drafts.find((row) =>
+      /^(שם פריט|שם מטלה|שם|name|item_name|task)$/i.test(row.base),
+    ) ?? drafts[0]!;
+  const previousRaw = record[preferred.base];
+  const previous =
+    typeof previousRaw === "string" && previousRaw.trim()
+      ? previousRaw.trim()
+      : llmItemLabel(
+          Object.fromEntries(
+            Object.entries(record).filter(([key]) => !UPDATE_DRAFT_RE.test(key.trim())),
+          ),
+        );
+  if (previous && normalizeLoose(previous) !== normalizeLoose(preferred.next)) {
+    return `${previous} ל${preferred.next}`;
+  }
+  return preferred.next;
 }
 
 function formatNewItemPhrase(items: string[]): string {

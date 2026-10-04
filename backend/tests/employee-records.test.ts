@@ -1219,6 +1219,95 @@ describe("employee records", () => {
     });
   });
 
+  it("splits personal vs shared shopping into separate snapshot list rows", async () => {
+    const michalId = "449eb6c9-14b8-44e4-b6d5-988bab53b396";
+    employeeFindUnique.mockResolvedValue({
+      userId: "user-1",
+      kind: "human",
+      name: "טל",
+      nickname: "טל",
+      isOwner: false,
+    });
+    listFindMany
+      .mockResolvedValueOnce([
+        {
+          id: "tal-shop",
+          employeeId: talId,
+          listType: "shopping",
+          name: "",
+          scope: "personal",
+          visibleTo: [],
+          employee: { id: talId, name: "טל", nickname: "טל" },
+          items: [
+            {
+              data: { "שם פריט": "קוטג׳" },
+              scope: "personal",
+              itemKey: "קוטג׳",
+              visibleTo: [],
+            },
+            {
+              data: { "שם פריט": "חלב" },
+              scope: "shared",
+              itemKey: "חלב",
+              addedById: talId,
+              visibleTo: [talId, michalId],
+            },
+            {
+              data: { "שם פריט": "גבינה" },
+              scope: "shared",
+              itemKey: "גבינה",
+              addedById: talId,
+              visibleTo: [talId, michalId],
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    itemFindMany.mockResolvedValue([]);
+    employeeFindMany.mockResolvedValue([
+      { id: talId, name: "טל", nickname: "טל" },
+      { id: michalId, name: "אורח", nickname: "מיכל" },
+    ]);
+    filingFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([]);
+
+    const snapshot = await getEmployeeRecordSnapshot(talId);
+    expect(snapshot.lists).toEqual([
+      {
+        list_type: "shopping",
+        owner: "טל",
+        scope: "personal",
+        items: [
+          { "שם פריט": "קוטג׳", scope: "personal", owner: "טל" },
+        ],
+      },
+      {
+        list_type: "shopping",
+        owner: "טל",
+        scope: "shared",
+        shared_with: ["טל", "מיכל"],
+        items: [
+          {
+            "שם פריט": "חלב",
+            scope: "shared",
+            owner: "טל",
+            shared_with: ["טל", "מיכל"],
+          },
+          {
+            "שם פריט": "גבינה",
+            scope: "shared",
+            owner: "טל",
+            shared_with: ["טל", "מיכל"],
+          },
+        ],
+      },
+    ]);
+    const context = formatEmployeeContext(snapshot);
+    expect(context).toContain('"scope":"personal"');
+    expect(context).toContain('"scope":"shared"');
+    expect(context).toContain("shared_with");
+  });
+
   it("includes empty shared custom lists with shared_with partners", async () => {
     listFindMany.mockResolvedValue([
       {

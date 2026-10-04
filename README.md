@@ -17,8 +17,9 @@ npm run dev
 `npm run dev` also runs `predev` → `prisma migrate deploy`, so pending schema migrations are applied before the API/frontend start.
 Or point `DATABASE_URL` at an existing PostgreSQL database. `docker-compose.yml` publishes Postgres on **5432**. If that port is taken, remap the container (this repo’s local box uses **5435**) and set `DATABASE_URL` to match.
 
-- Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
+- Frontend (local Vite): [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
 - API: [http://localhost:3001](http://localhost:3001) (`PORT`; local override may use **3003**)
+- Public UI (optional): after `npm run build -w frontend`, the API also serves `frontend/dist` on the same host as the Cloudflare tunnel (e.g. `https://wa.workee.site`). Set `CLIENT_ORIGIN` to that HTTPS origin and confirm cloudflared sends **all** host traffic to the API port (not only `/api/whatsapp/webhook`). Rebuild the frontend when the UI changes.
 
 Seeded login user(s) from `.env` `SEED_USERNAME` (comma-separated OK) + `SEED_PASSWORD`:
 
@@ -80,7 +81,7 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 - **Chat** — pick **Chat as** (human speaker) and **Chat with** (Lucy or any other digital). Guests are omitted from Chat-as. History is per `(Chat as, Chat with)` thread; after **24 hours** idle the server rotates the conversation and **deletes** stored chat messages (OpenAI context resets too).
 - **Employees** — CRUD for humans and digital workers (guests hidden); optional owner flag.
-- **Dashboard** — signed-in home. **WhatsApp** — webhook/flow status for operators.
+- **Dashboard** — signed-in home. **Admin** (admins only) — system health, WhatsApp channel diagnostics, CI, admin logins.
 
 ## Reminders and scheduled sends
 
@@ -118,6 +119,8 @@ WhatsApp is a channel into `sendChatMessage`, not a second bot. Inbound texts hi
 
    Meta → app → **Webhooks** → WhatsApp Business Account. Verify token = `WHATSAPP_VERIFY_TOKEN`.
 
+   Point the tunnel hostname at the API port for **all** paths (not only the webhook). After `npm run build -w frontend`, the same host serves the signed-in UI (`CLIENT_ORIGIN=https://wa.workee.site`).
+
    A `trycloudflare.com` URL works for a first test but changes when the process restarts.
 
 5. Legal pages Meta may ask for (served by the API): `/privacy`, `/data-deletion`, `/terms`.
@@ -128,7 +131,7 @@ Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound 
 
 Two laptops can run the web app on different branches with their own Postgres. The Meta webhook is **one** URL (`wa.workee.site`), so only one machine’s tunnel should be up for WhatsApp.
 
-Signed-in **WhatsApp** tab (and `GET /api/whatsapp/status`) shows the flow log: webhook POST, inbound, LLM, send, and whether Meta’s WABA `override_callback_uri` still points at a dead `trycloudflare.com` URL. Tokens are never returned.
+Signed-in **Admin** tab (and `GET /api/whatsapp/status`) shows WhatsApp channel diagnostics: webhook alignment + in-memory flow log, plus whether Meta’s WABA `override_callback_uri` still points at a dead `trycloudflare.com` URL. Tokens are never returned.
 
 **Ops monitoring (POC):** durable failure rows + optional WhatsApp alerts to `OPS_ALERT_PHONES`, and a cheap `GET /api/health` (DB + config flags — not every route). UI lives on the **Admin** tab (monitoring + code changes) for logins listed in `SEED_ADMIN_USERNAMES` (`Users.is_admin`). Lucy chat digests are refused (`זה לא נתמך.`). See [`docs/ops-monitoring.md`](docs/ops-monitoring.md).
 

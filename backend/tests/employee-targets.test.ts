@@ -442,6 +442,31 @@ describe("employee targets", () => {
         { partnerNames: ["טל"] },
       ),
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
+    expect(
+      fallbackNotificationText(
+        tal,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [
+                {
+                  "שם פריט": "גבינה לבנה",
+                  "שם פריט חדש": "גבינה סקי",
+                },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { recipientIsOwner: false, ownerName: "טל" },
+      ),
+    ).toBe(
+      "טל עדכן גבינה לבנה לגבינה סקי ברשימת הקניות המשותפת שלכם",
+    );
   });
 
   it("appends a linked reminder clock to a task notification", () => {

@@ -14,8 +14,8 @@ Coverage grids stay in the phase matrices. This file is the full numbered list o
 | Admin API + services | [`admin.test.ts`](../../backend/tests/admin.test.ts) | 7 |
 | Digest refuse prompt | [`llm-config.test.ts`](../../backend/tests/llm-config.test.ts) | includes CODE DIGEST |
 | Monitoring view | [`monitoring-view.test.ts`](../../frontend/src/pages/Admin/monitoring-view.test.ts) | 4 |
-| Admin page UI | [`AdminPage.test.tsx`](../../frontend/src/pages/Admin/AdminPage.test.tsx) | 4 |
-| WhatsApp without ops UI | [`WhatsAppPage.test.tsx`](../../frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx) | 5 |
+| Admin page UI | [`AdminPage.test.tsx`](../../frontend/src/pages/Admin/AdminPage.test.tsx) | includes WhatsApp channel panel |
+| SPA from API | [`spa-static.test.ts`](../../backend/tests/spa-static.test.ts) | 2 |
 
 Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
 
@@ -38,7 +38,7 @@ Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
 | 2.3 | UI | [`ChatPage.test.tsx`](../../frontend/src/pages/Chat/ChatPage.test.tsx) | 17 |
 | 2.4 | UI | [`chatTime.test.ts`](../../frontend/src/pages/Chat/chatTime.test.ts) | 2 |
 | 2.5 | UI | [`EmployeesPage.test.tsx`](../../frontend/src/pages/Employees/EmployeesPage.test.tsx) | 15 |
-| 2.6 | UI | [`WhatsAppPage.test.tsx`](../../frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx) | 5 |
+| 2.6 | UI | [`AdminPage.test.tsx`](../../frontend/src/pages/Admin/AdminPage.test.tsx) | WhatsApp channel in Admin |
 
 ---
 
@@ -51,6 +51,7 @@ Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
 3. on lists update, stores only the new name (not שם + שם חדש)
 4. snapshot hides leftover שם חדש draft keys
 5. guest snapshot excludes personal shopping and keeps shared partner lists
+5b. splits personal vs shared shopping into separate snapshot list rows
 6. ignores list_name when identifying a custom row
 7. fills a spoken fallback when remove applied but model left response empty
 8. removes a custom row found on another list name for the same owner
@@ -293,7 +294,7 @@ Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
 1. displays a greeting with the authenticated username
 2. opens the employees screen from the Employees tab
 3. opens the chat screen from the Chat tab
-4. opens the WhatsApp screen from the WhatsApp tab
+4. opens Admin (admins) — WhatsApp diagnostics live under Admin, not a product tab
 5. logs the user out and returns to login
 
 ### 2.3 `ChatPage.test.tsx` — 17
@@ -339,9 +340,9 @@ Docs: [`docs/ops-monitoring.md`](../ops-monitoring.md).
 14. creates a person and refreshes the list
 15. shows an error when saved records fail to load
 
-### 2.6 `WhatsAppPage.test.tsx` — 4
+### 2.6 `AdminPage.test.tsx` — WhatsApp channel panel
 
-1. shows the Meta override mismatch and flow events
+1. shows the Meta override mismatch and flow events under Admin
 2. shows aligned webhooks without a mismatch alert
 3. shows an error when status fails to load
 4. reloads status when Refresh is clicked

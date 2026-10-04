@@ -141,6 +141,24 @@ describe("open jobs context", () => {
     expect(block).toContain('"viewer_is":"asker"');
     expect(block).toContain('"raisable":false');
   });
+
+  it("marks self until-done jobs as viewer_is=self and raisable", () => {
+    const block = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "לקנות חלב",
+        }),
+      ],
+      AMIT,
+    );
+    expect(block).toContain('"viewer_is":"self"');
+    expect(block).toContain('"raisable":true');
+    expect(block).toContain("until-done");
+  });
 });
 
 describe("createJobsFromRelays", () => {
@@ -1026,5 +1044,87 @@ describe("applyJobActions", () => {
     });
     expect(result.reports).toEqual([]);
     expect(itemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("opens a self until-done job with asker=subject=speaker and optional first ping", async () => {
+    itemCreate
+      .mockResolvedValueOnce({ id: "self-job-1" })
+      .mockResolvedValueOnce({ id: "nudge-item-1" });
+    reminderCreate.mockResolvedValue({ id: "rem-1" });
+    reminderUpdate.mockResolvedValue({});
+
+    const result = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      actions: [
+        {
+          action: "open",
+          jobId: "",
+          answerText: "לקנות חלב",
+          reportText: "",
+          time: "",
+          in: 3600,
+        },
+      ],
+      jobs: [],
+    });
+
+    expect(result.opened).toEqual(["self-job-1"]);
+    expect(result.snoozed).toHaveLength(1);
+    expect(result.snoozed[0].jobId).toBe("self-job-1");
+    expect(result.reports).toEqual([]);
+    expect(itemCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          scope: "personal",
+          data: expect.objectContaining({
+            "שם מטלה": "לוודא שסגרת: לקנות חלב",
+            [JOB_META_KEY]: expect.objectContaining({
+              askerId: AMIT,
+              subjectId: AMIT,
+              ask: "לקנות חלב",
+              kind: "job",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(reminderCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          messageText: "עדיין פתוח: לקנות חלב",
+          pingIds: [AMIT],
+        }),
+      }),
+    );
+  });
+
+  it("closes a self-job without reporting to anyone else", async () => {
+    const selfJob = jobRow({
+      askerId: AMIT,
+      askerName: "עמית",
+      subjectId: AMIT,
+      subjectName: "עמית",
+      ask: "לקנות חלב",
+    });
+    const result = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      actions: [
+        {
+          action: "close",
+          jobId: "job-1",
+          answerText: "",
+          reportText: "",
+          time: "",
+          in: null,
+        },
+      ],
+      jobs: [selfJob],
+    });
+    expect(result.closed).toEqual(["job-1"]);
+    expect(result.reports).toEqual([]);
   });
 });

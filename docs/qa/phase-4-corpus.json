@@ -147,7 +147,7 @@
     {
       "id": "list-filtered-multi-delete",
       "tag": "happy",
-      "utterance": "תמחקי את 2 המטלות של רב פס",
+      "utterance": "מחקי את שתי המטלות של הרב פס מהמטלות שלי",
       "setup": {
         "lists": [
           {
@@ -155,8 +155,9 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "שם מטלה": "ליצור קשר עם רב פס" },
-              { "שם מטלה": "לדבר עם רב פס על הפגישה" },
+              { "שם מטלה": "לדבר עם רב פס", "תאריך לביצוע": "2026-10-04", "שעה לביצוע": "14:00" },
+              { "שם מטלה": "ליצור קשר עם רב פס שירות לקוחות" },
+              { "שם מטלה": "פגישה", "תאריך לביצוע": "2026-10-04", "שעה לביצוע": "21:30" },
               { "שם מטלה": "לקנות חלב" }
             ]
           }
@@ -171,7 +172,7 @@
         },
         {
           "type": "response_forbids_any",
-          "needles": ["לאיזו", "לאיזה"]
+          "needles": ["לאיזו", "לאיזה", "מצאתי מטלה אחת", "למחוק אותה"]
         }
       ]
     },
@@ -402,9 +403,14 @@
       "setup": {},
       "constraints": [
         {
-          "type": "reminders_has_action",
+          "type": "jobs_has_action",
+          "action": "open",
+          "requireAsk": true
+        },
+        {
+          "type": "lists_has_action",
           "action": "add",
-          "recurring": true
+          "listType": "shopping"
         },
         {
           "type": "response_mentions_any",
@@ -419,9 +425,9 @@
       "setup": {},
       "constraints": [
         {
-          "type": "reminders_has_action",
-          "action": "add",
-          "recurring": true
+          "type": "jobs_has_action",
+          "action": "open",
+          "requireAsk": true
         },
         { "type": "directory_empty" },
         {
@@ -518,6 +524,8 @@
           "type": "any",
           "constraints": [
             { "type": "reminders_has_action", "action": "remove" },
+            { "type": "jobs_has_action", "action": "close" },
+            { "type": "jobs_has_action", "action": "clear_clock" },
             { "type": "hold_or_confirm" }
           ]
         },

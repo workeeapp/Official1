@@ -29,6 +29,8 @@ export interface JobApplyResult {
   closed: string[];
   snoozed: Array<{ jobId: string; fireAt: Date }>;
   cleared: string[];
+  /** Newly opened self until-done jobs this turn. */
+  opened: string[];
   /** Job ids this turn marked progress — a later relay may reuse that row. */
   progressed: string[];
   /** Asks the speaker must choose among when a job action had no job_id. */
@@ -296,6 +298,82 @@ export async function answerOpenJobForPair(input: {
   return row.id;
 }
 
+function isSelfJob(meta: JobMeta): boolean {
+  return meta.askerId === meta.subjectId;
+}
+
+/**
+ * Open a self until-done job: asker = subject = speaker. Lucy must chase until
+ * they close the linked shopping/task (or cancel the chase).
+ */
+export async function createSelfJob(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  speaker: { id: string; name: string };
+  ask: string;
+}): Promise<OpenJobRow | null> {
+  const ask = input.ask.trim().replace(/[.!]+$/, "");
+  if (!ask) {
+    return null;
+  }
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return null;
+  }
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  for (const row of live ?? []) {
+    const meta = jobMetaFrom(row.data);
+    if (
+      meta?.kind === "job" &&
+      isSelfJob(meta) &&
+      meta.askerId === input.speaker.id &&
+      asksMatch(meta.ask, ask)
+    ) {
+      return { id: row.id, label: readLabel(row.data), meta };
+    }
+  }
+  const label = `לוודא שסגרת: ${ask}`.trim();
+  const meta: JobMeta = {
+    kind: "job",
+    askerId: input.speaker.id,
+    askerName: input.speaker.name,
+    subjectId: input.speaker.id,
+    subjectName: input.speaker.name,
+    ask,
+    state: "open",
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    const row = await prisma.employeeListItem.create({
+      data: {
+        listId,
+        itemKey: normalizeKey(label),
+        data: toJsonValue({ [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta }),
+        scope: "personal",
+        addedById: input.speaker.id,
+        visibleTo: toJsonValue([input.speaker.id]),
+      },
+    });
+    if (!row?.id) {
+      return null;
+    }
+    await recordAuditEvent({
+      userId: input.userId,
+      actorEmployeeId: input.speaker.id,
+      action: "job_open",
+      entityType: "EmployeeListItem",
+      entityId: row.id,
+      summary: `open self-job: ${label}`,
+      detail: { ask, self: true },
+    });
+    return { id: row.id, label, meta };
+  } catch {
+    return null;
+  }
+}
+
 /** Live jobs on this worker that the viewer is part of (asker or subject). */
 export async function listOpenJobsForViewer(input: {
   digitalEmployeeId: string;
@@ -375,7 +453,11 @@ export function formatOpenJobsContext(
     subject: job.meta.subjectName,
     ask: job.meta.ask,
     task: job.label,
-    viewer_is: job.meta.askerId === viewerId ? "asker" : "subject",
+    viewer_is: isSelfJob(job.meta)
+      ? "self"
+      : job.meta.askerId === viewerId
+        ? "asker"
+        : "subject",
     state: job.meta.state,
     ...(job.meta.progress ? { progress: job.meta.progress } : {}),
     ...(job.meta.nudgeFireAt
@@ -397,11 +479,12 @@ export function formatOpenJobsContext(
   return [
     "OPEN_JOBS:",
     "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do, list them even if WORKER_SAVED_DATA looks empty.",
-    "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line. Never read that label out loud — say it the way THIS speaker should hear it:",
+    "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» or «לוודא שסגרת: …» task line. Never read that label out loud — say it the way THIS speaker should hear it:",
+    "viewer_is=self → until-done chase on THIS speaker (נדנדי עד שאקנה). Raise: ask if they finished/closed the item. Done (קניתי/סיימתי) → lists.remove that item AND jobs.answer/close. Stop nag only (תפסיקי) → jobs.close/clear_clock; keep the shopping/task. Snooze next ping with jobs.snooze. Never ask another person's WhatsApp for this.",
     "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself.",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
-    "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
+    "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job. New until-done chase → jobs.open (no job_id; answer_text = obligation).",
     "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from these fields when you forget the list.",
     JSON.stringify(rows),
   ].join("\n");
@@ -541,7 +624,15 @@ async function openNudge(input: {
   if (!listId) {
     return null;
   }
-  const label = `להזכיר ל${input.job.meta.subjectName} ${input.job.meta.ask}`.trim();
+  const self = isSelfJob(input.job.meta);
+  const label = self
+    ? `לנדנד על ${input.job.meta.ask}`.trim()
+    : `להזכיר ל${input.job.meta.subjectName} ${input.job.meta.ask}`.trim();
+  const messageText = self
+    ? `עדיין פתוח: ${input.job.meta.ask}`
+    : input.job.meta.askerName
+      ? `${input.job.meta.askerName} מבקש/ת להזכיר לך: ${input.job.meta.ask}`
+      : input.job.meta.ask;
   const item = await prisma.employeeListItem.create({
     data: {
       listId,
@@ -560,9 +651,13 @@ async function openNudge(input: {
           jobItemId: input.job.id,
         } satisfies JobMeta,
       }),
-      scope: "shared",
+      scope: self ? "personal" : "shared",
       addedById: input.actorId,
-      visibleTo: toJsonValue([input.job.meta.askerId, input.job.meta.subjectId]),
+      visibleTo: toJsonValue(
+        self
+          ? [input.job.meta.subjectId]
+          : [input.job.meta.askerId, input.job.meta.subjectId],
+      ),
     },
   });
   if (!item?.id) {
@@ -579,9 +674,7 @@ async function openNudge(input: {
       fireAt: input.fireAt,
       repeat: "once",
       pingIds: toJsonValue([input.job.meta.subjectId]),
-      messageText: input.job.meta.askerName
-        ? `${input.job.meta.askerName} מבקש/ת להזכיר לך: ${input.job.meta.ask}`
-        : input.job.meta.ask,
+      messageText,
     },
   });
   if (!reminder?.id) {
@@ -647,16 +740,83 @@ export async function applyJobActions(input: {
     closed: [],
     snoozed: [],
     cleared: [],
+    opened: [],
     progressed: [],
     askWhich: [],
   };
-  if (input.actions.length === 0 || input.jobs.length === 0) {
+  if (input.actions.length === 0) {
     return result;
   }
-  const byId = new Map(input.jobs.map((job) => [job.id, job] as const));
+  const liveJobs = [...input.jobs];
+  const byId = new Map(liveJobs.map((job) => [job.id, job] as const));
   const handled = new Set<string>();
+
+  async function snoozeJob(
+    job: OpenJobRow,
+    action: LlmJobAction,
+  ): Promise<void> {
+    const fireAt = fireAtFrom(action);
+    if (!fireAt) {
+      await patchJobMeta(job.id, {
+        ...job.meta,
+        deferredAt: new Date().toISOString(),
+      });
+      return;
+    }
+    await sweepNudge(job.meta, input.userId, input.speaker.id);
+    const nudge = await openNudge({
+      userId: input.userId,
+      digitalEmployeeId: input.digitalEmployeeId,
+      actorId: input.speaker.id,
+      job,
+      fireAt,
+    });
+    if (!nudge) {
+      return;
+    }
+    const nextMeta: JobMeta = {
+      ...job.meta,
+      deferredAt: undefined,
+      nudgeReminderId: nudge.reminderId,
+      nudgeItemId: nudge.itemId,
+      nudgeFireAt: fireAt.toISOString(),
+    };
+    await patchJobMeta(job.id, nextMeta);
+    job.meta = nextMeta;
+    byId.set(job.id, job);
+    result.snoozed.push({ jobId: job.id, fireAt });
+  }
+
   for (const raw of input.actions) {
-    const bound = withJobId(raw, input.jobs, input.speaker.id);
+    if (raw.action === "open") {
+      const ask = raw.answerText.trim();
+      if (!ask || handled.has(`open:${normalizeKey(ask)}`)) {
+        continue;
+      }
+      handled.add(`open:${normalizeKey(ask)}`);
+      try {
+        const created = await createSelfJob({
+          userId: input.userId,
+          digitalEmployeeId: input.digitalEmployeeId,
+          speaker: input.speaker,
+          ask,
+        });
+        if (!created) {
+          continue;
+        }
+        liveJobs.push(created);
+        byId.set(created.id, created);
+        result.opened.push(created.id);
+        if (raw.time.trim() || (typeof raw.in === "number" && raw.in > 0)) {
+          await snoozeJob(created, raw);
+        }
+      } catch {
+        // Never let one job action break the rest of the turn.
+      }
+      continue;
+    }
+
+    const bound = withJobId(raw, liveJobs, input.speaker.id);
     if (bound.choices.length > 0) {
       for (const choice of bound.choices) {
         if (!result.askWhich.includes(choice)) {
@@ -752,34 +912,7 @@ export async function applyJobActions(input: {
         continue;
       }
       if (action.action === "snooze") {
-        const fireAt = fireAtFrom(action);
-        if (!fireAt) {
-          // No clock named — hold off until they bring it up again.
-          await patchJobMeta(job.id, {
-            ...job.meta,
-            deferredAt: new Date().toISOString(),
-          });
-          continue;
-        }
-        await sweepNudge(job.meta, input.userId, input.speaker.id);
-        const nudge = await openNudge({
-          userId: input.userId,
-          digitalEmployeeId: input.digitalEmployeeId,
-          actorId: input.speaker.id,
-          job,
-          fireAt,
-        });
-        if (!nudge) {
-          continue;
-        }
-        await patchJobMeta(job.id, {
-          ...job.meta,
-          deferredAt: undefined,
-          nudgeReminderId: nudge.reminderId,
-          nudgeItemId: nudge.itemId,
-          nudgeFireAt: fireAt.toISOString(),
-        });
-        result.snoozed.push({ jobId: job.id, fireAt });
+        await snoozeJob(job, action);
         continue;
       }
       if (action.action === "clear_clock") {

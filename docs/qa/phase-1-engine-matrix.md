@@ -6,7 +6,7 @@ Branch: `test/qa-phase-1-engine` (worktree). Product runtime stays on `feat/mult
 
 | Domain | add | update | remove | Notes / gaps |
 |--------|-----|--------|--------|--------------|
-| shopping | covered | covered | covered | `employee-records.test.ts` — no silent type rewrite |
+| shopping | covered | covered | covered | `employee-records.test.ts` — no silent type rewrite; snapshot splits personal vs shared shopping rows |
 | tasks | covered | covered | covered | ACTION `list_type` wins; reply wording may still fix קניות↔מטלות |
 | custom list | covered | covered | covered | shared + partner notify from **DB**; no cross-list fuzzy remove |
 | filing | covered (+ refuse empty description) | covered (loose name + miss) | covered (exact + loose + miss) | rename `item_name` = intentional gap |
@@ -17,7 +17,10 @@ Branch: `test/qa-phase-1-engine` (worktree). Product runtime stays on `feat/mult
 | bulk list delete | N/A | N/A | covered | ≥2 removes → `delete_lists` confirm hold |
 | no-guess share targets | N/A | N/A | covered | empty list targets stay empty — no message/top-level inherit (`llm-message` / pending-action) |
 | no-guess list match | covered | covered | covered | exact ACTION only; miss = no-op; personal beats same-named shared on empty targets |
-| filtered multi delete (model) | N/A | Phase 4 corpus | engine confirm same as bulk | prompt: delete all matches when count/plural named; no «לאיזו» |
+| filtered multi delete (model) | N/A | Phase 4 corpus | engine confirm same as bulk | prompt: delete all matches when count/plural named; no «לאיזו» / «מצאתי מטלה אחת» |
+| shared shopping notify | N/A | covered (`fallbackNotificationText`) | covered | old→new label + «המשותפת שלכם» for non-owner watcher |
+| self until-done job | covered (`jobs.open`) | snooze/raise | close/answer/clear_clock | asker=subject=speaker; one-shot remind stays reminders |
+| SPA from API | covered (`spa-static.test.ts`) | N/A | N/A | serves `frontend/dist` + SPA fallback; `/api` stays JSON |
 
 ## Engine cases added on this branch
 

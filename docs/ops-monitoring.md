@@ -33,7 +33,7 @@ After changing seed admins: `npm run db:seed`, then re-login. After Grant in UI,
 3. **Admins** — list login users; Grant/Revoke Admin tab (`Users.is_admin`). Blocks revoking the last admin.
 4. **Code changes** (below) — commits in a lookback window (24 / 48 / 168h). Preview first **5**, then **Show all**.
 
-**WhatsApp** tab is channel-only: webhook alignment + in-memory flow log. No durable ops banner, no git digest.
+**Admin** tab includes WhatsApp channel diagnostics: webhook alignment + in-memory flow log. No durable ops banner here beyond the monitoring board.
 
 ## Lucy / code digests
 
