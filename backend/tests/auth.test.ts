@@ -51,7 +51,7 @@ describe("authentication API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
-      user: { id: userId, username: "Amit" },
+      user: { id: userId, username: "Amit", isAdmin: false },
     });
     const setCookie = cookieHeader(response);
     expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
@@ -130,7 +130,7 @@ describe("authentication API", () => {
 
     expect(meResponse.status).toBe(200);
     expect(meResponse.body).toEqual({
-      user: { id: userId, username: "Amit" },
+      user: { id: userId, username: "Amit", isAdmin: false },
     });
   });
 

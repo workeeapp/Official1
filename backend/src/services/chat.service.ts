@@ -13,14 +13,15 @@ import {
   type PublicEmployee,
 } from "@workee/shared";
 import { loadLlmConfig, type LlmConfig, type LlmJsonSchemaFormat } from "../config/llm.js";
-import { ValidationError } from "../utils/errors.js";
-import { prisma } from "../database/prisma.js";
 import {
   isContextTooLargeError,
   isUniqueConstraintError,
   missingTableName,
+  opsErrorDetail,
   ServiceUnavailableError,
+  ValidationError,
 } from "../utils/errors.js";
+import { prisma } from "../database/prisma.js";
 import {
   alignListTypeInReply,
   applyEmployeeRecords,
@@ -449,7 +450,7 @@ function workerTargetingInstructions(
     `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → metadata.query = "self". Answer only from THIS turn's WORKER_SAVED_DATA. Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. Do not invent saved jobs from earlier chat that are missing from this JSON — PENDING_ACTION_STATE / hold message drafts are separate and stay in force.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
-    "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send. SEND WITHOUT TIME: תשלח/י / תרשום/י / תכתוב/י / תגיד/י / send / text + recipient (לי/אליי counts) and no delay words → NOW this turn — never ask מתי. Plain body → messages; git_log/saved_data compose → reminders in:5. Ask מתי only for תזכיר/י without a clock or vague «later».",
+    "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send. SEND WITHOUT TIME: תשלח/י / תרשום/י / תכתוב/י / תגיד/י / send / text + recipient (לי/אליי counts) and no delay words → NOW this turn — never ask מתי. Plain body → messages; saved_data compose → reminders in:5. Code digests (git_log) → CODE DIGEST NOT SUPPORTED. Ask מתי only for תזכיר/י without a clock or vague «later».",
     `Scheduled dictated send: (1) reminders add with ping + text + in/time. (2) lists tasks add targeting yourself (${workerName}) — לשלוח הודעה ל<name> (same item label as the clock). That is YOUR job for query self. (3) messages = []. Do not put shopping/tasks on the speaker unless they also asked to buy or remember their own work.`,
     "SEND BODY MODE: (1) Dictated copy AS-IS — «תרשמי לעמית לא משנה הסתדרתי שבוע טוב» → messages.text exactly that body (emojis only if they asked to add them); never polish/wrap. (2) Content / conversation reference — after you answered about a task/topic, «תשלחי לעמית את פרטי המטלה / מה שדיברנו / את זה / את התשובה / תשלחי לו <pointer to that chat topic>» → resolve and send the REAL substance (prior answer / saved details), never the literal pointer phrase; ambiguous among several topics → ASK. (3) Intent relay — תגידי לטל לקנות… → formulate for the recipient. Short pointer right after that topic was discussed → prefer (2).",
     "Write metadata.messages[].text / reminders.text using SEND BODY MODE above.",
@@ -483,7 +484,7 @@ function workerTargetingInstructions(
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
-    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\". «תשלחי לי / שלחי לי / תרשמי לי / תשלחי אליי / שלחי אלי / send me / text me» → ping=[SPEAKER] (לי/אליי/send-me names the recipient — FORBIDDEN to ask למי לשלוח). Named person («לטל») → that ping. Never invent עמית. Ask למי only when there is no לי/אליי/אלי/send-me and no named recipient. compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No delay words → in:5 NOW same turn (FORBIDDEN to ask מתי or למי); explicit delay → that clock. NEVER say אשלח without in/time/every. When saved, say WHEN (מיד / בעוד כמה שניות). After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient (SPEAKER via לי counts). Example names in prompts are fiction — not defaults.",
+    "CODE DIGEST NOT SUPPORTED: code/git change summaries via chat are not supported — never compose_source git_log, never reminders/messages for a digest. Reply only «זה לא נתמך.» — no Admin, no alternative screen, no coworker. Never claim אשלח a digest.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / תשלחי לי בעוד 10 שניות את הרשימה המשותפת עם עמית) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when שלחי לי / אליי / send me, brief=the live question (include עם X). At fire the server uses the SAME Lucy chat answer path as typing it now — not a separate compose model. messages=[]. Need a real clock. FORBIDDEN: deferred list mutations. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
@@ -1547,16 +1548,20 @@ export async function sendChatMessage(input: {
           filing: metadata.filing ?? [],
         }),
     );
-    // Compose send (git_log / saved_data) with recipient but no clock → fire now (~5s).
-    const remindersForApply = (guestSpeaker ? [] : metadata.reminders ?? []).map(
-      (row) => {
+    // saved_data compose with no clock → fire now (~5s). git_log digests are not supported via chat.
+    const reminderRows = guestSpeaker ? [] : metadata.reminders ?? [];
+    const blockedGitLogDigests = reminderRows.filter(
+      (row) =>
+        (row.action === "add" || row.action === "update") &&
+        row.composeSource === "git_log",
+    );
+    const remindersForApply = reminderRows
+      .filter((row) => row.composeSource !== "git_log")
+      .map((row) => {
         if (row.action !== "add") {
           return row;
         }
-        if (
-          row.composeSource !== "git_log" &&
-          row.composeSource !== "saved_data"
-        ) {
+        if (row.composeSource !== "saved_data") {
           return row;
         }
         const hasClock =
@@ -1565,8 +1570,7 @@ export async function sendChatMessage(input: {
           Boolean(row.everyCount && row.everyUnit) ||
           Boolean(row.weekdays && row.weekdays.length > 0);
         return hasClock ? row : { ...row, inSeconds: 5 };
-      },
-    );
+      });
     const reminderPlan = planReminderWrites(
       remindersForApply,
       metadata.confirm ?? null,
@@ -1879,6 +1883,9 @@ export async function sendChatMessage(input: {
     const confirmPending =
       reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
+    if (blockedGitLogDigests.length > 0) {
+      workingReply = setEngineResponse(workingReply, "זה לא נתמך.");
+    }
     const misaddressed = correctMisaddressedJobReply({
       response: parseLlmReply(workingReply).response,
       relays: outbound.relays
@@ -2067,16 +2074,12 @@ export async function sendChatMessage(input: {
     const table = missingTableName(error);
     recordWhatsAppEvent(
       "chat_failed",
-      table
-        ? `db_missing=${table}`
-        : error instanceof Error
-          ? error.message
-          : "unknown",
+      table ? `db_missing=${table}` : opsErrorDetail(error),
     );
     if (error instanceof ServiceUnavailableError) {
       throw error;
     }
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, { cause: error });
   }
 }
 

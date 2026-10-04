@@ -25,6 +25,13 @@ export type {
   ChatLiveEvent,
   WhatsAppFlowEvent,
   WhatsAppStatusResponse,
+  AdminMonitoringResponse,
+  AdminCodeChangeCommit,
+  AdminCodeChangesResponse,
+  AdminUserRow,
+  AdminUsersResponse,
+  AdminSetAdminRequest,
+  AdminSetAdminResponse,
 } from "./types";
 export {
   USERNAME_MIN_LENGTH,

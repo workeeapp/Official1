@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  isCriticalSystemFailure,
   isNonAlertableOpsDetail,
   isOpsFailureStep,
   opsAlertKey,
+  shouldWhatsAppAlertFailure,
 } from "../src/services/ops-monitor.service.js";
 
 describe("ops monitor helpers", () => {
@@ -41,5 +43,32 @@ describe("ops monitor helpers", () => {
       ),
     ).toBe(true);
     expect(isNonAlertableOpsDetail("status=500 upstream")).toBe(false);
+  });
+
+  it("classifies DB outages as critical system failures", () => {
+    expect(isCriticalSystemFailure("system_db_down", "P1001")).toBe(true);
+    expect(isCriticalSystemFailure("chat_failed", "429 credits")).toBe(false);
+  });
+
+  it("gates WhatsApp alerts by OPS_ALERT_MODE", () => {
+    expect(
+      shouldWhatsAppAlertFailure("chat_failed", "boom", "off"),
+    ).toBe(false);
+    expect(
+      shouldWhatsAppAlertFailure("chat_failed", "boom", "critical"),
+    ).toBe(false);
+    expect(
+      shouldWhatsAppAlertFailure("system_db_down", "P1001", "critical"),
+    ).toBe(true);
+    expect(
+      shouldWhatsAppAlertFailure("chat_failed", "boom", "all"),
+    ).toBe(true);
+    expect(
+      shouldWhatsAppAlertFailure(
+        "send_fail",
+        "131030 not in allowed list",
+        "all",
+      ),
+    ).toBe(false);
   });
 });

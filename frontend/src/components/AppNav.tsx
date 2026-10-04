@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
-const tabs = [
+const productTabs = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/employees", label: "Employees" },
   { to: "/chat", label: "Chat" },
@@ -8,6 +9,11 @@ const tabs = [
 ] as const;
 
 export function AppNav() {
+  const { user } = useAuth();
+  const tabs = user?.isAdmin
+    ? [...productTabs, { to: "/admin", label: "Admin" } as const]
+    : productTabs;
+
   return (
     <nav
       aria-label="Main"

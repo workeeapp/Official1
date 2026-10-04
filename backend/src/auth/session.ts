@@ -50,7 +50,7 @@ export async function readSessionToken(token: string): Promise<SessionPayload> {
       throw new Error("Invalid session payload");
     }
 
-    return { user: { id, username }, sessionId };
+    return { user: { id, username, isAdmin: false }, sessionId };
   } catch (error) {
     if (error instanceof joseErrors.JOSEError) {
       throw new Error("Invalid session");

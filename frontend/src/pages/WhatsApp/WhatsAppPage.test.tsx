@@ -73,35 +73,6 @@ describe("WhatsApp page", () => {
     expect(screen.getByText("fields=messages inbound=0")).toBeInTheDocument();
   });
 
-  it("shows a durable failures banner when failures exist", async () => {
-    statusMock.mockResolvedValue({
-      expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
-      metaWabaWebhook: "https://wa.workee.site/api/whatsapp/webhook",
-      metaAppWebhook: "https://wa.workee.site/api/whatsapp/webhook",
-      webhookMismatch: false,
-      hasAccessToken: true,
-      lastInboundAt: null,
-      events: [],
-      failuresLastHour: 3,
-      opsAlertConfigured: true,
-      recentFailures: [
-        {
-          at: "2026-10-03T20:00:00.000Z",
-          step: "chat_failed",
-          detail: "429 You have no credits remaining",
-        },
-      ],
-    });
-
-    renderWhatsApp();
-
-    expect(await screen.findByTestId("ops-failures-banner")).toHaveTextContent(
-      /3 failures in the last hour/i,
-    );
-    expect(screen.getByText("Durable failures")).toBeInTheDocument();
-    expect(screen.getByText("chat_failed")).toBeInTheDocument();
-  });
-
   it("shows aligned webhooks without a mismatch alert", async () => {
     statusMock.mockResolvedValue({
       expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
@@ -118,7 +89,9 @@ describe("WhatsApp page", () => {
     expect(
       screen.getByText("No webhook events since this API process started."),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("https://wa.workee.site/api/whatsapp/webhook").length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByText("https://wa.workee.site/api/whatsapp/webhook").length,
+    ).toBeGreaterThanOrEqual(1);
     expect(
       screen.queryByText(/Meta still points the WABA or phone webhook/i),
     ).not.toBeInTheDocument();
@@ -147,5 +120,16 @@ describe("WhatsApp page", () => {
     await vi.waitFor(() => {
       expect(statusMock.mock.calls.length).toBeGreaterThan(callsBefore);
     });
+  });
+
+  it("does not show Admin monitoring or code-changes sections", async () => {
+    renderWhatsApp();
+
+    expect(await screen.findByTestId("whatsapp-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("admin-monitoring")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-code-changes")).not.toBeInTheDocument();
+    expect(screen.queryByText(/System status/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Code changes/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/recorded failure/i)).not.toBeInTheDocument();
   });
 });

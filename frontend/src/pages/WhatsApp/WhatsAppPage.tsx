@@ -93,29 +93,6 @@ export function WhatsAppPage() {
             </p>
           ) : null}
 
-          {(status.failuresLastHour ?? 0) > 0 ? (
-            <p
-              data-testid="ops-failures-banner"
-              className="rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-error"
-              role="alert"
-            >
-              {(status.failuresLastHour ?? 0) === 1
-                ? "1 failure in the last hour"
-                : `${status.failuresLastHour} failures in the last hour`}
-              {status.recentFailures?.[0]
-                ? ` — latest: ${status.recentFailures[0].step}${
-                    status.recentFailures[0].detail
-                      ? ` (${status.recentFailures[0].detail})`
-                      : ""
-                  }`
-                : ""}
-              . See durable failures below
-              {status.opsAlertConfigured
-                ? "; ops WhatsApp alerts are configured."
-                : "; set OPS_ALERT_PHONES to get WhatsApp alerts."}
-            </p>
-          ) : null}
-
           {status.hasAccessToken &&
           !status.metaWabaWebhook &&
           !status.metaAppWebhook ? (
@@ -156,40 +133,7 @@ export function WhatsAppPage() {
                 {status.hasAccessToken ? "configured" : "missing"}
               </dd>
             </div>
-            <div>
-              <dt className="text-text-secondary">Ops alerts</dt>
-              <dd className="mt-1 font-medium text-text-primary">
-                {status.opsAlertConfigured ? "phones configured" : "log only"}
-              </dd>
-            </div>
           </dl>
-
-          {(status.recentFailures?.length ?? 0) > 0 ? (
-            <div>
-              <h2 className="text-base font-semibold text-text-primary">
-                Durable failures
-              </h2>
-              <p className="mt-1 text-text-secondary">
-                Stored in Postgres — survives API restart (see docs/ops-monitoring.md).
-              </p>
-              <ol className="mt-3 max-h-48 space-y-2 overflow-auto">
-                {status.recentFailures!.map((event) => (
-                  <li
-                    key={`fail-${event.at}-${event.step}-${event.detail}`}
-                    className="rounded-lg border border-error/20 px-3 py-2"
-                  >
-                    <p className="font-medium text-text-primary">{event.step}</p>
-                    <p className="text-xs text-text-secondary">
-                      {formatWhen(event.at)}
-                    </p>
-                    {event.detail ? (
-                      <p className="mt-1 break-all text-text-secondary">{event.detail}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
 
           <div>
             <h2 className="text-base font-semibold text-text-primary">Flow log</h2>

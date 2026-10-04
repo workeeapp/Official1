@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AdminRoute } from "@/components/AdminRoute";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { LoginPage } from "@/pages/Login/LoginPage";
+import { AdminPage } from "@/pages/Admin/AdminPage";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
@@ -16,6 +18,9 @@ export function AppRoutes() {
         <Route path="/employees" element={<EmployeesPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/whatsapp" element={<WhatsAppPage />} />
+        <Route element={<AdminRoute />}>
+          <Route path="/admin" element={<AdminPage />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

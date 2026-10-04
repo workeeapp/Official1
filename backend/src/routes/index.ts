@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
+import { adminRouter } from "./admin.routes.js";
 import { authRouter } from "./auth.routes.js";
 import { chatRouter } from "./chat.routes.js";
 import { employeeRouter } from "./employee.routes.js";
@@ -9,6 +10,7 @@ import { whatsappRouter } from "./whatsapp.routes.js";
 export const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+apiRouter.use("/admin", adminRouter);
 apiRouter.use("/chat", chatRouter);
 apiRouter.use("/employees", employeeRouter);
 apiRouter.use("/whatsapp", whatsappRouter);
@@ -22,8 +24,13 @@ apiRouter.get("/health", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     db = true;
-  } catch {
+  } catch (error) {
     db = false;
+    const detail =
+      error instanceof Error ? error.message : "database unreachable";
+    void import("../services/ops-monitor.service.js").then(({ noteOpsSystemDown }) =>
+      noteOpsSystemDown(detail).catch(() => {}),
+    );
   }
   const env = getEnv();
   const body = {
@@ -32,6 +39,7 @@ apiRouter.get("/health", async (_req, res) => {
     openaiConfigured: Boolean(env.OPENAI_API_KEY?.trim()),
     whatsappConfigured: Boolean(env.WHATSAPP_ACCESS_TOKEN?.trim()),
     opsAlertConfigured: Boolean(env.OPS_ALERT_PHONES?.trim()),
+    opsAlertMode: env.OPS_ALERT_MODE,
   };
   res.status(db ? 200 : 503).json(body);
 });

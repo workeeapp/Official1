@@ -176,7 +176,43 @@ export function keysLooselyMatch(stored: string, needle: string): boolean {
   if (!a || !b) {
     return false;
   }
-  return a === b || a.includes(b) || b.includes(a);
+  if (a === b) {
+    return true;
+  }
+
+  const longer = a.length >= b.length ? a : b;
+  const shorter = a.length >= b.length ? b : a;
+  if (!longer.includes(shorter)) {
+    return false;
+  }
+
+  // Prefix + qty/noise only: «חלב» ↔ «חלב 3%». Extra words = different item
+  // («פגישה» must not hit «פגישה עם נגב»).
+  if (longer.startsWith(shorter)) {
+    const rest = longer.slice(shorter.length).trim();
+    if (!rest) {
+      return true;
+    }
+    return isQtyOrNoiseSuffix(rest);
+  }
+
+  // Head noun as last token: «טונה» ↔ «קופסת טונה».
+  const tokens = longer.split(" ").filter(Boolean);
+  return tokens.length > 1 && tokens[tokens.length - 1] === shorter;
+}
+
+/** Remainder after a shared prefix that is only quantity / units / punctuation. */
+function isQtyOrNoiseSuffix(rest: string): boolean {
+  const compact = rest.replace(/\s+/g, " ").trim();
+  if (!compact) {
+    return true;
+  }
+  if (/^[\d.%x×/,+-]+$/i.test(compact.replace(/\s/g, ""))) {
+    return true;
+  }
+  return /^\d+(\.\d+)?(\s*(מ"?ל|מל|ל|ק"?ג|קג|גרם|ג|יח'?|יחידות))?$/i.test(
+    compact,
+  );
 }
 
 export function normalizeKey(value: string): string {
@@ -1748,7 +1784,11 @@ async function applyListAction(
       const matchNeedles = needles.length > 0 ? needles : [itemKey];
       let targetListId = list.id;
       let targetListName = list.name || listName;
-      let existing = await findMatchingItemByNeedles(list.id, matchNeedles);
+      let existing = await findMatchingItemByNeedles(
+        list.id,
+        matchNeedles,
+        "remove",
+      );
       if (!existing?.id && resolvedAction.listType === "custom") {
         const across = await findCustomItemAcrossEmployeeLists(
           employeeId,
@@ -2151,6 +2191,12 @@ async function findMatchingItemByNeedles(
     if (exact) {
       return exact;
     }
+  }
+
+  // New adds must not fuzzy-collide with a longer/different title.
+  // Example bug: booking «פגישה» updated «פגישה עם נגב» and inherited Tal in visibleTo.
+  if (action === "add") {
+    return null;
   }
 
   const items = await prisma.employeeListItem.findMany({

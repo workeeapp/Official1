@@ -87,7 +87,9 @@ export function extractOutputText(response: {
 
   const text = parts.join("\n").trim();
   if (!text) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "llm_empty_output",
+    });
   }
 
   return text;
@@ -169,7 +171,9 @@ export function getLlmClient(): LlmClient {
 
   const apiKey = getEnv().OPENAI_API_KEY;
   if (!apiKey) {
-    throw new ServiceUnavailableError();
+    throw new ServiceUnavailableError(undefined, {
+      detail: "openai_api_key_missing",
+    });
   }
 
   cachedOpenAi ??= createOpenAiClient(apiKey);
