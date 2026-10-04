@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getCiStatus,
   getCodeChanges,
   getMonitoring,
   getUsers,
@@ -13,6 +14,7 @@ export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireAdmin);
 adminRouter.get("/monitoring", asyncHandler(getMonitoring));
+adminRouter.get("/ci-status", asyncHandler(getCiStatus));
 adminRouter.get("/code-changes", asyncHandler(getCodeChanges));
 adminRouter.get("/users", asyncHandler(getUsers));
 adminRouter.patch("/users/:id/admin", asyncHandler(patchUserAdmin));

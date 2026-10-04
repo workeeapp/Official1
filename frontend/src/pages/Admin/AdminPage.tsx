@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  AdminCiStatusResponse,
   AdminCodeChangesResponse,
   AdminMonitoringResponse,
   AdminUserRow,
@@ -8,6 +9,7 @@ import { Button } from "@/components/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { adminApi } from "@/services/admin.service";
 import { ApiError } from "@/types";
+import { buildCiView } from "./ci-view";
 import { buildMonitoringView } from "./monitoring-view";
 
 const CODE_PREVIEW_COUNT = 5;
@@ -20,8 +22,8 @@ function formatWhen(value: string): string {
   return date.toLocaleString();
 }
 
-function checkTone(state: "ok" | "warn" | "bad"): string {
-  if (state === "ok") {
+function checkTone(state: "ok" | "warn" | "bad" | "idle"): string {
+  if (state === "ok" || state === "idle") {
     return "border-border bg-background text-text-primary";
   }
   if (state === "warn") {
@@ -30,11 +32,27 @@ function checkTone(state: "ok" | "warn" | "bad"): string {
   return "border-error/40 bg-error/5 text-text-primary";
 }
 
+function runBadge(status: string, conclusion: string | null): string {
+  const s = status.toLowerCase();
+  const c = (conclusion ?? "").toLowerCase();
+  if (s === "in_progress" || s === "queued") {
+    return "Running";
+  }
+  if (c === "success") {
+    return "Pass";
+  }
+  if (c === "failure" || c === "timed_out") {
+    return "Fail";
+  }
+  return conclusion ?? status;
+}
+
 export function AdminPage() {
   const { user: me } = useAuth();
   const [monitoring, setMonitoring] = useState<AdminMonitoringResponse | null>(
     null,
   );
+  const [ciStatus, setCiStatus] = useState<AdminCiStatusResponse | null>(null);
   const [codeChanges, setCodeChanges] =
     useState<AdminCodeChangesResponse | null>(null);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
@@ -47,6 +65,7 @@ export function AdminPage() {
   const monitoringView = monitoring
     ? buildMonitoringView(monitoring)
     : null;
+  const ciView = ciStatus ? buildCiView(ciStatus) : null;
   const adminCount = users.filter((row) => row.isAdmin).length;
 
   const load = useCallback(
@@ -56,12 +75,14 @@ export function AdminPage() {
         setLoading(true);
       }
       try {
-        const [nextMonitoring, nextCode, nextUsers] = await Promise.all([
+        const [nextMonitoring, nextCi, nextCode, nextUsers] = await Promise.all([
           adminApi.monitoring(signal),
+          adminApi.ciStatus(signal),
           adminApi.codeChanges(lookbackHours, signal),
           adminApi.users(signal),
         ]);
         setMonitoring(nextMonitoring);
+        setCiStatus(nextCi);
         setCodeChanges(nextCode);
         setUsers(nextUsers.users);
         setCodeExpanded(false);
@@ -132,7 +153,8 @@ export function AdminPage() {
             Platform ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary sm:text-base">
-            System health first, then admin logins, then recent git commits.
+            System health and CI first, then admin logins, then recent git
+            commits.
           </p>
         </div>
         <Button
@@ -283,6 +305,137 @@ export function AdminPage() {
           <p className="mt-4 text-sm text-text-secondary">
             Loading monitoring…
           </p>
+        ) : null}
+      </section>
+
+      <section
+        data-testid="admin-ci"
+        className="rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8"
+      >
+        <h2 className="text-lg font-semibold text-text-primary">CI tests</h2>
+        <p className="mt-1 text-sm text-text-secondary">
+          Latest GitHub Actions Test workflow on main — shared / backend /
+          frontend.
+        </p>
+
+        {ciView ? (
+          <div className="mt-4 space-y-5 text-sm">
+            <div
+              data-testid="ci-status-banner"
+              className={`rounded-xl border px-4 py-3 ${
+                ciView.level === "healthy" || ciView.level === "idle"
+                  ? "border-border bg-background"
+                  : ciView.level === "critical"
+                    ? "border-error/40 bg-error/5"
+                    : "border-amber-500/40 bg-amber-500/5"
+              }`}
+              role={
+                ciView.level === "healthy" || ciView.level === "idle"
+                  ? undefined
+                  : "alert"
+              }
+            >
+              <p
+                data-testid="ci-status-headline"
+                className="text-base font-semibold text-text-primary"
+              >
+                {ciView.headline}
+              </p>
+              <p className="mt-1 text-text-secondary">{ciView.subline}</p>
+              {ciStatus?.latest ? (
+                <p className="mt-2 text-xs text-text-secondary">
+                  Updated {formatWhen(ciStatus.latest.updatedAt)}
+                  {ciStatus.repo ? ` · ${ciStatus.repo}` : ""}
+                  {" · "}
+                  <a
+                    className="underline underline-offset-2"
+                    href={ciStatus.latest.htmlUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open run
+                  </a>
+                </p>
+              ) : null}
+            </div>
+
+            {ciView.checks.length > 0 ? (
+              <div>
+                <h3 className="text-base font-semibold text-text-primary">
+                  Package board
+                </h3>
+                <ul className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {ciView.checks.map((check) => (
+                    <li
+                      key={check.id}
+                      data-testid={`ci-check-${check.id}`}
+                      className={`rounded-lg border px-3 py-2 ${checkTone(check.state)}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{check.label}</p>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                          {check.badge}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-text-secondary">{check.meaning}</p>
+                      {check.htmlUrl ? (
+                        <a
+                          className="mt-2 inline-block text-xs text-text-secondary underline underline-offset-2"
+                          href={check.htmlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Job log
+                        </a>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {ciStatus && ciStatus.recentRuns.length > 0 ? (
+              <div>
+                <h3 className="text-base font-semibold text-text-primary">
+                  Recent runs
+                </h3>
+                <ol
+                  data-testid="ci-recent-runs"
+                  className="mt-3 max-h-64 space-y-2 overflow-auto"
+                >
+                  {ciStatus.recentRuns.map((run) => (
+                    <li
+                      key={run.id}
+                      className="rounded-lg border border-border px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-medium text-text-primary">
+                          {run.headSha.slice(0, 7)} · {run.event}
+                        </p>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                          {runBadge(run.status, run.conclusion)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        {formatWhen(run.updatedAt)}
+                        {" · "}
+                        <a
+                          className="underline underline-offset-2"
+                          href={run.htmlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Actions
+                        </a>
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
+          </div>
+        ) : loading ? (
+          <p className="mt-4 text-sm text-text-secondary">Loading CI status…</p>
         ) : null}
       </section>
 

@@ -1,5 +1,6 @@
 import type {
   AdminCodeChangesResponse,
+  AdminCiStatusResponse,
   AdminMonitoringResponse,
   AdminSetAdminResponse,
   AdminUsersResponse,
@@ -9,6 +10,9 @@ import { api } from "./http";
 export const adminApi = {
   monitoring(signal?: AbortSignal): Promise<AdminMonitoringResponse> {
     return api<AdminMonitoringResponse>("/api/admin/monitoring", { signal });
+  },
+  ciStatus(signal?: AbortSignal): Promise<AdminCiStatusResponse> {
+    return api<AdminCiStatusResponse>("/api/admin/ci-status", { signal });
   },
   codeChanges(
     hours = 24,

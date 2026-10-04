@@ -29,6 +29,38 @@ export interface AdminMonitoringResponse {
   }>;
 }
 
+/** Admin CI dashboard — GitHub Actions Test workflow on main. */
+export interface AdminCiJob {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+}
+
+export interface AdminCiRunSummary {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  event: string;
+  headSha: string;
+  htmlUrl: string;
+  startedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminCiStatusResponse {
+  /** False when GITHUB_TOKEN is missing — UI shows setup hint, not an error. */
+  configured: boolean;
+  branch: string;
+  workflow: string;
+  repo: string | null;
+  latest: AdminCiRunSummary | null;
+  jobs: AdminCiJob[];
+  recentRuns: AdminCiRunSummary[];
+  /** Soft error when token/repo/API failed (still HTTP 200). */
+  error?: string;
+}
+
 export interface AdminCodeChangeCommit {
   sha: string;
   subject: string;

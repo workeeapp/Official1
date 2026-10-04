@@ -10,6 +10,7 @@ Lightweight monitoring for the local / self-hosted Workee stack. Goal: notice Lu
 | Durable failures (`OpsEvents`) | Steps matching fail/error (e.g. `chat_failed`, `send_fail`) from the WhatsApp/chat flow logger. Survives API restart. | **Admin → System status** (not WhatsApp). |
 | Ops WhatsApp alert | Rate-limited per `alertKey`. Gated by `OPS_ALERT_MODE`: **off** (default) never WhatsApps; **critical** only system-down (e.g. DB via `system_db_down`); **all** alertable app failures. Meta allow-list (`131030`) never alerts. Cooldown claimed before send; ops sends use `muteOps`. | Optional WhatsApp to `OPS_ALERT_PHONES`. |
 | Code changes | Recent git commits (`git_log` source). | **Admin → Code changes** only. Chat digests via Lucy are **not supported**. |
+| CI tests | Latest GitHub Actions `Test` workflow on `main` (shared / backend / frontend jobs + recent runs). Needs `GITHUB_TOKEN`. | **Admin → CI tests**. |
 
 **Not in scope for health:** hitting `/api/chat`, employees CRUD, or sending WhatsApp on every probe. That would cost money, need auth, and mutate state. Full journeys stay in CI / Phase 5 smoke.
 
@@ -18,7 +19,7 @@ Lightweight monitoring for the local / self-hosted Workee stack. Goal: notice Lu
 - Flag: `Users.is_admin` (DB). **Not** the same as `Employees.is_owner`.
 - Seed: `SEED_ADMIN_USERNAMES` (comma-separated login usernames). Runtime auth reads the DB flag, not this env on every request.
 - UI: **Admin** tab only when `/api/auth/me` returns `isAdmin: true`.
-- API: `GET /api/admin/monitoring`, `GET /api/admin/code-changes`, `GET /api/admin/users`, `PATCH /api/admin/users/:id/admin` require session + `requireAdmin` (reloads `isAdmin` from DB).
+- API: `GET /api/admin/monitoring`, `GET /api/admin/ci-status`, `GET /api/admin/code-changes`, `GET /api/admin/users`, `PATCH /api/admin/users/:id/admin` require session + `requireAdmin` (reloads `isAdmin` from DB).
 - **Admins** section on the Admin page can Grant/Revoke `is_admin` for login users. Cannot revoke the last admin.
 
 After changing seed admins: `npm run db:seed`, then re-login. After Grant in UI, the other user must re-login (or refresh `/me`) to see the Admin tab.
@@ -28,8 +29,9 @@ After changing seed admins: `npm run db:seed`, then re-login. After Grant in UI,
 1. **System status** (top) — plain-language health board + categorized recent failures.
    - Severity: `noise` (allow-list / typing) · `attention` (chat/WhatsApp path) · `critical` (DB/system).
    - **Cause (log)** shows the stored root-cause string (OpenAI status/code, Meta Graph detail, or tagged reasons like `openai_api_key_missing`). New failures must not store only the generic public 503 text.
-2. **Admins** — list login users; Grant/Revoke Admin tab (`Users.is_admin`). Blocks revoking the last admin.
-3. **Code changes** (below) — commits in a lookback window (24 / 48 / 168h). Preview first **5**, then **Show all**.
+2. **CI tests** — latest Actions `Test` run on `main` (package board + recent runs). Without `GITHUB_TOKEN`, shows a setup hint (not an error).
+3. **Admins** — list login users; Grant/Revoke Admin tab (`Users.is_admin`). Blocks revoking the last admin.
+4. **Code changes** (below) — commits in a lookback window (24 / 48 / 168h). Preview first **5**, then **Show all**.
 
 **WhatsApp** tab is channel-only: webhook alignment + in-memory flow log. No durable ops banner, no git digest.
 
@@ -58,6 +60,9 @@ OPS_ALERT_MODE=off
 OPS_ALERT_COOLDOWN_MINUTES=30
 # Status board ignores failures older than this (minutes). History list still shows them.
 OPS_STATUS_LOOKBACK_MINUTES=60
+# Admin CI dashboard (optional). Token needs actions:read. Repo defaults from git remote.
+GITHUB_TOKEN=
+GITHUB_REPO=workeeapp/Official1
 ```
 
 After pull:
@@ -86,8 +91,10 @@ at: 2026-10-03T…
 | Ops alert keys / modes | `backend/tests/ops-monitor.test.ts` |
 | Root-cause detail helper | `backend/tests/errors.test.ts` (`opsErrorDetail`) |
 | Admin monitoring + code-changes API | `backend/tests/admin.test.ts` |
+| Admin CI status (GitHub Actions) | `backend/tests/admin-ci.test.ts` |
 | Digest refuse in prompt | `backend/tests/llm-config.test.ts` |
 | Monitoring view copy / severity | `frontend/src/pages/Admin/monitoring-view.test.ts` |
+| CI view copy / severity | `frontend/src/pages/Admin/ci-view.test.ts` |
 | Admin page layout + expand | `frontend/src/pages/Admin/AdminPage.test.tsx` |
 | WhatsApp has no ops/digest UI | `frontend/src/pages/WhatsApp/WhatsAppPage.test.tsx` |
 
