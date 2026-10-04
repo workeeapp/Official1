@@ -32,6 +32,11 @@ const envSchema = z.object({
   OPS_ALERT_MODE: z.enum(["off", "critical", "all"]).default("off"),
   /** Minutes between alerts for the same alertKey (default 30). */
   OPS_ALERT_COOLDOWN_MINUTES: z.coerce.number().int().positive().default(30),
+  /**
+   * Admin status-board freshness window (minutes). Failures older than this
+   * stay in the history list but no longer drive Check/attention badges.
+   */
+  OPS_STATUS_LOOKBACK_MINUTES: z.coerce.number().int().positive().default(60),
 });
 
 export type Env = z.infer<typeof envSchema>;

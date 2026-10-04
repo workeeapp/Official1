@@ -16,6 +16,11 @@ export interface AdminMonitoringResponse {
     opsAlertMode?: "off" | "critical" | "all";
   };
   failuresLastHour: number;
+  /**
+   * Minutes: status-board badges ignore failures older than this.
+   * History list may still include older rows.
+   */
+  statusLookbackMinutes: number;
   recentFailures: Array<{
     at: string;
     step: string;

@@ -185,8 +185,8 @@ export function AdminPage() {
               {monitoring && monitoring.failuresLastHour > 0 ? (
                 <p className="mt-2 text-xs text-text-secondary">
                   {monitoring.failuresLastHour} recorded failure
-                  {monitoring.failuresLastHour === 1 ? "" : "s"} in the last
-                  hour
+                  {monitoring.failuresLastHour === 1 ? "" : "s"} in the last{" "}
+                  {monitoring.statusLookbackMinutes ?? 60} min
                 </p>
               ) : null}
             </div>
