@@ -16,6 +16,8 @@ export type ModelEvalConstraint =
       listType?: string;
       minCount?: number;
       maxCount?: number;
+      /** At least one item JSON must contain this substring (e.g. phone digits). */
+      itemTextIncludes?: string;
     }
   | { type: "not_lists_remove_shopping" }
   | {
@@ -154,6 +156,17 @@ export function checkConstraint(
       }
       if (rows.length === 0) {
         return `expected lists.${constraint.action}${constraint.listType ? `/${constraint.listType}` : ""}`;
+      }
+      if (constraint.itemTextIncludes) {
+        const needle = constraint.itemTextIncludes;
+        const hit = rows.some((row) =>
+          (row.items ?? []).some((item) =>
+            includesFold(JSON.stringify(item), needle),
+          ),
+        );
+        if (!hit) {
+          return `lists.${constraint.action} missing item text ${needle}`;
+        }
       }
       return null;
     }

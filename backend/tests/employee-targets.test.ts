@@ -4,6 +4,8 @@ import {
   dropSpeakerTaskAddsForOutboundClocks,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  appendSharedMutationAckIfMissing,
+  formatSharedMutationAckLine,
   planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
@@ -1414,5 +1416,26 @@ describe("employee targets", () => {
     expect(plan.guestMutationBlocked).toBe(true);
     expect(plan.applications).toEqual([]);
     expect(plan.notifications).toEqual([]);
+  });
+
+  it("appends shared-mutation partner ack when the model omitted it", () => {
+    expect(formatSharedMutationAckLine(["עמית"])).toBe(
+      "נשלחה הודעה מתאימה לעמית.",
+    );
+    expect(
+      appendSharedMutationAckIfMissing(
+        "נמחקו מ«משימות לעבודה»:\n• דיווח א\n• דיווח ב",
+        ["עמית"],
+      ),
+    ).toBe(
+      "נמחקו מ«משימות לעבודה»:\n• דיווח א\n• דיווח ב\nנשלחה הודעה מתאימה לעמית.",
+    );
+    expect(
+      appendSharedMutationAckIfMissing(
+        "מחקתי.\nנשלחה הודעה מתאימה לעמית.",
+        ["עמית"],
+      ),
+    ).toBe("מחקתי.\nנשלחה הודעה מתאימה לעמית.");
+    expect(appendSharedMutationAckIfMissing("מחקתי.", [])).toBe("מחקתי.");
   });
 });
