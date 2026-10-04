@@ -10,12 +10,14 @@ import { AdminRoute } from "@/components/AdminRoute";
 const {
   meMock,
   monitoringMock,
+  ciStatusMock,
   codeChangesMock,
   usersMock,
   setAdminMock,
 } = vi.hoisted(() => ({
   meMock: vi.fn(),
   monitoringMock: vi.fn(),
+  ciStatusMock: vi.fn(),
   codeChangesMock: vi.fn(),
   usersMock: vi.fn(),
   setAdminMock: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("@/services/auth.service", () => ({
 vi.mock("@/services/admin.service", () => ({
   adminApi: {
     monitoring: monitoringMock,
+    ciStatus: ciStatusMock,
     codeChanges: codeChangesMock,
     users: usersMock,
     setAdmin: setAdminMock,
@@ -86,6 +89,54 @@ describe("Admin page", () => {
         },
       ],
     });
+    ciStatusMock.mockReset().mockResolvedValue({
+      configured: true,
+      branch: "main",
+      workflow: "Test",
+      repo: "workeeapp/Official1",
+      latest: {
+        id: 100,
+        status: "completed",
+        conclusion: "success",
+        event: "push",
+        headSha: "abc123def456",
+        htmlUrl: "https://github.com/workeeapp/Official1/actions/runs/100",
+        startedAt: "2026-10-04T07:22:00.000Z",
+        updatedAt: "2026-10-04T07:22:44.000Z",
+      },
+      jobs: [
+        {
+          name: "shared",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://example.com/shared",
+        },
+        {
+          name: "backend",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://example.com/backend",
+        },
+        {
+          name: "frontend",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://example.com/frontend",
+        },
+      ],
+      recentRuns: [
+        {
+          id: 100,
+          status: "completed",
+          conclusion: "success",
+          event: "push",
+          headSha: "abc123def456",
+          htmlUrl: "https://github.com/workeeapp/Official1/actions/runs/100",
+          startedAt: "2026-10-04T07:22:00.000Z",
+          updatedAt: "2026-10-04T07:22:44.000Z",
+        },
+      ],
+    });
     codeChangesMock.mockReset().mockResolvedValue({
       headSha: "abc123def456",
       lookbackHours: 24,
@@ -108,20 +159,27 @@ describe("Admin page", () => {
     setAdminMock.mockReset();
   });
 
-  it("shows monitoring above admins above code changes", async () => {
+  it("shows monitoring above CI above admins above code changes", async () => {
     renderAdmin();
 
     expect(await screen.findByTestId("admin-page")).toBeInTheDocument();
     const monitoring = await screen.findByTestId("admin-monitoring");
+    const ci = await screen.findByTestId("admin-ci");
     const admins = await screen.findByTestId("admin-users");
     const code = screen.getByTestId("admin-code-changes");
     expect(
-      monitoring.compareDocumentPosition(admins) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      monitoring.compareDocumentPosition(ci) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      ci.compareDocumentPosition(admins) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       admins.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(screen.getByTestId("ci-status-headline")).toHaveTextContent(
+      /healthy/i,
+    );
+    expect(screen.getByTestId("ci-check-backend")).toHaveTextContent(/Pass/i);
     expect(screen.getByTestId("admin-user-Amit")).toBeInTheDocument();
     expect(screen.getByTestId("admin-user-Tal")).toBeInTheDocument();
     expect(screen.getByTestId("admin-toggle-Amit")).toBeDisabled();

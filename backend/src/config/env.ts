@@ -37,6 +37,15 @@ const envSchema = z.object({
    * stay in the history list but no longer drive Check/attention badges.
    */
   OPS_STATUS_LOOKBACK_MINUTES: z.coerce.number().int().positive().default(60),
+  /**
+   * Optional GitHub token (actions:read) for Admin CI status.
+   * Empty = CI section shows “not configured”.
+   */
+  GITHUB_TOKEN: z.string().optional(),
+  /**
+   * Optional owner/repo (e.g. workeeapp/Official1). Empty = derive from git remote.
+   */
+  GITHUB_REPO: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

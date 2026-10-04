@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { getAdminCiStatus } from "../services/admin-ci.service.js";
 import {
   getAdminCodeChanges,
   getAdminMonitoring,
@@ -13,6 +14,10 @@ export async function getMonitoring(
   res: Response,
 ): Promise<void> {
   res.status(200).json(await getAdminMonitoring());
+}
+
+export async function getCiStatus(_req: Request, res: Response): Promise<void> {
+  res.status(200).json(await getAdminCiStatus());
 }
 
 export async function getCodeChanges(
