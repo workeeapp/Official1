@@ -163,4 +163,9 @@ describe("Phase 4 constraint checkers", () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it("includes exact-list-or-ask journey in the corpus", () => {
+    const ids = loadModelEvalCorpus().cases.map((row) => row.id);
+    expect(ids).toContain("list-ambiguous-name-ask");
+  });
 });
