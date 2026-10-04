@@ -264,31 +264,18 @@ export function resolveFilingItemName(
 }
 
 /**
- * When the model guesses the wrong list_type on remove/update, prefer the list
- * where the item actually lives. If several lists match, keep the requested type
- * when it is among them; otherwise prefer tasks over shopping.
+ * Keep the model's list_type when it appears in hits. Never invent another type
+ * (tasks-over-shopping etc.) — that rewrote ACTIONs and could hit the wrong list.
  */
 export function chooseSavedListType(
   requested: LlmListType,
   hitTypes: string[],
 ): LlmListType | null {
   const unique = [...new Set(hitTypes.filter(Boolean))];
-  if (unique.length === 0) {
-    return null;
-  }
   if (unique.includes(requested)) {
     return requested;
   }
-  if (unique.length === 1) {
-    return unique[0] as LlmListType;
-  }
-  if (unique.includes("tasks")) {
-    return "tasks";
-  }
-  if (unique.includes("shopping")) {
-    return "shopping";
-  }
-  return unique[0] as LlmListType;
+  return null;
 }
 
 /** Fix spoken list names when mutations prove shopping vs tasks. */
@@ -1782,28 +1769,15 @@ async function applyListAction(
 
     if (resolvedAction.action === "remove") {
       const matchNeedles = needles.length > 0 ? needles : [itemKey];
-      let targetListId = list.id;
-      let targetListName = list.name || listName;
-      let existing = await findMatchingItemByNeedles(
+      const targetListId = list.id;
+      const targetListName = list.name || listName;
+      const existing = await findMatchingItemByNeedles(
         list.id,
         matchNeedles,
         "remove",
       );
-      if (!existing?.id && resolvedAction.listType === "custom") {
-        const across = await findCustomItemAcrossEmployeeLists(
-          employeeId,
-          matchNeedles,
-          listName,
-        );
-        if (across) {
-          existing = across.item;
-          targetListId = across.listId;
-          targetListName = across.listName || targetListName;
-        }
-      }
       if (!existing?.id) {
-        // Do not soft-delete by a guessed key on the wrong/empty match — that
-        // looked like success in the model reply while nothing changed.
+        // Miss on this exact list → no-op. Do not hunt other lists.
         continue;
       }
       const removedKey = existing.itemKey;
@@ -1979,6 +1953,10 @@ async function applyListAction(
         });
       }
     } else {
+      if (resolvedAction.action === "update") {
+        // Update miss → no-op. Do not invent a new row under a wrong key.
+        continue;
+      }
       const created = await prisma.employeeListItem.create({
         data: {
           listId: list.id,
@@ -2081,71 +2059,15 @@ async function applyListAction(
   return { events, mutations, cancelledReminders };
 }
 
+/**
+ * Never rewrite list_type / list_name from fuzzy saved-data hits.
+ * The ACTION fields are the only authority (Model → ACTION → Engine).
+ */
 async function resolveListActionAgainstSaved(
-  employeeId: string,
+  _employeeId: string,
   action: LlmListAction,
 ): Promise<LlmListAction> {
-  if (action.action !== "remove" && action.action !== "update") {
-    return action;
-  }
-
-  const needles = action.items.flatMap((item) =>
-    itemSearchNeedles(action.listType, item),
-  );
-  if (needles.length === 0) {
-    return action;
-  }
-
-  const lists = await prisma.employeeList.findMany({
-    where: { employeeId },
-    include: { items: { where: { deletedAt: null } } },
-  });
-  const hits: Array<{ listType: string; name: string }> = [];
-
-  for (const list of lists) {
-    const hit = list.items.some((row) => itemRowMatchesNeedles(row, needles));
-    if (!hit) {
-      continue;
-    }
-    hits.push({ listType: list.listType, name: list.name });
-  }
-
-  if (hits.length === 0) {
-    return action;
-  }
-
-  const chosen = chooseSavedListType(
-    action.listType,
-    hits.map((row) => row.listType),
-  );
-  if (!chosen) {
-    return action;
-  }
-
-  const requestedName = action.listName?.trim() ?? "";
-  const sameType = hits.filter((row) => row.listType === chosen);
-  // Prefer the list the model named (e.g. בעיות), never the first custom list
-  // of that type — that bug silently no-op'd shared removes/updates.
-  const matched =
-    (requestedName
-      ? sameType.find(
-          (row) =>
-            normalizeKey(row.name) === normalizeKey(requestedName) ||
-            normalizeKey(row.name).includes(normalizeKey(requestedName)) ||
-            normalizeKey(requestedName).includes(normalizeKey(row.name)),
-        )
-      : undefined) ??
-    sameType.find((row) => row.listType === action.listType) ??
-    sameType[0];
-  if (!matched) {
-    return action;
-  }
-
-  return {
-    ...action,
-    listType: chosen,
-    listName: matched.name,
-  };
+  return action;
 }
 
 function itemRowMatchesNeedles(
@@ -2207,66 +2129,16 @@ async function findMatchingItemByNeedles(
   if (fuzzy) {
     return fuzzy;
   }
-  if (action === "update" && items.length === 1) {
-    return items[0];
-  }
-  return null;
-}
-
-async function findCustomItemAcrossEmployeeLists(
-  employeeId: string,
-  needles: string[],
-  preferredListName?: string,
-): Promise<{
-  listId: string;
-  listName: string;
-  item: {
-    id: string;
-    itemKey: string;
-    data: unknown;
-    scope?: string;
-    addedById?: string | null;
-    visibleTo?: unknown;
-  };
-} | null> {
-  const lists = await prisma.employeeList.findMany({
-    where: { employeeId, listType: "custom" },
-    include: { items: { where: { deletedAt: null } } },
-  });
-  const preferred = preferredListName?.trim() ?? "";
-  const ordered = preferred
-    ? [...lists].sort((a, b) => {
-        const aHit =
-          normalizeKey(a.name) === normalizeKey(preferred) ||
-          normalizeKey(a.name).includes(normalizeKey(preferred)) ||
-          normalizeKey(preferred).includes(normalizeKey(a.name))
-            ? 0
-            : 1;
-        const bHit =
-          normalizeKey(b.name) === normalizeKey(preferred) ||
-          normalizeKey(b.name).includes(normalizeKey(preferred)) ||
-          normalizeKey(preferred).includes(normalizeKey(b.name))
-            ? 0
-            : 1;
-        return aHit - bHit;
-      })
-    : lists;
-  for (const row of ordered) {
-    const item = row.items.find((entry) =>
-      itemRowMatchesNeedles(entry, needles),
-    );
-    if (item) {
-      return { listId: row.id, listName: row.name, item };
-    }
-  }
+  // Never update "the only item on the list" when needles miss — that rewrote
+  // unrelated rows. Exact / same-list loose match only.
   return null;
 }
 
 /**
- * Last-resort custom remove: find the row on any custom list the actor can see
- * on the account (owned or shared-visible), then soft-delete every matching copy.
+ * Last-resort custom remove across the account.
+ * Disabled: a miss on the ACTION list must stay a miss (no substring hunt).
  */
-export async function removeVisibleCustomItems(input: {
+export async function removeVisibleCustomItems(_input: {
   userId: string;
   actorId: string;
   lists: LlmListAction[];
@@ -2275,126 +2147,7 @@ export async function removeVisibleCustomItems(input: {
   mutations: ListItemMutation[];
   cancelledReminders: string[];
 }> {
-  const events: SharedItemEvent[] = [];
-  const mutations: ListItemMutation[] = [];
-  const cancelledReminders: string[] = [];
-  const removes = input.lists.filter(
-    (row) => row.action === "remove" && row.listType === "custom",
-  );
-  if (removes.length === 0) {
-    return { events, mutations, cancelledReminders };
-  }
-
-  const lists = await prisma.employeeList.findMany({
-    where: {
-      listType: "custom",
-      employee: { userId: input.userId, kind: "human" },
-    },
-    include: {
-      items: { where: { deletedAt: null } },
-      employee: { select: { id: true, userId: true } },
-    },
-  });
-
-  for (const action of removes) {
-    const preferred = action.listName?.trim() ?? "";
-    for (const rawItem of action.items) {
-      const item = asRecord(rawItem);
-      const needles = itemSearchNeedles("custom", item);
-      if (needles.length === 0) {
-        continue;
-      }
-      const candidates = lists.filter((list) => {
-        const visibleTo = idList(list.visibleTo);
-        const canSee =
-          list.employeeId === input.actorId ||
-          (list.scope === "shared" && visibleTo.includes(input.actorId));
-        if (!canSee) {
-          return false;
-        }
-        if (!preferred) {
-          return true;
-        }
-        const name = normalizeKey(list.name);
-        const needle = normalizeKey(preferred);
-        return (
-          name === needle || name.includes(needle) || needle.includes(name)
-        );
-      });
-
-      for (const list of candidates) {
-        const matches = list.items.filter((row) =>
-          itemRowMatchesNeedles(row, needles),
-        );
-        for (const existing of matches) {
-          if (mutations.some((row) => row.itemId === existing.id)) {
-            continue;
-          }
-          await cancelReminderLinkedToWorkerItem(existing.id);
-          await prisma.employeeListItem.updateMany({
-            where: {
-              listId: list.id,
-              itemKey: existing.itemKey,
-              deletedAt: null,
-            },
-            data: { deletedAt: new Date(), reminderId: null },
-          });
-          const label =
-            ownedItemTitle("custom", asRecord(existing.data), existing.itemKey) ||
-            existing.itemKey;
-          mutations.push({
-            action: "remove",
-            itemId: existing.id,
-            employeeId: list.employeeId,
-            listType: "custom",
-            itemKey: existing.itemKey,
-            itemLabel: label,
-            listName: list.name || preferred || undefined,
-          });
-          await recordAuditEvent({
-            userId: list.employee.userId,
-            actorEmployeeId: input.actorId,
-            action: "list_remove",
-            entityType: "EmployeeListItem",
-            entityId: existing.id,
-            summary: `remove custom: ${existing.itemKey}`,
-          });
-          const watchers = uniqueIds([
-            list.employeeId,
-            existing.addedById,
-            ...idList(existing.visibleTo),
-            ...idList(list.visibleTo),
-          ]).filter((id) => id !== input.actorId);
-          if (watchers.length > 0) {
-            events.push({
-              notifyEmployeeIds: watchers,
-              metadata: {
-                lists: [
-                  {
-                    ...action,
-                    listName: list.name,
-                    items: [item],
-                    targets: [],
-                  },
-                ],
-                filing: [],
-              },
-              listOwnerId: list.employeeId,
-            });
-          }
-          const cascade = await cancelActiveRemindersMatchingWork({
-            userId: list.employee.userId,
-            itemKey: existing.itemKey,
-            itemLabel: label,
-            actorEmployeeId: input.actorId,
-          });
-          cancelledReminders.push(...cascade.cancelledReminders);
-        }
-      }
-    }
-  }
-
-  return { events, mutations, cancelledReminders };
+  return { events: [], mutations: [], cancelledReminders: [] };
 }
 
 function mergeItemVisibility(
@@ -2449,11 +2202,8 @@ async function resolveWatchers(input: {
     input.actorId,
   );
   const watchers = uniqueIds([...fromItem, ...fromVisibility]);
-  if (watchers.length > 0) {
-    return watchers;
-  }
-
-  return findAssignmentWatcherIds(input.ownerId, input.actorId, input.itemKey);
+  // No assignment-key fallback: notify only from explicit shared audience.
+  return watchers;
 }
 
 function sharedAudience(
@@ -2490,32 +2240,6 @@ function idList(value: unknown): string[] {
 
 function uniqueIds(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
-}
-
-async function findAssignmentWatcherIds(
-  ownerId: string,
-  actorId: string,
-  itemKey: string,
-): Promise<string[]> {
-  if (!itemKey) {
-    return [];
-  }
-
-  const items = await prisma.employeeListItem.findMany({
-    where: {
-      itemKey: { contains: itemKey },
-      deletedAt: null,
-      list: {
-        listType: "tasks",
-        employeeId: { not: ownerId },
-      },
-    },
-    select: { list: { select: { employeeId: true } } },
-  });
-
-  return uniqueIds(items.map((item) => item.list.employeeId)).filter(
-    (id) => id !== actorId,
-  );
 }
 
 async function deleteRelatedAssignmentTasks(

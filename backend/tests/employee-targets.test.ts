@@ -748,6 +748,43 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.employeeId).toBe(amit.id);
   });
 
+  it("prefers the speaker personal list over a same-named shared list on empty targets", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "באגים",
+          visibleTo: [tal.id, amit.id],
+          scope: "shared",
+        },
+        {
+          ownerId: tal.id,
+          listName: "באגים",
+          visibleTo: [tal.id],
+          scope: "personal",
+        },
+      ],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "באגים",
+            targets: [],
+            items: [{ תיאור: "פריט אישי" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.visibility.scope).toBe("personal");
+    expect(plan.notifications).toHaveLength(0);
+  });
+
   it("does not notify partners when updating a personal custom list even if LLM targets include them", () => {
     const plan = planTargetedActions({
       actor: tal,

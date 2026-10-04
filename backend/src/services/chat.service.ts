@@ -30,7 +30,6 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
-  removeVisibleCustomItems,
   type FilingMutation,
   type ListItemMutation,
   type SharedItemEvent,
@@ -1503,23 +1502,6 @@ export async function sendChatMessage(input: {
       listMutations.push(...applied.mutations);
       filingMutations.push(...applied.filingMutations);
       cancelledReminders.push(...applied.cancelledReminders);
-    }
-    const customRemoves = metadataForApply.lists.filter(
-      (row) => row.action === "remove" && row.listType === "custom",
-    );
-    const removedCustom = listMutations.some(
-      (row) =>
-        row.action === "remove" && row.listType === "custom" && !row.listShell,
-    );
-    if (customRemoves.length > 0 && !removedCustom) {
-      const recovered = await removeVisibleCustomItems({
-        userId: input.userId,
-        actorId: employee.id,
-        lists: customRemoves,
-      });
-      collectedEvents.push(...recovered.events);
-      listMutations.push(...recovered.mutations);
-      cancelledReminders.push(...recovered.cancelledReminders);
     }
     const guestMutationNotice =
       guestSpeaker &&
