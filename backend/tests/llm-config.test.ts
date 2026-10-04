@@ -92,6 +92,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("קניות משותפות — עם");
     expect(config.systemMessage).toContain("SHOPPING BOTH PERSONAL AND SHARED");
     expect(config.systemMessage).toContain("SHOPPING ADD WORDING");
+    expect(config.systemMessage).toContain("MOVE BETWEEN PERSONAL AND SHARED SHOPPING");
     expect(config.systemMessage).toContain("SHARED LIST MUTATION REPLY");
     expect(config.systemMessage).toContain("נשלחה הודעה מתאימה");
     expect(config.systemMessage).toContain("רשימת הקניות האישית שלך");
@@ -114,6 +115,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("TARGETS ON LISTS");
     expect(config.systemMessage).toContain("server will NOT fix a wrong list_name");
     expect(config.systemMessage).toContain("top-level metadata.targets");
+    expect(config.systemMessage).toContain("Bulk list delete");
+    expect(config.systemMessage).toContain("נקה את רשימת הקניות");
+    expect(config.systemMessage).toContain("למחוק את כל הפריטים מרשימת הקניות");
     expect(config.systemMessage).toContain("FILTERED MULTI DELETE");
     expect(config.systemMessage).toContain("תמחקי את 2 המטלות של רב פס");
     expect(config.systemMessage).toContain("ליצור קשר עם רב פס שירות לקוחות");

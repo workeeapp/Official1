@@ -109,6 +109,84 @@
       ]
     },
     {
+      "id": "list-clear-personal-shopping",
+      "tag": "happy",
+      "utterance": "נקה את רשימת הקניות האישית שלי",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              { "שם פריט": "חלב" },
+              { "שם פריט": "לחם" },
+              { "שם פריט": "ביצים" }
+            ]
+          },
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": ["טל", "מיכל"],
+            "items": [{ "שם פריט": "גבינה סקי" }]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "remove",
+          "listType": "shopping",
+          "minCount": 3
+        },
+        {
+          "type": "response_forbids_any",
+          "needles": ["למחוק את כל הפריטים"]
+        }
+      ]
+    },
+    {
+      "id": "shop-move-shared-to-personal",
+      "tag": "happy",
+      "utterance": "העבירי חלב מהקניות המשותפת עם מיכל לקניות האישיות",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [{ "שם פריט": "לחם" }]
+          },
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": ["טל", "מיכל"],
+            "items": [{ "שם פריט": "חלב" }]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "remove",
+          "listType": "shopping",
+          "minCount": 1
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping",
+          "minCount": 1
+        },
+        {
+          "type": "response_forbids_any",
+          "needles": ["lists.update"]
+        }
+      ]
+    },
+    {
       "id": "list-ambiguous-name-ask",
       "tag": "action-confusion",
       "utterance": "תמחק מבעיות את הפריט לבדוק שוב",
