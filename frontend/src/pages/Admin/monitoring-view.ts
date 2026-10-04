@@ -39,6 +39,19 @@ function isAllowListDetail(detail: string): boolean {
   );
 }
 
+/** Status-board signals only — history list can still show older rows. */
+function isFreshFailure(
+  at: string,
+  lookbackMs: number,
+  nowMs = Date.now(),
+): boolean {
+  const t = new Date(at).getTime();
+  if (Number.isNaN(t) || lookbackMs <= 0) {
+    return false;
+  }
+  return nowMs - t <= lookbackMs;
+}
+
 function explainFailure(row: {
   at: string;
   step: string;
@@ -141,19 +154,32 @@ function badgeFor(id: string, state: "ok" | "warn" | "bad"): string {
 
 export function buildMonitoringView(
   monitoring: AdminMonitoringResponse,
+  nowMs = Date.now(),
 ): MonitoringView {
   const failures = monitoring.recentFailures.map(explainFailure);
+  const lookbackMinutes = Math.max(
+    1,
+    monitoring.statusLookbackMinutes ?? 60,
+  );
+  const lookbackMs = lookbackMinutes * 60 * 1000;
   const hour = monitoring.failuresLastHour;
   const { health } = monitoring;
 
-  const criticalFailures = failures.filter((row) => row.severity === "critical");
-  const attentionFailures = failures.filter(
+  const freshFailures = failures.filter((row) =>
+    isFreshFailure(row.at, lookbackMs, nowMs),
+  );
+  const criticalFailures = freshFailures.filter(
+    (row) => row.severity === "critical",
+  );
+  const attentionFailures = freshFailures.filter(
     (row) => row.severity === "attention",
   );
-  const noiseFailures = failures.filter((row) => row.severity === "noise");
+  const noiseFailures = freshFailures.filter((row) => row.severity === "noise");
   const materialInList = criticalFailures.length + attentionFailures.length;
   const noiseOnly =
-    failures.length > 0 && materialInList === 0 && noiseFailures.length > 0;
+    freshFailures.length > 0 &&
+    materialInList === 0 &&
+    noiseFailures.length > 0;
 
   const creditIssue = attentionFailures.some(
     (row) =>
@@ -163,9 +189,9 @@ export function buildMonitoringView(
     isAllowListDetail(row.detail),
   );
 
-  // Last hour: never "Down" for allow-list / typing noise alone.
+  // Recent window: never "Down" for allow-list / typing noise alone.
   let recentState: "ok" | "warn" | "bad" = "ok";
-  let recentMeaning = "No recorded failures in the last hour.";
+  let recentMeaning = `No recorded failures in the last ${lookbackMinutes} min.`;
   if (hour > 0) {
     if (noiseOnly || (materialInList === 0 && allowListIssue)) {
       recentState = "warn";
@@ -258,7 +284,7 @@ export function buildMonitoringView(
     },
     {
       id: "recent",
-      label: "Last hour",
+      label: `Last ${lookbackMinutes} min`,
       state: recentState,
       badge: badgeFor("recent", recentState),
       meaning: recentMeaning,

@@ -56,6 +56,8 @@ OPS_ALERT_PHONES=9725xxxxxxxx,9725yyyyyyyy
 # off | critical | all  (default off)
 OPS_ALERT_MODE=off
 OPS_ALERT_COOLDOWN_MINUTES=30
+# Status board ignores failures older than this (minutes). History list still shows them.
+OPS_STATUS_LOOKBACK_MINUTES=60
 ```
 
 After pull:

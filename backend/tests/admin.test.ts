@@ -100,6 +100,7 @@ describe("admin monitoring service", () => {
     expect(result.health.db).toBe(true);
     expect(result.health.opsAlertMode).toMatch(/^(off|critical|all)$/);
     expect(result.failuresLastHour).toBe(2);
+    expect(result.statusLookbackMinutes).toBeGreaterThan(0);
     expect(result.recentFailures[0]).toMatchObject({
       step: "chat_failed",
       alertKey: "llm_credits",

@@ -39,7 +39,10 @@ export async function getAdminMonitoring(): Promise<AdminMonitoringResponse> {
     db = false;
   }
   const recentFailures = await listRecentOpsFailures(20);
-  const failuresLastHour = await countRecentOpsFailures(60 * 60 * 1000);
+  const statusLookbackMinutes = env.OPS_STATUS_LOOKBACK_MINUTES;
+  const failuresLastHour = await countRecentOpsFailures(
+    statusLookbackMinutes * 60 * 1000,
+  );
 
   return {
     health: {
@@ -51,6 +54,7 @@ export async function getAdminMonitoring(): Promise<AdminMonitoringResponse> {
       opsAlertMode: env.OPS_ALERT_MODE,
     },
     failuresLastHour,
+    statusLookbackMinutes,
     recentFailures: recentFailures.map((row) => ({
       at: row.at,
       step: row.step,

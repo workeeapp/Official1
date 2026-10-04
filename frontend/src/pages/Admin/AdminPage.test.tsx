@@ -76,6 +76,7 @@ describe("Admin page", () => {
         opsAlertMode: "off",
       },
       failuresLastHour: 2,
+      statusLookbackMinutes: 60,
       recentFailures: [
         {
           at: "2026-10-04T06:00:00.000Z",
