@@ -245,34 +245,20 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   }
 
   const meta = metadata as Record<string, unknown>;
+  // Top-level metadata.targets is kept for legacy reads only — never inherit
+  // onto lists/filing rows. Empty row targets = speaker-only / personal.
   const defaultTargets = parseTargets(meta);
   const reportSections = parseReportSections(meta);
   const lists = Array.isArray(meta.lists)
     ? meta.lists.flatMap((entry) => {
         const action = toListAction(entry);
-        if (!action) {
-          return [];
-        }
-        return [
-          {
-            ...action,
-            targets: action.targets.length > 0 ? action.targets : defaultTargets,
-          },
-        ];
+        return action ? [action] : [];
       })
     : [];
   const filing = Array.isArray(meta.filing)
     ? meta.filing.flatMap((entry) => {
         const action = toFilingAction(entry);
-        if (!action) {
-          return [];
-        }
-        return [
-          {
-            ...action,
-            targets: action.targets.length > 0 ? action.targets : defaultTargets,
-          },
-        ];
+        return action ? [action] : [];
       })
     : [];
   const reminders = parseReminderActions(meta);
