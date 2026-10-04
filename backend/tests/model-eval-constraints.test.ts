@@ -244,6 +244,50 @@ describe("Phase 4 constraint checkers", () => {
     ).toBe(false);
   });
 
+  it("requires jobs.open with answer_text for until-done", () => {
+    const constraints: ModelEvalConstraint[] = [
+      { type: "jobs_has_action", action: "open", requireAsk: true },
+    ];
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          jobs: [
+            {
+              action: "open",
+              jobId: "",
+              answerText: "לקנות חלב",
+              reportText: "",
+              time: "",
+              in: 3600,
+              date: "",
+            },
+          ],
+        }),
+        "אנדנד עד שתקנה",
+      ).ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          jobs: [
+            {
+              action: "open",
+              jobId: "",
+              answerText: "",
+              reportText: "",
+              time: "",
+              in: null,
+              date: "",
+            },
+          ],
+        }),
+        "שמרתי",
+      ).ok,
+    ).toBe(false);
+  });
+
   it("includes exact-list-or-ask and Lucy nudge/delete journeys in the corpus", () => {
     const ids = loadModelEvalCorpus().cases.map((row) => row.id);
     expect(ids).toContain("list-ambiguous-name-ask");

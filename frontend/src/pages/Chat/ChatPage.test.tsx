@@ -16,7 +16,13 @@ const { meMock, listEmployeesMock, sendMock, historyMock, resetMock, subscribeMo
   sendMock: vi.fn(),
   historyMock: vi.fn(),
   resetMock: vi.fn(),
-  subscribeMock: vi.fn(() => () => {}),
+  subscribeMock: vi.fn(
+    (
+      _employeeId: string,
+      _digitalEmployeeId: string,
+      _listener: (event: unknown) => void,
+    ) => () => {},
+  ),
 }));
 
 vi.mock("@/services/auth.service", () => ({
@@ -867,10 +873,24 @@ describe("Chat page", () => {
           };
         }) => void)
       | undefined;
-    subscribeMock.mockImplementation((_employeeId: string, _digitalEmployeeId: string, listener) => {
-      onEvent = listener;
-      return () => {};
-    });
+    subscribeMock.mockImplementation(
+      (
+        _employeeId: string,
+        _digitalEmployeeId: string,
+        listener: (event: {
+          employeeId: string;
+          message: {
+            id: string;
+            author: "assistant";
+            speaker: string;
+            text: string;
+          };
+        }) => void,
+      ) => {
+        onEvent = listener;
+        return () => {};
+      },
+    );
     renderApp(
       <Routes>
         <Route element={<ProtectedRoute />}>

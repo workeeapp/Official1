@@ -425,7 +425,7 @@ export function formatEmployeeContext(
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel PENDING_ACTION_STATE / hold drafts (send text, confirm delete, missing phone/time) — those stay active until completed.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
-    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Shopping: personal vs shared may appear as separate list rows and/or items with scope=shared (+ shared_with on the item when known) — in FULL DUMP split *קניות שלי* vs *קניות משותפות — עם X*.",
+    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Shopping/tasks: personal vs shared-with-partner are SEPARATE list rows in this JSON (scope=personal vs scope=shared + shared_with). Map each shopping row 1:1 — *קניות שלי* only for scope=personal shopping; *קניות משותפות — עם X* only for scope=shared shopping. Never put items from a scope=shared shopping row under *קניות שלי*.",
     JSON.stringify({
       lists: snapshot.lists,
       filing: snapshot.filing,
@@ -1003,12 +1003,20 @@ export async function getEmployeeRecordSnapshot(
     if (!entry) {
       return;
     }
-    const key = `${entry.owner}\0${entry.list_type}\0${entry.list_name ?? ""}`;
+    const partners = (entry.shared_with ?? []).slice().sort().join("\u0001");
+    const key = `${entry.owner}\0${entry.list_type}\0${entry.list_name ?? ""}\0${entry.scope}\0${partners}`;
     if (seenListKeys.has(key)) {
       return;
     }
     seenListKeys.add(key);
     lists.push(entry);
+  };
+  const pushSnapshotLists = (
+    entries: Array<EmployeeRecordSnapshot["lists"][number] | null>,
+  ) => {
+    for (const entry of entries) {
+      pushSnapshotList(entry);
+    }
   };
 
   for (const list of ownLists) {
@@ -1016,8 +1024,8 @@ export async function getEmployeeRecordSnapshot(
     if (guestMode && list.scope !== "shared") {
       continue;
     }
-    pushSnapshotList(
-      toListSnapshotEntry({
+    pushSnapshotLists(
+      toListSnapshotEntries({
         listType: list.listType,
         listName: list.name,
         ownerId: list.employee.id,
@@ -1035,8 +1043,8 @@ export async function getEmployeeRecordSnapshot(
     if (!visibleToIncludes(list.visibleTo, employeeId)) {
       continue;
     }
-    pushSnapshotList(
-      toListSnapshotEntry({
+    pushSnapshotLists(
+      toListSnapshotEntries({
         listType: list.listType,
         listName: list.name,
         ownerId: list.employee.id,
@@ -2305,7 +2313,12 @@ function sharedWithNames(
     .filter((name) => Boolean(name));
 }
 
-function toListSnapshotEntry(input: {
+/**
+ * Build snapshot list row(s). Personal shopping/tasks with item-level shares
+ * become separate list rows (scope=personal vs scope=shared + shared_with) so
+ * the model maps 1:1 to *קניות שלי* / *קניות משותפות — עם X* without mixing.
+ */
+function toListSnapshotEntries(input: {
   listType: string;
   listName: string;
   ownerId: string;
@@ -2318,26 +2331,26 @@ function toListSnapshotEntry(input: {
     scope?: string;
     itemKey?: string;
     visibleTo?: unknown;
+    addedById?: string | null;
   }>;
   currentShopping: Map<string, Set<string>>;
   names: Map<string, string>;
-}): EmployeeRecordSnapshot["lists"][number] | null {
+}): Array<EmployeeRecordSnapshot["lists"][number] | null> {
   const derivedName =
     input.listName.trim() ||
     (input.listType === "custom"
       ? deriveCustomListName(input.items.map((item) => asRecord(item.data)))
       : "");
-  const items = input.items
+  const mapped = input.items
     .filter(
       (item) =>
         input.listType !== "tasks" ||
         !isOrphanAssignment(asRecord(item.data), input.currentShopping),
     )
     .map((item) => {
-      const itemScope =
-        item.scope === "shared" || input.scope === "shared"
-          ? "shared"
-          : "personal";
+      const itemShared =
+        input.scope === "shared" || isSharedItem(item, input.ownerId);
+      const itemScope: ItemScope = itemShared ? "shared" : "personal";
       const itemVisibleTo =
         "visibleTo" in item && item.visibleTo !== undefined
           ? item.visibleTo
@@ -2346,36 +2359,91 @@ function toListSnapshotEntry(input: {
             : undefined;
       const partners =
         itemScope === "shared"
-          ? sharedWithNames(input.ownerId, itemVisibleTo ?? input.visibleTo, input.names)
+          ? sharedWithNames(
+              input.ownerId,
+              itemVisibleTo ?? input.visibleTo,
+              input.names,
+            )
           : [];
-      return withVisibility(item.data, itemScope, input.ownerName, partners);
+      return {
+        row: withVisibility(item.data, itemScope, input.ownerName, partners),
+        itemScope,
+        partners,
+      };
     });
-  // Keep named custom lists and any shared list even when empty so Lucy can
-  // answer "do we have X?" / "show shared lists" without inventing.
-  if (items.length === 0) {
-    const keepEmpty =
-      Boolean(derivedName) &&
-      (input.scope === "shared" || input.listType === "custom");
-    if (!keepEmpty) {
-      return null;
+
+  const buildEntry = (
+    scope: ItemScope,
+    items: Record<string, unknown>[],
+    sharedWith?: string[],
+  ): EmployeeRecordSnapshot["lists"][number] | null => {
+    if (items.length === 0) {
+      const keepEmpty =
+        Boolean(derivedName) &&
+        (scope === "shared" || input.listType === "custom");
+      if (!keepEmpty) {
+        return null;
+      }
     }
-  }
-  return {
-    list_type: input.listType,
-    ...(derivedName ? { list_name: derivedName } : {}),
-    owner: input.ownerName,
-    scope: input.scope,
-    ...(input.scope === "shared"
-      ? {
-          shared_with: sharedWithNames(
-            input.ownerId,
-            input.visibleTo,
-            input.names,
-          ),
-        }
-      : {}),
-    items,
+    return {
+      list_type: input.listType,
+      ...(derivedName ? { list_name: derivedName } : {}),
+      owner: input.ownerName,
+      scope,
+      ...(scope === "shared" && sharedWith && sharedWith.length > 0
+        ? { shared_with: sharedWith }
+        : scope === "shared"
+          ? {
+              shared_with: sharedWithNames(
+                input.ownerId,
+                input.visibleTo,
+                input.names,
+              ),
+            }
+          : {}),
+      items,
+    };
   };
+
+  // List-level shared (custom / partner list) or non-split types → one row.
+  const splitBuiltins =
+    input.scope === "personal" &&
+    (input.listType === "shopping" || input.listType === "tasks");
+  if (!splitBuiltins) {
+    return [
+      buildEntry(
+        input.scope,
+        mapped.map((entry) => entry.row),
+        input.scope === "shared"
+          ? sharedWithNames(input.ownerId, input.visibleTo, input.names)
+          : undefined,
+      ),
+    ];
+  }
+
+  const personalItems = mapped
+    .filter((entry) => entry.itemScope === "personal")
+    .map((entry) => entry.row);
+  const sharedGroups = new Map<string, { partners: string[]; items: Record<string, unknown>[] }>();
+  for (const entry of mapped) {
+    if (entry.itemScope !== "shared") {
+      continue;
+    }
+    const key = entry.partners.slice().sort().join("\u0001");
+    const group = sharedGroups.get(key) ?? {
+      partners: entry.partners,
+      items: [],
+    };
+    group.items.push(entry.row);
+    sharedGroups.set(key, group);
+  }
+
+  return [
+    buildEntry("personal", personalItems),
+    ...[...sharedGroups.values()].map((group) =>
+      buildEntry("shared", group.items, group.partners),
+    ),
+  ];
 }
 
 function withVisibility(

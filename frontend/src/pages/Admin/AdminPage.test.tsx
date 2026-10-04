@@ -14,6 +14,7 @@ const {
   codeChangesMock,
   usersMock,
   setAdminMock,
+  whatsappStatusMock,
 } = vi.hoisted(() => ({
   meMock: vi.fn(),
   monitoringMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   codeChangesMock: vi.fn(),
   usersMock: vi.fn(),
   setAdminMock: vi.fn(),
+  whatsappStatusMock: vi.fn(),
 }));
 
 vi.mock("@/services/auth.service", () => ({
@@ -38,6 +40,12 @@ vi.mock("@/services/admin.service", () => ({
     codeChanges: codeChangesMock,
     users: usersMock,
     setAdmin: setAdminMock,
+  },
+}));
+
+vi.mock("@/services/whatsapp.service", () => ({
+  whatsappApi: {
+    status: whatsappStatusMock,
   },
 }));
 
@@ -157,18 +165,41 @@ describe("Admin page", () => {
       ],
     });
     setAdminMock.mockReset();
+    whatsappStatusMock.mockReset().mockResolvedValue({
+      expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaWabaWebhook: "https://dead.trycloudflare.com/api/whatsapp/webhook",
+      metaAppWebhook: "https://dead.trycloudflare.com/api/whatsapp/webhook",
+      webhookMismatch: true,
+      hasAccessToken: true,
+      lastInboundAt: null,
+      events: [
+        {
+          at: "2026-09-24T06:00:00.000Z",
+          step: "webhook_post",
+          detail: "fields=messages inbound=0",
+        },
+      ],
+      recentFailures: [],
+      failuresLastHour: 0,
+      opsAlertConfigured: false,
+    });
   });
 
-  it("shows monitoring above CI above admins above code changes", async () => {
+  it("shows monitoring above WhatsApp channel above CI", async () => {
     renderAdmin();
 
     expect(await screen.findByTestId("admin-page")).toBeInTheDocument();
     const monitoring = await screen.findByTestId("admin-monitoring");
+    const whatsapp = await screen.findByTestId("admin-whatsapp-channel");
     const ci = await screen.findByTestId("admin-ci");
     const admins = await screen.findByTestId("admin-users");
     const code = screen.getByTestId("admin-code-changes");
     expect(
-      monitoring.compareDocumentPosition(ci) & Node.DOCUMENT_POSITION_FOLLOWING,
+      monitoring.compareDocumentPosition(whatsapp) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      whatsapp.compareDocumentPosition(ci) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       ci.compareDocumentPosition(admins) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -176,6 +207,10 @@ describe("Admin page", () => {
     expect(
       admins.compareDocumentPosition(code) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      await screen.findByText(/Meta still points the WABA or phone webhook/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("webhook_post")).toBeInTheDocument();
     expect(screen.getByTestId("ci-status-headline")).toHaveTextContent(
       /healthy/i,
     );
@@ -184,6 +219,27 @@ describe("Admin page", () => {
     expect(screen.getByTestId("admin-user-Tal")).toBeInTheDocument();
     expect(screen.getByTestId("admin-toggle-Amit")).toBeDisabled();
     expect(screen.getByTestId("admin-toggle-Tal")).not.toBeChecked();
+  });
+
+  it("shows aligned WhatsApp webhooks without a mismatch alert", async () => {
+    whatsappStatusMock.mockResolvedValue({
+      expectedWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaWabaWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      metaAppWebhook: "https://wa.workee.site/api/whatsapp/webhook",
+      webhookMismatch: false,
+      hasAccessToken: true,
+      lastInboundAt: "2026-09-24T07:00:00.000Z",
+      events: [],
+    });
+    renderAdmin();
+
+    expect(await screen.findByText("configured")).toBeInTheDocument();
+    expect(
+      screen.getByText("No webhook events since this API process started."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Meta still points the WABA or phone webhook/i),
+    ).not.toBeInTheDocument();
   });
 
   it("grants admin to another login user", async () => {

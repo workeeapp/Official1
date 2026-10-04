@@ -59,7 +59,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("רב פס");
     expect(config.systemMessage).toContain("HEBREW PERSON / GENDER ON RELAYS");
     expect(config.systemMessage).toContain("מבקשת להזכיר לך");
-    expect(config.systemMessage).toContain("RECURRING SELF-NUDGE / UNTIL DONE");
+    expect(config.systemMessage).toContain("UNTIL DONE / CHASE");
     expect(config.systemMessage).toContain("לנדנד עד שיקנה");
     expect(config.systemMessage).toContain("תפסיקי");
     expect(config.systemMessage).toContain("Keep the speaker shopping/task row");
@@ -91,6 +91,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("סכמי לי");
     expect(config.systemMessage).toContain("קניות משותפות — עם");
     expect(config.systemMessage).toContain("SHOPPING BOTH PERSONAL AND SHARED");
+    expect(config.systemMessage).toContain("SHOPPING ADD WORDING");
+    expect(config.systemMessage).toContain("SHARED LIST MUTATION REPLY");
+    expect(config.systemMessage).toContain("נשלחה הודעה מתאימה");
+    expect(config.systemMessage).toContain("רשימת הקניות האישית שלך");
     expect(config.systemMessage).toContain("רשימות אישיות");
     expect(config.systemMessage).toContain("יש לך קוטג׳ לקנות");
     expect(config.systemMessage).toContain("SHARED WITH A NAMED PERSON");
@@ -112,6 +116,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("top-level metadata.targets");
     expect(config.systemMessage).toContain("FILTERED MULTI DELETE");
     expect(config.systemMessage).toContain("תמחקי את 2 המטלות של רב פס");
+    expect(config.systemMessage).toContain("ליצור קשר עם רב פס שירות לקוחות");
+    expect(config.systemMessage).toContain("מצאתי מטלה אחת");
+    expect(config.systemMessage).toContain("SINGLE ITEM DELETE CONFIRM");
     expect(config.systemMessage).toContain("לאילו מ־");
+    expect(config.systemMessage).toContain("UNTIL DONE / CHASE");
+    expect(config.systemMessage).toContain("jobs.open");
+    expect(config.systemMessage).toContain("SELF UNTIL-DONE JOB");
   });
 });

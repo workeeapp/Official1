@@ -449,6 +449,11 @@ describe("parseLlmReply", () => {
             },
             { action: "snooze", job_id: "job-2", in: 600 },
             { action: "snooze", job_id: "job-3", time: "19:30" },
+            {
+              action: "open",
+              answer_text: "לקנות חלב",
+              in: 3600,
+            },
             { action: "answer", answer_text: "כן" },
             { action: "explode", job_id: "job-4" },
           ],
@@ -481,6 +486,15 @@ describe("parseLlmReply", () => {
         reportText: "",
         time: "19:30",
         in: null,
+        date: "",
+      },
+      {
+        action: "open",
+        jobId: "",
+        answerText: "לקנות חלב",
+        reportText: "",
+        time: "",
+        in: 3600,
         date: "",
       },
       {

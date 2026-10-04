@@ -31,6 +31,12 @@ export type ModelEvalConstraint =
       /** When true, at least one matching add must have everyCount set. */
       recurring?: boolean;
     }
+  | {
+      type: "jobs_has_action";
+      action: string;
+      /** When true, answerText on at least one matching open must be non-empty. */
+      requireAsk?: boolean;
+    }
   | { type: "no_invented_reminder_add" }
   | { type: "hold_present" }
   | { type: "hold_or_confirm" }
@@ -204,6 +210,18 @@ export function checkConstraint(
         )
       ) {
         return `expected reminders.${constraint.action} with every_count+every_unit`;
+      }
+      return null;
+    }
+    case "jobs_has_action": {
+      const rows = (meta.jobs ?? []).filter(
+        (row) => row.action === constraint.action,
+      );
+      if (rows.length === 0) {
+        return `expected jobs.${constraint.action}`;
+      }
+      if (constraint.requireAsk && !rows.some((row) => row.answerText.trim())) {
+        return `expected jobs.${constraint.action} with answer_text`;
       }
       return null;
     }

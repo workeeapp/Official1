@@ -45,7 +45,7 @@
     "    ],",
     "    \"jobs\": [",
     "      {",
-    "        \"action\": \"<answer | decline | progress | counter | snooze | clear_clock | close>\",",
+    "        \"action\": \"<open | answer | decline | progress | counter | snooze | clear_clock | close>\",",
     "        \"job_id\": \"<job_id from OPEN_JOBS>\",",
     "        \"answer_text\": \"<what the speaker said>\",",
     "        \"report_text\": \"<sentence to deliver to the asker>\",",
@@ -58,7 +58,7 @@
     "}",
     "",
     "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
-    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id.",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. Until-done self-nudge («נדנדי עד שאקנה») → jobs.open (answer_text = obligation) + speaker list item — not a recurring reminders clock. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id.",
     "",
     "------------------------------------------------------------",
     "CAPABILITIES (זהה לכל עובד)",
@@ -358,13 +358,14 @@
               },
               "jobs": {
                 "type": "array",
-                "description": "Lifecycle updates for jobs listed in OPEN_JOBS this turn. Always reference an existing job_id — never open a second task row for the same job.",
+                "description": "OPEN_JOBS lifecycle. open = self until-done job (asker=subject=speaker; answer_text = obligation). Other actions need job_id from OPEN_JOBS.",
                 "items": {
                   "type": "object",
                   "properties": {
                     "action": {
                       "type": "string",
                       "enum": [
+                        "open",
                         "answer",
                         "decline",
                         "progress",
@@ -374,6 +375,14 @@
                         "close"
                       ]
                     },
+                    "job_id": {
+                      "type": "string",
+                      "description": "Required except action=open (empty). Copy from OPEN_JOBS."
+                    },
+                    "answer_text": {
+                      "type": "string",
+                      "description": "On open: the close obligation (לקנות חלב / ליצור קשר עם X). On answer/decline/progress: what they said."
+                    },
                     "time": { "type": "string" },
                     "in": { "type": ["number", "null"] },
                     "date": {
@@ -381,7 +390,7 @@
                       "description": "Counter only. Proposed meeting date as YYYY-MM-DD from SESSION_CLOCK. Empty otherwise."
                     }
                   },
-                  "required": ["action", "job_id"]
+                  "required": ["action"]
                 }
               },
               "directory": {

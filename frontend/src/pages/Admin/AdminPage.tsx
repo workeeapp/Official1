@@ -4,13 +4,16 @@ import type {
   AdminCodeChangesResponse,
   AdminMonitoringResponse,
   AdminUserRow,
+  WhatsAppStatusResponse,
 } from "@workee/shared";
 import { Button } from "@/components/Button";
 import { useAuth } from "@/hooks/useAuth";
 import { adminApi } from "@/services/admin.service";
+import { whatsappApi } from "@/services/whatsapp.service";
 import { ApiError } from "@/types";
 import { buildCiView } from "./ci-view";
 import { buildMonitoringView } from "./monitoring-view";
+import { WhatsAppChannelPanel } from "./WhatsAppChannelPanel";
 
 const CODE_PREVIEW_COUNT = 5;
 
@@ -56,6 +59,9 @@ export function AdminPage() {
   const [codeChanges, setCodeChanges] =
     useState<AdminCodeChangesResponse | null>(null);
   const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [whatsappStatus, setWhatsappStatus] =
+    useState<WhatsAppStatusResponse | null>(null);
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
   const [lookbackHours, setLookbackHours] = useState(24);
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,20 +77,36 @@ export function AdminPage() {
   const load = useCallback(
     async (signal?: AbortSignal, silent = false) => {
       setError(null);
+      setWhatsappError(null);
       if (!silent) {
         setLoading(true);
       }
       try {
-        const [nextMonitoring, nextCi, nextCode, nextUsers] = await Promise.all([
-          adminApi.monitoring(signal),
-          adminApi.ciStatus(signal),
-          adminApi.codeChanges(lookbackHours, signal),
-          adminApi.users(signal),
-        ]);
+        const [nextMonitoring, nextCi, nextCode, nextUsers, nextWhatsapp] =
+          await Promise.all([
+            adminApi.monitoring(signal),
+            adminApi.ciStatus(signal),
+            adminApi.codeChanges(lookbackHours, signal),
+            adminApi.users(signal),
+            whatsappApi.status(signal).catch((caught: unknown) => {
+              if (caught instanceof ApiError && caught.code === "ABORTED") {
+                throw caught;
+              }
+              setWhatsappError(
+                caught instanceof ApiError
+                  ? caught.message
+                  : "Unable to load WhatsApp status.",
+              );
+              return null;
+            }),
+          ]);
         setMonitoring(nextMonitoring);
         setCiStatus(nextCi);
         setCodeChanges(nextCode);
         setUsers(nextUsers.users);
+        if (nextWhatsapp) {
+          setWhatsappStatus(nextWhatsapp);
+        }
         setCodeExpanded(false);
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === "ABORTED") {
@@ -153,8 +175,8 @@ export function AdminPage() {
             Platform ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary sm:text-base">
-            System health and CI first, then admin logins, then recent git
-            commits.
+            System health and WhatsApp channel diagnostics first, then CI,
+            admin logins, and recent git commits.
           </p>
         </div>
         <Button
@@ -307,6 +329,12 @@ export function AdminPage() {
           </p>
         ) : null}
       </section>
+
+      <WhatsAppChannelPanel
+        status={whatsappStatus}
+        error={whatsappError}
+        loading={loading && !whatsappStatus}
+      />
 
       <section
         data-testid="admin-ci"

@@ -49,6 +49,7 @@ export interface LlmMessageBook {
 }
 
 export type LlmJobActionName =
+  | "open"
   | "answer"
   | "decline"
   | "progress"
@@ -57,17 +58,17 @@ export type LlmJobActionName =
   | "clear_clock"
   | "close";
 
-/** Lifecycle of an open job the digital worker holds for one person about another. */
+/** Lifecycle of an open job the digital worker holds (relay or self until-done). */
 export interface LlmJobAction {
   action: LlmJobActionName;
   jobId: string;
-  /** What the subject said (answer / decline reason / progress note). */
+  /** What the subject said (answer / decline reason / progress note). On open: the obligation ask (e.g. לקנות חלב). */
   answerText: string;
-  /** Sentence to deliver to the other person. On answer/decline that is the asker. On counter it is the approval question for whoever must answer next. Empty = server writes a plain line. */
+  /** Sentence to deliver to the other person. On answer/decline that is the asker. On counter it is the approval question for whoever must answer next. Empty = server writes a plain line. Unused on self-job open. */
   reportText: string;
-  /** Snooze clock: HH:mm. On counter, the proposed meeting time. */
+  /** Snooze clock: HH:mm. On counter, the proposed meeting time. On open: optional first ping clock. */
   time: string;
-  /** Snooze clock: seconds from now. */
+  /** Snooze clock: seconds from now. On open: optional first ping delay. */
   in: number | null;
   /** Counter only: the proposed meeting date, YYYY-MM-DD. */
   date?: string;
@@ -203,6 +204,7 @@ const FILING_ACTIONS = new Set<LlmFilingActionName>([
 ]);
 
 const JOB_ACTIONS = new Set<LlmJobActionName>([
+  "open",
   "answer",
   "decline",
   "progress",
