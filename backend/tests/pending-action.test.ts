@@ -3,7 +3,6 @@ import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
-  alignListTargetsWithMessageRecipients,
   fillRemindersFromPendingHold,
   formatCancelledHoldReply,
   formatConversationPendingContext,
@@ -167,32 +166,6 @@ describe("pending action hold", () => {
     ]);
     expect(fillListsFromPendingHold(hold, [], "כן", null)).toEqual([
       removeDraft,
-    ]);
-  });
-
-  it("aligns empty shopping targets with same-turn message recipients", () => {
-    expect(
-      alignListTargetsWithMessageRecipients({
-        speakerName: "מיכל",
-        messages: [{ targets: ["טל"], text: "תקני ביצים" }],
-        lists: [
-          {
-            action: "add",
-            listType: "shopping",
-            listName: "",
-            items: [{ "שם פריט": "ביצים" }],
-            targets: [],
-          },
-        ],
-      }),
-    ).toEqual([
-      {
-        action: "add",
-        listType: "shopping",
-        listName: "",
-        items: [{ "שם פריט": "ביצים" }],
-        targets: ["מיכל", "טל"],
-      },
     ]);
   });
 

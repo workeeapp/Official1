@@ -80,7 +80,6 @@ import {
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
   fillRemindersFromPendingHold,
-  alignListTargetsWithMessageRecipients,
   formatCancelledHoldReply,
   formatConversationPendingContext,
   formatListDeleteConfirmNotice,
@@ -1448,16 +1447,6 @@ export async function sendChatMessage(input: {
           reminders: filledReminders,
           hold: null,
         };
-      }
-    }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
-      const alignedLists = alignListTargetsWithMessageRecipients({
-        lists: metadata.lists ?? [],
-        messages: metadata.messages ?? [],
-        speakerName: employeeDisplayName(employee),
-      });
-      if (alignedLists !== metadata.lists) {
-        metadata = { ...metadata, lists: alignedLists };
       }
     }
     if (!guestSpeaker && !cancelledAwaitingHold) {

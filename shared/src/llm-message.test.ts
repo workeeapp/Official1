@@ -111,6 +111,35 @@ describe("parseLlmReply", () => {
     expect(parseReplyMetadata(reply).lists[0].targets).toEqual(["טל"]);
   });
 
+  it("does not inherit top-level metadata.targets onto empty list or filing rows", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "שמרתי",
+        metadata: {
+          targets: ["מיכל"],
+          lists: [
+            {
+              action: "add",
+              list_type: "shopping",
+              items: [{ name: "חלב" }],
+            },
+          ],
+          filing: [
+            {
+              action: "add_filing",
+              item_name: "עיר",
+              item_info: "תל אביב",
+              item_description: "עיר",
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.targets).toEqual(["מיכל"]);
+    expect(parsed.lists[0].targets).toEqual([]);
+    expect(parsed.filing[0].targets).toEqual([]);
+  });
+
   it("reads filing description from metadata (model resolves כמו השם)", () => {
     expect(
       parseReplyMetadata(
