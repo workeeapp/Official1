@@ -909,6 +909,7 @@ export function formatReminderConfirmNotice(
   ask: LlmReminderAction[],
   cancelled: boolean,
   noneToDelete = false,
+  options: { repeatsByItem?: Map<string, string> } = {},
 ): string {
   if (cancelled) {
     return "לא שיניתי ולא מחקתי כלום.";
@@ -920,11 +921,30 @@ export function formatReminderConfirmNotice(
     return "";
   }
   const names = ask.map((row) => row.item).filter(Boolean);
+  const cadenceFor = (name: string): string => {
+    const repeat = options.repeatsByItem?.get(name)?.trim() ?? "";
+    if (!repeat || repeat === "once") {
+      return "";
+    }
+    return formatReminderIntervalHe(repeat).trim();
+  };
   if (names.length === 1) {
-    return `למחוק את «${names[0]}»?`;
+    const name = names[0]!;
+    const cadence = cadenceFor(name);
+    if (cadence) {
+      return `לבטל את התזכורת החוזרת ${cadence} ל«${name}»? הפריט או המטלה לא יימחקו.`;
+    }
+    return `לבטל את התזכורת «${name}»? הפריט או המטלה לא יימחקו.`;
   }
-  const bullets = names.map((name) => `• ${name}`).join("\n");
-  return `למחוק את אלה?\n${bullets}`;
+  const bullets = names
+    .map((name) => {
+      const cadence = cadenceFor(name);
+      return cadence
+        ? `• התזכורת החוזרת ${cadence} ל«${name}»`
+        : `• התזכורת «${name}»`;
+    })
+    .join("\n");
+  return `לבטל את התזכורות האלה? הפריטים או המטלות לא יימחקו.\n${bullets}`;
 }
 
 export async function applyReminders(input: {

@@ -164,8 +164,96 @@ describe("Phase 4 constraint checkers", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("includes exact-list-or-ask journey in the corpus", () => {
+  it("requires recurring every_count on reminders.add when asked", () => {
+    const constraints: ModelEvalConstraint[] = [
+      { type: "reminders_has_action", action: "add", recurring: true },
+    ];
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          reminders: [
+            {
+              action: "add",
+              item: "לקנות חלב",
+              listType: "shopping",
+              date: "",
+              time: "",
+              repeat: "hourly",
+              ping: ["טל"],
+              targets: ["טל"],
+              text: "לקנות חלב",
+              inSeconds: 3600,
+              everyCount: 1,
+              everyUnit: "hours",
+              weekdays: null,
+              confirmed: false,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+            },
+          ],
+        }),
+        "אזכיר כל שעה",
+      ).ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          reminders: [
+            {
+              action: "add",
+              item: "לקנות חלב",
+              listType: "shopping",
+              date: "",
+              time: "08:00",
+              repeat: "once",
+              ping: ["טל"],
+              targets: ["טל"],
+              text: "לקנות חלב",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: false,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+            },
+          ],
+        }),
+        "שמרתי",
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("forbids banned response phrases", () => {
+    const constraints: ModelEvalConstraint[] = [
+      { type: "response_forbids_any", needles: ["לאיזו", "ווטסאפ"] },
+    ];
+    expect(
+      evaluateConstraints(constraints, meta({}), "מוחקת את שתיהן").ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({}),
+        "לאיזו מ־2 המטלות התכוונת?",
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("includes exact-list-or-ask and Lucy nudge/delete journeys in the corpus", () => {
     const ids = loadModelEvalCorpus().cases.map((row) => row.id);
     expect(ids).toContain("list-ambiguous-name-ask");
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "list-filtered-multi-delete",
+        "self-nudge-contact-topic-no-whatsapp",
+        "self-nudge-recurring-until-done",
+        "reminder-stop-nudge-keep-item",
+      ]),
+    );
   });
 });

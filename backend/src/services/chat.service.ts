@@ -67,7 +67,9 @@ import {
   formatReminderConfirmNotice,
   hasUnrelatedWorkWhilePending,
   linkRemindersToWorkerTasks,
+  listReminderRowsForUser,
   planReminderWrites,
+  reminderLabelsMatch,
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
@@ -458,6 +460,7 @@ function workerTargetingInstructions(
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
+    "Exception — SELF-nudge to contact/call/talk to X («תזכירי/תנדנדי לי … ליצור קשר עם X / לדבר עם X»): ping=speaker; X is task text only. NEVER ask for X's WhatsApp and never put X in ping/messages.targets. Phone ask is only for «תזכירי ל־X / תשלחי ל־X / תגידי ל־X».",
     "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking — but set metadata.hold kind=directory with the known name+phone draft and need=confirm_save.",
     "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
     "Exception — self-nudge / personal task with volunteered name+digits (תזכירי לי לדבר עם X … הטלפון 05…): do NOT ask לשמור and do NOT empty reminders. Same turn: three self-nudge ACTIONS + directory add name+phone. Confirm both in response.",
@@ -476,13 +479,16 @@ function workerTargetingInstructions(
       : "",
     "One sentence can be several actions. Fill every array that applies.",
     `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock) for NEW work only: (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. EXCEPTION: if OPEN_JOBS has a row and «תזכירי לי / בעוד X / על זה» is about that raised/open job → ONLY jobs.snooze (see OPEN JOBS); never the three actions.`,
+    "RECURRING SELF-NUDGE / UNTIL DONE: «כל שעה / כל יום / תנדנדי עד שאקנה/אסיים» → same three ACTIONS + every_count+every_unit; ping=speaker; say it keeps going until they finish/cancel. Plain one-shot «תזכירי לי … ב־08:00 / בעוד שעה» → do NOT ask about until-done or frequency.",
+    "SELF-NUDGE vs CONTACT THEM: «תנדנדי לי … ליצור קשר עם X / לדבר עם X» → ping=speaker; X is only the task label. FORBIDDEN: ask X's WhatsApp or ping X. Phone ask only for תזכירי ל־X / תשלחי ל־X / תגידי ל־X.",
     "VOLUNTEERED CONTACT ON SELF-NUDGE: if the work is talk to / call / contact person X and they volunteer X's WhatsApp digits same turn, and X is not Known / not in SPEAKER_CONTACTS → also metadata.directory add name+phone SAME TURN. Never leave the number only in response; never empty reminders to ask לשמור first.",
+    "Done/finished (קניתי / סיימתי / עשיתי): lists.remove that item — matching active clocks are cancelled by the server; also reminders.remove if a clear matching active_reminders row remains.",
     "REMIND ABOUT A DISCUSSED ITEM: after you just named a meeting/task in chat (פגישה עם עמית מחר 21:30) and they say תזכורת ב־21:15 / ל־21:15 → bind to that item NOW (three ACTIONS); do not ask מה/למה להזכיר or re-ask the hour. Missing topic with no bindable item → ask «מה תרצה שאזכיר לך?» — NEVER «למה תרצה שאזכיר לך». Topic follow-up after a clock was already given → use that clock; never ask מתי again.",
     `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: every_count + every_unit. NEVER ask for WhatsApp if the name is Known.`,
     "REMIND-SOMEONE-ELSE TEXT: set reminders.text to the FULL WhatsApp line for the ping recipient, naming the asker with correct gender — e.g. «מיכל מבקשת להזכיר לך לסדר את השעון ולקחת את הכיסאות למחסן» / «עמית מבקש להזכיר לך לקנות חלב». Prefer infinitive for the work. Do not leave text empty so the server falls back to a generic wrapper.",
     "REMIND CLOCK vs APPOINTMENT: «בעוד שעתיים» = `in` for the clock. «יש לה תור ב־22:00» = task context (optional שעה on their task) — do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared משימות לעבודה for a remind.",
     "NO META ON LISTS: complaints about your timing/questions → response only, empty lists. Never dump bug/meta text onto משימות לעבודה or any shared list.",
-    "Cancel a nudge / stop the jokes / בטלי את התזכורת: reminders remove for that clock. Also lists.remove the speaker item when it is only the wrapper for that nudge (same work by meaning). If the speaker item looks like independent work they may still want, ASK whether to remove it too; empty lists while asking. The server clears the linked worker task with the clock.",
+    "Cancel a nudge / stop the jokes / תפסיקי / בטלי את התזכורת: reminders remove ONLY for that clock (exact active_reminders item). Keep speaker shopping/task (חלב stays). FORBIDDEN: same-turn lists.remove of that buy/task with reminders.remove. Joke-only wrappers may remove the wrapper or ask once. Server clears the linked worker task with the clock. After cancel: response says reminder cancelled, the item remains, and one short line they can update/delete it anytime (e.g. ביטלתי את התזכורת; חלב נשאר בקניות. אפשר לעדכן או למחוק אותו מתי שתרצה). Do not ask למחוק עכשיו.",
     "Change a clock / תעדכן תזכורת → reminders update using the EXACT item name from this turn's active_reminders (match by meaning if they rephrased). Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
@@ -495,6 +501,7 @@ function workerTargetingInstructions(
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
     "Delete reminder: one remove per name, no confirmed. Do not write the confirm question in response — the server asks. After yes: metadata.confirm=true, empty reminders. In response: past tense + one • line per deleted name when ≥2 — never a comma list. If PENDING_ACTION_STATE is present, stay in that delete — names pick targets, not send.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item. Do not write the confirm question — the server asks and holds. After yes: confirm=true, empty lists. In response: short intro + one • per deleted name from PENDING_ACTION_STATE current_target (e.g. נמחקו מהמטלות:\\n• …\\n• …). Never מאשרת/לאשר/confirming — yes already confirmed. A single bought item (קניתי חלב) may remove immediately without confirm.",
+    "FILTERED MULTI DELETE: «תמחקי את 2 המטלות של רב פס» / «את שתי המטלות…» / «את המטלות של X» / «את כל המטלות ש…» → lists.remove EVERY matching row (name/description) SAME TURN. Named count that matches, or plural/כל over that filter → delete all matches; FORBIDDEN ask which one. Ask which ONLY for singular «את המטלה» with several candidates. Then Hebrew «לאילו מ־…» — never «לאיזו» for plural options.",
     "SINGLE NAMED/SHARED LIST REMOVE: one row on custom/shared (משימות לעבודה) → lists.remove now (exact list_name + item). FORBIDDEN: homemade «למחוק משם?» then «כן» with confirm=true + empty lists (deletes nothing). Optional ask → hold need=confirm with remove draft; on כן confirm=true or re-emit remove. Never claim נמחק without lists.remove / PENDING delete_lists.",
     "DELETE ALL EXCEPT KEEP: «תמחק הכל פרט ל־X» / «תשאיר רק X» → lists.remove every OTHER row on that named list — never remove X. Hold those removes if asking; on כן apply them.",
     "APPLY FEEDBACK layout: after add/remove/update — short intro + one • line per item when ≥2 (deletes, adds, updates). Never one dense comma block. Single item → one sentence OK.",
@@ -1636,11 +1643,30 @@ export async function sendChatMessage(input: {
           .map((row) => row.itemId),
       }),
     );
+    const reminderConfirmRepeats = new Map<string, string>();
+    if (reminderPlan.ask.length > 0) {
+      const activeClocks = await listReminderRowsForUser(input.userId);
+      for (const row of reminderPlan.ask) {
+        const name = row.item.trim();
+        if (!name) {
+          continue;
+        }
+        const match = activeClocks.find(
+          (clock) =>
+            reminderLabelsMatch(clock.itemLabel, name) ||
+            reminderLabelsMatch(String(clock.itemKey ?? ""), name),
+        );
+        if (match?.repeat) {
+          reminderConfirmRepeats.set(name, String(match.repeat));
+        }
+      }
+    }
     const confirmAsk = [
       formatReminderConfirmNotice(
         reminderPlan.ask,
         reminderPlan.cancelled,
         reminderPlan.noneToDelete,
+        { repeatsByItem: reminderConfirmRepeats },
       ),
       formatListDeleteConfirmNotice(listPlan.askLabels, listPlan.cancelled),
     ]
@@ -1924,6 +1950,7 @@ export async function sendChatMessage(input: {
       (claimedListDelete &&
         !appliedListRemove &&
         reminderResult.removed.length === 0 &&
+        reminderResult.missed.length === 0 &&
         !filingMutations.some((row) => row.action === "remove"))
     ) {
       workingReply = setEngineResponse(

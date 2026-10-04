@@ -24,7 +24,13 @@ export type ModelEvalConstraint =
       nameIncludes?: string;
       phoneIncludes?: string;
     }
-  | { type: "reminders_has_action"; action: string }
+  | { type: "directory_empty" }
+  | {
+      type: "reminders_has_action";
+      action: string;
+      /** When true, at least one matching add must have everyCount set. */
+      recurring?: boolean;
+    }
   | { type: "no_invented_reminder_add" }
   | { type: "hold_present" }
   | { type: "hold_or_confirm" }
@@ -33,6 +39,7 @@ export type ModelEvalConstraint =
   | { type: "mutations_empty_or_read_only" }
   | { type: "no_silent_multi_domain_wipe" }
   | { type: "response_mentions_any"; needles: string[] }
+  | { type: "response_forbids_any"; needles: string[] }
   | { type: "any"; constraints: ModelEvalConstraint[] };
 
 export interface ModelEvalCaseResult {
@@ -176,13 +183,29 @@ export function checkConstraint(
       }
       return null;
     }
+    case "directory_empty":
+      return (meta.directory?.length ?? 0) === 0
+        ? null
+        : `expected empty directory, got ${meta.directory?.length}`;
     case "reminders_has_action": {
       const rows = (meta.reminders ?? []).filter(
         (row) => row.action === constraint.action,
       );
-      return rows.length > 0
-        ? null
-        : `expected reminders.${constraint.action}`;
+      if (rows.length === 0) {
+        return `expected reminders.${constraint.action}`;
+      }
+      if (
+        constraint.recurring &&
+        !rows.some(
+          (row) =>
+            typeof row.everyCount === "number" &&
+            row.everyCount > 0 &&
+            Boolean(row.everyUnit),
+        )
+      ) {
+        return `expected reminders.${constraint.action} with every_count+every_unit`;
+      }
+      return null;
     }
     case "no_invented_reminder_add": {
       const invented = (meta.reminders ?? []).some((row) => {
@@ -231,6 +254,12 @@ export function checkConstraint(
         return null;
       }
       return `response missing any of: ${constraint.needles.join(", ")}`;
+    }
+    case "response_forbids_any": {
+      const hit = constraint.needles.find((needle) =>
+        includesFold(response, needle),
+      );
+      return hit ? `response must not mention: ${hit}` : null;
     }
     default: {
       const unknown = constraint as { type: string };
