@@ -482,6 +482,45 @@ export function fillListsFromPendingHold(
   return draftLists;
 }
 
+/**
+ * Confirm-save directory hold: on yes / confirm / model directory.add,
+ * apply the stored name+phone draft so «כן» still saves the contact.
+ */
+export function fillDirectoryFromPendingHold(
+  pending: ConversationPendingAction | null,
+  directory: LlmDirectoryAction[],
+  speakerText: string,
+  confirm: boolean | null,
+): LlmDirectoryAction[] | null {
+  if (
+    !pending ||
+    pending.action !== "complete_directory" ||
+    pending.step !== "awaiting_fields" ||
+    !isConfirmHoldNeed(pending.need)
+  ) {
+    return null;
+  }
+  const draftDirectory = pending.draft.directory ?? [];
+  if (draftDirectory.length === 0) {
+    return null;
+  }
+  if (confirm === false || isPendingHoldCancelText(speakerText)) {
+    return null;
+  }
+  const modelAdded = directory.some(
+    (row) =>
+      row.action === "add" && Boolean(row.name.trim()) && Boolean(row.phone.trim()),
+  );
+  const accepted =
+    confirm === true ||
+    isPendingHoldAcceptText(speakerText) ||
+    modelAdded;
+  if (!accepted) {
+    return null;
+  }
+  return draftDirectory;
+}
+
 function reminderDraftHasClock(row: LlmReminderAction): boolean {
   return (
     Boolean(row.time?.trim()) ||
@@ -732,6 +771,7 @@ export function formatConversationPendingContext(
       "Stay inside this action until the server clears it.",
       "Yes / confirm → metadata.confirm=true and empty lists.",
       "After yes: response must list the deleted items by name from current_target in past tense (e.g. נמחקו הפריטים הבאים מרשימת הקניות: …). Never מאשרת/לאשר/confirming — the yes already confirmed.",
+      "If the deleted rows were on a shared list/shopping (known_draft / prior EMPLOYEE_SAVED_DATA scope=shared): also end with «נשלחה הודעה מתאימה ל<partner>».",
       "No / cancel → metadata.confirm=false and empty lists.",
       "Do not emit new list adds/updates or messages while current_step is confirm.",
     ].join("\n");
@@ -748,8 +788,9 @@ export function formatConversationPendingContext(
     "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
     "If current_action is complete_lists and missing_field is confirm / confirm_share: Yes / confirm=true → apply known_draft.lists (shared targets included). Do not replace with the speaker's private list. The server prefers known_draft lists on accept.",
+    "If current_action is complete_directory and missing_field is confirm_save: Yes / confirm=true → directory add from known_draft (name+phone), hold=null. No / לא → hold=null and empty directory; do not undo lists/reminders already saved earlier. Never ask again what the task was.",
     "If current_action is complete_reminders and missing_field is time / מתי: the short reply sets the clock — «עכשיו» / now → send soon; or emit reminders add with in/time from their words. Do not claim אשלח until a clock exists.",
-    "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort this draft — hold=null and empty directory/lists/reminders/filing/messages. Do not complete the unfinished action. Say you cancelled (e.g. ביטלתי את השליחה / ביטלתי את התיוק).",
+    "CANCEL (לא / בטל / ביטול / אל תשלחי / cancel / no / בעצם לא): abort this draft — hold=null and empty directory/lists/reminders/filing/messages. Do not complete the unfinished action. Say you cancelled (e.g. ביטלתי את השליחה / ביטלתי את שמירת איש הקשר / ביטלתי את התיוק). Lists/reminders already applied in a previous turn stay.",
     "If still missing something else, emit hold again with the updated draft and the new need.",
     "Do not start an unrelated new request until this hold is completed, cancelled, or the speaker clearly switches topic.",
   ].join("\n");

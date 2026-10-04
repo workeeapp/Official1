@@ -223,6 +223,36 @@
       ]
     },
     {
+      "id": "shared-list-found-no-not-found",
+      "tag": "action-confusion",
+      "utterance": "שתי הבעיות ברשימת משימות לעבודה טופלו",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "custom",
+            "list_name": "משימות לעבודה",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": ["טל", "עמית"],
+            "items": [
+              { "תיאור": "דיווח באג לוח שנה" },
+              { "תיאור": "דיווח באג תזכורות" }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "response_forbids_any",
+          "needles": ["לא מצאתי רשימה", "לא מצאתי"]
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": ["משימות לעבודה", "משותפת"]
+        }
+      ]
+    },
+    {
       "id": "list-filtered-multi-delete",
       "tag": "happy",
       "utterance": "מחקי את שתי המטלות של הרב פס מהמטלות שלי",
@@ -462,16 +492,38 @@
       "utterance": "תזכירי לי בסביבות 14:00 לדבר עם רב פס הטלפון שלהם לווטסאפ הוא 0508087073",
       "setup": {},
       "constraints": [
-        {
-          "type": "directory_has_action",
-          "action": "add",
-          "nameIncludes": "רב פס",
-          "phoneIncludes": "0508087073"
-        },
+        { "type": "directory_empty" },
+        { "type": "hold_present" },
         {
           "type": "reminders_has_action",
           "action": "add"
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "0508087073"
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": ["לשמור", "ספר הטלפונים", "אנשי קשר"]
         }
+      ]
+    },
+    {
+      "id": "task-keep-phone-in-title",
+      "tag": "happy",
+      "utterance": "תוסיפי לי מטלה לדבר עם אורי בטלפון 0534455366",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "0534455366"
+        },
+        { "type": "directory_empty" },
+        { "type": "hold_present" }
       ]
     },
     {
@@ -523,6 +575,33 @@
       },
       "constraints": [
         { "type": "directory_has_action", "action": "remove", "nameIncludes": "מיכל" }
+      ]
+    },
+    {
+      "id": "directory-clear-all",
+      "tag": "happy",
+      "utterance": "תמחקי את כל אנשי הקשר",
+      "setup": {
+        "contacts": [
+          { "name": "מיכל", "phone": "0541111111" },
+          { "name": "אורי", "phone": "0534455366" }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "directory_has_action",
+          "action": "remove",
+          "nameIncludes": "מיכל"
+        },
+        {
+          "type": "directory_has_action",
+          "action": "remove",
+          "nameIncludes": "אורי"
+        },
+        {
+          "type": "response_forbids_any",
+          "needles": ["לא ניתן למחוק", "אילו אנשי קשר"]
+        }
       ]
     },
     {

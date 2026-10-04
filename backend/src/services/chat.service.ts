@@ -39,6 +39,7 @@ import {
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  appendSharedMutationAckIfMissing,
   planPhoneRelays,
   planRelayDeliveries,
   planTargetedActions,
@@ -80,6 +81,7 @@ import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
+  fillDirectoryFromPendingHold,
   fillRemindersFromPendingHold,
   formatCancelledHoldReply,
   formatConversationPendingContext,
@@ -464,9 +466,10 @@ function workerTargetingInstructions(
     "Exception — SELF-nudge to contact/call/talk to X («תזכירי/תנדנדי לי … ליצור קשר עם X / לדבר עם X»): ping=speaker; X is task text only. NEVER ask for X's WhatsApp and never put X in ping/messages.targets. Phone ask is only for «תזכירי ל־X / תשלחי ל־X / תגידי ל־X».",
     "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking — but set metadata.hold kind=directory with the known name+phone draft and need=confirm_save.",
     "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
-    "Exception — self-nudge / personal task with volunteered name+digits (תזכירי לי לדבר עם X … הטלפון 05…): do NOT ask לשמור and do NOT empty reminders. Same turn: three self-nudge ACTIONS + directory add name+phone. Confirm both in response.",
+    "Exception — self-nudge / personal task with volunteered name+digits (תזכירי לי לדבר עם X … הטלפון 05…): SAME TURN three self-nudge ACTIONS (שם מטלה keeps the phone text) — do NOT empty lists/reminders. ASK לשמור with hold kind=directory need=confirm_save + name+phone draft; directory=[] this turn. FORBIDDEN: auto directory.add. Confirm the reminder/task then the save-contact ask.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
     "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
+    "CLEAR ALL CONTACTS: «תמחקי את כל אנשי הקשר» / «נקי את ספר הטלפונים» → directory.remove EVERY SPEAKER_CONTACTS row SAME TURN (name+phone). FORBIDDEN: refuse or ask which ones when they said כל.",
     "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. תגידי לטל לקנות… / תשלחי הודעה לעמית המערכת למעלה → messages NOW; do NOT ask מה תרצה שאשלח or האם זו הודעה או רשימת קניות. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי / זו ההודעה / כן תשלחי) → send that text, hold=null — never ask again. Cancel any awaiting hold (לא / בטל / אל תשלחי / cancel) → empty unfinished arrays + hold=null; do not use cancel words as the missing field.",
     "CORRECT / CLARIFY A JUST-SENT RELAY: after you sent (or claimed שלחתי) and the speaker corrects the meaning (לא שהוא… / התכוונתי ל… / לא X אלא Y / שהפיצ'ר… לא האדם…) → do NOT only say הבנתי with empty messages. Prefer SAME TURN messages to that recipient with the CORRECTED body. Follow-up «תשלחי לו הבהרה / תיקון / עדכון / אז תשלחי» → messages NOW with that corrected wording from chat; hold=null. FORBIDDEN: ask מה לשלוח / מה תרצה שאבהיר when the correction is already clear.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
@@ -482,7 +485,7 @@ function workerTargetingInstructions(
     `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock) for NEW work only: (1) lists add for the speaker — shopping if buying, else tasks. (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. EXCEPTION: if OPEN_JOBS has a row and «תזכירי לי / בעוד X / על זה» is about that raised/open job → ONLY jobs.snooze (see OPEN JOBS); never the three actions.`,
     "RECURRING / UNTIL DONE: «כל שעה / כל יום / תנדנדי עד שאקנה/אסיים» → lists add on speaker + metadata.jobs open (answer_text = obligation, in/time for first ping). NOT three-action reminders.every_count. Plain one-shot «תזכירי לי … ב־08:00 / בעוד שעה» → three-action reminders; do NOT open a self-job.",
     "SELF-NUDGE vs CONTACT THEM: «תנדנדי לי … ליצור קשר עם X / לדבר עם X» → X is task text only. One-shot → reminders ping=speaker. Until-done → jobs.open. FORBIDDEN: ask X's WhatsApp or ping X. Phone ask only for תזכירי ל־X / תשלחי ל־X / תגידי ל־X.",
-    "VOLUNTEERED CONTACT ON SELF-NUDGE: if the work is talk to / call / contact person X and they volunteer X's WhatsApp digits same turn, and X is not Known / not in SPEAKER_CONTACTS → also metadata.directory add name+phone SAME TURN. Never leave the number only in response; never empty reminders to ask לשמור first.",
+    "VOLUNTEERED CONTACT ON SELF-NUDGE: if the work is talk to / call / contact person X and they volunteer X's WhatsApp digits same turn, and X is not Known / not in SPEAKER_CONTACTS → save the self-nudge ACTIONS (שם מטלה keeps phone) and ASK לשמור with hold directory confirm_save; directory=[] — never auto-add; never empty reminders to ask first.",
     "Done/finished (קניתי / סיימתי / עשיתי): lists.remove that item — matching active clocks are cancelled by the server; also reminders.remove if a clear matching active_reminders row remains. If OPEN_JOBS has a viewer_is=self row for that same work → also jobs.answer or jobs.close on that job_id.",
     "REMIND ABOUT A DISCUSSED ITEM: after you just named a meeting/task in chat (פגישה עם עמית מחר 21:30) and they say תזכורת ב־21:15 / ל־21:15 → bind to that item NOW (three ACTIONS); do not ask מה/למה להזכיר or re-ask the hour. Missing topic with no bindable item → ask «מה תרצה שאזכיר לך?» — NEVER «למה תרצה שאזכיר לך». Topic follow-up after a clock was already given → use that clock; never ask מתי again.",
     `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: every_count + every_unit. NEVER ask for WhatsApp if the name is Known.`,
@@ -507,7 +510,7 @@ function workerTargetingInstructions(
     "SINGLE NAMED/SHARED LIST REMOVE: one row on custom/shared (משימות לעבודה) → lists.remove now (exact list_name + item). FORBIDDEN: homemade «למחוק משם?» then «כן» with confirm=true + empty lists (deletes nothing). Optional ask → hold need=confirm with remove draft; on כן confirm=true or re-emit remove. Never claim נמחק without lists.remove / PENDING delete_lists.",
     "DELETE ALL EXCEPT KEEP: «תמחק הכל פרט ל־X» / «תשאיר רק X» → lists.remove every OTHER row on that named list — never remove X. Hold those removes if asking; on כן apply them.",
     "APPLY FEEDBACK layout: after add/remove/update — short intro + one • line per item when ≥2 (deletes, adds, updates). Never one dense comma block. Single item → one sentence OK.",
-    "SHARED LIST MUTATION REPLY: add/update/remove on shared shopping or any scope=shared list → past-tense what you did + shared-with <partner>, then «נשלחה הודעה מתאימה ל<partner>». Never claim נשלחה on personal mutations. Never paste the partner's notify text into response.",
+    "SHARED LIST MUTATION REPLY: add/update/remove on shared shopping or any scope=shared list → past-tense what you did + shared-with <partner>, then «נשלחה הודעה מתאימה ל<partner>». Same after PENDING delete_lists Yes on shared rows. Never claim נשלחה on personal mutations. Never paste the partner's notify text into response.",
     "SHOPPING ADD WORDING: personal shopping → «הוספתי לרשימת הקניות האישית שלך» (no partner-notify line). Shared → «…המשותפת עם <partner>» + «נשלחה הודעה מתאימה ל…». FORBIDDEN for personal: bare «לרשימת הקניות שלך».",
     "MOVE PERSONAL↔SHARED SHOPPING: העבירי X… = SAME TURN lists.remove from source + lists.add on destination (not lists.update scope). Shared touch → also «נשלחה הודעה מתאימה ל…».",
     "Speaker still needs → query todos. Your tasks / your reminder jobs (להזכיר ל…) → query self from WORKER_SAVED_DATA. Ping clocks only → query reminders. Empty clocks ≠ you have no work.",
@@ -517,8 +520,10 @@ function workerTargetingInstructions(
     "After any save/send/remove/update, state clearly in response what you did — short intro + • lines when ≥2 names; never one dense comma block. That text is what the user sees.",
     "If the speaker says they bought or already have a shopping item, remove it from shopping. If they finished a task (הכנתי / סיימתי / עשיתי / הכנתי חביתה), remove it from tasks — look up which list holds it in EMPLOYEE_SAVED_DATA. Never call a tasks item רשימת הקניות.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say מטלות for tasks and קניות for shopping.",
-    "PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» / «מטלה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal מטלות). Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
+    "PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» / «מטלה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal מטלות). שם מטלה = FULL wording they asked to save (keep phones/places) — FORBIDDEN to shorten «לדבר עם אורי בטלפון 053…» to «לדבר עם אורי». Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
+    "TASK TITLE FIDELITY: never strip phones/addresses/details from שם מטלה / שם פריט when saving. directory.add is extra, not a reason to truncate.",
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that exact list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
+    "LIST FOUND = PERSONAL OR SHARED: list_name in EMPLOYEE_SAVED_DATA under either scope counts as found. FORBIDDEN: «לא מצאתי רשימה…» when it exists personal or shared. FORBIDDEN: claim not found then mention the shared list in the same reply. Clarify rows/remove only — no לא מצאתי opener.",
     "EXACT LIST OR ASK: copy list_name exactly from EMPLOYEE_SAVED_DATA. Near-miss / shortened titles FORBIDDEN. Unsure or several similar names → empty lists + ASK. One clear match → mutate now. Server will not fix a wrong list_name.",
     "TARGETS ON LISTS: targets:[] = personal/speaker-only. Partners only for a new shared list they asked for, or when mutating an already-shared list (DB partners). FORBIDDEN: top-level metadata.targets; FORBIDDEN: all/כולם unless they said everyone; FORBIDDEN: copying message recipients onto shopping/tasks — use hold confirm_share for that.",
     "AMBIGUOUS LIST NAME: several list_name values similarly close to what they said and you are unsure → ASK which list (brief candidates) before mutating; empty lists while asking. One clear match → mutate immediately.",
@@ -1450,6 +1455,21 @@ export async function sendChatMessage(input: {
       }
     }
     if (!input.scheduledStatus && !guestSpeaker && !cancelledAwaitingHold) {
+      const filledDirectory = fillDirectoryFromPendingHold(
+        waitingPending,
+        metadata.directory ?? [],
+        input.message,
+        metadata.confirm ?? null,
+      );
+      if (filledDirectory) {
+        metadata = {
+          ...metadata,
+          directory: filledDirectory,
+          hold: null,
+        };
+      }
+    }
+    if (!input.scheduledStatus && !guestSpeaker && !cancelledAwaitingHold) {
       const filledReminders = fillRemindersFromPendingHold(
         waitingPending,
         metadata.reminders ?? [],
@@ -1699,6 +1719,7 @@ export async function sendChatMessage(input: {
     const notifications: ChatThreadNotification[] = [];
     const notified = new Set<string>();
     const sharedWhatsAppSkips: WhatsAppDeliverySkip[] = [];
+    const sharedPartnerAckNames: string[] = [];
 
     // Prefer plan notifications (named shared lists include partner context + full list payload).
     for (const notification of plan.notifications) {
@@ -1718,6 +1739,7 @@ export async function sendChatMessage(input: {
       });
       notifications.push(pushed.notification);
       sharedWhatsAppSkips.push(...pushed.whatsappSkips);
+      sharedPartnerAckNames.push(speakerName(notification.employee));
     }
 
     const sharedNotify = await notifySharedItemEvents({
@@ -1735,6 +1757,10 @@ export async function sendChatMessage(input: {
       }
       notified.add(notification.employeeId);
       notifications.push(notification);
+      const partner = humans.find((row) => row.id === notification.employeeId);
+      if (partner) {
+        sharedPartnerAckNames.push(speakerName(partner));
+      }
     }
     sharedWhatsAppSkips.push(...sharedNotify.whatsappSkips);
 
@@ -1891,6 +1917,9 @@ export async function sendChatMessage(input: {
     const deliveryFailed = formatWhatsAppSkipNotice(outboundSkips).length > 0;
     const confirmPending =
       reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
+    // Minimal wording intervention: prefer the model's response.
+    // Allowed: list-type word fix after apply; fact corrections when the engine
+    // refused/blocked work; empty-bubble fallback; narrow confirm-path ack.
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
     if (blockedGitLogDigests.length > 0) {
       workingReply = setEngineResponse(workingReply, "זה לא נתמך.");
@@ -1936,44 +1965,19 @@ export async function sendChatMessage(input: {
         workingReply = setEngineResponse(workingReply, fallback);
       }
     }
-    // Model often claims «הסרתי/נמחק» with no applied remove (e.g. כן + empty lists) — correct that.
-    const requestedCustomRemove = (metadata.lists ?? []).some(
-      (row) => row.action === "remove" && row.listType === "custom",
-    );
-    const appliedListRemove = listMutations.some(
-      (row) => row.action === "remove" && !row.listShell,
-    );
-    const appliedCustomRemove = listMutations.some(
-      (row) =>
-        row.action === "remove" && row.listType === "custom" && !row.listShell,
-    );
-    const spokenReply = parseLlmReply(workingReply).response;
-    const claimedListDelete =
-      /(?:^|[\s«"'])(?:נמחק|נמחקו|מחקתי|הסרתי)/.test(spokenReply) ||
-      /הפריט\s+[«"].+[»"]\s+.*(?:נמחק|הוסר)/.test(spokenReply);
-    if (
-      (requestedCustomRemove && !appliedCustomRemove) ||
-      (claimedListDelete &&
-        !appliedListRemove &&
-        reminderResult.removed.length === 0 &&
-        reminderResult.missed.length === 0 &&
-        !filingMutations.some((row) => row.action === "remove"))
-    ) {
-      workingReply = setEngineResponse(
-        workingReply,
-        "לא מצאתי את הפריט למחיקה ברשימה.",
+    // Only after delete confirm: model often lists bullets and forgets partner ack.
+    // Same-turn shared mutations stay model-written (prompt); engine stays out.
+    if (metadata.confirm === true && sharedPartnerAckNames.length > 0) {
+      const spoken = parseLlmReply(workingReply).response;
+      const withAck = appendSharedMutationAckIfMissing(
+        spoken,
+        sharedPartnerAckNames,
       );
-    } else if (
-      requestedCustomRemove &&
-      appliedCustomRemove &&
-      !spokenReply.trim()
-    ) {
-      workingReply = setEngineResponse(
-        workingReply,
-        formatAppliedMutationFallback(listMutations, filingMutations),
-      );
+      if (withAck !== spoken) {
+        workingReply = setEngineResponse(workingReply, withAck);
+      }
     }
-    // Do not append apply-summary lines — the spoken reply is the model's response only.
+    // Engine filled the send body from a hold — report what was actually sent.
     if (serverFilledSendText) {
       const dests = (metadata.messages ?? [])
         .flatMap((row) => row.targets)
@@ -1994,22 +1998,14 @@ export async function sendChatMessage(input: {
         formatCancelledHoldReply(waitingPending),
       );
     }
-    const noTimeSkipped = reminderResult.skipped.some(
-      (row) => row.reason === "no_time",
-    );
-    if (noTimeSkipped) {
-      workingReply = setEngineResponse(
-        workingReply,
-        "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",
-      );
-    }
+    // Reminder missing clock / other apply notices → append via notice (do not overwrite).
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const notice = [
       confirmPending ? "" : confirmAsk,
       guestMutationNotice,
       missingSend,
       whatsappNotice,
-      noTimeSkipped ? "" : reminderApplyNotice,
+      reminderApplyNotice,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -2017,6 +2013,8 @@ export async function sendChatMessage(input: {
     if (alignedSpoken !== parseLlmReply(turn.reply).response) {
       await patchLastAssistantText(conversation.id, alignedSpoken);
     }
+    // Replace spoken only when the model must not keep a false "sent" claim,
+    // or when the server owns the delete-confirm question.
     const replaceSpoken = deliveryFailed || confirmPending;
     const composeNotice = [
       consultAnswers.join("\n\n"),

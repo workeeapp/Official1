@@ -98,24 +98,32 @@ export async function applyDirectoryActions(input: {
 
   for (const action of input.actions) {
     const name = action.name.trim().slice(0, 100);
-    const phone = toWhatsAppAddress(action.phone);
-    if (!name || !looksLikePhone(phone)) {
-      continue;
-    }
+    const phoneRaw = action.phone.trim();
+    const phone = phoneRaw ? toWhatsAppAddress(phoneRaw) : "";
+    const phoneOk = Boolean(phone && looksLikePhone(phone));
 
     if (action.action === "remove") {
+      if (!name && !phoneOk) {
+        continue;
+      }
       const deleted = await prisma.contact.deleteMany({
         where: {
           ownerEmployeeId: input.ownerEmployeeId,
           OR: [
-            { phone },
-            { name: { equals: name, mode: "insensitive" } },
+            ...(phoneOk ? [{ phone }] : []),
+            ...(name
+              ? [{ name: { equals: name, mode: "insensitive" as const } }]
+              : []),
           ],
         },
       });
       if (deleted.count > 0) {
-        removed.push(name);
+        removed.push(name || phone);
       }
+      continue;
+    }
+
+    if (!name || !phoneOk) {
       continue;
     }
 

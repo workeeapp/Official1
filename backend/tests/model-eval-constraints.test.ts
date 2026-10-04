@@ -53,6 +53,51 @@ describe("Phase 4 constraint checkers", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("requires list item text when itemTextIncludes is set", () => {
+    const constraints: ModelEvalConstraint[] = [
+      {
+        type: "lists_has_action",
+        action: "add",
+        listType: "tasks",
+        itemTextIncludes: "0534455366",
+      },
+    ];
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לדבר עם אורי בטלפון 0534455366" }],
+              targets: [],
+            },
+          ],
+        }),
+        "שמרתי",
+      ).ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לדבר עם אורי" }],
+              targets: [],
+            },
+          ],
+        }),
+        "שמרתי",
+      ).ok,
+    ).toBe(false);
+  });
+
   it("fails when lists.remove is used instead of remove_filing", () => {
     const result = evaluateConstraints(
       [

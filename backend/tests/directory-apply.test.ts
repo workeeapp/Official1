@@ -69,6 +69,24 @@ describe("applyDirectoryActions", () => {
     expect(result.saved).toEqual([]);
   });
 
+  it("removes a contact by name only when phone is empty", async () => {
+    contactDeleteMany.mockResolvedValue({ count: 1 });
+
+    const result = await applyDirectoryActions({
+      userId: "user-1",
+      ownerEmployeeId: "emp-1",
+      actions: [{ action: "remove", name: "אורי", phone: "" }],
+    });
+
+    expect(contactDeleteMany).toHaveBeenCalledWith({
+      where: {
+        ownerEmployeeId: "emp-1",
+        OR: [{ name: { equals: "אורי", mode: "insensitive" } }],
+      },
+    });
+    expect(result.removed).toEqual(["אורי"]);
+  });
+
   it("skips remove when no row matched", async () => {
     contactDeleteMany.mockResolvedValue({ count: 0 });
 

@@ -1028,6 +1028,46 @@ export function fallbackNotificationText(
   return `${actorName} עדכן מידע אצלך: ${itemText}`;
 }
 
+/** Speaker-facing line after a partner was notified about a shared mutation. */
+export function formatSharedMutationAckLine(partnerNames: string[]): string {
+  const unique = [
+    ...new Set(
+      partnerNames.map((name) => name.trim()).filter((name) => name.length > 0),
+    ),
+  ];
+  if (unique.length === 0) {
+    return "";
+  }
+  if (unique.length === 1) {
+    return `נשלחה הודעה מתאימה ל${unique[0]}.`;
+  }
+  if (unique.length === 2) {
+    return `נשלחה הודעה מתאימה ל${unique[0]} ול${unique[1]}.`;
+  }
+  const head = unique.slice(0, -1).join(", ");
+  return `נשלחה הודעה מתאימה ל${head} ול${unique[unique.length - 1]}.`;
+}
+
+/**
+ * If partners were notified and the model omitted the speaker ack on a confirm
+ * turn, append «נשלחה הודעה מתאימה ל…». Caller should only use this when
+ * metadata.confirm === true (minimal engine wording intervention).
+ */
+export function appendSharedMutationAckIfMissing(
+  response: string,
+  partnerNames: string[],
+): string {
+  const line = formatSharedMutationAckLine(partnerNames);
+  if (!line) {
+    return response;
+  }
+  if (/נשלחה\s+הודעה/.test(response)) {
+    return response;
+  }
+  const trimmed = response.trim();
+  return trimmed ? `${trimmed}\n${line}` : line;
+}
+
 function isAllTarget(rawTargets: string[]): boolean {
   return rawTargets.some((target) => ALL_TARGET_TOKENS.test(target.trim()));
 }

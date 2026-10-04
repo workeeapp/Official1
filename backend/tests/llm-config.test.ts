@@ -56,6 +56,8 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
     expect(config.systemMessage).toContain("JOB vs PLAIN REMIND");
     expect(config.systemMessage).toContain("VOLUNTEERED CONTACT PHONE");
+    expect(config.systemMessage).toContain("confirm_save");
+    expect(config.systemMessage).toContain("do NOT auto directory.add");
     expect(config.systemMessage).toContain("רב פס");
     expect(config.systemMessage).toContain("HEBREW PERSON / GENDER ON RELAYS");
     expect(config.systemMessage).toContain("מבקשת להזכיר לך");
@@ -92,9 +94,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("קניות משותפות — עם");
     expect(config.systemMessage).toContain("SHOPPING BOTH PERSONAL AND SHARED");
     expect(config.systemMessage).toContain("SHOPPING ADD WORDING");
+    expect(config.systemMessage).toContain("CLEAR ALL CONTACTS");
+    expect(config.systemMessage).toContain("לא ניתן למחוק את כל אנשי הקשר");
+    expect(config.systemMessage).toContain("NAMED LIST MUTATE");
+    expect(config.systemMessage).toContain("LIST FOUND = PERSONAL OR SHARED");
+    expect(config.systemMessage).toContain("לא מצאתי רשימה");
+    expect(config.systemMessage).toContain("TASK TITLE FIDELITY");
+    expect(config.systemMessage).toContain("לדבר עם אורי בטלפון");
+    expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
     expect(config.systemMessage).toContain("MOVE BETWEEN PERSONAL AND SHARED SHOPPING");
     expect(config.systemMessage).toContain("SHARED LIST MUTATION REPLY");
     expect(config.systemMessage).toContain("נשלחה הודעה מתאימה");
+    expect(config.systemMessage).toContain("delete_lists");
     expect(config.systemMessage).toContain("רשימת הקניות האישית שלך");
     expect(config.systemMessage).toContain("רשימות אישיות");
     expect(config.systemMessage).toContain("יש לך קוטג׳ לקנות");

@@ -3,6 +3,7 @@ import {
   conversationPendingFromStored,
   fillMessagesFromPendingHold,
   fillListsFromPendingHold,
+  fillDirectoryFromPendingHold,
   fillRemindersFromPendingHold,
   formatCancelledHoldReply,
   formatConversationPendingContext,
@@ -290,6 +291,33 @@ describe("pending action hold", () => {
       confirm: null,
     });
     expect(completed).toBeNull();
+  });
+
+  it("applies confirm_save directory draft on כן / confirm=true", () => {
+    const hold = pendingHoldFromLlm({
+      kind: "directory",
+      need: "confirm_save",
+      directory: [{ action: "add", name: "רב פס", phone: "0508087073" }],
+      lists: [],
+      reminders: [],
+      filing: [],
+    });
+    expect(hold?.need).toBe("confirm_save");
+    expect(
+      fillDirectoryFromPendingHold(hold, [], "כן", null),
+    ).toEqual([{ action: "add", name: "רב פס", phone: "0508087073" }]);
+    expect(
+      fillDirectoryFromPendingHold(hold, [], "לא", null),
+    ).toBeNull();
+    expect(
+      fillDirectoryFromPendingHold(hold, [], "משהו אחר", null),
+    ).toBeNull();
+    expect(
+      fillDirectoryFromPendingHold(hold, [], "whatever", true),
+    ).toEqual([{ action: "add", name: "רב פס", phone: "0508087073" }]);
+    expect(
+      formatConversationPendingContext(hold),
+    ).toContain("confirm_save");
   });
 
   it("lets a fresh hold replace a previous incomplete draft", () => {
