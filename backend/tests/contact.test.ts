@@ -33,7 +33,7 @@ describe("contact directory POC", () => {
       contacts,
     );
     expect(deliveries).toEqual([
-      { phone: "972541111111", text: "שלום מטל" },
+      { phone: "972541111111", text: "שלום מטל", label: "מיכל" },
     ]);
   });
 
@@ -43,13 +43,13 @@ describe("contact directory POC", () => {
         response: "שמרתי",
         metadata: {
           directory: [
-            { action: "add", name: "מיכל", phone: "0541111111" },
+            { action: "add", name: "מיכל", phone: "0541111111", contactId: "" },
           ],
         },
       }),
     );
     expect(meta.directory).toEqual([
-      { action: "add", name: "מיכל", phone: "0541111111" },
+      { action: "add", name: "מיכל", phone: "0541111111", contactId: "" },
     ]);
   });
 

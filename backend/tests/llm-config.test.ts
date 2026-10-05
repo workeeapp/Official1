@@ -18,6 +18,30 @@ describe("LLM action schema", () => {
       response: { type: "string" },
       metadata: { type: "object" },
     });
+
+    const jobsItems = (
+      format?.schema.properties as {
+        metadata?: {
+          properties?: {
+            jobs?: {
+              items?: {
+                properties?: Record<string, unknown>;
+                required?: string[];
+              };
+            };
+          };
+        };
+      }
+    )?.metadata?.properties?.jobs?.items;
+    expect(jobsItems?.required).toEqual(
+      expect.arrayContaining(["action", "job_id"]),
+    );
+    expect(jobsItems?.properties).toMatchObject({
+      action: { type: "string" },
+      job_id: { type: "string" },
+      answer_text: { type: "string" },
+      report_text: { type: "string" },
+    });
   });
 
   it("attaches the schema when loading Lucy config", () => {
@@ -25,8 +49,9 @@ describe("LLM action schema", () => {
 
     expect(config.responseFormat?.name).toBe("lucy_metadata_response");
     expect(config.systemMessage).toContain("metadata");
-    expect(config.systemMessage).toContain("metadata.query");
-    expect(config.systemMessage).toContain("never emit query report");
+    expect(config.systemMessage).toContain("Do not emit metadata.query");
+    expect(config.systemMessage).toContain("STATUS QUESTIONS");
+    expect(config.systemMessage).toContain("WORKER_SAVED_DATA");
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");
     expect(config.systemMessage).toContain("git_log");
@@ -50,6 +75,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
+    expect(config.systemMessage).toContain("מה יש לי משותף עם X");
+    expect(config.systemMessage).toContain("אסור לומר אין/לא מופיעות עם X");
+    expect(config.systemMessage).toContain("NEVER ask for quantity");
+    expect(config.systemMessage).toContain("NEVER ask for unit");
+    expect(config.systemMessage).toContain("From a recipe / ingredient list");
+    expect(config.systemMessage).toContain("MUST copy into כמות + יחידת מידה");
     expect(config.systemMessage).toContain("confirm_share");
     expect(config.systemMessage).toContain("FORBIDDEN: «לרשימת הקניות שלך»");
     expect(config.systemMessage).toContain("TELL vs ASSIGN");
@@ -64,5 +95,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ping Michal only");
     expect(config.systemMessage).toContain("REMIND CLOCK vs APPOINTMENT CONTEXT");
     expect(config.systemMessage).toContain("NO META / BUG / CHAT CRITIQUE ON LISTS");
+    expect(config.systemMessage).toContain("EVERY metadata.jobs entry MUST copy job_id");
+    expect(config.systemMessage).toContain("נזיז ל־21:00");
+    expect(config.systemMessage).toContain("A different clock time is COUNTER only");
+    expect(config.systemMessage).toContain(
+      "MUST end with all human participants in parentheses",
+    );
+    expect(config.systemMessage).toContain("פגישה נוספת בנושא פורים (עמית, טל)");
+    expect(config.systemMessage).toContain("DELETE BY DAY");
+    expect(config.systemMessage).toContain("תמחקי את הפגישה / המטלה ביום חמישי");
+    expect(config.systemMessage).toContain("MUTATE BY ID");
+    expect(config.systemMessage).toContain("item_id");
+    expect(config.systemMessage).toContain("filing_id");
+    expect(config.systemMessage).toContain("reminder_id");
   });
 });

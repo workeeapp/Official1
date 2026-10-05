@@ -29,7 +29,11 @@ function readRootEnv(name: string): string | undefined {
 }
 
 const apiPort = Number(readRootEnv("PORT") ?? 3001);
-const clientOrigin = readRootEnv("CLIENT_ORIGIN") ?? "http://localhost:5173";
+const clientOrigin =
+  (readRootEnv("CLIENT_ORIGIN") ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .find(Boolean) ?? "http://localhost:5173";
 let clientPort = 5173;
 try {
   clientPort = Number(new URL(clientOrigin).port || 5173);

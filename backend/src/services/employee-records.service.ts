@@ -9,6 +9,7 @@ import {
 } from "@workee/shared";
 import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
+import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { stripJobMeta } from "./job-meta.js";
@@ -40,6 +41,7 @@ export interface EmployeeRecordSnapshot {
     items: Record<string, unknown>[];
   }>;
   filing: Array<{
+    filing_id: string;
     item_name: string;
     item_info: string;
     item_description: string;
@@ -65,7 +67,22 @@ const CUSTOM_ITEM_META_KEYS = new Set([
   "list_type",
   "listType",
   "targets",
+  "item_id",
+  "itemId",
+  "scope",
+  "owner",
 ]);
+
+/** Read a DB id from an ACTION item / row (jobs-style job_id aliases). */
+export function readItemId(record: Record<string, unknown>): string {
+  for (const key of ["item_id", "itemId", "id"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
 
 function customItemDataEntries(
   item: Record<string, unknown>,
@@ -91,6 +108,9 @@ export function normalizeListItemData(
   const next: Record<string, unknown> = {};
   const drafts: Array<[string, unknown]> = [];
   for (const [key, value] of Object.entries(data)) {
+    if (CUSTOM_ITEM_META_KEYS.has(key)) {
+      continue;
+    }
     const base = draftBaseField(key);
     if (base) {
       drafts.push([base, value]);
@@ -353,14 +373,18 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel PENDING_ACTION_STATE / hold drafts (send text, confirm delete, missing phone/time) — those stay active until completed.",
-    "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
+    "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     JSON.stringify({
       lists: snapshot.lists,
       filing: snapshot.filing,
       active_reminders: (snapshot.reminders ?? [])
         .filter((row) => row.status === "active")
-        .map((row) => row.item),
+        .map((row) => ({
+          reminder_id: row.reminder_id,
+          item: row.item,
+        })),
       reminders: snapshot.reminders ?? [],
     }),
   ].join("\n");
@@ -857,7 +881,7 @@ export async function getEmployeeRecordSnapshot(
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
     const items = byType.get(item.list.listType) ?? [];
-    items.push(withVisibility(item.data, "shared", owner));
+    items.push(withVisibility(item.data, "shared", owner, item.id));
     byType.set(item.list.listType, items);
     sharedByOwner.set(owner, byType);
     if (item.list.listType === "shopping") {
@@ -888,6 +912,7 @@ export async function getEmployeeRecordSnapshot(
           item.data,
           "shared",
           owner,
+          item.id,
         ),
       );
     }
@@ -1006,6 +1031,7 @@ export async function getEmployeeRecordSnapshot(
     ...ownFilings
       .filter((filing) => !guestMode || filing.scope === "shared")
       .map((filing) => ({
+        filing_id: filing.id,
         item_name: filing.itemName,
         item_info: filing.itemInfo,
         item_description: filing.itemDescription ?? "",
@@ -1017,6 +1043,7 @@ export async function getEmployeeRecordSnapshot(
     ...partnerFilings
       .filter((filing) => visibleToIncludes(filing.visibleTo, employeeId))
       .map((filing) => ({
+        filing_id: filing.id,
         item_name: filing.itemName,
         item_info: filing.itemInfo,
         item_description: filing.itemDescription ?? "",
@@ -1118,38 +1145,90 @@ export async function applyEmployeeRecords(
   });
   for (const action of metadata.filing) {
     if (action.action === "remove_filing") {
-      const itemName = action.itemName.slice(0, 200);
-      const doomed = await prisma.employeeFiling.findMany({
-        where: { employeeId, itemName, deletedAt: null },
-        select: { id: true },
+      const filingId = action.filingId.trim();
+      if (!filingId) {
+        continue;
+      }
+      const existing = await prisma.employeeFiling.findFirst({
+        where: { id: filingId, employeeId, deletedAt: null },
       });
-      await prisma.employeeFiling.updateMany({
-        where: {
-          employeeId,
-          itemName,
-          deletedAt: null,
-        },
+      if (!existing) {
+        continue;
+      }
+      await prisma.employeeFiling.update({
+        where: { id: existing.id },
         data: { deletedAt: new Date() },
       });
-      if (doomed.length > 0) {
-        filingMutations.push({
-          action: "remove",
-          itemName,
-          itemInfo: action.itemInfo,
-          itemDescription: action.itemDescription,
+      filingMutations.push({
+        action: "remove",
+        itemName: existing.itemName,
+        itemInfo: existing.itemInfo,
+        itemDescription: existing.itemDescription ?? "",
+      });
+      if (filingOwner) {
+        await recordAuditEvent({
+          userId: filingOwner.userId,
+          actorEmployeeId: actor,
+          action: "filing_remove",
+          entityType: "EmployeeFiling",
+          entityId: existing.id,
+          summary: `remove filing: ${existing.itemName}`,
         });
       }
+    } else if (action.action === "update_filing") {
+      const filingId = action.filingId.trim();
+      if (!filingId) {
+        continue;
+      }
+      const existingFiling = await prisma.employeeFiling.findFirst({
+        where: { id: filingId, employeeId, deletedAt: null },
+      });
+      if (!existingFiling) {
+        continue;
+      }
+      const itemDescription = action.itemDescription.trim().slice(0, 4000);
+      const nextDescription =
+        itemDescription || existingFiling.itemDescription || "";
+      const shareFiling =
+        resolved.scope === "shared" || resolved.visibleTo.length > 1;
+      await prisma.employeeFiling.update({
+        where: { id: existingFiling.id },
+        data: {
+          ...(action.itemName.trim()
+            ? { itemName: action.itemName.trim().slice(0, 200) }
+            : {}),
+          itemInfo: action.itemInfo,
+          itemDescription: nextDescription,
+          ...(shareFiling
+            ? {
+                scope: "shared",
+                visibleTo: uniqueIds([
+                  employeeId,
+                  ...resolved.visibleTo,
+                  ...idList(existingFiling.visibleTo),
+                ]),
+              }
+            : {}),
+        },
+      });
+      const nextName = action.itemName.trim()
+        ? action.itemName.trim().slice(0, 200)
+        : existingFiling.itemName;
+      filingMutations.push({
+        action: "update",
+        itemName: nextName,
+        itemInfo: action.itemInfo,
+        itemDescription: nextDescription,
+      });
       if (filingOwner) {
-        for (const row of doomed) {
-          await recordAuditEvent({
-            userId: filingOwner.userId,
-            actorEmployeeId: actor,
-            action: "filing_remove",
-            entityType: "EmployeeFiling",
-            entityId: row.id,
-            summary: `remove filing: ${itemName}`,
-          });
-        }
+        await recordAuditEvent({
+          userId: filingOwner.userId,
+          actorEmployeeId: actor,
+          action: "filing_update",
+          entityType: "EmployeeFiling",
+          entityId: existingFiling.id,
+          summary: `update filing: ${nextName}`,
+        });
       }
     } else {
       const itemName = action.itemName.slice(0, 200);
@@ -1427,7 +1506,9 @@ async function updateOwnedFiling(
           action: "update_filing",
           itemName: itemName.slice(0, 200),
           itemInfo,
+          itemDescription: "",
           targets: [],
+          filingId: existing.id,
         },
       ],
     },
@@ -1474,7 +1555,9 @@ async function deleteOwnedFiling(
           action: "remove_filing",
           itemName: existing.itemName,
           itemInfo: existing.itemInfo,
+          itemDescription: "",
           targets: [],
+          filingId: existing.id,
         },
       ],
     },
@@ -1660,34 +1743,23 @@ async function applyListAction(
     ) {
       continue;
     }
-    const needles = itemSearchNeedles(resolvedAction.listType, item);
-    const itemKey = itemIdentity(resolvedAction.listType, item) || needles[0] || "";
-    if (!itemKey && needles.length === 0) {
+    const mutateId = readItemId(item);
+    if (
+      (resolvedAction.action === "remove" ||
+        resolvedAction.action === "update") &&
+      !mutateId
+    ) {
+      // Id-only mutate (jobs-style): never match remove/update by title/key.
       continue;
     }
 
     if (resolvedAction.action === "remove") {
-      const matchNeedles = needles.length > 0 ? needles : [itemKey];
-      let targetListId = list.id;
-      let targetListName = list.name || listName;
-      let existing = await findMatchingItemByNeedles(list.id, matchNeedles);
-      if (!existing?.id && resolvedAction.listType === "custom") {
-        const across = await findCustomItemAcrossEmployeeLists(
-          employeeId,
-          matchNeedles,
-          listName,
-        );
-        if (across) {
-          existing = across.item;
-          targetListId = across.listId;
-          targetListName = across.listName || targetListName;
-        }
-      }
+      const existing = await findLiveListItemById(mutateId, employeeId);
       if (!existing?.id) {
-        // Do not soft-delete by a guessed key on the wrong/empty match — that
-        // looked like success in the model reply while nothing changed.
         continue;
       }
+      const targetListId = existing.listId;
+      const targetListName = list.name || listName;
       const removedKey = existing.itemKey;
       await cancelReminderLinkedToWorkerItem(existing.id);
       mutations.push({
@@ -1704,8 +1776,8 @@ async function applyListAction(
           ) || removedKey,
         listName: targetListName || resolvedAction.listName || undefined,
       });
-      await prisma.employeeListItem.updateMany({
-        where: { listId: targetListId, itemKey: removedKey, deletedAt: null },
+      await prisma.employeeListItem.update({
+        where: { id: existing.id },
         data: { deletedAt: new Date(), reminderId: null },
       });
       const owner = await prisma.employee.findUnique({
@@ -1769,19 +1841,6 @@ async function applyListAction(
         seenCascadeTaskIds.add(task.itemId);
         mutations.push(task);
       }
-      if (removedKey !== itemKey && itemKey) {
-        const relatedAlt = await deleteRelatedAssignmentTasks(
-          [...new Set([actorId, employeeId, ...watchers])],
-          itemKey,
-        );
-        for (const task of relatedAlt) {
-          if (seenCascadeTaskIds.has(task.itemId)) {
-            continue;
-          }
-          seenCascadeTaskIds.add(task.itemId);
-          mutations.push(task);
-        }
-      }
       if (watchers.length > 0) {
         events.push({
           notifyEmployeeIds: watchers,
@@ -1797,11 +1856,21 @@ async function applyListAction(
       continue;
     }
 
-    const existing = await findMatchingItem(
-      list.id,
-      itemKey,
-      resolvedAction.action,
-    );
+    const needles = itemSearchNeedles(resolvedAction.listType, item);
+    const itemKey = itemIdentity(resolvedAction.listType, item) || needles[0] || "";
+    if (resolvedAction.action === "add" && !itemKey && needles.length === 0) {
+      continue;
+    }
+
+    const existing =
+      resolvedAction.action === "update"
+        ? await findLiveListItemById(mutateId, employeeId)
+        : itemKey
+          ? await findMatchingItem(list.id, itemKey, resolvedAction.action)
+          : null;
+    if (resolvedAction.action === "update" && !existing?.id) {
+      continue;
+    }
     const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
     const nextDataRecord =
       resolvedAction.action === "update" && existing
@@ -1846,9 +1915,11 @@ async function applyListAction(
           ownedItemTitle(
             resolvedAction.listType,
             nextDataRecord,
-            nextItemKey || itemKey,
-          ) || nextItemKey || itemKey,
-        listName: resolvedAction.listName || list.name || undefined,
+            nextItemKey || existing.itemKey,
+          ) ||
+          nextItemKey ||
+          existing.itemKey,
+        listName: list.name || resolvedAction.listName || undefined,
       });
       if (listOwner) {
         await recordAuditEvent({
@@ -1857,14 +1928,17 @@ async function applyListAction(
           action: "list_update",
           entityType: "EmployeeListItem",
           entityId: existing.id,
-          summary: `update ${resolvedAction.listType}: ${itemKey}`,
+          summary: `update ${resolvedAction.listType}: ${existing.itemKey}`,
         });
       }
     } else {
+      if (!nextItemKey) {
+        continue;
+      }
       const created = await prisma.employeeListItem.create({
         data: {
           listId: list.id,
-          itemKey: nextItemKey || itemKey,
+          itemKey: nextItemKey,
           ...fields,
         },
       });
@@ -1873,16 +1947,14 @@ async function applyListAction(
         itemId: created.id,
         employeeId,
         listType: resolvedAction.listType,
-        itemKey: nextItemKey || itemKey,
+        itemKey: nextItemKey,
         itemLabel:
           ownedItemTitle(
             resolvedAction.listType,
             nextDataRecord,
-            nextItemKey || itemKey,
-          ) ||
-          nextItemKey ||
-          itemKey,
-        listName: resolvedAction.listName || list.name || undefined,
+            nextItemKey,
+          ) || nextItemKey,
+        listName: list.name || resolvedAction.listName || undefined,
       });
       if (listOwner) {
         await recordAuditEvent({
@@ -1891,29 +1963,23 @@ async function applyListAction(
           action: "list_add",
           entityType: "EmployeeListItem",
           entityId: created.id,
-          summary: `add ${resolvedAction.listType}: ${nextItemKey || itemKey}`,
+          summary: `add ${resolvedAction.listType}: ${nextItemKey}`,
         });
       }
     }
-
+    // Shared watchers for add/update — keep existing notify path below.
     const watchers = await resolveWatchers({
-      existing: { ...resolvedVisibility, addedById: resolvedVisibility.addedById },
+      existing,
       visibility: resolvedVisibility,
       ownerId: employeeId,
       actorId,
-      itemKey: existing?.itemKey ?? itemKey,
+      itemKey: nextItemKey || existing?.itemKey || "",
     });
     if (watchers.length > 0) {
       events.push({
         notifyEmployeeIds: watchers,
         metadata: {
-          lists: [
-            {
-              ...resolvedAction,
-              listName: listName || resolvedAction.listName,
-              items: [item],
-            },
-          ],
+          lists: [{ ...resolvedAction, items: [item] }],
           filing: [],
         },
         listOwnerId: employeeId,
@@ -2049,6 +2115,20 @@ function itemRowMatchesNeedles(
   });
 }
 
+async function findLiveListItemById(itemId: string, employeeId: string) {
+  const id = itemId.trim();
+  if (!id) {
+    return null;
+  }
+  return prisma.employeeListItem.findFirst({
+    where: {
+      id,
+      deletedAt: null,
+      list: { employeeId },
+    },
+  });
+}
+
 async function findMatchingItem(
   listId: string,
   itemKey: string,
@@ -2173,91 +2253,45 @@ export async function removeVisibleCustomItems(input: {
   });
 
   for (const action of removes) {
-    const preferred = action.listName?.trim() ?? "";
     for (const rawItem of action.items) {
       const item = asRecord(rawItem);
-      const needles = itemSearchNeedles("custom", item);
-      if (needles.length === 0) {
+      const itemId = readItemId(item);
+      if (!itemId) {
         continue;
       }
-      const candidates = lists.filter((list) => {
+      for (const list of lists) {
         const visibleTo = idList(list.visibleTo);
         const canSee =
           list.employeeId === input.actorId ||
           (list.scope === "shared" && visibleTo.includes(input.actorId));
         if (!canSee) {
-          return false;
+          continue;
         }
-        if (!preferred) {
-          return true;
+        const existing = list.items.find((row) => row.id === itemId);
+        if (!existing) {
+          continue;
         }
-        const name = normalizeKey(list.name);
-        const needle = normalizeKey(preferred);
-        return (
-          name === needle || name.includes(needle) || needle.includes(name)
-        );
-      });
-
-      for (const list of candidates) {
-        const matches = list.items.filter((row) =>
-          itemRowMatchesNeedles(row, needles),
-        );
-        for (const existing of matches) {
-          if (mutations.some((row) => row.itemId === existing.id)) {
-            continue;
-          }
-          await cancelReminderLinkedToWorkerItem(existing.id);
-          await prisma.employeeListItem.updateMany({
-            where: {
-              listId: list.id,
-              itemKey: existing.itemKey,
-              deletedAt: null,
-            },
-            data: { deletedAt: new Date(), reminderId: null },
-          });
-          const label =
-            ownedItemTitle("custom", asRecord(existing.data), existing.itemKey) ||
-            existing.itemKey;
-          mutations.push({
-            action: "remove",
-            itemId: existing.id,
-            employeeId: list.employeeId,
-            listType: "custom",
-            itemKey: existing.itemKey,
-            itemLabel: label,
-            listName: list.name || preferred || undefined,
-          });
-          await recordAuditEvent({
-            userId: list.employee.userId,
-            actorEmployeeId: input.actorId,
-            action: "list_remove",
-            entityType: "EmployeeListItem",
-            entityId: existing.id,
-            summary: `remove custom: ${existing.itemKey}`,
-          });
-          const watchers = uniqueIds([
-            list.employeeId,
-            existing.addedById,
-            ...idList(existing.visibleTo),
-            ...idList(list.visibleTo),
-          ]).filter((id) => id !== input.actorId);
-          if (watchers.length > 0) {
-            events.push({
-              notifyEmployeeIds: watchers,
-              metadata: {
-                lists: [
-                  {
-                    ...action,
-                    listName: list.name,
-                    items: [item],
-                    targets: [],
-                  },
-                ],
-                filing: [],
-              },
-              listOwnerId: list.employeeId,
-            });
-          }
+        if (mutations.some((row) => row.itemId === existing.id)) {
+          continue;
+        }
+        await cancelReminderLinkedToWorkerItem(existing.id);
+        await prisma.employeeListItem.update({
+          where: { id: existing.id },
+          data: { deletedAt: new Date(), reminderId: null },
+        });
+        const label =
+          ownedItemTitle("custom", asRecord(existing.data), existing.itemKey) ||
+          existing.itemKey;
+        mutations.push({
+          action: "remove",
+          itemId: existing.id,
+          employeeId: list.employeeId,
+          listType: "custom",
+          itemKey: existing.itemKey,
+          itemLabel: label,
+          listName: list.name || action.listName || undefined,
+        });
+        if (list.employee.userId) {
           const cascade = await cancelActiveRemindersMatchingWork({
             userId: list.employee.userId,
             itemKey: existing.itemKey,
@@ -2265,6 +2299,20 @@ export async function removeVisibleCustomItems(input: {
             actorEmployeeId: input.actorId,
           });
           cancelledReminders.push(...cascade.cancelledReminders);
+        }
+        const watchers = uniqueIds([
+          ...idList(list.visibleTo),
+          list.employeeId,
+        ]).filter((id) => id !== input.actorId);
+        if (watchers.length > 0) {
+          events.push({
+            notifyEmployeeIds: watchers,
+            metadata: {
+              lists: [{ ...action, items: [item] }],
+              filing: [],
+            },
+            listOwnerId: list.employeeId,
+          });
         }
       }
     }
@@ -2486,6 +2534,7 @@ function toListSnapshotEntry(input: {
           ? "shared"
           : "personal",
         input.ownerName,
+        item.id,
       ),
     );
   // Keep named custom lists and any shared list even when empty so Lucy can
@@ -2520,9 +2569,16 @@ function withVisibility(
   data: unknown,
   scope: string,
   owner: string,
+  itemId?: string,
 ): Record<string, unknown> {
+  const normalized = stripJobMeta(normalizeListItemData(asRecord(data)));
+  const dateRaw = normalized["תאריך לביצוע"];
+  const weekday =
+    typeof dateRaw === "string" ? hebrewWeekdayFromYmd(dateRaw) : null;
   return {
-    ...stripJobMeta(normalizeListItemData(asRecord(data))),
+    ...normalized,
+    ...(itemId ? { item_id: itemId } : {}),
+    ...(weekday ? { "יום בשבוע": weekday } : {}),
     scope,
     owner,
   };

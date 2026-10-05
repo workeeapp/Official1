@@ -23,6 +23,7 @@ export function formatJerusalemDateTime(value: Date): string {
 }
 
 export interface ReminderSnapshotRow {
+  reminder_id: string;
   item: string;
   list_type: string;
   fire_at: string;
@@ -513,6 +514,29 @@ export async function cancelActiveRemindersMatchingWork(input: {
   }
 }
 
+async function cancelActiveReminderById(
+  userId: string,
+  reminderId: string,
+): Promise<string | null> {
+  const match = await prisma.reminder.findFirst({
+    where: { id: reminderId, userId, status: "active" },
+  });
+  if (!match) {
+    return null;
+  }
+  const workerItemId =
+    "workerItemId" in match && typeof match.workerItemId === "string"
+      ? match.workerItemId
+      : null;
+  await removeReminderAndLinkedWorkerTask({
+    id: match.id,
+    workerItemId,
+    userId,
+    label: match.itemLabel,
+  });
+  return match.itemLabel;
+}
+
 async function cancelActiveReminder(
   userId: string,
   ownerId: string,
@@ -744,28 +768,6 @@ function emptyPlan(
   };
 }
 
-function removeShell(item: string): LlmReminderAction {
-  return {
-    action: "remove",
-    item,
-    listType: "tasks",
-    date: "",
-    time: "",
-    repeat: "once",
-    ping: [],
-    targets: [],
-    text: "",
-    inSeconds: null,
-    everyCount: null,
-    everyUnit: null,
-    weekdays: null,
-    confirmed: false,
-    compose: false,
-    composeSource: "",
-    composeLookbackHours: 0,
-  };
-}
-
 export function pendingFromStored(row: {
   pendingAction: string | null;
   pendingTargets: unknown;
@@ -834,7 +836,10 @@ export function hasUnrelatedWorkWhilePending(input: {
   return false;
 }
 
-/** Pure planner: pending delete lives in nextPending, not an in-memory Map. */
+/**
+ * Reminder remove/update with reminder_id apply immediately.
+ * Legacy delete_reminder pending is only drained on confirm / abandon / timeout.
+ */
 export function planReminderWrites(
   incoming: LlmReminderAction[],
   confirm: boolean | null = null,
@@ -846,63 +851,33 @@ export function planReminderWrites(
   const adds = incoming.filter(
     (row) => row.action === "add" || row.action === "update",
   );
-  const mutations = incoming.filter(
-    (row) => row.action === "remove" && row.item.trim() !== "",
-  );
-  const ready = mutations.filter((row) => row.confirmed);
-  const waiting = mutations.filter((row) => !row.confirmed);
+  const removes = incoming.filter((row) => row.action === "remove");
 
   let pending = stored;
-  if (
-    pending &&
-    now.getTime() - pending.at.getTime() > timeoutMs
-  ) {
+  if (pending && now.getTime() - pending.at.getTime() > timeoutMs) {
     pending = null;
-    if (confirm === null && waiting.length === 0 && ready.length === 0) {
+    if (confirm === null && removes.length === 0) {
       return emptyPlan(adds, { cancelled: true });
     }
   }
 
   if (options.abandonPending && pending) {
-    return emptyPlan(adds, { cancelled: true, nextPending: null });
-  }
-
-  if (pending && confirm === false) {
-    return emptyPlan(adds, { cancelled: true });
-  }
-
-  if (pending && confirm === true) {
-    const held = pending.targets.map(removeShell);
-    return emptyPlan([...adds, ...held]);
-  }
-
-  if (ready.length > 0 && waiting.length === 0) {
-    return emptyPlan([...adds, ...ready]);
-  }
-
-  if (waiting.length > 0) {
-    const targets = waiting.map((row) => row.item.trim()).filter(Boolean);
-    return {
-      apply: [...adds, ...ready],
-      ask: waiting,
-      cancelled: false,
-      noneToDelete: false,
-      nextPending: {
-        action: "delete_reminder",
-        step: "confirm",
-        targets,
-        at: pending?.at ?? now,
-      },
-    };
-  }
-
-  if (pending) {
-    return emptyPlan(adds, {
-      nextPending: pending,
+    return emptyPlan([...adds, ...removes], {
+      cancelled: true,
+      nextPending: null,
     });
   }
 
-  return emptyPlan(adds);
+  if (pending && confirm === false) {
+    return emptyPlan([...adds, ...removes], { cancelled: true });
+  }
+
+  if (pending && confirm === true) {
+    // Legacy held targets had names only; id-gated apply skips them — clear hold.
+    return emptyPlan([...adds, ...removes]);
+  }
+
+  return emptyPlan([...adds, ...removes]);
 }
 
 export function formatReminderConfirmNotice(
@@ -976,32 +951,33 @@ export async function applyReminders(input: {
     return { removed, missed, saved, skipped };
   }
   for (const reminder of input.reminders) {
-    const key = itemKey(reminder.item);
-    if (!key) {
-      continue;
-    }
-
     if (reminder.action === "remove") {
-      const ownerId = ownerIdFor(reminder, input.employees, input.actor.id);
-      const cancelled = await cancelActiveReminder(
+      const reminderId = reminder.reminderId.trim();
+      if (!reminderId) {
+        if (reminder.item.trim()) {
+          missed.push(reminder.item.trim());
+        }
+        continue;
+      }
+      const cancelled = await cancelActiveReminderById(
         input.userId,
-        ownerId,
-        reminder.item,
+        reminderId,
       );
       if (cancelled) {
         removed.push(cancelled);
       } else {
-        // Also try across the account — clocks may be owned by another human.
-        const any = await cancelActiveReminderAnyOwner(
-          input.userId,
-          reminder.item,
-        );
-        if (any) {
-          removed.push(any);
-        } else {
-          missed.push(reminder.item.trim());
-        }
+        missed.push(reminder.item.trim() || reminderId);
       }
+      continue;
+    }
+
+    const reminderId = reminder.reminderId.trim();
+    const key = itemKey(reminder.item);
+    if (reminder.action === "update" && !reminderId) {
+      skipped.push({ item: reminder.item.trim() || "(missing reminder_id)", reason: "db" });
+      continue;
+    }
+    if (reminder.action === "add" && !key) {
       continue;
     }
 
@@ -1017,7 +993,10 @@ export async function applyReminders(input: {
     const rows = await prisma.reminder.findMany({
       where: { userId: input.userId, status: "active" },
     });
-    const existing = findMatchingActiveReminder(rows, reminder.item);
+    const existing =
+      reminder.action === "update" && reminderId
+        ? rows.find((row) => row.id === reminderId)
+        : findMatchingActiveReminder(rows, reminder.item);
     // Clocks stay on the speaker who created them; do not re-scope by targets.
     const ownerId = existing?.ownerId ?? input.actor.id;
 
@@ -1388,6 +1367,7 @@ export async function listVisibleReminders(
 
 export function toReminderSnapshotRow(
   row: {
+    id: string;
     itemLabel: string;
     listType: string;
     fireAt: Date;
@@ -1428,6 +1408,7 @@ export function toReminderSnapshotRow(
       ? row.composeLookbackHours
       : 0;
   return {
+    reminder_id: row.id,
     item: row.itemLabel,
     list_type: row.listType,
     fire_at: formatJerusalemDateTime(row.fireAt),

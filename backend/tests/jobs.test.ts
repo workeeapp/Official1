@@ -115,6 +115,8 @@ describe("open jobs context", () => {
     expect(block).toContain('"viewer_is":"subject"');
     expect(block).toContain('"ask":"אם קנית חלב?"');
     expect(block).toContain('"raisable":true');
+    expect(block).toMatch(/"job_id"\s*:\s*"/);
+    expect(block).toContain("using its job_id");
   });
 
   it("marks a scheduled job as not raisable and stays empty with no jobs", () => {

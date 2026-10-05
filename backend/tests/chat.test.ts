@@ -120,8 +120,8 @@ function resetChatStore(): void {
   messageStore.length = 0;
 }
 
-function ageStoredConversation(hours: number): void {
-  const when = new Date(Date.now() - hours * 60 * 60 * 1000);
+function ageStoredConversation(minutes: number): void {
+  const when = new Date(Date.now() - minutes * 60 * 1000);
   for (const row of conversationStore.values()) {
     row.createdAt = when;
     row.updatedAt = when;
@@ -1117,7 +1117,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(25);
+    ageStoredConversation(41);
     createConversation.mockResolvedValue("conv_idle");
 
     const history = await request(app)
@@ -1138,7 +1138,7 @@ describe("chat API", () => {
     expect(createConversation).toHaveBeenCalledTimes(2);
   });
 
-  it("starts a new OpenAI conversation after a day of idle chat", async () => {
+  it("starts a new OpenAI conversation after 40 minutes of idle chat", async () => {
     const cookie = await login();
     mockOwnedEmployee();
 
@@ -1147,7 +1147,7 @@ describe("chat API", () => {
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
 
-    ageStoredConversation(25);
+    ageStoredConversation(41);
     createConversation.mockResolvedValue("conv_idle_send");
     createResponse.mockResolvedValue({
       reply: "After idle",
@@ -1487,6 +1487,7 @@ describe("chat API", () => {
                 },
               ],
               targets: ["טל"],
+            filingId: "",
             },
           ],
           filing: [],

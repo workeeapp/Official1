@@ -25,8 +25,8 @@ describe("pending action hold", () => {
       kind: "directory",
       need: "שם משפחה",
       directory: [
-        { action: "add", name: "יואב", phone: "0515520802" },
-        { action: "add", name: "מאיה", phone: "0537234448" },
+        { action: "add", name: "יואב", phone: "0515520802", contactId: "" },
+        { action: "add", name: "מאיה", phone: "0537234448", contactId: "" },
       ],
       lists: [],
       reminders: [],
@@ -195,6 +195,7 @@ describe("pending action hold", () => {
           compose: true,
           composeSource: "git_log",
           composeLookbackHours: 168,
+          reminderId: "",
         },
       ],
       filing: [],
@@ -230,7 +231,7 @@ describe("pending action hold", () => {
     }
     expect(
       metadataAfterHoldCancel({
-        directory: [{ action: "add", name: "x", phone: "1" }],
+        directory: [{ action: "add", name: "x", phone: "1", contactId: "" }],
         lists: [{ action: "add", listType: "shopping", items: ["חלב"] }],
         reminders: [],
         filing: [],
@@ -260,7 +261,7 @@ describe("pending action hold", () => {
     const stored = pendingHoldFromLlm({
       kind: "directory",
       need: "שם משפחה",
-      directory: [{ action: "add", name: "יואב", phone: "0515520802" }],
+      directory: [{ action: "add", name: "יואב", phone: "0515520802", contactId: "" }],
       lists: [],
       reminders: [],
       filing: [],
@@ -283,7 +284,7 @@ describe("pending action hold", () => {
       stored,
       hold: null,
       reminderNext: null,
-      directory: [{ action: "add", name: "יואב דור", phone: "0515520802" }],
+      directory: [{ action: "add", name: "יואב דור", phone: "0515520802", contactId: "" }],
       lists: [],
       reminders: [],
       filing: [],
@@ -297,7 +298,7 @@ describe("pending action hold", () => {
     const previous = pendingHoldFromLlm({
       kind: "directory",
       need: "שם משפחה",
-      directory: [{ action: "add", name: "יואב", phone: "0515520802" }],
+      directory: [{ action: "add", name: "יואב", phone: "0515520802", contactId: "" }],
       lists: [],
       reminders: [],
       filing: [],
@@ -308,8 +309,8 @@ describe("pending action hold", () => {
         kind: "directory",
         need: "שם משפחה",
         directory: [
-          { action: "add", name: "יואב דור", phone: "0515520802" },
-          { action: "add", name: "מאיה דור", phone: "0537234448" },
+          { action: "add", name: "יואב דור", phone: "0515520802", contactId: "" },
+          { action: "add", name: "מאיה דור", phone: "0537234448", contactId: "" },
         ],
         lists: [],
         reminders: [],
@@ -378,56 +379,53 @@ describe("planListDeletes", () => {
       listName: "",
       targets: [] as string[],
       items: [
-        { "שם מטלה": "להוריד את הכלב" },
-        { "שם מטלה": "לטפל בתקלות" },
+        { item_id: "task-1", "שם מטלה": "להוריד את הכלב" },
+        { item_id: "task-2", "שם מטלה": "לטפל בתקלות" },
       ],
     },
   ];
 
-  it("holds two or more list removes until confirm", () => {
+  it("applies two or more list removes immediately with item_id", () => {
     const planned = planListDeletes({
       lists: twoTaskRemoves,
       confirm: null,
       stored: null,
     });
-    expect(planned.applyLists).toEqual([]);
-    expect(planned.askLabels).toEqual(["להוריד את הכלב", "לטפל בתקלות"]);
-    expect(planned.nextPending).toMatchObject({
-      action: "delete_lists",
-      step: "confirm",
-      targets: ["להוריד את הכלב", "לטפל בתקלות"],
-    });
-    expect(formatListDeleteConfirmNotice(planned.askLabels, false)).toContain(
-      "לאשר מחיקה",
-    );
+    expect(planned.applyLists).toEqual(twoTaskRemoves);
+    expect(planned.askLabels).toEqual([]);
+    expect(planned.nextPending).toBeNull();
   });
 
-  it("applies held list removes after confirm=true", () => {
-    const held = planListDeletes({
+  it("drains a legacy held list delete on confirm=true", () => {
+    const legacyHeld = {
+      action: "delete_lists" as const,
+      step: "confirm" as const,
+      targets: ["להוריד את הכלב", "לטפל בתקלות"],
       lists: twoTaskRemoves,
-      confirm: null,
-      stored: null,
-    });
+      at: new Date(),
+    };
     const confirmed = planListDeletes({
       lists: [],
       confirm: true,
-      stored: held.nextPending,
+      stored: legacyHeld,
     });
     expect(confirmed.applyLists).toEqual(twoTaskRemoves);
     expect(confirmed.askLabels).toEqual([]);
     expect(confirmed.nextPending).toBeNull();
   });
 
-  it("cancels held list deletes on confirm=false", () => {
-    const held = planListDeletes({
+  it("cancels a legacy held list delete on confirm=false", () => {
+    const legacyHeld = {
+      action: "delete_lists" as const,
+      step: "confirm" as const,
+      targets: ["להוריד את הכלב", "לטפל בתקלות"],
       lists: twoTaskRemoves,
-      confirm: null,
-      stored: null,
-    });
+      at: new Date(),
+    };
     const cancelled = planListDeletes({
       lists: [],
       confirm: false,
-      stored: held.nextPending,
+      stored: legacyHeld,
     });
     expect(cancelled.applyLists).toEqual([]);
     expect(cancelled.cancelled).toBe(true);
@@ -443,7 +441,7 @@ describe("planListDeletes", () => {
           listType: "shopping",
           listName: "",
           targets: [],
-          items: [{ "שם פריט": "חלב" }],
+          items: [{ item_id: "shop-1", "שם פריט": "חלב" }],
         },
       ],
       confirm: null,
@@ -454,33 +452,18 @@ describe("planListDeletes", () => {
     expect(planned.nextPending).toBeNull();
   });
 
-  it("round-trips delete_lists through pending storage", () => {
-    const held = planListDeletes({
-      lists: twoTaskRemoves,
-      confirm: null,
-      stored: null,
-    });
-    const stored = pendingToStored(held.nextPending);
-    const roundTrip = conversationPendingFromStored({
-      pendingAction: stored.pendingAction,
-      pendingTargets: stored.pendingTargets,
-      pendingStep: stored.pendingStep,
-      pendingAt: stored.pendingAt,
-    });
-    expect(roundTrip).toMatchObject({
-      action: "delete_lists",
-      step: "confirm",
-      targets: ["להוריד את הכלב", "לטפל בתקלות"],
-    });
-    expect(formatConversationPendingContext(roundTrip)).toContain(
-      "confirm=true and empty lists",
-    );
-
+  it("does not keep delete_lists in next pending after resolve", () => {
     const next = resolveNextPending({
-      stored: roundTrip,
+      stored: {
+        action: "delete_lists",
+        step: "confirm",
+        targets: ["חלב"],
+        lists: twoTaskRemoves,
+        at: new Date(),
+      },
       hold: null,
       reminderNext: null,
-      listDeleteNext: held.nextPending,
+      listDeleteNext: null,
       directory: [],
       lists: [],
       reminders: [],
@@ -488,6 +471,6 @@ describe("planListDeletes", () => {
       messages: [],
       confirm: null,
     });
-    expect(next?.action).toBe("delete_lists");
+    expect(next).toBeNull();
   });
 });

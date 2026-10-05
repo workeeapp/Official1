@@ -202,32 +202,8 @@ export type ConversationPendingAction =
   | PendingHoldAction
   | PendingListDeleteAction;
 
-/** Two or more list removes in one turn require server confirm (like reminder delete). */
-export const BULK_LIST_REMOVE_CONFIRM_MIN = 2;
-
-function listRemoveItemLabel(
-  listType: string,
-  item: Record<string, unknown>,
-): string {
-  const keys =
-    listType === "shopping"
-      ? ["שם פריט", "name", "item_name"]
-      : listType === "tasks"
-        ? ["שם מטלה", "name", "task", "item_name"]
-        : ["name", "שם", "title", "item_name", "שם פריט"];
-  for (const key of keys) {
-    const value = item[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  for (const value of Object.values(item)) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "פריט";
-}
+/** @deprecated List removes with item_id apply immediately; no bulk confirm. */
+export const BULK_LIST_REMOVE_CONFIRM_MIN = Number.POSITIVE_INFINITY;
 
 export function countListRemoveItems(lists: LlmListAction[]): number {
   return lists
@@ -235,6 +211,10 @@ export function countListRemoveItems(lists: LlmListAction[]): number {
     .reduce((n, row) => n + row.items.length, 0);
 }
 
+/**
+ * List removes apply immediately when the ACTION carries item_id(s).
+ * Legacy `delete_lists` pending is only drained on confirm true/false.
+ */
 export function planListDeletes(input: {
   lists: LlmListAction[];
   confirm: boolean | null;
@@ -257,7 +237,6 @@ export function planListDeletes(input: {
 
   const removes = input.lists.filter((row) => row.action === "remove");
   const other = input.lists.filter((row) => row.action !== "remove");
-  const removeCount = countListRemoveItems(removes);
 
   if (stored && input.confirm === false) {
     return {
@@ -277,33 +256,6 @@ export function planListDeletes(input: {
     };
   }
 
-  if (removeCount >= BULK_LIST_REMOVE_CONFIRM_MIN) {
-    const labels = removes.flatMap((row) =>
-      row.items.map((item) => listRemoveItemLabel(row.listType, item)),
-    );
-    return {
-      applyLists: other,
-      askLabels: labels,
-      nextPending: {
-        action: "delete_lists",
-        step: "confirm",
-        targets: labels,
-        lists: removes,
-        at: stored?.at ?? now,
-      },
-      cancelled: false,
-    };
-  }
-
-  if (stored && input.confirm === null) {
-    return {
-      applyLists: other,
-      askLabels: stored.targets,
-      nextPending: stored,
-      cancelled: false,
-    };
-  }
-
   return {
     applyLists: [...other, ...removes],
     askLabels: [],
@@ -312,6 +264,7 @@ export function planListDeletes(input: {
   };
 }
 
+/** Legacy notice for draining an old delete_lists cancel; new deletes never ask. */
 export function formatListDeleteConfirmNotice(
   labels: string[],
   cancelled: boolean,

@@ -263,7 +263,13 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "properties": {
+                          "item_id": {
+                            "type": "string",
+                            "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA list item item_id. Required on lists.remove and lists.update — omitting it skips the mutate."
+                          }
+                        }
                       }
                     }
                   },
@@ -302,6 +308,10 @@
                     },
                     "item_description": {
                       "type": "string"
+                    },
+                    "filing_id": {
+                      "type": "string",
+                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA filing[].filing_id. Required on remove_filing and update_filing — omitting it skips the mutate."
                     }
                   },
                   "required": [
@@ -363,6 +373,18 @@
                         "close"
                       ]
                     },
+                    "job_id": {
+                      "type": "string",
+                      "description": "Copy exactly from this turn's OPEN_JOBS[].job_id. Required on every jobs action — omitting it when the speaker owes multiple jobs causes the server to ask which job and skip the action."
+                    },
+                    "answer_text": {
+                      "type": "string",
+                      "description": "Subject's words or the proposed slot in their words (counter)."
+                    },
+                    "report_text": {
+                      "type": "string",
+                      "description": "Sentence the server delivers to the other person. Empty when messaging them via metadata.messages instead."
+                    },
                     "time": { "type": "string" },
                     "in": { "type": ["number", "null"] },
                     "date": {
@@ -387,6 +409,10 @@
                     },
                     "phone": {
                       "type": "string"
+                    },
+                    "contact_id": {
+                      "type": "string",
+                      "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove — omitting it skips the mutate."
                     }
                   },
                   "required": ["action", "name", "phone"]
@@ -480,15 +506,16 @@
                       "enum": ["", "git_log", "saved_data"]
                     },
                     "compose_lookback_hours": { "type": "number" },
-                    "confirmed": { "type": "boolean" }
+                    "confirmed": { "type": "boolean" },
+                    "reminder_id": {
+                      "type": "string",
+                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id / active_reminders[].reminder_id. Required on reminders remove and update — omitting it skips the mutate."
+                    }
                   }
                 }
               },
               "confirm": {
                 "type": ["boolean", "null"]
-              },
-              "query": {
-                "type": ["string", "null"]
               }
             }
           }

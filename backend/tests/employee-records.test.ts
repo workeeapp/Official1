@@ -231,6 +231,7 @@ describe("employee records", () => {
             listName: "באגים",
             items: [
               {
+                item_id: "bug-1",
                 שם: "להוריד את הגרסה",
                 "שם חדש": "לא להוריד את הגרסה",
               },
@@ -438,6 +439,9 @@ describe("employee records", () => {
     itemFindFirst.mockResolvedValue(null);
     itemFindMany.mockResolvedValue([]);
     itemUpdateMany.mockResolvedValue({ count: 1 });
+    // Id-only remove looks up the live row by item_id on the owner.
+    itemFindFirst.mockResolvedValueOnce(stored);
+    itemUpdate.mockResolvedValue({ id: stored.id });
 
     const result = await applyEmployeeRecords(
       talId,
@@ -447,7 +451,7 @@ describe("employee records", () => {
             action: "remove",
             listType: "custom",
             listName: "באגים",
-            items: [{ תיאור: "מערכת לא עובדת" }],
+            items: [{ item_id: stored.id, תיאור: "מערכת לא עובדת" }],
             targets: [],
           },
         ],
@@ -461,12 +465,8 @@ describe("employee records", () => {
       employeeId,
     );
 
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: bugs.id,
-        itemKey: "מערכת לא עובדת",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: stored.id },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
@@ -545,7 +545,7 @@ describe("employee records", () => {
     itemFindUnique.mockResolvedValue(tasksList.items[0]);
     itemFindFirst.mockResolvedValue(tasksList.items[0]);
     itemFindMany.mockResolvedValue([]);
-    itemUpdateMany.mockResolvedValue({ count: 1 });
+    itemUpdate.mockResolvedValue({ id: "task-1" });
 
     const result = await applyEmployeeRecords(employeeId, {
       lists: [
@@ -553,7 +553,9 @@ describe("employee records", () => {
           action: "remove",
           listType: "shopping",
           listName: "",
-          items: [{ "שם פריט": "להכין חביתה לילדים" }],
+          items: [
+            { item_id: "task-1", "שם פריט": "להכין חביתה לילדים" },
+          ],
           targets: [],
         },
       ],
@@ -567,12 +569,8 @@ describe("employee records", () => {
         itemKey: "להכין חביתה לילדים",
       }),
     ]);
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: "tasks-1",
-        itemKey: "להכין חביתה לילדים",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "task-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(listCreate).not.toHaveBeenCalled();
@@ -596,16 +594,33 @@ describe("employee records", () => {
         {
           list_type: "shopping",
           owner: "עמית",
-          items: [{ "שם פריט": "חלב", scope: "personal", owner: "עמית" }],
+          scope: "personal",
+          items: [
+            {
+              item_id: "item-milk",
+              "שם פריט": "חלב",
+              scope: "personal",
+              owner: "עמית",
+            },
+          ],
         },
         {
           list_type: "tasks",
           owner: "עמית",
-          items: [{ "שם מטלה": "לקנות מתנה", scope: "personal", owner: "עמית" }],
+          scope: "personal",
+          items: [
+            {
+              item_id: "item-gift",
+              "שם מטלה": "לקנות מתנה",
+              scope: "personal",
+              owner: "עמית",
+            },
+          ],
         },
       ],
       filing: [
         {
+          filing_id: "filing-car",
           item_name: "מספר רכב",
           item_info: "3434343",
           item_description: "רכב שלי",
@@ -624,6 +639,9 @@ describe("employee records", () => {
     expect(context).toContain("durable personal facts");
     expect(context).toContain("filing");
     expect(context).toContain("LIVE FACTS THIS TURN");
+    expect(context).toContain("MUTATE BY ID");
+    expect(context).toContain("item_id");
+    expect(context).toContain("filing_id");
   });
 
   it("formats dated team schedules for meeting conflict checks", () => {
@@ -817,21 +835,32 @@ describe("employee records", () => {
         data: { "שם פריט": "חלב", כמות: 1 },
       });
     itemFindFirst
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // add: no existing by key
       .mockResolvedValueOnce({
+        // update by item_id
         id: "item-1",
         listId: list.id,
         itemKey: "חלב",
         data: { "שם פריט": "חלב", כמות: 1 },
       })
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null); // filing add
+      .mockResolvedValueOnce(null) // remove without id → skipped (no lookup)
+      .mockResolvedValueOnce(null); // filing add by name
     itemCreate.mockResolvedValue({ id: "item-1" });
     itemUpdate.mockResolvedValue({ id: "item-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
     itemFindMany.mockResolvedValue([]);
-    filingFindFirst.mockResolvedValue(null);
+    filingFindFirst
+      .mockResolvedValueOnce(null) // add_filing no existing name
+      .mockResolvedValueOnce({
+        // remove_filing by filing_id
+        id: "filing-old",
+        employeeId,
+        itemName: "רישיון ישן",
+        itemInfo: "",
+        itemDescription: "",
+      });
     filingCreate.mockResolvedValue({ id: "filing-1" });
+    filingUpdate.mockResolvedValue({ id: "filing-old" });
     filingFindMany.mockResolvedValue([{ id: "filing-old" }]);
     filingUpdateMany.mockResolvedValue({ count: 1 });
 
@@ -848,7 +877,7 @@ describe("employee records", () => {
           action: "update",
           listType: "shopping",
           listName: "",
-          items: [{ "שם פריט": "חלב", כמות: 2 }],
+          items: [{ item_id: "item-1", "שם פריט": "חלב", כמות: 2 }],
           targets: [],
         },
         {
@@ -866,6 +895,7 @@ describe("employee records", () => {
           itemInfo: "3434343",
           itemDescription: "מספר רכב",
           targets: [],
+          filingId: "",
         },
         {
           action: "remove_filing",
@@ -873,6 +903,7 @@ describe("employee records", () => {
           itemInfo: "",
           itemDescription: "",
           targets: [],
+          filingId: "filing-old",
         },
       ],
     });
@@ -896,7 +927,7 @@ describe("employee records", () => {
         visibleTo: [employeeId],
       },
     });
-    // Remove of an unmatched item must not soft-delete by guessed key.
+    // Remove without item_id must not soft-delete by guessed key.
     expect(itemUpdateMany).not.toHaveBeenCalledWith({
       where: { listId: "list-1", itemKey: "לחם", deletedAt: null },
       data: { deletedAt: expect.any(Date), reminderId: null },
@@ -910,8 +941,8 @@ describe("employee records", () => {
         addedById: employeeId,
       },
     });
-    expect(filingUpdateMany).toHaveBeenCalledWith({
-      where: { employeeId, itemName: "רישיון ישן", deletedAt: null },
+    expect(filingUpdate).toHaveBeenCalledWith({
+      where: { id: "filing-old" },
       data: { deletedAt: expect.any(Date) },
     });
   });
@@ -919,20 +950,16 @@ describe("employee records", () => {
   it("updates the only task when the new name does not match the stored key", async () => {
     const list = { id: "lucy-tasks", employeeId, listType: "tasks", name: "" };
     listFindUnique.mockResolvedValue(list);
-    itemFindUnique.mockResolvedValue(null);
-    itemFindMany
-      .mockResolvedValueOnce([
-        {
-          id: "task-1",
-          listId: list.id,
-          itemKey: "להזכיר לעמית לבדוק מייל",
-          data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
-          scope: "personal",
-          addedById: employeeId,
-          visibleTo: [employeeId],
-        },
-      ])
-      .mockResolvedValue([]);
+    itemFindFirst.mockResolvedValue({
+      id: "task-1",
+      listId: list.id,
+      itemKey: "להזכיר לעמית לבדוק מייל",
+      data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
+      scope: "personal",
+      addedById: employeeId,
+      visibleTo: [employeeId],
+    });
+    itemFindMany.mockResolvedValue([]);
     itemUpdate.mockResolvedValue({ id: "task-1" });
 
     await applyEmployeeMetadata(employeeId, {
@@ -941,7 +968,7 @@ describe("employee records", () => {
           action: "update",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "להזכיר לטל לבדוק מייל" }],
+          items: [{ item_id: "task-1", "שם מטלה": "להזכיר לטל לבדוק מייל" }],
           targets: [],
         },
       ],
@@ -972,6 +999,7 @@ describe("employee records", () => {
       visibleTo: [employeeId, talId],
       data: { "שם פריט": "קופסת טונה", כמות: 1 },
     });
+    itemUpdate.mockResolvedValue({ id: "tuna-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
 
     const events = await applyEmployeeMetadata(
@@ -982,7 +1010,7 @@ describe("employee records", () => {
             action: "remove",
             listType: "shopping",
             listName: "",
-            items: [{ "שם פריט": "קופסת טונה" }],
+            items: [{ item_id: "tuna-1", "שם פריט": "קופסת טונה" }],
             targets: [],
           },
         ],
@@ -1000,7 +1028,7 @@ describe("employee records", () => {
             expect.objectContaining({
               action: "remove",
               listType: "shopping",
-              items: [{ "שם פריט": "קופסת טונה" }],
+              items: [{ item_id: "tuna-1", "שם פריט": "קופסת טונה" }],
             }),
           ],
           filing: [],
@@ -1009,12 +1037,8 @@ describe("employee records", () => {
         purchased: true,
       },
     ]);
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: list.id,
-        itemKey: "קופסת טונה",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(itemUpdateMany).toHaveBeenCalledWith({
@@ -1038,11 +1062,18 @@ describe("employee records", () => {
         scope: "personal",
         visibleTo: [],
         employee: { id: employeeId, name: "עמית", nickname: "עמית" },
-        items: [{ data: { "שם מטלה": "לקנות מתנה" }, scope: "personal" }],
+        items: [
+          {
+            id: "task-gift",
+            data: { "שם מטלה": "לקנות מתנה" },
+            scope: "personal",
+          },
+        ],
       },
     ]);
     filingFindMany.mockResolvedValue([
       {
+        id: "filing-car",
         itemName: "מספר רכב",
         itemInfo: "3434343",
         itemDescription: "רכב שלי",
@@ -1056,11 +1087,19 @@ describe("employee records", () => {
           list_type: "tasks",
           owner: "עמית",
           scope: "personal",
-          items: [{ "שם מטלה": "לקנות מתנה", scope: "personal", owner: "עמית" }],
+          items: [
+            {
+              item_id: "task-gift",
+              "שם מטלה": "לקנות מתנה",
+              scope: "personal",
+              owner: "עמית",
+            },
+          ],
         },
       ],
       filing: [
         {
+          filing_id: "filing-car",
           item_name: "מספר רכב",
           item_info: "3434343",
           item_description: "רכב שלי",
@@ -1376,9 +1415,9 @@ describe("employee records", () => {
         items: [stored],
       },
     ]);
-    itemFindFirst.mockResolvedValue(null);
+    itemFindFirst.mockResolvedValue(stored);
     itemFindMany.mockResolvedValue([stored]);
-    itemUpdateMany.mockResolvedValue({ count: 1 });
+    itemUpdate.mockResolvedValue({ id: stored.id });
 
     const result = await applyEmployeeRecords(
       talId,
@@ -1390,6 +1429,7 @@ describe("employee records", () => {
             listName: "בעיות",
             items: [
               {
+                item_id: stored.id,
                 list_name: "בעיות",
                 תיאור: "לבדוק שוב את הפונקציונליות",
               },
@@ -1416,12 +1456,8 @@ describe("employee records", () => {
         },
       },
     });
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: list.id,
-        itemKey: "לבדוק שוב את הפונקציונליות",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: stored.id },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
@@ -1446,10 +1482,8 @@ describe("employee records", () => {
       visibleTo: [talId, employeeId],
     };
     listFindUnique.mockResolvedValue(list);
-    itemFindFirst.mockResolvedValue(null);
-    itemFindMany
-      .mockResolvedValueOnce([stored])
-      .mockResolvedValueOnce([stored]);
+    itemFindFirst.mockResolvedValue(stored);
+    itemFindMany.mockResolvedValue([stored]);
     itemUpdate.mockResolvedValue({ id: stored.id });
 
     const result = await applyEmployeeRecords(
@@ -1462,6 +1496,7 @@ describe("employee records", () => {
             listName: "בעיות",
             items: [
               {
+                item_id: stored.id,
                 list_name: "בעיות",
                 תיאור: "לתמוך ברשימה ריקה",
                 סטטוס: "בטיפול",
@@ -1497,18 +1532,16 @@ describe("employee records", () => {
   it("matches a shorter bought name to the saved shared item", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
     listFindUnique.mockResolvedValue(list);
-    itemFindFirst.mockResolvedValue(null);
-    itemFindMany.mockResolvedValue([
-      {
-        id: "tuna-1",
-        listId: list.id,
-        itemKey: "קופסת טונה",
-        scope: "shared",
-        addedById: employeeId,
-        visibleTo: [employeeId, talId],
-        data: { "שם פריט": "קופסת טונה" },
-      },
-    ]);
+    itemFindFirst.mockResolvedValue({
+      id: "tuna-1",
+      listId: list.id,
+      itemKey: "קופסת טונה",
+      scope: "shared",
+      addedById: employeeId,
+      visibleTo: [employeeId, talId],
+      data: { "שם פריט": "קופסת טונה" },
+    });
+    itemUpdate.mockResolvedValue({ id: "tuna-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
 
     const events = await applyEmployeeMetadata(
@@ -1519,7 +1552,7 @@ describe("employee records", () => {
             action: "remove",
             listType: "shopping",
             listName: "",
-            items: [{ "שם פריט": "טונה" }],
+            items: [{ item_id: "tuna-1", "שם פריט": "טונה" }],
             targets: [],
           },
         ],
@@ -1531,12 +1564,8 @@ describe("employee records", () => {
 
     expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
     expect(events[0]?.purchased).toBe(true);
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: list.id,
-        itemKey: "קופסת טונה",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
   });
@@ -1554,6 +1583,7 @@ describe("employee records", () => {
       data: { "שם פריט": "טונה" },
     });
     itemFindMany.mockResolvedValue([{ list: { employeeId } }]);
+    itemUpdate.mockResolvedValue({ id: "tuna-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
 
     const events = await applyEmployeeMetadata(
@@ -1564,7 +1594,7 @@ describe("employee records", () => {
             action: "remove",
             listType: "shopping",
             listName: "",
-            items: [{ "שם פריט": "טונה" }],
+            items: [{ item_id: "tuna-1", "שם פריט": "טונה" }],
             targets: [],
           },
         ],

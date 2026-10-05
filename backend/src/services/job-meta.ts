@@ -1,6 +1,6 @@
 /**
  * An open job is an ordinary tasks row on the digital worker, so it already shows
- * up in WORKER_SAVED_DATA / query=self and is removable with lists.remove.
+ * up in WORKER_SAVED_DATA and is removable with lists.remove.
  * The bookkeeping below lives under a reserved key in that row's free-form data
  * and is stripped before the row reaches the model as saved data.
  *

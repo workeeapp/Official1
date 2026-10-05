@@ -43,8 +43,14 @@ export function formatSpeakerContacts(contacts: SpeakerContact[]): string {
   return [
     "SPEAKER_CONTACTS:",
     "Personal phone book for this speaker only. Resolve these names without asking for a number.",
+    "MUTATE BY ID: directory.remove MUST copy contact_id from this turn — never omit it, never invent it, never speak ids aloud.",
     JSON.stringify(
-      contacts.map((row) => ({ name: row.name, phone: row.phone, kind: row.kind })),
+      contacts.map((row) => ({
+        contact_id: row.id,
+        name: row.name,
+        phone: row.phone,
+        kind: row.kind,
+      })),
     ),
   ].join("\n");
 }
@@ -97,25 +103,28 @@ export async function applyDirectoryActions(input: {
   }
 
   for (const action of input.actions) {
-    const name = action.name.trim().slice(0, 100);
-    const phone = toWhatsAppAddress(action.phone);
-    if (!name || !looksLikePhone(phone)) {
+    if (action.action === "remove") {
+      const contactId = action.contactId.trim();
+      if (!contactId) {
+        continue;
+      }
+      const existing = await prisma.contact.findFirst({
+        where: {
+          id: contactId,
+          ownerEmployeeId: input.ownerEmployeeId,
+        },
+      });
+      if (!existing) {
+        continue;
+      }
+      await prisma.contact.delete({ where: { id: existing.id } });
+      removed.push(existing.name);
       continue;
     }
 
-    if (action.action === "remove") {
-      const deleted = await prisma.contact.deleteMany({
-        where: {
-          ownerEmployeeId: input.ownerEmployeeId,
-          OR: [
-            { phone },
-            { name: { equals: name, mode: "insensitive" } },
-          ],
-        },
-      });
-      if (deleted.count > 0) {
-        removed.push(name);
-      }
+    const name = action.name.trim().slice(0, 100);
+    const phone = toWhatsAppAddress(action.phone);
+    if (!name || !looksLikePhone(phone)) {
       continue;
     }
 

@@ -8,7 +8,6 @@ import {
   findMatchingActiveReminder,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
-  formatReminderConfirmNotice,
   formatPingLabel,
   pairWorkerItemsToReminders,
   planReminderWrites,
@@ -38,6 +37,7 @@ const milkRemove: LlmReminderAction = {
   compose: false,
   composeSource: "",
   composeLookbackHours: 0,
+  reminderId: "rem-milk",
 };
 
 const tal: PublicEmployee = {
@@ -271,57 +271,54 @@ describe("unknown dest", () => {
 });
 
 describe("planReminderWrites", () => {
-  it("holds a delete until the speaker confirms", () => {
+  it("applies a delete with reminder_id immediately", () => {
     const first = planReminderWrites([milkRemove], null, null);
-    expect(first.apply).toEqual([]);
-    expect(first.ask).toEqual([milkRemove]);
-    expect(first.nextPending?.targets).toEqual(["חלב"]);
-    expect(formatReminderConfirmNotice(first.ask, false, false)).toContain("חלב");
-
-    const second = planReminderWrites([], true, first.nextPending);
-    expect(second.apply.map((row) => row.item)).toEqual(["חלב"]);
-    expect(second.ask).toEqual([]);
-    expect(second.nextPending).toBeNull();
+    expect(first.apply).toEqual([milkRemove]);
+    expect(first.ask).toEqual([]);
+    expect(first.nextPending).toBeNull();
   });
 
-  it("cancels a pending delete", () => {
-    const held = planReminderWrites([milkRemove], null, null);
-    const cancelled = planReminderWrites([], false, held.nextPending);
+  it("cancels a legacy pending delete", () => {
+    const legacy = {
+      action: "delete_reminder" as const,
+      step: "confirm" as const,
+      targets: ["חלב"],
+      at: new Date(),
+    };
+    const cancelled = planReminderWrites([], false, legacy);
     expect(cancelled.apply).toEqual([]);
     expect(cancelled.cancelled).toBe(true);
     expect(cancelled.nextPending).toBeNull();
   });
 
-  it("asks only for the named items the model listed", () => {
+  it("applies every named remove with reminder_id in one turn", () => {
     const planned = planReminderWrites(
       [
-        { ...milkRemove, item: "חלב" },
-        { ...milkRemove, item: "מתנה" },
+        { ...milkRemove, item: "חלב", reminderId: "rem-1" },
+        { ...milkRemove, item: "מתנה", reminderId: "rem-2" },
       ],
       null,
       null,
     );
-    expect(planned.apply).toEqual([]);
-    expect(planned.ask.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
-    expect(planned.nextPending?.targets).toEqual(["חלב", "מתנה"]);
+    expect(planned.apply.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
+    expect(planned.ask).toEqual([]);
+    expect(planned.nextPending).toBeNull();
   });
 
-  it("applies the held deletes when they confirm even if remove is sent again", () => {
-    const held = planReminderWrites(
-      [
-        { ...milkRemove, item: "התאמן" },
-        { ...milkRemove, item: "ללכת לסופר" },
-      ],
-      null,
-      null,
-    );
+  it("clears legacy pending on confirm=true and still applies incoming removes", () => {
+    const legacy = {
+      action: "delete_reminder" as const,
+      step: "confirm" as const,
+      targets: ["התאמן", "ללכת לסופר"],
+      at: new Date(),
+    };
     const confirmed = planReminderWrites(
       [
-        { ...milkRemove, item: "התאמן" },
-        { ...milkRemove, item: "ללכת לסופר" },
+        { ...milkRemove, item: "התאמן", reminderId: "rem-a" },
+        { ...milkRemove, item: "ללכת לסופר", reminderId: "rem-b" },
       ],
       true,
-      held.nextPending,
+      legacy,
     );
     expect(confirmed.apply.map((row) => row.item)).toEqual([
       "התאמן",
@@ -337,24 +334,33 @@ describe("planReminderWrites", () => {
       null,
       null,
     );
-    expect(planned.apply).toEqual([]);
-    expect(planned.ask.map((row) => row.item)).toEqual(["all"]);
+    expect(planned.apply.map((row) => row.item)).toEqual(["all"]);
+    expect(planned.ask).toEqual([]);
+    expect(planned.nextPending).toBeNull();
   });
 
-  it("times out a stale pending delete", () => {
-    const held = planReminderWrites([milkRemove], null, null, {
-      now: new Date("2026-09-28T10:00:00.000Z"),
-    });
-    const timedOut = planReminderWrites([], null, held.nextPending, {
+  it("times out a stale legacy pending delete", () => {
+    const legacy = {
+      action: "delete_reminder" as const,
+      step: "confirm" as const,
+      targets: ["חלב"],
+      at: new Date("2026-09-28T10:00:00.000Z"),
+    };
+    const timedOut = planReminderWrites([], null, legacy, {
       now: new Date("2026-09-28T10:20:00.000Z"),
     });
     expect(timedOut.cancelled).toBe(true);
     expect(timedOut.nextPending).toBeNull();
   });
 
-  it("abandons pending delete when unrelated work arrives", () => {
-    const held = planReminderWrites([milkRemove], null, null);
-    const abandoned = planReminderWrites([], null, held.nextPending, {
+  it("abandons legacy pending delete when unrelated work arrives", () => {
+    const legacy = {
+      action: "delete_reminder" as const,
+      step: "confirm" as const,
+      targets: ["חלב"],
+      at: new Date(),
+    };
+    const abandoned = planReminderWrites([], null, legacy, {
       abandonPending: true,
     });
     expect(abandoned.cancelled).toBe(true);
@@ -365,9 +371,7 @@ describe("planReminderWrites", () => {
 describe("toReminderSnapshotRow", () => {
   it("does not treat a finished clock as sent when WhatsApp failed", () => {
     expect(
-      toReminderSnapshotRow(
-        {
-          itemLabel: "חלב",
+      toReminderSnapshotRow({ id: "rem-1", itemLabel: "חלב",
           listType: "shopping",
           fireAt: new Date("2026-09-24T17:08:00.000Z"),
           repeat: "once",
@@ -396,7 +400,7 @@ describe("formatActiveRemindersReply", () => {
     expect(
       formatActiveRemindersReply([
         {
-          item: "חלב",
+          reminder_id: "rem-x",item: "חלב",
           list_type: "shopping",
           fire_at: "2026-09-24 22:00",
           repeat: "once",
@@ -415,7 +419,7 @@ describe("formatActiveRemindersReply", () => {
           sent_text: "",
         },
         {
-          item: "ישן",
+          reminder_id: "rem-x",item: "ישן",
           list_type: "tasks",
           fire_at: "2026-09-23 10:00",
           repeat: "once",
@@ -440,7 +444,7 @@ describe("formatActiveRemindersReply", () => {
 
 describe("formatTodosReply", () => {
   const supermarket = {
-    item: "ללכת לסופר",
+    reminder_id: "rem-x",item: "ללכת לסופר",
     list_type: "tasks",
     fire_at: "2026-09-25 21:30",
     repeat: "once",
@@ -578,7 +582,7 @@ describe("formatReminderApplyNotice", () => {
       missed: [],
       saved: [
         {
-          item: "לאסוף את יואב מהחוג",
+          reminder_id: "rem-x",item: "לאסוף את יואב מהחוג",
           fireAt: "2026-09-29 10:00",
           sameTimeOthers: ["להזמין כרטיסים"],
         },
@@ -598,7 +602,7 @@ describe("formatReminderApplyNotice", () => {
         missed: [],
         saved: [
           {
-            item: "לשלוח ברכת בוקר לעמית",
+            reminder_id: "rem-x",item: "לשלוח ברכת בוקר לעמית",
             fireAt: "2026-09-30 09:00",
             ping: "עמית",
             composeAtFire: true,

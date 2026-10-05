@@ -8,7 +8,7 @@ alwaysApply: true
 **The product loop (non-negotiable):**
 
 1. **Model understands** the speaker (Hebrew/English free text).
-2. **Model decides** and emits a structured **ACTION** in `metadata` (lists / filing / messages / reminders / directory / hold / query / confirm / handoff…).
+2. **Model decides** and emits a structured **ACTION** in `metadata` (lists / filing / messages / reminders / directory / hold / confirm / handoff…).
 3. **Engine executes** only what is in that ACTION: validate, persist, inject facts next turn, send WhatsApp, fire clocks, enforce visibility.
 
 Understanding is **never** in the server. The server does not re-interpret the chat message.

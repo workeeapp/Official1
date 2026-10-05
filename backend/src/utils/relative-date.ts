@@ -54,18 +54,67 @@ export function sessionClock(now = new Date()): SessionClock {
  */
 export function formatSessionClockContext(now = new Date()): string {
   const clock = sessionClock(now);
+  const weekdayDates = upcomingWeekdayDates(now);
   return [
     "SESSION_CLOCK:",
     `timezone: ${clock.timezone}`,
     `current_date: ${clock.currentDate}`,
     `current_time: ${clock.currentTime}`,
     `now_iso: ${clock.nowIso}`,
+    `weekday_dates: ${JSON.stringify(weekdayDates)}`,
+    "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to YYYY-MM-DD for the next week. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
     "Use this clock when the speaker asks what is due today, tomorrow, this week/month, in N hours/days, or similar.",
     "Compare date/time fields for the question's subject only: אני/שלי → speaker personal tasks + their active_reminders in EMPLOYEE_SAVED_DATA. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
     "מה את/ה צריך/ה ביום X / what YOU need that day → only WORKER_SAVED_DATA rows in THIS turn whose תאריך לביצוע matches that day. If none match, say you have nothing that day — never reuse an older *saved* job claim about someone else's work. Does not affect PENDING_ACTION_STATE / hold (e.g. short היי after asking what to send).",
-    "Answer in response only — leave query empty (never query report). The server does not filter the rows for you.",
+    "Answer in response only from the matching injected facts. The server does not filter the rows for you.",
     "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה) — never jargon like מטלות מתוזמנות.",
   ].join("\n");
+}
+
+const HEBREW_WEEKDAYS = [
+  "ראשון",
+  "שני",
+  "שלישי",
+  "רביעי",
+  "חמישי",
+  "שישי",
+  "שבת",
+] as const;
+
+/** Hebrew weekday name for a YYYY-MM-DD calendar date (UTC date parts = civil day). */
+export function hebrewWeekdayFromYmd(ymd: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!match) {
+    return null;
+  }
+  const day = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
+  return HEBREW_WEEKDAYS[day.getUTCDay()] ?? null;
+}
+
+/** Next occurrence of each weekday label from today (inclusive), plus היום/מחר/אתמול. */
+export function upcomingWeekdayDates(now = new Date()): Record<string, string> {
+  const out: Record<string, string> = {
+    היום: jerusalemYmd(now),
+    מחר: shiftJerusalemYmd(now, 1),
+    אתמול: shiftJerusalemYmd(now, -1),
+  };
+  for (let i = 0; i < 7; i++) {
+    const ymd = shiftJerusalemYmd(now, i);
+    const name = hebrewWeekdayFromYmd(ymd);
+    if (!name) {
+      continue;
+    }
+    if (!out[name]) {
+      out[name] = ymd;
+    }
+    const withYom = `יום ${name}`;
+    if (!out[withYom]) {
+      out[withYom] = ymd;
+    }
+  }
+  return out;
 }
 
 function shiftJerusalemYmd(now: Date, dayDelta: number): string {

@@ -24,6 +24,8 @@ export interface LlmFilingAction {
   /** Human description for retrieval; required on add (may equal itemName). */
   itemDescription: string;
   targets: string[];
+  /** Copy from this turn's EMPLOYEE_SAVED_DATA filing[].filing_id on remove/update. */
+  filingId: string;
 }
 
 export interface LlmMessageAction {
@@ -69,6 +71,8 @@ export interface LlmDirectoryAction {
   action: LlmDirectoryActionName;
   name: string;
   phone: string;
+  /** Copy from this turn's SPEAKER_CONTACTS[].contact_id on remove. */
+  contactId: string;
 }
 
 export type LlmHoldKind =
@@ -132,17 +136,13 @@ export interface LlmReminderAction {
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
    */
   composeLookbackHours: number;
+  /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
+  reminderId: string;
 }
 
 export interface LlmHandoffAction {
   worker: string;
 }
-
-export type LlmQuery =
-  | "reminders"
-  | "reminders_sent"
-  | "todos"
-  | "self";
 
 export type ReportSection =
   | "reminders"
@@ -166,8 +166,7 @@ export interface LlmMetadata {
   /** Lifecycle updates for jobs listed in OPEN_JOBS this turn. */
   jobs?: LlmJobAction[];
   handoff?: LlmHandoffAction | null;
-  query?: LlmQuery | null;
-  /** Categories for query=report. Empty/omit = full report. */
+  /** Categories for legacy report sections. Empty/omit = full set. */
   reportSections?: ReportSection[];
   /**
    * When sections includes history: limit audit rows to these kinds.
@@ -177,7 +176,8 @@ export interface LlmMetadata {
   reportHistoryKinds?: ReportHistoryKind[];
   /**
    * Incomplete multi-turn draft: known fields while asking for `need`.
-   * Server stores this as PENDING_ACTION_STATE (same idea as reminder delete confirm).
+   * Server stores this as PENDING_ACTION_STATE (missing fields / share confirm).
+   * Id-based deletes are not held — they apply immediately.
    */
   hold?: LlmHold | null;
   confirm?: boolean | null;
@@ -220,7 +220,6 @@ export function emptyLlmMetadata(): LlmMetadata {
     directory: [],
     jobs: [],
     handoff: null,
-    query: null,
     reportSections: [],
     reportHistoryKinds: [],
     hold: null,
@@ -274,7 +273,6 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     directory,
     jobs: parseJobActions(meta),
     handoff: parseHandoff(meta),
-    query: parseQuery(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
     hold: parseHold(meta, { directory, lists, reminders, filing, messages }),
@@ -443,33 +441,6 @@ function parseHandoff(meta: Record<string, unknown>): LlmHandoffAction | null {
     "employee",
   ]);
   return worker ? { worker } : null;
-}
-
-function parseQuery(meta: Record<string, unknown>): LlmQuery | null {
-  const raw = meta.query ?? meta.show ?? meta.list;
-  if (typeof raw !== "string") {
-    return null;
-  }
-  const value = raw.trim().toLowerCase();
-  if (value === "reminders" || value === "reminder") {
-    return "reminders";
-  }
-  if (value === "reminders_sent" || value === "sent") {
-    return "reminders_sent";
-  }
-  if (value === "todos" || value === "todo") {
-    return "todos";
-  }
-  if (
-    value === "self" ||
-    value === "worker" ||
-    value === "mine" ||
-    value === "tasks"
-  ) {
-    return "self";
-  }
-  // Legacy "report" / status dump — ignored; the model answers in response.
-  return null;
 }
 
 const REPORT_SECTION_ALIASES: Record<string, ReportSection> = {
@@ -815,12 +786,19 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
   if (!action) {
     return null;
   }
+  const contactId = readText(record, ["contact_id", "contactId", "id"]);
   const name = readText(record, ["name", "שם", "contact", "label"]);
   const phone = readText(record, ["phone", "טלפון", "number", "whatsapp"]);
+  if (action === "remove") {
+    if (!contactId) {
+      return null;
+    }
+    return { action, name, phone, contactId };
+  }
   if (!name || !phone) {
     return null;
   }
-  return { action, name, phone };
+  return { action, name, phone, contactId: "" };
 }
 
 function reminderActionName(value: unknown): LlmReminderActionName | null {
@@ -861,7 +839,12 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     "שם מטלה",
     "name",
   ]);
-  if (!item) {
+  const reminderId = readText(record, ["reminder_id", "reminderId", "id"]);
+  if (action === "remove" || action === "update") {
+    if (!reminderId) {
+      return null;
+    }
+  } else if (!item) {
     return null;
   }
 
@@ -916,6 +899,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     compose,
     composeSource: parseComposeSource(record),
     composeLookbackHours: parseComposeLookbackHours(record),
+    reminderId,
   };
 }
 
@@ -1080,13 +1064,19 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
     return null;
   }
 
+  const filingId = readText(value, ["filing_id", "filingId", "id"]);
   const itemName = readText(value, ["item_name", "שם הפריט", "name"]);
-  if (!itemName) {
+  const action = value.action as LlmFilingActionName;
+  if (action === "remove_filing" || action === "update_filing") {
+    if (!filingId) {
+      return null;
+    }
+  } else if (!itemName) {
     return null;
   }
 
   return {
-    action: value.action as LlmFilingActionName,
+    action,
     itemName,
     itemInfo: readText(value, ["item_info", "מידע נוסף", "info"]),
     itemDescription: readText(value, [
@@ -1096,6 +1086,7 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
       "תיאור הפריט",
     ]),
     targets: parseTargets(value),
+    filingId,
   };
 }
 

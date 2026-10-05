@@ -94,7 +94,6 @@ export type {
   LlmHoldKind,
   LlmJobAction,
   LlmJobActionName,
-  LlmQuery,
   ReportSection,
   ReportHistoryKind,
   LlmMetadata,

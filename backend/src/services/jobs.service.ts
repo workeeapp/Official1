@@ -335,7 +335,7 @@ export function formatOpenJobsContext(
     "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself.",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
-    "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
+    "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
     "book_on_yes=true: the person who must answer is approving a new meeting slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item פגישה with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from book_date and book_time when you forget the list.",
     JSON.stringify(rows),
   ].join("\n");

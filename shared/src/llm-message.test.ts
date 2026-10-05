@@ -34,7 +34,6 @@ describe("parseLlmReply", () => {
         directory: [],
         reminders: [],
         handoff: { worker: "" },
-        query: null,
         sections: [],
         history_kinds: [],
         hold: null,
@@ -135,6 +134,7 @@ describe("parseLlmReply", () => {
         itemInfo: "1234",
         itemDescription: "קוד לשער של לבנת",
         targets: [],
+        filingId: "",
       },
     ]);
   });
@@ -191,6 +191,7 @@ describe("parseLlmReply", () => {
           itemInfo: "3434343",
           itemDescription: "",
           targets: [],
+          filingId: "",
         },
       ],
       messages: [],
@@ -198,7 +199,6 @@ describe("parseLlmReply", () => {
       directory: [],
       jobs: [],
       handoff: null,
-      query: null,
       reportSections: [],
       reportHistoryKinds: [],
       hold: null,
@@ -228,45 +228,28 @@ describe("parseLlmReply", () => {
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
-          metadata: { query: "reminders", confirm: true },
+          metadata: { confirm: true },
         }),
       ),
-    ).toMatchObject({ query: "reminders", confirm: true });
+    ).toMatchObject({ confirm: true });
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
-          metadata: { query: "todos", targets: ["לוסי"] },
+          metadata: { targets: ["לוסי"] },
         }),
       ),
-    ).toMatchObject({ query: "todos", targets: ["לוסי"] });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: { query: "self" },
-        }),
-      ).query,
-    ).toBe("self");
+    ).toMatchObject({ targets: ["לוסי"] });
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "רגע",
           metadata: {
-            query: "report",
             sections: ["tasks", "קניות", "sends"],
           },
         }),
-      ).query,
-    ).toBeNull();
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: { query: "report:reminders,filings" },
-        }),
-      ).query,
-    ).toBeNull();
+      ).reportSections,
+    ).toEqual(expect.arrayContaining(["tasks", "shopping", "sends"]));
     expect(
       parseReplyMetadata(
         JSON.stringify({
@@ -298,7 +281,7 @@ describe("parseLlmReply", () => {
               kind: "directory",
               need: "שם משפחה",
               directory: [
-                { action: "add", name: "יואב", phone: "0515520802" },
+                { action: "add", name: "יואב", phone: "0515520802", contactId: "" },
               ],
             },
           },
@@ -308,17 +291,9 @@ describe("parseLlmReply", () => {
       hold: {
         kind: "directory",
         need: "שם משפחה",
-        directory: [{ action: "add", name: "יואב", phone: "0515520802" }],
+        directory: [{ action: "add", name: "יואב", phone: "0515520802", contactId: "" }],
       },
     });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "רגע",
-          metadata: { query: "tasks" },
-        }),
-      ).query,
-    ).toBe("self");
   });
 
   it("extracts a relayed message for another employee", () => {
@@ -370,6 +345,39 @@ describe("parseLlmReply", () => {
         text: "עמית שואל אם קנית חלב?",
         expectsReply: true,
         askSummary: "אם קנית חלב?",
+      },
+    ]);
+  });
+
+  it("parses counter with job_id date and time from OPEN_JOBS-shaped ACTION", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "אעדכן את עמית.",
+        metadata: {
+          jobs: [
+            {
+              action: "counter",
+              job_id: "275996ef-4853-40ca-bae1-8c4e24c502dc",
+              answer_text: "יום רביעי ב-21:00",
+              report_text:
+                "טל רוצה לשנות את מועד הפגישה ליום רביעי בשעה 21:00. האם לאשר?",
+              date: "2026-10-07",
+              time: "21:00",
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.jobs).toEqual([
+      {
+        action: "counter",
+        jobId: "275996ef-4853-40ca-bae1-8c4e24c502dc",
+        answerText: "יום רביעי ב-21:00",
+        reportText:
+          "טל רוצה לשנות את מועד הפגישה ליום רביעי בשעה 21:00. האם לאשר?",
+        time: "21:00",
+        in: null,
+        date: "2026-10-07",
       },
     ]);
   });
@@ -487,6 +495,7 @@ describe("parseLlmReply", () => {
         compose: false,
         composeSource: "",
         composeLookbackHours: 0,
+        reminderId: "",
       },
     ]);
   });
@@ -565,6 +574,7 @@ describe("parseLlmReply", () => {
         compose: true,
         composeSource: "git_log",
         composeLookbackHours: 168,
+  reminderId: "",
       },
     ]);
   });

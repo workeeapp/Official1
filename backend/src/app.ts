@@ -18,9 +18,12 @@ export function createApp() {
       crossOriginResourcePolicy: { policy: "cross-origin" },
     }),
   );
+  const clientOrigins = env.CLIENT_ORIGIN.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.use(
     cors({
-      origin: env.CLIENT_ORIGIN,
+      origin: clientOrigins.length <= 1 ? clientOrigins[0] : clientOrigins,
       credentials: true,
     }),
   );
