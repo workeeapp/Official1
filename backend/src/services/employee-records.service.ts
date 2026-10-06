@@ -642,7 +642,7 @@ export async function getEmployeeOwnedRecords(
         type: list.listType,
         title: listTitle(list.listType, titleName),
         items: list.items.map((item) =>
-          toOwnedListItem(list.listType, item, names, ownerName),
+          toOwnedListItem(list.listType, item, names, ownerName, list.titleField),
         ),
       };
     });
@@ -1359,7 +1359,7 @@ async function deleteOwnedListItem(
     scope: string;
     addedById: string | null;
     visibleTo: unknown;
-    list: { employeeId: string; listType: string; name: string };
+    list: { employeeId: string; listType: string; name: string; titleField?: string };
   },
   actorId: string,
 ): Promise<SharedItemEvent[]> {
@@ -1375,8 +1375,12 @@ async function deleteOwnedListItem(
   });
   if (owner) {
     const label =
-      ownedItemTitle(listType, asRecord(existing.data), existing.itemKey) ||
-      existing.itemKey;
+      ownedItemTitle(
+        listType,
+        asRecord(existing.data),
+        existing.itemKey,
+        existing.list?.titleField,
+      ) || existing.itemKey;
     await cancelActiveRemindersMatchingWork({
       userId: owner.userId,
       itemKey: existing.itemKey,
@@ -1638,6 +1642,9 @@ async function applyListAction(
         employeeId,
         listType: resolvedAction.listType,
         name: listName,
+        ...(resolvedAction.listType === "custom" && resolvedAction.titleField
+          ? { titleField: resolvedAction.titleField }
+          : {}),
         ...(listShare
           ? { scope: "shared", visibleTo: visibility.visibleTo }
           : {}),
@@ -1710,6 +1717,7 @@ async function applyListAction(
       const targetListId = existing.listId;
       const targetListName = list.name || listName;
       const removedKey = existing.itemKey;
+      const removedTitleField = existing.list?.titleField ?? "";
       await cancelReminderLinkedToWorkerItem(existing.id);
       mutations.push({
         action: "remove",
@@ -1722,6 +1730,7 @@ async function applyListAction(
             resolvedAction.listType,
             asRecord(existing.data),
             removedKey,
+            removedTitleField,
           ) || removedKey,
         listName: targetListName || resolvedAction.listName || undefined,
       });
@@ -1739,6 +1748,7 @@ async function applyListAction(
             resolvedAction.listType,
             asRecord(existing.data),
             removedKey,
+            removedTitleField,
           ) || removedKey;
         const cascade = await cancelActiveRemindersMatchingWork({
           userId: owner.userId,
@@ -1826,6 +1836,10 @@ async function applyListAction(
         ? mergeListItemData(asRecord(existing.data), item)
         : normalizeListItemData(item);
     const nextData = toJsonValue(nextDataRecord);
+    const existingList = existing && "list" in existing
+      ? (existing.list as { titleField?: string } | null)
+      : null;
+    const rowTitleField = existingList?.titleField ?? list.titleField ?? "";
     const nextItemKey =
       itemIdentity(resolvedAction.listType, nextDataRecord) ||
       itemKey ||
@@ -1865,6 +1879,7 @@ async function applyListAction(
             resolvedAction.listType,
             nextDataRecord,
             nextItemKey || existing.itemKey,
+            rowTitleField,
           ) ||
           nextItemKey ||
           existing.itemKey,
@@ -1902,6 +1917,7 @@ async function applyListAction(
             resolvedAction.listType,
             nextDataRecord,
             nextItemKey,
+            rowTitleField,
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
       });
@@ -2075,6 +2091,7 @@ async function findLiveListItemById(itemId: string, employeeId: string) {
       deletedAt: null,
       list: { employeeId },
     },
+    include: { list: { select: { titleField: true } } },
   });
 }
 
@@ -2229,8 +2246,12 @@ export async function removeVisibleCustomItems(input: {
           data: { deletedAt: new Date(), reminderId: null },
         });
         const label =
-          ownedItemTitle("custom", asRecord(existing.data), existing.itemKey) ||
-          existing.itemKey;
+          ownedItemTitle(
+            "custom",
+            asRecord(existing.data),
+            existing.itemKey,
+            list.titleField,
+          ) || existing.itemKey;
         mutations.push({
           action: "remove",
           itemId: existing.id,
@@ -2679,12 +2700,13 @@ function toOwnedListItem(
   item: { id: string; itemKey?: string; data: unknown; addedById?: string | null; createdAt: Date },
   names: Map<string, string>,
   ownerName: string,
+  titleField = "",
 ): EmployeeRecordsResponse["groups"][number]["items"][number] {
   const data = normalizeListItemData(asRecord(item.data));
   return {
     id: item.id,
     kind: "list",
-    title: ownedItemTitle(listType, data, item.itemKey ?? ""),
+    title: ownedItemTitle(listType, data, item.itemKey ?? "", titleField),
     details: ownedItemDetails(listType, data),
     fields: ownedItemFields(data),
     createdBy: (item.addedById ? names.get(item.addedById) : undefined) ?? ownerName,
@@ -2696,6 +2718,7 @@ function ownedItemTitle(
   listType: string,
   data: Record<string, unknown>,
   fallback: string,
+  titleField = "",
 ): string {
   if (listType === "contacts") {
     const first = readItemText(data, ITEM_NAME_KEYS.contacts);
@@ -2709,7 +2732,8 @@ function ownedItemTitle(
     return titled;
   }
   if (listType === "custom") {
-    return firstCustomDataValue(data) || fallback;
+    const named = titleField.trim() ? readItemText(data, [titleField.trim()]) : "";
+    return named || firstCustomDataValue(data) || fallback;
   }
   return fallback;
 }

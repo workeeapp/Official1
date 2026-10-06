@@ -134,6 +134,8 @@ model EmployeeList {
   employeeId String             @map("employee_id") @db.Uuid
   listType   String             @map("list_type") @db.VarChar(32)
   name       String             @default("") @db.VarChar(100)
+  /// Custom lists: data key that names each row (set by the model when the list is created).
+  titleField String             @default("") @map("title_field") @db.VarChar(100)
   scope      String             @default("personal") @db.VarChar(16)
   visibleTo  Json               @default("[]") @map("visible_to")
   createdAt  DateTime           @default(now()) @map("created_at")

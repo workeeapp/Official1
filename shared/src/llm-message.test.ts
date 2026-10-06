@@ -1,6 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { parseLlmReply, parseReplyMetadata } from "./llm-message.js";
 
+describe("custom list title_field", () => {
+  it("reads title_field for custom lists only", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        response: "",
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "custom",
+              list_name: "באגים",
+              title_field: "שם הבאג",
+              targets: [],
+              items: [{ "שם הבאג": "כפתור לא עובד", סטטוס: "פתוח" }],
+            },
+            {
+              action: "add",
+              list_type: "shopping",
+              title_field: "שם פריט",
+              targets: [],
+              items: [{ "שם פריט": "חלב" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(meta.lists[0]?.titleField).toBe("שם הבאג");
+    expect(meta.lists[1]?.titleField).toBeUndefined();
+  });
+});
+
 describe("parseLlmReply", () => {
   it("returns plain text when the reply is not JSON", () => {
     expect(parseLlmReply("Hello from the assistant")).toEqual({

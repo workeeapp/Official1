@@ -107,6 +107,7 @@
     "4. רשימה חדשה:",
     "   - שאל את המשתמש אילו עמודות נדרשות",
     "   - לאחר מכן שמור list_type custom + list_name; אם עדיין אין שורות אמיתיות → items: [] (ריק). אל תמציא פריט ששמו הוא שם הרשימה.",
+    "   - ביצירת רשימה חדשה שלח גם title_field = שם העמודה שמזהה כל שורה (למשל «שם הבאג»).",
     "   - לאחר מכן פעל לפי ההיגיון של הרשימות",
     "",
     "Rules:",
@@ -254,6 +255,10 @@
                     "list_name": {
                       "type": "string",
                       "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Never put the new row text here."
+                    },
+                    "title_field": {
+                      "type": "string",
+                      "description": "Custom lists only. When this action creates a new custom list (list_name not yet in EMPLOYEE_SAVED_DATA): the exact column key that names each row (e.g. «שם הבאג»). Must be one of the list's columns. Ignored for lists that already exist."
                     },
                     "targets": {
                       "type": "array",

@@ -1273,6 +1273,31 @@ describe("employee targets", () => {
     ).toBe("טל קנה קופסת טונה");
   });
 
+  it("never echoes a raw item_id in a custom-list remove notification", () => {
+    const itemId = "f233b21a-a56f-499d-b157-108db593f590";
+    const removal = (item: Record<string, unknown>) =>
+      fallbackNotificationText(
+        amit,
+        {
+          lists: [
+            {
+              action: "remove",
+              listType: "custom",
+              listName: "באגים",
+              items: [item],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: ["ערן"] },
+      );
+    expect(removal({ item_id: itemId })).not.toContain(itemId);
+    expect(removal({ item_id: itemId, name: "באג חדש לבדיקה" })).toBe(
+      "עמית מחק «באג חדש לבדיקה» מרשימת «באגים»",
+    );
+  });
+
   it("applies a named digital worker task without an assignment on the speaker", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",

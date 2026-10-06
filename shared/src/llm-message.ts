@@ -24,6 +24,8 @@ export interface LlmListAction {
   action: LlmListActionName;
   listType: LlmListType;
   listName: string;
+  /** Custom lists: column that names each row; stored only when the list is created. */
+  titleField?: string;
   items: Record<string, unknown>[];
   targets: string[];
 }
@@ -383,10 +385,14 @@ function toListAction(value: unknown): LlmListAction | null {
     return null;
   }
 
+  const titleField =
+    listType === "custom" ? readText(value, ["title_field"]).slice(0, 100) : "";
+
   return {
     action: value.action as LlmListActionName,
     listType,
     listName,
+    ...(titleField ? { titleField } : {}),
     items,
     targets: parseTargets(value),
   };
@@ -1479,6 +1485,11 @@ function itemLabel(item: unknown): string {
     "list_type",
     "listType",
     "targets",
+    "item_id",
+    "itemId",
+    "reminder_id",
+    "filing_id",
+    "contact_id",
   ]);
   const firstText = Object.entries(record).find(
     ([key, value]) =>

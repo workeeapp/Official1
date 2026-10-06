@@ -30,6 +30,7 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  readItemId,
   removeVisibleCustomItems,
   type FilingMutation,
   type ListItemMutation,
@@ -816,11 +817,36 @@ async function markContextInjected(conversationId: string): Promise<void> {
   });
 }
 
+/**
+ * Remove/update ACTIONs carry only `item_id`; name those rows from the saved
+ * label so notifications never echo a raw id.
+ */
+function withSavedItemLabels(
+  metadata: LlmMetadata,
+  savedLabels?: ReadonlyMap<string, string>,
+): LlmMetadata {
+  if (!savedLabels || savedLabels.size === 0) {
+    return metadata;
+  }
+  return {
+    ...metadata,
+    lists: metadata.lists.map((list) => ({
+      ...list,
+      items: list.items.map((item) => {
+        const itemId = readItemId(item);
+        const label = itemId ? savedLabels.get(itemId)?.trim() : "";
+        return label ? { ...item, name: label } : item;
+      }),
+    })),
+  };
+}
+
 async function pushTargetNotification(input: {
   userId: string;
   actor: PublicEmployee;
   target: PublicEmployee;
   metadata: LlmMetadata;
+  savedLabels?: ReadonlyMap<string, string>;
   purchased?: boolean;
   recipientIsOwner?: boolean;
   ownerName?: string;
@@ -836,12 +862,16 @@ async function pushTargetNotification(input: {
     input.target.id,
     input.digitalEmployeeId,
   );
-  const text = fallbackNotificationText(input.actor, input.metadata, {
-    purchased: input.purchased,
-    recipientIsOwner: input.recipientIsOwner,
-    ownerName: input.ownerName,
-    partnerNames: input.partnerNames,
-  });
+  const text = fallbackNotificationText(
+    input.actor,
+    withSavedItemLabels(input.metadata, input.savedLabels),
+    {
+      purchased: input.purchased,
+      recipientIsOwner: input.recipientIsOwner,
+      ownerName: input.ownerName,
+      partnerNames: input.partnerNames,
+    },
+  );
   const raw = { notification: text };
   const message = await saveAssistantMessage({
     conversationId: conversation.id,
@@ -878,6 +908,7 @@ export async function notifySharedItemEvents(input: {
   assistantSpeaker?: string;
   digitalEmployeeId: string;
   alreadyNotifiedIds?: Set<string>;
+  savedLabels?: ReadonlyMap<string, string>;
 }): Promise<{
   notifications: ChatThreadNotification[];
   whatsappSkips: WhatsAppDeliverySkip[];
@@ -911,6 +942,7 @@ export async function notifySharedItemEvents(input: {
       actor: input.actor,
       target,
       metadata: event.metadata,
+      savedLabels: input.savedLabels,
       purchased: event.purchased,
       recipientIsOwner: event.listOwnerId === target.id,
       ownerName: owner ? employeeDisplayName(owner) : undefined,
@@ -1621,6 +1653,9 @@ export async function sendChatMessage(input: {
     const notifications: ChatThreadNotification[] = [];
     const notified = new Set<string>();
     const sharedWhatsAppSkips: WhatsAppDeliverySkip[] = [];
+    const savedLabels = new Map(
+      listMutations.map((row) => [row.itemId, row.itemLabel] as const),
+    );
 
     // Prefer plan notifications (named shared lists include partner context + full list payload).
     for (const notification of plan.notifications) {
@@ -1633,6 +1668,7 @@ export async function sendChatMessage(input: {
         actor: employee,
         target: notification.employee,
         metadata: notification.metadata,
+        savedLabels,
         recipientIsOwner: true,
         partnerNames: notification.partnerNames,
         assistantSpeaker,
@@ -1650,6 +1686,7 @@ export async function sendChatMessage(input: {
       assistantSpeaker,
       digitalEmployeeId: digital.id,
       alreadyNotifiedIds: notified,
+      savedLabels,
     });
     for (const notification of sharedNotify.notifications) {
       if (notified.has(notification.employeeId)) {

@@ -158,6 +158,7 @@
     "4. רשימה חדשה / custom:",
     "   - שאל אילו עמודות נדרשות, ואז שמור עם list_type: \"custom\" ו-list_name (שם הרשימה, למשל חנויות).",
     "   - כל פריט = אובייקט עם אותן עמודות. Example: { \"שם החנות\": \"אדידס\" }.",
+    "   - When creating the list, also send title_field = the column that names each row (e.g. \"שם החנות\").",
     "   - After columns are chosen but before any real rows: emit items: [] (empty). Do NOT invent a row whose value is the list title. Do NOT put the list name inside items.",
     "   - Do not leave list_name empty. Do not use shopping for a named custom list.",
     "   - Shared new list (לי ולעמית רשימה בשם…): list_type custom, list_name set, targets = speaker + partners, items=[] until they add real rows. One shared list — not a tasks assignment.",

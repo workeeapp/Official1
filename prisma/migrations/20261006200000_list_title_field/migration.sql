@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "EmployeeLists" ADD COLUMN IF NOT EXISTS "title_field" VARCHAR(100) NOT NULL DEFAULT '';
