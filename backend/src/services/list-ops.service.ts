@@ -336,7 +336,13 @@ async function alterList(
     },
   });
 
-  const text = `«${employeeDisplayName(input.actor)}» עדכן את הרשימה «${oldLabel}»: ${parts.join(", ")}.`;
+  const actorName = employeeDisplayName(input.actor);
+  const shareOnly = !structural && removed.length === 0 && added.length > 0;
+  const text = shareOnly
+    ? `${actorName} שיתף את רשימת «${oldLabel}» עם ${added
+        .map((row) => `«${employeeDisplayName(row)}»`)
+        .join(", ")}`
+    : `«${actorName}» עדכן את הרשימה «${oldLabel}»: ${parts.join(", ")}.`;
   const audience = uniqueIds([...watcherIds(list, input.actor.id), ...added.map((row) => row.id)])
     .filter((id) => id !== input.actor.id);
   return {

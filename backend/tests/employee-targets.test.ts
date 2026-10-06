@@ -144,7 +144,9 @@ describe("employee targets", () => {
       ),
     ).toEqual({
       lists: [],
+      listOps: [],
       filing: [],
+      hold: null,
       directory: [],
       messages: [],
       reminders: [],
@@ -154,6 +156,39 @@ describe("employee targets", () => {
       reportSections: [],
       targets: [],
     });
+  });
+
+  it("keeps list_ops and hold from the model for the engine", () => {
+    const listOps = [
+      {
+        action: "alter_list" as const,
+        listId: "7588a40b-ad10-4490-af80-207c62c1de28",
+        newName: "",
+        addColumns: [],
+        removeColumns: [],
+        renameColumns: [],
+        addParticipants: ["טל"],
+        removeParticipants: [],
+      },
+    ];
+    const hold = {
+      kind: "list_ops" as const,
+      need: "confirm_delete",
+      directory: [],
+      lists: [],
+      listOps,
+      reminders: [],
+      filing: [],
+      messages: [],
+    };
+    const resolved = resolveSpokenMetadata(
+      "תוסיפי את טל כשותף לרשימת באגים",
+      { lists: [], filing: [], listOps, hold },
+      employees,
+      amit.id,
+    );
+    expect(resolved.listOps).toEqual(listOps);
+    expect(resolved.hold).toEqual(hold);
   });
 
   it("does not invent a task when the LLM returns no actions", () => {

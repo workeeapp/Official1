@@ -221,9 +221,13 @@ export function resolveSpokenMetadata(
   _employees?: PublicEmployee[],
   _actorId?: string,
 ): LlmMetadata {
+  // Spread first so every parsed field reaches the engine even if it is not defaulted below.
   return {
+    ...metadata,
     lists: metadata.lists,
+    listOps: metadata.listOps ?? [],
     filing: metadata.filing,
+    hold: metadata.hold ?? null,
     messages: metadata.messages ?? [],
     reminders: metadata.reminders ?? [],
     directory: metadata.directory ?? [],

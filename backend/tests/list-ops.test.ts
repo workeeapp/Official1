@@ -231,6 +231,30 @@ describe("list ops", () => {
     expect(result.notices.map((row) => row.employeeId)).toEqual([talId]);
   });
 
+  it("adds a partner to a shared list and tells every other partner who joined", async () => {
+    const eranId = "5964b8b8-9ff1-4173-b50f-fb4e436b7cca";
+    const eran = person(eranId, "ערן");
+    listFindFirst.mockResolvedValueOnce(
+      bugsList({ name: "באגים", visibleTo: [amitId, eranId], items: [] }),
+    );
+
+    const [result] = await applyListOps({
+      userId: "user-1",
+      actor: amit,
+      employees: [amit, tal, eran],
+      ops: [op({ addParticipants: ["טל"] })],
+    });
+
+    expect(listUpdate).toHaveBeenCalledWith({
+      where: { id: listId },
+      data: { scope: "shared", visibleTo: [amitId, eranId, talId] },
+    });
+    expect(result.notices).toEqual([
+      { employeeId: eranId, text: "עמית שיתף את רשימת «באגים» עם «טל»" },
+      { employeeId: talId, text: "עמית שיתף את רשימת «באגים» עם «טל»" },
+    ]);
+  });
+
   it("refuses an unknown participant without writing", async () => {
     listFindFirst.mockResolvedValueOnce(bugsList());
 
