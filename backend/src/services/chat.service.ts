@@ -72,6 +72,7 @@ import {
   formatReminderApplyNotice,
   formatReminderConfirmNotice,
   hasUnrelatedWorkWhilePending,
+  linkRemindersToItems,
   linkRemindersToWorkerTasks,
   planReminderWrites,
   type WorkerTaskRef,
@@ -428,7 +429,7 @@ function workerTargetingInstructions(
     "If the speaker gives a meeting date without a time and did not say all-day / יום שלם, ask before saving.",
     "If omitted on a normal list item, the action applies only to the current speaker.",
     `Work assigned to YOU → lists tasks add, targets: ["${workerName}"]. The item is the work itself. Do not put that task on the speaker. Do not handoff.`,
-    `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → answer only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. Do not invent saved jobs from earlier chat that are missing from this JSON — PENDING_ACTION_STATE / hold message drafts are separate and stay in force.`,
+    `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → answer only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON — PENDING_ACTION_STATE / hold message drafts are separate and stay in force.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
@@ -474,7 +475,7 @@ function workerTargetingInstructions(
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id.",
     "MUTATE BY ID (like OPEN_JOBS job_id): lists.remove/update need item_id; remove_filing/update_filing need filing_id; reminders remove/update need reminder_id; directory.remove needs contact_id — copy from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS. With a matching id the server applies immediately (no delete-confirm). Never invent or speak ids. Server skips mutate without a matching id.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
-    "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (not the same as hold/PENDING_ACTION_STATE follow-ups). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
+    "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). List a clock in parentheses next to a task only when that task row has a `reminder` field — never pair a task with an active_reminders row by similar wording. Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (not the same as hold/PENDING_ACTION_STATE follow-ups). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
     "Status / דוח / what someone needs to buy or do / show a list: answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Prefer exact list_name; if several similar names and unsure which, ask before mutating. כל מה ששמור עלי / סיכום מלא → full dump of shopping, tasks, custom lists, active reminders, filings+memory, contacts — not tasks alone.",
     "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes. It does not append a mutation summary.",
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
@@ -1183,10 +1184,10 @@ export async function sendChatMessage(input: {
           : "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
         guestSpeaker
           ? ""
-          : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, answer from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. PENDING_ACTION_STATE / hold drafts are unrelated and stay active. List jobs one • per line. Never emit metadata.query.",
+          : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, answer from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. PENDING_ACTION_STATE / hold drafts are unrelated and stay active. List jobs one • per line. A row with a `reminder` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no `reminder` field → no parentheses. Never emit metadata.query.",
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
         "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Use short intro + one • item per line; never a dense paragraph. כל מה ששמור / סיכום מלא → FULL DUMP layout (all sections), not tasks only.",
-        "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — not hold/PENDING follow-ups like היי after מה תרצה שאשלח). Ask about X by name → that person's visible rows. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
+        "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — not hold/PENDING follow-ups like היי after מה תרצה שאשלח). Ask about X by name → that person's visible rows. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
         "הציגי את הרשימות שלי / show my lists: one block per list — header (list_name + shared_with if shared), then • items with CURRENT field values only; blank line between lists. Never one run-on paragraph. Empty → «ריקה».",
         "FULL DUMP / כל מה ששמור עלי / סיכום מלא / everything saved about me: From THIS turn's EMPLOYEE_SAVED_DATA (+ SPEAKER_CONTACTS): cover shopping, tasks/meetings, each custom list, active_reminders, all filing (explicit + memory), contacts — every section even if empty (say ריק). Do not answer with tasks only. • bullets; no schema jargon.",
         "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA — one • line per item with the live value only (never «שם + שם חדש» / update drafts). Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata. items=[] → say the list is empty.",
@@ -1540,13 +1541,23 @@ export async function sendChatMessage(input: {
         )
         .map((row) => ({ id: row.itemId, itemKey: row.itemKey })),
     ];
-    await linkRemindersToWorkerTasks(
-      reminderResult.saved.map((row) => ({
-        id: row.id,
-        itemKey: row.itemKey,
-        itemLabel: row.itemLabel,
-      })),
-      workerItems,
+    const savedClocks = reminderResult.saved.map((row) => ({
+      id: row.id,
+      itemKey: row.itemKey,
+      itemLabel: row.itemLabel,
+    }));
+    await linkRemindersToWorkerTasks(savedClocks, workerItems);
+    await linkRemindersToItems(
+      savedClocks,
+      listMutations
+        .filter(
+          (row) =>
+            row.action === "add" &&
+            !row.listShell &&
+            row.itemId &&
+            humans.some((human) => human.id === row.employeeId),
+        )
+        .map((row) => ({ id: row.itemId, itemKey: row.itemKey, itemLabel: row.itemLabel })),
     );
     recordWhatsAppEvent(
       "reminder_apply",

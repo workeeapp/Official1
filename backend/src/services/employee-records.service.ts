@@ -17,6 +17,7 @@ import { toPlainJson } from "./llm-client.js";
 import {
   cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
+  formatJerusalemDateTime,
   listReminderRowsForUser,
   toReminderSnapshotRow,
   type ReminderSnapshotRow,
@@ -590,26 +591,6 @@ export async function getTeamSchedules(
   return entries;
 }
 
-export function parseAssignmentNote(text: string): {
-  targetLabel: string;
-  items: string[];
-} | null {
-  const match = text
-    .trim()
-    .match(/^(כולם|.+?)\s+צרי(?:ך|כה|כים)\s+(?:לקנות|להסיר|לעדכן)\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    targetLabel: match[1].trim(),
-    items: match[2]
-      .split(/\s+ו/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  };
-}
-
 const LIST_TYPE_TITLES: Record<string, string> = {
   shopping: "Shopping",
   tasks: "Tasks",
@@ -849,28 +830,11 @@ export async function getEmployeeRecordSnapshot(
   const names = new Map(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );
-
-  const currentShopping = new Map<string, Set<string>>();
-  const rememberShopping = (owner: string, items: Array<{ data: unknown; itemKey?: string }>) => {
-    const keys = currentShopping.get(owner) ?? new Set<string>();
-    for (const item of items) {
-      const record = asRecord(item.data);
-      const label = readItemText(record, ITEM_NAME_KEYS.shopping) || item.itemKey || "";
-      if (label) {
-        keys.add(normalizeKey(label));
-      }
-    }
-    currentShopping.set(owner, keys);
-  };
-
-  for (const list of ownLists) {
-    if (list.listType === "shopping") {
-      rememberShopping(
-        list.employee.nickname?.trim() || list.employee.name,
-        list.items,
-      );
-    }
-  }
+  const activeReminders = new Map<string, LinkedReminderRow>(
+    reminderRows
+      .filter((row) => row.status === "active")
+      .map((row) => [row.id, row] as const),
+  );
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
   const seenPartnerListIds = new Set<string>();
@@ -881,12 +845,17 @@ export async function getEmployeeRecordSnapshot(
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
     const items = byType.get(item.list.listType) ?? [];
-    items.push(withVisibility(item.data, "shared", owner, item.id));
+    items.push(
+      withVisibility(
+        item.data,
+        "shared",
+        owner,
+        item.id,
+        linkedReminderField(item, activeReminders),
+      ),
+    );
     byType.set(item.list.listType, items);
     sharedByOwner.set(owner, byType);
-    if (item.list.listType === "shopping") {
-      rememberShopping(owner, [item]);
-    }
   }
 
   for (const list of partnerLists) {
@@ -913,32 +882,12 @@ export async function getEmployeeRecordSnapshot(
           "shared",
           owner,
           item.id,
+          linkedReminderField(item, activeReminders),
         ),
       );
     }
     byType.set(bucketKey, items);
     sharedByOwner.set(owner, byType);
-    if (list.listType === "shopping") {
-      rememberShopping(owner, list.items);
-    }
-  }
-
-  const orphanIds = ownLists.flatMap((list) =>
-    list.listType === "tasks"
-      ? list.items
-          .filter(
-            (item) =>
-              Boolean(item.id) &&
-              isOrphanAssignment(asRecord(item.data), currentShopping),
-          )
-          .map((item) => item.id)
-      : [],
-  );
-  if (orphanIds.length > 0) {
-    await prisma.employeeListItem.updateMany({
-      where: { id: { in: orphanIds }, deletedAt: null },
-      data: { deletedAt: new Date(), reminderId: null },
-    });
   }
 
   const lists: EmployeeRecordSnapshot["lists"] = [];
@@ -971,8 +920,8 @@ export async function getEmployeeRecordSnapshot(
         scope: list.scope === "shared" ? "shared" : "personal",
         visibleTo: list.visibleTo,
         items: list.items,
-        currentShopping,
         names,
+        activeReminders,
       }),
     );
   }
@@ -990,8 +939,8 @@ export async function getEmployeeRecordSnapshot(
         scope: "shared",
         visibleTo: list.visibleTo,
         items: list.items,
-        currentShopping,
         names,
+        activeReminders,
       }),
     );
   }
@@ -2512,9 +2461,16 @@ function toListSnapshotEntry(input: {
   ownerName: string;
   scope: ItemScope;
   visibleTo: unknown;
-  items: Array<{ id?: string; data: unknown; scope?: string; itemKey?: string }>;
-  currentShopping: Map<string, Set<string>>;
+  items: Array<{
+    id?: string;
+    data: unknown;
+    scope?: string;
+    itemKey?: string;
+    reminderId?: string | null;
+    linkedReminderId?: string | null;
+  }>;
   names: Map<string, string>;
+  activeReminders?: Map<string, LinkedReminderRow>;
 }): EmployeeRecordSnapshot["lists"][number] | null {
   const derivedName =
     input.listName.trim() ||
@@ -2522,11 +2478,6 @@ function toListSnapshotEntry(input: {
       ? deriveCustomListName(input.items.map((item) => asRecord(item.data)))
       : "");
   const items = input.items
-    .filter(
-      (item) =>
-        input.listType !== "tasks" ||
-        !isOrphanAssignment(asRecord(item.data), input.currentShopping),
-    )
     .map((item) =>
       withVisibility(
         item.data,
@@ -2535,6 +2486,7 @@ function toListSnapshotEntry(input: {
           : "personal",
         input.ownerName,
         item.id,
+        linkedReminderField(item, input.activeReminders ?? new Map()),
       ),
     );
   // Keep named custom lists and any shared list even when empty so Lucy can
@@ -2565,11 +2517,37 @@ function toListSnapshotEntry(input: {
   };
 }
 
+export type LinkedReminderRow = { id: string; fireAt: Date; repeat: string };
+
+/**
+ * The active clock FK-linked to this item: reminder_id (worker task) or
+ * linked_reminder_id (speaker/shared item from the same turn).
+ */
+export function linkedReminderField(
+  item: { reminderId?: string | null; linkedReminderId?: string | null },
+  activeReminders: Map<string, LinkedReminderRow>,
+): Record<string, unknown> {
+  const reminder = [item.reminderId, item.linkedReminderId]
+    .map((id) => (id ? activeReminders.get(id) : undefined))
+    .find(Boolean);
+  if (!reminder) {
+    return {};
+  }
+  return {
+    reminder: {
+      reminder_id: reminder.id,
+      fire_at: formatJerusalemDateTime(reminder.fireAt),
+      repeat: reminder.repeat,
+    },
+  };
+}
+
 function withVisibility(
   data: unknown,
   scope: string,
   owner: string,
   itemId?: string,
+  linked: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const normalized = stripJobMeta(normalizeListItemData(asRecord(data)));
   const dateRaw = normalized["תאריך לביצוע"];
@@ -2579,6 +2557,7 @@ function withVisibility(
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
+    ...linked,
     scope,
     owner,
   };
@@ -2586,57 +2565,6 @@ function withVisibility(
 
 function visibleToIncludes(visibleTo: unknown, employeeId: string): boolean {
   return Array.isArray(visibleTo) && visibleTo.includes(employeeId);
-}
-
-function isOrphanAssignment(
-  data: Record<string, unknown>,
-  currentShopping: Map<string, Set<string>>,
-): boolean {
-  const parsed = parseAssignmentNote(readItemText(data, ITEM_NAME_KEYS.tasks));
-  if (!parsed) {
-    return false;
-  }
-
-  const wanted = parsed.items.map(normalizeKey).filter(Boolean);
-  if (wanted.length === 0) {
-    return false;
-  }
-
-  const owners =
-    parsed.targetLabel === "כולם"
-      ? [...currentShopping.keys()]
-      : [...currentShopping.keys()].filter((owner) =>
-          namesOverlap(owner, parsed.targetLabel),
-        );
-
-  if (owners.length === 0) {
-    return true;
-  }
-
-  return !owners.some((owner) => {
-    const keys = currentShopping.get(owner);
-    return Boolean(keys && wanted.some((item) => shoppingHasItem(keys, item)));
-  });
-}
-
-function namesOverlap(left: string, right: string): boolean {
-  const a = normalizeKey(left);
-  const b = normalizeKey(right);
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-function shoppingHasItem(keys: Set<string>, needle: string): boolean {
-  if (keys.has(needle)) {
-    return true;
-  }
-
-  for (const key of keys) {
-    if (key.includes(needle) || needle.includes(key)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 function listTitle(listType: string, listName: string): string {

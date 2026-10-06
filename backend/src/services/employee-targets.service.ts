@@ -143,42 +143,47 @@ export function reminderTargetsEmployee(
   return candidates.some((candidate) => names.includes(candidate));
 }
 
-/** Hebrew clause appended to task notifies when a linked clock exists. */
-export function formatLinkedReminderHint(
-  reminders: LlmReminderAction[],
-): string {
-  const clock = reminders.find(
-    (row) => row.action === "add" || row.action === "update",
-  );
-  if (!clock) {
-    return "";
-  }
+function isClockAdd(row: LlmReminderAction): boolean {
+  return row.action === "add" || row.action === "update";
+}
+
+/** «בעוד שעה» / «ב־2026-10-07 ב־09:00» from the clock the model emitted; empty when unknown. */
+function formatReminderWhen(clock: LlmReminderAction): string {
   if (typeof clock.inSeconds === "number" && clock.inSeconds > 0) {
     const seconds = clock.inSeconds;
     if (seconds < 90) {
-      return ", ותזכורת בעוד דקה";
+      return "בעוד דקה";
     }
     if (seconds < 3600) {
       const minutes = Math.max(1, Math.round(seconds / 60));
-      return `, ותזכורת בעוד ${minutes} דקות`;
+      return `בעוד ${minutes} דקות`;
     }
     if (seconds === 3600) {
-      return ", ותזכורת בעוד שעה";
+      return "בעוד שעה";
     }
     if (seconds % 3600 === 0) {
-      return `, ותזכורת בעוד ${seconds / 3600} שעות`;
+      return `בעוד ${seconds / 3600} שעות`;
     }
-    const minutes = Math.round(seconds / 60);
-    return `, ותזכורת בעוד ${minutes} דקות`;
+    return `בעוד ${Math.round(seconds / 60)} דקות`;
   }
   const time = clock.time?.trim() ?? "";
   if (time) {
     const date = clock.date?.trim() ?? "";
-    return date
-      ? `, ותזכורת ב־${date} ב־${time}`
-      : `, ותזכורת ב־${time}`;
+    return date ? `ב־${date} ב־${time}` : `ב־${time}`;
   }
-  return ", ותזכורת";
+  return "";
+}
+
+/** Hebrew clause appended to task notifies when a linked clock exists. */
+export function formatLinkedReminderHint(
+  reminders: LlmReminderAction[],
+): string {
+  const clock = reminders.find(isClockAdd);
+  if (!clock) {
+    return "";
+  }
+  const when = formatReminderWhen(clock);
+  return when ? `, ותזכורת ${when}` : ", ותזכורת";
 }
 
 export function resolveActionTargets(
@@ -869,6 +874,56 @@ export function fallbackNotificationText(
   },
 ): string {
   const actorName = employeeDisplayName(actor);
+  const clocks = (metadata.reminders ?? []).filter(isClockAdd);
+  const realLists = metadata.lists.filter(
+    (row) => row.items.length > 0 && !isOpeningCustomList(row),
+  );
+  const reportedLists = realLists.length > 0 ? realLists : metadata.lists.slice(0, 1);
+  const singleTaskAdd =
+    reportedLists.length === 1 &&
+    reportedLists[0].listType === "tasks" &&
+    reportedLists[0].action === "add";
+  // One task + its clock keeps the one-line «…, ותזכורת בעוד שעה». Anything more gets
+  // one line per action so no item is dropped and no clock is glued to the wrong task.
+  if (
+    reportedLists.length + metadata.filing.length > 1 ||
+    clocks.length > 1 ||
+    (clocks.length === 1 && !singleTaskAdd)
+  ) {
+    const strip = (sentence: string) =>
+      sentence.startsWith(`${actorName} `)
+        ? sentence.slice(actorName.length + 1)
+        : sentence;
+    const lines = [
+      ...reportedLists.map((list) =>
+        strip(
+          fallbackNotificationText(
+            actor,
+            { ...metadata, lists: [list], filing: [], reminders: [] },
+            options,
+          ),
+        ),
+      ),
+      ...metadata.filing.map((filing) =>
+        strip(
+          fallbackNotificationText(
+            actor,
+            { ...metadata, lists: [], filing: [filing], reminders: [] },
+            options,
+          ),
+        ),
+      ),
+      ...clocks.map((clock) => {
+        const when = formatReminderWhen(clock);
+        const item = clock.item?.trim() ?? "";
+        return `תזכורת אליך${when ? ` ${when}` : ""}${item ? `: ${item}` : ""}`;
+      }),
+    ];
+    if (lines.length === 1) {
+      return `${actorName} קבע לך ${lines[0].replace(/^תזכורת אליך/, "תזכורת")}`;
+    }
+    return `עדכונים מ${actorName}:\n${lines.map((line) => `• ${line}`).join("\n")}`;
+  }
   const list = pickPrimaryList(metadata.lists);
   const items = collectItemLabels(
     list ? { ...metadata, lists: [list] } : metadata,

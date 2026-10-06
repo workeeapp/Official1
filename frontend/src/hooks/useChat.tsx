@@ -66,6 +66,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdsRef = useRef<Record<string, KnownConversation>>({});
+  const pendingIdsRef = useRef<Set<string>>(new Set());
   const location = useLocation();
   const viewingChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
 
@@ -93,6 +94,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             threadId,
             history,
             conversationIdsRef.current,
+            pendingIdsRef.current,
             setThreads,
             setRawResponses,
             setRawRequests,
@@ -129,14 +131,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       setThreads((current) => {
         const thread = current[threadId] ?? [];
-        const already = thread.some(
-          (message) =>
-            message.id === event.message.id ||
-            messageKey(message) === messageKey(event.message),
-        );
-        return already
-          ? current
-          : { ...current, [threadId]: [...thread, event.message] };
+        const next = applyLiveMessage(thread, event.message, pendingIdsRef.current);
+        return next === thread ? current : { ...current, [threadId]: next };
       });
       if (event.raw !== undefined) {
         setRawResponses((current) => ({
@@ -192,6 +188,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         text: input.text,
         createdAt: new Date().toISOString(),
       };
+      pendingIdsRef.current.add(userMessage.id);
 
       setThreads((current) => ({
         ...current,
@@ -215,13 +212,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           abort.signal,
         );
         const parsed = parseLlmReply(reply);
+        const replyId = crypto.randomUUID();
+        pendingIdsRef.current.add(replyId);
 
         setThreads((current) => ({
           ...current,
           [threadId]: [
             ...(current[threadId] ?? []),
             {
-              id: crypto.randomUUID(),
+              id: replyId,
               author: "assistant" as const,
               speaker: input.assistantSpeaker ?? "Assistant",
               text: parsed.response,
@@ -347,6 +346,7 @@ function applyHistory(
   threadId: string,
   history: ChatHistoryResponse,
   knownIds: Record<string, KnownConversation>,
+  pendingIds: ReadonlySet<string>,
   setThreads: Dispatch<SetStateAction<Record<string, ChatMessage[]>>>,
   setRawResponses: Dispatch<SetStateAction<Record<string, unknown>>>,
   setRawRequests: Dispatch<SetStateAction<Record<string, unknown>>>,
@@ -370,7 +370,7 @@ function applyHistory(
     const merged = sortChatMessages(
       conversationChanged
         ? history.messages
-        : mergeMessages(current[threadId] ?? [], history.messages),
+        : mergeMessages(current[threadId] ?? [], history.messages, pendingIds),
     );
     if (sameMessages(current[threadId] ?? [], merged)) {
       return current;
@@ -467,21 +467,55 @@ function messageKey(message: ChatMessage): string {
   return `${message.author}|${message.speaker}|${message.text}`;
 }
 
-function mergeMessages(
+// Client and server clocks can differ; a saved copy is never much older than the local one.
+const PENDING_MATCH_SKEW_MS = 5 * 60 * 1000;
+
+function canReplacePending(pending: ChatMessage, saved: ChatMessage): boolean {
+  if (messageKey(pending) !== messageKey(saved)) {
+    return false;
+  }
+  const pendingAt = Date.parse(pending.createdAt ?? "");
+  const savedAt = Date.parse(saved.createdAt ?? "");
+  if (Number.isNaN(pendingAt) || Number.isNaN(savedAt)) {
+    return true;
+  }
+  return savedAt >= pendingAt - PENDING_MATCH_SKEW_MS;
+}
+
+/**
+ * Locally created (pending) messages are replaced only by server messages this thread has
+ * not shown yet — repeating an earlier text must not match the old saved copy.
+ */
+export function mergeMessages(
   local: ChatMessage[],
   incoming: ChatMessage[],
+  pendingIds: ReadonlySet<string> = new Set(),
 ): ChatMessage[] {
   if (incoming.length === 0) {
     return local;
   }
 
   const localById = new Map(local.map((message) => [message.id, message]));
-  const localByKey = new Map(local.map((message) => [messageKey(message), message]));
   const incomingIds = new Set(incoming.map((message) => message.id));
-  const incomingKeys = new Set(incoming.map((message) => messageKey(message)));
+  const fresh = incoming.filter((message) => !localById.has(message.id));
+  const replacedBy = new Map<string, ChatMessage>();
+  const replacedPending = new Set<string>();
+  for (const message of local) {
+    if (!pendingIds.has(message.id) || incomingIds.has(message.id)) {
+      continue;
+    }
+    const saved = fresh.find(
+      (candidate) =>
+        !replacedBy.has(candidate.id) && canReplacePending(message, candidate),
+    );
+    if (saved) {
+      replacedBy.set(saved.id, message);
+      replacedPending.add(message.id);
+    }
+  }
+
   const mergedIncoming = incoming.map((message) => {
-    const previous =
-      localById.get(message.id) ?? localByKey.get(messageKey(message));
+    const previous = localById.get(message.id) ?? replacedBy.get(message.id);
     return {
       ...message,
       createdAt: message.createdAt ?? previous?.createdAt,
@@ -490,10 +524,34 @@ function mergeMessages(
     };
   });
   const localOnly = local.filter(
-    (message) =>
-      !incomingIds.has(message.id) && !incomingKeys.has(messageKey(message)),
+    (message) => !incomingIds.has(message.id) && !replacedPending.has(message.id),
   );
   return sortChatMessages([...mergedIncoming, ...localOnly]);
+}
+
+/** Live server message: replace its pending local copy, or append it. */
+export function applyLiveMessage(
+  thread: ChatMessage[],
+  message: ChatMessage,
+  pendingIds: ReadonlySet<string>,
+): ChatMessage[] {
+  if (thread.some((existing) => existing.id === message.id)) {
+    return thread;
+  }
+  const pendingIndex = thread.findIndex(
+    (existing) => pendingIds.has(existing.id) && canReplacePending(existing, message),
+  );
+  if (pendingIndex >= 0) {
+    const pending = thread[pendingIndex];
+    const next = [...thread];
+    next[pendingIndex] = {
+      ...message,
+      llmMs: message.llmMs ?? pending.llmMs,
+      afterLlmMs: message.afterLlmMs ?? pending.afterLlmMs,
+    };
+    return next;
+  }
+  return [...thread, message];
 }
 
 export function useChat(): ChatContextValue {

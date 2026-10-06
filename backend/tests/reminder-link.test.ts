@@ -33,7 +33,9 @@ vi.mock("../src/database/prisma.js", () => ({
 
 import {
   cancelReminderLinkedToWorkerItem,
+  linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  pairLinkedItemsToReminders,
   removeReminderAndLinkedWorkerTask,
   syncLinkedWorkerTaskClock,
 } from "../src/services/reminder.service.js";
@@ -63,6 +65,45 @@ describe("reminder worker link", () => {
       where: { id: "r1" },
       data: { workerItemId: "w1" },
     });
+  });
+
+  it("links same-turn speaker and shared items to their clock by the action labels", () => {
+    const clocks = [
+      { id: "r-nonsense", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" },
+      { id: "r-apples", itemKey: "ערן צריך לקנות תפוחים", itemLabel: "ערן צריך לקנות תפוחים" },
+    ];
+    expect(
+      pairLinkedItemsToReminders(clocks, [
+        { id: "eran-task", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" },
+        { id: "shared-apples", itemKey: "תפוחים", itemLabel: "תפוחים" },
+        { id: "unrelated", itemKey: "גבינה", itemLabel: "גבינה" },
+      ]),
+    ).toEqual([
+      { reminderId: "r-nonsense", itemId: "eran-task" },
+      { reminderId: "r-apples", itemId: "shared-apples" },
+    ]);
+  });
+
+  it("never pairs a lone item with a lone clock when the labels differ", () => {
+    expect(
+      pairLinkedItemsToReminders(
+        [{ id: "r1", itemKey: "לאכול פיצה", itemLabel: "לאכול פיצה" }],
+        [{ id: "i1", itemKey: "גבינה", itemLabel: "גבינה" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("writes only linked_reminder_id for a speaker item (no cascade link)", async () => {
+    itemUpdate.mockResolvedValue({});
+    await linkRemindersToItems(
+      [{ id: "r1", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" }],
+      [{ id: "i1", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" }],
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "i1" },
+      data: { linkedReminderId: "r1" },
+    });
+    expect(reminderUpdate).not.toHaveBeenCalled();
   });
 
   it("deletes the worker task and the clock together", async () => {

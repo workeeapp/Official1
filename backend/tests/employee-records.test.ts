@@ -125,7 +125,6 @@ import {
   isPhantomCustomListItem,
   mergeListItemData,
   normalizeListItemData,
-  parseAssignmentNote,
 } from "../src/services/employee-records.service.js";
 
 const talId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
@@ -574,18 +573,6 @@ describe("employee records", () => {
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(listCreate).not.toHaveBeenCalled();
-  });
-
-  it("parses assignment notes for another employee's shopping", () => {
-    expect(parseAssignmentNote("טל צריך לקנות קופסת טונה")).toEqual({
-      targetLabel: "טל",
-      items: ["קופסת טונה"],
-    });
-    expect(parseAssignmentNote("כולם צריכים לקנות חלב וגבינה")).toEqual({
-      targetLabel: "כולם",
-      items: ["חלב", "גבינה"],
-    });
-    expect(parseAssignmentNote("לקנות מתנה")).toBeNull();
   });
 
   it("formats saved employee data for a new LLM conversation", () => {
@@ -1111,6 +1098,88 @@ describe("employee records", () => {
     });
   });
 
+  it("adds the FK-linked active reminder to a list item and nothing to unlinked items", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        listType: "tasks",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+        items: [
+          {
+            id: "task-milk",
+            data: { "שם מטלה": "לקנות חלב" },
+            scope: "personal",
+            reminderId: "rem-milk",
+          },
+          {
+            id: "task-stale",
+            data: { "שם מטלה": "להתקשר לבנק" },
+            scope: "personal",
+            reminderId: "rem-gone",
+          },
+          {
+            id: "task-gift",
+            data: { "שם מטלה": "לקנות מתנה" },
+            scope: "personal",
+            reminderId: null,
+          },
+          {
+            id: "task-speaker",
+            data: { "שם מטלה": "לבדוק שטויות" },
+            scope: "personal",
+            reminderId: null,
+            linkedReminderId: "rem-milk",
+          },
+        ],
+      },
+    ]);
+    reminderFindMany.mockResolvedValue([
+      {
+        id: "rem-milk",
+        itemLabel: "לקנות חלב",
+        listType: "tasks",
+        fireAt: new Date("2026-10-07T06:00:00.000Z"),
+        repeat: "none",
+        pingIds: [employeeId],
+        ownerId: employeeId,
+        messageText: "לקנות חלב",
+        status: "active",
+      },
+      {
+        id: "rem-gift-lookalike",
+        itemLabel: "לקנות מתנה",
+        listType: "tasks",
+        fireAt: new Date("2026-10-08T06:00:00.000Z"),
+        repeat: "none",
+        pingIds: [employeeId],
+        ownerId: employeeId,
+        messageText: "לקנות מתנה",
+        status: "active",
+      },
+    ]);
+
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    const items = snap.lists[0]?.items ?? [];
+    expect(items.find((item) => item.item_id === "task-milk")).toMatchObject({
+      reminder: {
+        reminder_id: "rem-milk",
+        fire_at: "2026-10-07 09:00",
+        repeat: "none",
+      },
+    });
+    expect(items.find((item) => item.item_id === "task-stale")).not.toHaveProperty(
+      "reminder",
+    );
+    expect(items.find((item) => item.item_id === "task-gift")).not.toHaveProperty(
+      "reminder",
+    );
+    expect(items.find((item) => item.item_id === "task-speaker")).toMatchObject({
+      reminder: { reminder_id: "rem-milk", fire_at: "2026-10-07 09:00" },
+    });
+  });
+
   it("includes empty shared custom lists with shared_with partners", async () => {
     listFindMany.mockResolvedValue([
       {
@@ -1302,19 +1371,21 @@ describe("employee records", () => {
     });
   });
 
-  it("hides leftover assignment tasks when the shopping item is gone", async () => {
+  it("keeps a «X צריך לקנות Y» task in the snapshot and never deletes it while reading", async () => {
     listFindMany.mockResolvedValue([
       {
         listType: "tasks",
         name: "",
-        scope: "personal",
+        scope: "shared",
         visibleTo: [],
-        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+        employee: { id: employeeId, name: "לוסי", nickname: "לוסי" },
         items: [
           {
-            data: { "שם מטלה": "טל צריך לקנות קופסת טונה" },
-            scope: "personal",
-            itemKey: "טל צריך לקנות קופסת טונה",
+            id: "lucy-apples",
+            data: { "שם מטלה": "להזכיר לעמית שערן צריך לקנות תפוחים" },
+            scope: "shared",
+            itemKey: "להזכיר לעמית שערן צריך לקנות תפוחים",
+            reminderId: null,
           },
         ],
       },
@@ -1322,11 +1393,14 @@ describe("employee records", () => {
     itemFindMany.mockResolvedValue([]);
     filingFindMany.mockResolvedValue([]);
 
-    await expect(getEmployeeRecordSnapshot(employeeId)).resolves.toEqual({
-      lists: [],
-      filing: [],
-      reminders: [],
-    });
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    expect(snap.lists[0]?.items).toEqual([
+      expect.objectContaining({
+        item_id: "lucy-apples",
+        "שם מטלה": "להזכיר לעמית שערן צריך לקנות תפוחים",
+      }),
+    ]);
+    expect(itemUpdateMany).not.toHaveBeenCalled();
   });
 
   it("emits watcher events when a shared item is added", async () => {

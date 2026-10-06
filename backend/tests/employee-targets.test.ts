@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { emptyLlmMetadata, type PublicEmployee } from "@workee/shared";
+import {
+  emptyLlmMetadata,
+  type LlmReminderAction,
+  type PublicEmployee,
+} from "@workee/shared";
 import {
   dropSpeakerTaskAddsForOutboundClocks,
   fallbackNotificationText,
@@ -543,6 +547,113 @@ describe("employee targets", () => {
     ).toBe(
       "טל הוסיף לך מטלה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
     );
+  });
+
+  it("lists every action for one recipient and keeps each clock on its own line", () => {
+    const eran: PublicEmployee = {
+      id: "eran-1",
+      name: "ערן",
+      surname: "",
+      nickname: "ערן",
+      email: null,
+      phone: null,
+    };
+    const clock = (item: string, ping: string, inSeconds: number): LlmReminderAction => ({
+      action: "add",
+      item,
+      listType: "tasks",
+      date: "",
+      time: "",
+      repeat: "once",
+      ping: [ping],
+      targets: [ping],
+      text: "",
+      inSeconds,
+      everyCount: null,
+      everyUnit: null,
+      weekdays: null,
+      confirmed: false,
+      compose: false,
+      composeSource: "",
+      composeLookbackHours: 0,
+      reminderId: "",
+    });
+    const plan = planTargetedActions({
+      actor: amit,
+      employees: [amit, eran],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לקנות תפוחים" }],
+            targets: ["ערן", "עמית"],
+          },
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לבדוק שזה עובד" }],
+            targets: ["ערן"],
+          },
+        ],
+        reminders: [
+          clock("ערן צריך לקנות תפוחים", "עמית", 7200),
+          clock("לבדוק שזה עובד", "ערן", 10800),
+        ],
+      },
+    });
+    const notify = plan.notifications.find((row) => row.employee.id === eran.id);
+    expect(
+      fallbackNotificationText(amit, notify!.metadata, { recipientIsOwner: true }),
+    ).toBe(
+      "עדכונים מעמית:\n• הוסיף לך מטלה: לקנות תפוחים\n• הוסיף לך מטלה: לבדוק שזה עובד\n• תזכורת אליך בעוד 3 שעות: לבדוק שזה עובד",
+    );
+  });
+
+  it("does not drop a clock that cannot hang on a single task", () => {
+    const reminder: LlmReminderAction = {
+      action: "add",
+      item: "לקנות תפוחים",
+      listType: "shopping",
+      date: "",
+      time: "",
+      repeat: "once",
+      ping: ["טל"],
+      targets: ["טל"],
+      text: "",
+      inSeconds: 3600,
+      everyCount: null,
+      everyUnit: null,
+      weekdays: null,
+      confirmed: false,
+      compose: false,
+      composeSource: "",
+      composeLookbackHours: 0,
+      reminderId: "",
+    };
+    expect(
+      fallbackNotificationText(amit, {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "תפוחים" }],
+            targets: [],
+          },
+        ],
+        reminders: [reminder],
+      }),
+    ).toBe(
+      "עדכונים מעמית:\n• הוסיף תפוחים לרשימת הקניות שלך\n• תזכורת אליך בעוד שעה: לקנות תפוחים",
+    );
+    expect(
+      fallbackNotificationText(amit, { ...emptyLlmMetadata(), reminders: [reminder] }),
+    ).toBe("עמית קבע לך תזכורת בעוד שעה: לקנות תפוחים");
   });
 
   it("notifies a shared custom-list partner with item and list names", () => {

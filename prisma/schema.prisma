@@ -162,8 +162,12 @@ model EmployeeListItem {
   reminderId    String?      @unique @map("reminder_id") @db.Uuid
   reminderClock Reminder?    @relation("ClockOwnsTask", fields: [reminderId], references: [id], onDelete: Cascade)
   ownedClock    Reminder?    @relation("TaskOwnsClock")
+  /** Same-turn clock for a speaker/shared item; deleting the clock keeps the item. */
+  linkedReminderId String?   @map("linked_reminder_id") @db.Uuid
+  linkedReminder   Reminder? @relation("ClockLinksItem", fields: [linkedReminderId], references: [id], onDelete: SetNull)
 
   @@index([listId, itemKey])
+  @@index([linkedReminderId])
   @@index([scope])
   @@index([deletedAt])
   @@map("EmployeeListItems")
@@ -220,6 +224,7 @@ model Reminder {
   actor     Employee @relation("ReminderActor", fields: [actorId], references: [id], onDelete: Restrict)
   workerItem EmployeeListItem? @relation("TaskOwnsClock", fields: [workerItemId], references: [id], onDelete: Cascade)
   ownedTask  EmployeeListItem? @relation("ClockOwnsTask")
+  linkedItems EmployeeListItem[] @relation("ClockLinksItem")
 
   @@index([userId, status, fireAt])
   @@index([ownerId, itemKey])

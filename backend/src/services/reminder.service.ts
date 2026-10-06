@@ -304,6 +304,63 @@ export async function linkRemindersToWorkerTasks(
   }
 }
 
+export interface LinkedItemRef {
+  id: string;
+  itemKey: string;
+  itemLabel: string;
+}
+
+/**
+ * Same-turn speaker/shared items (שוקו, לבדוק שטויות, תפוחים for ערן+עמית) ↔ the clock
+ * the model emitted in that turn. Labels must match — no lone-pair shortcut, because a
+ * turn can add an unrelated item next to a reminder.
+ */
+export function pairLinkedItemsToReminders(
+  reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
+  items: LinkedItemRef[],
+): Array<{ reminderId: string; itemId: string }> {
+  const pairs: Array<{ reminderId: string; itemId: string }> = [];
+  for (const item of items) {
+    const labels = [item.itemKey, item.itemLabel].filter((label) => label.trim());
+    const match =
+      reminders.find((reminder) =>
+        labels.some((label) => itemKey(label) === reminder.itemKey),
+      ) ??
+      reminders.find((reminder) =>
+        labels.some(
+          (label) =>
+            reminderLabelsMatch(reminder.itemLabel, label) ||
+            reminderLabelsMatch(reminder.itemKey, label),
+        ),
+      );
+    if (match) {
+      pairs.push({ reminderId: match.id, itemId: item.id });
+    }
+  }
+  return pairs;
+}
+
+export async function linkRemindersToItems(
+  reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
+  items: LinkedItemRef[],
+): Promise<void> {
+  if (reminders.length === 0 || items.length === 0 || !prisma.employeeListItem?.update) {
+    return;
+  }
+  for (const pair of pairLinkedItemsToReminders(reminders, items)) {
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: pair.itemId },
+        data: { linkedReminderId: pair.reminderId },
+      });
+    } catch (error) {
+      if (!isMissingTableError(error) && !isMissingRecord(error)) {
+        throw error;
+      }
+    }
+  }
+}
+
 function isMissingRecord(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025"
