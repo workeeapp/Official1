@@ -76,7 +76,7 @@ export const EMPLOYEE_NAME_MAX_LENGTH = 100;
 export const EMPLOYEE_EMAIL_MAX_LENGTH = 254;
 export const EMPLOYEE_PHONE_MAX_LENGTH = 32;
 export const EMPLOYEE_MODEL_MAX_LENGTH = 100;
-export const EMPLOYEE_INSTRUCTIONS_MAX_LENGTH = 50_000;
+export const EMPLOYEE_INSTRUCTIONS_MAX_LENGTH = 200_000;
 
 export interface EmployeeFieldErrors {
   kind?: string;
