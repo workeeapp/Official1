@@ -8,6 +8,7 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   sendWhatsAppTyping,
+  toWhatsAppFormatting,
   whatsappButtonsBody,
   whatsappTypingBody,
 } from "../src/services/whatsapp-send.js";
@@ -134,6 +135,20 @@ describe("WhatsApp webhook", () => {
         },
       },
     });
+  });
+
+  it("turns «quoted» parts into WhatsApp bold", () => {
+    expect(toWhatsAppFormatting("עמית מחק «באג» מרשימת «באגים»")).toBe(
+      "עמית מחק *באג* מרשימת *באגים*",
+    );
+    expect(toWhatsAppFormatting("מה לשלוח ל« מיכל »?")).toBe("מה לשלוח ל*מיכל*?");
+    expect(toWhatsAppFormatting("«לא סגור\nשורה»")).toBe("«לא סגור\nשורה»");
+    expect(toWhatsAppFormatting("«»")).toBe("«»");
+    expect(
+      (whatsappButtonsBody("972501234567", "הוספתי «חלב»", [
+        { label: "הצג", command: "הצג רשימת קניות" },
+      ]).interactive as { body: { text: string } }).body.text,
+    ).toBe("הוספתי *חלב*");
   });
 
   it("redacts tokens in the flow log", () => {

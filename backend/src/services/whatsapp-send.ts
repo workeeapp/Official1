@@ -93,6 +93,14 @@ export function startWhatsAppTyping(messageId: string): () => void {
   };
 }
 
+/**
+ * WhatsApp renders *text* as bold; product copy quotes with «…» (kept as-is in
+ * the DB and web chat). Bold markers must hug the text and stay on one line.
+ */
+export function toWhatsAppFormatting(text: string): string {
+  return text.replace(/«[^\S\n]*([^«»\n]*?[^\s«»])[^\S\n]*»/g, "*$1*");
+}
+
 export const WHATSAPP_BUTTON_BODY_MAX = 1024;
 const WHATSAPP_BUTTONS_FOLLOWUP_BODY = "לצפייה ברשימה";
 
@@ -107,7 +115,7 @@ export function whatsappButtonsBody(
     type: "interactive",
     interactive: {
       type: "button",
-      body: { text: body.slice(0, WHATSAPP_BUTTON_BODY_MAX) },
+      body: { text: toWhatsAppFormatting(body).slice(0, WHATSAPP_BUTTON_BODY_MAX) },
       action: {
         buttons: buttons.slice(0, REPLY_BUTTON_MAX).map((button) => ({
           type: "reply",
@@ -172,7 +180,7 @@ export async function sendWhatsAppText(
       messaging_product: "whatsapp",
       to: destination,
       type: "text",
-      text: { body: text.slice(0, 4096), preview_url: false },
+      text: { body: toWhatsAppFormatting(text).slice(0, 4096), preview_url: false },
     }),
     options,
   );
