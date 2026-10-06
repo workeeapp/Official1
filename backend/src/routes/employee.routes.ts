@@ -3,6 +3,7 @@ import {
   createEmployee,
   deleteEmployee,
   deleteEmployeeRecordItem,
+  getConfigFileDefaults,
   getDigitalDefaults,
   getEmployeeRecords,
   getEmployeeUsage,
@@ -18,6 +19,7 @@ export const employeeRouter = Router();
 
 employeeRouter.get("/", requireAuth, asyncHandler(listEmployees));
 employeeRouter.get("/digital-defaults", requireAuth, asyncHandler(getDigitalDefaults));
+employeeRouter.get("/config-defaults", requireAuth, asyncHandler(getConfigFileDefaults));
 employeeRouter.get("/usage", requireAuth, asyncHandler(getTeamUsage));
 employeeRouter.get("/:id/records", requireAuth, asyncHandler(getEmployeeRecords));
 employeeRouter.get("/:id/usage", requireAuth, asyncHandler(getEmployeeUsage));

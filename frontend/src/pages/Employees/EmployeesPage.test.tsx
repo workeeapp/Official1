@@ -14,9 +14,13 @@ const {
   updateRecordMock,
   deleteRecordMock,
   digitalDefaultsMock,
+  configFileDefaultsMock,
+  updateEmployeeMock,
   usageMock,
   teamUsageMock,
 } = vi.hoisted(() => ({
+  configFileDefaultsMock: vi.fn(),
+  updateEmployeeMock: vi.fn(),
   usageMock: vi.fn(),
   teamUsageMock: vi.fn(),
   meMock: vi.fn(),
@@ -44,8 +48,9 @@ vi.mock("@/services/employee.service", async () => {
     employeeApi: {
       list: listEmployeesMock,
       digitalDefaults: digitalDefaultsMock,
+      configFileDefaults: configFileDefaultsMock,
       create: vi.fn(),
-      update: vi.fn(),
+      update: updateEmployeeMock,
       remove: vi.fn(),
       records: recordsMock,
       usage: usageMock,
@@ -128,6 +133,12 @@ describe("Employees page", () => {
       temperature: 0,
       instructions: "You manage lists and filings.",
     });
+    configFileDefaultsMock.mockReset().mockResolvedValue({
+      model: "gpt-file-model",
+      temperature: 0.7,
+      instructions: "Prompt from LLM.config.json",
+    });
+    updateEmployeeMock.mockReset();
   });
 
   it("lists employees and keeps default actions disabled until a row is selected", async () => {
@@ -361,6 +372,56 @@ describe("Employees page", () => {
     );
     expect(
       screen.queryByRole("button", { name: "Inherit from Lucy" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("replaces only Lucy's on-screen prompt from the config file after confirm", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("לוסי · gpt-4.1-mini"));
+    await user.click(screen.getByRole("button", { name: "Update employee" }));
+    await user.click(screen.getByRole("button", { name: "Inherit Lucy config file" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Confirm change of existing prompt with LLM.config.json?\nPLEASE SAVE CURRENT PROMPT FOR BACKUP!",
+    );
+    expect(await screen.findByLabelText("Instructions")).toHaveValue(
+      "Prompt from LLM.config.json",
+    );
+    expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1-mini");
+    expect(screen.getByLabelText("Temperature")).toHaveValue(0);
+    expect(updateEmployeeMock).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("keeps the prompt when the config file replace is cancelled", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("לוסי · gpt-4.1-mini"));
+    await user.click(screen.getByRole("button", { name: "Update employee" }));
+    await user.click(screen.getByRole("button", { name: "Inherit Lucy config file" }));
+
+    expect(configFileDefaultsMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Instructions")).toHaveValue(
+      "You manage lists and filings.",
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("does not offer the config file prompt when adding a digital worker", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await user.click(await screen.findByRole("button", { name: "Add employee" }));
+    await user.click(screen.getByRole("button", { name: "Workee (digital)" }));
+    await screen.findByLabelText("Instructions");
+
+    expect(
+      screen.queryByRole("button", { name: "Inherit Lucy config file" }),
     ).not.toBeInTheDocument();
   });
 

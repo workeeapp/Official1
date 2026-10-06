@@ -46,6 +46,7 @@ export function EmployeeFormDialog({
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
   const [inheriting, setInheriting] = useState(false);
+  const [loadingConfigPrompt, setLoadingConfigPrompt] = useState(false);
   const [touched, setTouched] = useState({
     name: false,
     surname: false,
@@ -75,6 +76,27 @@ export function EmployeeFormDialog({
       setDefaultsError("Unable to load Lucy's prompt.");
     } finally {
       setInheriting(false);
+    }
+  }
+
+  // Replaces only the on-screen prompt; model, temperature and the DB wait for Save.
+  async function inheritConfigFilePrompt() {
+    const confirmed = window.confirm(
+      "Confirm change of existing prompt with LLM.config.json?\nPLEASE SAVE CURRENT PROMPT FOR BACKUP!",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setLoadingConfigPrompt(true);
+    setDefaultsError(null);
+    try {
+      const defaults = await employeeApi.configFileDefaults();
+      setInstructions(defaults.instructions);
+      setTouched((current) => ({ ...current, instructions: true }));
+    } catch {
+      setDefaultsError("Unable to load the config file prompt.");
+    } finally {
+      setLoadingConfigPrompt(false);
     }
   }
 
@@ -285,19 +307,34 @@ export function EmployeeFormDialog({
                     <p className="text-sm font-medium text-text-primary">
                       Instructions
                     </p>
-                    {employee?.protected ? null : (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="sm:w-auto"
-                        disabled={inheriting || submitting}
-                        onClick={() => {
-                          void inheritFromLucy();
-                        }}
-                      >
-                        {inheriting ? "Loading…" : "Inherit from Lucy"}
-                      </Button>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {employee?.protected ? null : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="sm:w-auto"
+                          disabled={inheriting || loadingConfigPrompt || submitting}
+                          onClick={() => {
+                            void inheritFromLucy();
+                          }}
+                        >
+                          {inheriting ? "Loading…" : "Inherit from Lucy"}
+                        </Button>
+                      )}
+                      {mode === "update" && employee ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="sm:w-auto"
+                          disabled={inheriting || loadingConfigPrompt || submitting}
+                          onClick={() => {
+                            void inheritConfigFilePrompt();
+                          }}
+                        >
+                          {loadingConfigPrompt ? "Loading…" : "Inherit Lucy config file"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                   <Textarea
                     id="employee-instructions"

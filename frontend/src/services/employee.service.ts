@@ -19,6 +19,10 @@ export const employeeApi = {
     return api<DigitalEmployeeDefaults>("/api/employees/digital-defaults");
   },
 
+  configFileDefaults(): Promise<DigitalEmployeeDefaults> {
+    return api<DigitalEmployeeDefaults>("/api/employees/config-defaults");
+  },
+
   create(input: EmployeeInput): Promise<{ employee: PublicEmployee }> {
     return api<{ employee: PublicEmployee }>("/api/employees", {
       method: "POST",

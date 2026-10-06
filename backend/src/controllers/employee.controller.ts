@@ -9,6 +9,7 @@ import {
 import {
   createEmployeeForUser,
   deleteEmployeeForUser,
+  getDigitalEmployeeDefaults,
   getLucyPromptDefaults,
   getEmployeeForUser,
   listEmployeesForUser,
@@ -42,6 +43,15 @@ export async function getDigitalDefaults(req: Request, res: Response): Promise<v
 
   // Prefer Lucy's saved prompt so "inherit from Lucy" matches what she actually runs.
   res.status(200).json(await getLucyPromptDefaults(req.user.id));
+}
+
+/** The shipped LLM.config.json base (not Lucy's saved DB prompt). */
+export async function getConfigFileDefaults(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+
+  res.status(200).json(getDigitalEmployeeDefaults());
 }
 
 export async function getEmployeeRecords(req: Request, res: Response): Promise<void> {
