@@ -241,6 +241,7 @@ describe("pending action hold", () => {
     ).toEqual({
       directory: [],
       lists: [],
+      listOps: [],
       reminders: [],
       filing: [],
       messages: [],

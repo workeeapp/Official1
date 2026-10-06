@@ -32,6 +32,96 @@ describe("custom list title_field", () => {
   });
 });
 
+describe("list_ops", () => {
+  const reply = (metadata: unknown) => JSON.stringify({ response: "", metadata });
+
+  it("parses alter_list and delete_list and drops ops without list_id", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        list_ops: [
+          {
+            action: "ALTER_LIST",
+            list_id: "l1",
+            new_name: " באגים ",
+            add_columns: ["עדיפות", "עדיפות", ""],
+            rename_columns: [{ from: "סטטוס", to: "מצב" }, { from: "x", to: "x" }],
+            remove_participants: ["טל"],
+          },
+          { action: "delete_list", list_id: "l2" },
+          { action: "delete_list" },
+          { action: "drop_list", list_id: "l3" },
+        ],
+      }),
+    );
+    expect(meta.listOps).toEqual([
+      {
+        action: "alter_list",
+        listId: "l1",
+        newName: "באגים",
+        addColumns: ["עדיפות"],
+        removeColumns: [],
+        renameColumns: [{ from: "סטטוס", to: "מצב" }],
+        addParticipants: [],
+        removeParticipants: ["טל"],
+      },
+      {
+        action: "delete_list",
+        listId: "l2",
+        newName: "",
+        addColumns: [],
+        removeColumns: [],
+        renameColumns: [],
+        addParticipants: [],
+        removeParticipants: [],
+      },
+    ]);
+  });
+
+  it("keeps a list_ops draft on a list_ops hold", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        hold: {
+          kind: "list_ops",
+          need: "confirm_delete",
+          list_ops: [{ action: "delete_list", list_id: "l2" }],
+        },
+      }),
+    );
+    expect(meta.hold?.kind).toBe("list_ops");
+    expect(meta.hold?.listOps?.[0]).toMatchObject({ action: "delete_list", listId: "l2" });
+  });
+
+  it("reads declared columns when a custom list is created", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "add",
+            list_type: "custom",
+            list_name: "חנויות",
+            columns: ["שם החנות", "עיר"],
+            items: [],
+          },
+        ],
+      }),
+    );
+    expect(meta.lists[0]?.columns).toEqual(["שם החנות", "עיר"]);
+  });
+
+  it("describes list ops for the action log", () => {
+    expect(
+      parseLlmReply(
+        reply({
+          list_ops: [
+            { action: "alter_list", list_id: "l1", new_name: "באגים" },
+            { action: "delete_list", list_id: "l2" },
+          ],
+        }),
+      ).actions,
+    ).toEqual(["Alter list: rename to באגים", "Delete list"]);
+  });
+});
+
 describe("parseLlmReply", () => {
   it("returns plain text when the reply is not JSON", () => {
     expect(parseLlmReply("Hello from the assistant")).toEqual({
@@ -249,6 +339,7 @@ describe("parseLlmReply", () => {
           targets: [],
         },
       ],
+      listOps: [],
       filing: [
         {
           action: "add_filing",

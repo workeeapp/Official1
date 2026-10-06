@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   listFindMany,
-  listFindUnique,
+  listFindFirst,
   listCreate,
   listUpdate,
   itemFindMany,
@@ -30,7 +30,7 @@ const {
   auditCreate,
 } = vi.hoisted(() => ({
   listFindMany: vi.fn(),
-  listFindUnique: vi.fn(),
+  listFindFirst: vi.fn(),
   listCreate: vi.fn(),
   listUpdate: vi.fn(),
   itemFindMany: vi.fn(),
@@ -62,7 +62,7 @@ vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     employeeList: {
       findMany: listFindMany,
-      findUnique: listFindUnique,
+      findFirst: listFindFirst,
       create: listCreate,
       update: listUpdate,
     },
@@ -134,7 +134,7 @@ const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 describe("employee records", () => {
   beforeEach(() => {
     listFindMany.mockReset().mockResolvedValue([]);
-    listFindUnique.mockReset();
+    listFindFirst.mockReset();
     listCreate.mockReset();
     listUpdate.mockReset();
     itemFindMany.mockReset().mockResolvedValue([]);
@@ -215,7 +215,7 @@ describe("employee records", () => {
       visibleTo: [talId, employeeId],
       deletedAt: null,
     };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindMany.mockResolvedValue([stored]);
     itemFindFirst.mockResolvedValue(stored);
     itemUpdate.mockResolvedValue({ id: "bug-1" });
@@ -424,7 +424,7 @@ describe("employee records", () => {
       deletedAt: null,
     };
     // Primary lookup uses a different/empty list name first.
-    listFindUnique.mockResolvedValue({
+    listFindFirst.mockResolvedValue({
       id: "empty-list",
       employeeId: talId,
       listType: "custom",
@@ -535,7 +535,7 @@ describe("employee records", () => {
       ],
     };
     listFindMany.mockResolvedValue([tasksList]);
-    listFindUnique.mockResolvedValue({
+    listFindFirst.mockResolvedValue({
       id: "tasks-1",
       employeeId,
       listType: "tasks",
@@ -666,7 +666,7 @@ describe("employee records", () => {
     const nonOwner = await getTeamSchedules(employeeId);
     expect(listFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { listType: "tasks", employeeId },
+        where: { listType: "tasks", deletedAt: null, employeeId },
       }),
     );
     expect(nonOwner).toEqual([
@@ -692,6 +692,7 @@ describe("employee records", () => {
       expect.objectContaining({
         where: {
           listType: "tasks",
+          deletedAt: null,
           employee: { userId: "user-1", kind: "human" },
         },
       }),
@@ -811,7 +812,7 @@ describe("employee records", () => {
 
   it("applies add, update, and remove actions for lists, tasks, and filings", async () => {
     const list = { id: "list-1", employeeId, listType: "shopping", name: "" };
-    listFindUnique.mockResolvedValueOnce(null).mockResolvedValue(list);
+    listFindFirst.mockResolvedValueOnce(null).mockResolvedValue(list);
     listCreate.mockResolvedValue(list);
     itemFindUnique
       .mockResolvedValueOnce(null)
@@ -936,7 +937,7 @@ describe("employee records", () => {
 
   it("updates the only task when the new name does not match the stored key", async () => {
     const list = { id: "lucy-tasks", employeeId, listType: "tasks", name: "" };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
       id: "task-1",
       listId: list.id,
@@ -976,7 +977,7 @@ describe("employee records", () => {
 
   it("notifies watchers and clears assignment tasks when the owner buys a shared item", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: list.id,
@@ -1200,6 +1201,7 @@ describe("employee records", () => {
     await expect(getEmployeeRecordSnapshot(employeeId)).resolves.toEqual({
       lists: [
         {
+          list_id: "bugs",
           list_type: "custom",
           list_name: "בעיות",
           owner: "עמית",
@@ -1211,6 +1213,46 @@ describe("employee records", () => {
       filing: [],
       reminders: [],
     });
+  });
+
+  it("exposes list_id, visible columns, and title_field; hides removed columns", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        id: "bugs",
+        listType: "custom",
+        name: "באגים",
+        titleField: "שם הבאג",
+        columns: ["שם הבאג", "עדיפות"],
+        hiddenColumns: ["עיר"],
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: null },
+        items: [
+          {
+            id: "bug-1",
+            itemKey: "כפתור",
+            data: { "שם הבאג": "כפתור", עיר: "חיפה", מצב: "פתוח" },
+            scope: "personal",
+          },
+        ],
+      },
+    ]);
+    employeeFindMany.mockResolvedValue([{ id: employeeId, name: "עמית", nickname: null }]);
+
+    const snapshot = await getEmployeeRecordSnapshot(employeeId);
+
+    expect(listFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+      }),
+    );
+    expect(snapshot.lists[0]).toMatchObject({
+      list_id: "bugs",
+      columns: ["שם הבאג", "עדיפות", "מצב"],
+      title_field: "שם הבאג",
+    });
+    expect(snapshot.lists[0]?.items[0]).toMatchObject({ "שם הבאג": "כפתור", מצב: "פתוח" });
+    expect(snapshot.lists[0]?.items[0]).not.toHaveProperty("עיר");
   });
 
   it("derives list_name from שם הרשימה when the list row name is empty", async () => {
@@ -1404,7 +1446,7 @@ describe("employee records", () => {
 
   it("emits watcher events when a shared item is added", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindUnique.mockResolvedValue(null);
     itemFindMany.mockResolvedValue([]);
     itemCreate.mockResolvedValue({ id: "tuna-1" });
@@ -1467,7 +1509,7 @@ describe("employee records", () => {
       visibleTo: [talId, employeeId],
       deletedAt: null,
     };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     listFindMany.mockResolvedValue([
       {
         id: "other-custom",
@@ -1520,13 +1562,12 @@ describe("employee records", () => {
       employeeId,
     );
 
-    expect(listFindUnique).toHaveBeenCalledWith({
+    expect(listFindFirst).toHaveBeenCalledWith({
       where: {
-        employeeId_listType_name: {
-          employeeId: talId,
-          listType: "custom",
-          name: "בעיות",
-        },
+        employeeId: talId,
+        listType: "custom",
+        name: "בעיות",
+        deletedAt: null,
       },
     });
     expect(itemUpdate).toHaveBeenCalledWith({
@@ -1554,7 +1595,7 @@ describe("employee records", () => {
       addedById: talId,
       visibleTo: [talId, employeeId],
     };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue(stored);
     itemFindMany.mockResolvedValue([stored]);
     itemUpdate.mockResolvedValue({ id: stored.id });
@@ -1604,7 +1645,7 @@ describe("employee records", () => {
 
   it("matches a shorter bought name to the saved shared item", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: list.id,
@@ -1645,7 +1686,7 @@ describe("employee records", () => {
 
   it("notifies assignment watchers when a bought item was not marked shared", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
-    listFindUnique.mockResolvedValue(list);
+    listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
       id: "tuna-1",
       listId: list.id,

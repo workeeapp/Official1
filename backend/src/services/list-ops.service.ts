@@ -207,7 +207,6 @@ async function alterList(
 
   // Working copy; order is fixed: column renames, removals, additions, list name, participants.
   const visible = visibleListColumns(list, list.items);
-  let declared = jsonStringList(list.columns);
   let hidden = jsonStringList(list.hiddenColumns);
   let titleField = list.titleField.trim();
 
@@ -219,9 +218,6 @@ async function alterList(
       throw new ListOpRefused("column_exists", rename.to);
     }
     visible.splice(visible.indexOf(rename.from), 1, rename.to);
-    declared = declared.includes(rename.from)
-      ? declared.map((key) => (key === rename.from ? rename.to : key))
-      : [...declared, rename.to];
     hidden = hidden.filter((key) => key !== rename.to);
     if (titleField === rename.from) {
       titleField = rename.to;
@@ -236,7 +232,6 @@ async function alterList(
       throw new ListOpRefused("title_column", column);
     }
     visible.splice(visible.indexOf(column), 1);
-    declared = declared.filter((key) => key !== column);
     if (!hidden.includes(column)) {
       hidden.push(column);
     }
@@ -247,7 +242,6 @@ async function alterList(
       throw new ListOpRefused("column_exists", column);
     }
     visible.push(column);
-    declared.push(column);
     hidden = hidden.filter((key) => key !== column);
   }
 
@@ -293,7 +287,7 @@ async function alterList(
       where: { id: list.id },
       data: {
         ...(renaming ? { name: newName } : {}),
-        ...(structural ? { columns: declared, hiddenColumns: hidden, titleField } : {}),
+        ...(structural ? { columns: visible, hiddenColumns: hidden, titleField } : {}),
         ...(participantsChanged ? { scope: nextScope, visibleTo: nextVisibleTo } : {}),
       },
     });

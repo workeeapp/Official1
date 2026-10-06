@@ -119,6 +119,16 @@
     "- PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» without naming a custom list → list_type tasks, targets [] — not a shared custom list like משימות לעבודה unless they named that list.",
     "",
     "------------------------------------------------------------",
+    "LIST MANAGEMENT (the list itself) — metadata.list_ops",
+    "------------------------------------------------------------",
+    "Rename a list, add/remove/rename columns, add/remove participants, or delete a whole list → metadata.list_ops (never metadata.lists).",
+    "- alter_list: ONE object per list with every requested change: new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty.",
+    "- delete_list: whole list. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it.",
+    "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, no list_ops.",
+    "- Before delete_list ask «למחוק את כל הרשימה «X»?» with hold { kind:\"list_ops\", need:\"confirm_delete\", list_ops:[{action:\"delete_list\", list_id}] }; emit delete_list only after yes.",
+    "- Only the owner can alter/delete; built-in lists allow participant changes only; the title_field column cannot be removed.",
+    "",
+    "------------------------------------------------------------",
     "MEETINGS (פגישות)",
     "------------------------------------------------------------",
     "A meeting/appointment (פגישה, ישיבה, meeting) is a tasks item, not a personal note for the speaker only.",
@@ -260,6 +270,11 @@
                       "type": "string",
                       "description": "Custom lists only. When this action creates a new custom list (list_name not yet in EMPLOYEE_SAVED_DATA): the exact column key that names each row (e.g. «שם הבאג»). Must be one of the list's columns. Ignored for lists that already exist."
                     },
+                    "columns": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Custom lists only, on creation: every column the user chose, in order. Ignored for lists that already exist — change columns with list_ops alter_list."
+                    },
                     "targets": {
                       "type": "array",
                       "items": {
@@ -286,6 +301,40 @@
                     "targets",
                     "items"
                   ]
+                }
+              },
+              "list_ops": {
+                "type": "array",
+                "description": "Changes to a whole list (not its rows). One object per list; put every change for that list in the same alter_list object.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["alter_list", "delete_list"]
+                    },
+                    "list_id": {
+                      "type": "string",
+                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Required — omitting it skips the op."
+                    },
+                    "new_name": { "type": "string", "description": "alter_list: new list name, or empty." },
+                    "add_columns": { "type": "array", "items": { "type": "string" } },
+                    "remove_columns": { "type": "array", "items": { "type": "string" } },
+                    "rename_columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "from": { "type": "string" },
+                          "to": { "type": "string" }
+                        },
+                        "required": ["from", "to"]
+                      }
+                    },
+                    "add_participants": { "type": "array", "items": { "type": "string" } },
+                    "remove_participants": { "type": "array", "items": { "type": "string" } }
+                  },
+                  "required": ["action", "list_id"]
                 }
               },
               "filing": {
@@ -440,9 +489,10 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["directory", "lists", "reminders", "filing", "messages"]
+                    "enum": ["directory", "lists", "list_ops", "reminders", "filing", "messages"]
                   },
                   "need": { "type": "string" },
+                  "list_ops": { "type": "array", "items": { "type": "object" } },
                   "directory": {
                     "type": "array",
                     "items": {

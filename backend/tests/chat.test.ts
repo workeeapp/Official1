@@ -499,7 +499,7 @@ describe("chat API", () => {
     );
     listFindMany.mockReset().mockResolvedValue([]);
     listFindUnique.mockReset().mockResolvedValue(null);
-    listFindFirst.mockReset().mockRejectedValue(new Error("not mocked"));
+    listFindFirst.mockReset().mockResolvedValue(null);
     itemFindMany.mockReset().mockResolvedValue([]);
     listCreate.mockReset().mockResolvedValue({
       id: "list-1",
@@ -1559,7 +1559,7 @@ describe("chat API", () => {
       }),
       raw: { output_text: "removed" },
     });
-    listFindUnique.mockResolvedValue({
+    listFindFirst.mockResolvedValue({
       id: "tal-shop",
       employeeId: otherEmployeeId,
       listType: "shopping",
@@ -1628,7 +1628,7 @@ describe("chat API", () => {
       }),
       raw: { output_text: "updated" },
     });
-    listFindUnique.mockResolvedValue({
+    listFindFirst.mockResolvedValue({
       id: "tal-shop",
       employeeId: otherEmployeeId,
       listType: "shopping",

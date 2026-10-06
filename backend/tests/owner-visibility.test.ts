@@ -92,7 +92,7 @@ describe("account owner visibility", () => {
     const snapshot = await getEmployeeRecordSnapshot(talId);
     expect(snapshot.reminders?.map((row) => row.item)).toEqual(["לשתות מים"]);
     expect(listFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { employeeId: talId } }),
+      expect.objectContaining({ where: { employeeId: talId, deletedAt: null } }),
     );
   });
 
@@ -147,7 +147,7 @@ describe("account owner visibility", () => {
     expect(snapshot.lists[0]?.owner).toBe("עמית");
     expect(listFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { employee: { userId, kind: "human" } },
+        where: { employee: { userId, kind: "human" }, deletedAt: null },
       }),
     );
     expect(itemFindMany).not.toHaveBeenCalled();
