@@ -6,6 +6,7 @@ import {
   isGuestEmployee,
   parseLlmReply,
   parseReplyMetadata,
+  toReplyButtons,
   type ChatHistoryResponse,
   type ChatThreadMessage,
   type ChatThreadNotification,
@@ -59,7 +60,12 @@ import {
   sweepJobNudgesForRemovedItems,
 } from "./jobs.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
-import { getLlmClient, toPlainJson, toResponsesCreateBody } from "./llm-client.js";
+import {
+  getLlmClient,
+  rememberInModelConversation,
+  toPlainJson,
+  toResponsesCreateBody,
+} from "./llm-client.js";
 import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
@@ -211,6 +217,7 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
   const actions = Array.isArray(row.actions)
     ? row.actions.filter((action): action is string => typeof action === "string")
     : [];
+  const buttons = toReplyButtons({ buttons: row.buttons });
 
   return {
     id: row.id,
@@ -219,6 +226,7 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     text: row.text,
     createdAt: row.createdAt.toISOString(),
     ...(actions.length > 0 ? { actions } : {}),
+    ...(buttons.length > 0 ? { buttons } : {}),
   };
 }
 
@@ -646,6 +654,7 @@ async function saveTurn(input: {
         speaker: input.assistantSpeaker,
         text: parsed.response,
         actions: Prisma.JsonNull,
+        buttons: parsed.buttons ? toJsonValue(parsed.buttons) : Prisma.JsonNull,
         raw: toJsonValue(packStoredLlmRaw(input.request, input.raw)),
         createdAt: assistantAt,
       },
@@ -746,6 +755,7 @@ async function pushRelayMessage(input: {
   const raw = { relay: true };
   const message = await saveAssistantMessage({
     conversationId: conversation.id,
+    modelConversationId: conversation.openaiConversationId,
     speaker: input.speaker,
     text: input.text,
     actions: [],
@@ -773,6 +783,8 @@ async function pushRelayMessage(input: {
 
 async function saveAssistantMessage(input: {
   conversationId: string;
+  /** Also record the text in this OpenAI conversation (server-sent messages). */
+  modelConversationId?: string;
   speaker: string;
   text: string;
   actions: string[];
@@ -788,6 +800,10 @@ async function saveAssistantMessage(input: {
       raw: toJsonValue(input.raw),
     },
   });
+
+  if (input.modelConversationId) {
+    await rememberInModelConversation(input.modelConversationId, input.text);
+  }
 
   return toThreadMessage(created);
 }
@@ -828,6 +844,7 @@ async function pushTargetNotification(input: {
   const raw = { notification: text };
   const message = await saveAssistantMessage({
     conversationId: conversation.id,
+    modelConversationId: conversation.openaiConversationId,
     speaker: input.assistantSpeaker ?? "Assistant",
     text,
     actions: [],

@@ -12,7 +12,7 @@ import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import { sendWhatsAppText, startWhatsAppTyping } from "./whatsapp-send.js";
+import { sendWhatsAppButtons, startWhatsAppTyping } from "./whatsapp-send.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -90,9 +90,16 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
           id?: unknown;
           from?: unknown;
           text?: { body?: unknown };
+          interactive?: { button_reply?: { id?: unknown } };
         };
-        const text =
-          typeof record.text?.body === "string" ? record.text.body.trim() : "";
+        const buttonCommand = record.interactive?.button_reply?.id;
+        const body =
+          typeof record.text?.body === "string"
+            ? record.text.body
+            : typeof buttonCommand === "string"
+              ? buttonCommand
+              : "";
+        const text = body.trim();
         const from = typeof record.from === "string" ? record.from : "";
         const messageId = typeof record.id === "string" ? record.id : "";
         if (text && from && messageId) {
@@ -157,10 +164,15 @@ export async function handleInboundWhatsAppTexts(
       if (handoff && handoff !== digital.name) {
         recordWhatsAppEvent("handoff", `worker=${handoff}`);
       }
-      const reply = parseLlmReply(turn.reply).response.trim();
-      recordWhatsAppEvent("llm_ok", `replyChars=${reply.length}`);
+      const parsed = parseLlmReply(turn.reply);
+      const reply = parsed.response.trim();
+      const buttons = parsed.buttons ?? [];
+      recordWhatsAppEvent(
+        "llm_ok",
+        `replyChars=${reply.length} buttons=${buttons.length}`,
+      );
       if (reply) {
-        const sendResult = await sendWhatsAppText(message.from, reply, {
+        const sendResult = await sendWhatsAppButtons(message.from, reply, buttons, {
           ignoreSession: true,
         });
         recordWhatsAppEvent("reply_send", `result=${sendResult}`);

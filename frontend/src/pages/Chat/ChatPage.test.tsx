@@ -185,6 +185,78 @@ describe("Chat page", () => {
     );
   });
 
+  it("shows a reply button that sends its command as the next message", async () => {
+    sendMock.mockResolvedValueOnce({
+      reply: JSON.stringify({
+        response: "הוספתי חלב לרשימת הקניות שלך",
+        metadata: {
+          lists: [{ action: "add", list_type: "shopping", targets: [], items: [{ "שם פריט": "חלב" }] }],
+          buttons: [{ label: "הצג", command: "הצג רשימת קניות" }],
+        },
+      }),
+      raw: {},
+    });
+    const user = userEvent.setup();
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await user.type(await screen.findByLabelText("Message"), "הוסיפי חלב לרשימת קניות");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const show = await within(await screen.findByTestId("chat-reply-buttons")).findByRole(
+      "button",
+      { name: "הצג" },
+    );
+    await user.click(show);
+
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ message: "הצג רשימת קניות" }),
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("shows saved reply buttons from history", async () => {
+    historyMock.mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages: [
+        {
+          id: "a1",
+          author: "assistant",
+          speaker: "לוסי",
+          text: "הוספתי משימה",
+          createdAt: new Date().toISOString(),
+          buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+        },
+      ],
+      raw: null,
+    });
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    const buttons = await screen.findByTestId("chat-reply-buttons");
+    expect(within(buttons).getByRole("button", { name: "הצג" })).toHaveAttribute(
+      "title",
+      "הצג רשימת מטלות",
+    );
+  });
+
   it("keeps the speaker message before the assistant when history timestamps tie", async () => {
     const sameTime = new Date().toISOString();
     historyMock.mockResolvedValue({

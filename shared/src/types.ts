@@ -1,3 +1,5 @@
+import type { LlmReplyButton } from "./llm-message.js";
+
 export interface PublicUser {
   id: string;
   username: string;
@@ -188,6 +190,7 @@ export interface ChatThreadMessage {
   text: string;
   createdAt?: string;
   actions?: string[];
+  buttons?: LlmReplyButton[];
   llmMs?: number;
   afterLlmMs?: number;
 }

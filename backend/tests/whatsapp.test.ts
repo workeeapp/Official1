@@ -8,6 +8,7 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   sendWhatsAppTyping,
+  whatsappButtonsBody,
   whatsappTypingBody,
 } from "../src/services/whatsapp-send.js";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
@@ -82,6 +83,57 @@ describe("WhatsApp webhook", () => {
     expect(listWhatsAppEvents().some((event) => event.step === "webhook_post")).toBe(
       true,
     );
+  });
+
+  it("reads a tapped reply button as the button's command", () => {
+    expect(
+      extractInboundTexts({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      id: "wamid.btn",
+                      from: "972501234567",
+                      type: "interactive",
+                      interactive: {
+                        type: "button_reply",
+                        button_reply: { id: "הצג רשימת קניות", title: "הצג" },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([
+      { from: "972501234567", text: "הצג רשימת קניות", messageId: "wamid.btn" },
+    ]);
+  });
+
+  it("builds an interactive reply-button message", () => {
+    expect(
+      whatsappButtonsBody("972501234567", "הוספתי חלב לרשימת הקניות שלך", [
+        { label: "הצג", command: "הצג רשימת קניות" },
+      ]),
+    ).toEqual({
+      messaging_product: "whatsapp",
+      to: "972501234567",
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: "הוספתי חלב לרשימת הקניות שלך" },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: "הצג רשימת קניות", title: "הצג" } },
+          ],
+        },
+      },
+    });
   });
 
   it("redacts tokens in the flow log", () => {

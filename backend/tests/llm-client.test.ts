@@ -1,9 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractUsage,
+  rememberInModelConversation,
+  setLlmClientForTests,
   toResponsesCreateBody,
   usesGpt6RequestRules,
 } from "../src/services/llm-client.js";
+
+describe("rememberInModelConversation", () => {
+  afterEach(() => {
+    setLlmClientForTests(null);
+  });
+
+  function clientWith(appendAssistantMessage: ReturnType<typeof vi.fn>) {
+    setLlmClientForTests({
+      createConversation: vi.fn(),
+      createResponse: vi.fn(),
+      appendAssistantMessage,
+    });
+  }
+
+  it("records a server-sent message in the model conversation", async () => {
+    const append = vi.fn().mockResolvedValue(undefined);
+    clientWith(append);
+    await rememberInModelConversation("conv_1", "  תזכורת: לקנות חלב ");
+    expect(append).toHaveBeenCalledWith("conv_1", "תזכורת: לקנות חלב");
+  });
+
+  it("skips an empty text or a missing conversation", async () => {
+    const append = vi.fn().mockResolvedValue(undefined);
+    clientWith(append);
+    await rememberInModelConversation("", "תזכורת");
+    await rememberInModelConversation("conv_1", "   ");
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("never throws when the model conversation cannot be updated", async () => {
+    clientWith(vi.fn().mockRejectedValue(new Error("busy")));
+    await expect(
+      rememberInModelConversation("conv_1", "תזכורת: לקנות חלב"),
+    ).resolves.toBeUndefined();
+  });
+});
 
 describe("extractUsage", () => {
   it("reads input, output, cached, reasoning, and total tokens", () => {

@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { formatAttributedOutbound } from "../src/services/outbound-text.js";
+import {
+  formatAttributedOutbound,
+  reminderSnoozeCommand,
+} from "../src/services/outbound-text.js";
+
+describe("reminderSnoozeCommand", () => {
+  it("asks for the same reminder again in 10 minutes", () => {
+    expect(
+      reminderSnoozeCommand({ item: "לקנות חלב", text: "", composeAtFire: false }),
+    ).toBe("נדנדי לי לקנות חלב בעוד 10 דקות");
+    expect(
+      reminderSnoozeCommand({ item: "לקנות חלב", text: "לקנות חלב", composeAtFire: false }),
+    ).toBe("נדנדי לי לקנות חלב בעוד 10 דקות");
+  });
+
+  it("has no snooze for a dictated message or a composed send", () => {
+    expect(
+      reminderSnoozeCommand({
+        item: "לשלוח הודעה לערן",
+        text: "ערן, אל תשכח את הפגישה",
+        composeAtFire: false,
+      }),
+    ).toBe("");
+    expect(
+      reminderSnoozeCommand({ item: "ברכת יום הולדת", text: "", composeAtFire: true }),
+    ).toBe("");
+  });
+});
 
 describe("formatAttributedOutbound", () => {
   it("leaves a self-reminder without who asked", () => {

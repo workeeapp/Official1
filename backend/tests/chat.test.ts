@@ -1695,6 +1695,10 @@ describe("chat API", () => {
     expect(response.body.notifications[0].message.text).toBe(
       "עמית שואל מה שלומך?\nמה לענות לו ?",
     );
+    expect(appendAssistantMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      "עמית שואל מה שלומך?\nמה לענות לו ?",
+    );
   });
 
   it("does not relay when the LLM omitted messages", async () => {

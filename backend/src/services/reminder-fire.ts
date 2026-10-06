@@ -3,18 +3,20 @@ import {
   digitalEmployees,
   isProtectedEmployee,
   parseStoredRepeat,
+  type LlmReplyButton,
 } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
 import { publishChatEvent } from "./chat-events.service.js";
+import { rememberInModelConversation } from "./llm-client.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
-import { formatAttributedOutbound } from "./outbound-text.js";
+import { formatAttributedOutbound, reminderSnoozeCommand } from "./outbound-text.js";
 import { composeScheduledOutbound } from "./reminder-compose.js";
 import { loadComposeFacts } from "./compose-facts.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import { sendWhatsAppText } from "./whatsapp-send.js";
+import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
 
 function pingIds(value: unknown): string[] {
@@ -274,6 +276,14 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         item: reminder.composeAtFire ? undefined : reminder.itemLabel,
         text: outboundBody,
       });
+      const snooze = reminderSnoozeCommand({
+        item: reminder.itemLabel,
+        text: outboundBody,
+        composeAtFire: reminder.composeAtFire,
+      });
+      const buttons: LlmReplyButton[] = snooze
+        ? [{ label: "נדנד", command: snooze }]
+        : [];
 
       if (target && speaker) {
         const conversation = await prisma.chatConversation.findUnique({
@@ -292,6 +302,11 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
               author: "assistant",
               speaker: speaker.nickname?.trim() || speaker.name,
               text,
+              ...(buttons.length > 0
+                ? {
+                    buttons: buttons.map(({ label, command }) => ({ label, command })),
+                  }
+                : {}),
               raw: { reminder: true },
             },
           });
@@ -304,9 +319,11 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
               speaker: created.speaker,
               text: created.text,
               createdAt: created.createdAt.toISOString(),
+              ...(buttons.length > 0 ? { buttons } : {}),
             },
             raw: { reminder: true },
           });
+          await rememberInModelConversation(conversation.openaiConversationId, text);
         }
       }
 
@@ -317,7 +334,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       );
       if (phone && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
         try {
-          const result = await sendWhatsAppText(phone, text, {
+          const result = await sendWhatsAppButtons(phone, text, buttons, {
             ignoreSession: true,
           });
           sendResults.push(result === "sent");

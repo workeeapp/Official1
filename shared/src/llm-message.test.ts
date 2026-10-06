@@ -46,6 +46,40 @@ describe("parseLlmReply", () => {
     expect(parsed.response).not.toContain("confirm");
   });
 
+  it("reads show buttons from metadata", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        response: "הוספתי חלב לרשימת הקניות שלך",
+        metadata: {
+          lists: [{ action: "add", list_type: "shopping", targets: [], items: [{ "שם פריט": "חלב" }] }],
+          buttons: [
+            { label: " הצג ", command: " הצג רשימת קניות " },
+            { label: "הצג", command: "הצג רשימת קניות" },
+            { label: "", command: "הצג רשימת מטלות" },
+            { label: "הצג", command: "" },
+            "bad",
+            { label: "הצג את הרשימה הארוכה מאוד", command: "הצג רשימת בעיות" },
+            { label: "הצג", command: "הצג רשימת מטלות" },
+            { label: "הצג", command: "הצג רשימת אנשי קשר" },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת קניות" },
+      { label: "הצג את הרשימה הארוכה", command: "הצג רשימת בעיות" },
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+  });
+
+  it("omits buttons when metadata has none", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({ response: "שלום", metadata: { lists: [], buttons: [] } }),
+    );
+    expect(parsed.buttons).toBeUndefined();
+  });
+
   it("ignores a null metadata action", () => {
     const parsed = parseLlmReply(
       JSON.stringify({

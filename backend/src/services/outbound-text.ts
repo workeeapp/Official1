@@ -17,6 +17,29 @@ function asInfinitive(value: string): string {
   return value;
 }
 
+export const REMINDER_SNOOZE_MINUTES = 10;
+
+/**
+ * Text a «נדנד» tap sends back as the recipient's next message. Only for a plain
+ * ping clock — not a dictated send to someone or a compose-at-fire message.
+ */
+export function reminderSnoozeCommand(input: {
+  item: string;
+  text: string;
+  composeAtFire: boolean;
+}): string {
+  if (input.composeAtFire) {
+    return "";
+  }
+  const dictated = input.text.trim();
+  const label = input.item.trim();
+  if (dictated && dictated !== label) {
+    return "";
+  }
+  const content = reminderLine(label, input.text).replace(/^תזכורת:\s*/u, "");
+  return content ? `נדנדי לי ${content} בעוד ${REMINDER_SNOOZE_MINUTES} דקות` : "";
+}
+
 export function formatAttributedOutbound(input: {
   actorName: string;
   destIsActor: boolean;

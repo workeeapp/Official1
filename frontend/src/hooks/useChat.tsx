@@ -227,6 +227,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               text: parsed.response,
               createdAt: new Date().toISOString(),
               actions: parsed.actions,
+              ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
               llmMs: timing?.llmMs,
               afterLlmMs: timing?.afterLlmMs,
             },

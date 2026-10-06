@@ -70,6 +70,10 @@ export {
   parseReportHistoryKinds,
   parseTargets,
   llmItemLabel,
+  toReplyButtons,
+  REPLY_BUTTON_MAX,
+  REPLY_BUTTON_LABEL_MAX,
+  REPLY_BUTTON_COMMAND_MAX,
 } from "./llm-message";
 export {
   addReminderInterval,
@@ -102,4 +106,5 @@ export type {
   LlmReminderActionName,
   LlmReminderRepeat,
   ParsedLlmMessage,
+  LlmReplyButton,
 } from "./llm-message";

@@ -1,4 +1,11 @@
-import { isDigitalEmployee, type PublicEmployee } from "@workee/shared";
+import {
+  isDigitalEmployee,
+  REPLY_BUTTON_COMMAND_MAX,
+  REPLY_BUTTON_LABEL_MAX,
+  REPLY_BUTTON_MAX,
+  type LlmReplyButton,
+  type PublicEmployee,
+} from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
@@ -86,9 +93,94 @@ export function startWhatsAppTyping(messageId: string): () => void {
   };
 }
 
+export const WHATSAPP_BUTTON_BODY_MAX = 1024;
+const WHATSAPP_BUTTONS_FOLLOWUP_BODY = "לצפייה ברשימה";
+
+export function whatsappButtonsBody(
+  destination: string,
+  body: string,
+  buttons: LlmReplyButton[],
+): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    to: destination,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: body.slice(0, WHATSAPP_BUTTON_BODY_MAX) },
+      action: {
+        buttons: buttons.slice(0, REPLY_BUTTON_MAX).map((button) => ({
+          type: "reply",
+          reply: {
+            id: button.command.slice(0, REPLY_BUTTON_COMMAND_MAX),
+            title: button.label.slice(0, REPLY_BUTTON_LABEL_MAX),
+          },
+        })),
+      },
+    },
+  };
+}
+
+/**
+ * Reply text with tap buttons. A tap comes back as an inbound message whose
+ * text is the button's command. Falls back to plain text if the interactive
+ * send fails.
+ */
+export async function sendWhatsAppButtons(
+  to: string,
+  text: string,
+  buttons: LlmReplyButton[],
+  options?: { ignoreSession?: boolean },
+): Promise<WhatsAppTextResult> {
+  if (buttons.length === 0) {
+    return sendWhatsAppText(to, text, options);
+  }
+
+  const fits = text.trim().length > 0 && text.length <= WHATSAPP_BUTTON_BODY_MAX;
+  if (!fits) {
+    const textResult = await sendWhatsAppText(to, text, options);
+    if (textResult !== "sent") {
+      return textResult;
+    }
+    await sendWhatsAppPayload(
+      to,
+      (destination) => whatsappButtonsBody(destination, WHATSAPP_BUTTONS_FOLLOWUP_BODY, buttons),
+      { ignoreSession: true },
+    );
+    return textResult;
+  }
+
+  const result = await sendWhatsAppPayload(
+    to,
+    (destination) => whatsappButtonsBody(destination, text, buttons),
+    options,
+  );
+  if (result === "failed") {
+    return sendWhatsAppText(to, text, options);
+  }
+  return result;
+}
+
 export async function sendWhatsAppText(
   to: string,
   text: string,
+  options?: { ignoreSession?: boolean },
+): Promise<WhatsAppTextResult> {
+  return sendWhatsAppPayload(
+    to,
+    (destination) => ({
+      messaging_product: "whatsapp",
+      to: destination,
+      type: "text",
+      text: { body: text.slice(0, 4096), preview_url: false },
+    }),
+    options,
+  );
+}
+
+async function sendWhatsAppPayload(
+  to: string,
+  payload: (destination: string) => Record<string, unknown>,
   options?: { ignoreSession?: boolean },
 ): Promise<WhatsAppTextResult> {
   const env = getEnv();
@@ -116,12 +208,7 @@ export async function sendWhatsAppText(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: destination,
-        type: "text",
-        text: { body: text.slice(0, 4096), preview_url: false },
-      }),
+      body: JSON.stringify(payload(destination)),
     },
   );
 

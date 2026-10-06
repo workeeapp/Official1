@@ -53,7 +53,8 @@
     "        \"date\": \"<YYYY-MM-DD on counter, else empty>\",",
     "        \"in\": null",
     "      }",
-    "    ]",
+    "    ],",
+    "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ]",
     "  }",
     "}",
     "",
@@ -527,6 +528,19 @@
               },
               "confirm": {
                 "type": ["boolean", "null"]
+              },
+              "buttons": {
+                "type": "array",
+                "description": "Tap buttons shown under response (web + WhatsApp). Max 3. A tap sends command back as the speaker's next message.",
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": { "type": "string", "description": "Short button text, max 20 characters (e.g. הצג)." },
+                    "command": { "type": "string", "description": "Exact text sent as the next message on tap (e.g. הצג רשימת קניות)." }
+                  },
+                  "required": ["label", "command"]
+                }
               }
             }
           }

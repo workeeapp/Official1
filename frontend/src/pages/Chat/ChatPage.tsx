@@ -123,6 +123,14 @@ export function ChatPage() {
     }
 
     setDraft("");
+    await sendText(text);
+  }
+
+  async function sendText(text: string) {
+    if (!text || sending || !selectedEmployee) {
+      return;
+    }
+
     keepComposerFocusRef.current = true;
     composerRef.current?.focus();
     await send({
@@ -323,6 +331,26 @@ export function ChatPage() {
                       </span>
                     ) : null}
                   </p>
+                  {message.author === "assistant" && message.buttons?.length ? (
+                    <div
+                      data-testid="chat-reply-buttons"
+                      className="mt-2 flex flex-wrap gap-2"
+                    >
+                      {message.buttons.map((button) => (
+                        <button
+                          key={button.command}
+                          type="button"
+                          dir="auto"
+                          title={button.command}
+                          disabled={sending || !selectedEmployee}
+                          onClick={() => void sendText(button.command)}
+                          className="min-h-11 rounded-xl border border-primary/40 bg-surface px-4 text-sm font-medium text-primary shadow-sm transition-colors hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                        >
+                          {button.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
               </div>

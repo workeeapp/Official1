@@ -66,6 +66,26 @@ export function setLlmClientForTests(client: LlmClient | null): void {
   override = client;
 }
 
+/**
+ * Put a server-sent thread message (reminder fire, notification, relay) into the
+ * model conversation so the next turn does not contradict it from stale memory.
+ * Memory only: a failure here must never block delivery of the message itself.
+ */
+export async function rememberInModelConversation(
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!conversationId || !trimmed) {
+    return;
+  }
+  try {
+    await getLlmClient().appendAssistantMessage?.(conversationId, trimmed);
+  } catch {
+    /* best effort */
+  }
+}
+
 export function extractOutputText(response: {
   output_text?: string;
   output?: Array<{

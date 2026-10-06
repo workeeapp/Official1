@@ -1,9 +1,20 @@
 import { parseReminderInterval } from "./reminder-interval.js";
 
+export interface LlmReplyButton {
+  label: string;
+  /** Sent back verbatim as the speaker's next message when tapped. */
+  command: string;
+}
+
 export interface ParsedLlmMessage {
   response: string;
   actions: string[];
+  buttons?: LlmReplyButton[];
 }
+
+export const REPLY_BUTTON_MAX = 3;
+export const REPLY_BUTTON_LABEL_MAX = 20;
+export const REPLY_BUTTON_COMMAND_MAX = 256;
 
 export type LlmListType = "shopping" | "contacts" | "tasks" | "custom";
 export type LlmListActionName = "add" | "remove" | "update";
@@ -1171,10 +1182,45 @@ export function parseLlmReply(text: string): ParsedLlmMessage {
     return { response: text, actions: [] };
   }
 
+  const buttons = toReplyButtons(payload.rawMetadata);
   return {
     response: payload.response,
     actions: collectActionDescriptions(payload.rawMetadata),
+    ...(buttons.length > 0 ? { buttons } : {}),
   };
+}
+
+export function toReplyButtons(rawMetadata: unknown): LlmReplyButton[] {
+  if (!rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+    return [];
+  }
+  const raw = (rawMetadata as { buttons?: unknown }).buttons;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const buttons: LlmReplyButton[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const { label, command } = entry as { label?: unknown; command?: unknown };
+    if (typeof label !== "string" || typeof command !== "string") {
+      continue;
+    }
+    const cleanLabel = label.trim().slice(0, REPLY_BUTTON_LABEL_MAX);
+    const cleanCommand = command.trim().slice(0, REPLY_BUTTON_COMMAND_MAX);
+    if (!cleanLabel || !cleanCommand) {
+      continue;
+    }
+    if (buttons.some((button) => button.command === cleanCommand)) {
+      continue;
+    }
+    buttons.push({ label: cleanLabel, command: cleanCommand });
+    if (buttons.length === REPLY_BUTTON_MAX) {
+      break;
+    }
+  }
+  return buttons;
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | null {
