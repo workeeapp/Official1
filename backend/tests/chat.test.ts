@@ -1542,7 +1542,7 @@ describe("chat API", () => {
     );
   });
 
-  it("notifies the person who added a shared item when the owner buys it", async () => {
+  it("notifies the person who added a shared item when the owner deletes it", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
         response: "הסרתי את הטונה מרשימת הקניות",
@@ -1605,7 +1605,9 @@ describe("chat API", () => {
     });
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(employeeId);
-    expect(response.body.notifications[0].message.text).toBe("טל קנה קופסת טונה");
+    expect(response.body.notifications[0].message.text).toBe(
+      "טל מחק «קופסת טונה» מרשימת «קניות»",
+    );
   });
 
   it("notifies the other employee when a shared item is updated", async () => {

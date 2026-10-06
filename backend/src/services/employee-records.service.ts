@@ -1808,8 +1808,6 @@ async function applyListAction(
             filing: [],
           },
           listOwnerId: employeeId,
-          purchased:
-            resolvedAction.listType === "shopping" && actorId === employeeId,
         });
       }
       continue;

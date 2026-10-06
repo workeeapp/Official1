@@ -929,7 +929,6 @@ export function fallbackNotificationText(
     list ? { ...metadata, lists: [list] } : metadata,
   );
   const itemText = items.join(" ו") || "פריט";
-  const purchased = options?.purchased ?? options?.completed;
   const yours = options?.recipientIsOwner !== false;
   const ownerList = yours
     ? "שלך"
@@ -983,10 +982,7 @@ export function fallbackNotificationText(
 
   if (list?.listType === "shopping") {
     if (list.action === "remove") {
-      if (purchased) {
-        return `${actorName} קנה ${itemText}`;
-      }
-      return `${actorName} הסיר ${itemText} מרשימת הקניות ${ownerList}`.trim();
+      return `${actorName} מחק ${formatQuotedItems(items)} מרשימת «קניות»`;
     }
     if (list.action === "update") {
       return `${actorName} עדכן ${itemText} ברשימת הקניות ${ownerList}`.trim();

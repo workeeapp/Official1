@@ -1021,7 +1021,6 @@ describe("employee records", () => {
           filing: [],
         },
         listOwnerId: talId,
-        purchased: true,
       },
     ]);
     expect(itemUpdate).toHaveBeenCalledWith({
@@ -1637,7 +1636,7 @@ describe("employee records", () => {
     );
 
     expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
-    expect(events[0]?.purchased).toBe(true);
+    expect(events[0]?.purchased).toBeUndefined();
     expect(itemUpdate).toHaveBeenCalledWith({
       where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
@@ -1679,7 +1678,7 @@ describe("employee records", () => {
     );
 
     expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
-    expect(events[0]?.purchased).toBe(true);
+    expect(events[0]?.purchased).toBeUndefined();
   });
 
   it("notifies watchers when a shared item is updated from employee records", async () => {

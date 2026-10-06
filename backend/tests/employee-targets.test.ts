@@ -1252,7 +1252,7 @@ describe("employee targets", () => {
     ]);
   });
 
-  it("builds a purchase notification when someone buys a shared item", () => {
+  it("builds a delete notification when someone removes a shared shopping item", () => {
     expect(
       fallbackNotificationText(
         tal,
@@ -1270,7 +1270,7 @@ describe("employee targets", () => {
         },
         { completed: true },
       ),
-    ).toBe("טל קנה קופסת טונה");
+    ).toBe("טל מחק «קופסת טונה» מרשימת «קניות»");
   });
 
   it("never echoes a raw item_id in a custom-list remove notification", () => {
