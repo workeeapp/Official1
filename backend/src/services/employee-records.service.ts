@@ -33,8 +33,13 @@ export interface ItemVisibility {
 
 export interface EmployeeRecordSnapshot {
   lists: Array<{
+    /** Copy into list_ops.list_id for alter_list / delete_list. */
+    list_id?: string;
     list_type: string;
     list_name?: string;
+    /** Custom lists only: visible columns and the column that names each row. */
+    columns?: string[];
+    title_field?: string;
     owner: string;
     scope: ItemScope;
     /** Partner display names when scope is shared (includes owner). */
@@ -131,6 +136,50 @@ export function mergeListItemData(
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
   return normalizeListItemData({ ...existing, ...patch });
+}
+
+export function jsonStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim() !== "",
+      )
+    : [];
+}
+
+/** Custom list columns: declared + seen in live rows, minus removed (hidden) columns. */
+export function visibleListColumns(
+  list: { columns?: unknown; hiddenColumns?: unknown },
+  items: Array<{ data: unknown }>,
+): string[] {
+  const hidden = new Set(jsonStringList(list.hiddenColumns));
+  const columns: string[] = [];
+  const push = (key: string) => {
+    if (!hidden.has(key) && !columns.includes(key)) {
+      columns.push(key);
+    }
+  };
+  for (const key of jsonStringList(list.columns)) {
+    push(key);
+  }
+  for (const item of items) {
+    for (const key of Object.keys(normalizeListItemData(asRecord(item.data)))) {
+      push(key);
+    }
+  }
+  return columns;
+}
+
+export function withoutHiddenColumns(
+  data: Record<string, unknown>,
+  hiddenColumns: unknown,
+): Record<string, unknown> {
+  const hidden = jsonStringList(hiddenColumns);
+  if (hidden.length === 0) {
+    return data;
+  }
+  return Object.fromEntries(
+    Object.entries(data).filter(([key]) => !hidden.includes(key)),
+  );
 }
 
 function firstCustomDataValue(item: Record<string, unknown>): string {
@@ -558,6 +607,7 @@ export async function getTeamSchedules(
   const lists = await prisma.employeeList.findMany({
     where: {
       listType: "tasks",
+      deletedAt: null,
       ...listWhere,
     },
     include: {
@@ -610,7 +660,7 @@ export async function getEmployeeOwnedRecords(
 ): Promise<EmployeeRecordsResponse> {
   const [lists, filings] = await Promise.all([
     prisma.employeeList.findMany({
-      where: { employeeId },
+      where: { employeeId, deletedAt: null },
       include: {
         employee: { select: { name: true, nickname: true } },
         items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
@@ -642,7 +692,13 @@ export async function getEmployeeOwnedRecords(
         type: list.listType,
         title: listTitle(list.listType, titleName),
         items: list.items.map((item) =>
-          toOwnedListItem(list.listType, item, names, ownerName, list.titleField),
+          toOwnedListItem(
+            list.listType,
+            { ...item, data: withoutHiddenColumns(asRecord(item.data), list.hiddenColumns) },
+            names,
+            ownerName,
+            list.titleField,
+          ),
         ),
       };
     });
@@ -755,7 +811,7 @@ export async function getEmployeeRecordSnapshot(
   const [ownListsRaw, sharedItems, partnerLists, ownFilings, partnerFilings, reminderRows, people] =
     await Promise.all([
     prisma.employeeList.findMany({
-      where: listWhere,
+      where: { ...listWhere, deletedAt: null },
       include: {
         employee: { select: { id: true, name: true, nickname: true } },
         items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
@@ -782,6 +838,7 @@ export async function getEmployeeRecordSnapshot(
       : prisma.employeeList.findMany({
           where: {
             scope: "shared",
+            deletedAt: null,
             employeeId: { not: employeeId },
           },
           include: {
@@ -913,8 +970,12 @@ export async function getEmployeeRecordSnapshot(
     }
     pushSnapshotList(
       toListSnapshotEntry({
+        listId: list.id,
         listType: list.listType,
         listName: list.name,
+        titleField: list.titleField,
+        columns: list.columns,
+        hiddenColumns: list.hiddenColumns,
         ownerId: list.employee.id,
         ownerName: list.employee.nickname?.trim() || list.employee.name,
         scope: list.scope === "shared" ? "shared" : "personal",
@@ -932,8 +993,12 @@ export async function getEmployeeRecordSnapshot(
     }
     pushSnapshotList(
       toListSnapshotEntry({
+        listId: list.id,
         listType: list.listType,
         listName: list.name,
+        titleField: list.titleField,
+        columns: list.columns,
+        hiddenColumns: list.hiddenColumns,
         ownerId: list.employee.id,
         ownerName: list.employee.nickname?.trim() || list.employee.name,
         scope: "shared",
@@ -1625,13 +1690,12 @@ async function applyListAction(
     resolvedAction.listType === "custom" &&
     Boolean(listName.trim());
 
-  const existingList = await prisma.employeeList.findUnique({
+  const existingList = await prisma.employeeList.findFirst({
     where: {
-      employeeId_listType_name: {
-        employeeId,
-        listType: resolvedAction.listType,
-        name: listName,
-      },
+      employeeId,
+      listType: resolvedAction.listType,
+      name: listName,
+      deletedAt: null,
     },
   });
   const createdList = !existingList;
@@ -1644,6 +1708,10 @@ async function applyListAction(
         name: listName,
         ...(resolvedAction.listType === "custom" && resolvedAction.titleField
           ? { titleField: resolvedAction.titleField }
+          : {}),
+        ...(resolvedAction.listType === "custom" &&
+        (resolvedAction.columns?.length ?? 0) > 0
+          ? { columns: resolvedAction.columns }
           : {}),
         ...(listShare
           ? { scope: "shared", visibleTo: visibility.visibleTo }
@@ -1672,13 +1740,12 @@ async function applyListAction(
     list.name.trim() === "" &&
     resolvedAction.listType === "custom"
   ) {
-    const clash = await prisma.employeeList.findUnique({
+    const clash = await prisma.employeeList.findFirst({
       where: {
-        employeeId_listType_name: {
-          employeeId,
-          listType: "custom",
-          name: listName,
-        },
+        employeeId,
+        listType: "custom",
+        name: listName,
+        deletedAt: null,
       },
     });
     if (!clash || clash.id === list.id) {
@@ -2008,7 +2075,7 @@ async function resolveListActionAgainstSaved(
   }
 
   const lists = await prisma.employeeList.findMany({
-    where: { employeeId },
+    where: { employeeId, deletedAt: null },
     include: { items: { where: { deletedAt: null } } },
   });
   const hits: Array<{ listType: string; name: string }> = [];
@@ -2150,7 +2217,7 @@ async function findCustomItemAcrossEmployeeLists(
   };
 } | null> {
   const lists = await prisma.employeeList.findMany({
-    where: { employeeId, listType: "custom" },
+    where: { employeeId, listType: "custom", deletedAt: null },
     include: { items: { where: { deletedAt: null } } },
   });
   const preferred = preferredListName?.trim() ?? "";
@@ -2208,6 +2275,7 @@ export async function removeVisibleCustomItems(input: {
   const lists = await prisma.employeeList.findMany({
     where: {
       listType: "custom",
+      deletedAt: null,
       employee: { userId: input.userId, kind: "human" },
     },
     include: {
@@ -2474,8 +2542,12 @@ function sharedWithNames(
 }
 
 function toListSnapshotEntry(input: {
+  listId?: string;
   listType: string;
   listName: string;
+  titleField?: string;
+  columns?: unknown;
+  hiddenColumns?: unknown;
   ownerId: string;
   ownerName: string;
   scope: ItemScope;
@@ -2499,7 +2571,7 @@ function toListSnapshotEntry(input: {
   const items = input.items
     .map((item) =>
       withVisibility(
-        item.data,
+        withoutHiddenColumns(asRecord(item.data), input.hiddenColumns),
         item.scope === "shared" || input.scope === "shared"
           ? "shared"
           : "personal",
@@ -2518,9 +2590,21 @@ function toListSnapshotEntry(input: {
       return null;
     }
   }
+  const columns =
+    input.listType === "custom"
+      ? visibleListColumns(
+          { columns: input.columns, hiddenColumns: input.hiddenColumns },
+          input.items,
+        )
+      : [];
+  const titleField =
+    input.listType === "custom" ? (input.titleField ?? "").trim() : "";
   return {
+    ...(input.listId ? { list_id: input.listId } : {}),
     list_type: input.listType,
     ...(derivedName ? { list_name: derivedName } : {}),
+    ...(columns.length > 0 ? { columns } : {}),
+    ...(titleField ? { title_field: titleField } : {}),
     owner: input.ownerName,
     scope: input.scope,
     ...(input.scope === "shared"

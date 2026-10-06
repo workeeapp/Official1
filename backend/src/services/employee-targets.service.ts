@@ -1055,7 +1055,7 @@ function isAllTarget(rawTargets: string[]): boolean {
   return rawTargets.some((target) => ALL_TARGET_TOKENS.test(target.trim()));
 }
 
-function matchEmployee(
+export function matchEmployee(
   raw: string,
   employees: PublicEmployee[],
 ): PublicEmployee | undefined {

@@ -93,7 +93,7 @@ function samePeople(
 
 async function tasksListIdFor(employeeId: string): Promise<string | null> {
   const existing = await prisma.employeeList.findFirst({
-    where: { employeeId, listType: "tasks", name: "" },
+    where: { employeeId, listType: "tasks", name: "", deletedAt: null },
   });
   if (existing) {
     return existing.id;

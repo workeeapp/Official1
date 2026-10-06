@@ -38,6 +38,11 @@ import {
 } from "./employee-records.service.js";
 import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import {
+  applyListOps,
+  formatListOpFallback,
+  formatListOpRefusals,
+} from "./list-ops.service.js";
+import {
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
@@ -1425,6 +1430,16 @@ export async function sendChatMessage(input: {
       ...metadata,
       lists: listPlan.applyLists,
     };
+    // Before item-level lists so a same-turn rename/delete is visible to them.
+    const listOpResults =
+      guestSpeaker || cancelledAwaitingHold
+        ? []
+        : await applyListOps({
+            userId: input.userId,
+            actor: employee,
+            employees: humans,
+            ops: metadata.listOps ?? [],
+          });
     const sharedLists = await listSharedCustomListsForActor(
       input.userId,
       employee.id,
@@ -1449,7 +1464,9 @@ export async function sendChatMessage(input: {
     const collectedEvents: SharedItemEvent[] = [];
     const listMutations: ListItemMutation[] = [];
     const filingMutations: FilingMutation[] = [];
-    const cancelledReminders: string[] = [];
+    const cancelledReminders: string[] = listOpResults.flatMap(
+      (row) => row.cancelledReminders,
+    );
     for (const application of plan.applications) {
       const applied = await applyEmployeeRecords(
         application.employeeId,
@@ -1482,6 +1499,7 @@ export async function sendChatMessage(input: {
     const guestMutationNotice =
       guestSpeaker &&
       ((metadata.lists?.length ?? 0) > 0 ||
+        (metadata.listOps?.length ?? 0) > 0 ||
         (metadata.filing?.length ?? 0) > 0 ||
         (metadata.reminders?.length ?? 0) > 0 ||
         (metadata.directory?.length ?? 0) > 0 ||
@@ -1512,6 +1530,7 @@ export async function sendChatMessage(input: {
       listDeleteNext: listPlan.nextPending,
       directory: guestSpeaker ? [] : metadata.directory ?? [],
       lists: guestSpeaker ? [] : metadata.lists ?? [],
+      listOps: guestSpeaker ? [] : metadata.listOps ?? [],
       reminders: guestSpeaker ? [] : metadata.reminders ?? [],
       filing: guestSpeaker ? [] : metadata.filing ?? [],
       messages: guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
@@ -1696,6 +1715,28 @@ export async function sendChatMessage(input: {
       notifications.push(notification);
     }
     sharedWhatsAppSkips.push(...sharedNotify.whatsappSkips);
+
+    const listOpRelays = listOpResults.flatMap((result) =>
+      result.notices.flatMap((notice) => {
+        const target = humans.find((row) => row.id === notice.employeeId);
+        return target ? [{ target, text: notice.text }] : [];
+      }),
+    );
+    for (const relay of listOpRelays) {
+      notifications.push(
+        await pushRelayMessage({
+          userId: input.userId,
+          employeeId: relay.target.id,
+          digitalEmployeeId: digital.id,
+          speaker: assistantSpeaker,
+          text: relay.text,
+        }),
+      );
+    }
+    if (listOpRelays.length > 0) {
+      const listOpDelivery = await deliverWhatsAppRelays(listOpRelays, employee.id);
+      sharedWhatsAppSkips.push(...listOpDelivery.skips);
+    }
 
     const actorName = speakerName(employee);
     const attributedRelays = outbound.relays.map((relay) => ({
@@ -1887,6 +1928,7 @@ export async function sendChatMessage(input: {
           : metadata.confirm === true
             ? "בוצע."
             : "") ||
+        formatListOpFallback(listOpResults) ||
         formatAppliedMutationFallback(listMutations, filingMutations);
       if (fallback) {
         workingReply = setEngineResponse(workingReply, fallback);
@@ -1921,6 +1963,14 @@ export async function sendChatMessage(input: {
       workingReply = setEngineResponse(
         workingReply,
         formatAppliedMutationFallback(listMutations, filingMutations),
+      );
+    }
+    // The model already said «שיניתי/מחקתי» — correct it when the engine refused the list op.
+    const listOpRefusal = formatListOpRefusals(listOpResults);
+    if (listOpRefusal) {
+      workingReply = setEngineResponse(
+        workingReply,
+        [formatListOpFallback(listOpResults), listOpRefusal].filter(Boolean).join("\n"),
       );
     }
     // Do not append apply-summary lines — the spoken reply is the model's response only.
@@ -2040,6 +2090,7 @@ async function listSharedCustomListsForActor(
   const rows = await prisma.employeeList.findMany({
     where: {
       listType: "custom",
+      deletedAt: null,
       employee: { userId, kind: "human" },
       OR: [{ employeeId: actorId }, { scope: "shared" }],
     },

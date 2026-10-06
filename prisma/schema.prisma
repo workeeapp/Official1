@@ -136,16 +136,23 @@ model EmployeeList {
   name       String             @default("") @db.VarChar(100)
   /// Custom lists: data key that names each row (set by the model when the list is created).
   titleField String             @default("") @map("title_field") @db.VarChar(100)
+  /// Custom lists: declared column names, in order.
+  columns    Json               @default("[]")
+  /// Custom lists: removed columns. Values stay in item data but are hidden from the model and UI.
+  hiddenColumns Json            @default("[]") @map("hidden_columns")
   scope      String             @default("personal") @db.VarChar(16)
   visibleTo  Json               @default("[]") @map("visible_to")
+  deletedAt  DateTime?          @map("deleted_at")
   createdAt  DateTime           @default(now()) @map("created_at")
   updatedAt  DateTime           @updatedAt @map("updated_at")
   employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   items      EmployeeListItem[]
 
-  @@unique([employeeId, listType, name])
+  /// Name uniqueness is a partial index (deleted_at IS NULL) in the migration.
+  @@index([employeeId, listType, name])
   @@index([employeeId])
   @@index([scope])
+  @@index([deletedAt])
   @@map("EmployeeLists")
 }
 

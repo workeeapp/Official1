@@ -4,6 +4,8 @@ export type AuditAction =
   | "list_add"
   | "list_update"
   | "list_remove"
+  | "list_alter"
+  | "list_delete"
   | "filing_add"
   | "filing_update"
   | "filing_remove"
@@ -30,6 +32,8 @@ const HISTORY_ACTIONS: AuditAction[] = [
   "list_add",
   "list_update",
   "list_remove",
+  "list_alter",
+  "list_delete",
   "filing_add",
   "filing_update",
   "filing_remove",

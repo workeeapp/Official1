@@ -26,8 +26,30 @@ export interface LlmListAction {
   listName: string;
   /** Custom lists: column that names each row; stored only when the list is created. */
   titleField?: string;
+  /** Custom lists: declared columns; stored only when the list is created. */
+  columns?: string[];
   items: Record<string, unknown>[];
   targets: string[];
+}
+
+export type LlmListOpName = "alter_list" | "delete_list";
+
+export interface LlmColumnRename {
+  from: string;
+  to: string;
+}
+
+/** List-level change. Every field except action/listId is optional; empty = no change. */
+export interface LlmListOp {
+  action: LlmListOpName;
+  /** Copy from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. */
+  listId: string;
+  newName: string;
+  addColumns: string[];
+  removeColumns: string[];
+  renameColumns: LlmColumnRename[];
+  addParticipants: string[];
+  removeParticipants: string[];
 }
 
 export interface LlmFilingAction {
@@ -101,6 +123,7 @@ export interface LlmDirectoryAction {
 export type LlmHoldKind =
   | "directory"
   | "lists"
+  | "list_ops"
   | "reminders"
   | "filing"
   | "messages";
@@ -111,6 +134,7 @@ export interface LlmHold {
   need: string;
   directory: LlmDirectoryAction[];
   lists: LlmListAction[];
+  listOps?: LlmListOp[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
   messages: LlmMessageAction[];
@@ -182,6 +206,8 @@ export type ReportHistoryKind = "add" | "update" | "remove" | "fire";
 
 export interface LlmMetadata {
   lists: LlmListAction[];
+  /** List-level alter/delete (rename, columns, participants, delete whole list). */
+  listOps?: LlmListOp[];
   filing: LlmFilingAction[];
   messages?: LlmMessageAction[];
   reminders?: LlmReminderAction[];
@@ -237,6 +263,7 @@ const REMINDER_REPEATS = new Set<LlmReminderRepeat>([
 export function emptyLlmMetadata(): LlmMetadata {
   return {
     lists: [],
+    listOps: [],
     filing: [],
     messages: [],
     reminders: [],
@@ -290,6 +317,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const reminders = parseReminderActions(meta);
   const directory = parseDirectoryActions(meta);
   const messages = parseMessageActions(meta);
+  const listOps = parseListOps(meta);
   return {
     messages,
     reminders,
@@ -298,12 +326,85 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     handoff: parseHandoff(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
-    hold: parseHold(meta, { directory, lists, reminders, filing, messages }),
+    hold: parseHold(meta, { directory, lists, listOps, reminders, filing, messages }),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
     lists,
+    listOps,
     filing,
   };
+}
+
+const LIST_OP_ACTIONS = new Set<LlmListOpName>(["alter_list", "delete_list"]);
+
+export function parseListOps(meta: Record<string, unknown>): LlmListOp[] {
+  const raw = meta.list_ops ?? meta.listOps;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.flatMap((entry) => {
+    const op = toListOp(entry);
+    return op ? [op] : [];
+  });
+}
+
+function toListOp(value: unknown): LlmListOp | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const action = String(record.action ?? "").trim().toLowerCase();
+  if (!LIST_OP_ACTIONS.has(action as LlmListOpName)) {
+    return null;
+  }
+  const listId = readText(record, ["list_id", "listId"]);
+  if (!listId) {
+    return null;
+  }
+  return {
+    action: action as LlmListOpName,
+    listId,
+    newName: readText(record, ["new_name", "newName"]).slice(0, 100),
+    addColumns: readStringList(record.add_columns ?? record.addColumns),
+    removeColumns: readStringList(record.remove_columns ?? record.removeColumns),
+    renameColumns: readColumnRenames(record.rename_columns ?? record.renameColumns),
+    addParticipants: readStringList(record.add_participants ?? record.addParticipants),
+    removeParticipants: readStringList(
+      record.remove_participants ?? record.removeParticipants,
+    ),
+  };
+}
+
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    const text = entry.trim().slice(0, 100);
+    if (text && !out.includes(text)) {
+      out.push(text);
+    }
+  }
+  return out;
+}
+
+function readColumnRenames(value: unknown): LlmColumnRename[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    const from = readText(record, ["from"]).slice(0, 100);
+    const to = readText(record, ["to"]).slice(0, 100);
+    return from && to && from !== to ? [{ from, to }] : [];
+  });
 }
 
 export function parseTargets(value: unknown): string[] {
@@ -387,12 +488,14 @@ function toListAction(value: unknown): LlmListAction | null {
 
   const titleField =
     listType === "custom" ? readText(value, ["title_field"]).slice(0, 100) : "";
+  const columns = listType === "custom" ? readStringList(value.columns) : [];
 
   return {
     action: value.action as LlmListActionName,
     listType,
     listName,
     ...(titleField ? { titleField } : {}),
+    ...(columns.length > 0 ? { columns } : {}),
     items,
     targets: parseTargets(value),
   };
@@ -674,6 +777,7 @@ function parseConfirm(meta: Record<string, unknown>): boolean | null {
 const HOLD_KINDS = new Set<LlmHoldKind>([
   "directory",
   "lists",
+  "list_ops",
   "reminders",
   "filing",
   "messages",
@@ -684,6 +788,7 @@ function parseHold(
   fallback: {
     directory: LlmDirectoryAction[];
     lists: LlmListAction[];
+    listOps: LlmListOp[];
     reminders: LlmReminderAction[];
     filing: LlmFilingAction[];
     messages: LlmMessageAction[];
@@ -734,9 +839,12 @@ function parseHold(
       })
     : [];
 
+  const nestedListOps = parseListOps(record);
+
   const directory =
     nestedDirectory.length > 0 ? nestedDirectory : fallback.directory;
   const lists = nestedLists.length > 0 ? nestedLists : fallback.lists;
+  const listOps = nestedListOps.length > 0 ? nestedListOps : fallback.listOps;
   const reminders =
     nestedReminders.length > 0 ? nestedReminders : fallback.reminders;
   const filing = nestedFiling.length > 0 ? nestedFiling : fallback.filing;
@@ -746,6 +854,7 @@ function parseHold(
   if (
     directory.length === 0 &&
     lists.length === 0 &&
+    listOps.length === 0 &&
     reminders.length === 0 &&
     filing.length === 0 &&
     messages.length === 0
@@ -758,6 +867,7 @@ function parseHold(
     need: need.slice(0, 200),
     directory,
     lists,
+    ...(listOps.length > 0 ? { listOps } : {}),
     reminders,
     filing,
     messages,
@@ -1291,6 +1401,10 @@ function collectActionDescriptions(metadata: unknown): string[] {
     }
   }
 
+  for (const op of parseListOps(meta)) {
+    descriptions.push(describeListOp(op));
+  }
+
   if (Array.isArray(meta.filing)) {
     for (const filing of meta.filing) {
       if (isActionRecord(filing)) {
@@ -1396,6 +1510,23 @@ function describeListAction(list: Record<string, unknown>): string {
   return names
     ? `${verb} ${listName}${targetSuffix}: ${names}`
     : `${verb} ${listName}${targetSuffix}`;
+}
+
+function describeListOp(op: LlmListOp): string {
+  if (op.action === "delete_list") {
+    return "Delete list";
+  }
+  const parts = [
+    op.newName ? `rename to ${op.newName}` : "",
+    op.addColumns.length > 0 ? `add columns ${op.addColumns.join(", ")}` : "",
+    op.removeColumns.length > 0 ? `remove columns ${op.removeColumns.join(", ")}` : "",
+    ...op.renameColumns.map((row) => `rename column ${row.from} → ${row.to}`),
+    op.addParticipants.length > 0 ? `share with ${op.addParticipants.join(", ")}` : "",
+    op.removeParticipants.length > 0
+      ? `unshare ${op.removeParticipants.join(", ")}`
+      : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? `Alter list: ${parts.join("; ")}` : "Alter list";
 }
 
 function describeTargets(record: Record<string, unknown>): string {

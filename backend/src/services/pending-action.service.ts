@@ -2,6 +2,7 @@ import type {
   LlmDirectoryAction,
   LlmFilingAction,
   LlmListAction,
+  LlmListOp,
   LlmMessageAction,
   LlmReminderAction,
 } from "@workee/shared";
@@ -127,6 +128,7 @@ export function isAwaitingFieldsHold(
 export function metadataAfterHoldCancel<T extends {
   directory?: unknown[];
   lists?: unknown[];
+  listOps?: unknown[];
   reminders?: unknown[];
   filing?: unknown[];
   messages?: unknown[];
@@ -136,6 +138,7 @@ export function metadataAfterHoldCancel<T extends {
     ...metadata,
     directory: [],
     lists: [],
+    listOps: [],
     reminders: [],
     filing: [],
     messages: [],
@@ -152,6 +155,7 @@ export function formatCancelledHoldReply(
     case "complete_directory":
       return "ביטלתי את שמירת איש הקשר.";
     case "complete_lists":
+    case "complete_list_ops":
       return "ביטלתי את עדכון הרשימה.";
     case "complete_reminders":
       return "ביטלתי את הגדרת התזכורת.";
@@ -165,6 +169,7 @@ export function formatCancelledHoldReply(
 export type PendingHoldKind =
   | "directory"
   | "lists"
+  | "list_ops"
   | "reminders"
   | "filing"
   | "messages";
@@ -173,6 +178,7 @@ export type PendingHoldAction = {
   action:
     | "complete_directory"
     | "complete_lists"
+    | "complete_list_ops"
     | "complete_reminders"
     | "complete_filing"
     | "complete_messages";
@@ -181,6 +187,7 @@ export type PendingHoldAction = {
   draft: {
     directory?: LlmDirectoryAction[];
     lists?: LlmListAction[];
+    listOps?: LlmListOp[];
     reminders?: LlmReminderAction[];
     filing?: LlmFilingAction[];
     messages?: LlmMessageAction[];
@@ -287,6 +294,7 @@ export type LlmHold = {
   need: string;
   directory: LlmDirectoryAction[];
   lists: LlmListAction[];
+  listOps?: LlmListOp[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
   messages?: LlmMessageAction[];
@@ -295,6 +303,7 @@ export type LlmHold = {
 const HOLD_ACTIONS: Record<PendingHoldKind, PendingHoldAction["action"]> = {
   directory: "complete_directory",
   lists: "complete_lists",
+  list_ops: "complete_list_ops",
   reminders: "complete_reminders",
   filing: "complete_filing",
   messages: "complete_messages",
@@ -309,9 +318,11 @@ export function pendingHoldFromLlm(hold: LlmHold | null | undefined): PendingHol
     return null;
   }
   const messages = hold.messages ?? [];
+  const listOps = hold.listOps ?? [];
   const draft = {
     ...(hold.directory.length > 0 ? { directory: hold.directory } : {}),
     ...(hold.lists.length > 0 ? { lists: hold.lists } : {}),
+    ...(listOps.length > 0 ? { listOps } : {}),
     ...(hold.reminders.length > 0 ? { reminders: hold.reminders } : {}),
     ...(hold.filing.length > 0 ? { filing: hold.filing } : {}),
     ...(messages.length > 0 ? { messages } : {}),
@@ -593,6 +604,7 @@ export function conversationPendingFromStored(row: {
     row.pendingStep === "awaiting_fields" &&
     (row.pendingAction === "complete_directory" ||
       row.pendingAction === "complete_lists" ||
+      row.pendingAction === "complete_list_ops" ||
       row.pendingAction === "complete_reminders" ||
       row.pendingAction === "complete_filing" ||
       row.pendingAction === "complete_messages")
@@ -622,6 +634,9 @@ export function conversationPendingFromStored(row: {
           : undefined,
         lists: Array.isArray(draftRaw.lists)
           ? (draftRaw.lists as LlmListAction[])
+          : undefined,
+        listOps: Array.isArray(draftRaw.listOps)
+          ? (draftRaw.listOps as LlmListOp[])
           : undefined,
         reminders: Array.isArray(draftRaw.reminders)
           ? (draftRaw.reminders as LlmReminderAction[])
@@ -728,7 +743,8 @@ export function formatConversationPendingContext(
     `known_draft: ${JSON.stringify(pending.draft)}`,
     "The speaker's short reply fills missing_field for this draft — a name, time, number, message body, or yes/no.",
     "Never reply לא הבנתי / מה תרצה לעשות to that short reply.",
-    "Complete the draft: emit the finished metadata (directory/lists/reminders/filing/messages) with hold=null.",
+    "Complete the draft: emit the finished metadata (directory/lists/list_ops/reminders/filing/messages) with hold=null.",
+    "If current_action is complete_list_ops: the short reply fills the missing list change (new name, column, participant, or yes to delete) — emit list_ops with known_draft list_id.",
     "If current_action is complete_messages: the short reply IS the WhatsApp body — emit messages with known_draft targets and that text; do not ask מה לשלוח again.",
     "If current_action is complete_lists and missing_field is confirm / confirm_share: Yes / confirm=true → apply known_draft.lists (shared targets included). Do not replace with the speaker's private list. The server prefers known_draft lists on accept.",
     "If current_action is complete_reminders and missing_field is time / מתי: the short reply sets the clock — «עכשיו» / now → send soon; or emit reminders add with in/time from their words. Do not claim אשלח until a clock exists.",
@@ -743,6 +759,7 @@ export function holdFulfilledByMetadata(
   meta: {
     directory: LlmDirectoryAction[];
     lists: LlmListAction[];
+    listOps?: LlmListOp[];
     reminders: LlmReminderAction[];
     filing: LlmFilingAction[];
     messages?: LlmMessageAction[];
@@ -751,6 +768,9 @@ export function holdFulfilledByMetadata(
 ): boolean {
   if (meta.hold) {
     return false;
+  }
+  if (pending.action === "complete_list_ops") {
+    return (meta.listOps ?? []).length > 0;
   }
   if (pending.action === "complete_directory") {
     return meta.directory.some(
@@ -794,6 +814,7 @@ export function hasUnrelatedWorkWhileHold(input: {
   hold: LlmHold | null;
   directory: LlmDirectoryAction[];
   lists: LlmListAction[];
+  listOps?: LlmListOp[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
   messages: Array<{ text: string; targets: string[] }>;
@@ -822,6 +843,14 @@ export function hasUnrelatedWorkWhileHold(input: {
     return true;
   }
   // Other domains than the one held count as a topic switch.
+  if (input.pending.action === "complete_list_ops") {
+    return (
+      input.directory.length > 0 ||
+      input.lists.length > 0 ||
+      input.reminders.length > 0 ||
+      input.filing.length > 0
+    );
+  }
   if (input.pending.action === "complete_directory") {
     return (
       input.lists.length > 0 ||
@@ -857,6 +886,7 @@ export function resolveNextPending(input: {
   listDeleteNext?: PendingListDeleteAction | null;
   directory: LlmDirectoryAction[];
   lists: LlmListAction[];
+  listOps?: LlmListOp[];
   reminders: LlmReminderAction[];
   filing: LlmFilingAction[];
   messages: Array<{ text: string; targets: string[] }>;
@@ -887,6 +917,7 @@ export function resolveNextPending(input: {
       holdFulfilledByMetadata(input.stored, {
         directory: input.directory,
         lists: input.lists,
+        listOps: input.listOps,
         reminders: input.reminders,
         filing: input.filing,
         messages: input.messages,
@@ -900,6 +931,7 @@ export function resolveNextPending(input: {
         hold: input.hold,
         directory: input.directory,
         lists: input.lists,
+        listOps: input.listOps,
         reminders: input.reminders,
         filing: input.filing,
         messages: input.messages,

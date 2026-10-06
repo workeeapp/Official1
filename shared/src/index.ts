@@ -64,6 +64,7 @@ export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./valida
 export {
   emptyLlmMetadata,
   parseLlmMetadata,
+  parseListOps,
   parseLlmReply,
   parseReplyMetadata,
   parseReportSections,
@@ -89,6 +90,9 @@ export type {
   LlmFilingActionName,
   LlmListAction,
   LlmListActionName,
+  LlmListOp,
+  LlmListOpName,
+  LlmColumnRename,
   LlmListType,
   LlmMessageAction,
   LlmMessageBook,
