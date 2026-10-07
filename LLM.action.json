@@ -295,6 +295,10 @@
                           "recurrence": {
                             "type": ["object", "null"],
                             "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count). Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating."
+                          },
+                          "occurrence_done": {
+                            "type": ["string", "boolean", "null"],
+                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Occurrences up to that day leave next_occurrences."
                           }
                         }
                       }

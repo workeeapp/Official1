@@ -27,6 +27,7 @@ import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { applyClockRuleToTask } from "./list-recurrence.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
 export function formatJerusalemDateTime(value: Date): string {
@@ -233,8 +234,10 @@ export function storedReminderRule(row: {
   if (rule) {
     return rule;
   }
-  const interval = parseStoredRepeat(row.repeat);
-  return interval ? anchorRecurrence(recurrenceFromInterval(interval), row.fireAt) : null;
+  const interval = typeof row.repeat === "string" ? parseStoredRepeat(row.repeat) : null;
+  return interval && row.fireAt instanceof Date
+    ? anchorRecurrence(recurrenceFromInterval(interval), row.fireAt)
+    : null;
 }
 
 /**
@@ -305,6 +308,8 @@ export async function syncLinkedWorkerTaskClock(input: {
   reminderId: string;
   workerItemId?: string | null;
   fireAt: Date;
+  /** The clock's rule; copied onto the worker task when present. */
+  rule?: Recurrence | null;
 }): Promise<void> {
   if (!prisma.employeeListItem?.findUnique || !prisma.employeeListItem?.update) {
     return;
@@ -330,14 +335,16 @@ export async function syncLinkedWorkerTaskClock(input: {
         ? data["שם מטלה"].trim()
         : item.itemKey;
     const nextName = applyTimeToTaskLabel(currentName, time);
+    const ruled =
+      input.rule === undefined ? data : applyClockRuleToTask(data, input.rule);
     await prisma.employeeListItem.update({
       where: { id: item.id },
       data: {
         data: {
-          ...data,
+          ...ruled,
           "שם מטלה": nextName,
           "שעה לביצוע": time,
-        },
+        } as Prisma.InputJsonValue,
         ...(itemKey(nextName) !== item.itemKey
           ? { itemKey: itemKey(nextName) }
           : {}),
@@ -404,14 +411,26 @@ export async function linkRemindersToWorkerTasks(
   }
   for (const pair of pairWorkerItemsToReminders(reminders, workerItems)) {
     try {
-      await prisma.employeeListItem.update({
+      const task = await prisma.employeeListItem.update({
         where: { id: pair.workerItemId },
         data: { reminderId: pair.reminderId },
       });
-      await prisma.reminder.update({
+      const clock = await prisma.reminder.update({
         where: { id: pair.reminderId },
         data: { workerItemId: pair.workerItemId },
       });
+      const rule = clock && task ? storedReminderRule(clock) : null;
+      if (rule && rule.freq !== "interval" && task?.data && typeof task.data === "object") {
+        await prisma.employeeListItem.update({
+          where: { id: pair.workerItemId },
+          data: {
+            data: applyClockRuleToTask(
+              task.data as Record<string, unknown>,
+              rule,
+            ) as Prisma.InputJsonValue,
+          },
+        });
+      }
     } catch (error) {
       if (!isMissingTableError(error)) {
         throw error;
@@ -1166,6 +1185,11 @@ export async function applyReminders(input: {
               ? existing.workerItemId
               : null,
         fireAt,
+        rule: recurring
+          ? recurring.recurrence
+          : "recurrence" in ruleFields
+            ? null
+            : undefined,
       });
       await recordAuditEvent({
         userId: input.userId,

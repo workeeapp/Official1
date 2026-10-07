@@ -15,7 +15,10 @@ import { recordAuditEvent } from "./audit.service.js";
 import { stripJobMeta } from "./job-meta.js";
 import {
   clearItemRecurrence,
+  extractOccurrenceDone,
+  itemDoneThrough,
   itemNextOccurrences,
+  markOccurrenceDone,
   shapeItemRecurrence,
   stripRecurrenceMeta,
 } from "./list-recurrence.js";
@@ -1890,7 +1893,8 @@ async function applyListAction(
       continue;
     }
 
-    const shaped = shapeItemRecurrence(item);
+    const done = extractOccurrenceDone(item);
+    const shaped = shapeItemRecurrence(done.item);
     const fieldsItem = shaped.item;
     const needles = itemSearchNeedles(resolvedAction.listType, fieldsItem);
     const itemKey = itemIdentity(resolvedAction.listType, fieldsItem) || needles[0] || "";
@@ -1912,7 +1916,11 @@ async function applyListAction(
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
         : normalizeListItemData(fieldsItem);
-    const nextDataRecord = shaped.clear ? clearItemRecurrence(mergedRecord) : mergedRecord;
+    const ruledRecord = shaped.clear ? clearItemRecurrence(mergedRecord) : mergedRecord;
+    const nextDataRecord =
+      done.doneDate && resolvedAction.action === "update"
+        ? markOccurrenceDone(ruledRecord, done.doneDate)
+        : ruledRecord;
     const nextData = toJsonValue(nextDataRecord);
     const existingList = existing && "list" in existing
       ? (existing.list as { titleField?: string } | null)
@@ -1964,13 +1972,16 @@ async function applyListAction(
         listName: list.name || resolvedAction.listName || undefined,
       });
       if (listOwner) {
+        const occurrenceDone = done.doneDate && itemDoneThrough(nextDataRecord);
         await recordAuditEvent({
           userId: listOwner.userId,
           actorEmployeeId: actorId,
-          action: "list_update",
+          action: occurrenceDone ? "list_occurrence_done" : "list_update",
           entityType: "EmployeeListItem",
           entityId: existing.id,
-          summary: `update ${resolvedAction.listType}: ${existing.itemKey}`,
+          summary: occurrenceDone
+            ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
+            : `update ${resolvedAction.listType}: ${existing.itemKey}`,
         });
       }
     } else {
@@ -2009,6 +2020,12 @@ async function applyListAction(
           summary: `add ${resolvedAction.listType}: ${nextItemKey}`,
         });
       }
+    }
+    const onlyOccurrenceDone =
+      Boolean(done.doneDate) &&
+      Object.keys(fieldsItem).every((key) => key === "item_id" || key === "itemId" || key === "id");
+    if (onlyOccurrenceDone) {
+      continue;
     }
     // Shared watchers for add/update — keep existing notify path below.
     const watchers = await resolveWatchers({
@@ -2678,11 +2695,13 @@ function withVisibility(
   const weekday =
     typeof dateRaw === "string" ? hebrewWeekdayFromYmd(dateRaw) : null;
   const nextOccurrences = itemNextOccurrences(raw);
+  const doneThrough = nextOccurrences ? itemDoneThrough(raw) : "";
   return {
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
     ...(nextOccurrences ? { next_occurrences: nextOccurrences } : {}),
+    ...(doneThrough ? { done_through: doneThrough } : {}),
     ...linked,
     scope,
     owner,

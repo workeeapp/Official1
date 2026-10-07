@@ -3,6 +3,7 @@ import { prisma } from "../database/prisma.js";
 export type AuditAction =
   | "list_add"
   | "list_update"
+  | "list_occurrence_done"
   | "list_remove"
   | "list_alter"
   | "list_delete"
@@ -31,6 +32,7 @@ export type MutationHistoryRow = {
 const HISTORY_ACTIONS: AuditAction[] = [
   "list_add",
   "list_update",
+  "list_occurrence_done",
   "list_remove",
   "list_alter",
   "list_delete",

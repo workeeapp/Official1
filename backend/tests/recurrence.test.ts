@@ -9,8 +9,12 @@ import {
 import {
   RECURRENCE_DISPLAY_KEY,
   RECURRENCE_META_KEY,
+  applyClockRuleToTask,
   clearItemRecurrence,
+  extractOccurrenceDone,
+  itemDoneThrough,
   itemNextOccurrences,
+  markOccurrenceDone,
   shapeItemRecurrence,
   stripRecurrenceMeta,
 } from "../src/services/list-recurrence.js";
@@ -194,6 +198,79 @@ describe("recurring tasks", () => {
     const item = { "שם מטלה": "לקנות חלב" };
     expect(shapeItemRecurrence(item)).toEqual({ item, clear: false });
     expect(itemNextOccurrences(item)).toBeNull();
+  });
+});
+
+describe("standing task occurrence done", () => {
+  const gym = shapeItemRecurrence(
+    {
+      "שם מטלה": "ללכת לחדר כושר",
+      recurrence: { freq: "weekly", interval: 1, weekdays: [3, 4], time: "19:00" },
+    },
+    NOW,
+  ).item;
+
+  it("reads occurrence_done as a date or today", () => {
+    expect(extractOccurrenceDone({ item_id: "a", occurrence_done: true }, NOW)).toEqual({
+      item: { item_id: "a" },
+      doneDate: "2026-10-07",
+    });
+    expect(extractOccurrenceDone({ occurrence_done: "2026-10-06" }, NOW).doneDate).toBe(
+      "2026-10-06",
+    );
+    expect(extractOccurrenceDone({ "שם מטלה": "x" }, NOW).doneDate).toBeNull();
+  });
+
+  it("today's done occurrence leaves next_occurrences, the row stays", () => {
+    expect(itemNextOccurrences(gym, NOW)?.[0]).toBe("2026-10-07 19:00");
+    const marked = markOccurrenceDone(gym, "2026-10-07");
+    expect(itemDoneThrough(marked)).toBe("2026-10-07");
+    expect(marked[RECURRENCE_DISPLAY_KEY]).toBe(gym[RECURRENCE_DISPLAY_KEY]);
+    expect(itemNextOccurrences(marked, NOW)?.slice(0, 2)).toEqual([
+      "2026-10-08 19:00",
+      "2026-10-14 19:00",
+    ]);
+  });
+
+  it("never moves done_through backwards and ignores tasks without a rule", () => {
+    const later = markOccurrenceDone(markOccurrenceDone(gym, "2026-10-08"), "2026-10-07");
+    expect(itemDoneThrough(later)).toBe("2026-10-08");
+    const plain = { "שם מטלה": "לקנות חלב" };
+    expect(markOccurrenceDone(plain, "2026-10-07")).toBe(plain);
+  });
+});
+
+describe("worker task mirrors its clock rule", () => {
+  it("copies a calendar rule and keeps start / done_through", () => {
+    const task = {
+      "שם מטלה": "להזכיר לעמית ללכת לחדר כושר",
+      [RECURRENCE_META_KEY]: { freq: "daily", interval: 1, start: "2026-10-01", done_through: "2026-10-06" },
+    };
+    const next = applyClockRuleToTask(
+      task,
+      { freq: "weekly", interval: 1, weekdays: [2, 4], time: "19:00" },
+      NOW,
+    );
+    expect(next[RECURRENCE_META_KEY]).toEqual({
+      freq: "weekly",
+      interval: 1,
+      weekdays: [2, 4],
+      time: "19:00",
+      start: "2026-10-01",
+      done_through: "2026-10-06",
+    });
+    expect(next[RECURRENCE_DISPLAY_KEY]).toBe("כל שלישי וחמישי ב־19:00");
+  });
+
+  it("drops the rule for interval or one-shot clocks", () => {
+    const task = shapeItemRecurrence(
+      { "שם מטלה": "x", recurrence: { freq: "daily", time: "09:00" } },
+      NOW,
+    ).item;
+    expect(applyClockRuleToTask(task, null)).toEqual({ "שם מטלה": "x" });
+    expect(
+      applyClockRuleToTask(task, { freq: "interval", interval: 10, unit: "minutes" }),
+    ).toEqual({ "שם מטלה": "x" });
   });
 });
 
