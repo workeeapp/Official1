@@ -2,6 +2,8 @@ import {
   addReminderInterval,
   digitalEmployees,
   isProtectedEmployee,
+  nextRecurrenceFire,
+  parseRecurrence,
   parseStoredRepeat,
   type LlmReplyButton,
 } from "@workee/shared";
@@ -44,12 +46,21 @@ export function resolveComposeFireOutbound(input: {
   };
 }
 
-function nextFireAt(from: Date, repeat: string, now: Date): Date | null {
-  const interval = parseStoredRepeat(repeat);
+/** Next fire after this one, or null when the clock is finished (one-shot, count, until). */
+export function nextFireAt(
+  reminder: { fireAt: Date; repeat: string; recurrence?: unknown },
+  now: Date,
+  firedCount: number,
+): Date | null {
+  const rule = parseRecurrence(reminder.recurrence);
+  if (rule) {
+    return nextRecurrenceFire({ rec: rule, fired: reminder.fireAt, now, firedCount });
+  }
+  const interval = parseStoredRepeat(reminder.repeat);
   if (!interval) {
     return null;
   }
-  let next = addReminderInterval(from, interval);
+  let next = addReminderInterval(reminder.fireAt, interval);
   while (next.getTime() <= now.getTime()) {
     next = addReminderInterval(next, interval);
   }
@@ -61,6 +72,8 @@ export async function settleFiredReminder(
     id: string;
     fireAt: Date;
     repeat: string;
+    recurrence?: unknown;
+    occurrencesFired?: number;
     userId?: string;
     actorId?: string;
     itemLabel?: string;
@@ -69,7 +82,9 @@ export async function settleFiredReminder(
   sendStatus: "sent" | "failed",
 ): Promise<void> {
   const sentAt = sendStatus === "sent" ? now : null;
-  const nextAt = nextFireAt(reminder.fireAt, reminder.repeat, now);
+  const firedCount = (reminder.occurrencesFired ?? 0) + 1;
+  const nextAt = nextFireAt(reminder, now, firedCount);
+  const hasRule = Boolean(parseRecurrence(reminder.recurrence));
   if (nextAt) {
     await prisma.reminder.update({
       where: { id: reminder.id },
@@ -77,6 +92,7 @@ export async function settleFiredReminder(
         fireAt: nextAt,
         sendStatus,
         sentAt,
+        ...(hasRule ? { occurrencesFired: firedCount } : {}),
       },
     });
     scheduleSoon(nextAt);
@@ -101,6 +117,7 @@ export async function settleFiredReminder(
       sendStatus,
       sentAt,
       workerItemId: null,
+      ...(hasRule ? { occurrencesFired: firedCount } : {}),
     },
   });
 

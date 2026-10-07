@@ -210,7 +210,11 @@ model Reminder {
   itemLabel String   @map("item_label") @db.VarChar(255)
   listType  String   @map("list_type") @db.VarChar(32)
   fireAt    DateTime @map("fire_at")
-  repeat    String   @default("once") @db.VarChar(16)
+  repeat    String   @default("once") @db.VarChar(32)
+  /** Structured repeat rule from the model (freq/interval/weekdays/month_day/month/time/until/count). Wins over `repeat`. */
+  recurrence Json?
+  /** Occurrences fired so far — enforces recurrence.count. */
+  occurrencesFired Int @default(0) @map("occurrences_fired")
   pingIds     Json     @default("[]") @map("ping_ids")
   messageText String   @default("") @map("message_text") @db.Text
   composeAtFire Boolean @default(false) @map("compose_at_fire")

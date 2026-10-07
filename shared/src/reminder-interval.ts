@@ -1,4 +1,4 @@
-const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
+import { addJerusalemDays, addJerusalemMonths, jerusalemParts } from "./jerusalem-time.js";
 
 const WEEKDAY_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
@@ -46,9 +46,10 @@ export function serializeReminderRepeat(interval: ReminderInterval | null): stri
 }
 
 export function israelWeekday(value: Date): number {
-  return new Date(value.getTime() + JERUSALEM_OFFSET_MS).getUTCDay();
+  return jerusalemParts(value).weekday;
 }
 
+/** Next instant on one of `weekdays`, keeping the Jerusalem wall-clock time of `from`. */
 export function nextWeekdayFireAt(
   from: Date,
   weekdays: number[],
@@ -56,40 +57,37 @@ export function nextWeekdayFireAt(
 ): Date {
   const wanted = new Set(weekdays.filter((day) => day >= 0 && day <= 6));
   if (wanted.size === 0) {
-    return new Date(from.getTime() + 24 * 60 * 60 * 1000);
+    return addJerusalemDays(from, 1);
   }
-  let cursor = skipStart
-    ? new Date(from.getTime() + 24 * 60 * 60 * 1000)
-    : new Date(from.getTime());
-  for (let step = 0; step < 14; step += 1) {
+  for (let step = skipStart ? 1 : 0; step <= 7; step += 1) {
+    const cursor = step === 0 ? from : addJerusalemDays(from, step);
     if (wanted.has(israelWeekday(cursor))) {
       return cursor;
     }
-    cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
   }
-  return cursor;
+  return addJerusalemDays(from, 7);
 }
 
+/**
+ * Seconds / minutes / hours are elapsed time. Days, weeks, months and weekdays keep
+ * the Jerusalem wall-clock time, so «כל יום ב־8:00» stays 08:00 across DST changes.
+ */
 export function addReminderInterval(from: Date, interval: ReminderInterval): Date {
   if (interval.unit === "weekdays") {
     return nextWeekdayFireAt(from, interval.weekdays ?? [], true);
   }
   const count = Math.max(1, interval.count);
   if (interval.unit === "months") {
-    const next = new Date(from.getTime());
-    next.setUTCMonth(next.getUTCMonth() + count);
-    return next;
+    return addJerusalemMonths(from, count);
+  }
+  if (interval.unit === "days") {
+    return addJerusalemDays(from, count);
+  }
+  if (interval.unit === "weeks") {
+    return addJerusalemDays(from, count * 7);
   }
   const ms =
-    interval.unit === "seconds"
-      ? 1000
-      : interval.unit === "minutes"
-        ? 60_000
-        : interval.unit === "hours"
-          ? 3_600_000
-          : interval.unit === "days"
-            ? 86_400_000
-            : 7 * 86_400_000;
+    interval.unit === "seconds" ? 1000 : interval.unit === "minutes" ? 60_000 : 3_600_000;
   return new Date(from.getTime() + count * ms);
 }
 

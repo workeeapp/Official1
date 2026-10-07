@@ -832,6 +832,45 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads a structured recurrence rule", () => {
+    const [reminder] = parseReplyMetadata(
+      JSON.stringify({
+        response: "אשמור",
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "חדר כושר",
+              recurrence: { freq: "weekly", interval: 1, weekdays: [2, 4], time: "19:00", count: 8 },
+            },
+          ],
+        },
+      }),
+    ).reminders;
+    expect(reminder).toMatchObject({
+      item: "חדר כושר",
+      repeat: "weekly",
+      everyCount: null,
+      recurrence: { freq: "weekly", interval: 1, weekdays: [2, 4], time: "19:00", count: 8 },
+    });
+  });
+
+  it("freq none on update means stop repeating; null means unchanged", () => {
+    const [stop, keep] = parseReplyMetadata(
+      JSON.stringify({
+        response: "עדכנתי",
+        metadata: {
+          reminders: [
+            { action: "update", reminder_id: "r1", item: "ארנונה", recurrence: { freq: "none" } },
+            { action: "update", reminder_id: "r2", item: "מים", recurrence: null },
+          ],
+        },
+      }),
+    ).reminders;
+    expect(stop.recurrence).toBeNull();
+    expect(keep).not.toHaveProperty("recurrence");
+  });
+
   it("does not translate Hebrew when or every fields", () => {
     expect(
       parseReplyMetadata(

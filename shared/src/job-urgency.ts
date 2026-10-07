@@ -13,8 +13,8 @@ export interface JobUrgencyPolicy {
 
 export const JOB_URGENCY_POLICY: Record<JobUrgency, JobUrgencyPolicy> = {
   normal: { autoNudges: 0, intervalSeconds: 0, label: "" },
-  urgent: { autoNudges: 2, intervalSeconds: 2 * 60 * 60, label: "דחוף" },
-  very_urgent: { autoNudges: 6, intervalSeconds: 30 * 60, label: "דחוף מאוד" },
+  urgent: { autoNudges: 2, intervalSeconds:  60 * 60, label: "דחוף" },
+  very_urgent: { autoNudges: 6, intervalSeconds: 20 * 60, label: "דחוף מאוד" },
 };
 
 export function parseJobUrgency(value: unknown): JobUrgency {

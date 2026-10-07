@@ -135,6 +135,40 @@ describe("resolveReminderFireAt", () => {
     expect(formatJerusalemDateTime(new Date("2026-09-23T22:22:00.000Z"))).toBe(
       "2026-09-24 01:22",
     );
+    expect(formatJerusalemDateTime(new Date("2026-12-01T06:00:00.000Z"))).toBe(
+      "2026-12-01 08:00",
+    );
+  });
+
+  it("places a winter 08:00 clock at UTC+2", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "08:00",
+      new Date("2026-11-30T20:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-12-01T06:00:00.000Z");
+  });
+
+  it("schedules a first weekday clock past the October change at 08:00 local", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "08:00",
+      new Date("2026-10-24T10:00:00.000Z"),
+      null,
+      { count: 1, unit: "weekdays", weekdays: [0, 2, 4] },
+    );
+    expect(fireAt?.toISOString()).toBe("2026-10-25T06:00:00.000Z");
+  });
+
+  it("rolls a passed clock to tomorrow at the same local time over the change", () => {
+    const fireAt = resolveReminderFireAt(
+      "",
+      "08:00",
+      new Date("2026-10-24T10:00:00.000Z"),
+      null,
+    );
+    expect(fireAt?.toISOString()).toBe("2026-10-25T06:00:00.000Z");
   });
 });
 

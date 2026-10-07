@@ -63,6 +63,10 @@ export function formatSessionClockContext(now = new Date()): string {
     `now_iso: ${clock.nowIso}`,
     `weekday_dates: ${JSON.stringify(weekdayDates)}`,
     "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to YYYY-MM-DD for the next week. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
+    "calendar (Sunday-first weeks; line 1 = this week, line 2 = next week, line 3 = in two weeks…):",
+    ...upcomingCalendarWeeks(now),
+    "For any date further than weekday_dates (בעוד שבועיים, השבוע הבא, ב-20 לחודש, עד דצמבר) read the exact date + weekday from calendar — never count days in your head.",
+    "RECURRING ITEMS IN A DATE QUESTION: a task with חוזר / next_occurrences, or a clock with recurrence_text / next_occurrences, is a standing item. When the speaker asks about a day / week / date range, list each matching occurrence as its own line with its date and time, e.g. «ביום שלישי 20.10 — חדר כושר ב־19:00 (קבוע)». Never answer with the rule itself («כל שלישי וחמישי») for a dated question. Match by next_occurrences when the date is there; past their end, match the rule's weekday/day against calendar (respecting until / count). Mention the rule only when the speaker asks what is recurring or about the task without a date.",
     "Use this clock when the speaker asks what is due today, tomorrow, this week/month, in N hours/days, or similar.",
     "Compare date/time fields for the question's subject only: אני/שלי → speaker personal tasks + their active_reminders in EMPLOYEE_SAVED_DATA. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
     "מה את/ה צריך/ה ביום X / what YOU need that day → only WORKER_SAVED_DATA rows in THIS turn whose תאריך לביצוע matches that day. If none match, say you have nothing that day — never reuse an older *saved* job claim about someone else's work. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
@@ -115,6 +119,27 @@ export function upcomingWeekdayDates(now = new Date()): Record<string, string> {
     }
   }
   return out;
+}
+
+export const CALENDAR_WEEKS = 9;
+
+/**
+ * Sunday-first weeks from the current week: one line per week, "YYYY-MM-DD weekday"
+ * per day. Lets the model name the exact date of «שלישי בעוד שבועיים» without math.
+ */
+export function upcomingCalendarWeeks(now = new Date(), weeks = CALENDAR_WEEKS): string[] {
+  const todayName = hebrewWeekdayFromYmd(jerusalemYmd(now));
+  const offset = todayName ? HEBREW_WEEKDAYS.indexOf(todayName as (typeof HEBREW_WEEKDAYS)[number]) : 0;
+  const lines: string[] = [];
+  for (let week = 0; week < weeks; week++) {
+    const days: string[] = [];
+    for (let day = 0; day < 7; day++) {
+      const ymd = shiftJerusalemYmd(now, week * 7 + day - offset);
+      days.push(`${ymd} ${HEBREW_WEEKDAYS[day]}`);
+    }
+    lines.push(days.join(", "));
+  }
+  return lines;
 }
 
 function shiftJerusalemYmd(now: Date, dayDelta: number): string {

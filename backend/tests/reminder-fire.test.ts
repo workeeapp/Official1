@@ -115,6 +115,50 @@ describe("settleFiredReminder", () => {
     });
   });
 
+  it("advances a recurring clock by its rule and counts the fire", async () => {
+    // Thu 2026-10-08 19:00 Jerusalem.
+    const fired = new Date("2026-10-08T16:00:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: fired,
+        repeat: "weekdays:2,4",
+        recurrence: { freq: "weekly", interval: 1, weekdays: [2, 4], time: "19:00" },
+        occurrencesFired: 0,
+      },
+      new Date(fired.getTime() + 60_000),
+      "sent",
+    );
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: {
+        fireAt: new Date("2026-10-13T16:00:00.000Z"),
+        sendStatus: "sent",
+        sentAt: expect.any(Date),
+        occurrencesFired: 1,
+      },
+    });
+  });
+
+  it("finishes a recurring clock when count is reached", async () => {
+    const fired = new Date("2026-10-28T06:00:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: fired,
+        repeat: "10:days",
+        recurrence: { freq: "daily", interval: 10, time: "09:00", count: 3 },
+        occurrencesFired: 2,
+      },
+      new Date(fired.getTime() + 60_000),
+      "sent",
+    );
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: expect.objectContaining({ status: "done", occurrencesFired: 3 }),
+    });
+  });
+
   it("hands a fired job nudge to the job so it is freed and its follow-ups continue", async () => {
     continueJobAfterNudge.mockReset();
     const nudge = {

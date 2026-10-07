@@ -1,4 +1,5 @@
 import { parseJobUrgency, type JobUrgency } from "./job-urgency.js";
+import { parseRecurrence, type Recurrence } from "./recurrence.js";
 import { parseReminderInterval } from "./reminder-interval.js";
 
 export interface LlmReplyButton {
@@ -153,6 +154,11 @@ export interface LlmReminderAction {
     | "weekdays"
     | null;
   weekdays: number[] | null;
+  /**
+   * Structured repeat rule; wins over every_count/every_unit/weekdays when present.
+   * null = the model sent {freq:"none"}: stop repeating (undefined = unchanged).
+   */
+  recurrence?: Recurrence | null;
   confirmed: boolean;
   /** When true, text is a brief; final WhatsApp copy is written at fire time. */
   compose: boolean;
@@ -865,9 +871,22 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     ? (listRaw as LlmListType)
     : "shopping";
   const interval = parseReminderInterval(record);
+  const recurrence = parseRecurrence(record.recurrence);
+  const recurrenceRecord =
+    record.recurrence && typeof record.recurrence === "object"
+      ? (record.recurrence as Record<string, unknown>)
+      : null;
+  const stopsRecurrence =
+    String(recurrenceRecord?.freq ?? "").trim().toLowerCase() === "none";
   const repeatRaw = String(record.repeat ?? "").trim().toLowerCase();
   const repeat = REMINDER_REPEATS.has(repeatRaw as LlmReminderRepeat)
     ? (repeatRaw as LlmReminderRepeat)
+    : recurrence
+      ? recurrence.freq === "interval"
+        ? "hourly"
+        : recurrence.freq === "yearly"
+          ? "monthly"
+          : recurrence.freq
     : interval
       ? interval.unit === "hours"
         ? "hourly"
@@ -907,6 +926,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     everyCount: interval?.count ?? null,
     everyUnit: interval?.unit ?? null,
     weekdays: interval?.weekdays ?? null,
+    ...(recurrence ? { recurrence } : stopsRecurrence ? { recurrence: null } : {}),
     confirmed: record.confirmed === true || record.confirm === true,
     compose,
     composeSource: parseComposeSource(record),

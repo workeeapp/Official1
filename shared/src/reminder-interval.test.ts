@@ -55,4 +55,25 @@ describe("reminder interval", () => {
       addReminderInterval(from, { count: 2, unit: "hours" }).toISOString(),
     ).toBe("2026-01-15T07:05:00.000Z");
   });
+
+  it("keeps a daily and a weekday clock on 08:00 across the October change", () => {
+    const saturday8 = new Date("2026-10-24T05:00:00.000Z");
+    expect(addReminderInterval(saturday8, { count: 1, unit: "days" }).toISOString()).toBe(
+      "2026-10-25T06:00:00.000Z",
+    );
+    expect(
+      addReminderInterval(saturday8, { count: 1, unit: "weekdays", weekdays: [0, 2, 4] })
+        .toISOString(),
+    ).toBe("2026-10-25T06:00:00.000Z");
+    expect(addReminderInterval(saturday8, { count: 1, unit: "weeks" }).toISOString()).toBe(
+      "2026-10-31T06:00:00.000Z",
+    );
+  });
+
+  it("keeps hour intervals as elapsed time across the change", () => {
+    const beforeChange = new Date("2026-10-24T22:00:00.000Z");
+    expect(
+      addReminderInterval(beforeChange, { count: 1, unit: "hours" }).toISOString(),
+    ).toBe("2026-10-24T23:00:00.000Z");
+  });
 });

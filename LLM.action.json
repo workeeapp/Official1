@@ -291,6 +291,10 @@
                           "item_id": {
                             "type": "string",
                             "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA list item item_id. Required on lists.remove and lists.update — omitting it skips the mutate."
+                          },
+                          "recurrence": {
+                            "type": ["object", "null"],
+                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count). Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating."
                           }
                         }
                       }
@@ -521,6 +525,26 @@
                     "weekdays": {
                       "type": ["array", "null"],
                       "items": { "type": "number" }
+                    },
+                    "recurrence": {
+                      "type": ["object", "null"],
+                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly).",
+                      "properties": {
+                        "freq": {
+                          "type": "string",
+                          "enum": ["interval", "daily", "weekly", "monthly", "yearly", "none"],
+                          "description": "interval = every N seconds/minutes/hours; daily = every N days; weekly = on weekdays every N weeks; monthly = on month_day every N months; yearly = on month+month_day every N years (birthdays, anniversaries)."
+                        },
+                        "interval": { "type": "number", "description": "Every N (default 1). כל יומיים → 2, כל שבועיים → 2, כל 10 ימים → daily 10." },
+                        "unit": { "type": "string", "enum": ["seconds", "minutes", "hours"], "description": "Only for freq=interval." },
+                        "weekdays": { "type": "array", "items": { "type": "number" }, "description": "weekly: 0=Sunday … 6=Saturday. כל רביעי וחמישי → [3,4]." },
+                        "month_day": { "type": "number", "description": "monthly / yearly: day of month 1–31 (short months clamp to the last day)." },
+                        "month": { "type": "number", "description": "yearly: 1–12." },
+                        "time": { "type": "string", "description": "HH:mm of every occurrence." },
+                        "until": { "type": "string", "description": "YYYY-MM-DD, inclusive last day. «עד דצמבר» → last day of that December (from SESSION_CLOCK calendar)." },
+                        "count": { "type": "number", "description": "Total number of occurrences including the first. «חזור 3 פעמים» → 3." }
+                      },
+                      "required": ["freq"]
                     },
                     "ping": {
                       "type": "array",

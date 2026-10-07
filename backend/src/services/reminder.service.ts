@@ -1,9 +1,24 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import {
+  addJerusalemDays,
   addReminderInterval,
+  anchorRecurrence,
+  firstOccurrence,
+  formatJerusalemDateTime as formatJerusalemWallTime,
+  formatRecurrenceHe,
   formatReminderIntervalHe,
+  jerusalemParts,
+  jerusalemWallTimeToDate,
+  legacyRepeatFor,
+  listOccurrences,
   nextWeekdayFireAt,
+  parseRecurrence,
+  parseStoredRepeat,
+  recurrenceFromInterval,
+  serializeRecurrence,
   serializeReminderRepeat,
+  withinUntil,
+  type Recurrence,
   type ReminderInterval,
 } from "@workee/shared";
 import { Prisma } from "@prisma/client";
@@ -14,12 +29,8 @@ import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
-const JERUSALEM_OFFSET_MS = 3 * 60 * 60 * 1000;
-
 export function formatJerusalemDateTime(value: Date): string {
-  const local = new Date(value.getTime() + JERUSALEM_OFFSET_MS);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())} ${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}`;
+  return formatJerusalemWallTime(value);
 }
 
 export interface ReminderSnapshotRow {
@@ -49,6 +60,12 @@ export interface ReminderSnapshotRow {
   sent_at: string | null;
   /** When status changed to done/cancelled (Jerusalem). */
   changed_at?: string | null;
+  /** Repeating clocks: the rule in product Hebrew. */
+  recurrence_text?: string;
+  /** Repeating clocks: upcoming fires, "YYYY-MM-DD HH:mm" (Jerusalem). */
+  next_occurrences?: string[];
+  /** Repeating clocks with a count: fires left. */
+  remaining_times?: number;
 }
 
 function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
@@ -84,7 +101,14 @@ export function findMatchingActiveReminder<
 export function canReuseExistingReminderClock(
   reminder: Pick<
     LlmReminderAction,
-    "action" | "text" | "time" | "inSeconds" | "everyCount" | "everyUnit" | "weekdays"
+    | "action"
+    | "text"
+    | "time"
+    | "inSeconds"
+    | "everyCount"
+    | "everyUnit"
+    | "weekdays"
+    | "recurrence"
   >,
   hasExisting: boolean,
 ): boolean {
@@ -98,7 +122,8 @@ export function canReuseExistingReminderClock(
     Boolean(reminder.time.trim()) ||
     Boolean(reminder.inSeconds && reminder.inSeconds > 0) ||
     Boolean(reminder.everyCount && reminder.everyUnit) ||
-    Boolean(reminder.weekdays && reminder.weekdays.length > 0);
+    Boolean(reminder.weekdays && reminder.weekdays.length > 0) ||
+    Boolean(reminder.recurrence);
   return Boolean(reminder.text.trim()) && !hasNewClock;
 }
 
@@ -113,15 +138,12 @@ export function resolveReminderFireAt(
     return new Date(now.getTime() + inSeconds * 1000);
   }
 
-  const localNow = new Date(now.getTime() + JERUSALEM_OFFSET_MS);
-  const y = localNow.getUTCFullYear();
-  const m = localNow.getUTCMonth();
-  const d = localNow.getUTCDate();
+  const localNow = jerusalemParts(now);
   const relative = dateText.trim().toLowerCase();
 
-  let year = y;
-  let month = m;
-  let day = d;
+  let year = localNow.year;
+  let month = localNow.month;
+  let day = localNow.day;
   if (relative === "") {
     if (!timeText.trim()) {
       return interval ? addReminderInterval(now, interval) : null;
@@ -130,7 +152,7 @@ export function resolveReminderFireAt(
     const iso = relative.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (iso) {
       year = Number(iso[1]);
-      month = Number(iso[2]) - 1;
+      month = Number(iso[2]);
       day = Number(iso[3]);
     }
   }
@@ -140,9 +162,9 @@ export function resolveReminderFireAt(
     return interval ? addReminderInterval(now, interval) : null;
   }
 
-  let fireAt = new Date(Date.UTC(year, month, day, time.hour - 3, time.minute));
+  let fireAt = jerusalemWallTimeToDate(year, month, day, time.hour, time.minute);
   while (fireAt.getTime() <= now.getTime()) {
-    fireAt = new Date(fireAt.getTime() + 24 * 60 * 60 * 1000);
+    fireAt = addJerusalemDays(fireAt, 1);
   }
   if (interval?.weekdays?.length) {
     fireAt = nextWeekdayFireAt(fireAt, interval.weekdays, false);
@@ -151,6 +173,100 @@ export function resolveReminderFireAt(
     }
   }
   return fireAt;
+}
+
+/**
+ * First fire of a structured rule. Fields the rule leaves out (weekday, day of month,
+ * month, time) come from the ACTION's date/time, then from the first fire itself.
+ * Daily/weekly/monthly/yearly need a time; interval rules behave like every_count.
+ */
+export function resolveRecurringFireAt(
+  rec: Recurrence,
+  dateText: string,
+  timeText: string,
+  now = new Date(),
+  inSeconds?: number | null,
+): { fireAt: Date; recurrence: Recurrence } | null {
+  if (rec.freq === "interval") {
+    const fireAt = resolveReminderFireAt(dateText, timeText, now, inSeconds, {
+      count: rec.interval,
+      unit: rec.unit ?? "hours",
+    });
+    return fireAt && withinUntil(rec, fireAt) ? { fireAt, recurrence: rec } : null;
+  }
+  const clock = rec.time ? parseClock(rec.time) : parseClock(timeText);
+  if (!clock) {
+    return null;
+  }
+  let shaped: Recurrence = {
+    ...rec,
+    time: `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`,
+  };
+  let from = now;
+  let inclusive = false;
+  const iso = dateText.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const dayStart = jerusalemWallTimeToDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), 0, 0);
+    shaped = anchorRecurrence(shaped, dayStart);
+    if (dayStart.getTime() > now.getTime()) {
+      from = dayStart;
+      inclusive = true;
+    }
+  }
+  const fireAt = firstOccurrence(shaped, from, inclusive);
+  if (!withinUntil(shaped, fireAt)) {
+    return null;
+  }
+  return { fireAt, recurrence: anchorRecurrence(shaped, fireAt) };
+}
+
+const SNAPSHOT_OCCURRENCES = 6;
+const SNAPSHOT_HORIZON_DAYS = 62;
+
+/** The rule a stored clock follows: `recurrence` JSON, else the legacy `repeat` token. */
+export function storedReminderRule(row: {
+  fireAt: Date;
+  repeat: string;
+  recurrence?: unknown;
+}): Recurrence | null {
+  const rule = parseRecurrence(row.recurrence);
+  if (rule) {
+    return rule;
+  }
+  const interval = parseStoredRepeat(row.repeat);
+  return interval ? anchorRecurrence(recurrenceFromInterval(interval), row.fireAt) : null;
+}
+
+/**
+ * Facts for a repeating clock: product-Hebrew rule text and the next concrete fires
+ * (bounded by until/count), so the model answers per date without weekday math.
+ */
+export function reminderRuleSnapshot(row: {
+  fireAt: Date;
+  repeat: string;
+  recurrence?: unknown;
+  occurrencesFired?: number;
+}): {
+  recurrence_text?: string;
+  next_occurrences?: string[];
+  remaining_times?: number;
+} {
+  const rule = storedReminderRule(row);
+  if (!rule) {
+    return {};
+  }
+  const fired = typeof row.occurrencesFired === "number" ? row.occurrencesFired : 0;
+  const occurrences = listOccurrences(rule, {
+    first: row.fireAt,
+    limit: SNAPSHOT_OCCURRENCES,
+    horizon: addJerusalemDays(row.fireAt, SNAPSHOT_HORIZON_DAYS),
+    firedCount: fired,
+  });
+  return {
+    recurrence_text: formatRecurrenceHe(rule),
+    next_occurrences: occurrences.map((value) => formatJerusalemDateTime(value)),
+    ...(rule.count ? { remaining_times: Math.max(0, rule.count - fired) } : {}),
+  };
 }
 
 function parseClock(value: string): { hour: number; minute: number } | null {
@@ -874,14 +990,25 @@ export async function applyReminders(input: {
       continue;
     }
 
-    const interval = intervalOf(reminder);
-    let fireAt = resolveReminderFireAt(
-      reminder.date,
-      reminder.time,
-      new Date(),
-      reminder.inSeconds,
-      interval,
-    );
+    const recurring = reminder.recurrence
+      ? resolveRecurringFireAt(
+          reminder.recurrence,
+          reminder.date,
+          reminder.time,
+          new Date(),
+          reminder.inSeconds,
+        )
+      : null;
+    const interval = reminder.recurrence ? null : intervalOf(reminder);
+    let fireAt = reminder.recurrence
+      ? (recurring?.fireAt ?? null)
+      : resolveReminderFireAt(
+          reminder.date,
+          reminder.time,
+          new Date(),
+          reminder.inSeconds,
+          interval,
+        );
 
     const rows = await prisma.reminder.findMany({
       where: { userId: input.userId, status: "active" },
@@ -935,11 +1062,25 @@ export async function applyReminders(input: {
     try {
       const owned = rows.filter((row) => row.ownerId === ownerId);
       const label = (existing?.itemLabel ?? reminder.item.trim()).slice(0, 255);
-      const nextRepeat = interval
-        ? serializeReminderRepeat(interval)
-        : existing && canReuseClock
-          ? existing.repeat
-          : serializeReminderRepeat(null);
+      const stopsRule = reminder.recurrence === null;
+      const nextRepeat = recurring
+        ? legacyRepeatFor(recurring.recurrence)
+        : interval
+          ? serializeReminderRepeat(interval)
+          : existing && canReuseClock && !stopsRule
+            ? existing.repeat
+            : serializeReminderRepeat(null);
+      const keepsRule =
+        !recurring && !interval && !stopsRule && Boolean(existing && canReuseClock);
+      const hadRule = Boolean(existing && "recurrence" in existing && existing.recurrence);
+      const ruleFields = recurring
+        ? {
+            recurrence: serializeRecurrence(recurring.recurrence) as Prisma.InputJsonValue,
+            occurrencesFired: 0,
+          }
+        : hadRule && !keepsRule
+          ? { recurrence: Prisma.DbNull, occurrencesFired: 0 }
+          : {};
       const nextText = reminder.text.trim()
         ? reminder.text.trim().slice(0, 4096)
         : existing && canReuseClock
@@ -988,6 +1129,7 @@ export async function applyReminders(input: {
               listType: reminder.listType || existing.listType,
               fireAt,
               repeat: nextRepeat,
+              ...ruleFields,
               pingIds,
               messageText: nextText,
               composeAtFire,
@@ -1005,6 +1147,7 @@ export async function applyReminders(input: {
               listType: reminder.listType,
               fireAt,
               repeat: nextRepeat,
+              ...ruleFields,
               pingIds,
               messageText: nextText,
               composeAtFire,
@@ -1265,6 +1408,8 @@ export function toReminderSnapshotRow(
     listType: string;
     fireAt: Date;
     repeat: string;
+    recurrence?: unknown;
+    occurrencesFired?: number;
     pingIds: unknown;
     ownerId: string;
     messageText: string;
@@ -1325,5 +1470,6 @@ export function toReminderSnapshotRow(
     sent: sendStatus === "sent",
     sent_at: row.sentAt ? formatJerusalemDateTime(row.sentAt) : null,
     changed_at: changedAt,
+    ...(row.status === "active" ? reminderRuleSnapshot(row) : {}),
   };
 }

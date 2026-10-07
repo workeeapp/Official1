@@ -13,12 +13,19 @@ import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { stripJobMeta } from "./job-meta.js";
+import {
+  clearItemRecurrence,
+  itemNextOccurrences,
+  shapeItemRecurrence,
+  stripRecurrenceMeta,
+} from "./list-recurrence.js";
 import { toPlainJson } from "./llm-client.js";
 import {
   cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
   formatJerusalemDateTime,
   listReminderRowsForUser,
+  reminderRuleSnapshot,
   toReminderSnapshotRow,
   type ReminderSnapshotRow,
 } from "./reminder.service.js";
@@ -162,7 +169,9 @@ export function visibleListColumns(
     push(key);
   }
   for (const item of items) {
-    for (const key of Object.keys(normalizeListItemData(asRecord(item.data)))) {
+    for (const key of Object.keys(
+      stripRecurrenceMeta(stripJobMeta(normalizeListItemData(asRecord(item.data)))),
+    )) {
       push(key);
     }
   }
@@ -1881,8 +1890,10 @@ async function applyListAction(
       continue;
     }
 
-    const needles = itemSearchNeedles(resolvedAction.listType, item);
-    const itemKey = itemIdentity(resolvedAction.listType, item) || needles[0] || "";
+    const shaped = shapeItemRecurrence(item);
+    const fieldsItem = shaped.item;
+    const needles = itemSearchNeedles(resolvedAction.listType, fieldsItem);
+    const itemKey = itemIdentity(resolvedAction.listType, fieldsItem) || needles[0] || "";
     if (resolvedAction.action === "add" && !itemKey && needles.length === 0) {
       continue;
     }
@@ -1897,10 +1908,11 @@ async function applyListAction(
       continue;
     }
     const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
-    const nextDataRecord =
+    const mergedRecord =
       resolvedAction.action === "update" && existing
-        ? mergeListItemData(asRecord(existing.data), item)
-        : normalizeListItemData(item);
+        ? mergeListItemData(asRecord(existing.data), fieldsItem)
+        : normalizeListItemData(fieldsItem);
+    const nextDataRecord = shaped.clear ? clearItemRecurrence(mergedRecord) : mergedRecord;
     const nextData = toJsonValue(nextDataRecord);
     const existingList = existing && "list" in existing
       ? (existing.list as { titleField?: string } | null)
@@ -2621,7 +2633,13 @@ function toListSnapshotEntry(input: {
   };
 }
 
-export type LinkedReminderRow = { id: string; fireAt: Date; repeat: string };
+export type LinkedReminderRow = {
+  id: string;
+  fireAt: Date;
+  repeat: string;
+  recurrence?: unknown;
+  occurrencesFired?: number;
+};
 
 /**
  * The active clock FK-linked to this item: reminder_id (worker task) or
@@ -2642,6 +2660,7 @@ export function linkedReminderField(
       reminder_id: reminder.id,
       fire_at: formatJerusalemDateTime(reminder.fireAt),
       repeat: reminder.repeat,
+      ...reminderRuleSnapshot(reminder),
     },
   };
 }
@@ -2653,14 +2672,17 @@ function withVisibility(
   itemId?: string,
   linked: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const normalized = stripJobMeta(normalizeListItemData(asRecord(data)));
+  const raw = normalizeListItemData(asRecord(data));
+  const normalized = stripRecurrenceMeta(stripJobMeta(raw));
   const dateRaw = normalized["תאריך לביצוע"];
   const weekday =
     typeof dateRaw === "string" ? hebrewWeekdayFromYmd(dateRaw) : null;
+  const nextOccurrences = itemNextOccurrences(raw);
   return {
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
+    ...(nextOccurrences ? { next_occurrences: nextOccurrences } : {}),
     ...linked,
     scope,
     owner,
@@ -2785,7 +2807,7 @@ function toOwnedListItem(
   ownerName: string,
   titleField = "",
 ): EmployeeRecordsResponse["groups"][number]["items"][number] {
-  const data = normalizeListItemData(asRecord(item.data));
+  const data = stripRecurrenceMeta(stripJobMeta(normalizeListItemData(asRecord(item.data))));
   return {
     id: item.id,
     kind: "list",

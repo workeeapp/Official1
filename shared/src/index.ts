@@ -85,6 +85,31 @@ export {
   serializeReminderRepeat,
 } from "./reminder-interval";
 export type { ReminderInterval, ReminderIntervalUnit } from "./reminder-interval";
+export {
+  JERUSALEM_TIME_ZONE,
+  addJerusalemDays,
+  addJerusalemMonths,
+  formatJerusalemDateTime,
+  jerusalemOffsetMs,
+  jerusalemParts,
+  jerusalemWallTimeToDate,
+} from "./jerusalem-time";
+export type { JerusalemParts } from "./jerusalem-time";
+export {
+  RECURRENCE_FREQS,
+  anchorRecurrence,
+  firstOccurrence,
+  formatRecurrenceHe,
+  legacyRepeatFor,
+  listOccurrences,
+  nextOccurrence,
+  nextRecurrenceFire,
+  parseRecurrence,
+  recurrenceFromInterval,
+  serializeRecurrence,
+  withinUntil,
+} from "./recurrence";
+export type { Recurrence, RecurrenceFreq, RecurrenceUnit } from "./recurrence";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";
 export type {

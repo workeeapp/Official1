@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JOB_URGENCY_POLICY } from "@workee/shared";
 
 const {
   itemCreate,
@@ -495,8 +496,9 @@ describe("createJobsFromRelays", () => {
     expect(clock.pingIds).toEqual([ERAN]);
     expect(clock.messageText).toBe("דחוף מאוד — עמית מחכה לתשובה: מה שלומך?");
     const delay = clock.fireAt.getTime() - before;
-    expect(delay).toBeGreaterThanOrEqual(30 * 60 * 1000);
-    expect(delay).toBeLessThan(31 * 60 * 1000);
+    const interval = JOB_URGENCY_POLICY.very_urgent.intervalSeconds * 1000;
+    expect(delay).toBeGreaterThanOrEqual(interval);
+    expect(delay).toBeLessThan(interval + 60 * 1000);
     expect(created[0].urgency).toBe("very_urgent");
     expect(created[0].meta.nudgeAuto).toBe(true);
   });
@@ -619,7 +621,9 @@ describe("continueJobAfterNudge", () => {
     });
     const clock = reminderCreate.mock.calls[0][0].data;
     expect(clock.pingIds).toEqual([ERAN]);
-    expect(clock.fireAt).toEqual(new Date(NOW.getTime() + 2 * 60 * 60 * 1000));
+    expect(clock.fireAt).toEqual(
+      new Date(NOW.getTime() + JOB_URGENCY_POLICY.urgent.intervalSeconds * 1000),
+    );
     const patched = itemUpdate.mock.calls.at(-1)?.[0].data.data[JOB_META_KEY];
     expect(patched.autoNudgesSent).toBe(1);
     expect(patched.nudgeItemId).toBe("nudge-2");
