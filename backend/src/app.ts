@@ -2,9 +2,22 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
+import path from "node:path";
 import { getEnv } from "./config/env.js";
 import { apiRouter } from "./routes/index.js";
 import { errorMiddleware, notFoundMiddleware } from "./middleware/error.middleware.js";
+import { resolveFrontendDist } from "./utils/frontend-dist.js";
+
+function clientOrigins(raw: string): string | string[] {
+  const list = raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (list.length === 0) {
+    return "http://localhost:5173";
+  }
+  return list.length === 1 ? list[0]! : list;
+}
 
 export function createApp() {
   const env = getEnv();
@@ -18,12 +31,9 @@ export function createApp() {
       crossOriginResourcePolicy: { policy: "cross-origin" },
     }),
   );
-  const clientOrigins = env.CLIENT_ORIGIN.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
   app.use(
     cors({
-      origin: clientOrigins.length <= 1 ? clientOrigins[0] : clientOrigins,
+      origin: clientOrigins(env.CLIENT_ORIGIN),
       credentials: true,
     }),
   );
@@ -50,6 +60,43 @@ export function createApp() {
   });
 
   app.use("/api", apiRouter);
+
+  // Resolve dist per request so a later `npm run build -w frontend` works without
+  // restarting the API (createApp runs once at boot).
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      next();
+      return;
+    }
+    if (req.path === "/api" || req.path.startsWith("/api/")) {
+      next();
+      return;
+    }
+    const frontendDist = resolveFrontendDist();
+    if (!frontendDist) {
+      next();
+      return;
+    }
+    express.static(frontendDist, { index: false, fallthrough: true })(
+      req,
+      res,
+      (error?: unknown) => {
+        if (error) {
+          next(error);
+          return;
+        }
+        if (res.headersSent) {
+          return;
+        }
+        res.sendFile(path.join(frontendDist, "index.html"), (sendError) => {
+          if (sendError) {
+            next(sendError);
+          }
+        });
+      },
+    );
+  });
+
   app.use(notFoundMiddleware);
   app.use(errorMiddleware);
 

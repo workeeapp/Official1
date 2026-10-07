@@ -17,8 +17,9 @@ npm run dev
 `npm run dev` also runs `predev` → `prisma migrate deploy`, so pending schema migrations are applied before the API/frontend start.
 Or point `DATABASE_URL` at an existing PostgreSQL database. `docker-compose.yml` publishes Postgres on **5432**. If that port is taken, remap the container (this repo’s local box uses **5435**) and set `DATABASE_URL` to match.
 
-- Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
+- Frontend (local Vite): [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
 - API: [http://localhost:3001](http://localhost:3001) (`PORT`; local override may use **3003**)
+- Public UI (optional): after `npm run build -w frontend`, the API also serves `frontend/dist` on the same host as the Cloudflare tunnel (e.g. `https://wa.workee.site`). Set `CLIENT_ORIGIN` to include that HTTPS origin. Point cloudflared at the **API** port for all host traffic. `npm run refresh` pulls, migrates, builds the SPA, restarts, and health-checks.
 
 Seeded user (from `.env` `SEED_*`):
 
