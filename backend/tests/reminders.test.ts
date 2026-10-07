@@ -10,7 +10,6 @@ import {
   formatReminderApplyNotice,
   formatPingLabel,
   pairWorkerItemsToReminders,
-  planReminderWrites,
   reminderLabelsMatch,
   resolveReminderFireAt,
   resolveReminderPingDestinations,
@@ -267,104 +266,6 @@ describe("unknown dest", () => {
         skipped: [{ item: "היי", reason: "no_phone", dest: "מיכל" }],
       }),
     ).toBe("אין לי מספר ל«מיכל». מה המספר?");
-  });
-});
-
-describe("planReminderWrites", () => {
-  it("applies a delete with reminder_id immediately", () => {
-    const first = planReminderWrites([milkRemove], null, null);
-    expect(first.apply).toEqual([milkRemove]);
-    expect(first.ask).toEqual([]);
-    expect(first.nextPending).toBeNull();
-  });
-
-  it("cancels a legacy pending delete", () => {
-    const legacy = {
-      action: "delete_reminder" as const,
-      step: "confirm" as const,
-      targets: ["חלב"],
-      at: new Date(),
-    };
-    const cancelled = planReminderWrites([], false, legacy);
-    expect(cancelled.apply).toEqual([]);
-    expect(cancelled.cancelled).toBe(true);
-    expect(cancelled.nextPending).toBeNull();
-  });
-
-  it("applies every named remove with reminder_id in one turn", () => {
-    const planned = planReminderWrites(
-      [
-        { ...milkRemove, item: "חלב", reminderId: "rem-1" },
-        { ...milkRemove, item: "מתנה", reminderId: "rem-2" },
-      ],
-      null,
-      null,
-    );
-    expect(planned.apply.map((row) => row.item)).toEqual(["חלב", "מתנה"]);
-    expect(planned.ask).toEqual([]);
-    expect(planned.nextPending).toBeNull();
-  });
-
-  it("clears legacy pending on confirm=true and still applies incoming removes", () => {
-    const legacy = {
-      action: "delete_reminder" as const,
-      step: "confirm" as const,
-      targets: ["התאמן", "ללכת לסופר"],
-      at: new Date(),
-    };
-    const confirmed = planReminderWrites(
-      [
-        { ...milkRemove, item: "התאמן", reminderId: "rem-a" },
-        { ...milkRemove, item: "ללכת לסופר", reminderId: "rem-b" },
-      ],
-      true,
-      legacy,
-    );
-    expect(confirmed.apply.map((row) => row.item)).toEqual([
-      "התאמן",
-      "ללכת לסופר",
-    ]);
-    expect(confirmed.ask).toEqual([]);
-    expect(confirmed.nextPending).toBeNull();
-  });
-
-  it("does not expand item all into other reminders", () => {
-    const planned = planReminderWrites(
-      [{ ...milkRemove, item: "all" }],
-      null,
-      null,
-    );
-    expect(planned.apply.map((row) => row.item)).toEqual(["all"]);
-    expect(planned.ask).toEqual([]);
-    expect(planned.nextPending).toBeNull();
-  });
-
-  it("times out a stale legacy pending delete", () => {
-    const legacy = {
-      action: "delete_reminder" as const,
-      step: "confirm" as const,
-      targets: ["חלב"],
-      at: new Date("2026-09-28T10:00:00.000Z"),
-    };
-    const timedOut = planReminderWrites([], null, legacy, {
-      now: new Date("2026-09-28T10:20:00.000Z"),
-    });
-    expect(timedOut.cancelled).toBe(true);
-    expect(timedOut.nextPending).toBeNull();
-  });
-
-  it("abandons legacy pending delete when unrelated work arrives", () => {
-    const legacy = {
-      action: "delete_reminder" as const,
-      step: "confirm" as const,
-      targets: ["חלב"],
-      at: new Date(),
-    };
-    const abandoned = planReminderWrites([], null, legacy, {
-      abandonPending: true,
-    });
-    expect(abandoned.cancelled).toBe(true);
-    expect(abandoned.nextPending).toBeNull();
   });
 });
 

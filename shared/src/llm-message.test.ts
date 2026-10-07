@@ -77,20 +77,6 @@ describe("list_ops", () => {
     ]);
   });
 
-  it("keeps a list_ops draft on a list_ops hold", () => {
-    const meta = parseReplyMetadata(
-      reply({
-        hold: {
-          kind: "list_ops",
-          need: "confirm_delete",
-          list_ops: [{ action: "delete_list", list_id: "l2" }],
-        },
-      }),
-    );
-    expect(meta.hold?.kind).toBe("list_ops");
-    expect(meta.hold?.listOps?.[0]).toMatchObject({ action: "delete_list", listId: "l2" });
-  });
-
   it("reads declared columns when a custom list is created", () => {
     const meta = parseReplyMetadata(
       reply({
@@ -157,7 +143,6 @@ describe("parseLlmReply", () => {
         handoff: { worker: "" },
         sections: [],
         history_kinds: [],
-        hold: null,
         confirm: true,
       },
     });
@@ -357,7 +342,6 @@ describe("parseLlmReply", () => {
       handoff: null,
       reportSections: [],
       reportHistoryKinds: [],
-      hold: null,
       confirm: null,
       targets: [],
     });
@@ -412,43 +396,11 @@ describe("parseLlmReply", () => {
           response: "מה לשלוח למאיה?",
           metadata: {
             messages: [{ targets: ["מאיה"], text: "" }],
-            hold: {
-              kind: "messages",
-              need: "text",
-              messages: [{ targets: ["מאיה"], text: "" }],
-            },
           },
         }),
       ),
     ).toMatchObject({
       messages: [{ targets: ["מאיה"], text: "" }],
-      hold: {
-        kind: "messages",
-        need: "text",
-        messages: [{ targets: ["מאיה"], text: "" }],
-      },
-    });
-    expect(
-      parseReplyMetadata(
-        JSON.stringify({
-          response: "מה שם המשפחה?",
-          metadata: {
-            hold: {
-              kind: "directory",
-              need: "שם משפחה",
-              directory: [
-                { action: "add", name: "יואב", phone: "0515520802", contactId: "" },
-              ],
-            },
-          },
-        }),
-      ),
-    ).toMatchObject({
-      hold: {
-        kind: "directory",
-        need: "שם משפחה",
-        directory: [{ action: "add", name: "יואב", phone: "0515520802", contactId: "" }],
-      },
     });
   });
 

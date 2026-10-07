@@ -99,8 +99,6 @@ export type {
   LlmDirectoryAction,
   LlmDirectoryActionName,
   LlmHandoffAction,
-  LlmHold,
-  LlmHoldKind,
   LlmJobAction,
   LlmJobActionName,
   ReportSection,

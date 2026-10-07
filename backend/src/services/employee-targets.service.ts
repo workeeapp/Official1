@@ -227,7 +227,6 @@ export function resolveSpokenMetadata(
     lists: metadata.lists,
     listOps: metadata.listOps ?? [],
     filing: metadata.filing,
-    hold: metadata.hold ?? null,
     messages: metadata.messages ?? [],
     reminders: metadata.reminders ?? [],
     directory: metadata.directory ?? [],
@@ -237,6 +236,46 @@ export function resolveSpokenMetadata(
     confirm: metadata.confirm ?? null,
     targets: metadata.targets ?? [],
   };
+}
+
+/**
+ * Same-turn guard: shopping/tasks add with empty targets while messages name
+ * recipients → attach those recipients (plus optional speaker label) as targets.
+ */
+export function alignListTargetsWithMessageRecipients(input: {
+  lists: LlmListAction[];
+  messages: LlmMessageAction[];
+  speakerName?: string;
+}): LlmListAction[] {
+  const recipients = [
+    ...new Set(
+      input.messages.flatMap((row) =>
+        row.targets.map((name) => name.trim()).filter(Boolean),
+      ),
+    ),
+  ];
+  if (recipients.length === 0 || input.lists.length === 0) {
+    return input.lists;
+  }
+  const speaker = input.speakerName?.trim() ?? "";
+  let changed = false;
+  const next = input.lists.map((row) => {
+    if (row.action !== "add" && row.action !== "update") {
+      return row;
+    }
+    if (row.listType !== "shopping" && row.listType !== "tasks") {
+      return row;
+    }
+    if (row.targets.length > 0) {
+      return row;
+    }
+    changed = true;
+    const targets = speaker
+      ? [...new Set([speaker, ...recipients])]
+      : recipients;
+    return { ...row, targets };
+  });
+  return changed ? next : input.lists;
 }
 
 export function resolveRelayMessages(

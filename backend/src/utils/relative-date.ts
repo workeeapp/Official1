@@ -65,7 +65,7 @@ export function formatSessionClockContext(now = new Date()): string {
     "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to YYYY-MM-DD for the next week. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
     "Use this clock when the speaker asks what is due today, tomorrow, this week/month, in N hours/days, or similar.",
     "Compare date/time fields for the question's subject only: אני/שלי → speaker personal tasks + their active_reminders in EMPLOYEE_SAVED_DATA. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
-    "מה את/ה צריך/ה ביום X / what YOU need that day → only WORKER_SAVED_DATA rows in THIS turn whose תאריך לביצוע matches that day. If none match, say you have nothing that day — never reuse an older *saved* job claim about someone else's work. Does not affect PENDING_ACTION_STATE / hold (e.g. short היי after asking what to send).",
+    "מה את/ה צריך/ה ביום X / what YOU need that day → only WORKER_SAVED_DATA rows in THIS turn whose תאריך לביצוע matches that day. If none match, say you have nothing that day — never reuse an older *saved* job claim about someone else's work. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
     "Answer in response only from the matching injected facts. The server does not filter the rows for you.",
     "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה) — never jargon like מטלות מתוזמנות.",
   ].join("\n");

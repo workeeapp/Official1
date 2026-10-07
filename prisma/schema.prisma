@@ -54,10 +54,6 @@ model ChatConversation {
   employeeId           String        @map("employee_id") @db.Uuid
   digitalEmployeeId    String        @map("digital_employee_id") @db.Uuid
   openaiConversationId String        @map("openai_conversation_id") @db.VarChar(255)
-  pendingAction        String?       @map("pending_action") @db.VarChar(32)
-  pendingTargets       Json?         @map("pending_targets")
-  pendingStep          String?       @map("pending_step") @db.VarChar(32)
-  pendingAt            DateTime?     @map("pending_at")
   createdAt            DateTime      @default(now()) @map("created_at")
   updatedAt            DateTime      @updatedAt @map("updated_at")
   user                 User          @relation(fields: [userId], references: [id], onDelete: Restrict)

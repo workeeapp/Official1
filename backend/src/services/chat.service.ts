@@ -43,6 +43,7 @@ import {
   formatListOpRefusals,
 } from "./list-ops.service.js";
 import {
+  alignListTargetsWithMessageRecipients,
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
@@ -76,36 +77,14 @@ import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
   formatReminderApplyNotice,
-  formatReminderConfirmNotice,
-  hasUnrelatedWorkWhilePending,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
-  planReminderWrites,
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
   formatRecentOutboundContext,
   listRecentReminderOutbounds,
 } from "./recent-outbound.service.js";
-import {
-  conversationPendingFromStored,
-  fillMessagesFromPendingHold,
-  fillListsFromPendingHold,
-  fillRemindersFromPendingHold,
-  alignListTargetsWithMessageRecipients,
-  formatCancelledHoldReply,
-  formatConversationPendingContext,
-  formatListDeleteConfirmNotice,
-  isAwaitingFieldsHold,
-  isPendingHoldCancelText,
-  metadataAfterHoldCancel,
-  pendingHoldFromLlm,
-  pendingHoldFromMissingMessages,
-  pendingToStored,
-  planListDeletes,
-  resolveNextPending,
-  type ConversationPendingAction,
-} from "./pending-action.service.js";
 import {
   applyDirectoryActions,
   formatSpeakerContacts,
@@ -326,10 +305,10 @@ const OPEN_JOBS_RULES = [
   "ANSWER: a short reply from the subject (כן / לא / הכל בסדר תודה / תגידי לו ש…) answers the job whose ask it matches → metadata.jobs [{ action:\"answer\", job_id, answer_text: their words, report_text: your sentence for the asker }]. «לו / לה / להם» = that job's asker; «זה / על זה» = that job's ask. Two possible jobs → ASK which. Do NOT emit messages for the report — the server delivers report_text. report_text speaks about the subject in third person and quotes the ask, e.g. «ערן מוסר הכל בסדר, תודה — בקשר לשאלה שביקשת ממני לשאול אותו «מה שלומך?»». report_text is NEVER for the current speaker: if you are talking to the asker, leave it empty and use messages to reach the subject. If you are talking to the subject, report_text goes to the asker.",
   "WHO HEARS WHAT: response is only for the person in front of you. After you message someone else, response confirms the send in second person to the asker — «שלחתי לערן שאתה שואל אם קנית חלב.» Never put the recipient's line in response (not «ערן, עמית שואל…», not the messages.text). After the subject answers, response to THEM is only a short ack — «אעדכן את עמית.» The report sentence exists only in report_text; never copy it into response.",
   "COUNTER: the subject names a DIFFERENT slot than the one in ask (מתאים לי 15:00 / נזיז ל־21:00 instead of 11:00) → SAME TURN metadata.jobs [{ action:\"counter\", job_id from OPEN_JOBS, answer_text: the new slot in their words, date: YYYY-MM-DD from SESSION_CLOCK, time: \"21:00\", report_text: «טל רוצה לשנות את מועד הפגישה ליום רביעי בשעה 21:00. האם לאשר?» }], messages=[], lists=[]. job_id + date + time are required. If exactly one open schedule/coordinate job fits (לתאם / לקבוע), counter immediately — do not ask «על איזו משימה?» or list unrelated chores. If you already asked «הפגישה עם עמית?» and they say כן, emit that full counter with the previously spoken new slot AND that job_id — כן is not jobs.answer approving the old time. The server keeps ONE job, flips who must answer, and delivers report_text. Do not book yet. כן / מאשר / אוקיי on a book_on_yes job → answer AND lists add the meeting (תאריך לביצוע=book_date, שעה לביצוע=book_time, targets=both people). «לא כרגע» is snooze, not counter. A full refusal → decline.",
-  "BOOK A MEETING when the job's ask is to schedule/coordinate anything shared at a slot (לתאם פגישה / שיחה / שיחת עדכון / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself — שם מטלה MUST include all participants in parentheses matching targets (e.g. פגישה נוספת בנושא פורים (עמית, טל) or פגישת עבודה (עמית, ערן) — not לבדוק עם… and not a topic-only title). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. hold=null — do NOT confirm_share; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה (עמית, ערן)\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
+  "BOOK A MEETING when the job's ask is to schedule/coordinate anything shared at a slot (לתאם פגישה / שיחה / שיחת עדכון / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself — שם מטלה MUST include all participants in parentheses matching targets (e.g. פגישה נוספת בנושא פורים (עמית, טל) or פגישת עבודה (עמית, ערן) — not לבדוק עם… and not a topic-only title). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. Do NOT offer a shared save; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה (עמית, ערן)\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / לא כרגע with no hour) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only — never progress.",
-  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while a hold/confirm is unfinished, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
+  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
   "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
@@ -350,7 +329,7 @@ function thinSessionEnvelope(input: {
     `Current speaker: ${input.speaker}. You are ${workerName}.`,
     `Known employees: ${names}.`,
     "Follow ONLY your system instructions above for persona and capabilities. Do not invent Lucy's (or any other worker's) catalog if it is not in your prompt.",
-    "EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, RECENT_OUTBOUND, and PENDING_ACTION_STATE in this turn's user message are facts — do not invent missing ones.",
+    "EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, and RECENT_OUTBOUND in this turn's user message are facts — do not invent missing ones.",
     input.speakerIsOwner
       ? "This speaker is the account owner and may see every human's live saved data in EMPLOYEE_SAVED_DATA."
       : "This speaker is not the account owner — answer only from their own live saved data (plus shared items visible to them).",
@@ -424,18 +403,18 @@ function workerTargetingInstructions(
     'If the speaker assigns an action to another employee or to everyone, set targets on that action to those names or ["all"]. The server will not infer targets from the sentence.',
     'Example: "טל צריך לקנות חלב" → shopping add, targets: ["טל"] (assign — no tell/send verb). Item = חלב only; no speaker copy.',
     'Example: "מיכל צריכה לעשות טסט לרכב" → tasks add, targets: ["מיכל"], item = לעשות טסט לרכב. Confirm + ONE offer: date + reminder to her, optionally also speaker. «כן ב־9» → ping her only.',
-    'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW; lists=[]. Offer shared shopping; hold kind=lists need=confirm_share with draft targets [speaker,\"טל\"]. On כן the server applies that draft — never private speaker shopping.',
-    'Example: "תגידי לטל ולעמית לקנות ביצים" → messages to both; hold confirm_share targets speaker+טל+עמית.',
+    'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW; lists=[]. Offer shared shopping with lists=[]. On כן emit lists add with targets [speaker,\"טל\"] — never private speaker shopping.',
+    'Example: "תגידי לטל ולעמית לקנות ביצים" → messages to both; offer a shared list; on כן targets speaker+טל+עמית.',
     'Example: "תגידי לטל להכין מצגת" / "תגידי למיכל שיש פגישה ב־10" / "תגידי לעמית שהקוד 1234" → messages NOW; lists/filing=[] until they accept an offer to save.',
     'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders.',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
     `Example: "שמור פגישה עם טל ביום ראשון בשעה 10" → tasks add, targets: ["${speaker}", "טל"], שם מטלה includes (${speaker}, טל) in parentheses.`,
-    "A meeting WITH someone must include the current speaker and every named participant in targets.",
+    "A meeting WITH other Known employees must include the current speaker and every named employee in targets. A general meeting or one with an outside party (company / client / not a Known employee, e.g. פגישה עם אלסטיק) is saved on the speaker only (targets=[speaker], outside party stays in שם מטלה) — never ask עם מי עוד or for a person's name there.",
     "If the speaker gives a meeting date without a time and did not say all-day / יום שלם, ask before saving.",
     "If omitted on a normal list item, the action applies only to the current speaker.",
     `Work assigned to YOU → lists tasks add, targets: ["${workerName}"]. The item is the work itself. Do not put that task on the speaker. Do not handoff.`,
-    `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → answer only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON — PENDING_ACTION_STATE / hold message drafts are separate and stay in force.`,
+    `What YOU still need to do, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה המטלות שלך, מה התזכורות שלך) → answer only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
@@ -446,11 +425,11 @@ function workerTargetingInstructions(
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking — but set metadata.hold kind=directory with the known name+phone draft and need=confirm_save.",
-    "Yes → same turn: directory add with name + phone, hold=null, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; hold=null; still emit messages or reminders using the phone digits if the words were already given.",
+    "After they give digits for an unknown person, ASK לשמור את «name» בספר הטלפונים שלך? Empty directory and empty messages/reminders while asking.",
+    "Yes → same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; still emit messages or reminders using the phone digits if the words were already given.",
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words.",
-    "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, emit hold with the known draft; next turn PENDING_ACTION_STATE keeps context — never לא הבנתי to the short fill-in.",
-    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. תגידי לטל לקנות… / תשלחי הודעה לעמית המערכת למעלה → messages NOW; do NOT ask מה תרצה שאשלח or האם זו הודעה או רשימת קניות. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[{targets:[name], text:\"\"}] and hold kind=messages need=text with the same draft. Next short reply (היי / זו ההודעה / כן תשלחי) → send that text, hold=null — never ask again. Cancel any awaiting hold (לא / בטל / אל תשלחי / cancel) → empty unfinished arrays + hold=null; do not use cancel words as the missing field.",
+    "Phone book / אנשי קשר with name+phone already given → directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, ask with that action empty; next turn emit it complete from your previous turn plus the answer — never לא הבנתי to the short fill-in.",
+    "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body — even without dash/colon/quotes. תגידי לטל לקנות… / תשלחי הודעה לעמית המערכת למעלה → messages NOW; do NOT ask מה תרצה שאשלח or האם זו הודעה או רשימת קניות. Only ask what to send when a recipient is named but no message content follows; you may offer שלום. While asking: messages=[]. Next short reply (היי / זו ההודעה / כן תשלחי) → send that text to the recipient you asked about — never ask again. Cancel (לא / בטל / אל תשלחי / cancel) → empty arrays; do not use cancel words as the message.",
     `Example delayed send: \"תשלחי למיכל בעוד שעה אני אוהב את מושה\" → messages [], lists tasks add on ${workerName} לשלוח הודעה למיכל, reminders add in 3600 ping:[\"מיכל\"] text the love note.`,
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
@@ -469,19 +448,19 @@ function workerTargetingInstructions(
     "Change a clock / תעדכן תזכורת → reminders update with reminder_id from this turn's active_reminders. Put a new time only if they changed the clock. Do not add a second clock. The server updates the linked worker task time.",
     "Edit scheduled-message text only (תוסיפי בסוף להודעה לעמית): reminders update, exact saved item, text = FULL new wording (previous + addition), leave time/in empty so the server keeps the existing clock. Never claim updated unless reminders has update.",
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
-    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily); hold kind=reminders need=time with git_log draft; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
+    "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily) with reminders=[], then emit the full git_log clock with their answer; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר / תשלחי לי בעוד 10 שניות את רשימת הקניות המשותפת עם מיכל) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said שלחי לי, brief=the question; «עם מיכל» is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
     "RELATED TO THESE items (קשורות למטלות האלה / לפריטים שמחקנו): answer only active clocks that match those items by meaning. If none, say none. Never list unrelated active clocks. Never invent past deletes or completed history — the system does not load it.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. Recurring: every_count + every_unit. Weekdays: [1] = Monday (0=Sun … 6=Sat). date empty or YYYY-MM-DD.",
-    "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm hold. In response say the reminder(s) were deleted (past tense), naming them. Never put removes only in hold.",
-    "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm hold. In response: past tense naming what was deleted. Never put removes only in hold. Never lists=[] when matching rows exist this turn.",
+    "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
+    "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id.",
     "MUTATE BY ID (like OPEN_JOBS job_id): lists.remove/update need item_id; remove_filing/update_filing need filing_id; reminders remove/update need reminder_id; directory.remove needs contact_id — copy from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS. With a matching id the server applies immediately (no delete-confirm). Never invent or speak ids. Server skips mutate without a matching id.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
-    "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). List a clock in parentheses next to a task only when that task row has a `reminder` field — never pair a task with an active_reminders row by similar wording. Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (not the same as hold/PENDING_ACTION_STATE follow-ups). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
+    "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). List a clock in parentheses next to a task only when that task row has a `reminder` field — never pair a task with an active_reminders row by similar wording. Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (answers to a question you just asked still count). TEAM_SCHEDULES only when they ask about another person by name. Short intro + • lines. Empty timed window → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
     "Status / דוח / what someone needs to buy or do / show a list: answer fully in response from EMPLOYEE_SAVED_DATA (name the owner when relevant). Format lists as short intro + one • item per line — not a paragraph. Current field values only — never dump שם חדש / update drafts. Bold with single *asterisks* (WhatsApp), never **. Shared lists: use scope/shared_with; say shared with those partners. Prefer exact list_name; if several similar names and unsure which, ask before mutating. כל מה ששמור עלי / סיכום מלא → full dump of shopping, tasks, custom lists, active reminders, filings+memory, contacts — not tasks alone.",
     "Answer in your response from this turn's saved data. The server does not write that answer — except known false delivery / list-type wording fixes. It does not append a mutation summary.",
     "After any save/send/remove, state clearly in response what you did — that text is what the user sees.",
@@ -513,44 +492,6 @@ async function rotateConversation(existing: { id: string }): Promise<{
     data: {
       openaiConversationId,
       contextInjectedAt: null,
-      pendingAction: null,
-      pendingTargets: Prisma.JsonNull,
-      pendingStep: null,
-      pendingAt: null,
-    },
-  });
-}
-
-async function loadPendingAction(
-  conversationId: string,
-): Promise<ConversationPendingAction | null> {
-  const row = await prisma.chatConversation.findUnique({
-    where: { id: conversationId },
-    select: {
-      pendingAction: true,
-      pendingTargets: true,
-      pendingStep: true,
-      pendingAt: true,
-    },
-  });
-  return conversationPendingFromStored(row);
-}
-
-async function savePendingAction(
-  conversationId: string,
-  pending: ConversationPendingAction | null,
-): Promise<void> {
-  const stored = pendingToStored(pending);
-  await prisma.chatConversation.update({
-    where: { id: conversationId },
-    data: {
-      pendingAction: stored.pendingAction,
-      pendingTargets:
-        stored.pendingTargets === null
-          ? Prisma.JsonNull
-          : (stored.pendingTargets as Prisma.InputJsonValue),
-      pendingStep: stored.pendingStep,
-      pendingAt: stored.pendingAt,
     },
   });
 }
@@ -722,29 +663,6 @@ async function clearLastAssistantActions(conversationId: string): Promise<void> 
     where: { id: last.id },
     data: { actions: Prisma.JsonNull },
   });
-}
-
-/** Rewrite metadata.lists on an LLM JSON reply (e.g. drop held bulk removes). */
-function setReplyLists(reply: string, lists: unknown[]): string {
-  try {
-    const parsed: unknown = JSON.parse(reply);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as { metadata?: unknown };
-      const metadata =
-        record.metadata &&
-        typeof record.metadata === "object" &&
-        !Array.isArray(record.metadata)
-          ? (record.metadata as Record<string, unknown>)
-          : {};
-      return JSON.stringify({
-        ...record,
-        metadata: { ...metadata, lists },
-      });
-    }
-  } catch {
-    /* plain text */
-  }
-  return reply;
 }
 
 async function pushRelayMessage(input: {
@@ -1128,9 +1046,6 @@ export async function sendChatMessage(input: {
     conversationOwnerId,
     digital.id,
   );
-  const waitingPending = await loadPendingAction(conversation.id);
-  const waitingDeletes =
-    waitingPending?.action === "delete_reminder" ? waitingPending : null;
   const guestSpeaker = isGuestEmployee(employee);
   const speakerContacts = guestSpeaker
     ? []
@@ -1164,7 +1079,6 @@ export async function sendChatMessage(input: {
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
     guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
-    formatConversationPendingContext(waitingPending),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1221,10 +1135,10 @@ export async function sendChatMessage(input: {
           : "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
         guestSpeaker
           ? ""
-          : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, answer from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. PENDING_ACTION_STATE / hold drafts are unrelated and stay active. List jobs one • per line. A row with a `reminder` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no `reminder` field → no parentheses. Never emit metadata.query.",
+          : "If asked what you still need to do, which tasks you have, or what YOUR reminders are, answer from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. List jobs one • per line. A row with a `reminder` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no `reminder` field → no parentheses. Never emit metadata.query.",
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
         "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Use short intro + one • item per line; never a dense paragraph. כל מה ששמור / סיכום מלא → FULL DUMP layout (all sections), not tasks only.",
-        "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — not hold/PENDING follow-ups like היי after מה תרצה שאשלח). Ask about X by name → that person's visible rows. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
+        "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — a short היי after מה תרצה שאשלח is still the answer to your question). Ask about X by name → that person's visible rows. Empty timed window → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
         "הציגי את הרשימות שלי / show my lists: one block per list — header (list_name + shared_with if shared), then • items with CURRENT field values only; blank line between lists. Never one run-on paragraph. Empty → «ריקה».",
         "FULL DUMP / כל מה ששמור עלי / סיכום מלא / everything saved about me: From THIS turn's EMPLOYEE_SAVED_DATA (+ SPEAKER_CONTACTS): cover shopping, tasks/meetings, each custom list, active_reminders, all filing (explicit + memory), contacts — every section even if empty (say ריק). Do not answer with tasks only. • bullets; no schema jargon.",
         "Show a named list / הציגי את רשימת X / שיעורי נהיגה של מאיה: enumerate that list's items from EMPLOYEE_SAVED_DATA — one • line per item with the live value only (never «שם + שם חדש» / update drafts). Never reply with only the owner name — owner is whose list it is; the answer is the items. Speak Hebrew only — never list_name / list_type / metadata. items=[] → say the list is empty.",
@@ -1242,7 +1156,7 @@ export async function sendChatMessage(input: {
           : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
         guestSpeaker
           ? ""
-          : "If PENDING_ACTION_STATE is present: stay inside that action. current_step=awaiting_fields → the speaker's short reply fills missing_field for known_draft; complete it (hold=null) — never לא הבנתי. Cancel that draft (לא / בטל / אל תשלחי / cancel / בעצם לא) → hold=null and empty directory/lists/reminders/filing/messages; do not finish the unfinished save/send. Yes/No for share/draft holds → confirm true/false as asked. Id-based list/reminder/filing deletes are NOT held here — emit removes with ids and report past tense. Do not start unrelated work until the server clears the state.",
+          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. On כן to an offer, emit exactly that offered action (same targets). Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
         guestSpeaker
           ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
           : "If asked what you can do, list every capability. Saved data does not limit that answer.",
@@ -1347,62 +1261,7 @@ export async function sendChatMessage(input: {
       humans,
       employee.id,
     );
-    let serverFilledSendText = "";
-    let cancelledAwaitingHold = false;
-    if (
-      !guestSpeaker &&
-      isAwaitingFieldsHold(waitingPending) &&
-      isPendingHoldCancelText(input.message)
-    ) {
-      cancelledAwaitingHold = true;
-      metadata = metadataAfterHoldCancel(metadata);
-    }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
-      const filledMessages = fillMessagesFromPendingHold(
-        waitingPending,
-        metadata.messages ?? [],
-        input.message,
-      );
-      if (filledMessages) {
-        serverFilledSendText = input.message.trim();
-        metadata = {
-          ...metadata,
-          messages: filledMessages,
-          hold: null,
-        };
-      }
-    }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
-      const filledLists = fillListsFromPendingHold(
-        waitingPending,
-        metadata.lists ?? [],
-        input.message,
-        metadata.confirm ?? null,
-      );
-      if (filledLists) {
-        metadata = {
-          ...metadata,
-          lists: filledLists,
-          hold: null,
-          confirm: null,
-        };
-      }
-    }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
-      const filledReminders = fillRemindersFromPendingHold(
-        waitingPending,
-        metadata.reminders ?? [],
-        input.message,
-      );
-      if (filledReminders) {
-        metadata = {
-          ...metadata,
-          reminders: filledReminders,
-          hold: null,
-        };
-      }
-    }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
+    if (!guestSpeaker) {
       const alignedLists = alignListTargetsWithMessageRecipients({
         lists: metadata.lists ?? [],
         messages: metadata.messages ?? [],
@@ -1412,7 +1271,7 @@ export async function sendChatMessage(input: {
         metadata = { ...metadata, lists: alignedLists };
       }
     }
-    if (!guestSpeaker && !cancelledAwaitingHold) {
+    if (!guestSpeaker) {
       const booked = meetingListsForAnswers(openJobs, metadata.jobs ?? []);
       const alreadyBooked = (metadata.lists ?? []).some(
         (row) => row.action === "add" && row.listType === "tasks",
@@ -1421,20 +1280,17 @@ export async function sendChatMessage(input: {
         metadata = { ...metadata, lists: [...(metadata.lists ?? []), ...booked] };
       }
     }
-    const listPlan = planListDeletes({
-      lists: metadata.lists ?? [],
-      confirm: metadata.confirm ?? null,
-      stored: waitingPending,
-    });
     const metadataForApply = {
       ...metadata,
-      lists: listPlan.applyLists,
+      lists: [
+        ...(metadata.lists ?? []).filter((row) => row.action !== "remove"),
+        ...(metadata.lists ?? []).filter((row) => row.action === "remove"),
+      ],
     };
     // Before item-level lists so a same-turn rename/delete is visible to them.
-    const listOpResults =
-      guestSpeaker || cancelledAwaitingHold
-        ? []
-        : await applyListOps({
+    const listOpResults = guestSpeaker
+      ? []
+      : await applyListOps({
             userId: input.userId,
             actor: employee,
             employees: humans,
@@ -1455,10 +1311,7 @@ export async function sendChatMessage(input: {
       actor: employee,
       sender: digital,
       employees,
-      messages:
-        guestSpeaker || cancelledAwaitingHold
-          ? []
-          : resolveRelayMessages(metadata.messages ?? []),
+      messages: guestSpeaker ? [] : resolveRelayMessages(metadata.messages ?? []),
     });
 
     const collectedEvents: SharedItemEvent[] = [];
@@ -1507,35 +1360,11 @@ export async function sendChatMessage(input: {
         plan.guestMutationBlocked)
         ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
         : "";
-    const abandonPending = Boolean(
-      waitingDeletes &&
-        hasUnrelatedWorkWhilePending({
-          confirm: metadata.confirm ?? null,
-          reminders: metadata.reminders ?? [],
-          messages: metadata.messages ?? [],
-          lists: metadata.lists ?? [],
-          filing: metadata.filing ?? [],
-        }),
-    );
-    const reminderPlan = planReminderWrites(
-      guestSpeaker ? [] : metadata.reminders ?? [],
-      metadata.confirm ?? null,
-      waitingDeletes,
-      { abandonPending },
-    );
-    const nextPending = resolveNextPending({
-      stored: cancelledAwaitingHold ? null : waitingPending,
-      hold: guestSpeaker || cancelledAwaitingHold ? null : metadata.hold ?? null,
-      reminderNext: reminderPlan.nextPending,
-      listDeleteNext: listPlan.nextPending,
-      directory: guestSpeaker ? [] : metadata.directory ?? [],
-      lists: guestSpeaker ? [] : metadata.lists ?? [],
-      listOps: guestSpeaker ? [] : metadata.listOps ?? [],
-      reminders: guestSpeaker ? [] : metadata.reminders ?? [],
-      filing: guestSpeaker ? [] : metadata.filing ?? [],
-      messages: guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
-      confirm: metadata.confirm ?? null,
-    });
+    const incomingReminders = guestSpeaker ? [] : metadata.reminders ?? [];
+    const reminderWrites = [
+      ...incomingReminders.filter((row) => row.action !== "remove"),
+      ...incomingReminders.filter((row) => row.action === "remove"),
+    ];
     const incompleteComposeClocks = (metadata.reminders ?? []).filter(
       (row) =>
         row.action === "add" &&
@@ -1546,27 +1375,11 @@ export async function sendChatMessage(input: {
         !(row.everyCount && row.everyUnit) &&
         !(row.weekdays && row.weekdays.length > 0),
     );
-    const pendingAfterGit =
-      !guestSpeaker &&
-      !cancelledAwaitingHold &&
-      !nextPending &&
-      incompleteComposeClocks.length > 0
-        ? pendingHoldFromLlm({
-            kind: "reminders",
-            need: "time",
-            directory: [],
-            lists: [],
-            reminders: incompleteComposeClocks,
-            filing: [],
-            messages: [],
-          })
-        : nextPending;
-    await savePendingAction(conversation.id, pendingAfterGit);
     const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
       employees: humans,
-      reminders: reminderPlan.apply,
+      reminders: reminderWrites,
       contacts: speakerContacts,
     });
     const directoryResult = guestSpeaker
@@ -1612,7 +1425,7 @@ export async function sendChatMessage(input: {
     );
     recordWhatsAppEvent(
       "reminder_apply",
-      `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderPlan.apply.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
+      `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderWrites.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
     );
     const jobResult = guestSpeaker
       ? null
@@ -1641,25 +1454,14 @@ export async function sendChatMessage(input: {
           .map((row) => row.itemId),
       }),
     );
-    const confirmAsk = [
-      formatReminderConfirmNotice(
-        reminderPlan.ask,
-        reminderPlan.cancelled,
-        reminderPlan.noneToDelete,
-      ),
-      formatListDeleteConfirmNotice(listPlan.askLabels, listPlan.cancelled),
-    ]
-      .filter(Boolean)
-      .join("\n");
-
     const phoneRelays = planPhoneRelays(
-      guestSpeaker || cancelledAwaitingHold ? [] : metadata.messages ?? [],
+      guestSpeaker ? [] : metadata.messages ?? [],
       employees,
       employee.id,
       refreshedContacts,
     );
     const outbound = planOutboundSends({
-      relays: guestSpeaker || cancelledAwaitingHold ? [] : relays,
+      relays: guestSpeaker ? [] : relays,
       phones: phoneRelays,
     });
     if (outbound.held) {
@@ -1882,15 +1684,7 @@ export async function sendChatMessage(input: {
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = formatWhatsAppSkipNotice(skips);
     const missingSend = formatMissingSendTextNotice(metadata.messages ?? []);
-    if (!guestSpeaker && missingSend) {
-      const sendHold = pendingHoldFromMissingMessages(metadata.messages ?? []);
-      if (sendHold) {
-        await savePendingAction(conversation.id, sendHold);
-      }
-    }
     const deliveryFailed = formatWhatsAppSkipNotice(outboundSkips).length > 0;
-    const confirmPending =
-      reminderPlan.ask.length > 0 || listPlan.askLabels.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
     const misaddressed = correctMisaddressedJobReply({
       response: parseLlmReply(workingReply).response,
@@ -1914,14 +1708,9 @@ export async function sendChatMessage(input: {
         `על איזו משימה?\n${jobResult.askWhich.map((ask) => `• ${ask}`).join("\n")}`,
       );
     }
-    // Id-based list deletes apply immediately — askLabels stay empty.
-    if (listPlan.askLabels.length > 0) {
-      workingReply = setReplyLists(workingReply, listPlan.applyLists);
-    }
     // Empty LLM response must not leak raw JSON / blank bubble to the user.
     if (!parseLlmReply(workingReply).response.trim()) {
       const fallback =
-        confirmAsk ||
         guestMutationNotice ||
         (metadata.confirm === false
           ? "ביטלתי את המחיקה."
@@ -1974,26 +1763,6 @@ export async function sendChatMessage(input: {
       );
     }
     // Do not append apply-summary lines — the spoken reply is the model's response only.
-    if (serverFilledSendText) {
-      const dests = (metadata.messages ?? [])
-        .flatMap((row) => row.targets)
-        .map((name) => name.trim())
-        .filter(Boolean);
-      const destLabel =
-        dests.length === 1 ? `ל«${dests[0]}»` : dests.length > 1 ? "להם" : "";
-      workingReply = setEngineResponse(
-        workingReply,
-        destLabel
-          ? `שלחתי ${destLabel}: «${serverFilledSendText}».`
-          : `שלחתי: «${serverFilledSendText}».`,
-      );
-    }
-    if (cancelledAwaitingHold && isAwaitingFieldsHold(waitingPending)) {
-      workingReply = setEngineResponse(
-        workingReply,
-        formatCancelledHoldReply(waitingPending),
-      );
-    }
     const noTimeSkipped = reminderResult.skipped.some(
       (row) => row.reason === "no_time",
     );
@@ -2005,7 +1774,6 @@ export async function sendChatMessage(input: {
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const notice = [
-      confirmPending ? "" : confirmAsk,
       guestMutationNotice,
       missingSend,
       whatsappNotice,
@@ -2017,11 +1785,8 @@ export async function sendChatMessage(input: {
     if (alignedSpoken !== parseLlmReply(turn.reply).response) {
       await patchLastAssistantText(conversation.id, alignedSpoken);
     }
-    const replaceSpoken = deliveryFailed || confirmPending;
-    const composeNotice = [
-      consultAnswers.join("\n\n"),
-      confirmPending ? confirmAsk : notice,
-    ]
+    const replaceSpoken = deliveryFailed;
+    const composeNotice = [consultAnswers.join("\n\n"), notice]
       .filter(Boolean)
       .join("\n\n");
     const reply = composeAssistantReply({

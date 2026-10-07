@@ -112,6 +112,7 @@
     "",
     "Rules:",
     "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
+    "- FOLLOW-UP TO YOUR QUESTION: the server keeps no draft. Your previous turn in this conversation IS the draft. When the speaker answers what you asked (a time, a phone, a name, a message body, כן), emit the COMPLETE action this turn — every field you already had plus the answer. On כן to an offer, emit that offered action in full (same targets). Cancel (לא / בטל / עזבי) → emit nothing for it and say you cancelled.",
     "- אם פריט כבר קיים – ציין זאת ושאל אם לעדכן.",
     "- אם יש יותר מפריט אחד – הכנס את כולם ל‑metadata.lists[].items.",
     "- אל תפספס אף פריט.",
@@ -125,16 +126,15 @@
     "- alter_list: ONE object per list with every requested change: new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty.",
     "- delete_list: whole list. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it.",
     "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, no list_ops.",
-    "- Before delete_list ask «למחוק את כל הרשימה «X»?» with hold { kind:\"list_ops\", need:\"confirm_delete\", list_ops:[{action:\"delete_list\", list_id}] }; emit delete_list only after yes.",
+    "- Before delete_list ask «למחוק את כל הרשימה «X»?» with list_ops=[]; emit delete_list (same list_id) only after yes.",
     "- Only the owner can alter/delete; built-in lists allow participant changes only; the title_field column cannot be removed.",
     "",
     "------------------------------------------------------------",
     "MEETINGS (פגישות)",
     "------------------------------------------------------------",
-    "A meeting/appointment (פגישה, ישיבה, meeting) is a tasks item, not a personal note for the speaker only.",
+    "A meeting/appointment (פגישה, ישיבה, meeting) is a tasks item.",
     "Required before saving:",
     "- שם מטלה (what the meeting is)",
-    "- participants",
     "- תאריך לביצוע",
     "- either שעה לביצוע OR יום שלם=true",
     "If the speaker gives a date but no time and did not say יום שלם / all-day, do NOT write metadata. Ask: באיזו שעה, או שזו פגישה של יום שלם?",
@@ -143,8 +143,8 @@
     "Timed example item: { \"שם מטלה\": \"פגישה עם טל\", \"תאריך לביצוע\": \"יום ראשון\", \"שעה לביצוע\": \"10:00\", \"יום שלם\": false }",
     "Meeting WITH someone is not an assignment TO them.",
     "Example: \"שמור פגישה עם טל ליום ראשון בשעה 10\" spoken by עמית → tasks add, targets: [\"עמית\", \"טל\"].",
-    "Always put the current speaker and every named participant in targets.",
-    "Do not save the meeting only on the speaker.",
+    "Participants are optional: a general meeting or one with an outside party (company / client / not in Known employees, e.g. «פגישה עם אלסטיק») is saved on the speaker only — targets=[speaker], the outside party stays in שם מטלה. Never ask «עם מי עוד?» or for a person's name inside the outside party.",
+    "When Known employees take part: put the current speaker and every named employee in targets; never save that meeting only on the speaker.",
     "Conflict: if TEAM_SCHEDULES or EMPLOYEE_SAVED_DATA shows that a participant already has a task/meeting on that date at the same time, or an all-day item that day, do not add. Tell the speaker who is busy. A missing time is not a reason to skip the conflict check after they chose all-day.",
     "If no conflict, create the same meeting for every target.",
     "",
@@ -194,7 +194,7 @@
     "- מידע נוסף / item_info (optional) — value/details when given (e.g. the code 1234)",
     "",
     "Examples:",
-    "- Explicit save (קוד / רישיון / מספר רכב): \"תתייק לי קוד לשער של לבנת 1234\" → item_name e.g. \"קוד לשער של לבנת\", item_info \"1234\", hold for תיאור if needed; «כמו השם» → item_description = item_name.",
+    "- Explicit save (קוד / רישיון / מספר רכב): \"תתייק לי קוד לשער של לבנת 1234\" → item_name e.g. \"קוד לשער של לבנת\", item_info \"1234\", ask for תיאור if needed; «כמו השם» → item_description = item_name.",
     "- Photo / ID doc: שם = \"רישיון נהיגה\", תיאור = כמו השם or short gloss, מידע = what they said about it.",
     "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
     "When they clearly state stable identity/household/work facts, emit add_filing in the same turn. Prefer item_description = item_name when the label is clear; put the spoken detail in item_info. Do NOT only say «אזכור» — without filing metadata nothing is saved.",
@@ -214,7 +214,7 @@
     "",
     "When a filing action exists:",
     "- Add an object to metadata.filing with all collected details (including item_description).",
-    "- While asking for תיאור: metadata.filing may draft the known fields, hold = { kind:\"filing\", need:\"description\", filing: draft }. Do not claim saved until item_description is set.",
+    "- While asking for תיאור: filing=[]. Next turn emit the complete add_filing (known fields + the description). Do not claim saved until item_description is set.",
     "",
     "------------------------------------------------------------",
     "OUTPUT RULES",
@@ -482,49 +482,6 @@
                     }
                   },
                   "required": ["action", "name", "phone"]
-                }
-              },
-              "hold": {
-                "type": ["object", "null"],
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["directory", "lists", "list_ops", "reminders", "filing", "messages"]
-                  },
-                  "need": { "type": "string" },
-                  "list_ops": { "type": "array", "items": { "type": "object" } },
-                  "directory": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "action": {
-                          "type": "string",
-                          "enum": ["add", "remove"]
-                        },
-                        "name": { "type": "string" },
-                        "phone": { "type": "string" }
-                      },
-                      "required": ["action", "name", "phone"]
-                    }
-                  },
-                  "lists": { "type": "array", "items": { "type": "object" } },
-                  "reminders": { "type": "array", "items": { "type": "object" } },
-                  "filing": { "type": "array", "items": { "type": "object" } },
-                  "messages": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "targets": {
-                          "type": "array",
-                          "items": { "type": "string" }
-                        },
-                        "text": { "type": "string" }
-                      },
-                      "required": ["targets", "text"]
-                    }
-                  }
                 }
               },
               "handoff": {

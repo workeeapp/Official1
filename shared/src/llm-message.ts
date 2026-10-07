@@ -120,26 +120,6 @@ export interface LlmDirectoryAction {
   contactId: string;
 }
 
-export type LlmHoldKind =
-  | "directory"
-  | "lists"
-  | "list_ops"
-  | "reminders"
-  | "filing"
-  | "messages";
-
-/** Draft kept while asking for a missing required field (server PENDING_ACTION_STATE). */
-export interface LlmHold {
-  kind: LlmHoldKind;
-  need: string;
-  directory: LlmDirectoryAction[];
-  lists: LlmListAction[];
-  listOps?: LlmListOp[];
-  reminders: LlmReminderAction[];
-  filing: LlmFilingAction[];
-  messages: LlmMessageAction[];
-}
-
 export type LlmReminderActionName = "add" | "remove" | "update";
 export type LlmReminderRepeat =
   | "once"
@@ -223,12 +203,6 @@ export interface LlmMetadata {
    * further scope history to that domain.
    */
   reportHistoryKinds?: ReportHistoryKind[];
-  /**
-   * Incomplete multi-turn draft: known fields while asking for `need`.
-   * Server stores this as PENDING_ACTION_STATE (missing fields / share confirm).
-   * Id-based deletes are not held — they apply immediately.
-   */
-  hold?: LlmHold | null;
   confirm?: boolean | null;
   targets?: string[];
 }
@@ -272,7 +246,6 @@ export function emptyLlmMetadata(): LlmMetadata {
     handoff: null,
     reportSections: [],
     reportHistoryKinds: [],
-    hold: null,
     confirm: null,
     targets: [],
   };
@@ -326,7 +299,6 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     handoff: parseHandoff(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
-    hold: parseHold(meta, { directory, lists, listOps, reminders, filing, messages }),
     confirm: parseConfirm(meta),
     targets: defaultTargets,
     lists,
@@ -774,106 +746,6 @@ function parseConfirm(meta: Record<string, unknown>): boolean | null {
   return null;
 }
 
-const HOLD_KINDS = new Set<LlmHoldKind>([
-  "directory",
-  "lists",
-  "list_ops",
-  "reminders",
-  "filing",
-  "messages",
-]);
-
-function parseHold(
-  meta: Record<string, unknown>,
-  fallback: {
-    directory: LlmDirectoryAction[];
-    lists: LlmListAction[];
-    listOps: LlmListOp[];
-    reminders: LlmReminderAction[];
-    filing: LlmFilingAction[];
-    messages: LlmMessageAction[];
-  },
-): LlmHold | null {
-  const raw = meta.hold ?? meta.pending_hold ?? meta.pendingHold;
-  if (raw == null || raw === false) {
-    return null;
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw as Record<string, unknown>;
-  const kindRaw =
-    typeof record.kind === "string"
-      ? record.kind.trim().toLowerCase()
-      : typeof record.action === "string"
-        ? record.action.trim().toLowerCase().replace(/^complete_/, "")
-        : "";
-  if (!HOLD_KINDS.has(kindRaw as LlmHoldKind)) {
-    return null;
-  }
-  const need =
-    typeof record.need === "string"
-      ? record.need.trim()
-      : typeof record.missing === "string"
-        ? record.missing.trim()
-        : typeof record.ask === "string"
-          ? record.ask.trim()
-          : "";
-  if (!need) {
-    return null;
-  }
-
-  const nestedDirectory = parseDirectoryActions(record);
-  const nestedReminders = parseReminderActions(record);
-  const nestedMessages = parseMessageActions(record);
-  const nestedLists = Array.isArray(record.lists)
-    ? record.lists.flatMap((entry) => {
-        const action = toListAction(entry);
-        return action ? [action] : [];
-      })
-    : [];
-  const nestedFiling = Array.isArray(record.filing)
-    ? record.filing.flatMap((entry) => {
-        const action = toFilingAction(entry);
-        return action ? [action] : [];
-      })
-    : [];
-
-  const nestedListOps = parseListOps(record);
-
-  const directory =
-    nestedDirectory.length > 0 ? nestedDirectory : fallback.directory;
-  const lists = nestedLists.length > 0 ? nestedLists : fallback.lists;
-  const listOps = nestedListOps.length > 0 ? nestedListOps : fallback.listOps;
-  const reminders =
-    nestedReminders.length > 0 ? nestedReminders : fallback.reminders;
-  const filing = nestedFiling.length > 0 ? nestedFiling : fallback.filing;
-  const messages =
-    nestedMessages.length > 0 ? nestedMessages : fallback.messages;
-
-  if (
-    directory.length === 0 &&
-    lists.length === 0 &&
-    listOps.length === 0 &&
-    reminders.length === 0 &&
-    filing.length === 0 &&
-    messages.length === 0
-  ) {
-    return null;
-  }
-
-  return {
-    kind: kindRaw as LlmHoldKind,
-    need: need.slice(0, 200),
-    directory,
-    lists,
-    ...(listOps.length > 0 ? { listOps } : {}),
-    reminders,
-    filing,
-    messages,
-  };
-}
-
 function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {
   const raw = meta.messages ?? meta.relays ?? meta.outbound;
   if (!Array.isArray(raw)) {
@@ -1132,7 +1004,7 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
   const record = value as Record<string, unknown>;
   const targets = parseTargets(record);
   const text = readText(record, ["text", "message", "body", "תוכן"]);
-  // Allow targets + empty text so "what to send?" can hold a draft.
+  // Allow targets + empty text so the engine can ask what to send instead of dropping the recipient.
   if (!text && targets.length === 0) {
     return null;
   }

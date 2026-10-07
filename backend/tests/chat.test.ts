@@ -9,10 +9,6 @@ type ConversationRow = {
   digitalEmployeeId: string;
   openaiConversationId: string;
   contextInjectedAt: Date | null;
-  pendingAction: string | null;
-  pendingTargets: unknown;
-  pendingStep: string | null;
-  pendingAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -441,10 +437,6 @@ describe("chat API", () => {
           digitalEmployeeId: data.digitalEmployeeId,
           openaiConversationId: data.openaiConversationId,
           contextInjectedAt: null,
-          pendingAction: null,
-          pendingTargets: null,
-          pendingStep: null,
-          pendingAt: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -464,10 +456,6 @@ describe("chat API", () => {
         data: {
           contextInjectedAt?: Date | null;
           openaiConversationId?: string;
-          pendingAction?: string | null;
-          pendingTargets?: unknown;
-          pendingStep?: string | null;
-          pendingAt?: Date | null;
         };
       }) => {
         for (const row of conversationStore.values()) {
@@ -477,18 +465,6 @@ describe("chat API", () => {
             }
             if (data.openaiConversationId) {
               row.openaiConversationId = data.openaiConversationId;
-            }
-            if (data.pendingAction !== undefined) {
-              row.pendingAction = data.pendingAction;
-            }
-            if (data.pendingTargets !== undefined) {
-              row.pendingTargets = data.pendingTargets;
-            }
-            if (data.pendingStep !== undefined) {
-              row.pendingStep = data.pendingStep;
-            }
-            if (data.pendingAt !== undefined) {
-              row.pendingAt = data.pendingAt;
             }
             row.updatedAt = new Date();
             return row;

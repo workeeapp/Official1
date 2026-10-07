@@ -81,7 +81,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("NEVER ask for unit");
     expect(config.systemMessage).toContain("From a recipe / ingredient list");
     expect(config.systemMessage).toContain("MUST copy into כמות + יחידת מידה");
-    expect(config.systemMessage).toContain("confirm_share");
+    expect(config.systemMessage).toContain("FOLLOW-UP TO YOUR QUESTION");
+    expect(config.systemMessage).not.toContain("confirm_share");
+    expect(config.systemMessage).not.toContain("PENDING_ACTION_STATE");
     expect(config.systemMessage).toContain("FORBIDDEN: «לרשימת הקניות שלך»");
     expect(config.systemMessage).toContain("TELL vs ASSIGN");
     expect(config.systemMessage).toContain("תגידי לטל לקנות");

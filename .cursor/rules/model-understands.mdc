@@ -8,7 +8,7 @@ alwaysApply: true
 **The product loop (non-negotiable):**
 
 1. **Model understands** the speaker (Hebrew/English free text).
-2. **Model decides** and emits a structured **ACTION** in `metadata` (lists / filing / messages / reminders / directory / hold / confirm / handoff…).
+2. **Model decides** and emits a structured **ACTION** in `metadata` (lists / filing / messages / reminders / directory / confirm / handoff…).
 3. **Engine executes** only what is in that ACTION: validate, persist, inject facts next turn, send WhatsApp, fire clocks, enforce visibility.
 
 Understanding is **never** in the server. The server does not re-interpret the chat message.
@@ -16,7 +16,7 @@ Understanding is **never** in the server. The server does not re-interpret the c
 ## Do
 
 - Put interpretation and product decisions in **prompts** + the shared action schema (`LLM.action.json` / `LLM.config.json` / runtime extras).
-- If something is missing → model asks + `hold` / confirm; engine waits for a complete ACTION.
+- If something is missing → model asks with that action empty; next turn it emits the complete ACTION from its own previous turn + the answer. The engine keeps no draft.
 - Engine may filter **DB rows** for ownership/`seeAll` before injecting context (facts), and may apply narrow post-apply corrections already allowed by architecture (list-type wording, WhatsApp notices, delete-confirm prompts).
 
 ## Do not
