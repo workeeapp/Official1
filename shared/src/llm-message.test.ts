@@ -457,6 +457,42 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads the urgency the model set on a relayed message and drops normal", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "שלחתי לערן",
+        metadata: {
+          messages: [
+            {
+              targets: ["ערן"],
+              text: "דחוף מאוד — עמית מבקש תשובה עכשיו: מה שלומך?",
+              expects_reply: true,
+              ask_summary: "מה שלומך?",
+              urgency: "very_urgent",
+            },
+            {
+              targets: ["טל"],
+              text: "עמית שואל מה שלומך?",
+              expects_reply: true,
+              ask_summary: "מה שלומך?",
+              urgency: "normal",
+            },
+            {
+              targets: ["מיכל"],
+              text: "עמית שואל מה שלומך?",
+              expects_reply: true,
+              ask_summary: "מה שלומך?",
+              urgency: "whenever",
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.messages?.[0].urgency).toBe("very_urgent");
+    expect(parsed.messages?.[1]).not.toHaveProperty("urgency");
+    expect(parsed.messages?.[2]).not.toHaveProperty("urgency");
+  });
+
   it("parses counter with job_id date and time from OPEN_JOBS-shaped ACTION", () => {
     const parsed = parseReplyMetadata(
       JSON.stringify({

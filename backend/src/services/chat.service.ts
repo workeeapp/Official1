@@ -4,6 +4,7 @@ import {
   humanEmployees,
   isDigitalEmployee,
   isGuestEmployee,
+  JOB_URGENCY_POLICY,
   parseLlmReply,
   parseReplyMetadata,
   toReplyButtons,
@@ -294,10 +295,32 @@ async function withoutFailingTurn<T>(
   }
 }
 
+function englishDuration(seconds: number): string {
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return hours === 1 ? "hour" : `${hours} hours`;
+  }
+  return `${Math.round(seconds / 60)} minutes`;
+}
+
+const URGENCY_RULE = (() => {
+  const urgent = JOB_URGENCY_POLICY.urgent;
+  const veryUrgent = JOB_URGENCY_POLICY.very_urgent;
+  return [
+    "URGENCY (every messages entry): urgency = normal | urgent | very_urgent, judged by the MEANING of how the speaker asked — never ask them how urgent it is.",
+    "normal by default. urgent when they stress it (דחוף / בהקדם / חשוב שיענה מהר). very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד / קריטי).",
+    "The text to the recipient carries it: urgent → «עמית מבקש בדחיפות: מה שלומך?»; very_urgent → «דחוף מאוד — עמית מבקש תשובה עכשיו: מה שלומך?».",
+    `On a job (expects_reply true) the server follows up with the recipient on its own: urgent → ${urgent.autoNudges} more times, every ${englishDuration(urgent.intervalSeconds)}; very_urgent → ${veryUrgent.autoNudges} more times, every ${englishDuration(veryUrgent.intervalSeconds)}; normal → none (you only raise it when they write). After the last follow-up the server tells the asker.`,
+    "Never emit reminders, jobs.snooze or lists for those follow-ups. Response to the asker says it briefly: «שלחתי לערן בדחיפות, ואזכיר לו שוב אם לא יענה.»",
+    "The same ask repeated more urgently (תבדקי שוב, זה ממש דחוף) → the same messages entry with the higher urgency; the server raises the open job.",
+  ].join(" ");
+})();
+
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
   "ask_summary = what the speaker wants from them, in the speaker's own words, WITHOUT the recipient's name: «לתאם פגישת עבודה ליום שלישי» / «אם קנית חלב?» — not «לתאם פגישה עם ערן».",
-  "Example: עמית אומר «תתאמי פגישת עבודה עם ערן ליום שלישי בשעה 10» → messages: [{ \"targets\": [\"ערן\"], \"text\": \"עמית מבקש לתאם איתך פגישת עבודה ביום שלישי ב-10:00. מתאים לך שעה זו כדי שאקבע?\", \"expects_reply\": true, \"ask_summary\": \"לתאם פגישת עבודה ביום שלישי ב-10:00\", \"book\": { \"title\": \"פגישת עבודה\", \"date\": \"<that Tuesday YYYY-MM-DD>\", \"time\": \"10:00\" } }], lists: []. The text states the slot AND ends with a yes/no question (מתאים לך…? / נוח לך שעה זו?). A statement alone is not enough. The server opens the job task on you — never add a lists task for it yourself. This is the only exception to «a tell/send never becomes a task» besides scheduled sends.",
+  URGENCY_RULE,
+  "Example: עמית אומר «תתאמי פגישת עבודה עם ערן ליום שלישי בשעה 10» → messages: [{ \"targets\": [\"ערן\"], \"text\": \"עמית מבקש לתאם איתך פגישת עבודה ביום שלישי ב-10:00. מתאים לך שעה זו כדי שאקבע?\", \"expects_reply\": true, \"ask_summary\": \"לתאם פגישת עבודה ביום שלישי ב-10:00\", \"urgency\": \"normal\", \"book\": { \"title\": \"פגישת עבודה\", \"date\": \"<that Tuesday YYYY-MM-DD>\", \"time\": \"10:00\" } }], lists: []. The text states the slot AND ends with a yes/no question (מתאים לך…? / נוח לך שעה זו?). A statement alone is not enough. The server opens the job task on you — never add a lists task for it yourself. This is the only exception to «a tell/send never becomes a task» besides scheduled sends.",
   "book (on that messages entry): set it whenever the ask is to set up something the two of them will do together at a slot — פגישה, שיחה, שיחת עדכון, זום, ארוחה. title = the speaker's own words for it (שיחת עדכון), date = YYYY-MM-DD from SESSION_CLOCK, time = HH:mm. On a yes the server saves that item on BOTH people's tasks. Omit book for a plain question or a request that is not a shared slot (מה שלומך / תשלח את הקובץ).",
   "MEETING SLOT FIRST: תתאמי פגישה עם X needs a date+time (or all-day) BEFORE you message X. Speaker omitted them → ask the speaker in response, messages=[], lists=[]. Never ping X with «באיזה תאריך ושעה נוח לך?» while you still lack the slot, and never ask X for a time the speaker already gave. Follow-up «מחר ב-10» when no job is open yet → now message X WITH that slot (expects_reply true, ask_summary includes מחר ב-10:00). A new different request to the same person (תבדקי מה שלומו while a meeting job is already open) is another job — expects_reply + ask_summary, do not emit jobs.progress on the old row. Updating the SAME open job (new slot for that meeting) → jobs.progress on that job_id AND the update message; the server keeps that one row.",
   "OPEN_JOBS (injected when present) lists the jobs you still owe for THIS speaker: job_id, asker, subject, ask, task, viewer_is, state, raisable. Only those exist — never invent one. Several rows can be open at once. EVERY metadata.jobs entry MUST copy job_id from OPEN_JOBS — never omit it (missing job_id when several jobs are owed makes the server ask «על איזו משימה?» and drop the action, including counter). Two possible rows → ASK which OPEN_JOBS ask briefly, then on their pick emit the jobs action WITH that job_id. If OPEN_JOBS has rows you DO have work: say so even when WORKER_SAVED_DATA is empty, and never answer «אין לי מטלות».",
@@ -308,7 +331,7 @@ const OPEN_JOBS_RULES = [
   "BOOK A MEETING when the job's ask is to schedule/coordinate anything shared at a slot (לתאם פגישה / שיחה / שיחת עדכון / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself — שם מטלה MUST include all participants in parentheses matching targets (e.g. פגישה נוספת בנושא פורים (עמית, טל) or פגישת עבודה (עמית, ערן) — not לבדוק עם… and not a topic-only title). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. Do NOT offer a shared save; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה (עמית, ערן)\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / לא כרגע with no hour) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only — never progress.",
-  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early.",
+  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. raisable=false (a clock is set) → wait, do not raise early. A row with urgency=urgent → raise it FIRST, before their own request, and say it is urgent. urgency=very_urgent → raise it first in EVERY reply while it is open, even right after לא כרגע (one short line).",
   "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
@@ -1166,7 +1189,7 @@ export async function sendChatMessage(input: {
           : "Ping clocks only → active_reminders. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
         guestSpeaker
           ? ""
-          : "LAST CHECK before you answer: every entry in metadata.messages must have all four fields — targets, text, expects_reply, ask_summary. expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
+          : "LAST CHECK before you answer: every entry in metadata.messages must have all five fields — targets, text, expects_reply, ask_summary, urgency (normal unless the speaker stressed it). expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -1596,6 +1619,7 @@ export async function sendChatMessage(input: {
               subjectName: speakerName(relay.target),
               text: relay.text,
               ask: relay.askSummary ?? "",
+              ...(relay.urgency ? { urgency: relay.urgency } : {}),
               ...(relay.book ? { book: relay.book } : {}),
             })),
         }),

@@ -28,6 +28,12 @@ export interface JobMeta {
   nudgeReminderId?: string;
   nudgeItemId?: string;
   nudgeFireAt?: string;
+  /** The active clock is an urgency follow-up, not a snooze the subject asked for. */
+  nudgeAuto?: boolean;
+  /** Urgency follow-ups already fired for this job. */
+  autoNudgesSent?: number;
+  /** Set on a nudge row: it was opened by the urgency policy. */
+  auto?: boolean;
   /** Latest progress note, kept so the asker can be told where things stand. */
   progress?: string;
   /** Set on a nudge row: the job it belongs to. */
@@ -84,6 +90,11 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
     ...(typeof meta.nudgeFireAt === "string"
       ? { nudgeFireAt: meta.nudgeFireAt }
       : {}),
+    ...(meta.nudgeAuto === true ? { nudgeAuto: true } : {}),
+    ...(typeof meta.autoNudgesSent === "number" && meta.autoNudgesSent > 0
+      ? { autoNudgesSent: meta.autoNudgesSent }
+      : {}),
+    ...(meta.auto === true ? { auto: true } : {}),
     ...(typeof meta.progress === "string" ? { progress: meta.progress } : {}),
     ...(typeof meta.jobItemId === "string"
       ? { jobItemId: meta.jobItemId }

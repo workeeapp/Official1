@@ -1,3 +1,4 @@
+import { parseJobUrgency, type JobUrgency } from "./job-urgency.js";
 import { parseReminderInterval } from "./reminder-interval.js";
 
 export interface LlmReplyButton {
@@ -73,6 +74,8 @@ export interface LlmMessageAction {
   expectsReply?: boolean;
   /** The asker's question in their own words, quoted back when reporting. */
   askSummary?: string;
+  /** How hard the speaker stressed the ask; drives the server's follow-up clocks. */
+  urgency?: JobUrgency;
   /** The ask is to set up a meeting/call at this slot; a yes books it for both people. */
   book?: LlmMessageBook;
 }
@@ -1019,11 +1022,13 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
     "שאלה",
   ]);
   const book = toMessageBook(record.book);
+  const urgency = parseJobUrgency(record.urgency);
   return {
     text,
     targets,
     ...(expectsReply !== undefined ? { expectsReply } : {}),
     ...(askSummary ? { askSummary } : {}),
+    ...(urgency !== "normal" ? { urgency } : {}),
     ...(book ? { book } : {}),
   };
 }

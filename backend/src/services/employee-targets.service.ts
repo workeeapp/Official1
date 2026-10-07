@@ -6,6 +6,7 @@ import {
   type LlmFilingAction,
   type LlmListAction,
   type LlmMessageAction,
+  type JobUrgency,
   type LlmMessageBook,
   type LlmMetadata,
   type LlmReminderAction,
@@ -313,6 +314,7 @@ export function planRelayDeliveries(input: {
   text: string;
   expectsReply?: boolean;
   askSummary?: string;
+  urgency?: JobUrgency;
   book?: LlmMessageBook;
 }> {
   const deliveries: Array<{
@@ -322,6 +324,7 @@ export function planRelayDeliveries(input: {
     text: string;
     expectsReply?: boolean;
     askSummary?: string;
+    urgency?: JobUrgency;
     book?: LlmMessageBook;
   }> = [];
   const seen = new Set<string>();
@@ -356,6 +359,7 @@ export function planRelayDeliveries(input: {
           ? { expectsReply: action.expectsReply }
           : {}),
         ...(action.askSummary ? { askSummary: action.askSummary } : {}),
+        ...(action.urgency ? { urgency: action.urgency } : {}),
         ...(action.book ? { book: action.book } : {}),
       });
     }

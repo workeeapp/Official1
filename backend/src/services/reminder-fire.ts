@@ -18,6 +18,7 @@ import { loadComposeFacts } from "./compose-facts.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { jobMetaFrom } from "./job-meta.js";
 
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
@@ -109,14 +110,34 @@ export async function settleFiredReminder(
       data: { reminderId: null },
     });
   }
+  let firedTaskData: unknown = null;
   if (workerItemId && prisma.employeeListItem?.update) {
     try {
-      await prisma.employeeListItem.update({
+      const task = await prisma.employeeListItem.update({
         where: { id: workerItemId },
         data: { deletedAt: new Date(), reminderId: null },
       });
+      firedTaskData = task?.data ?? null;
     } catch {
       // Already removed.
+    }
+  }
+
+  const nudge = jobMetaFrom(firedTaskData);
+  if (workerItemId && reminder.userId && nudge?.kind === "nudge") {
+    try {
+      const { continueJobAfterNudge } = await import("./jobs.service.js");
+      await continueJobAfterNudge({
+        userId: reminder.userId,
+        nudgeItemId: workerItemId,
+        nudge,
+        now,
+      });
+    } catch (error) {
+      console.error(
+        "Job follow-up failed",
+        error instanceof Error ? error.message : "unknown",
+      );
     }
   }
 

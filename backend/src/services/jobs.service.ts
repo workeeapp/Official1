@@ -1,5 +1,13 @@
 import { Prisma } from "@prisma/client";
-import type { LlmJobAction, LlmListAction, LlmMessageBook } from "@workee/shared";
+import {
+  JOB_URGENCIES,
+  JOB_URGENCY_POLICY,
+  parseJobUrgency,
+  type JobUrgency,
+  type LlmJobAction,
+  type LlmListAction,
+  type LlmMessageBook,
+} from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { JOB_META_KEY, jobMetaFrom, type JobMeta } from "./job-meta.js";
@@ -16,6 +24,11 @@ export interface OpenJobRow {
   id: string;
   label: string;
   meta: JobMeta;
+  urgency?: JobUrgency;
+}
+
+function urgencyRank(urgency: JobUrgency): number {
+  return JOB_URGENCIES.indexOf(urgency);
 }
 
 export interface JobReport {
@@ -119,6 +132,7 @@ export async function createJobsFromRelays(input: {
     subjectName: string;
     text: string;
     ask: string;
+    urgency?: JobUrgency;
     book?: LlmMessageBook;
   }>;
   reuseJobIds?: string[];
@@ -137,6 +151,7 @@ export async function createJobsFromRelays(input: {
     id: string;
     meta: JobMeta;
     data: Record<string, unknown>;
+    urgency: JobUrgency;
   }> = [];
   for (const row of live) {
     const data = asRecord(row.data);
@@ -144,7 +159,7 @@ export async function createJobsFromRelays(input: {
     if (meta?.kind !== "job") {
       continue;
     }
-    openJobs.push({ id: row.id, meta, data });
+    openJobs.push({ id: row.id, meta, data, urgency: parseJobUrgency(row.urgency) });
   }
   const reuse = new Set(input.reuseJobIds ?? []);
   const created: OpenJobRow[] = [];
@@ -152,6 +167,7 @@ export async function createJobsFromRelays(input: {
     if (delivery.subjectId === input.asker.id) {
       continue;
     }
+    const urgency = delivery.urgency ?? "normal";
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
     const duplicate = openJobs.find(
       (job) =>
@@ -164,6 +180,13 @@ export async function createJobsFromRelays(input: {
         ),
     );
     if (duplicate) {
+      await escalateJob({
+        userId: input.userId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        actorId: input.asker.id,
+        job: duplicate,
+        urgency,
+      });
       continue;
     }
     const reusable = openJobs.filter(
@@ -201,6 +224,13 @@ export async function createJobsFromRelays(input: {
       } catch {
         /* keep the existing row */
       }
+      await escalateJob({
+        userId: input.userId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        actorId: input.asker.id,
+        job: existing,
+        urgency,
+      });
       continue;
     }
     const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
@@ -224,13 +254,26 @@ export async function createJobsFromRelays(input: {
           scope: "shared",
           addedById: input.asker.id,
           visibleTo: toJsonValue([input.asker.id, delivery.subjectId]),
+          urgency,
         },
       });
       if (!row?.id) {
         continue;
       }
-      created.push({ id: row.id, label, meta });
-      openJobs.push({ id: row.id, meta, data: { [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta } });
+      const job: OpenJobRow = { id: row.id, label, meta, urgency };
+      const chained = await startFollowUps({
+        userId: input.userId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        actorId: input.asker.id,
+        job,
+      });
+      created.push(chained);
+      openJobs.push({
+        id: row.id,
+        meta: chained.meta,
+        data: { [TASK_NAME_KEY]: label, [JOB_META_KEY]: chained.meta },
+        urgency,
+      });
       await recordAuditEvent({
         userId: input.userId,
         actorEmployeeId: input.asker.id,
@@ -238,7 +281,7 @@ export async function createJobsFromRelays(input: {
         entityType: "EmployeeListItem",
         entityId: row.id,
         summary: `open job: ${label}`,
-        detail: { subjectId: delivery.subjectId, ask },
+        detail: { subjectId: delivery.subjectId, ask, urgency },
       });
     } catch {
       // A job that cannot be stored must not break the send that already happened.
@@ -321,7 +364,12 @@ export async function listOpenJobsForViewer(input: {
       if (meta.askerId !== input.viewerId && meta.subjectId !== input.viewerId) {
         continue;
       }
-      jobs.push({ id: row.id, label: readLabel(row.data), meta });
+      jobs.push({
+        id: row.id,
+        label: readLabel(row.data),
+        meta,
+        urgency: parseJobUrgency(row.urgency),
+      });
     }
     return jobs;
   } catch {
@@ -362,38 +410,68 @@ export function meetingListsForAnswers(
   return lists;
 }
 
+/** A clock still ahead of us; one that already fired must not hold the job back. */
+function pendingClock(meta: JobMeta, now: Date): string | null {
+  if (!meta.nudgeFireAt) {
+    return null;
+  }
+  const at = Date.parse(meta.nudgeFireAt);
+  return Number.isFinite(at) && at > now.getTime() ? meta.nudgeFireAt : null;
+}
+
+function urgencyFields(job: OpenJobRow, clock: string | null): Record<string, unknown> {
+  const urgency = job.urgency ?? "normal";
+  if (urgency === "normal") {
+    return {};
+  }
+  const policy = JOB_URGENCY_POLICY[urgency];
+  const sent = job.meta.autoNudgesSent ?? 0;
+  return {
+    urgency,
+    follow_ups_sent: sent,
+    follow_ups_left: Math.max(0, policy.autoNudges - sent),
+    ...(clock && job.meta.nudgeAuto ? { next_follow_up_at: clock } : {}),
+  };
+}
+
 export function formatOpenJobsContext(
   jobs: OpenJobRow[],
   viewerId: string,
+  now: Date = new Date(),
 ): string {
   if (jobs.length === 0) {
     return "";
   }
-  const rows = jobs.map((job) => ({
-    job_id: job.id,
-    asker: job.meta.askerName,
-    subject: job.meta.subjectName,
-    ask: job.meta.ask,
-    task: job.label,
-    viewer_is: job.meta.askerId === viewerId ? "asker" : "subject",
-    state: job.meta.state,
-    ...(job.meta.progress ? { progress: job.meta.progress } : {}),
-    ...(job.meta.nudgeFireAt
-      ? { reminder_at: job.meta.nudgeFireAt, raisable: false }
-      : {
-          ...(job.meta.deferredAt ? { deferred: true } : {}),
-          raisable: job.meta.subjectId === viewerId,
-        }),
-    ...(job.meta.needsBook
-      ? {
-          book_on_yes: true,
-          ...(job.meta.bookDate ? { book_date: job.meta.bookDate } : {}),
-          ...(job.meta.bookTime ? { book_time: job.meta.bookTime } : {}),
-          ...(job.meta.bookTitle ? { book_title: job.meta.bookTitle } : {}),
-        }
-      : {}),
-    opened_at: job.meta.createdAt,
-  }));
+  const rows = jobs.map((job) => {
+    const clock = pendingClock(job.meta, now);
+    const snoozed = Boolean(clock && !job.meta.nudgeAuto);
+    return {
+      job_id: job.id,
+      asker: job.meta.askerName,
+      subject: job.meta.subjectName,
+      ask: job.meta.ask,
+      task: job.label,
+      viewer_is: job.meta.askerId === viewerId ? "asker" : "subject",
+      state: job.meta.state,
+      ...urgencyFields(job, clock),
+      ...(job.meta.progress ? { progress: job.meta.progress } : {}),
+      ...(snoozed
+        ? { reminder_at: clock, raisable: false }
+        : {
+            ...(job.meta.deferredAt ? { deferred: true } : {}),
+            raisable: job.meta.subjectId === viewerId,
+          }),
+      ...(job.meta.needsBook
+        ? {
+            book_on_yes: true,
+            ...(job.meta.bookDate ? { book_date: job.meta.bookDate } : {}),
+            ...(job.meta.bookTime ? { book_time: job.meta.bookTime } : {}),
+            ...(job.meta.bookTitle ? { book_title: job.meta.bookTitle } : {}),
+          }
+        : {}),
+      opened_at: job.meta.createdAt,
+    };
+  });
   return [
     "OPEN_JOBS:",
     "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do, list them even if WORKER_SAVED_DATA looks empty.",
@@ -401,6 +479,7 @@ export function formatOpenJobsContext(
     "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself.",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
+    "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
     "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from these fields when you forget the list.",
     JSON.stringify(rows),
@@ -529,13 +608,24 @@ function defaultReport(job: OpenJobRow, outcome: string, said: string): string {
   return `${job.meta.subjectName} ${outcome}${detail}${quoted}`;
 }
 
+type NudgeableJob = Pick<OpenJobRow, "id" | "meta" | "urgency">;
+
+function nudgeText(job: NudgeableJob): string {
+  const base = job.meta.askerName
+    ? `${job.meta.askerName} מחכה לתשובה: ${job.meta.ask}`
+    : job.meta.ask;
+  const label = JOB_URGENCY_POLICY[job.urgency ?? "normal"].label;
+  return label ? `${label} — ${base}` : base;
+}
+
 /** Create the follow-up clock plus its own nudge task row on the worker. */
 async function openNudge(input: {
   userId: string;
   digitalEmployeeId: string;
   actorId: string;
-  job: OpenJobRow;
+  job: NudgeableJob;
   fireAt: Date;
+  auto?: boolean;
 }): Promise<{ reminderId: string; itemId: string } | null> {
   const listId = await tasksListIdFor(input.digitalEmployeeId);
   if (!listId) {
@@ -558,6 +648,7 @@ async function openNudge(input: {
           state: "open",
           createdAt: new Date().toISOString(),
           jobItemId: input.job.id,
+          ...(input.auto ? { auto: true } : {}),
         } satisfies JobMeta,
       }),
       scope: "shared",
@@ -579,9 +670,7 @@ async function openNudge(input: {
       fireAt: input.fireAt,
       repeat: "once",
       pingIds: toJsonValue([input.job.meta.subjectId]),
-      messageText: input.job.meta.askerName
-        ? `${input.job.meta.askerName} מחכה לתשובה: ${input.job.meta.ask}`
-        : input.job.meta.ask,
+      messageText: nudgeText(input.job),
     },
   });
   if (!reminder?.id) {
@@ -597,6 +686,186 @@ async function openNudge(input: {
   });
   scheduleSoon(input.fireAt);
   return { reminderId: reminder.id, itemId: item.id };
+}
+
+/**
+ * Schedule the next urgency follow-up when the job's policy still has one left.
+ * Returns the job with its meta updated (unchanged when nothing was scheduled).
+ */
+async function startFollowUps<T extends NudgeableJob>(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  actorId: string;
+  job: T;
+  now?: Date;
+}): Promise<T> {
+  const policy = JOB_URGENCY_POLICY[input.job.urgency ?? "normal"];
+  const sent = input.job.meta.autoNudgesSent ?? 0;
+  if (sent >= policy.autoNudges || policy.intervalSeconds <= 0) {
+    return input.job;
+  }
+  const fireAt = new Date((input.now ?? new Date()).getTime() + policy.intervalSeconds * 1000);
+  try {
+    const nudge = await openNudge({
+      userId: input.userId,
+      digitalEmployeeId: input.digitalEmployeeId,
+      actorId: input.actorId,
+      job: input.job,
+      fireAt,
+      auto: true,
+    });
+    if (!nudge) {
+      return input.job;
+    }
+    const meta: JobMeta = {
+      ...input.job.meta,
+      nudgeReminderId: nudge.reminderId,
+      nudgeItemId: nudge.itemId,
+      nudgeFireAt: fireAt.toISOString(),
+      nudgeAuto: true,
+    };
+    await patchJobMeta(input.job.id, meta);
+    return { ...input.job, meta };
+  } catch {
+    // A follow-up that cannot be scheduled must not break the send that already happened.
+    return input.job;
+  }
+}
+
+/** Raise an open job's urgency when the asker repeats it more urgently. */
+async function escalateJob(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  actorId: string;
+  job: { id: string; meta: JobMeta; urgency: JobUrgency };
+  urgency: JobUrgency;
+}): Promise<void> {
+  if (urgencyRank(input.urgency) <= urgencyRank(input.job.urgency)) {
+    return;
+  }
+  try {
+    await prisma.employeeListItem.update({
+      where: { id: input.job.id },
+      data: { urgency: input.urgency },
+    });
+  } catch {
+    return;
+  }
+  input.job.urgency = input.urgency;
+  // A snooze the subject asked for stays; an older follow-up is replaced by the faster cadence.
+  if (input.job.meta.nudgeReminderId && !input.job.meta.nudgeAuto) {
+    return;
+  }
+  await sweepNudge(input.job.meta, input.userId, input.actorId);
+  const cleared: JobMeta = {
+    ...input.job.meta,
+    nudgeReminderId: undefined,
+    nudgeItemId: undefined,
+    nudgeFireAt: undefined,
+    nudgeAuto: undefined,
+    autoNudgesSent: undefined,
+  };
+  const next = await startFollowUps({
+    userId: input.userId,
+    digitalEmployeeId: input.digitalEmployeeId,
+    actorId: input.actorId,
+    job: { ...input.job, meta: cleared },
+  });
+  if (next.meta === cleared) {
+    await patchJobMeta(input.job.id, cleared);
+  }
+  input.job.meta = next.meta;
+}
+
+function exhaustedNotice(job: NudgeableJob, sent: number): string {
+  const quoted = job.meta.ask ? ` על «${job.meta.ask}»` : "";
+  const tail = job.urgency === "very_urgent" ? " כדאי להתקשר אליו ישירות." : "";
+  return `${job.meta.subjectName} עדיין לא ענה${quoted} — שלחתי לו ${sent} תזכורות.${tail}`;
+}
+
+/** Tell the asker the follow-ups ran out, through the regular one-shot clock delivery. */
+async function notifyAskerExhausted(input: {
+  userId: string;
+  job: NudgeableJob;
+  sent: number;
+  now: Date;
+}): Promise<void> {
+  const text = exhaustedNotice(input.job, input.sent);
+  const label = `עדכון: ${input.job.meta.subjectName} לא ענה`;
+  await prisma.reminder.create({
+    data: {
+      userId: input.userId,
+      ownerId: input.job.meta.askerId,
+      actorId: input.job.meta.askerId,
+      itemKey: normalizeKey(label),
+      itemLabel: label.slice(0, 255),
+      listType: "tasks",
+      fireAt: input.now,
+      repeat: "once",
+      pingIds: toJsonValue([input.job.meta.askerId]),
+      messageText: text,
+    },
+  });
+  scheduleSoon(input.now);
+}
+
+/**
+ * A job's nudge clock just fired. Clear the spent clock off the job so it is raisable
+ * again, then run the job's urgency policy: schedule the next follow-up, or tell the
+ * asker the follow-ups ran out.
+ */
+export async function continueJobAfterNudge(input: {
+  userId: string;
+  nudgeItemId: string;
+  nudge: JobMeta;
+  now?: Date;
+}): Promise<void> {
+  const now = input.now ?? new Date();
+  const jobItemId = input.nudge.jobItemId;
+  if (input.nudge.kind !== "nudge" || !jobItemId) {
+    return;
+  }
+  const row = await prisma.employeeListItem.findUnique({
+    where: { id: jobItemId },
+    include: { list: { select: { employeeId: true } } },
+  });
+  if (!row || row.deletedAt) {
+    return;
+  }
+  const meta = jobMetaFrom(row.data);
+  if (meta?.kind !== "job") {
+    return;
+  }
+  // A newer clock already replaced this one.
+  if (meta.nudgeItemId && meta.nudgeItemId !== input.nudgeItemId) {
+    return;
+  }
+  const urgency = parseJobUrgency(row.urgency);
+  const sent = (meta.autoNudgesSent ?? 0) + (input.nudge.auto ? 1 : 0);
+  const cleared: JobMeta = {
+    ...meta,
+    nudgeReminderId: undefined,
+    nudgeItemId: undefined,
+    nudgeFireAt: undefined,
+    nudgeAuto: undefined,
+    ...(sent > 0 ? { autoNudgesSent: sent } : {}),
+  };
+  const job: NudgeableJob = { id: row.id, meta: cleared, urgency };
+  const next = await startFollowUps({
+    userId: input.userId,
+    digitalEmployeeId: row.list.employeeId,
+    actorId: meta.askerId,
+    job,
+    now,
+  });
+  if (next.meta !== cleared) {
+    return;
+  }
+  await patchJobMeta(row.id, cleared);
+  const policy = JOB_URGENCY_POLICY[urgency];
+  if (input.nudge.auto && policy.autoNudges > 0 && sent >= policy.autoNudges) {
+    await notifyAskerExhausted({ userId: input.userId, job, sent, now });
+  }
 }
 
 /**
@@ -727,12 +996,21 @@ export async function applyJobActions(input: {
           nudgeReminderId: undefined,
           nudgeItemId: undefined,
           nudgeFireAt: undefined,
+          nudgeAuto: undefined,
+          autoNudgesSent: undefined,
           needsBook: true,
           ...(action.date ? { bookDate: action.date } : {}),
           ...(action.time ? { bookTime: action.time } : {}),
         };
         const label = `לבדוק עם ${meta.subjectName}: ${proposed}`.trim();
         await rewriteJob(job.id, meta, label);
+        // The other side now owes the answer; the same urgency chases them.
+        await startFollowUps({
+          userId: input.userId,
+          digitalEmployeeId: input.digitalEmployeeId,
+          actorId: input.speaker.id,
+          job: { id: job.id, meta, urgency: job.urgency },
+        });
         addReport(
           result,
           input.speaker.id,
@@ -778,6 +1056,7 @@ export async function applyJobActions(input: {
           nudgeReminderId: nudge.reminderId,
           nudgeItemId: nudge.itemId,
           nudgeFireAt: fireAt.toISOString(),
+          nudgeAuto: undefined,
         });
         result.snoozed.push({ jobId: job.id, fireAt });
         continue;
@@ -797,6 +1076,7 @@ export async function applyJobActions(input: {
           nudgeReminderId: undefined,
           nudgeItemId: undefined,
           nudgeFireAt: undefined,
+          nudgeAuto: undefined,
         });
         continue;
       }

@@ -33,6 +33,12 @@ vi.mock("../src/services/audit.service.js", () => ({
   recordAuditEvent: vi.fn(),
 }));
 
+const { continueJobAfterNudge } = vi.hoisted(() => ({
+  continueJobAfterNudge: vi.fn(),
+}));
+
+vi.mock("../src/services/jobs.service.js", () => ({ continueJobAfterNudge }));
+
 import {
   claimDueReminder,
   resolveComposeFireOutbound,
@@ -107,6 +113,55 @@ describe("settleFiredReminder", () => {
       where: { id: "task-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
+  });
+
+  it("hands a fired job nudge to the job so it is freed and its follow-ups continue", async () => {
+    continueJobAfterNudge.mockReset();
+    const nudge = {
+      kind: "nudge",
+      askerId: "amit",
+      askerName: "עמית",
+      subjectId: "eran",
+      subjectName: "ערן",
+      ask: "מה שלומך?",
+      state: "open",
+      createdAt: "2026-09-28T00:00:00.000Z",
+      jobItemId: "job-1",
+      auto: true,
+    };
+    itemUpdate.mockResolvedValue({ id: "task-1", data: { __job: nudge } });
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+        userId: "u1",
+      },
+      now,
+      "sent",
+    );
+    expect(continueJobAfterNudge).toHaveBeenCalledWith({
+      userId: "u1",
+      nudgeItemId: "task-1",
+      nudge: expect.objectContaining({ kind: "nudge", jobItemId: "job-1", auto: true }),
+      now,
+    });
+  });
+
+  it("does not touch jobs when a plain worker task fires", async () => {
+    continueJobAfterNudge.mockReset();
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+        userId: "u1",
+      },
+      new Date("2026-09-28T00:03:00.000Z"),
+      "sent",
+    );
+    expect(continueJobAfterNudge).not.toHaveBeenCalled();
   });
 
   it("keeps a repeating clock", async () => {

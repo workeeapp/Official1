@@ -40,6 +40,7 @@
     "        \"text\": \"<הודעה מנוסחת לנמען>\",",
     "        \"expects_reply\": false,",
     "        \"ask_summary\": \"\",",
+    "        \"urgency\": \"<normal | urgent | very_urgent>\",",
     "        \"book\": { \"title\": \"<שיחת עדכון / פגישה>\", \"date\": \"<YYYY-MM-DD>\", \"time\": \"<HH:mm>\" }",
     "      }",
     "    ],",
@@ -381,7 +382,7 @@
               },
               "messages": {
                 "type": "array",
-                "description": "Messages to relay for the speaker. EVERY entry must include all four fields: targets, text, expects_reply, ask_summary.",
+                "description": "Messages to relay for the speaker. EVERY entry must include all five fields: targets, text, expects_reply, ask_summary, urgency.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -402,6 +403,11 @@
                       "type": "string",
                       "description": "What the speaker wants from them, in the speaker's own words (e.g. אם קנית חלב? / לתאם פגישת עבודה ליום שלישי). Quoted back when reporting. Empty when expects_reply is false."
                     },
+                    "urgency": {
+                      "type": "string",
+                      "enum": ["normal", "urgent", "very_urgent"],
+                      "description": "How hard the speaker stressed the ask, judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). On an open job the server sends follow-ups to the recipient on its own: urgent 2 more, very_urgent 4 more, normal none."
+                    },
                     "book": {
                       "type": "object",
                       "description": "Only when the ask is to set up something both people do together at a slot (פגישה / שיחה / שיחת עדכון). On a yes the server saves it on both people's tasks. Omit otherwise.",
@@ -417,7 +423,8 @@
                     "targets",
                     "text",
                     "expects_reply",
-                    "ask_summary"
+                    "ask_summary",
+                    "urgency"
                   ]
                 }
               },
