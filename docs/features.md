@@ -54,10 +54,33 @@ Speaker asks Lucy to check **with them** (not with a third party).
 - ACTION: `messages` targeting the **speaker**, `expects_reply: true`, `ask_summary`, `urgency`; `lists: []`.
 - Engine: `planSelfJobDeliveries` opens a self-job (`asker === subject`); no chat/WhatsApp relay — the ask lives in `response`.
 - `OPEN_JOBS` phrases `viewer_is=subject` as their own check («רצית שאבדוק איתך…»), never «עמית ביקש ממני…».
+- Auto-nudge copy for self-jobs is the ask (plus urgency label), not «X מחכה לתשובה».
 - Answer → `jobs.answer` with empty `report_text` (no third party).
 
 **Code:** `employee-targets.service.ts` (`planSelfJobDeliveries`), `jobs.service.ts`, chat runtime prompts.  
 **Tests:** `backend/tests/employee-targets.test.ts`, `backend/tests/jobs.test.ts`.
+
+---
+
+## 3b. Deferred check-with («תבדקי איתי בעוד שעתיים…» / recurring)
+
+Speaker asks Lucy to check **later** (self or third party), including recurring rules.
+
+**Speech examples:** «תבדקי איתי בעוד שעתיים אם קניתי חלב», «תבררי עם טל מחר ב־20:00 אם הוא מקליט», «כל ראשון לחודש ב־17:00 תבררי איתי אם לקחתי אקמול», «כל יום שני ב־14:00 תבדקי אם עשיתי הליכה».
+
+| Piece | Behavior |
+|-------|----------|
+| ACTION | Same job-opening `messages[]` entry (`expects_reply` + `ask_summary` + `urgency`) **plus** `in` / `date`+`time` / `recurrence`. `lists: []`. Response = ack only (no ask yet). |
+| Create | `createScheduledJobsFromRelays` saves Lucy’s `לבדוק עם …` task with `תאריך לביצוע` / `שעה לביצוע`, `__job.pendingActivation`, and a linked Reminder. No WhatsApp; no urgency follow-ups yet. |
+| OPEN_JOBS | Shows `scheduled: true`, `raisable: false` until fire. |
+| Inventory | «מה את צריכה לעשות / לברר» lists every OPEN_JOBS row including scheduled (from `ask`, note not yet due) — does **not** RAISE a different raisable job. |
+| Fire | Reminder sends the ask; `activateScheduledJob` clears date/time, drops `pendingActivation`, starts urgency follow-ups. Job row is kept (not soft-deleted). |
+| Recurring | Clock advances as usual. On job answer/close, if the Reminder is still active with a future `fireAt`, the same row resets to pending with the next תאריך/שעה. |
+
+Immediate self-check (no clock fields) is unchanged (§3).
+
+**Code:** `shared/src/llm-message.ts` (`messageHasSchedule`), `employee-targets.service.ts` (`planScheduledJobDeliveries`), `jobs.service.ts`, `reminder-fire.ts`.  
+**Tests:** `shared/src/llm-message.test.ts`, `backend/tests/employee-targets.test.ts`, `backend/tests/jobs.test.ts`, `backend/tests/reminder-fire.test.ts`.
 
 ---
 

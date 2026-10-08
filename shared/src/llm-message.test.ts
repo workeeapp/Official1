@@ -457,6 +457,77 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads deferred check-with clock fields on a messages entry", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אבדוק איתך בעוד שעתיים",
+          metadata: {
+            messages: [
+              {
+                targets: ["עמית"],
+                text: "קנית חלב?",
+                expects_reply: true,
+                ask_summary: "אם קניתי חלב?",
+                urgency: "normal",
+                in: 7200,
+              },
+              {
+                targets: ["טל"],
+                text: "עמית שואל אם אתה מקליט?",
+                expects_reply: true,
+                ask_summary: "אם מקליט את המשחק?",
+                urgency: "normal",
+                date: "2026-10-09",
+                time: "20:00",
+              },
+              {
+                targets: ["עמית"],
+                text: "לקחת אקמול?",
+                expects_reply: true,
+                ask_summary: "אם לקחתי אקמול?",
+                recurrence: {
+                  freq: "monthly",
+                  interval: 1,
+                  month_day: 1,
+                  time: "17:00",
+                },
+              },
+            ],
+          },
+        }),
+      ).messages,
+    ).toEqual([
+      {
+        targets: ["עמית"],
+        text: "קנית חלב?",
+        expectsReply: true,
+        askSummary: "אם קניתי חלב?",
+        inSeconds: 7200,
+      },
+      {
+        targets: ["טל"],
+        text: "עמית שואל אם אתה מקליט?",
+        expectsReply: true,
+        askSummary: "אם מקליט את המשחק?",
+        date: "2026-10-09",
+        time: "20:00",
+      },
+      {
+        targets: ["עמית"],
+        text: "לקחת אקמול?",
+        expectsReply: true,
+        askSummary: "אם לקחתי אקמול?",
+        recurrence: {
+          freq: "monthly",
+          interval: 1,
+          monthDay: 1,
+          time: "17:00",
+        },
+      },
+    ]);
+  });
+
   it("reads the urgency the model set on a relayed message and drops normal", () => {
     const parsed = parseReplyMetadata(
       JSON.stringify({

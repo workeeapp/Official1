@@ -112,6 +112,9 @@ export {
 export type { Recurrence, RecurrenceFreq, RecurrenceUnit } from "./recurrence";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";
+export {
+  messageHasSchedule,
+} from "./llm-message";
 export type {
   LlmFilingAction,
   LlmFilingActionName,

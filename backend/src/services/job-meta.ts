@@ -46,6 +46,14 @@ export interface JobMeta {
   bookTime?: string;
   /** Meeting title saved on both lists when it is booked. */
   bookTitle?: string;
+  /**
+   * Deferred check-with: the job row exists on the worker with a future clock,
+   * but the ask has not been sent yet. At fire the server clears this and opens
+   * the job for real (WhatsApp + urgency follow-ups).
+   */
+  pendingActivation?: boolean;
+  /** Ask body to send when a pending job activates (WhatsApp / chat). */
+  activateText?: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -108,6 +116,10 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
       : {}),
     ...(typeof meta.bookTitle === "string" && meta.bookTitle
       ? { bookTitle: meta.bookTitle }
+      : {}),
+    ...(meta.pendingActivation === true ? { pendingActivation: true } : {}),
+    ...(typeof meta.activateText === "string" && meta.activateText
+      ? { activateText: meta.activateText }
       : {}),
   };
 }

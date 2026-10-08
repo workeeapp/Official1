@@ -12,6 +12,7 @@ const {
   reminderCreate,
   reminderUpdate,
   reminderFindFirst,
+  reminderFindUnique,
   reminderDelete,
   auditCreate,
 } = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const {
   reminderCreate: vi.fn(),
   reminderUpdate: vi.fn(),
   reminderFindFirst: vi.fn(),
+  reminderFindUnique: vi.fn(),
   reminderDelete: vi.fn(),
   auditCreate: vi.fn(),
 }));
@@ -43,6 +45,7 @@ vi.mock("../src/database/prisma.js", () => ({
       create: reminderCreate,
       update: reminderUpdate,
       findFirst: reminderFindFirst,
+      findUnique: reminderFindUnique,
       delete: reminderDelete,
     },
     auditEvent: { create: auditCreate },
@@ -50,10 +53,12 @@ vi.mock("../src/database/prisma.js", () => ({
 }));
 
 import {
+  activateScheduledJob,
   applyJobActions,
   continueJobAfterNudge,
   correctMisaddressedJobReply,
   createJobsFromRelays,
+  createScheduledJobsFromRelays,
   formatOpenJobsContext,
   listOpenJobsForViewer,
   meetingListsForAnswers,
@@ -203,6 +208,28 @@ describe("open jobs context", () => {
     expect(block).toContain('"viewer_is":"subject"');
     expect(block).toContain('"raisable":true');
     expect(block).toContain('"ask":"אם קנית שוקו?"');
+  });
+
+  it("marks a pending deferred check as scheduled and not raisable", () => {
+    const block = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "אם קניתי חלב?",
+          pendingActivation: true,
+          activateText: "קנית חלב?",
+        }),
+      ],
+      AMIT,
+    );
+    expect(block).toContain('"scheduled":true');
+    expect(block).toContain('"raisable":false');
+    expect(block).toContain("INVENTORY");
+    expect(block).toContain("scheduled=true");
+    expect(block).toMatch(/do not RAISE/i);
   });
 });
 
@@ -519,6 +546,33 @@ describe("createJobsFromRelays", () => {
     expect(delay).toBeLessThan(interval + 60 * 1000);
     expect(created[0].urgency).toBe("very_urgent");
     expect(created[0].meta.nudgeAuto).toBe(true);
+  });
+
+  it("uses ask-only nudge copy for self-jobs (no מחכה לתשובה)", async () => {
+    itemCreate
+      .mockResolvedValueOnce({ id: "job-self" })
+      .mockResolvedValueOnce({ id: "nudge-self" });
+    reminderCreate.mockReset().mockResolvedValue({ id: "clock-self" });
+    reminderUpdate.mockReset().mockResolvedValue({});
+    itemFindUnique.mockReset().mockResolvedValue({ id: "job-self", data: {} });
+    await createJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      deliveries: [
+        {
+          subjectId: AMIT,
+          subjectName: "עמית",
+          text: "הכנת פיצה?",
+          ask: "אם הכנת פיצה?",
+          urgency: "urgent",
+        },
+      ],
+    });
+    const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.pingIds).toEqual([AMIT]);
+    expect(clock.messageText).toBe("דחוף — אם הכנת פיצה?");
+    expect(clock.messageText).not.toContain("מחכה לתשובה");
   });
 
   it("schedules no follow-up for a normal ask", async () => {
@@ -1336,5 +1390,208 @@ describe("applyJobActions", () => {
     });
     expect(result.reports).toEqual([]);
     expect(itemUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("createScheduledJobsFromRelays", () => {
+  beforeEach(() => {
+    listFindFirst.mockReset().mockResolvedValue({ id: "tasks-list" });
+    itemCreate.mockReset().mockResolvedValue({ id: "job-1" });
+    itemUpdate.mockReset().mockResolvedValue({});
+    reminderCreate.mockReset().mockResolvedValue({ id: "clock-1" });
+    auditCreate.mockReset().mockResolvedValue({});
+  });
+
+  it("creates a Lucy task with date/time and a linked Reminder, without urgency follow-ups", async () => {
+    const now = new Date("2026-10-08T10:00:00.000Z");
+    const created = await createScheduledJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      now,
+      deliveries: [
+        {
+          subjectId: AMIT,
+          subjectName: "עמית",
+          text: "קנית חלב?",
+          ask: "אם קניתי חלב?",
+          inSeconds: 7200,
+        },
+      ],
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0].meta.pendingActivation).toBe(true);
+    const data = itemCreate.mock.calls[0][0].data;
+    expect(data.data[JOB_META_KEY].pendingActivation).toBe(true);
+    expect(data.data[JOB_META_KEY].activateText).toBe("קנית חלב?");
+    expect(data.data["תאריך לביצוע"]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(data.data["שעה לביצוע"]).toMatch(/^\d{2}:\d{2}$/);
+    expect(reminderCreate).toHaveBeenCalledTimes(1);
+    const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.fireAt.getTime()).toBe(now.getTime() + 7200_000);
+    expect(clock.pingIds).toEqual([AMIT]);
+    expect(clock.messageText).toBe("קנית חלב?");
+    expect(clock.workerItemId).toBe("job-1");
+    expect(clock.repeat).toBe("once");
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { reminderId: "clock-1" },
+    });
+    // No urgency nudge on create.
+    expect(itemCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores recurrence on the schedule clock for a monthly check", async () => {
+    const now = new Date("2026-10-08T10:00:00.000Z");
+    await createScheduledJobsFromRelays({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      asker: { id: AMIT, name: "עמית" },
+      now,
+      deliveries: [
+        {
+          subjectId: AMIT,
+          subjectName: "עמית",
+          text: "לקחת אקמול?",
+          ask: "אם לקחתי אקמול?",
+          recurrence: {
+            freq: "monthly",
+            interval: 1,
+            monthDay: 1,
+            time: "17:00",
+          },
+        },
+      ],
+    });
+    const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.recurrence).toMatchObject({
+      freq: "monthly",
+      interval: 1,
+      month_day: 1,
+      time: "17:00",
+    });
+    expect(clock.repeat).not.toBe("once");
+  });
+});
+
+describe("activateScheduledJob", () => {
+  beforeEach(() => {
+    itemFindUnique.mockReset();
+    itemUpdate.mockReset().mockResolvedValue({});
+    itemCreate.mockReset();
+    reminderCreate.mockReset();
+    auditCreate.mockReset().mockResolvedValue({});
+  });
+
+  it("clears date/time, drops pendingActivation, and starts urgency follow-ups", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "job-1",
+      deletedAt: null,
+      urgency: "urgent",
+      data: {
+        "שם מטלה": "לבדוק עם עמית: אם קניתי חלב?",
+        "תאריך לביצוע": "2026-10-08",
+        "שעה לביצוע": "15:00",
+        [JOB_META_KEY]: {
+          kind: "job",
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "אם קניתי חלב?",
+          state: "open",
+          createdAt: "2026-10-08T10:00:00.000Z",
+          pendingActivation: true,
+          activateText: "קנית חלב?",
+        },
+      },
+      list: { employeeId: LUCY },
+    });
+    itemCreate.mockResolvedValue({ id: "nudge-1" });
+    reminderCreate.mockResolvedValue({ id: "nudge-clock" });
+    reminderUpdate.mockResolvedValue({});
+    const kept = await activateScheduledJob({
+      userId: "u1",
+      workerItemId: "job-1",
+      now: new Date("2026-10-08T12:00:00.000Z"),
+    });
+    expect(kept).toBe(true);
+    const patch = itemUpdate.mock.calls[0][0].data.data;
+    expect(patch["תאריך לביצוע"]).toBeUndefined();
+    expect(patch["שעה לביצוע"]).toBeUndefined();
+    expect(patch[JOB_META_KEY].pendingActivation).toBeUndefined();
+    expect(reminderCreate).toHaveBeenCalled();
+  });
+});
+
+describe("closeJobRow via answer resets recurring deferred jobs", () => {
+  beforeEach(() => {
+    itemFindUnique.mockReset();
+    itemUpdate.mockReset().mockResolvedValue({});
+    itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    reminderFindUnique.mockReset();
+    reminderFindFirst.mockReset();
+    reminderDelete.mockReset();
+    auditCreate.mockReset().mockResolvedValue({});
+  });
+
+  it("resets pendingActivation and next תאריך/שעה instead of soft-deleting", async () => {
+    const nextFire = new Date(Date.now() + 7 * 24 * 3600_000);
+    itemFindUnique.mockResolvedValue({
+      id: "job-1",
+      deletedAt: null,
+      reminderId: "clock-1",
+      urgency: "normal",
+      data: {
+        "שם מטלה": "לבדוק עם עמית: אם עשיתי הליכה?",
+        [JOB_META_KEY]: {
+          kind: "job",
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "אם עשיתי הליכה?",
+          state: "open",
+          createdAt: "2026-10-08T10:00:00.000Z",
+          activateText: "עשית הליכה?",
+        },
+      },
+    });
+    reminderFindUnique.mockResolvedValue({
+      id: "clock-1",
+      status: "active",
+      fireAt: nextFire,
+    });
+    const result = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      actions: [
+        {
+          action: "answer",
+          jobId: "job-1",
+          answerText: "כן",
+          reportText: "",
+          time: "",
+          in: null,
+        },
+      ],
+      jobs: [
+        jobRow({
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "אם עשיתי הליכה?",
+          activateText: "עשית הליכה?",
+        }),
+      ],
+    });
+    expect(result.answered).toEqual(["job-1"]);
+    expect(itemUpdateMany).not.toHaveBeenCalled();
+    const patch = itemUpdate.mock.calls[0][0].data.data;
+    expect(patch[JOB_META_KEY].pendingActivation).toBe(true);
+    expect(patch["תאריך לביצוע"]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(patch["שעה לביצוע"]).toMatch(/^\d{2}:\d{2}$/);
   });
 });

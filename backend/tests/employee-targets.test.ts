@@ -10,6 +10,7 @@ import {
   formatMissingSendTextNotice,
   planPhoneRelays,
   planRelayDeliveries,
+  planScheduledJobDeliveries,
   planSelfJobDeliveries,
   planTargetedActions,
   resolveActionTargets,
@@ -1384,6 +1385,72 @@ describe("employee targets", () => {
         text: "קנית שוקו?",
         ask: "אם קנית שוקו?",
         urgency: "normal",
+      },
+    ]);
+  });
+
+  it("skips deferred checks from immediate relay and self-job planners", () => {
+    const lucy: PublicEmployee = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+    };
+    const deferredSelf = {
+      targets: ["עמית"],
+      text: "קנית חלב?",
+      expectsReply: true as const,
+      askSummary: "אם קניתי חלב?",
+      inSeconds: 7200,
+    };
+    const deferredOther = {
+      targets: ["טל"],
+      text: "עמית שואל אם אתה מקליט?",
+      expectsReply: true as const,
+      askSummary: "אם מקליט?",
+      date: "2026-10-09",
+      time: "20:00",
+    };
+    expect(
+      planSelfJobDeliveries({
+        actor: amit,
+        employees,
+        messages: [deferredSelf],
+      }),
+    ).toEqual([]);
+    expect(
+      planRelayDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: [...employees, lucy],
+        messages: [deferredOther],
+      }),
+    ).toEqual([]);
+    expect(
+      planScheduledJobDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: [...employees, lucy],
+        messages: [deferredSelf, deferredOther],
+      }),
+    ).toEqual([
+      {
+        subjectId: amit.id,
+        subjectName: "עמית",
+        text: "קנית חלב?",
+        ask: "אם קניתי חלב?",
+        inSeconds: 7200,
+      },
+      {
+        subjectId: tal.id,
+        subjectName: "טל",
+        text: "עמית שואל אם אתה מקליט?",
+        ask: "אם מקליט?",
+        date: "2026-10-09",
+        time: "20:00",
       },
     ]);
   });

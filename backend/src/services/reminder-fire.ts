@@ -67,6 +67,41 @@ export function nextFireAt(
   return next;
 }
 
+async function workerItemIdForReminder(reminderId: string): Promise<string | null> {
+  if (typeof prisma.reminder.findUnique !== "function") {
+    return null;
+  }
+  const row = await prisma.reminder.findUnique({
+    where: { id: reminderId },
+    select: { workerItemId: true },
+  });
+  return row?.workerItemId ?? null;
+}
+
+async function maybeActivateScheduledJob(input: {
+  userId?: string;
+  workerItemId: string | null;
+  now: Date;
+}): Promise<boolean> {
+  if (!input.userId || !input.workerItemId) {
+    return false;
+  }
+  try {
+    const { activateScheduledJob } = await import("./jobs.service.js");
+    return await activateScheduledJob({
+      userId: input.userId,
+      workerItemId: input.workerItemId,
+      now: input.now,
+    });
+  } catch (error) {
+    console.error(
+      "Scheduled job activate failed",
+      error instanceof Error ? error.message : "unknown",
+    );
+    return false;
+  }
+}
+
 export async function settleFiredReminder(
   reminder: {
     id: string;
@@ -85,6 +120,8 @@ export async function settleFiredReminder(
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
   const nextAt = nextFireAt(reminder, now, firedCount);
   const hasRule = Boolean(parseRecurrence(reminder.recurrence));
+  const workerItemId = await workerItemIdForReminder(reminder.id);
+
   if (nextAt) {
     await prisma.reminder.update({
       where: { id: reminder.id },
@@ -96,19 +133,23 @@ export async function settleFiredReminder(
       },
     });
     scheduleSoon(nextAt);
+    // Recurring deferred check-with: activate (clear dates + urgency) and keep
+    // the job row; next תאריך/שעה is written back only when the job closes.
+    await maybeActivateScheduledJob({
+      userId: reminder.userId,
+      workerItemId,
+      now,
+    });
     return;
   }
 
   // One-shot: keep the row as history (status=done + sent_at). Detach the
   // worker task first so deleting that item cannot CASCADE-delete this clock.
-  let workerItemId: string | null = null;
-  if (typeof prisma.reminder.findUnique === "function") {
-    const row = await prisma.reminder.findUnique({
-      where: { id: reminder.id },
-      select: { workerItemId: true },
-    });
-    workerItemId = row?.workerItemId ?? null;
-  }
+  const keptAsScheduledJob = await maybeActivateScheduledJob({
+    userId: reminder.userId,
+    workerItemId,
+    now,
+  });
 
   await prisma.reminder.update({
     where: { id: reminder.id },
@@ -127,8 +168,9 @@ export async function settleFiredReminder(
       data: { reminderId: null },
     });
   }
+
   let firedTaskData: unknown = null;
-  if (workerItemId && prisma.employeeListItem?.update) {
+  if (workerItemId && !keptAsScheduledJob && prisma.employeeListItem?.update) {
     try {
       const task = await prisma.employeeListItem.update({
         where: { id: workerItemId },
@@ -138,10 +180,24 @@ export async function settleFiredReminder(
     } catch {
       // Already removed.
     }
+  } else if (workerItemId && keptAsScheduledJob && prisma.employeeListItem?.findUnique) {
+    try {
+      const task = await prisma.employeeListItem.findUnique({
+        where: { id: workerItemId },
+      });
+      firedTaskData = task?.data ?? null;
+    } catch {
+      firedTaskData = null;
+    }
   }
 
   const nudge = jobMetaFrom(firedTaskData);
-  if (workerItemId && reminder.userId && nudge?.kind === "nudge") {
+  if (
+    workerItemId &&
+    reminder.userId &&
+    nudge?.kind === "nudge" &&
+    !keptAsScheduledJob
+  ) {
     try {
       const { continueJobAfterNudge } = await import("./jobs.service.js");
       await continueJobAfterNudge({

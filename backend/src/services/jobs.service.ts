@@ -2,11 +2,14 @@ import { Prisma } from "@prisma/client";
 import {
   JOB_URGENCIES,
   JOB_URGENCY_POLICY,
+  legacyRepeatFor,
   parseJobUrgency,
+  serializeRecurrence,
   type JobUrgency,
   type LlmJobAction,
   type LlmListAction,
   type LlmMessageBook,
+  type Recurrence,
 } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -14,11 +17,15 @@ import { JOB_META_KEY, jobMetaFrom, type JobMeta } from "./job-meta.js";
 import { toPlainJson } from "./llm-client.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import {
+  formatJerusalemDateTime,
   removeReminderAndLinkedWorkerTask,
+  resolveRecurringFireAt,
   resolveReminderFireAt,
 } from "./reminder.service.js";
 
 const TASK_NAME_KEY = "שם מטלה";
+const TASK_DATE_KEY = "תאריך לביצוע";
+const TASK_TIME_KEY = "שעה לביצוע";
 
 export interface OpenJobRow {
   id: string;
@@ -287,6 +294,233 @@ export async function createJobsFromRelays(input: {
   return created;
 }
 
+function jerusalemDateAndTime(fireAt: Date): { date: string; time: string } {
+  const wall = formatJerusalemDateTime(fireAt);
+  return { date: wall.slice(0, 10), time: wall.slice(11, 16) };
+}
+
+function resolveScheduledJobFireAt(input: {
+  inSeconds?: number | null;
+  date?: string;
+  time?: string;
+  recurrence?: Recurrence;
+  now?: Date;
+}): { fireAt: Date; recurrence?: Recurrence } | null {
+  const now = input.now ?? new Date();
+  if (input.recurrence) {
+    return resolveRecurringFireAt(
+      input.recurrence,
+      input.date ?? "",
+      input.time ?? "",
+      now,
+      input.inSeconds,
+    );
+  }
+  const fireAt = resolveReminderFireAt(
+    input.date ?? "",
+    input.time ?? "",
+    now,
+    input.inSeconds,
+    null,
+  );
+  return fireAt ? { fireAt } : null;
+}
+
+/**
+ * Deferred check-with: save Lucy's לבדוק task with תאריך/שעה + linked Reminder.
+ * No WhatsApp and no urgency follow-ups until the clock fires.
+ */
+export async function createScheduledJobsFromRelays(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  asker: { id: string; name: string };
+  deliveries: Array<{
+    subjectId: string;
+    subjectName: string;
+    text: string;
+    ask: string;
+    urgency?: JobUrgency;
+    book?: LlmMessageBook;
+    inSeconds?: number | null;
+    date?: string;
+    time?: string;
+    recurrence?: Recurrence;
+  }>;
+  now?: Date;
+}): Promise<OpenJobRow[]> {
+  if (input.deliveries.length === 0) {
+    return [];
+  }
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return [];
+  }
+  const now = input.now ?? new Date();
+  const created: OpenJobRow[] = [];
+  for (const delivery of input.deliveries) {
+    const resolved = resolveScheduledJobFireAt({
+      inSeconds: delivery.inSeconds,
+      date: delivery.date,
+      time: delivery.time,
+      recurrence: delivery.recurrence,
+      now,
+    });
+    if (!resolved) {
+      continue;
+    }
+    const urgency = delivery.urgency ?? "normal";
+    const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
+    const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
+    const { date, time } = jerusalemDateAndTime(resolved.fireAt);
+    const meta: JobMeta = {
+      kind: "job",
+      askerId: input.asker.id,
+      askerName: input.asker.name,
+      subjectId: delivery.subjectId,
+      subjectName: delivery.subjectName,
+      ask,
+      state: "open",
+      createdAt: now.toISOString(),
+      pendingActivation: true,
+      activateText: delivery.text.trim().slice(0, 4096),
+      ...bookFields(delivery.book),
+    };
+    try {
+      const row = await prisma.employeeListItem.create({
+        data: {
+          listId,
+          itemKey: normalizeKey(label),
+          data: toJsonValue({
+            [TASK_NAME_KEY]: label,
+            [TASK_DATE_KEY]: date,
+            [TASK_TIME_KEY]: time,
+            [JOB_META_KEY]: meta,
+          }),
+          scope: "shared",
+          addedById: input.asker.id,
+          visibleTo: toJsonValue([input.asker.id, delivery.subjectId]),
+          urgency,
+        },
+      });
+      if (!row?.id) {
+        continue;
+      }
+      const recurrenceJson = resolved.recurrence
+        ? (serializeRecurrence(resolved.recurrence) as Prisma.InputJsonValue)
+        : undefined;
+      const reminder = await prisma.reminder.create({
+        data: {
+          userId: input.userId,
+          ownerId: delivery.subjectId,
+          actorId: input.asker.id,
+          itemKey: normalizeKey(label),
+          itemLabel: label.slice(0, 255),
+          listType: "tasks",
+          fireAt: resolved.fireAt,
+          repeat: resolved.recurrence
+            ? legacyRepeatFor(resolved.recurrence)
+            : "once",
+          ...(recurrenceJson
+            ? { recurrence: recurrenceJson, occurrencesFired: 0 }
+            : {}),
+          pingIds: toJsonValue([delivery.subjectId]),
+          messageText: (delivery.text.trim() || ask).slice(0, 4096),
+          workerItemId: row.id,
+        },
+      });
+      if (reminder?.id) {
+        await prisma.employeeListItem.update({
+          where: { id: row.id },
+          data: { reminderId: reminder.id },
+        });
+        scheduleSoon(resolved.fireAt);
+      }
+      created.push({ id: row.id, label, meta, urgency });
+      await recordAuditEvent({
+        userId: input.userId,
+        actorEmployeeId: input.asker.id,
+        action: "job_schedule",
+        entityType: "EmployeeListItem",
+        entityId: row.id,
+        summary: `schedule job: ${label}`,
+        detail: {
+          subjectId: delivery.subjectId,
+          ask,
+          urgency,
+          fireAt: resolved.fireAt.toISOString(),
+        },
+      });
+    } catch {
+      // A deferred job that cannot be stored must not break the chat turn.
+    }
+  }
+  return created;
+}
+
+/**
+ * Clock fired for a deferred check-with: clear תאריך/שעה, mark the job live,
+ * and start urgency follow-ups. WhatsApp was already sent by reminder-fire.
+ * Returns true when the worker task must be kept (not soft-deleted).
+ */
+export async function activateScheduledJob(input: {
+  userId: string;
+  workerItemId: string;
+  now?: Date;
+}): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const row = await prisma.employeeListItem.findUnique({
+    where: { id: input.workerItemId },
+    include: { list: { select: { employeeId: true } } },
+  });
+  if (!row || row.deletedAt) {
+    return false;
+  }
+  const data = asRecord(row.data);
+  const meta = jobMetaFrom(data);
+  if (meta?.kind !== "job") {
+    return false;
+  }
+  if (!meta.pendingActivation) {
+    // Already live (e.g. recurring re-fire while still open) — keep the row.
+    return true;
+  }
+  const nextData = { ...data };
+  delete nextData[TASK_DATE_KEY];
+  delete nextData[TASK_TIME_KEY];
+  const { pendingActivation: _pending, ...restMeta } = meta;
+  const nextMeta: JobMeta = {
+    ...restMeta,
+    kind: "job",
+    ...(meta.activateText ? { activateText: meta.activateText } : {}),
+  };
+  await prisma.employeeListItem.update({
+    where: { id: row.id },
+    data: {
+      data: toJsonValue({
+        ...nextData,
+        [JOB_META_KEY]: nextMeta,
+      }),
+    },
+  });
+  const urgency = parseJobUrgency(row.urgency);
+  await startFollowUps({
+    userId: input.userId,
+    digitalEmployeeId: row.list.employeeId,
+    actorId: meta.askerId,
+    job: { id: row.id, meta: nextMeta, urgency },
+    now,
+  });
+  await recordAuditEvent({
+    userId: input.userId,
+    actorEmployeeId: meta.askerId,
+    action: "job_activate",
+    entityType: "EmployeeListItem",
+    entityId: row.id,
+    summary: `activate job: ${readLabel(row.data)}`,
+  });
+  return true;
+}
+
 /**
  * Close the live job the asker holds on a subject once the subject's answer is in
  * hand (a consulted digital worker answers inside the asker's own turn).
@@ -442,6 +676,7 @@ export function formatOpenJobsContext(
   const rows = jobs.map((job) => {
     const clock = pendingClock(job.meta, now);
     const snoozed = Boolean(clock && !job.meta.nudgeAuto);
+    const scheduled = Boolean(job.meta.pendingActivation);
     return {
       job_id: job.id,
       asker: job.meta.askerName,
@@ -458,12 +693,14 @@ export function formatOpenJobsContext(
       state: job.meta.state,
       ...urgencyFields(job, clock),
       ...(job.meta.progress ? { progress: job.meta.progress } : {}),
-      ...(snoozed
-        ? { reminder_at: clock, raisable: false }
-        : {
-            ...(job.meta.deferredAt ? { deferred: true } : {}),
-            raisable: job.meta.subjectId === viewerId,
-          }),
+      ...(scheduled
+        ? { scheduled: true, raisable: false }
+        : snoozed
+          ? { reminder_at: clock, raisable: false }
+          : {
+              ...(job.meta.deferredAt ? { deferred: true } : {}),
+              raisable: job.meta.subjectId === viewerId,
+            }),
       ...(job.meta.needsBook
         ? {
             book_on_yes: true,
@@ -477,11 +714,11 @@ export function formatOpenJobsContext(
   });
   return [
     "OPEN_JOBS:",
-    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do, list them even if WORKER_SAVED_DATA looks empty.",
+    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do/check (מה את צריכה לעשות / לברר), list EVERY row — including scheduled=true — even if WORKER_SAVED_DATA looks empty. That ask is INVENTORY: do not RAISE; phrase each from ask; scheduled=true → say it is scheduled / not yet due.",
     "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line. Never read that label out loud — say it the way THIS speaker should hear it:",
-    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…».",
+    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…», «<name> מחכה לתשובה», or first-person ask copy (הכנתי / קניתי). On INVENTORY do not append the live question — list the check only.",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
-    "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
+    "raisable=false means a reminder clock is already set — wait for it, do not raise early. scheduled=true means a deferred check is waiting for its clock — do not ask yet; the server will send at fire; still list it on INVENTORY. deferred=true means they said not now, with no clock: still raisable. Raise only when not answering an inventory ask, at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
     "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
     "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from these fields when you forget the list.",
@@ -538,7 +775,64 @@ async function patchJobMeta(itemId: string, meta: JobMeta): Promise<void> {
   });
 }
 
+/**
+ * Soft-delete a finished job, or — when a recurring schedule clock is still
+ * active — reset the same row to pendingActivation with the next תאריך/שעה.
+ */
 async function closeJobRow(itemId: string): Promise<void> {
+  const row =
+    typeof prisma.employeeListItem.findUnique === "function"
+      ? await prisma.employeeListItem.findUnique({ where: { id: itemId } })
+      : null;
+  if (row?.deletedAt) {
+    return;
+  }
+  if (row) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (meta?.kind === "job" && row.reminderId && prisma.reminder?.findUnique) {
+      const reminder = await prisma.reminder.findUnique({
+        where: { id: row.reminderId },
+      });
+      if (
+        reminder &&
+        reminder.status === "active" &&
+        reminder.fireAt.getTime() > Date.now()
+      ) {
+        const { date, time } = jerusalemDateAndTime(reminder.fireAt);
+        const {
+          deferredAt: _d,
+          nudgeReminderId: _nr,
+          nudgeItemId: _ni,
+          nudgeFireAt: _nf,
+          nudgeAuto: _na,
+          autoNudgesSent: _as,
+          progress: _p,
+          ...base
+        } = meta;
+        const nextMeta: JobMeta = {
+          ...base,
+          kind: "job",
+          state: "open",
+          pendingActivation: true,
+          ...(meta.activateText ? { activateText: meta.activateText } : {}),
+        };
+        await prisma.employeeListItem.update({
+          where: { id: itemId },
+          data: {
+            data: toJsonValue({
+              ...data,
+              [TASK_DATE_KEY]: date,
+              [TASK_TIME_KEY]: time,
+              [JOB_META_KEY]: nextMeta,
+            }),
+            urgency: row.urgency,
+          },
+        });
+        return;
+      }
+    }
+  }
   await prisma.employeeListItem.updateMany({
     where: { id: itemId, deletedAt: null },
     data: { deletedAt: new Date(), reminderId: null },
@@ -614,9 +908,12 @@ function defaultReport(job: OpenJobRow, outcome: string, said: string): string {
 type NudgeableJob = Pick<OpenJobRow, "id" | "meta" | "urgency">;
 
 function nudgeText(job: NudgeableJob): string {
-  const base = job.meta.askerName
-    ? `${job.meta.askerName} מחכה לתשובה: ${job.meta.ask}`
-    : job.meta.ask;
+  const self = job.meta.askerId === job.meta.subjectId;
+  const base = self
+    ? job.meta.ask
+    : job.meta.askerName
+      ? `${job.meta.askerName} מחכה לתשובה: ${job.meta.ask}`
+      : job.meta.ask;
   const label = JOB_URGENCY_POLICY[job.urgency ?? "normal"].label;
   return label ? `${label} — ${base}` : base;
 }

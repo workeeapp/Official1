@@ -60,7 +60,7 @@
     "}",
     "",
     "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
-    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. Urgency follow-ups work the same as any other OPEN_JOB.",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated.",
     "",
     "------------------------------------------------------------",
     "CAPABILITIES (זהה לכל עובד)",
@@ -436,6 +436,22 @@
                         "time": { "type": "string", "description": "HH:mm" }
                       },
                       "required": ["title", "date", "time"]
+                    },
+                    "in": {
+                      "type": ["number", "null"],
+                      "description": "Deferred check-with only (expects_reply true): seconds from now until YOU ask. Server saves your לבדוק task with date/time and a clock; at fire it clears the dates, sends the ask, and opens the job. Omit for an immediate check."
+                    },
+                    "date": {
+                      "type": "string",
+                      "description": "Deferred check-with: fire date YYYY-MM-DD (with time). Omit for immediate."
+                    },
+                    "time": {
+                      "type": "string",
+                      "description": "Deferred check-with: fire clock HH:mm (with date or alone for today/tomorrow roll). Omit for immediate."
+                    },
+                    "recurrence": {
+                      "type": ["object", "null"],
+                      "description": "Deferred check-with that repeats (כל יום שני ב־14:00 / כל 1 לחודש ב־17:00). Same shape as reminders[].recurrence. Omit for one-shot or immediate."
                     }
                   },
                   "required": [

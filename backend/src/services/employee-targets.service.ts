@@ -3,6 +3,7 @@ import {
   isDigitalEmployee,
   isGuestEmployee,
   llmItemLabel,
+  messageHasSchedule,
   REPLY_BUTTON_MAX,
   type LlmFilingAction,
   type LlmListAction,
@@ -13,6 +14,7 @@ import {
   type LlmReminderAction,
   type LlmReplyButton,
   type PublicEmployee,
+  type Recurrence,
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import type { ItemVisibility } from "./employee-records.service.js";
@@ -332,6 +334,10 @@ export function planRelayDeliveries(input: {
   const seen = new Set<string>();
 
   for (const action of input.messages) {
+    // Deferred check-with: no WhatsApp until the clock fires.
+    if (messageHasSchedule(action) && action.expectsReply !== false) {
+      continue;
+    }
     const targets = resolveNamedRelayTargets(
       action.targets,
       input.employees,
@@ -373,6 +379,7 @@ export function planRelayDeliveries(input: {
 /**
  * «תבדקי איתי…» — messages that target the speaker with expects_reply open a
  * self-job on the worker (no chat/WhatsApp relay; the ask lives in response).
+ * Deferred (clock on the messages entry) is handled by planScheduledJobDeliveries.
  */
 export function planSelfJobDeliveries(input: {
   actor: PublicEmployee;
@@ -400,6 +407,9 @@ export function planSelfJobDeliveries(input: {
     if (action.expectsReply === false) {
       continue;
     }
+    if (messageHasSchedule(action)) {
+      continue;
+    }
     const selfTargets = resolveNamedRelayTargets(
       action.targets,
       input.employees,
@@ -416,6 +426,68 @@ export function planSelfJobDeliveries(input: {
         ask: action.askSummary ?? "",
         ...(action.urgency ? { urgency: action.urgency } : {}),
         ...(action.book ? { book: action.book } : {}),
+      });
+    }
+  }
+
+  return deliveries;
+}
+
+export type ScheduledJobDelivery = {
+  subjectId: string;
+  subjectName: string;
+  text: string;
+  ask: string;
+  urgency?: JobUrgency;
+  book?: LlmMessageBook;
+  inSeconds?: number | null;
+  date?: string;
+  time?: string;
+  recurrence?: Recurrence;
+};
+
+/**
+ * Deferred check-with: expects_reply messages that carry in / date+time / recurrence.
+ * Covers self-check and third-party; no immediate WhatsApp.
+ */
+export function planScheduledJobDeliveries(input: {
+  actor: PublicEmployee;
+  sender: PublicEmployee;
+  employees: PublicEmployee[];
+  messages: LlmMessageAction[];
+}): ScheduledJobDelivery[] {
+  const deliveries: ScheduledJobDelivery[] = [];
+  const seen = new Set<string>();
+
+  for (const action of input.messages) {
+    if (action.expectsReply === false || !messageHasSchedule(action)) {
+      continue;
+    }
+    const schedule = {
+      ...(action.inSeconds ? { inSeconds: action.inSeconds } : {}),
+      ...(action.date ? { date: action.date } : {}),
+      ...(action.time ? { time: action.time } : {}),
+      ...(action.recurrence ? { recurrence: action.recurrence } : {}),
+    };
+    const named = resolveNamedRelayTargets(action.targets, input.employees);
+    const subjects = named.filter(
+      (target) =>
+        target.id === input.actor.id ||
+        (target.id !== input.sender.id && !isDigitalEmployee(target)),
+    );
+    for (const target of subjects) {
+      if (seen.has(target.id)) {
+        continue;
+      }
+      seen.add(target.id);
+      deliveries.push({
+        subjectId: target.id,
+        subjectName: employeeDisplayName(target),
+        text: action.text,
+        ask: action.askSummary ?? "",
+        ...(action.urgency ? { urgency: action.urgency } : {}),
+        ...(action.book ? { book: action.book } : {}),
+        ...schedule,
       });
     }
   }

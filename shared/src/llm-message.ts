@@ -79,6 +79,37 @@ export interface LlmMessageAction {
   urgency?: JobUrgency;
   /** The ask is to set up a meeting/call at this slot; a yes books it for both people. */
   book?: LlmMessageBook;
+  /**
+   * Deferred check-with: activate the job later. Same clock fields as reminders.
+   * When any of these is set with expects_reply, the server schedules the job
+   * (Lucy task + Reminder) and does not ask/send until fire.
+   */
+  inSeconds?: number | null;
+  /** Deferred check: YYYY-MM-DD */
+  date?: string;
+  /** Deferred check: HH:mm */
+  time?: string;
+  /** Deferred check: structured recurrence (same shape as reminders[].recurrence). */
+  recurrence?: Recurrence;
+}
+
+/** True when a job-opening message should wait for a clock instead of opening now. */
+export function messageHasSchedule(action: {
+  inSeconds?: number | null;
+  date?: string;
+  time?: string;
+  recurrence?: Recurrence | null;
+}): boolean {
+  if (typeof action.inSeconds === "number" && action.inSeconds > 0) {
+    return true;
+  }
+  if (action.date?.trim()) {
+    return true;
+  }
+  if (action.time?.trim()) {
+    return true;
+  }
+  return Boolean(action.recurrence);
 }
 
 export interface LlmMessageBook {
@@ -1043,6 +1074,10 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
   ]);
   const book = toMessageBook(record.book);
   const urgency = parseJobUrgency(record.urgency);
+  const inSeconds = parseInSeconds(record);
+  const date = readText(record, ["date"]);
+  const time = parseClockField(readText(record, ["time"]));
+  const recurrence = parseRecurrence(record.recurrence);
   return {
     text,
     targets,
@@ -1050,6 +1085,10 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
     ...(askSummary ? { askSummary } : {}),
     ...(urgency !== "normal" ? { urgency } : {}),
     ...(book ? { book } : {}),
+    ...(inSeconds ? { inSeconds } : {}),
+    ...(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : {}),
+    ...(time ? { time } : {}),
+    ...(recurrence ? { recurrence } : {}),
   };
 }
 

@@ -33,11 +33,15 @@ vi.mock("../src/services/audit.service.js", () => ({
   recordAuditEvent: vi.fn(),
 }));
 
-const { continueJobAfterNudge } = vi.hoisted(() => ({
+const { continueJobAfterNudge, activateScheduledJob } = vi.hoisted(() => ({
   continueJobAfterNudge: vi.fn(),
+  activateScheduledJob: vi.fn(),
 }));
 
-vi.mock("../src/services/jobs.service.js", () => ({ continueJobAfterNudge }));
+vi.mock("../src/services/jobs.service.js", () => ({
+  continueJobAfterNudge,
+  activateScheduledJob,
+}));
 
 import {
   claimDueReminder,
@@ -81,6 +85,8 @@ describe("settleFiredReminder", () => {
     reminderFindUnique.mockReset().mockResolvedValue({ workerItemId: "task-1" });
     itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     itemUpdate.mockReset().mockResolvedValue({});
+    activateScheduledJob.mockReset().mockResolvedValue(false);
+    continueJobAfterNudge.mockReset();
   });
 
   it("marks a one-shot clock done with sent_at and detaches the worker task", async () => {
@@ -222,6 +228,59 @@ describe("settleFiredReminder", () => {
 
     expect(reminderDelete).not.toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("activates a deferred job and keeps the worker task on one-shot fire", async () => {
+    activateScheduledJob.mockResolvedValue(true);
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+        userId: "u1",
+      },
+      now,
+      "sent",
+    );
+    expect(activateScheduledJob).toHaveBeenCalledWith({
+      userId: "u1",
+      workerItemId: "task-1",
+      now,
+    });
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: {
+        status: "done",
+        sendStatus: "sent",
+        sentAt: now,
+        workerItemId: null,
+      },
+    });
+  });
+
+  it("activates a deferred job when a recurring schedule clock advances", async () => {
+    activateScheduledJob.mockResolvedValue(true);
+    const fired = new Date("2026-10-08T16:00:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: fired,
+        repeat: "weekdays:1",
+        recurrence: { freq: "weekly", interval: 1, weekdays: [1], time: "14:00" },
+        occurrencesFired: 0,
+        userId: "u1",
+      },
+      new Date(fired.getTime() + 60_000),
+      "sent",
+    );
+    expect(activateScheduledJob).toHaveBeenCalledWith({
+      userId: "u1",
+      workerItemId: "task-1",
+      now: expect.any(Date),
+    });
     expect(itemUpdate).not.toHaveBeenCalled();
   });
 });
