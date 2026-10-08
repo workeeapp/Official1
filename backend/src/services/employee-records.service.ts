@@ -1,13 +1,15 @@
 import { Prisma } from "@prisma/client";
 import {
   isGuestEmployee,
+  parseJobUrgency,
   type EmployeeRecordField,
   type EmployeeRecordsResponse,
+  type JobUrgency,
   type LlmListAction,
   type LlmListType,
   type LlmMetadata,
 } from "@workee/shared";
-import { ConflictError, NotFoundError, ValidationError } from "../utils/errors.js";
+import { NotFoundError, ValidationError } from "../utils/errors.js";
 import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
@@ -87,7 +89,27 @@ const CUSTOM_ITEM_META_KEYS = new Set([
   "itemId",
   "scope",
   "owner",
+  "urgency",
+  "דחיפות",
 ]);
+
+/** Read urgency from an ACTION item; undefined when the model omitted it. */
+export function readItemUrgency(
+  item: Record<string, unknown>,
+): JobUrgency | undefined {
+  if (!("urgency" in item) && !("דחיפות" in item)) {
+    return undefined;
+  }
+  return parseJobUrgency(item.urgency ?? item["דחיפות"]);
+}
+
+/** Inject into EMPLOYEE_SAVED_DATA only when not normal (same as OPEN_JOBS). */
+export function urgencySnapshotField(
+  urgency: unknown,
+): Record<string, unknown> {
+  const parsed = parseJobUrgency(urgency);
+  return parsed === "normal" ? {} : { urgency: parsed };
+}
 
 /** Read a DB id from an ACTION item / row (jobs-style job_id aliases). */
 export function readItemId(record: Record<string, unknown>): string {
@@ -209,6 +231,7 @@ function firstCustomDataValue(item: Record<string, unknown>): string {
 export function itemIdentity(
   listType: LlmListType,
   item: Record<string, unknown>,
+  titleField = "",
 ): string {
   if (listType === "contacts") {
     const first = readItemText(item, ITEM_NAME_KEYS.contacts);
@@ -217,6 +240,13 @@ export function itemIdentity(
   }
 
   if (listType === "custom") {
+    const field = titleField.trim();
+    if (field) {
+      const titled = readItemText(item, [field]);
+      if (titled) {
+        return normalizeKey(titled);
+      }
+    }
     return normalizeKey(firstCustomDataValue(item));
   }
 
@@ -438,6 +468,7 @@ export function formatEmployeeContext(
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, append «דחוף» / «דחוף מאוד» on that • line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
       lists: snapshot.lists,
@@ -921,7 +952,10 @@ export async function getEmployeeRecordSnapshot(
         "shared",
         owner,
         item.id,
-        linkedReminderField(item, activeReminders),
+        {
+          ...linkedReminderField(item, activeReminders),
+          ...urgencySnapshotField(item.urgency),
+        },
       ),
     );
     byType.set(item.list.listType, items);
@@ -952,7 +986,10 @@ export async function getEmployeeRecordSnapshot(
           "shared",
           owner,
           item.id,
-          linkedReminderField(item, activeReminders),
+          {
+            ...linkedReminderField(item, activeReminders),
+            ...urgencySnapshotField(item.urgency),
+          },
         ),
       );
     }
@@ -1375,30 +1412,24 @@ async function updateOwnedListItem(
     scope: string;
     addedById: string | null;
     visibleTo: unknown;
-    list: { id: string; employeeId: string; listType: string; name: string };
+    list: {
+      id: string;
+      employeeId: string;
+      listType: string;
+      name: string;
+      titleField?: string;
+    };
   },
   fields: EmployeeRecordField[],
   actorId: string,
 ): Promise<SharedItemEvent[]> {
   const listType = existing.list.listType as LlmListType;
   const nextData = mergeListItemData(asRecord(existing.data), fieldsToData(fields));
-  const nextKey = itemIdentity(listType, nextData) || existing.itemKey;
+  const nextKey =
+    itemIdentity(listType, nextData, existing.list.titleField ?? "") ||
+    existing.itemKey;
   if (!ownedItemTitle(listType, nextData, nextKey)) {
     throw new ValidationError("Item name is required", { name: "Item name is required" });
-  }
-
-  if (nextKey !== existing.itemKey) {
-    const clash = await prisma.employeeListItem.findFirst({
-      where: {
-        listId: existing.list.id,
-        itemKey: nextKey,
-        deletedAt: null,
-        NOT: { id: existing.id },
-      },
-    });
-    if (clash) {
-      throw new ConflictError("An item with this name already exists");
-    }
   }
 
   await prisma.employeeListItem.update({
@@ -1896,18 +1927,18 @@ async function applyListAction(
     const done = extractOccurrenceDone(item);
     const shaped = shapeItemRecurrence(done.item);
     const fieldsItem = shaped.item;
-    const needles = itemSearchNeedles(resolvedAction.listType, fieldsItem);
-    const itemKey = itemIdentity(resolvedAction.listType, fieldsItem) || needles[0] || "";
-    if (resolvedAction.action === "add" && !itemKey && needles.length === 0) {
+    const rowTitleField = list.titleField ?? "";
+    const itemKey =
+      itemIdentity(resolvedAction.listType, fieldsItem, rowTitleField) || "";
+    // add = always insert; update/remove = only by item_id (no key/fuzzy match).
+    if (resolvedAction.action === "add" && !itemKey) {
       continue;
     }
 
     const existing =
       resolvedAction.action === "update"
         ? await findLiveListItemById(mutateId, employeeId)
-        : itemKey
-          ? await findMatchingItem(list.id, itemKey, resolvedAction.action)
-          : null;
+        : null;
     if (resolvedAction.action === "update" && !existing?.id) {
       continue;
     }
@@ -1925,17 +1956,23 @@ async function applyListAction(
     const existingList = existing && "list" in existing
       ? (existing.list as { titleField?: string } | null)
       : null;
-    const rowTitleField = existingList?.titleField ?? list.titleField ?? "";
+    const effectiveTitleField = existingList?.titleField ?? rowTitleField;
     const nextItemKey =
-      itemIdentity(resolvedAction.listType, nextDataRecord) ||
+      itemIdentity(resolvedAction.listType, nextDataRecord, effectiveTitleField) ||
       itemKey ||
       existing?.itemKey ||
       "";
+    const itemUrgency = readItemUrgency(fieldsItem);
     const fields = {
       data: nextData,
       scope: resolvedVisibility.scope,
       addedById: resolvedVisibility.addedById,
       visibleTo: resolvedVisibility.visibleTo,
+      ...(itemUrgency !== undefined
+        ? { urgency: itemUrgency }
+        : resolvedAction.action === "add"
+          ? { urgency: "normal" as const }
+          : {}),
     };
 
     const listOwner = await prisma.employee.findUnique({
@@ -1965,7 +2002,7 @@ async function applyListAction(
             resolvedAction.listType,
             nextDataRecord,
             nextItemKey || existing.itemKey,
-            rowTitleField,
+            effectiveTitleField,
           ) ||
           nextItemKey ||
           existing.itemKey,
@@ -2006,7 +2043,7 @@ async function applyListAction(
             resolvedAction.listType,
             nextDataRecord,
             nextItemKey,
-            rowTitleField,
+            effectiveTitleField,
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
       });
@@ -2089,6 +2126,10 @@ async function applyListAction(
   return { events, mutations, cancelledReminders };
 }
 
+/**
+ * For update/remove: copy list_type + list_name from the row addressed by
+ * item_id. Never guess by title / fuzzy field match.
+ */
 async function resolveListActionAgainstSaved(
   employeeId: string,
   action: LlmListAction,
@@ -2097,82 +2138,28 @@ async function resolveListActionAgainstSaved(
     return action;
   }
 
-  const needles = action.items.flatMap((item) =>
-    itemSearchNeedles(action.listType, item),
-  );
-  if (needles.length === 0) {
-    return action;
-  }
-
-  const lists = await prisma.employeeList.findMany({
-    where: { employeeId, deletedAt: null },
-    include: { items: { where: { deletedAt: null } } },
-  });
-  const hits: Array<{ listType: string; name: string }> = [];
-
-  for (const list of lists) {
-    const hit = list.items.some((row) => itemRowMatchesNeedles(row, needles));
-    if (!hit) {
-      continue;
+  let itemId = "";
+  for (const raw of action.items) {
+    itemId = readItemId(asRecord(raw));
+    if (itemId) {
+      break;
     }
-    hits.push({ listType: list.listType, name: list.name });
   }
-
-  if (hits.length === 0) {
+  if (!itemId) {
     return action;
   }
 
-  const chosen = chooseSavedListType(
-    action.listType,
-    hits.map((row) => row.listType),
-  );
-  if (!chosen) {
-    return action;
-  }
-
-  const requestedName = action.listName?.trim() ?? "";
-  const sameType = hits.filter((row) => row.listType === chosen);
-  // Prefer the list the model named (e.g. בעיות), never the first custom list
-  // of that type — that bug silently no-op'd shared removes/updates.
-  const matched =
-    (requestedName
-      ? sameType.find(
-          (row) =>
-            normalizeKey(row.name) === normalizeKey(requestedName) ||
-            normalizeKey(row.name).includes(normalizeKey(requestedName)) ||
-            normalizeKey(requestedName).includes(normalizeKey(row.name)),
-        )
-      : undefined) ??
-    sameType.find((row) => row.listType === action.listType) ??
-    sameType[0];
-  if (!matched) {
+  const existing = await findLiveListItemById(itemId, employeeId);
+  const list = existing && "list" in existing ? existing.list : null;
+  if (!list?.listType) {
     return action;
   }
 
   return {
     ...action,
-    listType: chosen,
-    listName: matched.name,
+    listType: list.listType as LlmListType,
+    listName: list.name ?? action.listName,
   };
-}
-
-function itemRowMatchesNeedles(
-  row: { itemKey: string; data: unknown },
-  needles: string[],
-): boolean {
-  if (needles.some((needle) => keysLooselyMatch(row.itemKey, needle))) {
-    return true;
-  }
-  const data = asRecord(row.data);
-  return customItemDataEntries(data).some(([, value]) => {
-    if (typeof value === "string" && value.trim()) {
-      return needles.some((needle) => keysLooselyMatch(value, needle));
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return needles.some((needle) => keysLooselyMatch(String(value), needle));
-    }
-    return false;
-  });
 }
 
 async function findLiveListItemById(itemId: string, employeeId: string) {
@@ -2186,97 +2173,10 @@ async function findLiveListItemById(itemId: string, employeeId: string) {
       deletedAt: null,
       list: { employeeId },
     },
-    include: { list: { select: { titleField: true } } },
+    include: {
+      list: { select: { id: true, listType: true, name: true, titleField: true } },
+    },
   });
-}
-
-async function findMatchingItem(
-  listId: string,
-  itemKey: string,
-  action?: LlmListAction["action"],
-) {
-  return findMatchingItemByNeedles(listId, [itemKey], action);
-}
-
-async function findMatchingItemByNeedles(
-  listId: string,
-  needles: string[],
-  action?: LlmListAction["action"],
-) {
-  const clean = needles.map((n) => n.trim()).filter(Boolean);
-  if (clean.length === 0) {
-    return null;
-  }
-  for (const itemKey of clean) {
-    const exact = await prisma.employeeListItem.findFirst({
-      where: { listId, itemKey, deletedAt: null },
-    });
-    if (exact) {
-      return exact;
-    }
-  }
-
-  const items = await prisma.employeeListItem.findMany({
-    where: { listId, deletedAt: null },
-  });
-  const fuzzy =
-    items.find((item) => itemRowMatchesNeedles(item, clean)) ?? null;
-  if (fuzzy) {
-    return fuzzy;
-  }
-  if (action === "update" && items.length === 1) {
-    return items[0];
-  }
-  return null;
-}
-
-async function findCustomItemAcrossEmployeeLists(
-  employeeId: string,
-  needles: string[],
-  preferredListName?: string,
-): Promise<{
-  listId: string;
-  listName: string;
-  item: {
-    id: string;
-    itemKey: string;
-    data: unknown;
-    scope?: string;
-    addedById?: string | null;
-    visibleTo?: unknown;
-  };
-} | null> {
-  const lists = await prisma.employeeList.findMany({
-    where: { employeeId, listType: "custom", deletedAt: null },
-    include: { items: { where: { deletedAt: null } } },
-  });
-  const preferred = preferredListName?.trim() ?? "";
-  const ordered = preferred
-    ? [...lists].sort((a, b) => {
-        const aHit =
-          normalizeKey(a.name) === normalizeKey(preferred) ||
-          normalizeKey(a.name).includes(normalizeKey(preferred)) ||
-          normalizeKey(preferred).includes(normalizeKey(a.name))
-            ? 0
-            : 1;
-        const bHit =
-          normalizeKey(b.name) === normalizeKey(preferred) ||
-          normalizeKey(b.name).includes(normalizeKey(preferred)) ||
-          normalizeKey(preferred).includes(normalizeKey(b.name))
-            ? 0
-            : 1;
-        return aHit - bHit;
-      })
-    : lists;
-  for (const row of ordered) {
-    const item = row.items.find((entry) =>
-      itemRowMatchesNeedles(entry, needles),
-    );
-    if (item) {
-      return { listId: row.id, listName: row.name, item };
-    }
-  }
-  return null;
 }
 
 /**
@@ -2587,6 +2487,7 @@ function toListSnapshotEntry(input: {
     data: unknown;
     scope?: string;
     itemKey?: string;
+    urgency?: string | null;
     reminderId?: string | null;
     linkedReminderId?: string | null;
   }>;
@@ -2607,7 +2508,10 @@ function toListSnapshotEntry(input: {
           : "personal",
         input.ownerName,
         item.id,
-        linkedReminderField(item, input.activeReminders ?? new Map()),
+        {
+          ...linkedReminderField(item, input.activeReminders ?? new Map()),
+          ...urgencySnapshotField(item.urgency),
+        },
       ),
     );
   // Keep named custom lists and any shared list even when empty so Lucy can

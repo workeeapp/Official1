@@ -37,14 +37,17 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 | Metadata | Role |
 |----------|------|
-| `lists` | Shopping, tasks (incl. dated meetings), contacts-list type, or custom lists. Optional `targets` for other employees / everyone |
+| `lists` | Shopping, tasks (incl. dated meetings / standing `recurrence`), contacts-list type, or custom lists. Optional `targets`, item `urgency`, `occurrence_done`. Update/remove need `item_id` |
+| `list_ops` | Whole-list changes by `list_id`: `alter_list` (rename / columns / participants) or `delete_list` |
 | `filing` | Durable facts / memory (IDs, family context, preferences). Fields: `item_name`, `item_description` (תיאור — required on add; model asks if missing; if they say «כמו השם» the **model** sets description = name), optional `item_info`. Injected every turn in `EMPLOYEE_SAVED_DATA` |
 | `directory` | Personal phone book (`Contacts`) — not Employees |
-| `messages` | Send **now** on WhatsApp / in-app |
-| `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / recurring) |
+| `messages` | Send **now** on WhatsApp / in-app; open jobs with `expects_reply` + `ask_summary` + optional `urgency` / `book` (incl. self-check «תבדקי איתי…») |
+| `reminders` | Clocks: self-nudges or **scheduled** sends (`in` / `time` / structured `recurrence`) |
+| `jobs` | answer / decline / progress / counter / snooze / clear_clock / close by `job_id` from `OPEN_JOBS` |
 | `query` | Which saved data to read — see below |
-| `confirm` | Apply or drop a pending reminder delete or bulk list delete |
 | `handoff.worker` | Switch the conversation to another digital employee |
+
+Full feature write-ups (recurrence, urgency, list_ops, self-check, buttons, deploy refresh, …): **[docs/features.md](docs/features.md)**.
 
 **`query` values:**
 
@@ -84,7 +87,9 @@ The worker understands the speaker, asks until the schema is complete, then emit
 
 ## Reminders and scheduled sends
 
-A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). Recurring clocks use `repeat` as `once` or `count:unit` (`30:seconds`, `1:days`, …) or `weekdays:1,3`.
+A reminder row has two statuses: `status` is the clock (`active` / `done` / `cancelled`); `send_status` is the WhatsApp attempt (`pending` / `sent` / `failed`). Prefer structured `recurrence` (`freq` / `interval` / `weekdays` / `month_day` / `time` / `until` / `count`) on Asia/Jerusalem — see [docs/recurrence.md](docs/recurrence.md). Legacy `repeat` strings (`once`, `30:seconds`, `weekdays:1,3`) may still appear on older rows.
+
+**Standing tasks** use the same `recurrence` on a tasks item (one row, `חוזר` + `next_occurrences`). Finishing today’s occurrence uses `occurrence_done` — do not delete the standing row. Lucy’s linked reminder task follows the repeating clock date.
 
 - **Fixed copy:** `compose` false/omit; `text` is the final WhatsApp body.
 - **Compose at fire:** `compose: true`; `text` is a brief only; the LLM writes the final body when the clock fires. `last_composed_text` stores the last send so repeats can be avoided.
@@ -96,12 +101,14 @@ A reminder row has two statuses: `status` is the clock (`active` / `done` / `can
 - After a **one-shot** fire the clock is marked `done` (not deleted) with `sent_at` and kept in the DB for retention. Soft-deleted list/filing rows and done/cancelled clocks **stay in the DB** but are **never** loaded into `EMPLOYEE_SAVED_DATA` — live/active data only.
 - Reminder **cancel** marks `status=cancelled` (soft). List items and filings use `deleted_at` instead of hard DELETE. Mutations still append to `AuditEvents` for internal retention; they are not injected into the model.
 - Custom lists must always have a real `EmployeeLists.name`. Prefer the name the speaker already said (or `list_name` on the item); only ask “what should we call this list?” when none exists. Never persist custom rows with an empty name — snapshots derive a title from item `list_name` when repairing legacy rows.
-- **Multi-turn drafts:** the server keeps no Action State. While asking for a missing required field the model leaves that action empty; its own previous turn (OpenAI conversation history) is the draft, so a short reply like «דור» makes it emit the complete action. Id-based deletes apply immediately; the only delete confirm is the model asking before `list_ops.delete_list`. Phone-book saves (אנשי קשר + name + phone) use `metadata.directory` — first name is enough; do not require last name.
+- **Multi-turn drafts:** the server keeps no Action State. While asking for a missing required field the model leaves that action empty; its own previous turn (OpenAI conversation history) is the draft, so a short reply like «דור» / «מחר» / «ב־9» makes it emit the complete action (not a new WHEN query). Id-based deletes/updates apply immediately; the only delete confirm is the model asking before `list_ops.delete_list`. Phone-book saves (אנשי קשר + name + phone) use `metadata.directory` — first name is enough; do not require last name.
+- **Open jobs / urgency:** «תבדקי עם ערן…» opens a job (`expects_reply` + `ask_summary` + `urgency`). `urgent` / `very_urgent` get server follow-ups; when they run out the asker is notified. «תבדקי איתי…» is a self-job (ask in `response`, no third-party relay). List rows may also carry `urgency` for «מה יש לי דחוף».
+- **list_ops:** rename / re-column / re-share / delete a whole list by `list_id` — not row-by-row.
 - **Apply feedback:** the model’s `response` is the user-facing text after saves. The server does not append a Hebrew mutation inventory.
 
 ## Architecture note
 
-Canonical rules live in `.cursor/rules/architecture.mdc` and `.cursor/rules/security.mdc`. Prefer those if this README and the code diverge after a change.
+Canonical rules live in `.cursor/rules/architecture.mdc` and `.cursor/rules/security.mdc`. Feature catalog: [docs/features.md](docs/features.md). Prefer those if this README and the code diverge after a change.
 
 Do not commit `.env` or access tokens.
 
@@ -147,6 +154,12 @@ npm run keep-up
 ```
 
 restarts the keeper in the current terminal. Log: `%LOCALAPPDATA%\Workee\keep-up.log`.
+
+After pulling, a one-shot refresh (migrate, build SPA, restart API that serves `frontend/dist`):
+
+```bash
+npm run refresh
+```
 
 ## Tests
 

@@ -82,6 +82,15 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("From a recipe / ingredient list");
     expect(config.systemMessage).toContain("MUST copy into כמות + יחידת מידה");
     expect(config.systemMessage).toContain("FOLLOW-UP TO YOUR QUESTION");
+    expect(config.systemMessage).toContain("היום/מחר/אתמול");
+    expect(config.systemMessage).toContain("bare מחר");
+    expect(config.systemMessage).toContain("WHEN/TODAY");
+    expect(config.systemMessage).toContain("STANDING / recurring (critical)");
+    expect(config.systemMessage).toContain("next_occurrences");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: empty «אין לך…» when that date appears in any next_occurrences",
+    );
+    expect(config.systemMessage).toContain("RECURRING IN A DATE ANSWER");
     expect(config.systemMessage).not.toContain("confirm_share");
     expect(config.systemMessage).not.toContain("PENDING_ACTION_STATE");
     expect(config.systemMessage).toContain("FORBIDDEN: «לרשימת הקניות שלך»");

@@ -125,6 +125,8 @@ import {
   isPhantomCustomListItem,
   mergeListItemData,
   normalizeListItemData,
+  readItemUrgency,
+  urgencySnapshotField,
 } from "../src/services/employee-records.service.js";
 
 const talId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
@@ -195,6 +197,18 @@ describe("employee records", () => {
     expect(
       mergeListItemData({ "שם מטלה": "ישן" }, { "שם מטלה חדש": "חדש" }),
     ).toEqual({ "שם מטלה": "חדש" });
+    expect(
+      normalizeListItemData({
+        "שם מטלה": "לשתות מים",
+        urgency: "urgent",
+        דחיפות: "very_urgent",
+      }),
+    ).toEqual({ "שם מטלה": "לשתות מים" });
+    expect(readItemUrgency({ urgency: "urgent" })).toBe("urgent");
+    expect(readItemUrgency({ דחיפות: "very_urgent" })).toBe("very_urgent");
+    expect(readItemUrgency({ "שם מטלה": "לשתות מים" })).toBeUndefined();
+    expect(urgencySnapshotField("normal")).toEqual({});
+    expect(urgencySnapshotField("urgent")).toEqual({ urgency: "urgent" });
   });
 
   it("on lists update, stores only the new name (not שם + שם חדש)", async () => {
@@ -412,6 +426,7 @@ describe("employee records", () => {
       name: "באגים",
       scope: "shared",
       visibleTo: [talId, employeeId],
+      titleField: "",
     };
     const stored = {
       id: "bug-sys",
@@ -422,24 +437,14 @@ describe("employee records", () => {
       addedById: talId,
       visibleTo: [talId, employeeId],
       deletedAt: null,
+      list: bugs,
     };
-    // Primary lookup uses a different/empty list name first.
-    listFindFirst.mockResolvedValue({
-      id: "empty-list",
-      employeeId: talId,
-      listType: "custom",
-      name: "",
-      scope: "shared",
-      visibleTo: [talId, employeeId],
-    });
-    listFindMany
-      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]) // resolveListActionAgainstSaved
-      .mockResolvedValueOnce([{ ...bugs, items: [stored] }]); // across-employee search
-    itemFindFirst.mockResolvedValue(null);
+    // resolveListActionAgainstSaved + remove both look up by item_id only.
+    itemFindFirst
+      .mockResolvedValueOnce(stored)
+      .mockResolvedValueOnce(stored);
+    listFindFirst.mockResolvedValue(bugs);
     itemFindMany.mockResolvedValue([]);
-    itemUpdateMany.mockResolvedValue({ count: 1 });
-    // Id-only remove looks up the live row by item_id on the owner.
-    itemFindFirst.mockResolvedValueOnce(stored);
     itemUpdate.mockResolvedValue({ id: stored.id });
 
     const result = await applyEmployeeRecords(
@@ -469,6 +474,74 @@ describe("employee records", () => {
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
+  });
+
+  it("adds a custom row even when an existing item shares overlapping field values", async () => {
+    const list = {
+      id: "maya-lessons",
+      employeeId: talId,
+      listType: "custom",
+      name: "שיעורי הנהיגה של מאיה",
+      titleField: "מספר שיעור",
+      scope: "shared",
+      visibleTo: [talId, employeeId],
+    };
+    listFindFirst.mockResolvedValue(list);
+    itemCreate.mockResolvedValue({ id: "lesson-2-new" });
+
+    const result = await applyEmployeeRecords(
+      talId,
+      {
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "שיעורי הנהיגה של מאיה",
+            items: [
+              { "מספר שיעור": 2, תאריך: "2026-10-01", שולם: "כן" },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [talId, employeeId],
+      },
+      employeeId,
+    );
+
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(itemCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        listId: list.id,
+        itemKey: "2",
+        data: {
+          "מספר שיעור": 2,
+          תאריך: "2026-10-01",
+          שולם: "כן",
+        },
+      }),
+    });
+    expect(result.mutations).toEqual([
+      expect.objectContaining({
+        action: "add",
+        itemKey: "2",
+        listName: "שיעורי הנהיגה של מאיה",
+      }),
+    ]);
+  });
+
+  it("uses titleField for custom item identity", () => {
+    expect(
+      itemIdentity(
+        "custom",
+        { שולם: "כן", תאריך: "2026-10-01", "מספר שיעור": 2 },
+        "מספר שיעור",
+      ),
+    ).toBe("2");
   });
 
   it("prefers the saved list type when the model guesses wrong", () => {
@@ -526,23 +599,18 @@ describe("employee records", () => {
       employeeId,
       listType: "tasks",
       name: "",
-      items: [
-        {
-          id: "task-1",
-          itemKey: "להכין חביתה לילדים",
-          data: { "שם מטלה": "להכין חביתה לילדים" },
-        },
-      ],
+      titleField: "",
     };
-    listFindMany.mockResolvedValue([tasksList]);
-    listFindFirst.mockResolvedValue({
-      id: "tasks-1",
-      employeeId,
-      listType: "tasks",
-      name: "",
-    });
-    itemFindUnique.mockResolvedValue(tasksList.items[0]);
-    itemFindFirst.mockResolvedValue(tasksList.items[0]);
+    const stored = {
+      id: "task-1",
+      listId: tasksList.id,
+      itemKey: "להכין חביתה לילדים",
+      data: { "שם מטלה": "להכין חביתה לילדים" },
+      list: tasksList,
+    };
+    listFindFirst.mockResolvedValue(tasksList);
+    // resolve + remove both load by item_id (list_type comes from the row).
+    itemFindFirst.mockResolvedValueOnce(stored).mockResolvedValueOnce(stored);
     itemFindMany.mockResolvedValue([]);
     itemUpdate.mockResolvedValue({ id: "task-1" });
 
@@ -823,16 +891,22 @@ describe("employee records", () => {
         data: { "שם פריט": "חלב", כמות: 1 },
       });
     itemFindFirst
-      .mockResolvedValueOnce(null) // add: no existing by key
       .mockResolvedValueOnce({
-        // update by item_id
+        // update: resolveListActionAgainstSaved by item_id
         id: "item-1",
         listId: list.id,
         itemKey: "חלב",
         data: { "שם פריט": "חלב", כמות: 1 },
+        list: { ...list, titleField: "" },
       })
-      .mockResolvedValueOnce(null) // remove without id → skipped (no lookup)
-      .mockResolvedValueOnce(null); // filing add by name
+      .mockResolvedValueOnce({
+        // update: apply by item_id
+        id: "item-1",
+        listId: list.id,
+        itemKey: "חלב",
+        data: { "שם פריט": "חלב", כמות: 1 },
+        list: { ...list, titleField: "" },
+      });
     itemCreate.mockResolvedValue({ id: "item-1" });
     itemUpdate.mockResolvedValue({ id: "item-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
@@ -904,6 +978,7 @@ describe("employee records", () => {
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId],
+        urgency: "normal",
       },
     });
     expect(itemUpdate).toHaveBeenCalledWith({
@@ -1253,6 +1328,98 @@ describe("employee records", () => {
     });
     expect(snapshot.lists[0]?.items[0]).toMatchObject({ "שם הבאג": "כפתור", מצב: "פתוח" });
     expect(snapshot.lists[0]?.items[0]).not.toHaveProperty("עיר");
+  });
+
+  it("stores list-item urgency on add and injects only non-normal into the snapshot", async () => {
+    const list = {
+      id: "tasks-1",
+      employeeId,
+      listType: "tasks",
+      name: "",
+      titleField: "",
+      scope: "personal",
+      visibleTo: [employeeId],
+    };
+    employeeFindUnique.mockResolvedValue({
+      id: employeeId,
+      userId: "user-1",
+      name: "עמית",
+      nickname: null,
+      kind: "human",
+      isOwner: false,
+    });
+    listFindFirst.mockResolvedValue(list);
+    listFindMany.mockResolvedValue([
+      {
+        ...list,
+        employee: { id: employeeId, name: "עמית", nickname: null },
+        items: [
+          {
+            id: "water-1",
+            itemKey: "לשתות מים",
+            data: { "שם מטלה": "לשתות מים", "תאריך לביצוע": "2026-10-09" },
+            urgency: "urgent",
+            scope: "personal",
+          },
+          {
+            id: "milk-1",
+            itemKey: "לקנות חלב",
+            data: { "שם מטלה": "לקנות חלב" },
+            urgency: "normal",
+            scope: "personal",
+          },
+        ],
+      },
+    ]);
+    itemCreate.mockResolvedValue({ id: "water-new" });
+    itemFindMany.mockResolvedValue([]);
+    employeeFindMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: null },
+    ]);
+
+    await applyEmployeeMetadata(employeeId, {
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              "שם מטלה": "לשתות מים",
+              "תאריך לביצוע": "2026-10-09",
+              urgency: "urgent",
+            },
+          ],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(itemCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        itemKey: "לשתות מים",
+        data: {
+          "שם מטלה": "לשתות מים",
+          "תאריך לביצוע": "2026-10-09",
+        },
+        urgency: "urgent",
+      }),
+    });
+
+    const snapshot = await getEmployeeRecordSnapshot(employeeId);
+    expect(snapshot.lists[0]?.items[0]).toMatchObject({
+      "שם מטלה": "לשתות מים",
+      urgency: "urgent",
+    });
+    expect(snapshot.lists[0]?.items[1]).toMatchObject({
+      "שם מטלה": "לקנות חלב",
+    });
+    expect(snapshot.lists[0]?.items[1]).not.toHaveProperty("urgency");
+
+    const context = formatEmployeeContext(snapshot);
+    expect(context).toContain('"urgency":"urgent"');
+    expect(context).toContain("«דחוף»");
   });
 
   it("derives list_name from שם הרשימה when the list row name is empty", async () => {

@@ -21,7 +21,7 @@
     "        \"list_type\": \"<shopping | contacts | tasks | custom>\",",
     "        \"targets\": [\"<employee name | all>\"],",
     "        \"items\": [",
-    "          { ... כל הפריטים שנאספו ... }",
+    "          { \"...\": \"שדות הפריט\", \"urgency\": \"<normal | urgent | very_urgent>\" }",
     "        ]",
     "      }",
     "    ],",
@@ -60,7 +60,7 @@
     "}",
     "",
     "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
-    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id.",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. Urgency follow-ups work the same as any other OPEN_JOB.",
     "",
     "------------------------------------------------------------",
     "CAPABILITIES (זהה לכל עובד)",
@@ -113,7 +113,7 @@
     "",
     "Rules:",
     "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
-    "- FOLLOW-UP TO YOUR QUESTION: the server keeps no draft. Your previous turn in this conversation IS the draft. When the speaker answers what you asked (a time, a phone, a name, a message body, כן), emit the COMPLETE action this turn — every field you already had plus the answer. On כן to an offer, emit that offered action in full (same targets). Cancel (לא / בטל / עזבי) → emit nothing for it and say you cancelled.",
+    "- FOLLOW-UP TO YOUR QUESTION: the server keeps no draft. Your previous turn in this conversation IS the draft. When the speaker answers what you asked (a time / hour HH:mm / ב־9 / 21:00, a relative date היום/מחר/אתמול, a calendar date YYYY-MM-DD or spoken date, a weekday / day ראשון / יום רביעי, a duration/until you asked for, a phone, a name, a message body, כן), emit the COMPLETE action this turn — every field you already had plus the answer. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. On כן to an offer, emit that offered action in full (same targets). Cancel (לא / בטל / עזבי) → emit nothing for it and say you cancelled.",
     "- אם פריט כבר קיים – ציין זאת ושאל אם לעדכן.",
     "- אם יש יותר מפריט אחד – הכנס את כולם ל‑metadata.lists[].items.",
     "- אל תפספס אף פריט.",
@@ -138,10 +138,13 @@
     "- שם מטלה (what the meeting is)",
     "- תאריך לביצוע",
     "- either שעה לביצוע OR יום שלם=true",
+    "TIME IS PRESENT when they named any clock: HH:mm / 8:00 / ב־08 / ב08:00 / בשעה 8 / at 8 — including glued to ב (ב08:00) and next to a period word (בבוקר / בערב / בצהריים). That clock IS שעה לביצוע — save this turn; NEVER ask באיזו שעה.",
+    "Vague period alone (מחר בבוקר / בערב with NO clock digits) is NOT a time. Date + vague period only, and not יום שלם / all-day → do NOT write metadata. Ask: באיזו שעה, או שזו פגישה של יום שלם?",
     "If the speaker gives a date but no time and did not say יום שלם / all-day, do NOT write metadata. Ask: באיזו שעה, או שזו פגישה של יום שלם?",
     "Only after they answer, save.",
     "All-day example item: { \"שם מטלה\": \"פגישה עם טל\", \"תאריך לביצוע\": \"יום ראשון\", \"יום שלם\": true }",
     "Timed example item: { \"שם מטלה\": \"פגישה עם טל\", \"תאריך לביצוע\": \"יום ראשון\", \"שעה לביצוע\": \"10:00\", \"יום שלם\": false }",
+    "Example: «יש לי פגישה בהולה מחר בבוקר ב08:00 עם המנהל» → tasks add NOW, תאריך=מחר (YYYY-MM-DD), שעה לביצוע:\"08:00\", יום שלם:false; outside party stays in שם מטלה; never ask באיזו שעה.",
     "Meeting WITH someone is not an assignment TO them.",
     "Example: \"שמור פגישה עם טל ליום ראשון בשעה 10\" spoken by עמית → tasks add, targets: [\"עמית\", \"טל\"].",
     "Participants are optional: a general meeting or one with an outside party (company / client / not in Known employees, e.g. «פגישה עם אלסטיק») is saved on the speaker only — targets=[speaker], the outside party stays in שם מטלה. Never ask «עם מי עוד?» or for a person's name inside the outside party.",
@@ -176,6 +179,9 @@
     "  messages: [{ \"targets\": [\"טל\"], \"text\": \"עמית שואל מה שלומך?\\nמה לענות לו?\" }]",
     "- \"תבדקי עם טל אם הוא קנה שמן\" →",
     "  messages: [{ \"targets\": [\"טל\"], \"text\": \"עמית שואל אם קנית שמן?\" }]",
+    "- \"תבדקי איתי אם קניתי שוקו\" →",
+    "  messages: [{ \"targets\": [\"עמית\"], \"text\": \"קנית שוקו?\", \"expects_reply\": true, \"ask_summary\": \"אם קנית שוקו?\", \"urgency\": \"normal\" }]",
+    "  lists: [], response: ask NOW («בסדר — קנית שוקו?»)",
     "",
     "Do not turn a send/check request into a list or task unless they also asked to add one.",
     "If there is no message to send, metadata.messages = [].",
@@ -294,11 +300,16 @@
                           },
                           "recurrence": {
                             "type": ["object", "null"],
-                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count). Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating."
+                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating."
                           },
                           "occurrence_done": {
                             "type": ["string", "boolean", "null"],
                             "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Occurrences up to that day leave next_occurrences."
+                          },
+                          "urgency": {
+                            "type": "string",
+                            "enum": ["normal", "urgent", "very_urgent"],
+                            "description": "How hard the speaker stressed this list item (shopping/tasks/contacts/custom), judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). Keep the item title clean — do not put urgency words in the name. The server stores it on the row; EMPLOYEE_SAVED_DATA shows urgency only when not normal."
                           }
                         }
                       }

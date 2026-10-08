@@ -287,5 +287,7 @@ describe("SESSION_CLOCK calendar", () => {
     expect(text).toContain("calendar");
     expect(text).toContain("2026-10-20 שלישי");
     expect(text).toContain("(קבוע)");
+    expect(text).toContain("MUST scan next_occurrences");
+    expect(text).toContain("FORBIDDEN: empty day answer");
   });
 });

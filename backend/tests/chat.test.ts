@@ -1384,6 +1384,7 @@ describe("chat API", () => {
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId],
+        urgency: "normal",
       },
     });
     expect(itemCreate).toHaveBeenCalledWith({
@@ -1394,6 +1395,7 @@ describe("chat API", () => {
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId],
+        urgency: "normal",
       },
     });
     expect(filingCreate).toHaveBeenCalledWith({
@@ -1446,6 +1448,7 @@ describe("chat API", () => {
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, otherEmployeeId],
+        urgency: "normal",
       },
     });
     expect(itemCreate).toHaveBeenCalledTimes(1);
@@ -1500,6 +1503,7 @@ describe("chat API", () => {
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, otherEmployeeId],
+        urgency: "normal",
       },
     });
     expect(response.body.notifications).toHaveLength(1);
@@ -1527,7 +1531,7 @@ describe("chat API", () => {
             {
               action: "remove",
               list_type: "shopping",
-              items: [{ "שם פריט": "קופסת טונה" }],
+              items: [{ item_id: "tuna-1", "שם פריט": "קופסת טונה" }],
             },
           ],
           filing: [],
@@ -1549,6 +1553,13 @@ describe("chat API", () => {
       addedById: employeeId,
       visibleTo: [employeeId, otherEmployeeId],
       data: { "שם פריט": "קופסת טונה", כמות: 1 },
+      list: {
+        id: "tal-shop",
+        employeeId: otherEmployeeId,
+        listType: "shopping",
+        name: "",
+        titleField: "",
+      },
     });
 
     const cookie = await login();
@@ -1560,12 +1571,8 @@ describe("chat API", () => {
       .send({ message: "קניתי טונה", employeeId: otherEmployeeId });
 
     expect(response.status).toBe(200);
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        listId: "tal-shop",
-        itemKey: "קופסת טונה",
-        deletedAt: null,
-      },
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
     expect(itemUpdateMany).toHaveBeenCalledWith({
@@ -1596,7 +1603,7 @@ describe("chat API", () => {
               action: "update",
               list_type: "shopping",
               targets: ["טל"],
-              items: [{ "שם פריט": "קופסת טונה", כמות: 2 }],
+              items: [{ item_id: "tuna-1", "שם פריט": "קופסת טונה", כמות: 2 }],
             },
           ],
           filing: [],
@@ -1618,6 +1625,13 @@ describe("chat API", () => {
       addedById: employeeId,
       visibleTo: [employeeId, otherEmployeeId],
       data: { "שם פריט": "קופסת טונה", כמות: 1 },
+      list: {
+        id: "tal-shop",
+        employeeId: otherEmployeeId,
+        listType: "shopping",
+        name: "",
+        titleField: "",
+      },
     });
 
     const cookie = await login();

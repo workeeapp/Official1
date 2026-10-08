@@ -164,9 +164,6 @@ export async function createJobsFromRelays(input: {
   const reuse = new Set(input.reuseJobIds ?? []);
   const created: OpenJobRow[] = [];
   for (const delivery of input.deliveries) {
-    if (delivery.subjectId === input.asker.id) {
-      continue;
-    }
     const urgency = delivery.urgency ?? "normal";
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
     const duplicate = openJobs.find(
@@ -451,7 +448,13 @@ export function formatOpenJobsContext(
       subject: job.meta.subjectName,
       ask: job.meta.ask,
       task: job.label,
-      viewer_is: job.meta.askerId === viewerId ? "asker" : "subject",
+      viewer_is:
+        job.meta.askerId === job.meta.subjectId &&
+        job.meta.subjectId === viewerId
+          ? "subject"
+          : job.meta.askerId === viewerId
+            ? "asker"
+            : "subject",
       state: job.meta.state,
       ...urgencyFields(job, clock),
       ...(job.meta.progress ? { progress: job.meta.progress } : {}),
@@ -476,7 +479,7 @@ export function formatOpenJobsContext(
     "OPEN_JOBS:",
     "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do, list them even if WORKER_SAVED_DATA looks empty.",
     "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line. Never read that label out loud — say it the way THIS speaker should hear it:",
-    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself.",
+    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…».",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. deferred=true means they said not now, with no clock: still raisable. Raise it at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
     "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
@@ -863,7 +866,13 @@ export async function continueJobAfterNudge(input: {
   }
   await patchJobMeta(row.id, cleared);
   const policy = JOB_URGENCY_POLICY[urgency];
-  if (input.nudge.auto && policy.autoNudges > 0 && sent >= policy.autoNudges) {
+  // Self-check: no separate asker to notify when follow-ups run out.
+  if (
+    input.nudge.auto &&
+    policy.autoNudges > 0 &&
+    sent >= policy.autoNudges &&
+    meta.askerId !== meta.subjectId
+  ) {
     await notifyAskerExhausted({ userId: input.userId, job, sent, now });
   }
 }

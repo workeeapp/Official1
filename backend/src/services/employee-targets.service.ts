@@ -3,6 +3,7 @@ import {
   isDigitalEmployee,
   isGuestEmployee,
   llmItemLabel,
+  REPLY_BUTTON_MAX,
   type LlmFilingAction,
   type LlmListAction,
   type LlmMessageAction,
@@ -10,6 +11,7 @@ import {
   type LlmMessageBook,
   type LlmMetadata,
   type LlmReminderAction,
+  type LlmReplyButton,
   type PublicEmployee,
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
@@ -359,6 +361,59 @@ export function planRelayDeliveries(input: {
           ? { expectsReply: action.expectsReply }
           : {}),
         ...(action.askSummary ? { askSummary: action.askSummary } : {}),
+        ...(action.urgency ? { urgency: action.urgency } : {}),
+        ...(action.book ? { book: action.book } : {}),
+      });
+    }
+  }
+
+  return deliveries;
+}
+
+/**
+ * «תבדקי איתי…» — messages that target the speaker with expects_reply open a
+ * self-job on the worker (no chat/WhatsApp relay; the ask lives in response).
+ */
+export function planSelfJobDeliveries(input: {
+  actor: PublicEmployee;
+  employees: PublicEmployee[];
+  messages: LlmMessageAction[];
+}): Array<{
+  subjectId: string;
+  subjectName: string;
+  text: string;
+  ask: string;
+  urgency?: JobUrgency;
+  book?: LlmMessageBook;
+}> {
+  const deliveries: Array<{
+    subjectId: string;
+    subjectName: string;
+    text: string;
+    ask: string;
+    urgency?: JobUrgency;
+    book?: LlmMessageBook;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const action of input.messages) {
+    if (action.expectsReply === false) {
+      continue;
+    }
+    const selfTargets = resolveNamedRelayTargets(
+      action.targets,
+      input.employees,
+    ).filter((target) => target.id === input.actor.id);
+    for (const target of selfTargets) {
+      if (seen.has(target.id)) {
+        continue;
+      }
+      seen.add(target.id);
+      deliveries.push({
+        subjectId: target.id,
+        subjectName: employeeDisplayName(target),
+        text: action.text,
+        ask: action.askSummary ?? "",
         ...(action.urgency ? { urgency: action.urgency } : {}),
         ...(action.book ? { book: action.book } : {}),
       });
@@ -907,6 +962,61 @@ function visibilityFor(
     addedById: actorId,
     visibleTo,
   };
+}
+
+/**
+ * Engine-built «הצג» buttons for partner notifies (add/remove/update lists).
+ * Same product names as the speaker SHOW BUTTON rule — not LLM-emitted.
+ */
+export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
+  const buttons: LlmReplyButton[] = [];
+  const seen = new Set<string>();
+
+  const listMutates = metadata.lists.filter(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
+  );
+  for (const list of listMutates) {
+    const name = showListCommandName(list);
+    if (!name) {
+      continue;
+    }
+    const command = `הצג רשימת ${name}`;
+    if (seen.has(command)) {
+      continue;
+    }
+    seen.add(command);
+    buttons.push({ label: "הצג", command });
+    if (buttons.length >= REPLY_BUTTON_MAX) {
+      return buttons;
+    }
+  }
+
+  const reminderMutate = (metadata.reminders ?? []).some(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
+  );
+  if (buttons.length === 0 && reminderMutate) {
+    buttons.push({ label: "הצג", command: "הצג תזכורות" });
+  }
+  return buttons;
+}
+
+function showListCommandName(list: LlmListAction): string {
+  if (list.listType === "shopping") {
+    return "קניות";
+  }
+  if (list.listType === "tasks") {
+    return "מטלות";
+  }
+  if (list.listType === "contacts") {
+    return "אנשי קשר";
+  }
+  return customListDerivedName(list).trim();
 }
 
 export function fallbackNotificationText(

@@ -186,6 +186,24 @@ describe("open jobs context", () => {
     expect(block).toContain('"viewer_is":"asker"');
     expect(block).toContain('"raisable":false');
   });
+
+  it("treats a self-job as subject so the speaker can be raised", () => {
+    const block = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          askerName: "עמית",
+          subjectId: AMIT,
+          subjectName: "עמית",
+          ask: "אם קנית שוקו?",
+        }),
+      ],
+      AMIT,
+    );
+    expect(block).toContain('"viewer_is":"subject"');
+    expect(block).toContain('"raisable":true');
+    expect(block).toContain('"ask":"אם קנית שוקו?"');
+  });
 });
 
 describe("createJobsFromRelays", () => {
@@ -556,17 +574,39 @@ describe("createJobsFromRelays", () => {
     expect(reminderCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("never opens a job on the asker themselves", async () => {
+  it("opens a self-check job and schedules urgency follow-ups like any other job", async () => {
+    itemCreate
+      .mockResolvedValueOnce({ id: "job-1" })
+      .mockResolvedValueOnce({ id: "nudge-1" });
+    reminderCreate.mockReset().mockResolvedValue({ id: "clock-1" });
+    reminderUpdate.mockReset().mockResolvedValue({});
+    itemFindUnique.mockReset().mockResolvedValue({ id: "job-1", data: {} });
     const created = await createJobsFromRelays({
       userId: "u1",
       digitalEmployeeId: LUCY,
       asker: { id: AMIT, name: "עמית" },
       deliveries: [
-        { subjectId: AMIT, subjectName: "עמית", text: "היי", ask: "היי" },
+        {
+          subjectId: AMIT,
+          subjectName: "עמית",
+          text: "קנית שוקו?",
+          ask: "אם קנית שוקו?",
+          urgency: "urgent",
+        },
       ],
     });
-    expect(created).toEqual([]);
-    expect(itemCreate).not.toHaveBeenCalled();
+    expect(created).toHaveLength(1);
+    expect(created[0].meta.askerId).toBe(AMIT);
+    expect(created[0].meta.subjectId).toBe(AMIT);
+    expect(created[0].label).toBe("לבדוק עם עמית: אם קנית שוקו?");
+    expect(created[0].meta.nudgeAuto).toBe(true);
+    const data = itemCreate.mock.calls[0][0].data;
+    expect(data.data[JOB_META_KEY].askerId).toBe(AMIT);
+    expect(data.data[JOB_META_KEY].subjectId).toBe(AMIT);
+    expect(data.urgency).toBe("urgent");
+    const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.pingIds).toEqual([AMIT]);
+    expect(clock.messageText).toContain("אם קנית שוקו?");
   });
 });
 
@@ -646,6 +686,36 @@ describe("continueJobAfterNudge", () => {
     expect(patched.autoNudgesSent).toBe(2);
     expect(patched.nudgeFireAt).toBeUndefined();
     expect(patched.nudgeReminderId).toBeUndefined();
+  });
+
+  it("does not notify a separate asker when a self-check job's follow-ups run out", async () => {
+    itemFindUnique.mockResolvedValue(
+      firedJob("urgent", {
+        askerId: AMIT,
+        askerName: "עמית",
+        subjectId: AMIT,
+        subjectName: "עמית",
+        ask: "אם קנית שוקו?",
+        autoNudgesSent: 1,
+      }),
+    );
+    await continueJobAfterNudge({
+      userId: "u1",
+      nudgeItemId: "nudge-1",
+      nudge: {
+        ...autoNudge,
+        askerId: AMIT,
+        askerName: "עמית",
+        subjectId: AMIT,
+        subjectName: "עמית",
+        ask: "אם קנית שוקו?",
+      },
+      now: NOW,
+    });
+    expect(reminderCreate).not.toHaveBeenCalled();
+    const patched = itemUpdate.mock.calls.at(-1)?.[0].data.data[JOB_META_KEY];
+    expect(patched.autoNudgesSent).toBe(2);
+    expect(patched.nudgeFireAt).toBeUndefined();
   });
 
   it("clears a fired snooze on a normal job without scheduling more", async () => {

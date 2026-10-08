@@ -39,6 +39,12 @@ vi.mock("@/services/employee.service", async () => {
       records: vi.fn().mockResolvedValue({ employeeId: "", groups: [] }),
       updateRecord: vi.fn(),
       deleteRecord: vi.fn(),
+      teamUsage: vi.fn().mockResolvedValue({
+        allEmployeesUsd: 0,
+        humanEmployeesUsd: 0,
+      }),
+      digitalDefaults: vi.fn().mockResolvedValue({}),
+      configFileDefaults: vi.fn().mockResolvedValue({}),
     },
   };
 });

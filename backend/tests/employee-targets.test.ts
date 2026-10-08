@@ -10,10 +10,12 @@ import {
   formatMissingSendTextNotice,
   planPhoneRelays,
   planRelayDeliveries,
+  planSelfJobDeliveries,
   planTargetedActions,
   resolveActionTargets,
   resolveRelayMessages,
   resolveSpokenMetadata,
+  showButtonsForNotify,
 } from "../src/services/employee-targets.service.js";
 
 const amit: PublicEmployee = {
@@ -471,6 +473,79 @@ describe("employee targets", () => {
         { partnerNames: ["טל"] },
       ),
     ).toBe("עמית הוסיף חלב לרשימת הקניות שלך");
+  });
+
+  it("builds הצג buttons for partner list notifies", () => {
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "בדיקת שם",
+            items: [{ שם: "פריט" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת בדיקת שם" }]);
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "remove",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "1", "שם פריט": "חלב" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            items: [{ item_id: "2", "שם מטלה": "להתקשר" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        reminders: [
+          {
+            action: "add",
+            item: "בדיקה",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "once",
+            ping: [],
+            targets: [],
+            text: "",
+            inSeconds: 60,
+            everyCount: null,
+            everyUnit: null,
+            weekdays: null,
+            confirmed: false,
+            compose: false,
+            composeSource: "",
+            composeLookbackHours: 0,
+            reminderId: "",
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
   });
 
   it("appends a linked reminder clock to a task notification", () => {
@@ -1271,6 +1346,44 @@ describe("employee targets", () => {
         text: "עמית שואל אם קנית חלב?",
         expectsReply: true,
         askSummary: "אם קנית חלב?",
+      },
+    ]);
+  });
+
+  it("plans self-job deliveries for speaker-targeted expects_reply checks", () => {
+    expect(
+      planSelfJobDeliveries({
+        actor: amit,
+        employees,
+        messages: [
+          {
+            targets: ["עמית"],
+            text: "קנית שוקו?",
+            expectsReply: true,
+            askSummary: "אם קנית שוקו?",
+            urgency: "normal",
+          },
+          {
+            targets: ["עמית"],
+            text: "בוקר טוב",
+            expectsReply: false,
+            askSummary: "",
+          },
+          {
+            targets: ["טל"],
+            text: "עמית שואל אם קנית שמן?",
+            expectsReply: true,
+            askSummary: "אם קנית שמן?",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        subjectId: amit.id,
+        subjectName: "עמית",
+        text: "קנית שוקו?",
+        ask: "אם קנית שוקו?",
+        urgency: "normal",
       },
     ]);
   });

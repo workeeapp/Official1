@@ -18,7 +18,8 @@
     "db:studio": "prisma studio",
     "user:create": "tsx backend/src/scripts/create-user.ts",
     "keep-up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/keep-workee-up.ps1",
-    "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1"
+    "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1",
+    "refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

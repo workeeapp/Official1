@@ -56,5 +56,7 @@ describe("relative-date", () => {
     expect(text).toContain("אני/שלי");
     expect(text).toContain("WORKER_SAVED_DATA");
     expect(text).toContain("מה את");
+    expect(text).toContain("MUST scan next_occurrences");
+    expect(text).toContain("FORBIDDEN: empty day answer when the asked YYYY-MM-DD appears");
   });
 });

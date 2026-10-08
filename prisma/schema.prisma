@@ -160,7 +160,7 @@ model EmployeeListItem {
   scope      String       @default("personal") @db.VarChar(16)
   addedById  String?      @map("added_by_id") @db.Uuid
   visibleTo  Json         @default("[]") @map("visible_to")
-  /** normal | urgent | very_urgent — set from the model's messages[].urgency on open jobs. */
+  /** normal | urgent | very_urgent — list items from lists[].items[].urgency; open jobs from messages[].urgency. */
   urgency    String       @default("normal") @db.VarChar(16)
   deletedAt  DateTime?    @map("deleted_at")
   createdAt  DateTime     @default(now()) @map("created_at")

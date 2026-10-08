@@ -3,17 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   itemUpdate,
   itemFindUnique,
-  itemDeleteMany,
+  itemFindMany,
+  itemUpdateMany,
   reminderUpdate,
   reminderFindFirst,
-  reminderDelete,
 } = vi.hoisted(() => ({
   itemUpdate: vi.fn(),
   itemFindUnique: vi.fn(),
-  itemDeleteMany: vi.fn(),
+  itemFindMany: vi.fn(),
+  itemUpdateMany: vi.fn(),
   reminderUpdate: vi.fn(),
   reminderFindFirst: vi.fn(),
-  reminderDelete: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -21,12 +21,12 @@ vi.mock("../src/database/prisma.js", () => ({
     employeeListItem: {
       update: itemUpdate,
       findUnique: itemFindUnique,
-      deleteMany: itemDeleteMany,
+      findMany: itemFindMany,
+      updateMany: itemUpdateMany,
     },
     reminder: {
       update: reminderUpdate,
       findFirst: reminderFindFirst,
-      delete: reminderDelete,
     },
   },
 }));
@@ -44,10 +44,10 @@ describe("reminder worker link", () => {
   beforeEach(() => {
     itemUpdate.mockReset();
     itemFindUnique.mockReset();
-    itemDeleteMany.mockReset();
+    itemFindMany.mockReset();
+    itemUpdateMany.mockReset();
     reminderUpdate.mockReset();
     reminderFindFirst.mockReset();
-    reminderDelete.mockReset();
   });
 
   it("writes both foreign keys when pairing a clock to a worker task", async () => {
@@ -106,27 +106,50 @@ describe("reminder worker link", () => {
     expect(reminderUpdate).not.toHaveBeenCalled();
   });
 
-  it("deletes the worker task and the clock together", async () => {
-    itemDeleteMany.mockResolvedValue({ count: 1 });
-    reminderDelete.mockResolvedValue({});
+  it("soft-deletes the worker task and cancels the clock together", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "w1",
+        itemKey: "להזכיר לעמית לאכול פיצה",
+        data: { "שם מטלה": "להזכיר לעמית לאכול פיצה" },
+        list: { employeeId: "lucy", listType: "tasks" },
+      },
+    ]);
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    reminderUpdate.mockResolvedValue({});
     await removeReminderAndLinkedWorkerTask({
       id: "r1",
       workerItemId: "w1",
     });
-    expect(itemDeleteMany).toHaveBeenCalledWith({
-      where: { OR: [{ reminderId: "r1" }, { id: "w1" }] },
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["w1"] } },
+      data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    expect(reminderDelete).toHaveBeenCalledWith({ where: { id: "r1" } });
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "r1" },
+      data: { status: "cancelled", workerItemId: null },
+    });
   });
 
-  it("deletes the clock when the worker task is removed", async () => {
+  it("cancels the clock when the worker task is removed", async () => {
     itemFindUnique.mockResolvedValue({ id: "w1", reminderId: "r1" });
     reminderFindFirst.mockResolvedValue({ id: "r1", workerItemId: "w1" });
-    itemDeleteMany.mockResolvedValue({ count: 1 });
-    reminderDelete.mockResolvedValue({});
+    itemFindMany.mockResolvedValue([
+      {
+        id: "w1",
+        itemKey: "להזכיר לעמית לאכול פיצה",
+        data: { "שם מטלה": "להזכיר לעמית לאכול פיצה" },
+        list: { employeeId: "lucy", listType: "tasks" },
+      },
+    ]);
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    reminderUpdate.mockResolvedValue({});
     await cancelReminderLinkedToWorkerItem("w1");
-    expect(itemDeleteMany).toHaveBeenCalled();
-    expect(reminderDelete).toHaveBeenCalledWith({ where: { id: "r1" } });
+    expect(itemUpdateMany).toHaveBeenCalled();
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "r1" },
+      data: { status: "cancelled", workerItemId: null },
+    });
   });
 
   it("rewrites the linked worker task clock when the reminder time changes", async () => {

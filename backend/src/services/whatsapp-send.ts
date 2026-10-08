@@ -257,7 +257,11 @@ export type WhatsAppDeliveryResult = {
 };
 
 export async function deliverWhatsAppRelays(
-  relays: Array<{ target: PublicEmployee; text: string }>,
+  relays: Array<{
+    target: PublicEmployee;
+    text: string;
+    buttons?: LlmReplyButton[];
+  }>,
   actorId: string,
 ): Promise<WhatsAppDeliveryResult> {
   if (getEnv().NODE_ENV === "test" || !getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
@@ -281,7 +285,16 @@ export async function deliverWhatsAppRelays(
       continue;
     }
     sent.add(relay.target.id);
-    const result = await sendQuietly(phone, relay.text, "WhatsApp relay failed");
+    const buttons = relay.buttons ?? [];
+    const result =
+      buttons.length > 0
+        ? await sendQuietlyButtons(
+            phone,
+            relay.text,
+            buttons,
+            "WhatsApp relay failed",
+          )
+        : await sendQuietly(phone, relay.text, "WhatsApp relay failed");
     if (result !== "sent") {
       skips.push({
         label,
@@ -331,6 +344,20 @@ async function sendQuietly(
 ): Promise<WhatsAppTextResult> {
   try {
     return await sendWhatsAppText(phone, text);
+  } catch (error) {
+    console.error(logLabel, error instanceof Error ? error.message : "unknown");
+    return "failed";
+  }
+}
+
+async function sendQuietlyButtons(
+  phone: string,
+  text: string,
+  buttons: LlmReplyButton[],
+  logLabel: string,
+): Promise<WhatsAppTextResult> {
+  try {
+    return await sendWhatsAppButtons(phone, text, buttons);
   } catch (error) {
     console.error(logLabel, error instanceof Error ? error.message : "unknown");
     return "failed";
