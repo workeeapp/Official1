@@ -743,10 +743,14 @@ export function planTargetedActions(input: {
       input.actor.id,
       normalizedList.targets,
     );
+    // A digital worker is not a sharing partner: its tasks reach people through involvement.
+    const humanOthers = others.filter((target) => !isDigitalEmployee(target));
     const visibility = visibilityFor(
       input.actor.id,
       targets,
-      sharedCollection || others.length > 0 || isAllTarget(normalizedList.targets),
+      sharedCollection ||
+        humanOthers.length > 0 ||
+        isAllTarget(normalizedList.targets),
     );
     const metadata = { lists: [{ ...normalizedList, targets: [] }], filing: [] };
 

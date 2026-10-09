@@ -14,7 +14,7 @@ import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
-import { stripJobMeta } from "./job-meta.js";
+import { jobMetaFrom, stripJobMeta } from "./job-meta.js";
 import {
   clearItemRecurrence,
   extractOccurrenceDone,
@@ -547,73 +547,123 @@ async function resolveRecordVisibility(
   };
 }
 
-/** True when a digital-worker list item is tied to this human speaker (not someone else). */
-export function workerItemTiedToSpeaker(
-  item: {
-    addedById?: string | null;
-    visibleTo?: unknown;
-    reminderId?: string | null;
-  },
-  speakerId: string,
-  remindersById: Map<string, { ownerId: string; pingIds: unknown }>,
-): boolean {
-  if (item.addedById === speakerId) {
-    return true;
-  }
-  if (visibleToIncludes(item.visibleTo, speakerId)) {
-    return true;
-  }
-  const reminderId = item.reminderId?.trim();
-  if (!reminderId) {
-    return false;
-  }
-  const reminder = remindersById.get(reminderId);
-  if (!reminder) {
-    return false;
-  }
-  if (reminder.ownerId === speakerId) {
-    return true;
-  }
-  const pings = Array.isArray(reminder.pingIds)
-    ? reminder.pingIds.map(String)
+export type WorkerTaskRow = {
+  addedById?: string | null;
+  visibleTo?: unknown;
+  reminderId?: string | null;
+  data?: unknown;
+};
+
+export type WorkerReminderLink = { ownerId: string; pingIds: unknown };
+
+/**
+ * Everyone a digital-worker task involves: who asked for it, everyone in its
+ * visible_to, the linked clock's owner and recipients, and an open job's asker
+ * and subject. They can see it in WORKER_SAVED_DATA and act on it.
+ */
+export function workerTaskInvolvedIds(
+  item: WorkerTaskRow,
+  remindersById: ReadonlyMap<string, WorkerReminderLink>,
+): {
+  askers: string[];
+  recipients: string[];
+  all: string[];
+} {
+  const job = jobMetaFrom(item.data);
+  const reminder = item.reminderId
+    ? remindersById.get(item.reminderId.trim())
+    : undefined;
+  const pings = Array.isArray(reminder?.pingIds)
+    ? reminder.pingIds.map(String).filter(Boolean)
     : [];
-  return pings.includes(speakerId);
+  const askers = uniqueIds([
+    item.addedById ?? "",
+    reminder?.ownerId ?? "",
+    job?.askerId ?? "",
+  ]);
+  const recipients = uniqueIds([...pings, job?.subjectId ?? ""]);
+  return {
+    askers,
+    recipients,
+    all: uniqueIds([...askers, ...recipients, ...idList(item.visibleTo)]),
+  };
 }
 
-async function filterListItemsTiedToSpeaker<
-  T extends {
-    items: Array<{
-      addedById: string | null;
-      visibleTo: unknown;
-      reminderId: string | null;
-    }>;
-  },
->(lists: T[], speakerId: string): Promise<T[]> {
+/** True when a digital-worker list item involves this human speaker (not someone else). */
+export function workerItemTiedToSpeaker(
+  item: WorkerTaskRow,
+  speakerId: string,
+  remindersById: ReadonlyMap<string, WorkerReminderLink>,
+): boolean {
+  return workerTaskInvolvedIds(item, remindersById).all.includes(speakerId);
+}
+
+export async function loadWorkerReminderLinks(
+  items: Array<{ reminderId?: string | null }>,
+): Promise<Map<string, WorkerReminderLink>> {
   const reminderIds = [
     ...new Set(
-      lists.flatMap((list) =>
-        list.items
-          .map((item) => item.reminderId)
-          .filter((id): id is string => Boolean(id)),
-      ),
+      items
+        .map((item) => item.reminderId?.trim())
+        .filter((id): id is string => Boolean(id)),
     ),
   ];
-  const reminders =
-    reminderIds.length > 0
-      ? await prisma.reminder.findMany({
-          where: { id: { in: reminderIds } },
-          select: { id: true, ownerId: true, pingIds: true },
-        })
-      : [];
-  const remindersById = new Map(
-    reminders.map((row) => [row.id, row] as const),
-  );
+  if (reminderIds.length === 0 || !prisma.reminder?.findMany) {
+    return new Map();
+  }
+  const reminders = await prisma.reminder.findMany({
+    where: { id: { in: reminderIds } },
+    select: { id: true, ownerId: true, pingIds: true },
+  });
+  return new Map(reminders.map((row) => [row.id, row] as const));
+}
+
+function filterListItemsTiedToSpeaker<
+  T extends {
+    items: Array<WorkerTaskRow>;
+  },
+>(
+  lists: T[],
+  speakerId: string,
+  remindersById: ReadonlyMap<string, WorkerReminderLink>,
+): T[] {
   return lists.map((list) => ({
     ...list,
     items: list.items.filter((item) =>
       workerItemTiedToSpeaker(item, speakerId, remindersById),
     ),
   }));
+}
+
+/**
+ * How this viewer relates to a worker task, so the model phrases it for them:
+ * asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other.
+ */
+function workerTaskViewerFields(
+  item: WorkerTaskRow,
+  viewerId: string,
+  remindersById: ReadonlyMap<string, WorkerReminderLink>,
+  names: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  const { askers, recipients } = workerTaskInvolvedIds(item, remindersById);
+  const nameOf = (id: string) => names.get(id) ?? "";
+  const askedBy = askers.map(nameOf).filter(Boolean);
+  const forNames = recipients.map(nameOf).filter(Boolean);
+  const isAsker = askers.includes(viewerId);
+  const isSubject = recipients.includes(viewerId);
+  const viewerIs =
+    isAsker && isSubject
+      ? "self"
+      : isAsker
+        ? "asker"
+        : isSubject
+          ? "subject"
+          : "other";
+  return {
+    ...(askedBy.length > 0 ? { asked_by: askedBy[0] } : {}),
+    ...(forNames.length > 0 ? { for: forNames } : {}),
+    viewer_is: viewerIs,
+  };
 }
 
 export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
@@ -865,10 +915,11 @@ export async function getEmployeeRecordSnapshot(
     seeAll
       ? Promise.resolve([])
       : prisma.employeeListItem.findMany({
+          // Digital-worker tasks reach a person only through WORKER_SAVED_DATA.
           where: {
             scope: "shared",
             deletedAt: null,
-            list: { employeeId: { not: employeeId } },
+            list: { employeeId: { not: employeeId }, employee: { kind: "human" } },
           },
           include: {
             list: {
@@ -884,6 +935,7 @@ export async function getEmployeeRecordSnapshot(
             scope: "shared",
             deletedAt: null,
             employeeId: { not: employeeId },
+            employee: { kind: "human" },
           },
           include: {
             employee: { select: { id: true, name: true, nickname: true } },
@@ -916,11 +968,16 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
+  const workerViewerId = viewerScope ? options?.scopeItemsToViewerId : undefined;
+  const workerReminderLinks = workerViewerId
+    ? await loadWorkerReminderLinks(ownListsRaw.flatMap((list) => list.items))
+    : new Map<string, WorkerReminderLink>();
   const ownListsScoped =
-    viewerScope && !viewerScope.seeAll && options?.scopeItemsToViewerId
-      ? await filterListItemsTiedToSpeaker(
+    viewerScope && !viewerScope.seeAll && workerViewerId
+      ? filterListItemsTiedToSpeaker(
           ownListsRaw,
-          options.scopeItemsToViewerId,
+          workerViewerId,
+          workerReminderLinks,
         )
       : ownListsRaw;
   // After viewer scoping, drop empty list shells so day/self answers cannot latch onto stale list types.
@@ -938,6 +995,8 @@ export async function getEmployeeRecordSnapshot(
   );
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
+  /** owner name → bucket → ids that can see those items (owner first). */
+  const sharedAudience = new Map<string, Map<string, string[]>>();
   const seenPartnerListIds = new Set<string>();
   for (const item of sharedItems) {
     if (!visibleToIncludes(item.visibleTo, employeeId)) {
@@ -945,6 +1004,16 @@ export async function getEmployeeRecordSnapshot(
     }
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
+    const audience = sharedAudience.get(owner) ?? new Map<string, string[]>();
+    audience.set(
+      item.list.listType,
+      uniqueIds([
+        item.list.employee.id,
+        ...(audience.get(item.list.listType) ?? []),
+        ...idList(item.visibleTo),
+      ]),
+    );
+    sharedAudience.set(owner, audience);
     const items = byType.get(item.list.listType) ?? [];
     items.push(
       withVisibility(
@@ -1033,6 +1102,17 @@ export async function getEmployeeRecordSnapshot(
         items: list.items,
         names,
         activeReminders,
+        ...(workerViewerId
+          ? {
+              itemExtras: (item: WorkerTaskRow) =>
+                workerTaskViewerFields(
+                  item,
+                  workerViewerId,
+                  workerReminderLinks,
+                  names,
+                ),
+            }
+          : {}),
       }),
     );
   }
@@ -1080,12 +1160,16 @@ export async function getEmployeeRecordSnapshot(
       if (already) {
         continue;
       }
+      const audience = sharedAudience.get(owner)?.get(bucketKey) ?? [];
+      const sharedWith = audience
+        .map((id) => names.get(id) ?? "")
+        .filter(Boolean);
       lists.push({
         list_type: listType,
         ...(listName ? { list_name: listName } : {}),
         owner,
         scope: "shared",
-        shared_with: [owner],
+        shared_with: sharedWith.length > 0 ? sharedWith : [owner],
         items,
       });
     }
@@ -1156,6 +1240,53 @@ export interface ListItemMutation {
   listName?: string;
   /** Named custom list opened/updated with no real rows (columns only). */
   listShell?: boolean;
+  /** Set on a remove/update of a digital-worker task: everyone it involved before the change. */
+  workerTaskInvolvedIds?: string[];
+}
+
+type WorkerAccessCache = {
+  ownerDigital?: boolean;
+  actor?: { kind: string; isOwner: boolean } | null;
+};
+
+/**
+ * Remove/update of a digital-worker task: anyone the task involves may act on it
+ * (plus account owners and server-side worker turns). Null = not a worker task.
+ */
+async function workerTaskAccess(
+  employeeId: string,
+  actorId: string,
+  item: WorkerTaskRow,
+  cache: WorkerAccessCache,
+): Promise<{ allowed: boolean; involvedIds: string[] } | null> {
+  if (cache.ownerDigital === undefined) {
+    const owner = prisma.employee?.findUnique
+      ? await prisma.employee.findUnique({
+          where: { id: employeeId },
+          select: { kind: true },
+        })
+      : null;
+    cache.ownerDigital = owner?.kind === "digital";
+  }
+  if (!cache.ownerDigital) {
+    return null;
+  }
+  const links = await loadWorkerReminderLinks([item]);
+  const involvedIds = workerTaskInvolvedIds(item, links).all;
+  if (actorId === employeeId || involvedIds.includes(actorId)) {
+    return { allowed: true, involvedIds };
+  }
+  if (cache.actor === undefined) {
+    cache.actor = prisma.employee?.findUnique
+      ? await prisma.employee.findUnique({
+          where: { id: actorId },
+          select: { kind: true, isOwner: true },
+        })
+      : null;
+  }
+  const allowed =
+    cache.actor?.kind === "digital" || cache.actor?.isOwner === true;
+  return { allowed, involvedIds };
 }
 
 export interface FilingMutation {
@@ -1689,6 +1820,7 @@ async function applyListAction(
   const mutations: ListItemMutation[] = [];
   const cancelledReminders: string[] = [];
   const seenCascadeTaskIds = new Set<string>();
+  const accessCache: WorkerAccessCache = {};
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, action);
   let listName = resolvedAction.listName.slice(0, 100);
   if (!listName && resolvedAction.listType === "custom") {
@@ -1825,6 +1957,10 @@ async function applyListAction(
       if (!existing?.id) {
         continue;
       }
+      const access = await workerTaskAccess(employeeId, actorId, existing, accessCache);
+      if (access && !access.allowed) {
+        continue;
+      }
       const targetListId = existing.listId;
       const targetListName = list.name || listName;
       const removedKey = existing.itemKey;
@@ -1844,6 +1980,9 @@ async function applyListAction(
             removedTitleField,
           ) || removedKey,
         listName: targetListName || resolvedAction.listName || undefined,
+        ...(access && existing.reminderId
+          ? { workerTaskInvolvedIds: access.involvedIds }
+          : {}),
       });
       await prisma.employeeListItem.update({
         where: { id: existing.id },
@@ -1942,7 +2081,21 @@ async function applyListAction(
     if (resolvedAction.action === "update" && !existing?.id) {
       continue;
     }
-    const resolvedVisibility = mergeItemVisibility(existing, visibility, employeeId);
+    const access = existing
+      ? await workerTaskAccess(employeeId, actorId, existing, accessCache)
+      : null;
+    if (access && !access.allowed) {
+      continue;
+    }
+    // Editing a worker task never re-shares it; who it involves comes from the task itself.
+    const resolvedVisibility =
+      access && existing
+        ? {
+            scope: (existing.scope === "shared" ? "shared" : "personal") as ItemScope,
+            addedById: existing.addedById ?? actorId,
+            visibleTo: idList(existing.visibleTo),
+          }
+        : mergeItemVisibility(existing, visibility, employeeId);
     const mergedRecord =
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
@@ -2007,6 +2160,9 @@ async function applyListAction(
           nextItemKey ||
           existing.itemKey,
         listName: list.name || resolvedAction.listName || undefined,
+        ...(access && existing.reminderId
+          ? { workerTaskInvolvedIds: access.involvedIds }
+          : {}),
       });
       if (listOwner) {
         const occurrenceDone = done.doneDate && itemDoneThrough(nextDataRecord);
@@ -2490,9 +2646,12 @@ function toListSnapshotEntry(input: {
     urgency?: string | null;
     reminderId?: string | null;
     linkedReminderId?: string | null;
+    addedById?: string | null;
+    visibleTo?: unknown;
   }>;
   names: Map<string, string>;
   activeReminders?: Map<string, LinkedReminderRow>;
+  itemExtras?: (item: WorkerTaskRow) => Record<string, unknown>;
 }): EmployeeRecordSnapshot["lists"][number] | null {
   const derivedName =
     input.listName.trim() ||
@@ -2511,6 +2670,7 @@ function toListSnapshotEntry(input: {
         {
           ...linkedReminderField(item, input.activeReminders ?? new Map()),
           ...urgencySnapshotField(item.urgency),
+          ...(input.itemExtras?.(item) ?? {}),
         },
       ),
     );

@@ -7,6 +7,7 @@ const {
   itemUpdateMany,
   reminderUpdate,
   reminderFindFirst,
+  employeeFindMany,
 } = vi.hoisted(() => ({
   itemUpdate: vi.fn(),
   itemFindUnique: vi.fn(),
@@ -14,10 +15,14 @@ const {
   itemUpdateMany: vi.fn(),
   reminderUpdate: vi.fn(),
   reminderFindFirst: vi.fn(),
+  employeeFindMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
+    employee: {
+      findMany: employeeFindMany,
+    },
     employeeListItem: {
       update: itemUpdate,
       findUnique: itemFindUnique,
@@ -37,8 +42,14 @@ import {
   linkRemindersToWorkerTasks,
   pairLinkedItemsToReminders,
   removeReminderAndLinkedWorkerTask,
+  shareWorkerTaskWithPingRecipients,
   syncLinkedWorkerTaskClock,
 } from "../src/services/reminder.service.js";
+
+const AMIT = "11111111-1111-4111-8111-111111111111";
+const TAL = "22222222-2222-4222-8222-222222222222";
+const GUEST = "33333333-3333-4333-8333-333333333333";
+const LUCY = "44444444-4444-4444-8444-444444444444";
 
 describe("reminder worker link", () => {
   beforeEach(() => {
@@ -48,6 +59,57 @@ describe("reminder worker link", () => {
     itemUpdateMany.mockReset();
     reminderUpdate.mockReset();
     reminderFindFirst.mockReset();
+    employeeFindMany.mockReset();
+  });
+
+  it("involves the human the clock pings without sharing the worker task", async () => {
+    itemUpdate.mockResolvedValue({});
+    reminderUpdate.mockResolvedValue({ ownerId: AMIT, pingIds: [TAL] });
+    employeeFindMany.mockResolvedValue([
+      { id: TAL, name: "טל", nickname: null },
+    ]);
+    itemFindUnique.mockResolvedValue({
+      id: "w1",
+      scope: "personal",
+      addedById: AMIT,
+      visibleTo: [AMIT, LUCY],
+      deletedAt: null,
+    });
+    await linkRemindersToWorkerTasks(
+      [{ id: "r1", itemKey: "לקנות חלב", itemLabel: "לקנות חלב" }],
+      [{ id: "w1", itemKey: "להזכיר לטל לקנות חלב" }],
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "w1" },
+      data: { visibleTo: [AMIT, LUCY, TAL] },
+    });
+  });
+
+  it("keeps a self-nudge worker task personal", async () => {
+    await shareWorkerTaskWithPingRecipients({
+      workerItemId: "w1",
+      ownerId: AMIT,
+      pingIds: [AMIT],
+    });
+    expect(employeeFindMany).not.toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("skips phone destinations and guest recipients", async () => {
+    employeeFindMany.mockResolvedValue([
+      { id: GUEST, name: "אורח", nickname: null },
+    ]);
+    await shareWorkerTaskWithPingRecipients({
+      workerItemId: "w1",
+      ownerId: AMIT,
+      pingIds: ["972501234567", GUEST],
+    });
+    expect(employeeFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [GUEST] }, kind: "human" },
+      }),
+    );
+    expect(itemUpdate).not.toHaveBeenCalled();
   });
 
   it("writes both foreign keys when pairing a clock to a worker task", async () => {

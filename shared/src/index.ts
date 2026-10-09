@@ -18,6 +18,7 @@ export type {
   ChatMessageRequest,
   ChatMessageResponse,
   ChatReplyTiming,
+  ChatTurnMessageIds,
   ChatThreadNotification,
   ChatMessageAuthor,
   ChatThreadMessage,

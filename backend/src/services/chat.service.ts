@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
   digitalEmployees,
@@ -11,6 +12,7 @@ import {
   type ChatHistoryResponse,
   type ChatThreadMessage,
   type ChatThreadNotification,
+  type ChatTurnMessageIds,
   type LlmMetadata,
   type LlmReplyButton,
   type PublicEmployee,
@@ -85,6 +87,7 @@ import {
   formatReminderApplyNotice,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  type ReminderChange,
   type WorkerTaskRef,
 } from "./reminder.service.js";
 import {
@@ -321,6 +324,13 @@ const URGENCY_RULE = (() => {
   ].join(" ");
 })();
 
+/** Every phrasing that asks the worker for its own inventory; keep all INVENTORY rules on this list. */
+const WORKER_INVENTORY_ASKS =
+  "מה את/ה צריך/ה לעשות / לברר, מה יש לך, מה יש לך לעשות, מה פתוח אצלך, על מה את/ה עובד/ת, המטלות שלך, מה התזכורות שלך";
+
+const STATUS_ADDRESSEE_RULE =
+  "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS). First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows in EMPLOYEE_SAVED_DATA. A name («מה יש לטל») = that person's rows. Never answer «אין לי…» while WORKER_SAVED_DATA has a list item or OPEN_JOBS has a row — list them.";
+
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
   "SELF-CHECK («תבדקי איתי…» / check with me): when the speaker asks YOU to check with THEM (תבדקי איתי אם קניתי שוקו / check with me if I bought…), emit messages targeting the SPEAKER with expects_reply:true + ask_summary + urgency, lists:[]. text, ask_summary, and response MUST address the speaker in second person — convert their first person (קניתי / הכנתי / עשיתי) to second (קנית / הכנת / עשית). Example: עמית אומר «תבדקי איתי אם קניתי שוקו» → messages: [{ \"targets\": [\"עמית\"], \"text\": \"קנית שוקו?\", \"expects_reply\": true, \"ask_summary\": \"אם קנית שוקו?\", \"urgency\": \"normal\" }], lists: [], response: short ack + ask NOW («בסדר — קנית שוקו?»). FORBIDDEN when asker===subject: keeping first person in those fields, «<name> מחכה לתשובה», or third-party framing. «תבדקי איתי דחוף…» / «ממש דחוף» → same shape with urgency urgent / very_urgent; response notes the urgency like any other job. The server opens a self-job on you (לבדוק עם עמית: …) — never lists.add it. Do NOT claim you relayed a message to someone else; the ask lives in response. Urgency follow-ups run like any other OPEN_JOB. Later turns: OPEN_JOBS shows viewer_is=subject — raise/answer like any other job. On answer leave report_text empty (no third party). Never say «עמית ביקש ממני…» when asker===subject — phrase as their own check: «רצית שאבדוק איתך אם קנית שוקו — קנית?»",
@@ -338,11 +348,11 @@ const OPEN_JOBS_RULES = [
   "BOOK A MEETING when the job's ask is to schedule/coordinate anything shared at a slot (לתאם פגישה / שיחה / שיחת עדכון / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself — שם מטלה MUST include all participants in parentheses matching targets (e.g. פגישה נוספת בנושא פורים (עמית, טל) or פגישת עבודה (עמית, ערן) — not לבדוק עם… and not a topic-only title). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. Do NOT offer a shared save; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה (עמית, ערן)\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / לא כרגע with no hour) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only — never progress.",
-  "RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (מה את צריכה לעשות / לברר / המטלות שלך) — that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) → wait, do not raise early. A row with urgency=urgent → raise it FIRST, before their own request, and say it is urgent. urgency=very_urgent → raise it first in EVERY reply while it is open, even right after לא כרגע (one short line).",
+  `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) — that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) → wait, do not raise early. A row with urgency=urgent → raise it FIRST, before their own request, and say it is urgent. urgency=very_urgent → raise it first in EVERY reply while it is open, even right after לא כרגע (one short line).`,
   "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
-  "INVENTORY (מה את צריכה לעשות / לברר / המטלות שלך / מה התזכורות שלך): list EVERY OPEN_JOBS row for this speaker from THIS turn — including scheduled=true deferred checks — plus WORKER_SAVED_DATA. Phrase from each row's ask (self-job → «לבדוק איתך אם סגרת את המזגן»); scheduled=true → say it is scheduled / not yet due (do NOT ask the check now). One • per line. Never RAISE in that reply. Never invent or prefer an older chat topic that is missing from this JSON. Never say job / job_id / expects_reply / OPEN_JOBS in response.",
+  `INVENTORY (${WORKER_INVENTORY_ASKS}): list EVERY OPEN_JOBS row for this speaker from THIS turn — including scheduled=true deferred checks — plus WORKER_SAVED_DATA. Phrase from each row's ask (self-job → «לבדוק איתך אם סגרת את המזגן»); scheduled=true → say it is scheduled / not yet due (do NOT ask the check now). One • per line. Never RAISE in that reply. Never invent or prefer an older chat topic that is missing from this JSON. Never say job / job_id / expects_reply / OPEN_JOBS in response.`,
 ].join("\n");
 
 function thinSessionEnvelope(input: {
@@ -446,7 +456,9 @@ function workerTargetingInstructions(
     "Example: «יש לי פגישה … מחר בבוקר ב08:00 עם המנהל» → tasks add now with שעה לביצוע:\"08:00\"; never ask באיזו שעה.",
     "If omitted on a normal list item, the action applies only to the current speaker.",
     `Work assigned to YOU → lists tasks add, targets: ["${workerName}"]. The item is the work itself. Do not put that task on the speaker. Do not handoff.`,
-    `What YOU still need to do / check, your tasks, or YOUR reminders (מה את/ה צריך/ה לעשות, מה את צריכה לברר, מה המטלות שלך, מה התזכורות שלך) → INVENTORY only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Include every OPEN_JOBS row, including scheduled=true deferred checks — phrase from ask; scheduled → note not yet due, do not ask now. Do NOT RAISE a raisable job in that reply. Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON.`,
+    `What YOU still need to do / check, your tasks, or YOUR reminders (${WORKER_INVENTORY_ASKS}) → INVENTORY only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Include every OPEN_JOBS row, including scheduled=true deferred checks — phrase from ask; scheduled → note not yet due, do not ask now. Do NOT RAISE a raisable job in that reply. Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON.`,
+    STATUS_ADDRESSEE_RULE,
+    `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or reminders.remove / reminders.update with its reminder.reminder_id (a new time → reminders.update). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
@@ -620,14 +632,16 @@ async function saveTurn(input: {
   reply: string;
   raw: unknown;
   request: unknown;
-}): Promise<void> {
+}): Promise<ChatTurnMessageIds> {
   const parsed = parseLlmReply(input.reply);
   const userAt = new Date();
   const assistantAt = new Date(userAt.getTime() + 1);
+  const ids = { user: randomUUID(), assistant: randomUUID() };
 
   await prisma.chatMessage.createMany({
     data: [
       {
+        id: ids.user,
         conversationId: input.conversationId,
         author: "you",
         speaker: input.speaker,
@@ -635,6 +649,7 @@ async function saveTurn(input: {
         createdAt: userAt,
       },
       {
+        id: ids.assistant,
         conversationId: input.conversationId,
         author: "assistant",
         speaker: input.assistantSpeaker,
@@ -646,6 +661,7 @@ async function saveTurn(input: {
       },
     ],
   });
+  return ids;
 }
 
 async function appendAssistantNotice(
@@ -700,6 +716,58 @@ async function clearLastAssistantActions(conversationId: string): Promise<void> 
   await prisma.chatMessage.update({
     where: { id: last.id },
     data: { actions: Prisma.JsonNull },
+  });
+}
+
+/**
+ * After a remove/update of a reminder (or of the worker task linked to it), tell
+ * everyone else it involved — who asked for it and everyone it pings. Reports only
+ * what the engine applied; one message per person.
+ */
+export function planInvolvedChangeNotices(input: {
+  actor: PublicEmployee;
+  humans: PublicEmployee[];
+  listMutations: ListItemMutation[];
+  reminderChanges: ReminderChange[];
+}): Array<{ target: PublicEmployee; text: string }> {
+  const actorName = employeeDisplayName(input.actor);
+  const changes = [
+    ...input.listMutations
+      .filter(
+        (row) =>
+          (row.action === "remove" || row.action === "update") &&
+          (row.workerTaskInvolvedIds?.length ?? 0) > 0,
+      )
+      .map((row) => ({
+        action: row.action as "remove" | "update",
+        label: row.itemLabel,
+        fireAt: "",
+        involvedIds: row.workerTaskInvolvedIds ?? [],
+      })),
+    ...input.reminderChanges,
+  ];
+  const linesByTarget = new Map<string, string[]>();
+  for (const change of changes) {
+    const line =
+      change.action === "remove"
+        ? `התזכורת «${change.label}» בוטלה על ידי ${actorName}${change.fireAt ? ` (היתה ל-${change.fireAt})` : ""}.`
+        : `התזכורת «${change.label}» עודכנה על ידי ${actorName}${change.fireAt ? ` — עכשיו ל-${change.fireAt}` : ""}.`;
+    for (const id of new Set(change.involvedIds)) {
+      if (id === input.actor.id) {
+        continue;
+      }
+      const lines = linesByTarget.get(id) ?? [];
+      if (!lines.includes(line)) {
+        lines.push(line);
+      }
+      linesByTarget.set(id, lines);
+    }
+  }
+  return [...linesByTarget.entries()].flatMap(([id, lines]) => {
+    const target = input.humans.find((row) => row.id === id);
+    return target && !isDigitalEmployee(target) && !isGuestEmployee(target)
+      ? [{ target, text: lines.join("\n") }]
+      : [];
   });
 }
 
@@ -1052,6 +1120,7 @@ export async function sendChatMessage(input: {
   answeredBy: string;
   timing: { llmMs: number; afterLlmMs: number };
   request: unknown;
+  messageIds: ChatTurnMessageIds;
 }> {
   const client = getLlmClient();
   const [employee, employees] = await Promise.all([
@@ -1177,7 +1246,7 @@ export async function sendChatMessage(input: {
           : "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
         guestSpeaker
           ? ""
-          : "If asked what you still need to do/check, which tasks you have, or what YOUR reminders are (מה את צריכה לעשות / לברר / המטלות שלך): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only — every OPEN_JOBS row including scheduled=true; phrase from ask; scheduled → not yet due, do not ask the check now; do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. List jobs one • per line. A row with a `reminder` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no `reminder` field → no parentheses. Never emit metadata.query.",
+          : `If asked what you still need to do/check, which tasks you have, or what YOUR reminders are (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only — every OPEN_JOBS row including scheduled=true; phrase from ask; scheduled → not yet due, do not ask the check now; do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. List jobs one • per line. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Never emit metadata.query.`,
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
         "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Use short intro + one • item per line; never a dense paragraph. Item with urgency → append «דחוף» / «דחוף מאוד» on that line; מה יש לי דחוף → only those. כל מה ששמור / סיכום מלא → FULL DUMP layout (all sections), not tasks only.",
         "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — a short היי after מה תרצה שאשלח is still the answer to your question). Ask about X by name → that person's visible rows. STANDING / recurring: before «אין לך…», scan חוזר / next_occurrences (and clock next_occurrences); match next_occurrences first then תאריך לביצוע; FORBIDDEN empty answer when the asked date is in next_occurrences. Empty timed window only after that scan → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
@@ -1286,7 +1355,7 @@ export async function sendChatMessage(input: {
       model: config.model,
       turn,
     });
-    await saveTurn({
+    const messageIds = await saveTurn({
       conversationId: conversation.id,
       speaker: turnSpeaker,
       assistantSpeaker,
@@ -1741,6 +1810,24 @@ export async function sendChatMessage(input: {
       );
     }
     await deliverWhatsAppRelays(jobReports, employee.id);
+    const involvedNotices = planInvolvedChangeNotices({
+      actor: employee,
+      humans,
+      listMutations,
+      reminderChanges: reminderResult.changes ?? [],
+    });
+    for (const notice of involvedNotices) {
+      notifications.push(
+        await pushRelayMessage({
+          userId: input.userId,
+          employeeId: notice.target.id,
+          digitalEmployeeId: digital.id,
+          speaker: assistantSpeaker,
+          text: notice.text,
+        }),
+      );
+    }
+    await deliverWhatsAppRelays(involvedNotices, employee.id);
     const waRelays = await deliverWhatsAppRelays(attributedRelays, employee.id);
     const waPhones = await deliverWhatsAppPhones(attributedPhones);
     // Partner shared-list notify skips must not erase the speaker's spoken reply.
@@ -1895,6 +1982,7 @@ export async function sendChatMessage(input: {
       notifications,
       answeredBy: digital.name,
       timing: { llmMs, afterLlmMs: Date.now() - afterLlmStarted },
+      messageIds,
     };
   } catch (error) {
     const table = missingTableName(error);

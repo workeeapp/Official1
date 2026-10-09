@@ -617,12 +617,35 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[0][0].message).toContain("hi");
     expect(messageCreateMany).toHaveBeenCalledOnce();
     const saved = messageCreateMany.mock.calls[0][0].data as Array<{
+      id: string;
       author: string;
       createdAt: Date;
     }>;
     expect(saved[0].author).toBe("you");
     expect(saved[1].author).toBe("assistant");
     expect(saved[1].createdAt.getTime()).toBeGreaterThan(saved[0].createdAt.getTime());
+    expect(response.body.messageIds).toEqual({
+      user: saved[0].id,
+      assistant: saved[1].id,
+    });
+    expect(saved[0].id).not.toBe(saved[1].id);
+  });
+
+  it("routes «מה יש לך» to the worker's own inventory in the instructions", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "מה יש לך", employeeId });
+
+    const instructions = createResponse.mock.calls[0][0].instructions as string;
+    expect(instructions).toMatch(/INVENTORY \([^)]*מה יש לך/);
+    expect(instructions).toContain("WHO A STATUS QUESTION IS ABOUT");
+    expect(instructions).toContain(
+      "Never answer «אין לי…» while WORKER_SAVED_DATA has a list item",
+    );
   });
 
   it("stores LLM usage for the speaker, worker, and conversation", async () => {

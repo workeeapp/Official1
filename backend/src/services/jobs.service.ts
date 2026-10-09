@@ -714,7 +714,7 @@ export function formatOpenJobsContext(
   });
   return [
     "OPEN_JOBS:",
-    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do/check (מה את צריכה לעשות / לברר), list EVERY row — including scheduled=true — even if WORKER_SAVED_DATA looks empty. That ask is INVENTORY: do not RAISE; phrase each from ask; scheduled=true → say it is scheduled / not yet due.",
+    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do/check (מה את צריכה לעשות / לברר / מה יש לך / מה פתוח אצלך), list EVERY row — including scheduled=true — even if WORKER_SAVED_DATA looks empty. That ask is INVENTORY: do not RAISE; phrase each from ask; scheduled=true → say it is scheduled / not yet due.",
     "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line. Never read that label out loud — say it the way THIS speaker should hear it:",
     "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…», «<name> מחכה לתשובה», or first-person ask copy (הכנתי / קניתי). On INVENTORY do not append the live question — list the check only.",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",

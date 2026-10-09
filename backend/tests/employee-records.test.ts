@@ -813,6 +813,87 @@ describe("employee records", () => {
     ).toBe(true);
   });
 
+  it("involves an open job's asker and subject in the worker task", () => {
+    const job = {
+      __job: {
+        kind: "job",
+        askerId: "eran-id",
+        askerName: "ערן",
+        subjectId: employeeId,
+        subjectName: "עמית",
+        ask: "מה שלומך?",
+        state: "open",
+        createdAt: "2026-10-09T10:00:00.000Z",
+      },
+    };
+    const row = { addedById: "lucy-id", visibleTo: ["lucy-id"], data: job };
+    expect(workerItemTiedToSpeaker(row, employeeId, new Map())).toBe(true);
+    expect(workerItemTiedToSpeaker(row, "eran-id", new Map())).toBe(true);
+    expect(workerItemTiedToSpeaker(row, "maya-id", new Map())).toBe(false);
+  });
+
+  it("tells each viewer how a worker task involves them", async () => {
+    const workerId = "lucy-id";
+    const talId = "tal-id";
+    employeeFindUnique
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        kind: "digital",
+        name: "לוסי",
+        nickname: "לוסי",
+        isOwner: false,
+      })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        kind: "human",
+        name: "טל",
+        nickname: "טל",
+        isOwner: false,
+      });
+    listFindMany.mockResolvedValueOnce([
+      {
+        id: "lucy-tasks",
+        listType: "tasks",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: workerId, name: "לוסי", nickname: "לוסי" },
+        items: [
+          {
+            id: "item-tal",
+            itemKey: "להזכיר לטל לבדוק את התזכורת",
+            data: { "שם מטלה": "להזכיר לטל לבדוק את התזכורת" },
+            scope: "personal",
+            addedById: employeeId,
+            visibleTo: [employeeId, workerId],
+            reminderId: "rem-tal",
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+    reminderFindMany.mockImplementation(
+      async (args?: { where?: { id?: { in?: string[] } } }) =>
+        args?.where?.id?.in
+          ? [{ id: "rem-tal", ownerId: employeeId, pingIds: [talId] }]
+          : [],
+    );
+    employeeFindMany.mockResolvedValueOnce([
+      { id: employeeId, name: "עמית", nickname: null, surname: "" },
+      { id: talId, name: "טל", nickname: null, surname: "" },
+      { id: workerId, name: "לוסי", nickname: null, surname: "" },
+    ]);
+
+    const snap = await getEmployeeRecordSnapshot(workerId, {
+      scopeItemsToViewerId: talId,
+    });
+    expect(snap.lists[0]?.items[0]).toMatchObject({
+      asked_by: "עמית",
+      for: ["טל"],
+      viewer_is: "subject",
+    });
+  });
+
   it("scopes WORKER_SAVED_DATA items to the current human viewer", async () => {
     const workerId = "lucy-id";
     const mayaId = "maya-id";
@@ -1007,6 +1088,82 @@ describe("employee records", () => {
     expect(filingUpdate).toHaveBeenCalledWith({
       where: { id: "filing-old" },
       data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  describe("acting on a digital worker task", () => {
+    const lucyId = "lucy-id";
+    const eranId = "eran-id";
+    const removeLucyTask = (actorId: string) =>
+      applyEmployeeRecords(
+        lucyId,
+        {
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "lucy-task" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: actorId, visibleTo: [actorId, lucyId] },
+        actorId,
+      );
+
+    beforeEach(() => {
+      listFindFirst.mockResolvedValue({
+        id: "lucy-tasks",
+        employeeId: lucyId,
+        listType: "tasks",
+        name: "",
+      });
+      itemFindFirst.mockResolvedValue({
+        id: "lucy-task",
+        listId: "lucy-tasks",
+        itemKey: "להזכיר לטל לבדוק את התזכורת",
+        data: { "שם מטלה": "להזכיר לטל לבדוק את התזכורת" },
+        scope: "personal",
+        addedById: employeeId,
+        visibleTo: [employeeId, lucyId],
+        reminderId: "rem-1",
+        list: { id: "lucy-tasks", listType: "tasks", name: "", titleField: "" },
+      });
+      itemUpdate.mockResolvedValue({ id: "lucy-task" });
+      const people: Record<string, { kind: string; isOwner: boolean; userId: string }> = {
+        [lucyId]: { kind: "digital", isOwner: false, userId: "user-1" },
+        [talId]: { kind: "human", isOwner: false, userId: "user-1" },
+        [eranId]: { kind: "human", isOwner: false, userId: "user-1" },
+      };
+      employeeFindUnique.mockImplementation(
+        async (args: { where: { id: string } }) => people[args.where.id] ?? null,
+      );
+      reminderFindMany.mockImplementation(
+        async (args?: { where?: { id?: { in?: string[] } } }) =>
+          args?.where?.id?.in
+            ? [{ id: "rem-1", ownerId: employeeId, pingIds: [talId] }]
+            : [],
+      );
+    });
+
+    it("lets the person the clock pings remove it and records who it involved", async () => {
+      const result = await removeLucyTask(talId);
+      expect(itemUpdate).toHaveBeenCalledWith({
+        where: { id: "lucy-task" },
+        data: { deletedAt: expect.any(Date), reminderId: null },
+      });
+      const removed = result.mutations.find((row) => row.itemId === "lucy-task");
+      expect(removed?.workerTaskInvolvedIds).toEqual(
+        expect.arrayContaining([employeeId, talId]),
+      );
+    });
+
+    it("refuses someone the task does not involve", async () => {
+      const result = await removeLucyTask(eranId);
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
     });
   });
 

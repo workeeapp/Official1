@@ -201,7 +201,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abortRef.current = abort;
 
       try {
-        const { reply, raw, request, timing } = await chatApi.send(
+        const { reply, raw, request, timing, messageIds } = await chatApi.send(
           {
             message: input.text,
             employeeId: input.employeeId,
@@ -212,25 +212,29 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           abort.signal,
         );
         const parsed = parseLlmReply(reply);
-        const replyId = crypto.randomUUID();
-        pendingIdsRef.current.add(replyId);
+        const replyId = messageIds?.assistant ?? crypto.randomUUID();
+        if (!messageIds) {
+          pendingIdsRef.current.add(replyId);
+        }
+        const replyMessage: ChatMessage = {
+          id: replyId,
+          author: "assistant",
+          speaker: input.assistantSpeaker ?? "Assistant",
+          text: parsed.response,
+          createdAt: new Date().toISOString(),
+          actions: parsed.actions,
+          ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
+          llmMs: timing?.llmMs,
+          afterLlmMs: timing?.afterLlmMs,
+        };
 
         setThreads((current) => ({
           ...current,
-          [threadId]: [
-            ...(current[threadId] ?? []),
-            {
-              id: replyId,
-              author: "assistant" as const,
-              speaker: input.assistantSpeaker ?? "Assistant",
-              text: parsed.response,
-              createdAt: new Date().toISOString(),
-              actions: parsed.actions,
-              ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
-              llmMs: timing?.llmMs,
-              afterLlmMs: timing?.afterLlmMs,
-            },
-          ],
+          [threadId]: placeTurnReply(current[threadId] ?? [], {
+            pendingUserId: userMessage.id,
+            savedUserId: messageIds?.user,
+            reply: replyMessage,
+          }),
         }));
         setRawResponses((current) => ({
           ...current,
@@ -527,6 +531,38 @@ export function mergeMessages(
     (message) => !incomingIds.has(message.id) && !replacedPending.has(message.id),
   );
   return sortChatMessages([...mergedIncoming, ...localOnly]);
+}
+
+/**
+ * The POST reply carries the saved ids of this turn. History polling may already
+ * have shown either row (possibly before the engine appended its notice), so the
+ * pending user bubble takes the saved id and the reply replaces any saved copy.
+ */
+export function placeTurnReply(
+  thread: ChatMessage[],
+  input: { pendingUserId: string; savedUserId?: string; reply: ChatMessage },
+): ChatMessage[] {
+  const { pendingUserId, savedUserId, reply } = input;
+  let next = thread;
+  if (savedUserId && savedUserId !== pendingUserId) {
+    const hasSaved = next.some((message) => message.id === savedUserId);
+    next = hasSaved
+      ? next.filter((message) => message.id !== pendingUserId)
+      : next.map((message) =>
+          message.id === pendingUserId ? { ...message, id: savedUserId } : message,
+        );
+  }
+  const savedIndex = next.findIndex((message) => message.id === reply.id);
+  if (savedIndex < 0) {
+    return [...next, reply];
+  }
+  const saved = next[savedIndex];
+  const merged = [...next];
+  merged[savedIndex] = {
+    ...reply,
+    createdAt: saved.createdAt ?? reply.createdAt,
+  };
+  return merged;
 }
 
 /** Live server message: replace its pending local copy, or append it. */

@@ -166,12 +166,19 @@ export interface ChatReplyTiming {
   afterLlmMs: number;
 }
 
+/** Saved `ChatMessages` ids of this turn, so the client merges its bubbles with history by id. */
+export interface ChatTurnMessageIds {
+  user: string;
+  assistant: string;
+}
+
 export interface ChatMessageResponse {
   reply: string;
   raw: unknown;
   request?: unknown;
   notifications?: ChatThreadNotification[];
   timing?: ChatReplyTiming;
+  messageIds?: ChatTurnMessageIds;
 }
 
 export interface ChatThreadNotification {

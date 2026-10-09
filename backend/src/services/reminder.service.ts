@@ -1,6 +1,7 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import {
   addJerusalemDays,
+  isGuestEmployee,
   addReminderInterval,
   anchorRecurrence,
   firstOccurrence,
@@ -357,6 +358,83 @@ export async function syncLinkedWorkerTaskClock(input: {
   }
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Records the humans a worker task's clock pings in its visible_to, so each
+ * recipient is involved in it (sees it in WORKER_SAVED_DATA and may act on it).
+ * The task stays the worker's own — never scope=shared, which would put it into
+ * people's EMPLOYEE_SAVED_DATA. Phone/contact destinations and guests are skipped.
+ */
+export async function shareWorkerTaskWithPingRecipients(input: {
+  workerItemId?: string | null;
+  ownerId?: string | null;
+  pingIds: unknown;
+}): Promise<void> {
+  const workerItemId = input.workerItemId?.trim();
+  if (
+    !workerItemId ||
+    !prisma.employee?.findMany ||
+    !prisma.employeeListItem?.findUnique ||
+    !prisma.employeeListItem?.update
+  ) {
+    return;
+  }
+  const pingIds = Array.isArray(input.pingIds)
+    ? input.pingIds
+        .map(String)
+        .filter((id) => UUID_PATTERN.test(id) && id !== input.ownerId)
+    : [];
+  if (pingIds.length === 0) {
+    return;
+  }
+  try {
+    const recipients = (
+      await prisma.employee.findMany({
+        where: { id: { in: pingIds }, kind: "human" },
+        select: { id: true, name: true, nickname: true },
+      })
+    ).filter((employee) => !isGuestEmployee({ ...employee, kind: "human" }));
+    if (recipients.length === 0) {
+      return;
+    }
+    const item = await prisma.employeeListItem.findUnique({
+      where: { id: workerItemId },
+    });
+    if (!item || item.deletedAt) {
+      return;
+    }
+    const current = Array.isArray(item.visibleTo)
+      ? item.visibleTo.filter((id): id is string => typeof id === "string" && Boolean(id))
+      : [];
+    const visibleTo = [
+      ...new Set(
+        [
+          item.addedById,
+          input.ownerId,
+          ...current,
+          ...recipients.map((employee) => employee.id),
+        ].filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (
+      visibleTo.length === current.length &&
+      visibleTo.every((id) => current.includes(id))
+    ) {
+      return;
+    }
+    await prisma.employeeListItem.update({
+      where: { id: item.id },
+      data: { visibleTo },
+    });
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+  }
+}
+
 export function reminderLabelsMatch(stored: string, wanted: string): boolean {
   const left = itemKey(stored);
   const right = itemKey(wanted);
@@ -429,6 +507,13 @@ export async function linkRemindersToWorkerTasks(
               rule,
             ) as Prisma.InputJsonValue,
           },
+        });
+      }
+      if (clock) {
+        await shareWorkerTaskWithPingRecipients({
+          workerItemId: pair.workerItemId,
+          ownerId: clock.ownerId,
+          pingIds: clock.pingIds,
         });
       }
     } catch (error) {
@@ -706,10 +791,38 @@ export async function cancelActiveRemindersMatchingWork(input: {
   }
 }
 
+/**
+ * Everyone a clock involves: its owner, the people it pings, and whoever its
+ * linked worker task involves (who asked, visible_to). Read before the change.
+ */
+async function clockInvolvedIds(clock: {
+  ownerId: string;
+  pingIds: unknown;
+  workerItemId?: string | null;
+}): Promise<string[]> {
+  const ids = [
+    clock.ownerId,
+    ...(Array.isArray(clock.pingIds) ? clock.pingIds.map(String) : []),
+  ];
+  const workerItemId = clock.workerItemId?.trim();
+  if (workerItemId && prisma.employeeListItem?.findUnique) {
+    const task = await prisma.employeeListItem.findUnique({
+      where: { id: workerItemId },
+    });
+    if (task) {
+      ids.push(
+        task.addedById ?? "",
+        ...(Array.isArray(task.visibleTo) ? task.visibleTo.map(String) : []),
+      );
+    }
+  }
+  return [...new Set(ids.filter(Boolean))];
+}
+
 async function cancelActiveReminderById(
   userId: string,
   reminderId: string,
-): Promise<string | null> {
+): Promise<{ label: string; fireAt: Date; involvedIds: string[] } | null> {
   const match = await prisma.reminder.findFirst({
     where: { id: reminderId, userId, status: "active" },
   });
@@ -720,14 +833,27 @@ async function cancelActiveReminderById(
     "workerItemId" in match && typeof match.workerItemId === "string"
       ? match.workerItemId
       : null;
+  const involvedIds = await clockInvolvedIds({
+    ownerId: match.ownerId,
+    pingIds: match.pingIds,
+    workerItemId,
+  });
   await removeReminderAndLinkedWorkerTask({
     id: match.id,
     workerItemId,
     userId,
     label: match.itemLabel,
   });
-  return match.itemLabel;
+  return { label: match.itemLabel, fireAt: match.fireAt, involvedIds };
 }
+
+/** A remove/update of an existing clock, so everyone else it involves can be told. */
+export type ReminderChange = {
+  action: "remove" | "update";
+  label: string;
+  fireAt: string;
+  involvedIds: string[];
+};
 
 async function cancelActiveReminder(
   userId: string,
@@ -953,10 +1079,12 @@ export async function applyReminders(input: {
     reason: "no_time" | "db" | "no_phone";
     dest?: string;
   }>;
+  changes: ReminderChange[];
 }> {
   const contacts = input.contacts ?? [];
   const removed: string[] = [];
   const missed: string[] = [];
+  const changes: ReminderChange[] = [];
   const saved: Array<{
     id: string;
     item: string;
@@ -976,7 +1104,7 @@ export async function applyReminders(input: {
     for (const reminder of input.reminders.filter((row) => row.action !== "remove")) {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
-    return { removed, missed, saved, skipped };
+    return { removed, missed, saved, skipped, changes };
   }
   for (const reminder of input.reminders) {
     if (reminder.action === "remove") {
@@ -992,7 +1120,13 @@ export async function applyReminders(input: {
         reminderId,
       );
       if (cancelled) {
-        removed.push(cancelled);
+        removed.push(cancelled.label);
+        changes.push({
+          action: "remove",
+          label: cancelled.label,
+          fireAt: formatJerusalemDateTime(cancelled.fireAt),
+          involvedIds: cancelled.involvedIds,
+        });
       } else {
         missed.push(reminder.item.trim() || reminderId);
       }
@@ -1174,16 +1308,24 @@ export async function applyReminders(input: {
               composeLookbackHours: nextLookback,
             },
           });
+      const linkedWorkerItemId =
+        "workerItemId" in row && typeof row.workerItemId === "string"
+          ? row.workerItemId
+          : existing &&
+              "workerItemId" in existing &&
+              typeof existing.workerItemId === "string"
+            ? existing.workerItemId
+            : null;
+      if (existing) {
+        await shareWorkerTaskWithPingRecipients({
+          workerItemId: linkedWorkerItemId,
+          ownerId,
+          pingIds,
+        });
+      }
       await syncLinkedWorkerTaskClock({
         reminderId: row.id,
-        workerItemId:
-          "workerItemId" in row && typeof row.workerItemId === "string"
-            ? row.workerItemId
-            : existing &&
-                "workerItemId" in existing &&
-                typeof existing.workerItemId === "string"
-              ? existing.workerItemId
-              : null,
+        workerItemId: linkedWorkerItemId,
         fireAt,
         rule: recurring
           ? recurring.recurrence
@@ -1222,12 +1364,29 @@ export async function applyReminders(input: {
         ...(sameTimeOthers.length > 0 ? { sameTimeOthers } : {}),
         ...(nextCompose ? { composeAtFire: true } : {}),
       });
+      if (existing) {
+        changes.push({
+          action: "update",
+          label,
+          fireAt: fireLabel,
+          involvedIds: [
+            ...new Set([
+              ...(await clockInvolvedIds({
+                ownerId: existing.ownerId,
+                pingIds: existing.pingIds,
+                workerItemId: linkedWorkerItemId,
+              })),
+              ...pingIds,
+            ]),
+          ],
+        });
+      }
       scheduleSoon(fireAt);
     } catch {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
   }
-  return { removed, missed, saved, skipped };
+  return { removed, missed, saved, skipped, changes };
 }
 
 export function formatActiveRemindersReply(

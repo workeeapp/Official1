@@ -1556,6 +1556,8 @@ describe("employee targets", () => {
     expect(plan.notifications.map((row) => row.employee.id)).not.toContain(
       lucy.id,
     );
+    const lucyApply = plan.applications.find((row) => row.employeeId === lucy.id);
+    expect(lucyApply?.visibility.scope).toBe("personal");
   });
 
   it("plans a WhatsApp send to a raw phone number", () => {
