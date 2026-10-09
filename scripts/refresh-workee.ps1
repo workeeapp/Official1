@@ -261,6 +261,12 @@ Write-Step "Applying migrations (db:deploy)"
 npm run db:deploy
 Invoke-NativeOk "db:deploy"
 
+# Windows locks query_engine-windows.dll.node while the API is running — stop
+# before generate. keep-up may reclaim the port during the frontend build; we
+# stop again immediately before start (below).
+Write-Step "Freeing ports $apiPort / $VitePort before prisma generate"
+Stop-WorkeePorts
+
 Write-Step "Generating Prisma client"
 npx prisma generate
 Invoke-NativeOk "prisma generate"
