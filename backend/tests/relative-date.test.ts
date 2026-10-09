@@ -4,8 +4,10 @@ import {
   jerusalemHm,
   jerusalemYmd,
   normalizeRelativeDatesInRecord,
+  remainingThisWeek,
   resolveRelativeDateLabel,
   sessionClock,
+  weekRange,
 } from "../src/utils/relative-date.js";
 
 describe("relative-date", () => {
@@ -58,5 +60,28 @@ describe("relative-date", () => {
     expect(text).toContain("מה את");
     expect(text).toContain("MUST scan next_occurrences");
     expect(text).toContain("FORBIDDEN: empty day answer when the asked YYYY-MM-DD appears");
+  });
+
+  it("bounds השבוע to today→Saturday and השבוע הבא to the next Sunday→Saturday", () => {
+    const thursday = new Date("2026-10-08T11:49:00.000Z");
+    expect(remainingThisWeek(thursday)).toEqual({ from: "2026-10-08", to: "2026-10-10" });
+    expect(weekRange(thursday, 0)).toEqual({ from: "2026-10-04", to: "2026-10-10" });
+    expect(weekRange(thursday, 1)).toEqual({ from: "2026-10-11", to: "2026-10-17" });
+
+    const text = formatSessionClockContext(thursday);
+    expect(text).toContain("this_week: 2026-10-08..2026-10-10");
+    expect(text).toContain("next_week: 2026-10-11..2026-10-17");
+    expect(text).toContain("NEVER include days from next_week");
+  });
+
+  it("this_week on Saturday is just today; on Sunday it is the full week", () => {
+    expect(remainingThisWeek(new Date("2026-10-10T09:00:00.000Z"))).toEqual({
+      from: "2026-10-10",
+      to: "2026-10-10",
+    });
+    expect(remainingThisWeek(new Date("2026-10-11T09:00:00.000Z"))).toEqual({
+      from: "2026-10-11",
+      to: "2026-10-17",
+    });
   });
 });

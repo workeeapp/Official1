@@ -55,14 +55,19 @@ export function sessionClock(now = new Date()): SessionClock {
 export function formatSessionClockContext(now = new Date()): string {
   const clock = sessionClock(now);
   const weekdayDates = upcomingWeekdayDates(now);
+  const thisWeek = remainingThisWeek(now);
+  const nextWeek = weekRange(now, 1);
   return [
     "SESSION_CLOCK:",
     `timezone: ${clock.timezone}`,
     `current_date: ${clock.currentDate}`,
     `current_time: ${clock.currentTime}`,
     `now_iso: ${clock.nowIso}`,
+    `this_week: ${thisWeek.from}..${thisWeek.to}`,
+    `next_week: ${nextWeek.from}..${nextWeek.to}`,
+    "WEEK BOUNDARIES (Israel): a week runs ראשון→שבת. השבוע / this week = this_week only (today through this שבת, inclusive) — NEVER include days from next_week, even if this_week has few days left or nothing matches. If nothing in this_week matches, say so plainly (e.g. אין לך כלום להמשך השבוע). השבוע הבא / next week = next_week (ראשון→שבת).",
     `weekday_dates: ${JSON.stringify(weekdayDates)}`,
-    "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to YYYY-MM-DD for the next week. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
+    "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to the NEAREST upcoming YYYY-MM-DD (today inclusive) — it is a lookup for a single named day, not the definition of השבוע. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
     "calendar (Sunday-first weeks; line 1 = this week, line 2 = next week, line 3 = in two weeks…):",
     ...upcomingCalendarWeeks(now),
     "For any date further than weekday_dates (בעוד שבועיים, השבוע הבא, ב-20 לחודש, עד דצמבר) read the exact date + weekday from calendar — never count days in your head.",
@@ -128,8 +133,7 @@ export const CALENDAR_WEEKS = 9;
  * per day. Lets the model name the exact date of «שלישי בעוד שבועיים» without math.
  */
 export function upcomingCalendarWeeks(now = new Date(), weeks = CALENDAR_WEEKS): string[] {
-  const todayName = hebrewWeekdayFromYmd(jerusalemYmd(now));
-  const offset = todayName ? HEBREW_WEEKDAYS.indexOf(todayName as (typeof HEBREW_WEEKDAYS)[number]) : 0;
+  const offset = sundayOffset(now);
   const lines: string[] = [];
   for (let week = 0; week < weeks; week++) {
     const days: string[] = [];
@@ -140,6 +144,22 @@ export function upcomingCalendarWeeks(now = new Date(), weeks = CALENDAR_WEEKS):
     lines.push(days.join(", "));
   }
   return lines;
+}
+
+function sundayOffset(now: Date): number {
+  const todayName = hebrewWeekdayFromYmd(jerusalemYmd(now));
+  return todayName ? HEBREW_WEEKDAYS.indexOf(todayName as (typeof HEBREW_WEEKDAYS)[number]) : 0;
+}
+
+/** Sunday→Saturday range of the week `weekDelta` weeks from the current one. */
+export function weekRange(now = new Date(), weekDelta = 0): { from: string; to: string } {
+  const start = weekDelta * 7 - sundayOffset(now);
+  return { from: shiftJerusalemYmd(now, start), to: shiftJerusalemYmd(now, start + 6) };
+}
+
+/** Today through this Saturday (Israeli week ends on Saturday). */
+export function remainingThisWeek(now = new Date()): { from: string; to: string } {
+  return { from: jerusalemYmd(now), to: weekRange(now, 0).to };
 }
 
 function shiftJerusalemYmd(now: Date, dayDelta: number): string {
