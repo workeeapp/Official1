@@ -6,6 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 $PublicOrigin = "https://wa.workee.site"
+$VitePort = 5173
 
 function Write-Step([string]$message) {
   Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $message)
@@ -27,30 +28,78 @@ function Test-PortFree([int]$port) {
   -not [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
 
+function Get-PortListenerPid([int]$port) {
+  $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $_.OwningProcess -gt 0 } |
+    Select-Object -First 1
+  if ($conn) { return [int]$conn.OwningProcess }
+  return $null
+}
+
+function Get-ProcessTreeIds([int]$rootPid) {
+  $byParent = @{}
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
+    $ppid = [int]$_.ParentProcessId
+    if (-not $byParent.ContainsKey($ppid)) {
+      $byParent[$ppid] = [System.Collections.Generic.List[int]]::new()
+    }
+    $byParent[$ppid].Add([int]$_.ProcessId)
+  }
+  $ids = [System.Collections.Generic.HashSet[int]]::new()
+  $queue = [System.Collections.Generic.Queue[int]]::new()
+  $queue.Enqueue($rootPid)
+  while ($queue.Count -gt 0) {
+    $processId = $queue.Dequeue()
+    if (-not $ids.Add($processId)) { continue }
+    if ($byParent.ContainsKey($processId)) {
+      foreach ($child in $byParent[$processId]) {
+        $queue.Enqueue($child)
+      }
+    }
+  }
+  return $ids
+}
+
+function Test-PidInTree([int]$processId, [int]$rootPid) {
+  if ($processId -le 0 -or $rootPid -le 0) { return $false }
+  $tree = Get-ProcessTreeIds $rootPid
+  return $tree.Contains($processId)
+}
+
 function Stop-WorkeePorts {
   $apiPort = Get-DotEnvPort
-  foreach ($port in @($apiPort, 5173)) {
-    Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
-      Where-Object { $_.OwningProcess -gt 0 } |
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    foreach ($port in @($apiPort, $VitePort)) {
+      Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
+        Where-Object { $_.OwningProcess -gt 0 } |
+        ForEach-Object {
+          $owner = [int]$_.OwningProcess
+          Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+          Write-Step "Stopped PID $owner on port $port"
+        }
+    }
+    Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.CommandLine -and (
+          $_.CommandLine -match 'tsx watch|vite|concurrently -n api|npm run dev -w backend|@workee/backend|refresh-workee'
+        )
+      } |
       ForEach-Object {
-        Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
-        Write-Step "Stopped PID $($_.OwningProcess) on port $port"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        Write-Step "Stopped $($_.Name) $($_.ProcessId)"
       }
-  }
-  Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match 'tsx watch|vite|concurrently -n api' } |
-    ForEach-Object {
-      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-      Write-Step "Stopped node $($_.ProcessId)"
+
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+      if ((Test-PortFree $apiPort) -and (Test-PortFree $VitePort)) {
+        Write-Step "Ports $apiPort / $VitePort are free"
+        return
+      }
+      Start-Sleep -Milliseconds 500
     }
-  $deadline = (Get-Date).AddSeconds(15)
-  while ((Get-Date) -lt $deadline) {
-    if ((Test-PortFree $apiPort) -and (Test-PortFree 5173)) {
-      return
-    }
-    Start-Sleep -Seconds 1
+    Write-Step "Ports still busy after stop attempt $attempt - retrying"
   }
-  throw "Ports $apiPort/5173 still busy after stop"
+  throw "Ports $apiPort/$VitePort still busy after stop"
 }
 
 function Invoke-NativeOk([string]$label) {
@@ -99,19 +148,64 @@ function Test-HttpOk([string]$url) {
   }
 }
 
-function Wait-WorkeeHealthy([int]$apiPort, [int]$timeoutSec = 120) {
+function Test-DevLogConflict([string[]]$logPaths) {
+  foreach ($path in $logPaths) {
+    if (-not (Test-Path $path)) { continue }
+    $text = Get-Content -Path $path -Raw -ErrorAction SilentlyContinue
+    if ($text -and $text -match 'EADDRINUSE|address already in use') {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Wait-WorkeeHealthy {
+  param(
+    [int]$apiPort,
+    [int]$devPid,
+    [string[]]$logPaths,
+    [int]$timeoutSec = 120
+  )
   $deadline = (Get-Date).AddSeconds($timeoutSec)
   $needDashboard = Test-Path (Join-Path $root "frontend\dist\index.html")
   while ((Get-Date) -lt $deadline) {
+    if ($devPid -gt 0) {
+      $proc = Get-Process -Id $devPid -ErrorAction SilentlyContinue
+      if (-not $proc) {
+        throw "npm run dev exited before becoming healthy (PID $devPid)"
+      }
+    }
+    if (Test-DevLogConflict $logPaths) {
+      throw "Dev log shows EADDRINUSE - a previous process still held the port"
+    }
+
+    $apiPid = Get-PortListenerPid $apiPort
+    $vitePid = Get-PortListenerPid $VitePort
     $apiOk = Test-HttpOk "http://127.0.0.1:$apiPort/api/health"
     $viteOk = Test-HttpOk "http://127.0.0.1:5173/"
     $dashOk = -not $needDashboard -or (Test-HttpOk "http://127.0.0.1:$apiPort/dashboard")
-    if ($apiOk -and $viteOk -and $dashOk) {
-      return
+
+    if ($apiOk -and $viteOk -and $dashOk -and $apiPid -and $vitePid) {
+      $apiOurs = Test-PidInTree $apiPid $devPid
+      $viteOurs = Test-PidInTree $vitePid $devPid
+      if ($apiOurs -and $viteOurs) {
+        # Catch late bind failures from a racing second listener.
+        Start-Sleep -Seconds 2
+        if (Test-DevLogConflict $logPaths) {
+          throw "EADDRINUSE appeared after health - stale process raced the new API"
+        }
+        $apiPid2 = Get-PortListenerPid $apiPort
+        if (-not (Test-PidInTree $apiPid2 $devPid)) {
+          throw "API port $apiPort is no longer owned by this refresh process tree"
+        }
+        Write-Step "Port ownership OK (API PID $apiPid2, Vite PID $vitePid under dev PID $devPid)"
+        return
+      }
+      Write-Step "Health OK but ports not owned by this refresh yet (API=$apiPid Vite=$vitePid) - waiting"
     }
     Start-Sleep -Seconds 1
   }
-  throw "Timed out waiting for health (api :$apiPort, vite :5173, dashboard from API if dist exists)"
+  throw "Timed out waiting for health + port ownership (api :$apiPort, vite :$VitePort under PID $devPid)"
 }
 
 function Assert-Cloudflared {
@@ -159,8 +253,9 @@ Write-Step "npm install"
 npm install
 Invoke-NativeOk "npm install"
 
-Write-Step "Freeing ports $apiPort / 5173"
-Stop-WorkeePorts
+# Do NOT free ports here - keep-up / an old API may reclaim 3003 during the long
+# migrate+build window and then collide with the new npm run dev. Stop immediately
+# before start instead.
 
 Write-Step "Applying migrations (db:deploy)"
 npm run db:deploy
@@ -178,16 +273,31 @@ Invoke-NativeOk "frontend build"
 
 Assert-Cloudflared
 
+Write-Step "Freeing ports $apiPort / $VitePort immediately before start"
+Stop-WorkeePorts
+
 Write-Step "Starting npm run dev (api + web)"
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if (-not $npm) {
   $npm = Get-Command npm -ErrorAction Stop
 }
-$dev = Start-Process -FilePath $npm.Source -ArgumentList @("run", "dev") -WorkingDirectory $root -PassThru -NoNewWindow
+$logDir = Join-Path $env:TEMP "workee-refresh"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$outLog = Join-Path $logDir "dev-out.log"
+$errLog = Join-Path $logDir "dev-err.log"
+Remove-Item $outLog, $errLog -ErrorAction SilentlyContinue
+
+$dev = Start-Process -FilePath $npm.Source `
+  -ArgumentList @("run", "dev") `
+  -WorkingDirectory $root `
+  -PassThru `
+  -NoNewWindow `
+  -RedirectStandardOutput $outLog `
+  -RedirectStandardError $errLog
 try {
-  Write-Step "Waiting for health (API :$apiPort, Vite :5173, /dashboard from API)..."
-  Wait-WorkeeHealthy $apiPort 120
-  Write-Step "Healthy - API http://localhost:$apiPort  Vite http://127.0.0.1:5173/  SPA http://127.0.0.1:$apiPort/dashboard"
+  Write-Step "Waiting for health + ownership (API :$apiPort, Vite :$VitePort, under PID $($dev.Id))..."
+  Wait-WorkeeHealthy -apiPort $apiPort -devPid $dev.Id -logPaths @($outLog, $errLog) -timeoutSec 120
+  Write-Step "Healthy - API http://localhost:$apiPort  Vite http://127.0.0.1:$VitePort/  SPA http://127.0.0.1:$apiPort/dashboard"
   Write-Step "Public (if tunnel up): $PublicOrigin/dashboard"
   Write-Step "Dev is running (PID $($dev.Id)). Ctrl+C stops this watcher; stop node to free ports."
   Wait-Process -Id $dev.Id
