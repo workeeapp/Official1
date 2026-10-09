@@ -57,18 +57,21 @@ function Get-ProcessTreeIds([int]$rootPid) {
       }
     }
   }
-  return $ids
+  return @($ids)
 }
 
 function Test-PidInTree([int]$processId, [int]$rootPid) {
   if ($processId -le 0 -or $rootPid -le 0) { return $false }
-  $tree = Get-ProcessTreeIds $rootPid
-  return $tree.Contains($processId)
+  return @((Get-ProcessTreeIds $rootPid)) -contains $processId
 }
 
-function Get-ProtectedPids {
+function Stop-WorkeePorts {
+  $apiPort = Get-DotEnvPort
   # Never kill this refresh PowerShell or its parents (npm/cmd wrappers).
-  $protected = Get-ProcessTreeIds $PID
+  $protected = [System.Collections.Generic.HashSet[int]]::new()
+  foreach ($id in @(Get-ProcessTreeIds $PID)) {
+    [void]$protected.Add([int]$id)
+  }
   $walk = $PID
   for ($i = 0; $i -lt 6; $i++) {
     $row = Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue
@@ -78,12 +81,6 @@ function Get-ProtectedPids {
     if ($walk -le 0) { break }
     [void]$protected.Add($walk)
   }
-  return $protected
-}
-
-function Stop-WorkeePorts {
-  $apiPort = Get-DotEnvPort
-  $protected = Get-ProtectedPids
   for ($attempt = 1; $attempt -le 3; $attempt++) {
     foreach ($port in @($apiPort, $VitePort)) {
       Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
