@@ -66,12 +66,28 @@ function Test-PidInTree([int]$processId, [int]$rootPid) {
   return $tree.Contains($processId)
 }
 
+function Get-ProtectedPids {
+  # Never kill this refresh PowerShell or its parents (npm/cmd wrappers).
+  $protected = Get-ProcessTreeIds $PID
+  $walk = $PID
+  for ($i = 0; $i -lt 6; $i++) {
+    $row = Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue
+    if (-not $row) { break }
+    [void]$protected.Add([int]$row.ProcessId)
+    $walk = [int]$row.ParentProcessId
+    if ($walk -le 0) { break }
+    [void]$protected.Add($walk)
+  }
+  return $protected
+}
+
 function Stop-WorkeePorts {
   $apiPort = Get-DotEnvPort
+  $protected = Get-ProtectedPids
   for ($attempt = 1; $attempt -le 3; $attempt++) {
     foreach ($port in @($apiPort, $VitePort)) {
       Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
-        Where-Object { $_.OwningProcess -gt 0 } |
+        Where-Object { $_.OwningProcess -gt 0 -and -not $protected.Contains([int]$_.OwningProcess) } |
         ForEach-Object {
           $owner = [int]$_.OwningProcess
           Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
@@ -80,8 +96,9 @@ function Stop-WorkeePorts {
     }
     Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" -ErrorAction SilentlyContinue |
       Where-Object {
-        $_.CommandLine -and (
-          $_.CommandLine -match 'tsx watch|vite|concurrently -n api|npm run dev -w backend|@workee/backend|refresh-workee'
+        $_.CommandLine -and
+        -not $protected.Contains([int]$_.ProcessId) -and (
+          $_.CommandLine -match 'tsx watch|node_modules[\\/]vite[\\/]|concurrently -n api|npm run dev -w backend|@workee/backend'
         )
       } |
       ForEach-Object {
