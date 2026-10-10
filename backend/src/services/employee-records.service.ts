@@ -468,6 +468,7 @@ export function formatEmployeeContext(
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "A single item may carry its own shared_with (owner + partners of that item). It is the truth for that item — prefer it over the list's shared_with. When listing such an item, append the partners other than the viewer in parentheses on its • line, e.g. «ללכת לרופא (עם ערן) — 13.10», unless the item name already shows them (e.g. פגישה (עמית, ערן)).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, append «דחוף» / «דחוף מאוד» on that • line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
@@ -1024,6 +1025,7 @@ export async function getEmployeeRecordSnapshot(
         {
           ...linkedReminderField(item, activeReminders),
           ...urgencySnapshotField(item.urgency),
+          ...itemSharedWithField(item.list.employee.id, item, names),
         },
       ),
     );
@@ -2670,6 +2672,9 @@ function toListSnapshotEntry(input: {
         {
           ...linkedReminderField(item, input.activeReminders ?? new Map()),
           ...urgencySnapshotField(item.urgency),
+          ...(input.scope === "shared"
+            ? {}
+            : itemSharedWithField(input.ownerId, item, input.names)),
           ...(input.itemExtras?.(item) ?? {}),
         },
       ),
@@ -2744,6 +2749,19 @@ export function linkedReminderField(
       ...reminderRuleSnapshot(reminder),
     },
   };
+}
+
+/** Item-level partners (owner + item visible_to) when the item itself is shared. */
+function itemSharedWithField(
+  ownerId: string,
+  item: { scope?: string; visibleTo?: unknown },
+  names: Map<string, string>,
+): Record<string, unknown> {
+  if (item.scope !== "shared") {
+    return {};
+  }
+  const sharedWith = sharedWithNames(ownerId, item.visibleTo, names);
+  return sharedWith.length > 1 ? { shared_with: sharedWith } : {};
 }
 
 function withVisibility(
