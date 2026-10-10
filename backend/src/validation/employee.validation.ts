@@ -1,6 +1,7 @@
 import {
   hasEmployeeFieldErrors,
   parseEmployeeKind,
+  parseReasoningEffort,
   validateEmployeeInput,
   type EmployeeFieldErrors,
   type EmployeeInput,
@@ -38,6 +39,7 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     phone: record.phone,
     model: record.model,
     temperature: record.temperature,
+    reasoningEffort: record.reasoningEffort,
     instructions: record.instructions,
   });
 
@@ -60,6 +62,7 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
       phone: null,
       model: String(record.model).trim(),
       temperature: Number(record.temperature),
+      reasoningEffort: parseReasoningEffort(record.reasoningEffort),
       instructions: String(record.instructions).trim(),
     };
   }

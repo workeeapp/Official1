@@ -1,18 +1,30 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { usageCreate, usageAggregate, usageGroupBy, conversationCount, priceFindMany } =
-  vi.hoisted(() => ({
-    usageCreate: vi.fn(),
-    usageAggregate: vi.fn(),
-    usageGroupBy: vi.fn(),
-    conversationCount: vi.fn(),
-    priceFindMany: vi.fn(),
-  }));
+const {
+  usageCreate,
+  usageAggregate,
+  usageGroupBy,
+  usageFindMany,
+  conversationCount,
+  priceFindMany,
+} = vi.hoisted(() => ({
+  usageCreate: vi.fn(),
+  usageAggregate: vi.fn(),
+  usageGroupBy: vi.fn(),
+  usageFindMany: vi.fn(),
+  conversationCount: vi.fn(),
+  priceFindMany: vi.fn(),
+}));
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
-    llmUsage: { create: usageCreate, aggregate: usageAggregate, groupBy: usageGroupBy },
+    llmUsage: {
+      create: usageCreate,
+      aggregate: usageAggregate,
+      groupBy: usageGroupBy,
+      findMany: usageFindMany,
+    },
     llmModelPrice: { findMany: priceFindMany },
     chatConversation: { count: conversationCount },
   },
@@ -27,26 +39,54 @@ import {
 } from "../src/services/llm-usage.service.js";
 
 describe("getTeamUsageSummary", () => {
-  it("sums every visible employee's amount and the humans-only amount", async () => {
-    usageGroupBy.mockReset().mockImplementation(async ({ by }: { by: string[] }) =>
-      by[0] === "employeeId"
-        ? [
-            { employeeId: "amit", _sum: { costUsd: new Prisma.Decimal("0.006") } },
-            { employeeId: "tal", _sum: { costUsd: new Prisma.Decimal("0.002") } },
-            { employeeId: "guest", _sum: { costUsd: new Prisma.Decimal("0.5") } },
-          ]
-        : [{ digitalEmployeeId: "lucy", _sum: { costUsd: new Prisma.Decimal("0.508") } }],
-    );
+  const team = [
+    { id: "amit", kind: "human" as const, name: "עמית", nickname: "עמית" },
+    { id: "tal", kind: "human" as const, name: "טל", nickname: "טל" },
+    { id: "guest", kind: "human" as const, name: "אורח", nickname: "אורח" },
+    { id: "lucy", kind: "digital" as const, name: "לוסי", nickname: "לוסי" },
+  ];
+  const row = (employeeId: string, cost: string | null, createdAt: string) => ({
+    employeeId,
+    digitalEmployeeId: "lucy",
+    costUsd: cost === null ? null : new Prisma.Decimal(cost),
+    createdAt: new Date(createdAt),
+  });
 
-    const summary = await getTeamUsageSummary("u1", [
-      { id: "amit", kind: "human", name: "עמית", nickname: "עמית" },
-      { id: "tal", kind: "human", name: "טל", nickname: "טל" },
-      { id: "guest", kind: "human", name: "אורח", nickname: "אורח" },
-      { id: "lucy", kind: "digital", name: "לוסי", nickname: "לוסי" },
+  it("sums every visible employee's amount and the humans-only amount", async () => {
+    usageFindMany.mockReset().mockResolvedValue([
+      row("amit", "0.006", "2026-10-05T10:00:00Z"),
+      row("tal", "0.002", "2026-10-06T10:00:00Z"),
+      row("guest", "0.5", "2026-10-07T10:00:00Z"),
     ]);
+
+    const summary = await getTeamUsageSummary("u1", team);
 
     expect(summary.humanEmployeesUsd).toBeCloseTo(0.008);
     expect(summary.allEmployeesUsd).toBeCloseTo(0.516);
+    expect(usageFindMany.mock.calls[0][0].where).toEqual({ conversation: { userId: "u1" } });
+  });
+
+  it("splits the amounts by Jerusalem month, newest first", async () => {
+    usageFindMany.mockReset().mockResolvedValue([
+      row("amit", "0.001", "2026-08-15T10:00:00Z"),
+      // 22:30 UTC on Sep 30 is already Oct 1 in Jerusalem (UTC+3).
+      row("amit", "0.002", "2026-09-30T22:30:00Z"),
+      row("tal", "0.004", "2026-09-10T10:00:00Z"),
+      row("amit", null, "2026-07-01T10:00:00Z"),
+    ]);
+
+    const summary = await getTeamUsageSummary("u1", team);
+
+    expect(summary.months.map((m) => m.month)).toEqual(["2026-10", "2026-09", "2026-08"]);
+    const [oct, sep, aug] = summary.months;
+    expect(oct.humanEmployeesUsd).toBeCloseTo(0.002);
+    expect(oct.allEmployeesUsd).toBeCloseTo(0.004);
+    expect(sep.humanEmployeesUsd).toBeCloseTo(0.004);
+    expect(sep.allEmployeesUsd).toBeCloseTo(0.008);
+    expect(aug.humanEmployeesUsd).toBeCloseTo(0.001);
+    expect(aug.allEmployeesUsd).toBeCloseTo(0.002);
+    expect(summary.humanEmployeesUsd).toBeCloseTo(0.007);
+    expect(summary.allEmployeesUsd).toBeCloseTo(0.014);
   });
 });
 

@@ -24,6 +24,17 @@ export interface LoginRequest {
 
 export type EmployeeKind = "human" | "digital";
 
+/** OpenAI reasoning effort for gpt-6 models; temperature is sent only with "none". */
+export const REASONING_EFFORTS = ["none", "low", "medium", "high"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export function parseReasoningEffort(value: unknown): ReasoningEffort | null {
+  return typeof value === "string" &&
+    (REASONING_EFFORTS as readonly string[]).includes(value)
+    ? (value as ReasoningEffort)
+    : null;
+}
+
 export interface PublicEmployee {
   id: string;
   kind?: EmployeeKind;
@@ -34,6 +45,7 @@ export interface PublicEmployee {
   phone: string | null;
   model?: string | null;
   temperature?: number | null;
+  reasoningEffort?: ReasoningEffort | null;
   instructions?: string | null;
   protected?: boolean;
   isOwner?: boolean;
@@ -81,10 +93,19 @@ export interface EmployeeUsageSummary {
   totalUsd: number;
 }
 
+export interface TeamUsageMonth {
+  /** `YYYY-MM` in Asia/Jerusalem time. */
+  month: string;
+  allEmployeesUsd: number;
+  humanEmployeesUsd: number;
+}
+
 /** Sums of the per-employee amounts shown on the Employees screen. */
 export interface TeamUsageSummary {
   allEmployeesUsd: number;
   humanEmployeesUsd: number;
+  /** Newest first; months with no cost are omitted. */
+  months: TeamUsageMonth[];
 }
 
 export interface EmployeeInput {
@@ -96,6 +117,7 @@ export interface EmployeeInput {
   phone?: string | null;
   model?: string | null;
   temperature?: number | null;
+  reasoningEffort?: ReasoningEffort | null;
   instructions?: string | null;
   isOwner?: boolean;
 }
@@ -103,6 +125,7 @@ export interface EmployeeInput {
 export interface DigitalEmployeeDefaults {
   model: string;
   temperature: number;
+  reasoningEffort: ReasoningEffort;
   instructions: string;
 }
 

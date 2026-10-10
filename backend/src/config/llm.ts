@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { REASONING_EFFORTS } from "@workee/shared";
 
 const llmConfigSchema = z.object({
   model: z.string().trim().min(1),
   temperature: z.number().min(0).max(2),
+  reasoningEffort: z.enum(REASONING_EFFORTS).default("low"),
   systemMessage: z.string().trim().min(1),
 });
 
@@ -155,6 +157,7 @@ function parseLlmConfigText(text: string): unknown {
   } catch {
     const model = text.match(/"model"\s*:\s*"([^"]+)"/)?.[1];
     const temperature = Number(text.match(/"temperature"\s*:\s*(-?[0-9.]+)/)?.[1]);
+    const reasoningEffort = text.match(/"reasoningEffort"\s*:\s*"([^"]+)"/)?.[1];
     const marker = text.indexOf('"systemMessage"');
     if (marker === -1) {
       throw new Error("invalid JSON");
@@ -179,6 +182,11 @@ function parseLlmConfigText(text: string): unknown {
       throw new Error("invalid JSON");
     }
 
-    return { model, temperature, systemMessage };
+    return {
+      model,
+      temperature,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      systemMessage,
+    };
   }
 }

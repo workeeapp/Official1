@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   digitalEmployees,
+  jerusalemParts,
   workspaceHumans,
   type EmployeeUsageSummary,
   type PublicEmployee,
@@ -120,30 +121,42 @@ export async function getTeamUsageSummary(
 ): Promise<TeamUsageSummary> {
   const humanIds = new Set(workspaceHumans(employees).map((employee) => employee.id));
   const digitalIds = new Set(digitalEmployees(employees).map((employee) => employee.id));
-  const where = { conversation: { userId } };
-  const [bySpeaker, byWorker] = await Promise.all([
-    prisma.llmUsage.groupBy({ by: ["employeeId"], where, _sum: { costUsd: true } }),
-    prisma.llmUsage.groupBy({ by: ["digitalEmployeeId"], where, _sum: { costUsd: true } }),
-  ]);
+  const rows = await prisma.llmUsage.findMany({
+    where: { conversation: { userId } },
+    select: { employeeId: true, digitalEmployeeId: true, costUsd: true, createdAt: true },
+  });
 
   const perEmployee = new Map<string, number>();
-  const add = (id: string, cost: Prisma.Decimal | null) => {
-    perEmployee.set(id, (perEmployee.get(id) ?? 0) + (cost ? Number(cost) : 0));
+  const perMonth = new Map<string, Map<string, number>>();
+  const add = (bucket: Map<string, number>, id: string, cost: number) => {
+    bucket.set(id, (bucket.get(id) ?? 0) + cost);
   };
-  for (const row of bySpeaker) {
-    add(row.employeeId, row._sum.costUsd);
-  }
-  for (const row of byWorker) {
-    add(row.digitalEmployeeId, row._sum.costUsd);
+  for (const row of rows) {
+    const cost = row.costUsd ? Number(row.costUsd) : 0;
+    const { year, month } = jerusalemParts(row.createdAt);
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    let monthBucket = perMonth.get(key);
+    if (!monthBucket) {
+      monthBucket = new Map();
+      perMonth.set(key, monthBucket);
+    }
+    for (const bucket of [perEmployee, monthBucket]) {
+      add(bucket, row.employeeId, cost);
+      add(bucket, row.digitalEmployeeId, cost);
+    }
   }
 
-  const sum = (ids: Set<string>) =>
-    [...ids].reduce((total, id) => total + (perEmployee.get(id) ?? 0), 0);
-  const humanEmployeesUsd = sum(humanIds);
-  return {
-    allEmployeesUsd: humanEmployeesUsd + sum(digitalIds),
-    humanEmployeesUsd,
+  const totals = (bucket: Map<string, number>) => {
+    const sum = (ids: Set<string>) =>
+      [...ids].reduce((total, id) => total + (bucket.get(id) ?? 0), 0);
+    const humanEmployeesUsd = sum(humanIds);
+    return { allEmployeesUsd: humanEmployeesUsd + sum(digitalIds), humanEmployeesUsd };
   };
+  const months = [...perMonth.entries()]
+    .map(([month, bucket]) => ({ month, ...totals(bucket) }))
+    .filter((row) => row.allEmployeesUsd !== 0 || row.humanEmployeesUsd !== 0)
+    .sort((a, b) => b.month.localeCompare(a.month));
+  return { ...totals(perEmployee), months };
 }
 
 export async function recordLlmUsage(input: {

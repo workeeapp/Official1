@@ -4,7 +4,7 @@ import type {
   EmployeeInput,
   PublicEmployee,
 } from "@workee/shared";
-import { humanEmployees } from "@workee/shared";
+import { humanEmployees, parseReasoningEffort } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
 import { ConflictError, NotFoundError } from "../utils/errors.js";
@@ -23,6 +23,7 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     phone: employee.phone,
     model: employee.model,
     temperature: employee.temperature,
+    reasoningEffort: parseReasoningEffort(employee.reasoningEffort),
     instructions: employee.instructions,
     protected: employee.isProtected,
     isOwner: kind === "human" ? employee.isOwner : false,
@@ -34,6 +35,7 @@ export function getDigitalEmployeeDefaults(): DigitalEmployeeDefaults {
   return {
     model: config.model,
     temperature: config.temperature,
+    reasoningEffort: config.reasoningEffort,
     instructions: config.systemMessage,
   };
 }
@@ -65,6 +67,8 @@ export async function getLucyPromptDefaults(
       typeof lucy.temperature === "number" && Number.isFinite(lucy.temperature)
         ? lucy.temperature
         : fileDefaults.temperature,
+    reasoningEffort:
+      parseReasoningEffort(lucy.reasoningEffort) ?? fileDefaults.reasoningEffort,
     instructions: lucy.instructions?.trim() || fileDefaults.instructions,
   };
 }
@@ -103,6 +107,7 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
       nickname: LUCY_NAME,
       model: defaults.model,
       temperature: defaults.temperature,
+      reasoningEffort: defaults.reasoningEffort,
       instructions: defaults.instructions,
     },
   });
@@ -164,6 +169,8 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
       typeof input.temperature === "number" && Number.isFinite(input.temperature)
         ? input.temperature
         : defaults.temperature;
+    const reasoningEffort =
+      parseReasoningEffort(input.reasoningEffort) ?? defaults.reasoningEffort;
     const instructions = input.instructions?.trim() || defaults.instructions;
     return {
       kind: "digital" as const,
@@ -174,6 +181,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
       phone: null,
       model,
       temperature,
+      reasoningEffort,
       instructions,
       isOwner: false,
     };
@@ -188,6 +196,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
     phone: input.phone ?? null,
     model: null,
     temperature: null,
+    reasoningEffort: null,
     instructions: null,
     isOwner: input.isOwner === true,
   };

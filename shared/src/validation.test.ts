@@ -95,6 +95,7 @@ describe("validateEmployeeInput", () => {
     });
     expect(errors.model).toBe("Model is required");
     expect(errors.temperature).toBe("Temperature is required");
+    expect(errors.reasoningEffort).toBe("Reasoning effort is required");
     expect(errors.instructions).toBe("Instructions are required");
     expect(errors.surname).toBeUndefined();
   });
@@ -106,9 +107,23 @@ describe("validateEmployeeInput", () => {
         name: "לוסי",
         model: "gpt-4.1-mini",
         temperature: 0,
+        reasoningEffort: "low",
         instructions: "You manage lists and filings.",
       }),
     ).toEqual({});
+  });
+
+  it("rejects an unknown reasoning effort", () => {
+    expect(
+      validateEmployeeInput({
+        kind: "digital",
+        name: "לוסי",
+        model: "gpt-6-luna",
+        temperature: 0,
+        reasoningEffort: "extreme",
+        instructions: "You manage lists and filings.",
+      }).reasoningEffort,
+    ).toBe("Reasoning effort is required");
   });
 });
 

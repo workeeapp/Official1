@@ -100,6 +100,20 @@ describe("gpt-6 Responses request", () => {
     });
   });
 
+  it("sends the chosen effort and drops temperature when effort is not none", () => {
+    const body = toResponsesCreateBody({
+      conversationId: "conv_1",
+      message: "hi",
+      model: "gpt-6-luna",
+      temperature: 0,
+      reasoningEffort: "low",
+      instructions: "You are לוסי.",
+    });
+
+    expect(body.reasoning).toEqual({ effort: "low" });
+    expect("temperature" in body).toBe(false);
+  });
+
   it("does not add reasoning for gpt-4.1", () => {
     const body = toResponsesCreateBody({
       conversationId: "conv_1",

@@ -16,6 +16,7 @@ import {
   type LlmMetadata,
   type LlmReplyButton,
   type PublicEmployee,
+  type ReasoningEffort,
 } from "@workee/shared";
 import { loadLlmConfig, type LlmConfig, type LlmJsonSchemaFormat } from "../config/llm.js";
 import { ValidationError } from "../utils/errors.js";
@@ -179,6 +180,7 @@ function buildOpenAiRequest(input: {
   message: string;
   model: string;
   temperature: number;
+  reasoningEffort?: ReasoningEffort;
   instructions: string;
   textFormat?: LlmJsonSchemaFormat;
 }): Record<string, unknown> {
@@ -237,6 +239,7 @@ function llmConfigForDigital(digital: PublicEmployee): LlmConfig {
   return {
     model,
     temperature,
+    reasoningEffort: digital.reasoningEffort ?? base.reasoningEffort,
     systemMessage,
     ...(base.responseFormat ? { responseFormat: base.responseFormat } : {}),
   };
@@ -456,9 +459,9 @@ function workerTargetingInstructions(
     "Example: «יש לי פגישה … מחר בבוקר ב08:00 עם המנהל» → tasks add now with שעה לביצוע:\"08:00\"; never ask באיזו שעה.",
     "If omitted on a normal list item, the action applies only to the current speaker.",
     `Work assigned to YOU → lists tasks add, targets: ["${workerName}"]. The item is the work itself. Do not put that task on the speaker. Do not handoff.`,
-    `What YOU still need to do / check, your tasks, or YOUR reminders (${WORKER_INVENTORY_ASKS}) → INVENTORY only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Include every OPEN_JOBS row, including scheduled=true deferred checks — phrase from ask; scheduled → note not yet due, do not ask now. Do NOT RAISE a raisable job in that reply. Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON.`,
+    `What YOU still need to do / check, your tasks, or YOUR reminders (${WORKER_INVENTORY_ASKS}) → INVENTORY only from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present). Include every OPEN_JOBS row, including scheduled=true deferred checks — phrase from ask; scheduled → note not yet due, do not ask now. Do NOT RAISE a raisable job in that reply. Worker tasks להזכיר ל… / לשלוח הודעה ל… count only if listed there now. Never say you have none when one is listed. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no reminder parentheses. Do not invent saved jobs from earlier chat that are missing from this JSON.`,
     STATUS_ADDRESSEE_RULE,
-    `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or reminders.remove / reminders.update with its reminder.reminder_id (a new time → reminders.update). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
+    `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. On each such • line also name the humans the row involves in parentheses: asked_by plus every name in for, de-duplicated, comma-separated, never yourself — keep the viewer in it, e.g. «לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». These people-parentheses come before the «(תזכורת: …)» parentheses. Skip them when only one person is involved or the item name already shows all of them (פגישה (עמית, ערן)). Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or reminders.remove / reminders.update with its reminder.reminder_id (a new time → reminders.update). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
     "If asked what you can do, list every capability: any list, tasks, meetings, filings, messages, and reminders. Do not shorten it.",
     "Send NOW (no delay) → metadata.messages. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []. Do not also emit messages for a delayed send.",
@@ -1246,7 +1249,7 @@ export async function sendChatMessage(input: {
           : "If asked what ANOTHER person needs to buy or do (מה טל צריך לקנות / מה יש למיכל במטלות): answer from EMPLOYEE_SAVED_DATA for that owner — same bullet layout; e.g. «טל צריך לקנות:\\n• שוקו».",
         guestSpeaker
           ? ""
-          : `If asked what you still need to do/check, which tasks you have, or what YOUR reminders are (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only — every OPEN_JOBS row including scheduled=true; phrase from ask; scheduled → not yet due, do not ask the check now; do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. List jobs one • per line. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no parentheses. Never emit metadata.query.`,
+          : `If asked what you still need to do/check, which tasks you have, or what YOUR reminders are (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only — every OPEN_JOBS row including scheduled=true; phrase from ask; scheduled → not yet due, do not ask the check now; do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. List jobs one • per line. A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no reminder parentheses. Before that, name the humans the row involves (asked_by + for, de-duplicated, never yourself, viewer included) in parentheses when there are two or more and the item name does not already show them — e.g. «לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». Never emit metadata.query.`,
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
         "Status / דוח / מה יש לי / show a list: write the full answer in response from EMPLOYEE_SAVED_DATA. Use short intro + one • item per line; never a dense paragraph. Item with urgency → append «דחוף» / «דחוף מאוד» on that line; מה יש לי דחוף → only those. כל מה ששמור / סיכום מלא → FULL DUMP layout (all sections), not tasks only.",
         "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — a short היי after מה תרצה שאשלח is still the answer to your question). Ask about X by name → that person's visible rows. STANDING / recurring: before «אין לך…», scan חוזר / next_occurrences (and clock next_occurrences); match next_occurrences first then תאריך לביצוע; FORBIDDEN empty answer when the asked date is in next_occurrences. Empty timed window only after that scan → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
@@ -1309,6 +1312,7 @@ export async function sendChatMessage(input: {
       message,
       model: config.model,
       temperature: config.temperature,
+      reasoningEffort: config.reasoningEffort,
       instructions,
       textFormat: config.responseFormat,
     });
@@ -1318,6 +1322,7 @@ export async function sendChatMessage(input: {
         message,
         model: config.model,
         temperature: config.temperature,
+        reasoningEffort: config.reasoningEffort,
         instructions,
         textFormat: config.responseFormat,
       });
@@ -1333,6 +1338,7 @@ export async function sendChatMessage(input: {
         message,
         model: config.model,
         temperature: config.temperature,
+        reasoningEffort: config.reasoningEffort,
         instructions,
         textFormat: config.responseFormat,
       });
@@ -1341,6 +1347,7 @@ export async function sendChatMessage(input: {
         message,
         model: config.model,
         temperature: config.temperature,
+        reasoningEffort: config.reasoningEffort,
         instructions,
         textFormat: config.responseFormat,
       });

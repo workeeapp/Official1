@@ -42,6 +42,7 @@ vi.mock("@/services/employee.service", async () => {
       teamUsage: vi.fn().mockResolvedValue({
         allEmployeesUsd: 0,
         humanEmployeesUsd: 0,
+        months: [],
       }),
       digitalDefaults: vi.fn().mockResolvedValue({}),
       configFileDefaults: vi.fn().mockResolvedValue({}),

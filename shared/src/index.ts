@@ -7,6 +7,7 @@ export type {
   EmployeesResponse,
   EmployeeInput,
   EmployeeKind,
+  ReasoningEffort,
   DigitalEmployeeDefaults,
   EmployeeRecordField,
   EmployeeRecordItem,
@@ -14,6 +15,7 @@ export type {
   EmployeeRecordsResponse,
   EmployeeUsageSummary,
   TeamUsageSummary,
+  TeamUsageMonth,
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,
@@ -60,6 +62,8 @@ export {
   isProtectedEmployee,
   isAccountOwner,
   chatThreadKey,
+  REASONING_EFFORTS,
+  parseReasoningEffort,
 } from "./types";
 export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
 export {

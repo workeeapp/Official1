@@ -10,6 +10,7 @@ const result = await prisma.employee.updateMany({
     instructions: config.systemMessage,
     model: config.model,
     temperature: config.temperature,
+    reasoningEffort: config.reasoningEffort,
   },
 });
 console.log(

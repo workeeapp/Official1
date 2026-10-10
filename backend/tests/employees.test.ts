@@ -178,6 +178,7 @@ describe("employees API", () => {
         name: "דיאנה",
         model: "gpt-4.1",
         temperature: 0.4,
+        reasoningEffort: "medium",
         instructions: "Diana custom system prompt",
       });
 
@@ -187,6 +188,7 @@ describe("employees API", () => {
       name: "דיאנה",
       model: "gpt-4.1",
       temperature: 0.4,
+      reasoningEffort: "medium",
       instructions: "Diana custom system prompt",
     });
     expect(create).toHaveBeenCalledWith({
@@ -195,6 +197,7 @@ describe("employees API", () => {
         name: "דיאנה",
         model: "gpt-4.1",
         temperature: 0.4,
+        reasoningEffort: "medium",
         instructions: "Diana custom system prompt",
       }),
     });

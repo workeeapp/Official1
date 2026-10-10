@@ -89,6 +89,7 @@ describe("Employees page", () => {
           phone: null,
           model: "gpt-4.1-mini",
           temperature: 0,
+          reasoningEffort: "low" as const,
           instructions: "You manage lists and filings.",
         },
         {
@@ -125,17 +126,23 @@ describe("Employees page", () => {
     teamUsageMock.mockReset().mockResolvedValue({
       allEmployeesUsd: 0.0196,
       humanEmployeesUsd: 0.0098,
+      months: [
+        { month: "2026-10", allEmployeesUsd: 0.0126, humanEmployeesUsd: 0.0063 },
+        { month: "2026-09", allEmployeesUsd: 0.007, humanEmployeesUsd: 0.0035 },
+      ],
     });
     updateRecordMock.mockReset();
     deleteRecordMock.mockReset();
     digitalDefaultsMock.mockReset().mockResolvedValue({
       model: "gpt-4.1-mini",
       temperature: 0,
+      reasoningEffort: "low",
       instructions: "You manage lists and filings.",
     });
     configFileDefaultsMock.mockReset().mockResolvedValue({
       model: "gpt-file-model",
       temperature: 0.7,
+      reasoningEffort: "low",
       instructions: "Prompt from LLM.config.json",
     });
     updateEmployeeMock.mockReset();
@@ -193,6 +200,16 @@ describe("Employees page", () => {
     renderEmployees();
 
     expect(await screen.findByTestId("team-usage")).toHaveTextContent("$0.0196 ($0.0098)");
+  });
+
+  it("splits the team amounts by month, newest first", async () => {
+    renderEmployees();
+
+    const months = await screen.findByTestId("team-usage-months");
+    const rows = within(months).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("10/2026 $0.0126 ($0.0063)");
+    expect(rows[1]).toHaveTextContent("09/2026 $0.007 ($0.0035)");
   });
 
   it("shows conversation count and total LLM cost for the selected employee", async () => {
@@ -314,6 +331,7 @@ describe("Employees page", () => {
     expect(await screen.findByLabelText("Nickname")).toBeInTheDocument();
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1-mini");
     expect(screen.getByLabelText("Temperature")).toHaveValue(0);
+    expect(screen.getByLabelText("Reasoning effort")).toHaveValue("low");
     expect(screen.getByLabelText("Instructions")).toHaveValue(
       "You manage lists and filings.",
     );
@@ -329,11 +347,13 @@ describe("Employees page", () => {
       .mockResolvedValueOnce({
         model: "gpt-4.1-mini",
         temperature: 0,
+        reasoningEffort: "low",
         instructions: "You manage lists and filings.",
       })
       .mockResolvedValueOnce({
         model: "gpt-4.1",
         temperature: 0.3,
+        reasoningEffort: "medium",
         instructions: "Lucy live prompt from DB",
       });
     renderEmployees();
@@ -351,6 +371,27 @@ describe("Employees page", () => {
     );
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-4.1");
     expect(screen.getByLabelText("Temperature")).toHaveValue(0.3);
+    expect(screen.getByLabelText("Reasoning effort")).toHaveValue("medium");
+  });
+
+  it("saves the reasoning effort chosen next to the model", async () => {
+    const user = userEvent.setup();
+    updateEmployeeMock.mockResolvedValue({});
+    renderEmployees();
+
+    await user.click(await screen.findByTitle("לוסי · gpt-4.1-mini"));
+    expect(screen.getByTestId("employee-contact")).toHaveTextContent("Reasoning low");
+    await user.click(screen.getByRole("button", { name: "Update employee" }));
+
+    const effort = screen.getByLabelText("Reasoning effort");
+    expect(effort).toHaveValue("low");
+    await user.selectOptions(effort, "high");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateEmployeeMock).toHaveBeenCalledWith(
+      "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      expect.objectContaining({ model: "gpt-4.1-mini", reasoningEffort: "high" }),
+    );
   });
 
   it("lets Lucy be edited but not deleted", async () => {

@@ -1,3 +1,5 @@
+import { parseReasoningEffort } from "./types.js";
+
 export const USERNAME_MIN_LENGTH = 3;
 export const USERNAME_MAX_LENGTH = 32;
 export const PASSWORD_MIN_LENGTH = 8;
@@ -87,6 +89,7 @@ export interface EmployeeFieldErrors {
   phone?: string;
   model?: string;
   temperature?: string;
+  reasoningEffort?: string;
   instructions?: string;
 }
 
@@ -133,6 +136,7 @@ export function validateEmployeeInput(input: {
   phone?: unknown;
   model?: unknown;
   temperature?: unknown;
+  reasoningEffort?: unknown;
   instructions?: unknown;
 }): EmployeeFieldErrors {
   const errors: EmployeeFieldErrors = {};
@@ -155,6 +159,10 @@ export function validateEmployeeInput(input: {
       errors.temperature = "Temperature is required";
     } else if (temperature < 0 || temperature > 2) {
       errors.temperature = "Temperature must be between 0 and 2";
+    }
+
+    if (!parseReasoningEffort(input.reasoningEffort)) {
+      errors.reasoningEffort = "Reasoning effort is required";
     }
 
     if (
@@ -220,6 +228,7 @@ export function hasEmployeeFieldErrors(errors: EmployeeFieldErrors): boolean {
       errors.phone ||
       errors.model ||
       errors.temperature ||
+      errors.reasoningEffort ||
       errors.instructions,
   );
 }

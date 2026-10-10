@@ -251,6 +251,24 @@ export function EmployeesPage() {
                 </span>
               ) : null}
             </h1>
+            {teamUsage && teamUsage.months.length > 0 ? (
+              <ul
+                data-testid="team-usage-months"
+                className="mt-1 space-y-0.5 text-sm text-text-secondary"
+              >
+                {teamUsage.months.map((row) => {
+                  const [year, month] = row.month.split("-");
+                  return (
+                    <li key={row.month}>
+                      <span className="font-medium">
+                        {month}/{year}
+                      </span>{" "}
+                      {formatUsd(row.allEmployeesUsd)} ({formatUsd(row.humanEmployeesUsd)})
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <p
@@ -312,6 +330,9 @@ export function EmployeesPage() {
                   selectedEmployee.model,
                   selectedEmployee.temperature != null
                     ? `Temperature ${selectedEmployee.temperature}`
+                    : null,
+                  selectedEmployee.reasoningEffort
+                    ? `Reasoning ${selectedEmployee.reasoningEffort}`
                     : null,
                 ]
                   .filter(Boolean)

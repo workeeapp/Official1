@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { ReasoningEffort } from "@workee/shared";
 import type { LlmJsonSchemaFormat } from "../config/llm.js";
 import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
@@ -25,6 +26,8 @@ export type LlmResponseInput = {
   message: string;
   model: string;
   temperature: number;
+  /** gpt-6 only; defaults to "none". */
+  reasoningEffort?: ReasoningEffort;
   instructions: string;
   textFormat?: LlmJsonSchemaFormat;
 };
@@ -53,7 +56,13 @@ export function toResponsesCreateBody(
     body.text = { format: input.textFormat };
   }
   if (usesGpt6RequestRules(input.model)) {
-    body.reasoning = { effort: "none" };
+    const effort = input.reasoningEffort ?? "none";
+    body.reasoning = { effort };
+    // gpt-6 rejects temperature unless reasoning effort is "none".
+    if (effort === "none") {
+      body.temperature = input.temperature;
+    }
+    return body;
   }
   body.temperature = input.temperature;
   return body;
