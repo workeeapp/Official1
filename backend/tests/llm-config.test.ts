@@ -91,6 +91,8 @@ describe("LLM action schema", () => {
       "FORBIDDEN: empty «אין לך…» when that date appears in any next_occurrences",
     );
     expect(config.systemMessage).toContain("RECURRING IN A DATE ANSWER");
+    expect(config.systemMessage).toContain("RECURRENCE START (critical)");
+    expect(config.systemMessage).toContain('start:"2026-10-20"');
     expect(config.systemMessage).not.toContain("confirm_share");
     expect(config.systemMessage).not.toContain("PENDING_ACTION_STATE");
     expect(config.systemMessage).toContain("FORBIDDEN: «לרשימת הקניות שלך»");

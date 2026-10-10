@@ -300,7 +300,10 @@
                           },
                           "recurrence": {
                             "type": ["object", "null"],
-                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating."
+                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Plus start = YYYY-MM-DD from which the rule applies (first occurrence = first matching day on/after it). Set start whenever they say when it begins (החל מעוד 10 ימים / מהשבוע הבא / החל מ־23.10 / מנובמבר) — resolve via SESSION_CLOCK calendar. For every-N rules (interval > 1: כל שבועיים / כל 3 שבועות / כל חודשיים) start is REQUIRED: it fixes which weeks/months are on; if they gave no starting point, ask once which is first (e.g. «שישי הקרוב 16.10 או זה שאחריו 23.10?») with lists empty. Omitted start = today. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating; a re-sent rule without start keeps the row's start.",
+                            "properties": {
+                              "start": { "type": "string", "description": "YYYY-MM-DD the rule starts from. «כל שבועיים ביום שישי החל מעוד 10 ימים» on Sat 2026-10-10 → start 2026-10-20 (first occurrence Fri 2026-10-23)." }
+                            }
                           },
                           "occurrence_done": {
                             "type": ["string", "boolean", "null"],
@@ -559,7 +562,7 @@
                     },
                     "recurrence": {
                       "type": ["object", "null"],
-                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly).",
+                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly). The first occurrence is anchored by reminders[].date: put the start day there (החל מעוד 10 ימים / החל מ־23.10 → that YYYY-MM-DD). For every-N rules (interval > 1) without a stated start, ask which occurrence is first.",
                       "properties": {
                         "freq": {
                           "type": "string",

@@ -14,6 +14,7 @@ import {
   extractOccurrenceDone,
   itemDoneThrough,
   itemNextOccurrences,
+  keepRecurrenceStart,
   markOccurrenceDone,
   shapeItemRecurrence,
   stripRecurrenceMeta,
@@ -194,9 +195,43 @@ describe("recurring tasks", () => {
     expect(clearItemRecurrence({ ...gym.item })).toEqual({ "שם מטלה": "ללכת לחדר כושר" });
   });
 
+  it("every two weeks from a stated start keeps the cycle, even after the start passes", () => {
+    // Sat 2026-10-10: «כל שבועיים ביום שישי החל מעוד 10 ימים ב־11:45».
+    const saturday = new Date("2026-10-10T03:00:00.000Z");
+    const kids = shapeItemRecurrence(
+      {
+        "שם מטלה": "לאסוף את הילדים",
+        recurrence: { freq: "weekly", interval: 2, weekdays: [5], time: "11:45", start: "2026-10-20" },
+      },
+      saturday,
+    );
+    expect(kids.explicitStart).toBe(true);
+    expect(itemNextOccurrences(kids.item, saturday)?.slice(0, 3)).toEqual([
+      "2026-10-23 11:45",
+      "2026-11-06 11:45",
+      "2026-11-20 11:45",
+    ]);
+    const nextSaturday = new Date("2026-10-24T03:00:00.000Z");
+    expect(itemNextOccurrences(kids.item, nextSaturday)?.[0]).toBe("2026-11-06 11:45");
+  });
+
+  it("an update re-sending the rule without start keeps the row's start", () => {
+    const previous = {
+      "שם מטלה": "x",
+      [RECURRENCE_META_KEY]: { freq: "weekly", interval: 2, weekdays: [5], start: "2026-10-20" },
+    };
+    const shaped = shapeItemRecurrence(
+      { recurrence: { freq: "weekly", interval: 2, weekdays: [5], time: "12:00" } },
+      NOW,
+    );
+    expect(shaped.explicitStart).toBe(false);
+    const merged = keepRecurrenceStart({ ...previous, ...shaped.item }, previous);
+    expect(merged[RECURRENCE_META_KEY]).toMatchObject({ time: "12:00", start: "2026-10-20" });
+  });
+
   it("items without recurrence are untouched", () => {
     const item = { "שם מטלה": "לקנות חלב" };
-    expect(shapeItemRecurrence(item)).toEqual({ item, clear: false });
+    expect(shapeItemRecurrence(item)).toEqual({ item, clear: false, explicitStart: false });
     expect(itemNextOccurrences(item)).toBeNull();
   });
 });

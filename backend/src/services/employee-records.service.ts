@@ -20,6 +20,7 @@ import {
   extractOccurrenceDone,
   itemDoneThrough,
   itemNextOccurrences,
+  keepRecurrenceStart,
   markOccurrenceDone,
   shapeItemRecurrence,
   stripRecurrenceMeta,
@@ -53,7 +54,8 @@ export interface EmployeeRecordSnapshot {
     columns?: string[];
     title_field?: string;
     owner: string;
-    scope: ItemScope;
+    /** shared_items = items shared out of someone else's personal list (not a shared list). */
+    scope: ItemScope | "shared_items";
     /** Partner display names when scope is shared (includes owner). */
     shared_with?: string[];
     items: Record<string, unknown>[];
@@ -467,7 +469,8 @@ export function formatEmployeeContext(
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
-    "lists may include scope=personal|shared. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "scope=shared_items is NOT a shared list: it is another person's personal list (owner) from which only these items were shared with the viewer — each item has its own shared_with. Never count it, name it, or call it «רשימה משותפת» (no «מטלות» / «קניות» as a shared list). «איזה רשימות משותפות יש לי» → only scope=shared entries. Mention shared_items only when asked about items shared with them / what X shared / their tasks or shopping for a day — e.g. «ערן שיתף איתך: …».",
     "A single item may carry its own shared_with (owner + partners of that item). It is the truth for that item — prefer it over the list's shared_with. When listing such an item, append the partners other than the viewer in parentheses on its • line, e.g. «ללכת לרופא (עם ערן) — 13.10», unless the item name already shows them (e.g. פגישה (עמית, ערן)).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, append «דחוף» / «דחוף מאוד» on that • line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
@@ -996,26 +999,22 @@ export async function getEmployeeRecordSnapshot(
   );
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
-  /** owner name → bucket → ids that can see those items (owner first). */
-  const sharedAudience = new Map<string, Map<string, string[]>>();
   const seenPartnerListIds = new Set<string>();
   for (const item of sharedItems) {
     if (!visibleToIncludes(item.visibleTo, employeeId)) {
       continue;
     }
+    // Items of a shared list the viewer is on arrive with that list (partnerLists).
+    if (item.list.scope === "shared" && visibleToIncludes(item.list.visibleTo, employeeId)) {
+      continue;
+    }
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
-    const audience = sharedAudience.get(owner) ?? new Map<string, string[]>();
-    audience.set(
-      item.list.listType,
-      uniqueIds([
-        item.list.employee.id,
-        ...(audience.get(item.list.listType) ?? []),
-        ...idList(item.visibleTo),
-      ]),
-    );
-    sharedAudience.set(owner, audience);
-    const items = byType.get(item.list.listType) ?? [];
+    const bucketKey =
+      item.list.listType === "custom" && item.list.name.trim()
+        ? `custom\0${item.list.name.trim()}`
+        : item.list.listType;
+    const items = byType.get(bucketKey) ?? [];
     items.push(
       withVisibility(
         item.data,
@@ -1029,7 +1028,7 @@ export async function getEmployeeRecordSnapshot(
         },
       ),
     );
-    byType.set(item.list.listType, items);
+    byType.set(bucketKey, items);
     sharedByOwner.set(owner, byType);
   }
 
@@ -1162,16 +1161,13 @@ export async function getEmployeeRecordSnapshot(
       if (already) {
         continue;
       }
-      const audience = sharedAudience.get(owner)?.get(bucketKey) ?? [];
-      const sharedWith = audience
-        .map((id) => names.get(id) ?? "")
-        .filter(Boolean);
+      // Not a shared list: only these items of the owner's own list were shared;
+      // each item carries its own shared_with.
       lists.push({
         list_type: listType,
         ...(listName ? { list_name: listName } : {}),
         owner,
-        scope: "shared",
-        shared_with: sharedWith.length > 0 ? sharedWith : [owner],
+        scope: "shared_items",
         items,
       });
     }
@@ -2102,7 +2098,11 @@ async function applyListAction(
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
         : normalizeListItemData(fieldsItem);
-    const ruledRecord = shaped.clear ? clearItemRecurrence(mergedRecord) : mergedRecord;
+    const ruledRecord = shaped.clear
+      ? clearItemRecurrence(mergedRecord)
+      : existing && !shaped.explicitStart
+        ? keepRecurrenceStart(mergedRecord, existing.data)
+        : mergedRecord;
     const nextDataRecord =
       done.doneDate && resolvedAction.action === "update"
         ? markOccurrenceDone(ruledRecord, done.doneDate)

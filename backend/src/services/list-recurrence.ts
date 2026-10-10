@@ -6,6 +6,7 @@ import {
   jerusalemParts,
   jerusalemWallTimeToDate,
   listOccurrences,
+  nextOccurrence,
   parseRecurrence,
   serializeRecurrence,
   type Recurrence,
@@ -53,28 +54,45 @@ function wantsClear(value: unknown): boolean {
 export function shapeItemRecurrence(
   item: Record<string, unknown>,
   now = new Date(),
-): { item: Record<string, unknown>; clear: boolean } {
+): { item: Record<string, unknown>; clear: boolean; explicitStart: boolean } {
   if (!("recurrence" in item)) {
-    return { item, clear: false };
+    return { item, clear: false, explicitStart: false };
   }
   const { recurrence, ...rest } = item;
   const rule = parseRecurrence(recurrence);
   if (!rule || rule.freq === "interval") {
-    return { item: rest, clear: wantsClear(recurrence) };
+    return { item: rest, clear: wantsClear(recurrence), explicitStart: false };
   }
-  const start = asRecord(recurrence).start;
+  const raw = asRecord(recurrence).start;
+  const explicitStart = typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim());
   return {
     item: {
       ...rest,
       [RECURRENCE_META_KEY]: {
         ...serializeRecurrence(rule),
-        start:
-          typeof start === "string" && /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : ymd(now),
+        start: explicitStart ? (raw as string).trim() : ymd(now),
       },
       [RECURRENCE_DISPLAY_KEY]: formatRecurrenceHe(rule),
     },
     clear: false,
+    explicitStart,
   };
+}
+
+/**
+ * lists.update that re-sends a rule without `start` keeps the row's original start,
+ * so an every-N cycle does not shift to the edit day.
+ */
+export function keepRecurrenceStart(
+  data: Record<string, unknown>,
+  previous: unknown,
+): Record<string, unknown> {
+  const meta = asRecord(data[RECURRENCE_META_KEY]);
+  const prevStart = asRecord(asRecord(previous)[RECURRENCE_META_KEY]).start;
+  if (!parseRecurrence(meta) || typeof prevStart !== "string" || !prevStart) {
+    return data;
+  }
+  return { ...data, [RECURRENCE_META_KEY]: { ...meta, start: prevStart } };
 }
 
 /** lists.update field: this occurrence of a standing task was done (true = today, or YYYY-MM-DD). */
@@ -200,9 +218,13 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
     const first = firstOccurrence(rule, startDay, true);
     occurrences = listOccurrences(rule, { first, limit: rule.count, horizon }).filter(pending);
   } else {
-    const from = startDay.getTime() > today.getTime() ? startDay : today;
+    // Walk from the start (not from today) so every-N cycles keep their parity.
+    let first = firstOccurrence(rule, startDay, true);
+    for (let guard = 0; first.getTime() < today.getTime() && guard < 5000; guard += 1) {
+      first = nextOccurrence(rule, first);
+    }
     occurrences = listOccurrences(rule, {
-      first: firstOccurrence(rule, from, true),
+      first,
       limit: OCCURRENCE_LIMIT + 1,
       horizon,
     }).filter(pending);
