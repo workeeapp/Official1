@@ -196,6 +196,7 @@ Employee instructions field limit raised so Lucy’s full prompt can be saved fr
 - API serves `frontend/dist` (static + `index.html` fallback) when present — same origin as WhatsApp tunnel (`wa.workee.site`).
 - `CLIENT_ORIGIN` may be a comma-separated list.
 - `npm run refresh` → `scripts/refresh-workee.ps1`: pull, install, migrate, generate, build SPA, free ports, restart, health-check.
+- By default refresh also runs `lucy:sync-prompt` (push `LLM.config.json` into Lucy + digital workers still on her previous prompt). Skip with `-InheritConfig:$false`, `npm run refresh:no-inherit`, or `WORKEE_REFRESH_INHERIT_CONFIG=0`.
 
 **Code:** `backend/src/utils/frontend-dist.ts`, `backend/src/app.ts`.
 

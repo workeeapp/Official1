@@ -1,9 +1,23 @@
 # One-shot: pull, install, migrate, generate, build SPA, free ports, restart, health-check.
 # Serves https://wa.workee.site via API+frontend/dist when cloudflared points at the API port.
+#
+# -InheritConfig (default $true): push LLM.config.json into Lucy (+ digital workers
+#   that still share her previous prompt). Override with -InheritConfig:$false or
+#   env WORKEE_REFRESH_INHERIT_CONFIG=0|false|no (1|true|yes forces on).
+param(
+  [bool]$InheritConfig = $true
+)
+
 $ErrorActionPreference = "Stop"
 $env:Path = @("C:\Program Files\nodejs", $env:Path) -join ";"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+if ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(0|false|no)$') {
+  $InheritConfig = $false
+} elseif ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(1|true|yes)$') {
+  $InheritConfig = $true
+}
 
 $PublicOrigin = "https://wa.workee.site"
 $VitePort = 5173
@@ -275,7 +289,7 @@ Write-Step "Applying migrations (db:deploy)"
 npm run db:deploy
 Invoke-NativeOk "db:deploy"
 
-# Windows locks query_engine-windows.dll.node while the API is running — stop
+# Windows locks query_engine-windows.dll.node while the API is running - stop
 # before generate. keep-up may reclaim the port during the frontend build; we
 # stop again immediately before start (below).
 Write-Step "Freeing ports $apiPort / $VitePort before prisma generate"
@@ -284,6 +298,14 @@ Stop-WorkeePorts
 Write-Step "Generating Prisma client"
 npx prisma generate
 Invoke-NativeOk "prisma generate"
+
+if ($InheritConfig) {
+  Write-Step "Inheriting LLM.config.json into Lucy (+ matching digital workers)"
+  npx tsx backend/src/scripts/sync-lucy-prompt.ts
+  Invoke-NativeOk "sync-lucy-prompt"
+} else {
+  Write-Step "Skipping Lucy config inherit (-InheritConfig:`$false)"
+}
 
 Ensure-ClientOrigin
 

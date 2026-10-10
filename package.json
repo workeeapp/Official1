@@ -19,7 +19,9 @@
     "user:create": "tsx backend/src/scripts/create-user.ts",
     "keep-up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/keep-workee-up.ps1",
     "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1",
-    "refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1"
+    "refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1",
+    "refresh:no-inherit": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1 -InheritConfig:$false",
+    "lucy:sync-prompt": "tsx backend/src/scripts/sync-lucy-prompt.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
