@@ -86,11 +86,21 @@ export interface EmployeeRecordsResponse {
   groups: EmployeeRecordGroup[];
 }
 
+export interface EmployeeUsageMonth {
+  /** `YYYY-MM` in Asia/Jerusalem time. */
+  month: string;
+  conversations: number;
+  interactions: number;
+  totalUsd: number;
+}
+
 export interface EmployeeUsageSummary {
   employeeId: string;
   conversations: number;
   interactions: number;
   totalUsd: number;
+  /** Newest first. */
+  months: EmployeeUsageMonth[];
 }
 
 export interface TeamUsageMonth {

@@ -448,6 +448,34 @@ function EmployeeRecordsPanel({
           </span>
         </p>
       ) : null}
+      {usage && usage.months.length > 0 ? (
+        <ul
+          data-testid="employee-usage-months"
+          className="mt-1 space-y-0.5 text-sm text-text-secondary"
+        >
+          {usage.months.map((row) => {
+            const [year, month] = row.month.split("-");
+            return (
+              <li key={row.month} className="flex flex-wrap gap-x-6 gap-y-1">
+                <span className="font-medium">
+                  {month}/{year}
+                </span>
+                <span>
+                  Number of conversations{" "}
+                  <span className="font-semibold text-text-primary">{row.conversations}</span>{" "}
+                  <span title="Interactions">({row.interactions})</span>
+                </span>
+                <span>
+                  Total amount{" "}
+                  <span className="font-semibold text-text-primary">
+                    {formatUsd(row.totalUsd)}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
 
       {status === "loading" ? (
         <p className="mt-4 text-sm text-text-secondary">Loading saved data…</p>

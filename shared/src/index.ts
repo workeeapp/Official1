@@ -13,6 +13,7 @@ export type {
   EmployeeRecordItem,
   EmployeeRecordGroup,
   EmployeeRecordsResponse,
+  EmployeeUsageMonth,
   EmployeeUsageSummary,
   TeamUsageSummary,
   TeamUsageMonth,

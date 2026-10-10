@@ -75,7 +75,8 @@ async function findPrice(candidates: string[]): Promise<LlmPrice | null> {
  * A human is the speaker (`employee_id`); a digital worker is the partner (`digital_employee_id`).
  * Reset / idle / context rotation keeps the ChatConversation row but swaps the OpenAI
  * conversation, so each distinct `openai_conversation_id` with usage is one conversation.
- * Rows chatted in before usage tracking (messages, no usage) count once each.
+ * Rows chatted in before usage tracking (messages, no usage) count once each, in the
+ * month the chat was created. A session spanning two months counts in both months.
  */
 export async function getEmployeeUsageSummary(
   userId: string,
@@ -84,31 +85,66 @@ export async function getEmployeeUsageSummary(
   const involves = {
     OR: [{ employeeId }, { digitalEmployeeId: employeeId }],
   };
-  const usageWhere = { ...involves, conversation: { userId } };
-  const [sessions, untracked, totals] = await Promise.all([
-    prisma.llmUsage.groupBy({
-      by: ["openaiConversationId"],
-      where: usageWhere,
+  const [rows, untracked] = await Promise.all([
+    prisma.llmUsage.findMany({
+      where: { ...involves, conversation: { userId } },
+      select: { openaiConversationId: true, costUsd: true, createdAt: true },
     }),
-    prisma.chatConversation.count({
+    prisma.chatConversation.findMany({
       where: {
         userId,
         AND: [involves, { messages: { some: {} } }, { llmUsages: { none: {} } }],
       },
-    }),
-    prisma.llmUsage.aggregate({
-      where: usageWhere,
-      _sum: { costUsd: true },
-      _count: { _all: true },
+      select: { createdAt: true },
     }),
   ]);
 
-  return {
-    employeeId,
-    conversations: sessions.length + untracked,
-    interactions: totals._count?._all ?? 0,
-    totalUsd: totals._sum.costUsd ? Number(totals._sum.costUsd) : 0,
+  type Bucket = { sessions: Set<string>; untracked: number; interactions: number; totalUsd: number };
+  const newBucket = (): Bucket => ({
+    sessions: new Set(),
+    untracked: 0,
+    interactions: 0,
+    totalUsd: 0,
+  });
+  const all = newBucket();
+  const perMonth = new Map<string, Bucket>();
+  const monthBucket = (at: Date) => {
+    const key = jerusalemMonthKey(at);
+    let bucket = perMonth.get(key);
+    if (!bucket) {
+      bucket = newBucket();
+      perMonth.set(key, bucket);
+    }
+    return bucket;
   };
+
+  for (const row of rows) {
+    const cost = row.costUsd ? Number(row.costUsd) : 0;
+    for (const bucket of [all, monthBucket(row.createdAt)]) {
+      bucket.sessions.add(row.openaiConversationId);
+      bucket.interactions += 1;
+      bucket.totalUsd += cost;
+    }
+  }
+  for (const chat of untracked) {
+    all.untracked += 1;
+    monthBucket(chat.createdAt).untracked += 1;
+  }
+
+  const summarize = (bucket: Bucket) => ({
+    conversations: bucket.sessions.size + bucket.untracked,
+    interactions: bucket.interactions,
+    totalUsd: bucket.totalUsd,
+  });
+  const months = [...perMonth.entries()]
+    .map(([month, bucket]) => ({ month, ...summarize(bucket) }))
+    .sort((a, b) => b.month.localeCompare(a.month));
+  return { employeeId, ...summarize(all), months };
+}
+
+function jerusalemMonthKey(at: Date): string {
+  const { year, month } = jerusalemParts(at);
+  return `${year}-${String(month).padStart(2, "0")}`;
 }
 
 /**
@@ -133,8 +169,7 @@ export async function getTeamUsageSummary(
   };
   for (const row of rows) {
     const cost = row.costUsd ? Number(row.costUsd) : 0;
-    const { year, month } = jerusalemParts(row.createdAt);
-    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const key = jerusalemMonthKey(row.createdAt);
     let monthBucket = perMonth.get(key);
     if (!monthBucket) {
       monthBucket = new Map();

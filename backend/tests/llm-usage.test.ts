@@ -1,32 +1,23 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  usageCreate,
-  usageAggregate,
-  usageGroupBy,
-  usageFindMany,
-  conversationCount,
-  priceFindMany,
-} = vi.hoisted(() => ({
-  usageCreate: vi.fn(),
-  usageAggregate: vi.fn(),
-  usageGroupBy: vi.fn(),
-  usageFindMany: vi.fn(),
-  conversationCount: vi.fn(),
-  priceFindMany: vi.fn(),
-}));
+const { usageCreate, usageFindMany, conversationFindMany, priceFindMany } = vi.hoisted(
+  () => ({
+    usageCreate: vi.fn(),
+    usageFindMany: vi.fn(),
+    conversationFindMany: vi.fn(),
+    priceFindMany: vi.fn(),
+  }),
+);
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     llmUsage: {
       create: usageCreate,
-      aggregate: usageAggregate,
-      groupBy: usageGroupBy,
       findMany: usageFindMany,
     },
     llmModelPrice: { findMany: priceFindMany },
-    chatConversation: { count: conversationCount },
+    chatConversation: { findMany: conversationFindMany },
   },
 }));
 
@@ -91,52 +82,77 @@ describe("getTeamUsageSummary", () => {
 });
 
 describe("getEmployeeUsageSummary", () => {
+  const usage = (id: string, cost: string | null, createdAt: string) => ({
+    openaiConversationId: id,
+    costUsd: cost === null ? null : new Prisma.Decimal(cost),
+    createdAt: new Date(createdAt),
+  });
+
   it("counts each reset session as a conversation and sums cost as speaker or worker", async () => {
     // Same ChatConversation row, reset twice → three OpenAI conversations.
-    usageGroupBy.mockReset().mockResolvedValue([
-      { openaiConversationId: "conv_a" },
-      { openaiConversationId: "conv_b" },
-      { openaiConversationId: "conv_c" },
+    usageFindMany.mockReset().mockResolvedValue([
+      usage("conv_a", "0.005", "2026-10-02T10:00:00Z"),
+      usage("conv_a", "0.0025", "2026-10-02T10:05:00Z"),
+      usage("conv_b", "0.005", "2026-10-03T10:00:00Z"),
+      usage("conv_c", null, "2026-10-04T10:00:00Z"),
     ]);
     // Plus one older chat with messages but no tracked usage.
-    conversationCount.mockResolvedValue(1);
-    usageAggregate.mockResolvedValue({
-      _sum: { costUsd: new Prisma.Decimal("0.0125") },
-      _count: { _all: 9 },
-    });
+    conversationFindMany.mockReset().mockResolvedValue([
+      { createdAt: new Date("2026-10-01T10:00:00Z") },
+    ]);
 
     const summary = await getEmployeeUsageSummary("u1", "e1");
 
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       employeeId: "e1",
       conversations: 4,
-      interactions: 9,
-      totalUsd: 0.0125,
+      interactions: 4,
     });
+    expect(summary.totalUsd).toBeCloseTo(0.0125);
     const involves = { OR: [{ employeeId: "e1" }, { digitalEmployeeId: "e1" }] };
-    expect(usageGroupBy.mock.calls[0][0]).toMatchObject({
-      by: ["openaiConversationId"],
-      where: { ...involves, conversation: { userId: "u1" } },
-    });
-    expect(conversationCount.mock.calls[0][0].where).toMatchObject({
-      userId: "u1",
-      AND: [involves, { messages: { some: {} } }, { llmUsages: { none: {} } }],
-    });
-    expect(usageAggregate.mock.calls[0][0].where).toMatchObject({
+    expect(usageFindMany.mock.calls[0][0].where).toEqual({
       ...involves,
       conversation: { userId: "u1" },
     });
+    expect(conversationFindMany.mock.calls[0][0].where).toMatchObject({
+      userId: "u1",
+      AND: [involves, { messages: { some: {} } }, { llmUsages: { none: {} } }],
+    });
+  });
+
+  it("splits conversations, interactions and cost by Jerusalem month, newest first", async () => {
+    usageFindMany.mockReset().mockResolvedValue([
+      usage("conv_a", "0.001", "2026-09-10T10:00:00Z"),
+      // 22:30 UTC on Sep 30 is already Oct 1 in Jerusalem — same session spans both months.
+      usage("conv_a", "0.002", "2026-09-30T22:30:00Z"),
+      usage("conv_b", "0.004", "2026-10-05T10:00:00Z"),
+    ]);
+    conversationFindMany.mockReset().mockResolvedValue([
+      { createdAt: new Date("2026-08-01T10:00:00Z") },
+    ]);
+
+    const summary = await getEmployeeUsageSummary("u1", "e1");
+
+    expect(summary.conversations).toBe(3);
+    expect(summary.interactions).toBe(3);
+    expect(summary.months.map((m) => m.month)).toEqual(["2026-10", "2026-09", "2026-08"]);
+    const [oct, sep, aug] = summary.months;
+    expect(oct).toMatchObject({ conversations: 2, interactions: 2 });
+    expect(oct.totalUsd).toBeCloseTo(0.006);
+    expect(sep).toMatchObject({ conversations: 1, interactions: 1 });
+    expect(sep.totalUsd).toBeCloseTo(0.001);
+    expect(aug).toEqual({ month: "2026-08", conversations: 1, interactions: 0, totalUsd: 0 });
   });
 
   it("returns zero cost when there is no usage yet", async () => {
-    usageGroupBy.mockResolvedValue([]);
-    conversationCount.mockResolvedValue(0);
-    usageAggregate.mockResolvedValue({ _sum: { costUsd: null }, _count: { _all: 0 } });
+    usageFindMany.mockReset().mockResolvedValue([]);
+    conversationFindMany.mockReset().mockResolvedValue([]);
     expect(await getEmployeeUsageSummary("u1", "e2")).toEqual({
       employeeId: "e2",
       conversations: 0,
       interactions: 0,
       totalUsd: 0,
+      months: [],
     });
   });
 });

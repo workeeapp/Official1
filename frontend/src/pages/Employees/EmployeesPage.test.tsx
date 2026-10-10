@@ -122,6 +122,10 @@ describe("Employees page", () => {
       conversations: 3,
       interactions: 17,
       totalUsd: 0.0021528,
+      months: [
+        { month: "2026-10", conversations: 2, interactions: 12, totalUsd: 0.0015 },
+        { month: "2026-09", conversations: 1, interactions: 5, totalUsd: 0.0006528 },
+      ],
     });
     teamUsageMock.mockReset().mockResolvedValue({
       allEmployeesUsd: 0.0196,
@@ -225,6 +229,15 @@ describe("Employees page", () => {
       "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
       expect.any(AbortSignal),
     );
+
+    const rows = within(screen.getByTestId("employee-usage-months")).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("10/2026");
+    expect(rows[0]).toHaveTextContent("Number of conversations 2 (12)");
+    expect(rows[0]).toHaveTextContent("Total amount $0.0015");
+    expect(rows[1]).toHaveTextContent("09/2026");
+    expect(rows[1]).toHaveTextContent("Number of conversations 1 (5)");
+    expect(rows[1]).toHaveTextContent("Total amount $0.0007");
   });
 
   it("shows saved lists, tasks, and filings with creator and time", async () => {
