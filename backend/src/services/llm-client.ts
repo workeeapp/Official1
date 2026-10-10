@@ -51,6 +51,7 @@ export function toResponsesCreateBody(
     instructions: input.instructions,
     conversation: input.conversationId,
     input: input.message,
+    truncation: "auto",
   };
   if (input.textFormat) {
     body.text = { format: input.textFormat };
