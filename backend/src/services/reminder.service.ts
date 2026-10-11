@@ -1500,27 +1500,8 @@ export function formatReminderApplyNotice(result: {
   }>;
 }): string {
   const parts: string[] = [];
-  if (result.saved && result.saved.length > 0) {
-    parts.push(
-      result.saved
-        .map((row) => {
-          const kind = row.composeAtFire
-            ? `נשמרה הנחיה להודעה מתוזמנת «${row.item}» ל-${row.fireAt}`
-            : `נשמרה התזכורת «${row.item}» ל-${row.fireAt}`;
-          const saved = row.ping ? `${kind} (אל ${row.ping}).` : `${kind}.`;
-          const others = (row.sameTimeOthers ?? []).filter(Boolean);
-          if (others.length === 0) {
-            return saved;
-          }
-          const listed =
-            others.length === 1
-              ? `«${others[0]}»`
-              : others.map((name) => `«${name}»`).join(", ");
-          return `${saved} שים לב: יש לך כבר תזכורת אחרת באותה שעה (${listed}).`;
-        })
-        .join(" "),
-    );
-  }
+  // Success saves: no engine ack — the model's response already confirms
+  // (אזכיר לך… / אשלח לך…). Keep skip / remove / missed only.
   if (result.skipped && result.skipped.length > 0) {
     parts.push(
       result.skipped

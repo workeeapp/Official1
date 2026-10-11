@@ -208,6 +208,18 @@ Clock digits count as שעה לביצוע even when glued to ב (`ב08:00`) or n
 
 ---
 
+## 15. Send by meaning + send-me free text
+
+- **Send by meaning:** any deliver-words intent (תשלחי / תגידי / תמסרי / תכתבי / … — judged by meaning, not a closed verb list) → `messages` NOW or scheduled `reminders` + worker `לשלוח הודעה ל…`. Not assign-without-tell; not «תעדכני את התזכורת».
+- **Send-me free text** («תשלחי לי הודעה מה נשמע»): no clock → ask **«מתי תרצה שאשלח?»** only. With a clock → schedule to the speaker; confirm **«אשלח לך … את ההודעה «…»»**. **«עכשיו»** refused (that is the live chat). Third-party («תמסרי למיכל…») still sends NOW without asking when.
+- List/status dumps («תשלחי לי את הרשימה…») stay on `compose_source: saved_data`.
+- **No engine save ack:** successful reminder/scheduled-send saves never append `נשמרה התזכורת…` — only the model’s confirm (and skip/cancel/missed notices when needed).
+
+**Code:** `chat.service.ts` runtime prompts, `LLM.config.json`, `reminder.service.ts` (`formatReminderApplyNotice`).  
+**Tests:** `backend/tests/chat.test.ts`, `backend/tests/reminders.test.ts`.
+
+---
+
 ## Quick reference — ACTION surface
 
 | Metadata | Role |

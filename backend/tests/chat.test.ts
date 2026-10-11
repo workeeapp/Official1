@@ -685,6 +685,23 @@ describe("chat API", () => {
     );
   });
 
+  it("wires SEND BY MEANING and SEND-ME FREE TEXT into Lucy runtime instructions", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "היי", employeeId });
+
+    const instructions = createResponse.mock.calls[0][0].instructions as string;
+    expect(instructions).toContain("SEND BY MEANING");
+    expect(instructions).toContain("SEND-ME FREE TEXT");
+    expect(instructions).toContain("מתי תרצה שאשלח?");
+    expect(instructions).toContain("את ההודעה «…»");
+    expect(instructions).toContain("תמסרי למיכל שאני אוהב אותה");
+  });
+
   it("stores LLM usage for the speaker, worker, and conversation", async () => {
     const cookie = await login();
     mockOwnedEmployee();

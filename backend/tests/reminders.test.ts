@@ -492,7 +492,7 @@ describe("findMatchingActiveReminder", () => {
 });
 
 describe("formatReminderApplyNotice", () => {
-  it("says when a reminder was stored or skipped", () => {
+  it("does not ack successful saves — model response is enough", () => {
     expect(
       formatReminderApplyNotice({
         removed: [],
@@ -500,7 +500,39 @@ describe("formatReminderApplyNotice", () => {
         saved: [{ item: "חלב", fireAt: "2026-09-25 20:00" }],
         skipped: [],
       }),
-    ).toContain("נשמרה התזכורת «חלב»");
+    ).toBe("");
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        saved: [
+          {
+            item: "לשלוח הודעה לטל",
+            fireAt: "2026-10-13 08:00",
+            ping: "טל",
+          },
+        ],
+        skipped: [],
+      }),
+    ).toBe("");
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [],
+        saved: [
+          {
+            item: "לשלוח ברכת בוקר לעמית",
+            fireAt: "2026-09-30 09:00",
+            ping: "עמית",
+            composeAtFire: true,
+          },
+        ],
+        skipped: [],
+      }),
+    ).toBe("");
+  });
+
+  it("still reports skips, removes, and misses", () => {
     expect(
       formatReminderApplyNotice({
         removed: [],
@@ -509,43 +541,20 @@ describe("formatReminderApplyNotice", () => {
         skipped: [{ item: "חלב", reason: "no_time" }],
       }),
     ).toContain("מתי לשלוח");
-  });
-
-  it("notes another active clock at the same time without blocking", () => {
-    const notice = formatReminderApplyNotice({
-      removed: [],
-      missed: [],
-      saved: [
-        {
-          reminder_id: "rem-x",item: "לאסוף את יואב מהחוג",
-          fireAt: "2026-09-29 10:00",
-          sameTimeOthers: ["להזמין כרטיסים"],
-        },
-      ],
-      skipped: [],
-    });
-    expect(notice).toContain("נשמרה התזכורת «לאסוף את יואב מהחוג»");
-    expect(notice).toContain("יש לך כבר תזכורת אחרת באותה שעה");
-    expect(notice).toContain("להזמין כרטיסים");
-    expect(notice).not.toContain("לעדכן");
-  });
-
-  it("notes a compose-at-fire brief was stored", () => {
+    expect(
+      formatReminderApplyNotice({
+        removed: ["חלב"],
+        missed: [],
+        skipped: [],
+      }),
+    ).toContain("ביטלתי את התזכורת «חלב»");
     expect(
       formatReminderApplyNotice({
         removed: [],
-        missed: [],
-        saved: [
-          {
-            reminder_id: "rem-x",item: "לשלוח ברכת בוקר לעמית",
-            fireAt: "2026-09-30 09:00",
-            ping: "עמית",
-            composeAtFire: true,
-          },
-        ],
+        missed: ["חלב"],
         skipped: [],
       }),
-    ).toContain("נשמרה הנחיה להודעה מתוזמנת");
+    ).toContain("לא נמצאה תזכורת פעילה");
   });
 });
 
