@@ -1,10 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
   applyLiveMessage,
+  buildTurnReplies,
   mergeMessages,
   placeTurnReply,
   type ChatMessage,
 } from "./useChat";
+
+describe("buildTurnReplies", () => {
+  it("makes one bubble per response with buttons and timing on the first", () => {
+    const replies = buildTurnReplies({
+      reply: JSON.stringify({
+        responses: ["הוספתי חלב", "אגב, ביקשת שאבדוק אם קנית שוקו?"],
+        metadata: { buttons: [{ label: "הצג", command: "הצג רשימת קניות" }] },
+      }),
+      messageIds: { user: "u1", assistant: "a1", assistants: ["a1", "a2"] },
+      speaker: "לוסי",
+      timing: { llmMs: 900, afterLlmMs: 40 },
+    });
+
+    expect(replies.map((reply) => [reply.id, reply.text])).toEqual([
+      ["a1", "הוספתי חלב"],
+      ["a2", "אגב, ביקשת שאבדוק אם קנית שוקו?"],
+    ]);
+    expect(replies[0].buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת קניות" },
+    ]);
+    expect(replies[0].llmMs).toBe(900);
+    expect(replies[1].buttons).toBeUndefined();
+    expect(replies[1].llmMs).toBeUndefined();
+  });
+});
 
 const saved = (id: string, text: string, createdAt: string): ChatMessage => ({
   id,

@@ -9,7 +9,10 @@ export interface LlmReplyButton {
 }
 
 export interface ParsedLlmMessage {
+  /** All spoken messages joined — for readers that only need the text. */
   response: string;
+  /** Spoken messages in send order; each one is its own chat bubble / WhatsApp send. */
+  responses: string[];
   actions: string[];
   buttons?: LlmReplyButton[];
 }
@@ -1189,8 +1192,26 @@ function readText(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
+export function readSpokenResponses(parsed: Record<string, unknown>): string[] | null {
+  if (Array.isArray(parsed.responses)) {
+    return parsed.responses
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  if (typeof parsed.response === "string") {
+    const legacy = parsed.response.trim();
+    return legacy ? [legacy] : [];
+  }
+  return null;
+}
+
+export function joinSpokenResponses(responses: string[]): string {
+  return responses.join("\n\n");
+}
+
 function extractLlmPayload(text: string): {
-  response: string;
+  responses: string[];
   rawMetadata: unknown;
   metadata: LlmMetadata;
 } | null {
@@ -1199,14 +1220,11 @@ function extractLlmPayload(text: string): {
     return null;
   }
 
-  const response =
-    typeof parsed.response === "string"
-      ? parsed.response.trim()
-      : // Only fall back to raw text when the payload has no response field.
-        text;
+  // Only fall back to raw text when the payload has no response field.
+  const responses = readSpokenResponses(parsed) ?? [text];
 
   return {
-    response,
+    responses,
     rawMetadata: parsed.metadata,
     metadata: parseLlmMetadata(parsed.metadata),
   };
@@ -1231,12 +1249,13 @@ const ACTION_LABELS: Record<string, string> = {
 export function parseLlmReply(text: string): ParsedLlmMessage {
   const payload = extractLlmPayload(text);
   if (!payload) {
-    return { response: text, actions: [] };
+    return { response: text, responses: text.trim() ? [text] : [], actions: [] };
   }
 
   const buttons = toReplyButtons(payload.rawMetadata);
   return {
-    response: payload.response,
+    response: joinSpokenResponses(payload.responses),
+    responses: payload.responses,
     actions: collectActionDescriptions(payload.rawMetadata),
     ...(buttons.length > 0 ? { buttons } : {}),
   };

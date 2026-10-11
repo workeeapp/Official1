@@ -1,5 +1,6 @@
 import {
   isDigitalEmployee,
+  readSpokenResponses,
   REPLY_BUTTON_COMMAND_MAX,
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_MAX,
@@ -394,38 +395,43 @@ export function composeAssistantReply(input: {
   return appendEngineNotice(input.llmReply, input.notice);
 }
 
-export function setEngineResponse(reply: string, response: string): string {
+function parseReplyRecord(reply: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(reply);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return JSON.stringify({
-        ...(parsed as Record<string, unknown>),
-        response,
-      });
+      return parsed as Record<string, unknown>;
     }
   } catch {
     /* plain text */
   }
-  return response;
+  return null;
 }
 
+function withResponses(
+  record: Record<string, unknown>,
+  responses: string[],
+): string {
+  const { response: _legacy, ...rest } = record;
+  return JSON.stringify({ ...rest, responses });
+}
+
+/** Replaces every spoken message of the turn with one engine message. */
+export function setEngineResponse(reply: string, response: string): string {
+  const record = parseReplyRecord(reply);
+  return record ? withResponses(record, [response]) : response;
+}
+
+/** Adds an engine notice as its own message after the model's messages. */
 export function appendEngineNotice(reply: string, notice: string): string {
   if (!notice.trim()) {
     return reply;
   }
-  try {
-    const parsed: unknown = JSON.parse(reply);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as { response?: unknown };
-      if (typeof record.response === "string") {
-        return JSON.stringify({
-          ...record,
-          response: `${record.response.trim()}\n\n${notice}`,
-        });
-      }
+  const record = parseReplyRecord(reply);
+  if (record) {
+    const spoken = readSpokenResponses(record);
+    if (spoken) {
+      return withResponses(record, [...spoken, notice.trim()]);
     }
-  } catch {
-    /* plain text */
   }
   return `${reply.trim()}\n\n${notice}`;
 }

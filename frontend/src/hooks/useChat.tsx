@@ -14,9 +14,11 @@ import { useLocation } from "react-router-dom";
 import {
   chatThreadKey,
   parseLlmReply,
+  typingPauseMs,
   type ChatHistoryResponse,
   type ChatLiveEvent,
   type ChatThreadMessage,
+  type ChatTurnMessageIds,
 } from "@workee/shared";
 
 type KnownConversation = {
@@ -67,6 +69,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null);
   const conversationIdsRef = useRef<Record<string, KnownConversation>>({});
   const pendingIdsRef = useRef<Set<string>>(new Set());
+  /** Later messages of a turn stay hidden from polling until their typing pause ends. */
+  const heldIdsRef = useRef<Set<string>>(new Set());
   const location = useLocation();
   const viewingChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
 
@@ -92,7 +96,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         .then((history) => {
           applyHistory(
             threadId,
-            history,
+            withoutHeld(history, heldIdsRef.current),
             conversationIdsRef.current,
             pendingIdsRef.current,
             setThreads,
@@ -127,6 +131,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.digitalEmployeeId && event.digitalEmployeeId !== digitalEmployeeId) {
+        return;
+      }
+      if (heldIdsRef.current.has(event.message.id)) {
         return;
       }
       setThreads((current) => {
@@ -211,31 +218,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           },
           abort.signal,
         );
-        const parsed = parseLlmReply(reply);
-        const replyId = messageIds?.assistant ?? crypto.randomUUID();
-        if (!messageIds) {
-          pendingIdsRef.current.add(replyId);
-        }
-        const replyMessage: ChatMessage = {
-          id: replyId,
-          author: "assistant",
+        const replies = buildTurnReplies({
+          reply,
+          messageIds,
           speaker: input.assistantSpeaker ?? "Assistant",
-          text: parsed.response,
-          createdAt: new Date().toISOString(),
-          actions: parsed.actions,
-          ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
-          llmMs: timing?.llmMs,
-          afterLlmMs: timing?.afterLlmMs,
-        };
+          timing,
+        });
+        for (const message of replies) {
+          if (!messageIds) {
+            pendingIdsRef.current.add(message.id);
+          }
+        }
+        for (const message of replies.slice(1)) {
+          heldIdsRef.current.add(message.id);
+        }
+        const placeReply = (message: ChatMessage) =>
+          setThreads((current) => ({
+            ...current,
+            [threadId]: placeTurnReply(current[threadId] ?? [], {
+              pendingUserId: userMessage.id,
+              savedUserId: messageIds?.user,
+              reply: message,
+            }),
+          }));
 
-        setThreads((current) => ({
-          ...current,
-          [threadId]: placeTurnReply(current[threadId] ?? [], {
-            pendingUserId: userMessage.id,
-            savedUserId: messageIds?.user,
-            reply: replyMessage,
-          }),
-        }));
+        if (replies[0]) {
+          placeReply(replies[0]);
+        }
         setRawResponses((current) => ({
           ...current,
           [threadId]: raw ?? reply,
@@ -244,6 +253,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ...current,
           [threadId]: request,
         }));
+        for (const message of replies.slice(1)) {
+          await waitMs(typingPauseMs(message.text), abort.signal);
+          if (abort.signal.aborted) {
+            break;
+          }
+          heldIdsRef.current.delete(message.id);
+          placeReply({ ...message, createdAt: new Date().toISOString() });
+        }
+        for (const message of replies) {
+          heldIdsRef.current.delete(message.id);
+        }
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === "ABORTED") {
           return;
@@ -563,6 +583,68 @@ export function placeTurnReply(
     createdAt: saved.createdAt ?? reply.createdAt,
   };
   return merged;
+}
+
+/**
+ * One bubble per spoken response, in send order. Buttons, actions, and timing
+ * belong to the first bubble.
+ */
+export function buildTurnReplies(input: {
+  reply: string;
+  messageIds?: ChatTurnMessageIds;
+  speaker: string;
+  timing?: { llmMs?: number; afterLlmMs?: number };
+}): ChatMessage[] {
+  const parsed = parseLlmReply(input.reply);
+  const texts = parsed.responses.length > 0 ? parsed.responses : [parsed.response];
+  const ids =
+    input.messageIds?.assistants ??
+    (input.messageIds ? [input.messageIds.assistant] : []);
+  const createdAt = new Date().toISOString();
+  return texts.map((text, index): ChatMessage => ({
+    id: ids[index] ?? crypto.randomUUID(),
+    author: "assistant",
+    speaker: input.speaker,
+    text,
+    createdAt,
+    ...(index === 0
+      ? {
+          actions: parsed.actions,
+          ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
+          llmMs: input.timing?.llmMs,
+          afterLlmMs: input.timing?.afterLlmMs,
+        }
+      : {}),
+  }));
+}
+
+function withoutHeld(
+  history: ChatHistoryResponse,
+  heldIds: ReadonlySet<string>,
+): ChatHistoryResponse {
+  if (heldIds.size === 0) {
+    return history;
+  }
+  return {
+    ...history,
+    messages: history.messages.filter((message) => !heldIds.has(message.id)),
+  };
+}
+
+function waitMs(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = window.setTimeout(done, ms);
+    function done() {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done);
+  });
 }
 
 /** Live server message: replace its pending local copy, or append it. */

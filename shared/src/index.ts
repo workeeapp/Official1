@@ -72,6 +72,8 @@ export {
   parseLlmMetadata,
   parseListOps,
   parseLlmReply,
+  readSpokenResponses,
+  joinSpokenResponses,
   parseReplyMetadata,
   parseReportSections,
   parseReportHistoryKinds,
@@ -117,6 +119,7 @@ export {
 } from "./recurrence";
 export type { Recurrence, RecurrenceFreq, RecurrenceUnit } from "./recurrence";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
+export { TYPING_PAUSE_MAX_MS, TYPING_PAUSE_MIN_MS, typingPauseMs } from "./typing-pause";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";
 export {
   messageHasSchedule,

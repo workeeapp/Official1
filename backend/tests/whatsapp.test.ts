@@ -316,9 +316,8 @@ describe("WhatsApp webhook", () => {
       notice: fail,
       replaceResponse: true,
     });
-    const parsed = JSON.parse(spoken) as { response: string };
-    expect(parsed.response).toBe(fail);
-    expect(parsed.response).not.toContain("שלחתי");
+    const parsed = JSON.parse(spoken) as { responses: string[] };
+    expect(parsed.responses).toEqual([fail]);
   });
 
   it("appends partner notify skips without erasing a shared-list delete reply", () => {
@@ -334,9 +333,27 @@ describe("WhatsApp webhook", () => {
       // Shared-list partner notify failures must not set replaceResponse.
       replaceResponse: false,
     });
-    const parsed = JSON.parse(spoken) as { response: string };
-    expect(parsed.response).toContain("הסרתי מרשימת «בעיות»");
-    expect(parsed.response).toContain("עמית");
+    const parsed = JSON.parse(spoken) as { responses: string[] };
+    expect(parsed.responses).toHaveLength(2);
+    expect(parsed.responses[0]).toContain("הסרתי מרשימת «בעיות»");
+    expect(parsed.responses[1]).toContain("עמית");
+  });
+
+  it("keeps a raise as its own message and adds an engine notice after it", () => {
+    const spoken = composeAssistantReply({
+      llmReply: JSON.stringify({
+        responses: ["הי, איך אפשר לעזור?", "אגב, ביקשת שאבדוק אם קנית חלב?"],
+        metadata: {},
+      }),
+      notice: "הוואטסאפ אל מיכל לא נשלח.",
+    });
+    const parsed = JSON.parse(spoken) as { responses: string[]; response?: string };
+    expect(parsed.responses).toEqual([
+      "הי, איך אפשר לעזור?",
+      "אגב, ביקשת שאבדוק אם קנית חלב?",
+      "הוואטסאפ אל מיכל לא נשלח.",
+    ]);
+    expect(parsed.response).toBeUndefined();
   });
 });
 

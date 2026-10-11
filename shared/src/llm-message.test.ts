@@ -112,8 +112,33 @@ describe("parseLlmReply", () => {
   it("returns plain text when the reply is not JSON", () => {
     expect(parseLlmReply("Hello from the assistant")).toEqual({
       response: "Hello from the assistant",
+      responses: ["Hello from the assistant"],
       actions: [],
     });
+  });
+
+  it("reads responses as separate messages in order", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: ["הי, איך אפשר לעזור?", " ", "אגב, ביקשת שאבדוק אם קנית חלב?"],
+        metadata: { lists: [] },
+      }),
+    );
+    expect(parsed.responses).toEqual([
+      "הי, איך אפשר לעזור?",
+      "אגב, ביקשת שאבדוק אם קנית חלב?",
+    ]);
+    expect(parsed.response).toBe(
+      "הי, איך אפשר לעזור?\n\nאגב, ביקשת שאבדוק אם קנית חלב?",
+    );
+  });
+
+  it("wraps a legacy response string as one message", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({ response: "הוספתי חלב", metadata: {} }),
+    );
+    expect(parsed.responses).toEqual(["הוספתי חלב"]);
+    expect(parsed.response).toBe("הוספתי חלב");
   });
 
   it("shows only the response field from JSON", () => {

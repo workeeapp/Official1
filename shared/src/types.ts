@@ -202,7 +202,10 @@ export interface ChatReplyTiming {
 /** Saved `ChatMessages` ids of this turn, so the client merges its bubbles with history by id. */
 export interface ChatTurnMessageIds {
   user: string;
+  /** First assistant message of the turn. */
   assistant: string;
+  /** Every assistant message of the turn, in send order (one per spoken response). */
+  assistants?: string[];
 }
 
 export interface ChatMessageResponse {

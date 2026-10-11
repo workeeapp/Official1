@@ -3,6 +3,7 @@ import {
   humanEmployees,
   parseLlmReply,
   parseReplyMetadata,
+  typingPauseMs,
 } from "@workee/shared";
 import type { PublicEmployee } from "@workee/shared";
 import { getEnv } from "../config/env.js";
@@ -12,10 +13,18 @@ import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
-import { sendWhatsAppButtons, startWhatsAppTyping } from "./whatsapp-send.js";
+import {
+  sendWhatsAppButtons,
+  sendWhatsAppTyping,
+  startWhatsAppTyping,
+} from "./whatsapp-send.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface WhatsAppVerifyQuery {
   mode?: string;
@@ -165,17 +174,27 @@ export async function handleInboundWhatsAppTexts(
         recordWhatsAppEvent("handoff", `worker=${handoff}`);
       }
       const parsed = parseLlmReply(turn.reply);
-      const reply = parsed.response.trim();
+      const replies = parsed.responses.map((text) => text.trim()).filter(Boolean);
       const buttons = parsed.buttons ?? [];
       recordWhatsAppEvent(
         "llm_ok",
-        `replyChars=${reply.length} buttons=${buttons.length}`,
+        `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length}`,
       );
-      if (reply) {
-        const sendResult = await sendWhatsAppButtons(message.from, reply, buttons, {
-          ignoreSession: true,
-        });
-        recordWhatsAppEvent("reply_send", `result=${sendResult}`);
+      for (const [index, reply] of replies.entries()) {
+        if (index > 0) {
+          await sendWhatsAppTyping(message.messageId);
+          await sleep(typingPauseMs(reply));
+        }
+        const sendResult = await sendWhatsAppButtons(
+          message.from,
+          reply,
+          index === 0 ? buttons : [],
+          { ignoreSession: true },
+        );
+        recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);
+        if (sendResult !== "sent") {
+          break;
+        }
       }
     } catch (error) {
       recordWhatsAppEvent(

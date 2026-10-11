@@ -355,6 +355,16 @@ export function alignListTypeInReply(
       return llmReply;
     }
     const record = parsed as Record<string, unknown>;
+    if (Array.isArray(record.responses)) {
+      const current = record.responses;
+      const next = current.map((entry) =>
+        typeof entry === "string" ? alignSpokenListType(entry, mutations) : entry,
+      );
+      if (next.every((entry, index) => entry === current[index])) {
+        return llmReply;
+      }
+      return JSON.stringify({ ...record, responses: next });
+    }
     if (typeof record.response !== "string") {
       return llmReply;
     }

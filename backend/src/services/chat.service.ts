@@ -101,6 +101,7 @@ import {
   listContactsForEmployee,
 } from "./contact.service.js";
 import {
+  appendEngineNotice,
   composeAssistantReply,
   deliverWhatsAppPhones,
   deliverWhatsAppRelays,
@@ -158,7 +159,7 @@ function toHistoryResponse(
 ): ChatHistoryResponse {
   const lastAssistant = [...conversation.messages]
     .reverse()
-    .find((message) => message.author === "assistant");
+    .find((message) => message.author === "assistant" && message.raw != null);
 
   return {
     employeeId,
@@ -334,9 +335,12 @@ const WORKER_INVENTORY_ASKS =
 const STATUS_ADDRESSEE_RULE =
   "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS). First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows in EMPLOYEE_SAVED_DATA. A name («מה יש לטל») = that person's rows. Never answer «אין לי…» while WORKER_SAVED_DATA has a list item or OPEN_JOBS has a row — list them.";
 
+const RESPONSES_RULE =
+  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons attach to the first entry.";
+
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
-  "SELF-CHECK («תבדקי איתי…» / check with me): when the speaker asks YOU to check with THEM (תבדקי איתי אם קניתי שוקו / check with me if I bought…), emit messages targeting the SPEAKER with expects_reply:true + ask_summary + urgency, lists:[]. text, ask_summary, and response MUST address the speaker in second person — convert their first person (קניתי / הכנתי / עשיתי) to second (קנית / הכנת / עשית). Example: עמית אומר «תבדקי איתי אם קניתי שוקו» → messages: [{ \"targets\": [\"עמית\"], \"text\": \"קנית שוקו?\", \"expects_reply\": true, \"ask_summary\": \"אם קנית שוקו?\", \"urgency\": \"normal\" }], lists: [], response: short ack + ask NOW («בסדר — קנית שוקו?»). FORBIDDEN when asker===subject: keeping first person in those fields, «<name> מחכה לתשובה», or third-party framing. «תבדקי איתי דחוף…» / «ממש דחוף» → same shape with urgency urgent / very_urgent; response notes the urgency like any other job. The server opens a self-job on you (לבדוק עם עמית: …) — never lists.add it. Do NOT claim you relayed a message to someone else; the ask lives in response. Urgency follow-ups run like any other OPEN_JOB. Later turns: OPEN_JOBS shows viewer_is=subject — raise/answer like any other job. On answer leave report_text empty (no third party). Never say «עמית ביקש ממני…» when asker===subject — phrase as their own check: «רצית שאבדוק איתך אם קנית שוקו — קנית?»",
+  "SELF-CHECK («תבדקי איתי…» / check with me): when the speaker asks YOU to check with THEM (תבדקי איתי אם קניתי שוקו / check with me if I bought…), emit messages targeting the SPEAKER with expects_reply:true + ask_summary + urgency, lists:[]. text, ask_summary, and response MUST address the speaker in second person — convert their first person (קניתי / הכנתי / עשיתי) to second (קנית / הכנת / עשית). Example: עמית אומר «תבדקי איתי אם קניתי שוקו» → messages: [{ \"targets\": [\"עמית\"], \"text\": \"קנית שוקו?\", \"expects_reply\": true, \"ask_summary\": \"אם קנית שוקו?\", \"urgency\": \"normal\" }], lists: [], response: short ack + ask NOW («בסדר — קנית שוקו?»). FORBIDDEN when asker===subject: keeping first person in those fields, «<name> מחכה לתשובה», or third-party framing. «תבדקי איתי דחוף…» / «ממש דחוף» → same shape with urgency urgent / very_urgent; response notes the urgency like any other job. The server opens a self-job on you (לבדוק עם עמית: …) — never lists.add it. Do NOT claim you relayed a message to someone else; the ask lives in response. Urgency follow-ups run like any other OPEN_JOB. Later turns: OPEN_JOBS shows viewer_is=subject — raise/answer like any other job. On answer leave report_text empty (no third party). Never say «עמית ביקש ממני…» when asker===subject — phrase as their own check, as a separate raise entry: «אגב, ביקשת שאבדוק אם קנית שוקו?»",
   "DEFERRED CHECK (תבדקי/תבררי … בעוד X / מחר ב־… / כל יום שני / כל 1 לחודש): same expects_reply messages entry PLUS in (seconds) OR date+time OR recurrence (same shape as reminders[].recurrence). lists:[]. response = ack only («אבדוק איתך בעוד שעתיים» / «אבדוק עם טל מחר ב־20:00») — do NOT ask or WhatsApp now; do NOT emit metadata.reminders for this (the server schedules your לבדוק task with תאריך/שעה + clock). At fire the server clears the dates, sends the ask, and urgency follow-ups run like any open job. OPEN_JOBS may list scheduled=true / raisable=false until then — wait, do not raise early. Immediate check (no future clock on the messages entry) stays ask-now.",
   "ask_summary = what the speaker wants from them, in the speaker's own words, WITHOUT the recipient's name: «לתאם פגישת עבודה ליום שלישי» / «אם קנית חלב?» — not «לתאם פגישה עם ערן».",
   URGENCY_RULE,
@@ -351,7 +355,7 @@ const OPEN_JOBS_RULES = [
   "BOOK A MEETING when the job's ask is to schedule/coordinate anything shared at a slot (לתאם פגישה / שיחה / שיחת עדכון / לקבוע) AND the subject agrees (אוקיי תתאמי / כן אני פנוי / קבע): SAME TURN emit jobs.answer as above AND lists add list_type=tasks, targets=[asker name, subject name] (never YOU / לוסי), one item = the meeting itself — שם מטלה MUST include all participants in parentheses matching targets (e.g. פגישה נוספת בנושא פורים (עמית, טל) or פגישת עבודה (עמית, ערן) — not לבדוק עם… and not a topic-only title). תאריך לביצוע = YYYY-MM-DD from SESSION_CLOCK for that weekday, שעה לביצוע = HH:mm when a time was named, יום שלם=false. Do NOT offer a shared save; they already agreed. messages=[]. Example: ערן «אוקיי תתאמי את הפגישה» on ask «לתאם פגישת עבודה ליום שלישי בשעה 10» → jobs:[{action:\"answer\", job_id, answer_text:\"אוקיי תתאמי את הפגישה\", report_text:\"ערן אישר — קבעתי פגישת עבודה ליום שלישי ב-10:00\"}], lists:[{action:\"add\", list_type:\"tasks\", targets:[\"עמית\",\"ערן\"], items:[{ \"שם מטלה\":\"פגישת עבודה (עמית, ערן)\", \"תאריך לביצוע\":\"<that Tuesday YYYY-MM-DD>\", \"שעה לביצוע\":\"10:00\", \"יום שלם\":false }]}]. Time or all-day not agreed yet → jobs progress, ask the hour, lists=[]. A check/question job (מה שלומך / אם קנית חלב) stays answer-only — no lists.",
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / לא כרגע with no hour) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only — never progress.",
-  `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A meeting raise is the question: «עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) — that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) → wait, do not raise early. A row with urgency=urgent → raise it FIRST, before their own request, and say it is urgent. urgency=very_urgent → raise it first in EVERY reply while it is open, even right after לא כרגע (one short line).`,
+  `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A raise is ALWAYS its own entry in responses — never inside the answer entry. The answer entry is written as if no job were open (greeting «הי» → «הי, איך אפשר לעזור?»); a normal raise is the NEXT entry and starts with «אגב,». Example: עמית «הי» with a raisable self-check «אם קנית חלב?» → responses: ["הי, איך אפשר לעזור?", "אגב, ביקשת שאבדוק אם קנית חלב?"]. A meeting raise entry is the question: «אגב, עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) — that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) → wait, do not raise early. A row with urgency=urgent → the raise entry comes FIRST in responses, before the answer entry, and says it is urgent (no «אגב»). urgency=very_urgent → that first raise entry appears in EVERY reply while it is open, even right after לא כרגע (one short line).`,
   "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
   "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
@@ -635,7 +639,7 @@ async function saveTurn(input: {
   reply: string;
   raw: unknown;
   request: unknown;
-}): Promise<ChatTurnMessageIds> {
+}): Promise<ChatTurnMessageIds & { assistantAt: Date }> {
   const parsed = parseLlmReply(input.reply);
   const userAt = new Date();
   const assistantAt = new Date(userAt.getTime() + 1);
@@ -656,7 +660,9 @@ async function saveTurn(input: {
         conversationId: input.conversationId,
         author: "assistant",
         speaker: input.assistantSpeaker,
-        text: parsed.response,
+        // Later messages of the turn are written by syncTurnReplies once the engine is done,
+        // so history polling does not show them before the reply returns.
+        text: parsed.responses[0] ?? "",
         actions: Prisma.JsonNull,
         buttons: parsed.buttons ? toJsonValue(parsed.buttons) : Prisma.JsonNull,
         raw: toJsonValue(packStoredLlmRaw(input.request, input.raw)),
@@ -664,62 +670,42 @@ async function saveTurn(input: {
       },
     ],
   });
-  return ids;
+  return { ...ids, assistants: [ids.assistant], assistantAt };
 }
 
-async function appendAssistantNotice(
-  conversationId: string,
-  notice: string,
-  mode: "append" | "replace" = "append",
-): Promise<void> {
-  const last = await prisma.chatMessage.findFirst({
-    where: { conversationId, author: "assistant" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!last) {
-    return;
-  }
-  const nextText =
-    mode === "replace" ? notice : `${last.text.trim()}\n\n${notice}`;
+/**
+ * Writes the turn's final spoken messages: the first row (from saveTurn) gets
+ * the first message, each further message is its own row right after it.
+ */
+async function syncTurnReplies(input: {
+  conversationId: string;
+  assistantSpeaker: string;
+  saved: ChatTurnMessageIds & { assistantAt: Date };
+  responses: string[];
+}): Promise<ChatTurnMessageIds> {
+  const [first = "", ...rest] = input.responses;
   await prisma.chatMessage.update({
-    where: { id: last.id },
-    data: { text: nextText },
+    where: { id: input.saved.assistant },
+    data: { text: first, actions: Prisma.JsonNull },
   });
-}
-
-async function patchLastAssistantText(
-  conversationId: string,
-  text: string,
-): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return;
+  const extra = rest.map((text, index) => ({
+    id: randomUUID(),
+    conversationId: input.conversationId,
+    author: "assistant",
+    speaker: input.assistantSpeaker,
+    text,
+    actions: Prisma.JsonNull,
+    buttons: Prisma.JsonNull,
+    createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
+  }));
+  if (extra.length > 0) {
+    await prisma.chatMessage.createMany({ data: extra });
   }
-  const last = await prisma.chatMessage.findFirst({
-    where: { conversationId, author: "assistant" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!last || last.text === trimmed) {
-    return;
-  }
-  await prisma.chatMessage.update({
-    where: { id: last.id },
-    data: { text: trimmed },
-  });
-}
-
-async function clearLastAssistantActions(conversationId: string): Promise<void> {
-  const last = await prisma.chatMessage.findFirst({
-    where: { conversationId, author: "assistant" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!last) {
-    return;
-  }
-  await prisma.chatMessage.update({
-    where: { id: last.id },
-    data: { actions: Prisma.JsonNull },
-  });
+  return {
+    user: input.saved.user,
+    assistant: input.saved.assistant,
+    assistants: [input.saved.assistant, ...extra.map((row) => row.id)],
+  };
 }
 
 /**
@@ -1215,6 +1201,7 @@ export async function sendChatMessage(input: {
   const instructions = attachLucyEngine
     ? [
         config.systemMessage,
+        RESPONSES_RULE,
         `The user is chatting as ${speaker}.`,
         guestModeInstructions ||
           workerTargetingInstructions(employees, speaker, digital),
@@ -1286,6 +1273,7 @@ export async function sendChatMessage(input: {
         .join("\n\n")
     : [
         config.systemMessage,
+        RESPONSES_RULE,
         guestModeInstructions,
         thinSessionEnvelope({
           employees,
@@ -1940,28 +1928,23 @@ export async function sendChatMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    const alignedSpoken = parseLlmReply(workingReply).response;
-    if (alignedSpoken !== parseLlmReply(turn.reply).response) {
-      await patchLastAssistantText(conversation.id, alignedSpoken);
-    }
     const replaceSpoken = deliveryFailed;
-    const composeNotice = [consultAnswers.join("\n\n"), notice]
-      .filter(Boolean)
-      .join("\n\n");
-    const reply = composeAssistantReply({
-      llmReply: workingReply,
-      notice: composeNotice,
-      replaceResponse: replaceSpoken,
+    const reply = replaceSpoken
+      ? composeAssistantReply({
+          llmReply: workingReply,
+          notice: [...consultAnswers, notice].filter(Boolean).join("\n\n"),
+          replaceResponse: true,
+        })
+      : [...consultAnswers, notice].reduce(
+          (current, extra) => appendEngineNotice(current, extra),
+          workingReply,
+        );
+    const turnMessageIds = await syncTurnReplies({
+      conversationId: conversation.id,
+      assistantSpeaker,
+      saved: messageIds,
+      responses: parseLlmReply(reply).responses,
     });
-    if (composeNotice) {
-      await appendAssistantNotice(
-        conversation.id,
-        composeNotice,
-        replaceSpoken ? "replace" : "append",
-      );
-    }
-    // Never show English metadata action chips on the speaker bubble.
-    await clearLastAssistantActions(conversation.id);
 
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
@@ -1989,7 +1972,7 @@ export async function sendChatMessage(input: {
       notifications,
       answeredBy: digital.name,
       timing: { llmMs, afterLlmMs: Date.now() - afterLlmStarted },
-      messageIds,
+      messageIds: turnMessageIds,
     };
   } catch (error) {
     const table = missingTableName(error);

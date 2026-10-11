@@ -13,9 +13,9 @@ describe("LLM action schema", () => {
       name: "lucy_metadata_response",
       strict: false,
     });
-    expect(format?.schema.required).toEqual(["response", "metadata"]);
+    expect(format?.schema.required).toEqual(["responses", "metadata"]);
     expect(format?.schema.properties).toMatchObject({
-      response: { type: "string" },
+      responses: { type: "array", minItems: 1, items: { type: "string" } },
       metadata: { type: "object" },
     });
 
@@ -121,5 +121,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("item_id");
     expect(config.systemMessage).toContain("filing_id");
     expect(config.systemMessage).toContain("reminder_id");
+    expect(config.systemMessage).toContain("A raise is ALWAYS its own entry in responses");
+    expect(config.systemMessage).toContain("אגב, ביקשת שאבדוק אם קנית חלב?");
   });
 });

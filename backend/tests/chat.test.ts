@@ -627,8 +627,45 @@ describe("chat API", () => {
     expect(response.body.messageIds).toEqual({
       user: saved[0].id,
       assistant: saved[1].id,
+      assistants: [saved[1].id],
     });
     expect(saved[0].id).not.toBe(saved[1].id);
+  });
+
+  it("saves each spoken response as its own assistant message in order", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: ["הי, איך אפשר לעזור?", "אגב, ביקשת שאבדוק אם קנית חלב?"],
+        metadata: { lists: [], filing: [], messages: [] },
+      }),
+      raw: { output_text: "two" },
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הי", employeeId });
+
+    expect(response.status).toBe(200);
+    const [turnRows, extraRows] = messageCreateMany.mock.calls.map(
+      (call) =>
+        call[0].data as Array<{ id: string; author: string; text: string; createdAt: Date }>,
+    );
+    expect(turnRows[1].text).toBe("הי, איך אפשר לעזור?");
+    expect(extraRows).toHaveLength(1);
+    expect(extraRows[0]).toMatchObject({
+      author: "assistant",
+      text: "אגב, ביקשת שאבדוק אם קנית חלב?",
+    });
+    expect(extraRows[0].createdAt.getTime()).toBeGreaterThan(
+      turnRows[1].createdAt.getTime(),
+    );
+    expect(response.body.messageIds.assistants).toEqual([
+      turnRows[1].id,
+      extraRows[0].id,
+    ]);
   });
 
   it("routes «מה יש לך» to the worker's own inventory in the instructions", async () => {
