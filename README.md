@@ -158,7 +158,7 @@ One-time setup from this checkout (on the branch you want live to track):
 npm run live:setup
 ```
 
-That creates `..\Official1-live`, copies `.env`, and saves `WORKEE_LIVE_ROOT`. Then in the **live** folder:
+That creates `..\Official1-live` on a local branch `live/<your-shared-branch>` that **tracks** `origin/<your-shared-branch>` (Git cannot check out the same branch in two worktrees). Copies `.env` and saves `WORKEE_LIVE_ROOT`. Then in the **live** folder:
 
 ```bash
 npm install
