@@ -575,6 +575,48 @@ describe("employee records", () => {
       ]);
     });
 
+    it("unsharing drops the partner from visible_to and tells only them", async () => {
+      itemFindFirst.mockResolvedValue(coffee([employeeId, talId]));
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "99ea236b-9203-4a4f-be3f-69882dacf8ac" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "personal",
+          addedById: employeeId,
+          visibleTo: [employeeId],
+          removeIds: [talId],
+        },
+        employeeId,
+      );
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            scope: "personal",
+            addedById: employeeId,
+            visibleTo: [employeeId],
+          }),
+        }),
+      );
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          notifyEmployeeIds: [talId],
+          unshared: true,
+          listOwnerId: employeeId,
+        }),
+      ]);
+    });
+
     it("refuses someone the row is not shared with", async () => {
       itemFindFirst.mockResolvedValue(coffee([employeeId, talId]));
       const result = await removeAs(shareeId);

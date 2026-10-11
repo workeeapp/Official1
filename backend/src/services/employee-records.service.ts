@@ -42,6 +42,8 @@ export interface ItemVisibility {
   scope: ItemScope;
   addedById: string;
   visibleTo: string[];
+  /** Update by item_id: partners to drop from the row's visible_to (lists unshare_with). */
+  removeIds?: string[];
 }
 
 export interface EmployeeRecordSnapshot {
@@ -1298,6 +1300,8 @@ export interface SharedItemEvent {
   partnerNames?: string[];
   /** Recipients were just added to the item's visible_to by this update. */
   shared?: boolean;
+  /** Recipients were just removed from the item's visible_to by this update. */
+  unshared?: boolean;
   /** Who created / assigned the item (shared-item partners are everyone else but the owner). */
   addedById?: string | null;
 }
@@ -2202,7 +2206,7 @@ async function applyListAction(
       continue;
     }
     // Editing a worker task never re-shares it; who it involves comes from the task itself.
-    const resolvedVisibility =
+    const mergedVisibility =
       access && existing
         ? {
             scope: (existing.scope === "shared" ? "shared" : "personal") as ItemScope,
@@ -2210,6 +2214,13 @@ async function applyListAction(
             visibleTo: idList(existing.visibleTo),
           }
         : mergeItemVisibility(existing, visibility, employeeId);
+    const unshared =
+      existing && !access
+        ? (visibility.removeIds ?? []).filter(
+            (id) => id !== employeeId && idList(existing.visibleTo).includes(id),
+          )
+        : [];
+    const resolvedVisibility = withoutPartners(mergedVisibility, unshared, employeeId);
     const mergedRecord =
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
@@ -2355,6 +2366,16 @@ async function applyListAction(
         addedById: resolvedVisibility.addedById,
       });
     }
+    const unsharedRecipients = unshared.filter((id) => id !== actorId);
+    if (unsharedRecipients.length > 0) {
+      events.push({
+        notifyEmployeeIds: unsharedRecipients,
+        metadata: eventMetadata,
+        listOwnerId: employeeId,
+        unshared: true,
+        addedById: resolvedVisibility.addedById,
+      });
+    }
     const contentChanged =
       !existing ||
       Object.keys(fieldsItem).some((key) => !ITEM_ID_KEYS.has(key));
@@ -2368,7 +2389,7 @@ async function applyListAction(
             actorId,
             itemKey: nextItemKey || existing?.itemKey || "",
           })
-        ).filter((id) => !newlyShared.includes(id))
+        ).filter((id) => !newlyShared.includes(id) && !unshared.includes(id))
       : [];
     if (watchers.length > 0) {
       events.push({
@@ -2632,6 +2653,28 @@ function newlySharedIds(
   return uniqueIds(next.visibleTo).filter(
     (id) => !before.has(id) && id !== actorId,
   );
+}
+
+function withoutPartners(
+  visibility: ItemVisibility,
+  removeIds: string[],
+  ownerId: string,
+): ItemVisibility {
+  if (removeIds.length === 0) {
+    return visibility;
+  }
+  const visibleTo = visibility.visibleTo.filter((id) => !removeIds.includes(id));
+  // The assigner stays only if still a partner; a lone owner makes the row personal again.
+  const audience = uniqueIds([
+    ownerId,
+    removeIds.includes(visibility.addedById) ? null : visibility.addedById,
+    ...visibleTo,
+  ]);
+  return {
+    scope: audience.length > 1 ? "shared" : "personal",
+    addedById: removeIds.includes(visibility.addedById) ? ownerId : visibility.addedById,
+    visibleTo: uniqueIds([ownerId, ...visibleTo]),
+  };
 }
 
 function mergeItemVisibility(

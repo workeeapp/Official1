@@ -612,6 +612,35 @@ export function listActionItemIds(lists: LlmListAction[]): string[] {
   return [...ids];
 }
 
+const UNSHARE_KEYS = ["unshare_with", "unshareWith"] as const;
+
+/** Names the model asked to stop sharing this item with (lists.update). */
+function itemUnshareNames(item: Record<string, unknown>): string[] {
+  for (const key of UNSHARE_KEYS) {
+    const value = item[key];
+    if (Array.isArray(value)) {
+      return value
+        .filter((name): name is string => typeof name === "string")
+        .map((name) => name.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function withoutUnshareField(
+  item: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!UNSHARE_KEYS.some((key) => key in item)) {
+    return item;
+  }
+  const rest = { ...item };
+  for (const key of UNSHARE_KEYS) {
+    delete rest[key];
+  }
+  return rest;
+}
+
 function isOwnShoppingOrTasks(listType: string): boolean {
   return listType === "shopping" || listType === "tasks";
 }
@@ -742,8 +771,18 @@ export function planTargetedActions(input: {
           (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
         );
         for (const [ownerId, bucket] of byOwner) {
+          const unshareNames = bucket.items.flatMap(itemUnshareNames);
+          const removeIds =
+            list.action === "update"
+              ? resolveNamedRelayTargets(unshareNames, input.employees)
+                  .map((target) => target.id)
+                  .filter((id) => id !== ownerId)
+              : [];
           const partners = named.filter(
-            (target) => target.id !== ownerId && target.id !== input.actor.id,
+            (target) =>
+              target.id !== ownerId &&
+              target.id !== input.actor.id &&
+              !removeIds.includes(target.id),
           );
           const share = list.action === "update" && partners.length > 0;
           applications.push({
@@ -754,7 +793,7 @@ export function planTargetedActions(input: {
                   ...list,
                   listType: bucket.listType,
                   listName: "",
-                  items: bucket.items,
+                  items: bucket.items.map(withoutUnshareField),
                   targets: [],
                 },
               ],
@@ -766,6 +805,7 @@ export function planTargetedActions(input: {
               visibleTo: share
                 ? uniqueIds([ownerId, input.actor.id, ...partners.map((p) => p.id)])
                 : [ownerId],
+              ...(removeIds.length > 0 ? { removeIds } : {}),
             },
           });
         }
@@ -775,6 +815,8 @@ export function planTargetedActions(input: {
         list = { ...list, items: rest };
       }
     }
+    // unshare_with is an instruction, never row data.
+    list = { ...list, items: list.items.map(withoutUnshareField) };
     const normalizedList = normalizeSharedCustomList(list);
     const existingListMatches = findExistingCustomListsForActor(
       normalizedList,
@@ -1239,6 +1281,8 @@ export function fallbackNotificationText(
     purchased?: boolean;
     /** Recipient was just added to the item's visible_to (share, not edit). */
     shared?: boolean;
+    /** Recipient was just removed from the item's visible_to. */
+    unshared?: boolean;
     recipientIsOwner?: boolean;
     /** Recipient co-owns the shared item (not its owner, not who assigned it). */
     recipientIsPartner?: boolean;
@@ -1311,6 +1355,17 @@ export function fallbackNotificationText(
       : options?.ownerName
         ? `של ${options.ownerName}`
         : "";
+
+  if (options?.unshared && list?.action === "update") {
+    if (list.listType === "tasks") {
+      return `${actorName} הפסיק לשתף איתך מטלה: ${itemText}`;
+    }
+    if (list.listType === "shopping") {
+      return `${actorName} הפסיק לשתף איתך ${itemText} מרשימת הקניות`;
+    }
+    const title = customListDerivedName(list) || "רשימה";
+    return `${actorName} הפסיק לשתף איתך ${formatQuotedItems(items)} מרשימת «${title}»`;
+  }
 
   if (options?.shared && list?.action === "update") {
     if (list.listType === "shopping") {

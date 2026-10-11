@@ -1776,6 +1776,56 @@ describe("employee targets", () => {
     ).toBe("טל עדכן קפה ברשימת הקניות של טל");
   });
 
+  it("turns unshare_with into removeIds and never saves it as row data", () => {
+    const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: ["עמית"],
+            items: [{ item_id: coffeeId, unshare_with: ["טל"] }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "personal", removeIds: [tal.id] },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { item_id: coffeeId },
+    ]);
+  });
+
+  it("tells a removed partner the item is no longer shared with them", () => {
+    expect(
+      fallbackNotificationText(
+        amit,
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              targets: [],
+              items: [{ "שם פריט": "קפה" }],
+            },
+          ],
+        },
+        { unshared: true, recipientIsOwner: false },
+      ),
+    ).toBe("עמית הפסיק לשתף איתך קפה מרשימת הקניות");
+  });
+
   it("routes a partner's remove of a shared item to the owner's list", () => {
     const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
     const plan = planTargetedActions({

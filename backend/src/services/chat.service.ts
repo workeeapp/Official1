@@ -876,6 +876,7 @@ async function pushTargetNotification(input: {
   savedLabels?: ReadonlyMap<string, string>;
   purchased?: boolean;
   shared?: boolean;
+  unshared?: boolean;
   recipientIsOwner?: boolean;
   recipientIsPartner?: boolean;
   ownerName?: string;
@@ -895,6 +896,7 @@ async function pushTargetNotification(input: {
   const text = fallbackNotificationText(input.actor, labeled, {
     purchased: input.purchased,
     shared: input.shared,
+    unshared: input.unshared,
     recipientIsOwner: input.recipientIsOwner,
     recipientIsPartner: input.recipientIsPartner,
     ownerName: input.ownerName,
@@ -964,7 +966,7 @@ export async function notifySharedItemEvents(input: {
     notified.add(target.id);
     const event =
       events.find((item) => item.purchased) ??
-      events.find((item) => item.shared) ??
+      events.find((item) => item.shared || item.unshared) ??
       events.find((item) => item.listOwnerId === target.id) ??
       events[0];
     const owner = input.employees.find((item) => item.id === event.listOwnerId);
@@ -976,6 +978,7 @@ export async function notifySharedItemEvents(input: {
       savedLabels: input.savedLabels,
       purchased: event.purchased,
       shared: event.shared,
+      unshared: event.unshared,
       recipientIsOwner: event.listOwnerId === target.id,
       recipientIsPartner:
         event.listOwnerId !== target.id &&
