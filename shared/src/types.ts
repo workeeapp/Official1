@@ -234,6 +234,7 @@ export interface ChatThreadMessage {
   createdAt?: string;
   actions?: string[];
   buttons?: LlmReplyButton[];
+  navigateAddress?: string;
   llmMs?: number;
   afterLlmMs?: number;
 }

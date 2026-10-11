@@ -224,6 +224,73 @@ describe("Chat page", () => {
     );
   });
 
+  it("shows a Waze link for a reply with one address that stays enabled while sending", async () => {
+    sendMock.mockResolvedValueOnce({
+      reply: JSON.stringify({
+        responses: ["הכתובת שלך היא הרצל 12, תל אביב"],
+        metadata: { navigate_address: "הרצל 12, תל אביב" },
+      }),
+      raw: {},
+    });
+    sendMock.mockImplementationOnce(() => new Promise(() => {}));
+    const user = userEvent.setup();
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await user.type(await screen.findByLabelText("Message"), "מה הכתובת שלי?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const waze = await screen.findByTestId("chat-waze-button");
+    expect(waze).toHaveAttribute(
+      "href",
+      `https://waze.com/ul?q=${encodeURIComponent("הרצל 12, תל אביב")}&navigate=yes`,
+    );
+    expect(waze).toHaveAttribute("target", "_blank");
+    expect(waze).toHaveAccessibleName("נווט עם Waze");
+
+    await user.type(screen.getByLabelText("Message"), "עוד שאלה");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByTestId("chat-pending");
+    expect(screen.getByTestId("chat-waze-button")).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByTestId("chat-waze-button")).toHaveAttribute("href");
+  });
+
+  it("does not show a Waze link without a navigate address", async () => {
+    historyMock.mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages: [
+        {
+          id: "a1",
+          author: "assistant",
+          speaker: "לוסי",
+          text: "שלום",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      raw: null,
+    });
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await screen.findByText("שלום");
+    expect(screen.queryByTestId("chat-waze-button")).not.toBeInTheDocument();
+  });
+
   it("shows saved reply buttons from history", async () => {
     historyMock.mockResolvedValue({
       employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",

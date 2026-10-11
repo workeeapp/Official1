@@ -156,7 +156,9 @@ Lucy (and engine notifies) can attach tap buttons: show list / show reminders / 
 - Web chat renders them; WhatsApp sends interactive buttons when available.
 - Server-sent thread messages stay in the worker’s model memory.
 
-**Tests:** `frontend/src/hooks/useChat.test.ts`, `frontend/src/pages/Chat/ChatPage.test.tsx`, `backend/tests/whatsapp.test.ts`.
+**Waze navigate button:** when the reply mentions exactly one physical address, the model sets `metadata.navigate_address` (the engine never looks for addresses in the text). Web chat shows a Waze icon link under the first bubble (`https://waze.com/ul?q=…&navigate=yes`, opens the Waze app on a phone; stays tappable while sending). The address is saved in `ChatMessages.navigate_address` so history keeps the button. WhatsApp sends a `cta_url` button («פתח ב-Waze») right after the first reply, falling back to a text link.
+
+**Tests:** `shared/src/llm-message.test.ts`, `frontend/src/hooks/useChat.test.ts`, `frontend/src/pages/Chat/ChatPage.test.tsx`, `backend/tests/whatsapp.test.ts`.
 
 ---
 

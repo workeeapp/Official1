@@ -78,6 +78,7 @@ model ChatMessage {
   text           String           @db.Text
   actions        Json?
   buttons        Json?
+  navigateAddress String?         @map("navigate_address") @db.VarChar(300)
   raw            Json?
   createdAt      DateTime         @default(now()) @map("created_at")
   conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

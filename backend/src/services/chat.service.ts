@@ -227,6 +227,7 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     createdAt: row.createdAt.toISOString(),
     ...(actions.length > 0 ? { actions } : {}),
     ...(buttons.length > 0 ? { buttons } : {}),
+    ...(row.navigateAddress ? { navigateAddress: row.navigateAddress } : {}),
   };
 }
 
@@ -670,6 +671,7 @@ async function saveTurn(input: {
         text: parsed.responses[0] ?? "",
         actions: Prisma.JsonNull,
         buttons: parsed.buttons ? toJsonValue(parsed.buttons) : Prisma.JsonNull,
+        navigateAddress: parsed.navigateAddress ?? null,
         raw: toJsonValue(packStoredLlmRaw(input.request, input.raw)),
         createdAt: assistantAt,
       },

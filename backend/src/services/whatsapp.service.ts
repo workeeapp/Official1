@@ -15,6 +15,7 @@ import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
   sendWhatsAppButtons,
+  sendWhatsAppNavigate,
   sendWhatsAppTyping,
   startWhatsAppTyping,
 } from "./whatsapp-send.js";
@@ -194,6 +195,14 @@ export async function handleInboundWhatsAppTexts(
         recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);
         if (sendResult !== "sent") {
           break;
+        }
+        if (index === 0 && parsed.navigateAddress) {
+          const navigateResult = await sendWhatsAppNavigate(
+            message.from,
+            parsed.navigateAddress,
+            { ignoreSession: true },
+          );
+          recordWhatsAppEvent("navigate_send", `result=${navigateResult}`);
         }
       }
     } catch (error) {

@@ -4,6 +4,7 @@ import {
   REPLY_BUTTON_COMMAND_MAX,
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_MAX,
+  wazeNavigateUrl,
   type LlmReplyButton,
   type PublicEmployee,
 } from "@workee/shared";
@@ -171,6 +172,47 @@ export async function sendWhatsAppButtons(
   );
   if (result === "failed") {
     return sendWhatsAppText(to, text, options);
+  }
+  return result;
+}
+
+export const WHATSAPP_NAVIGATE_LABEL = "פתח ב-Waze";
+
+export function whatsappCtaUrlBody(
+  destination: string,
+  body: string,
+  displayText: string,
+  url: string,
+): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    to: destination,
+    type: "interactive",
+    interactive: {
+      type: "cta_url",
+      body: { text: toWhatsAppFormatting(body).slice(0, WHATSAPP_BUTTON_BODY_MAX) },
+      action: {
+        name: "cta_url",
+        parameters: { display_text: displayText, url },
+      },
+    },
+  };
+}
+
+/** Waze button for the reply's address; plain text with the link if the CTA send fails. */
+export async function sendWhatsAppNavigate(
+  to: string,
+  address: string,
+  options?: { ignoreSession?: boolean },
+): Promise<WhatsAppTextResult> {
+  const url = wazeNavigateUrl(address);
+  const result = await sendWhatsAppPayload(
+    to,
+    (destination) => whatsappCtaUrlBody(destination, address, WHATSAPP_NAVIGATE_LABEL, url),
+    options,
+  );
+  if (result === "failed") {
+    return sendWhatsAppText(to, `${WHATSAPP_NAVIGATE_LABEL}: ${url}`, options);
   }
   return result;
 }

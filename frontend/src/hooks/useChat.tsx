@@ -611,6 +611,7 @@ export function buildTurnReplies(input: {
       ? {
           actions: parsed.actions,
           ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
+          ...(parsed.navigateAddress ? { navigateAddress: parsed.navigateAddress } : {}),
           llmMs: input.timing?.llmMs,
           afterLlmMs: input.timing?.afterLlmMs,
         }

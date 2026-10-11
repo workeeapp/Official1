@@ -55,7 +55,8 @@
     "        \"in\": null",
     "      }",
     "    ],",
-    "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ]",
+    "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
+    "    \"navigate_address\": null",
     "  }",
     "}",
     "",
@@ -648,6 +649,11 @@
                   },
                   "required": ["label", "command"]
                 }
+              },
+              "navigate_address": {
+                "type": ["string", "null"],
+                "maxLength": 300,
+                "description": "Exactly one physical address mentioned in responses (full, with city) — shown as a Waze navigate button. null when responses mention no address or more than one."
               }
             }
           }

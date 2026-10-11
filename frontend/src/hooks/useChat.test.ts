@@ -30,6 +30,20 @@ describe("buildTurnReplies", () => {
     expect(replies[1].buttons).toBeUndefined();
     expect(replies[1].llmMs).toBeUndefined();
   });
+
+  it("puts the navigate address on the first bubble only", () => {
+    const replies = buildTurnReplies({
+      reply: JSON.stringify({
+        responses: ["הכתובת שלך היא הרצל 12, תל אביב", "עוד משהו?"],
+        metadata: { navigate_address: "הרצל 12, תל אביב" },
+      }),
+      messageIds: { user: "u1", assistant: "a1", assistants: ["a1", "a2"] },
+      speaker: "לוסי",
+    });
+
+    expect(replies[0].navigateAddress).toBe("הרצל 12, תל אביב");
+    expect(replies[1].navigateAddress).toBeUndefined();
+  });
 });
 
 const saved = (id: string, text: string, createdAt: string): ChatMessage => ({

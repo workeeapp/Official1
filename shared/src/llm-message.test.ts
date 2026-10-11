@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLlmReply, parseReplyMetadata } from "./llm-message.js";
+import { parseLlmReply, parseReplyMetadata, wazeNavigateUrl } from "./llm-message.js";
 
 describe("custom list title_field", () => {
   it("reads title_field for custom lists only", () => {
@@ -209,6 +209,32 @@ describe("parseLlmReply", () => {
       JSON.stringify({ response: "שלום", metadata: { lists: [], buttons: [] } }),
     );
     expect(parsed.buttons).toBeUndefined();
+  });
+
+  it("reads navigate_address from metadata", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: ["הכתובת שלך היא הרצל 12, תל אביב"],
+        metadata: { navigate_address: "  הרצל 12, תל אביב " },
+      }),
+    );
+    expect(parsed.navigateAddress).toBe("הרצל 12, תל אביב");
+  });
+
+  it("omits navigate_address when null, empty, or not a string", () => {
+    for (const navigate_address of [null, "", "   ", 12]) {
+      const parsed = parseLlmReply(
+        JSON.stringify({ responses: ["שלום"], metadata: { navigate_address } }),
+      );
+      expect(parsed.navigateAddress).toBeUndefined();
+    }
+  });
+
+  it("builds an encoded Waze navigate URL", () => {
+    expect(wazeNavigateUrl("הרצל 12, תל אביב")).toBe(
+      `https://waze.com/ul?q=${encodeURIComponent("הרצל 12, תל אביב")}&navigate=yes`,
+    );
+    expect(wazeNavigateUrl("a&b=c")).toBe("https://waze.com/ul?q=a%26b%3Dc&navigate=yes");
   });
 
   it("ignores a null metadata action", () => {

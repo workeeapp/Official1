@@ -10,8 +10,11 @@ import {
   sendWhatsAppTyping,
   toWhatsAppFormatting,
   whatsappButtonsBody,
+  whatsappCtaUrlBody,
   whatsappTypingBody,
+  WHATSAPP_NAVIGATE_LABEL,
 } from "../src/services/whatsapp-send.js";
+import { wazeNavigateUrl } from "@workee/shared";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
 import {
   listWhatsAppEvents,
@@ -132,6 +135,25 @@ describe("WhatsApp webhook", () => {
           buttons: [
             { type: "reply", reply: { id: "הצג רשימת קניות", title: "הצג" } },
           ],
+        },
+      },
+    });
+  });
+
+  it("builds a Waze CTA URL message", () => {
+    const url = wazeNavigateUrl("הרצל 12, תל אביב");
+    expect(
+      whatsappCtaUrlBody("972501234567", "הרצל 12, תל אביב", WHATSAPP_NAVIGATE_LABEL, url),
+    ).toEqual({
+      messaging_product: "whatsapp",
+      to: "972501234567",
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        body: { text: "הרצל 12, תל אביב" },
+        action: {
+          name: "cta_url",
+          parameters: { display_text: "פתח ב-Waze", url },
         },
       },
     });

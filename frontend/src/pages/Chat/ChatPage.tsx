@@ -1,6 +1,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { chatThreadKey } from "@workee/shared";
+import { chatThreadKey, wazeNavigateUrl } from "@workee/shared";
 import { Button } from "@/components/Button";
+import { WazeIcon } from "@/components/WazeIcon";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
 import { employeeDisplayName } from "@/services/employee.service";
@@ -331,12 +332,26 @@ export function ChatPage() {
                       </span>
                     ) : null}
                   </p>
-                  {message.author === "assistant" && message.buttons?.length ? (
+                  {message.author === "assistant" &&
+                  (message.buttons?.length || message.navigateAddress) ? (
                     <div
                       data-testid="chat-reply-buttons"
                       className="mt-2 flex flex-wrap gap-2"
                     >
-                      {message.buttons.map((button) => (
+                      {message.navigateAddress ? (
+                        <a
+                          data-testid="chat-waze-button"
+                          href={wazeNavigateUrl(message.navigateAddress)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="נווט עם Waze"
+                          title={message.navigateAddress}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-primary/40 bg-surface px-3 shadow-sm transition-colors hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        >
+                          <WazeIcon />
+                        </a>
+                      ) : null}
+                      {(message.buttons ?? []).map((button) => (
                         <button
                           key={button.command}
                           type="button"
