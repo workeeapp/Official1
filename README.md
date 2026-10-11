@@ -141,25 +141,56 @@ After pulling schema changes, stop the API and run `npx prisma migrate deploy` (
 
 ## Stay up on this machine (Windows)
 
-WhatsApp needs the API, Postgres, and the Cloudflare tunnel. Cloudflared should run as a Windows service. Then:
+WhatsApp needs the API, Postgres, and the Cloudflare tunnel. Cloudflared should run as a Windows service.
+
+### Dev folder + live worktree
+
+Use two checkouts on the same laptop so auto-refresh does not fight mid-edit work:
+
+| Folder | Role |
+|--------|------|
+| `Official1` (this repo) | Edit, `npm run dev`, commit / push — may be dirty |
+| `Official1-live` (sibling worktree) | Clean tree that serves WhatsApp; keep-up + auto-refresh |
+
+One-time setup from this checkout (on the branch you want live to track):
 
 ```bash
-npm run keep-up:install
+npm run live:setup
 ```
 
-That registers a logon task, starts `scripts/keep-workee-up.ps1`, and turns off sleep / lid-sleep **while on AC power**. Folding the laptop is fine if it is plugged in. Shutdown, log out, or long battery sleep still stop the API.
+That creates `..\Official1-live`, copies `.env`, and saves `WORKEE_LIVE_ROOT`. Then in the **live** folder:
+
+```bash
+npm install
+npm run keep-up:install
+npm run hooks:install
+```
+
+`keep-up:install` registers logon tasks for keep-up **and** `WorkeeRefreshWatch` (polls `git fetch`; when `origin/<current-branch>` is ahead and the live tree is clean → `npm run refresh`). Folding the laptop is fine if it is plugged in. Shutdown, log out, or long battery sleep still stop the API.
+
+`hooks:install` adds a `post-push` hook so after you `git push` from either worktree, the live checkout refreshes. Or use `npm run push:live` (push + refresh) if you skip hooks.
+
+Day to day:
+
+- Edit only in `Official1`.
+- When you finish: commit → pull if needed → push (hook / `push:live` refreshes live).
+- When a teammate pushes the same branch: the live watcher pulls and refreshes — no manual `refresh` ping.
+- Do not edit in `Official1-live`; if it is dirty, the watcher skips until it is clean.
+- After `live:setup`, `npm run refresh`, `refresh:watch`, and `keep-up` from **either** folder target `Official1-live` (override with `-Local` on refresh or `WORKEE_FORCE_LOCAL=1`).
 
 ```bash
 npm run keep-up
 ```
 
-restarts the keeper in the current terminal. Log: `%LOCALAPPDATA%\Workee\keep-up.log`.
+restarts the keeper in the current terminal (run from live). Logs: `%LOCALAPPDATA%\Workee\keep-up.log`, `refresh-watch.log`.
 
-After pulling, a one-shot refresh (migrate, build SPA, restart API that serves `frontend/dist`):
+Manual one-shot refresh (migrate, build SPA, restart):
 
 ```bash
 npm run refresh
 ```
+
+Auto paths use `-RequireClean` (no stash) and `-NoWait` (exit after healthy).
 
 ## Tests
 

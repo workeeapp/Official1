@@ -7,7 +7,11 @@ $env:Path = @(
   "C:\Program Files\Docker\Docker\resources\bin"
   $env:Path
 ) -join ";"
-$root = Split-Path -Parent $PSScriptRoot
+
+. (Join-Path $PSScriptRoot "workee-common.ps1")
+
+$scriptCheckout = Split-Path -Parent $PSScriptRoot
+$root = Get-WorkeeRuntimeRoot -ScriptCheckoutRoot $scriptCheckout
 $logDir = Join-Path $env:LOCALAPPDATA "Workee"
 $logFile = Join-Path $logDir "keep-up.log"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -16,6 +20,10 @@ function Write-Log([string]$message) {
   $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $message
   Add-Content -Path $logFile -Value $line
   Write-Host $line
+}
+
+if ($root -ne $scriptCheckout) {
+  Write-Log "Using live worktree $root (invoked from $scriptCheckout)"
 }
 
 if (-not ("WorkeeSleep" -as [type])) {
