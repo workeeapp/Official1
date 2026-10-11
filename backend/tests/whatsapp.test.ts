@@ -141,7 +141,14 @@ describe("WhatsApp webhook", () => {
     expect(toWhatsAppFormatting("עמית מחק «באג» מרשימת «באגים»")).toBe(
       "עמית מחק *באג* מרשימת *באגים*",
     );
-    expect(toWhatsAppFormatting("מה לשלוח ל« מיכל »?")).toBe("מה לשלוח ל*מיכל*?");
+    expect(toWhatsAppFormatting("מה לשלוח ל« מיכל »?")).toBe("מה לשלוח *למיכל*?");
+    expect(toWhatsAppFormatting("עידכנתי את השם ל«דני כהן».")).toBe(
+      "עידכנתי את השם *לדני כהן*.",
+    );
+    expect(toWhatsAppFormatting("«חלב» ו«לחם»")).toBe("*חלב* *ולחם*");
+    expect(toWhatsAppFormatting("ראיתי גם וה«משימה»ות")).toBe("ראיתי גם *והמשימהות*");
+    expect(toWhatsAppFormatting("ב«בית», ש«שם»!")).toBe("*בבית*, *ששם*!");
+    expect(toWhatsAppFormatting("(«חלב»)")).toBe("(*חלב*)");
     expect(toWhatsAppFormatting("«לא סגור\nשורה»")).toBe("«לא סגור\nשורה»");
     expect(toWhatsAppFormatting("«»")).toBe("«»");
     expect(

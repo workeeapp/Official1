@@ -96,10 +96,15 @@ export function startWhatsAppTyping(messageId: string): () => void {
 
 /**
  * WhatsApp renders *text* as bold; product copy quotes with «…» (kept as-is in
- * the DB and web chat). Bold markers must hug the text and stay on one line.
+ * the DB and web chat). Bold markers must hug the text and stay on one line,
+ * and only bold on word boundaries — letters glued to the quote (ל«X», «X»ים)
+ * go inside the markers.
  */
+const QUOTE_TO_BOLD =
+  /([\p{L}\p{M}\p{N}]*)«[^\S\n]*([^«»\n]*?[^\s«»])[^\S\n]*»([\p{L}\p{M}\p{N}]*)/gu;
+
 export function toWhatsAppFormatting(text: string): string {
-  return text.replace(/«[^\S\n]*([^«»\n]*?[^\s«»])[^\S\n]*»/g, "*$1*");
+  return text.replace(QUOTE_TO_BOLD, "*$1$2$3*");
 }
 
 export const WHATSAPP_BUTTON_BODY_MAX = 1024;
