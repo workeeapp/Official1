@@ -11,9 +11,13 @@ import {
   RECURRENCE_META_KEY,
   applyClockRuleToTask,
   clearItemRecurrence,
+  applyOccurrenceChange,
+  extractOccurrenceChange,
   extractOccurrenceDone,
-  itemDoneThrough,
+  itemDoneDates,
   itemNextOccurrences,
+  itemOccurrenceExceptions,
+  keepOccurrenceMarks,
   keepRecurrenceStart,
   markOccurrenceDone,
   shapeItemRecurrence,
@@ -258,8 +262,8 @@ describe("standing task occurrence done", () => {
 
   it("today's done occurrence leaves next_occurrences, the row stays", () => {
     expect(itemNextOccurrences(gym, NOW)?.[0]).toBe("2026-10-07 19:00");
-    const marked = markOccurrenceDone(gym, "2026-10-07");
-    expect(itemDoneThrough(marked)).toBe("2026-10-07");
+    const marked = markOccurrenceDone(gym, "2026-10-07", NOW);
+    expect(itemDoneDates(marked)).toEqual(["2026-10-07"]);
     expect(marked[RECURRENCE_DISPLAY_KEY]).toBe(gym[RECURRENCE_DISPLAY_KEY]);
     expect(itemNextOccurrences(marked, NOW)?.slice(0, 2)).toEqual([
       "2026-10-08 19:00",
@@ -267,16 +271,121 @@ describe("standing task occurrence done", () => {
     ]);
   });
 
-  it("never moves done_through backwards and ignores tasks without a rule", () => {
-    const later = markOccurrenceDone(markOccurrenceDone(gym, "2026-10-08"), "2026-10-07");
-    expect(itemDoneThrough(later)).toBe("2026-10-08");
+  it("a future done day hides only that day, not the ones before it", () => {
+    const marked = markOccurrenceDone(gym, "2026-10-14", NOW);
+    expect(itemNextOccurrences(marked, NOW)?.slice(0, 3)).toEqual([
+      "2026-10-07 19:00",
+      "2026-10-08 19:00",
+      "2026-10-15 19:00",
+    ]);
+  });
+
+  it("keeps every done day and ignores tasks without a rule", () => {
+    const both = markOccurrenceDone(markOccurrenceDone(gym, "2026-10-08", NOW), "2026-10-07", NOW);
+    expect(itemDoneDates(both)).toEqual(["2026-10-07", "2026-10-08"]);
     const plain = { "שם מטלה": "לקנות חלב" };
     expect(markOccurrenceDone(plain, "2026-10-07")).toBe(plain);
+  });
+
+  it("still honours a legacy done_through cutoff", () => {
+    const legacy = {
+      ...gym,
+      [RECURRENCE_META_KEY]: {
+        ...(gym[RECURRENCE_META_KEY] as Record<string, unknown>),
+        done_through: "2026-10-08",
+      },
+    };
+    expect(itemNextOccurrences(legacy, NOW)?.[0]).toBe("2026-10-14 19:00");
+  });
+});
+
+describe("standing task occurrence change", () => {
+  // Sat 2026-10-10: «לאסוף את הילדים כל יום שישי ב־12:00».
+  const saturday = new Date("2026-10-10T03:00:00.000Z");
+  const kids = shapeItemRecurrence(
+    {
+      "שם מטלה": "לאסוף את הילדים",
+      recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "12:00" },
+    },
+    saturday,
+  ).item;
+
+  it("reads occurrence_change off the ACTION item", () => {
+    expect(
+      extractOccurrenceChange({ item_id: "a", occurrence_change: { date: "2026-10-23", cancel: true } }),
+    ).toEqual({ item: { item_id: "a" }, change: { date: "2026-10-23", cancel: true } });
+    expect(
+      extractOccurrenceChange({ occurrence_change: { date: "2026-10-23", time: "11:0" } }).change,
+    ).toBeNull();
+  });
+
+  it("cancels only 23.10; every other Friday stays", () => {
+    const next = applyOccurrenceChange(kids, { date: "2026-10-23", cancel: true }, saturday);
+    expect(itemNextOccurrences(next, saturday)?.slice(0, 3)).toEqual([
+      "2026-10-16 12:00",
+      "2026-10-30 12:00",
+      "2026-11-06 12:00",
+    ]);
+    expect(itemOccurrenceExceptions(next, saturday)).toEqual(["23.10 בוטל"]);
+    expect(next[RECURRENCE_DISPLAY_KEY]).toBe("כל יום שישי ב־12:00");
+  });
+
+  it("moves only 23.10 to 11:00", () => {
+    const next = applyOccurrenceChange(kids, { date: "2026-10-23", time: "11:00" }, saturday);
+    expect(itemNextOccurrences(next, saturday)?.slice(0, 3)).toEqual([
+      "2026-10-16 12:00",
+      "2026-10-23 11:00",
+      "2026-10-30 12:00",
+    ]);
+    expect(itemOccurrenceExceptions(next, saturday)).toEqual(["23.10 ב־11:00"]);
+  });
+
+  it("a second change on the same day replaces the first", () => {
+    const moved = applyOccurrenceChange(kids, { date: "2026-10-23", time: "11:00" }, saturday);
+    const cancelled = applyOccurrenceChange(moved, { date: "2026-10-23", cancel: true }, saturday);
+    expect(itemOccurrenceExceptions(cancelled, saturday)).toEqual(["23.10 בוטל"]);
+  });
+
+  it("refuses a day the rule does not land on, a past day, or a task without a rule", () => {
+    expect(applyOccurrenceChange(kids, { date: "2026-10-22", cancel: true }, saturday)).toBe(kids);
+    expect(applyOccurrenceChange(kids, { date: "2026-10-09", cancel: true }, saturday)).toBe(kids);
+    const plain = { "שם מטלה": "לקנות חלב" };
+    expect(applyOccurrenceChange(plain, { date: "2026-10-23", cancel: true }, saturday)).toBe(plain);
+  });
+
+  it("an all-day rule shows the moved day with its time", () => {
+    const allDay = shapeItemRecurrence(
+      { "שם מטלה": "להשקות", recurrence: { freq: "weekly", weekdays: [5] } },
+      saturday,
+    ).item;
+    const next = applyOccurrenceChange(allDay, { date: "2026-10-23", time: "08:00" }, saturday);
+    expect(itemNextOccurrences(next, saturday)?.slice(0, 3)).toEqual([
+      "2026-10-16",
+      "2026-10-23 08:00",
+      "2026-10-30",
+    ]);
+  });
+
+  it("a re-sent rule keeps the stored exceptions and done days", () => {
+    const changed = markOccurrenceDone(
+      applyOccurrenceChange(kids, { date: "2026-10-23", cancel: true }, saturday),
+      "2026-10-16",
+      saturday,
+    );
+    const resent = shapeItemRecurrence(
+      { recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "12:30" } },
+      saturday,
+    ).item;
+    const merged = keepOccurrenceMarks({ ...changed, ...resent }, changed);
+    expect(itemNextOccurrences(merged, saturday)?.slice(0, 2)).toEqual([
+      "2026-10-30 12:30",
+      "2026-11-06 12:30",
+    ]);
   });
 });
 
 describe("worker task mirrors its clock rule", () => {
-  it("copies a calendar rule and keeps start / done_through", () => {
+  it("copies a calendar rule and keeps start / done marks", () => {
     const task = {
       "שם מטלה": "להזכיר לעמית ללכת לחדר כושר",
       [RECURRENCE_META_KEY]: { freq: "daily", interval: 1, start: "2026-10-01", done_through: "2026-10-06" },

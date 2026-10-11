@@ -4,22 +4,29 @@ import {
   isGuestEmployee,
   addReminderInterval,
   anchorRecurrence,
+  applyRecurrenceException,
+  baseRecurrenceOccurrence,
   firstOccurrence,
   formatJerusalemDateTime as formatJerusalemWallTime,
+  formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   formatReminderIntervalHe,
   jerusalemParts,
   jerusalemWallTimeToDate,
   legacyRepeatFor,
   listOccurrences,
+  nextOccurrence,
   nextWeekdayFireAt,
   parseRecurrence,
   parseStoredRepeat,
+  pruneRecurrenceExceptions,
   recurrenceFromInterval,
   serializeRecurrence,
   serializeReminderRepeat,
+  withRecurrenceException,
   withinUntil,
   type Recurrence,
+  type RecurrenceException,
   type ReminderInterval,
 } from "@workee/shared";
 import { Prisma } from "@prisma/client";
@@ -68,6 +75,8 @@ export interface ReminderSnapshotRow {
   next_occurrences?: string[];
   /** Repeating clocks with a count: fires left. */
   remaining_times?: number;
+  /** Repeating clocks: one-off changes still ahead («23.10 בוטל» / «23.10 ב־11:00»). */
+  exceptions?: string[];
 }
 
 function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
@@ -266,10 +275,14 @@ export function reminderRuleSnapshot(row: {
     horizon: addJerusalemDays(row.fireAt, SNAPSHOT_HORIZON_DAYS),
     firedCount: fired,
   });
+  const exceptions = formatRecurrenceExceptionsHe(
+    pruneRecurrenceExceptions(rule, formatJerusalemDateTime(new Date()).slice(0, 10)),
+  );
   return {
     recurrence_text: formatRecurrenceHe(rule),
     next_occurrences: occurrences.map((value) => formatJerusalemDateTime(value)),
     ...(rule.count ? { remaining_times: Math.max(0, rule.count - fired) } : {}),
+    ...(exceptions.length ? { exceptions } : {}),
   };
 }
 
@@ -847,6 +860,116 @@ async function cancelActiveReminderById(
   return { label: match.itemLabel, fireAt: match.fireAt, involvedIds };
 }
 
+/** True when `day` is one of the rule's own occurrence days, walking from the clock's next fire. */
+function clockLandsOn(rule: Recurrence, nextFire: Date, day: string): boolean {
+  let cursor = baseRecurrenceOccurrence(rule, nextFire);
+  for (let guard = 0; formatJerusalemDateTime(cursor).slice(0, 10) < day && guard < 5000; guard += 1) {
+    cursor = nextOccurrence(rule, cursor);
+  }
+  return formatJerusalemDateTime(cursor).slice(0, 10) === day;
+}
+
+/**
+ * Cancel / move ONE occurrence of a repeating clock (the ACTION's occurrence_change).
+ * The rule stays; fireAt moves when the changed day is the next fire. Refused (null)
+ * without an active calendar rule, for a past day, or a day the rule does not land on.
+ * fireAt null = that was the last occurrence, so the clock was cancelled.
+ */
+export async function applyReminderOccurrenceChange(input: {
+  userId: string;
+  actorEmployeeId: string;
+  reminderId: string;
+  change: RecurrenceException;
+  now?: Date;
+}): Promise<{
+  id: string;
+  label: string;
+  itemKey: string;
+  pingIds: string[];
+  involvedIds: string[];
+  previousFireAt: Date;
+  fireAt: Date | null;
+} | null> {
+  const now = input.now ?? new Date();
+  const row = await prisma.reminder.findFirst({
+    where: { id: input.reminderId, userId: input.userId, status: "active" },
+  });
+  if (!row) {
+    return null;
+  }
+  const rule = storedReminderRule(row);
+  const today = formatJerusalemDateTime(now).slice(0, 10);
+  if (
+    !rule ||
+    rule.freq === "interval" ||
+    input.change.date < today ||
+    !clockLandsOn(rule, row.fireAt, input.change.date)
+  ) {
+    return null;
+  }
+  const updated = withRecurrenceException(rule, input.change, today);
+  // Walk from the rule slot of the pending fire so every-N cycles keep their parity.
+  let fireAt: Date | null = null;
+  let slot = baseRecurrenceOccurrence(rule, row.fireAt);
+  for (let guard = 0; guard < 5000 && withinUntil(updated, slot); guard += 1) {
+    const actual = applyRecurrenceException(updated, slot);
+    if (actual && actual.getTime() > now.getTime()) {
+      fireAt = actual;
+      break;
+    }
+    slot = nextOccurrence(updated, slot);
+  }
+  const workerItemId =
+    "workerItemId" in row && typeof row.workerItemId === "string" ? row.workerItemId : null;
+  const involvedIds = await clockInvolvedIds({
+    ownerId: row.ownerId,
+    pingIds: row.pingIds,
+    workerItemId,
+  });
+  const base = {
+    id: row.id,
+    label: row.itemLabel,
+    itemKey: row.itemKey,
+    pingIds: Array.isArray(row.pingIds) ? row.pingIds.map(String) : [],
+    involvedIds,
+    previousFireAt: row.fireAt,
+  };
+  if (!fireAt) {
+    await removeReminderAndLinkedWorkerTask({
+      id: row.id,
+      workerItemId,
+      userId: input.userId,
+      label: row.itemLabel,
+    });
+    return { ...base, fireAt: null };
+  }
+  await prisma.reminder.update({
+    where: { id: row.id },
+    data: {
+      fireAt,
+      recurrence: serializeRecurrence(updated) as Prisma.InputJsonValue,
+    },
+  });
+  // The worker task shows the rule's own time, not a one-off moved slot.
+  await syncLinkedWorkerTaskClock({
+    reminderId: row.id,
+    workerItemId,
+    fireAt: baseRecurrenceOccurrence(updated, fireAt),
+    rule: updated,
+  });
+  await recordAuditEvent({
+    userId: input.userId,
+    actorEmployeeId: input.actorEmployeeId,
+    action: "reminder_save",
+    entityType: "Reminder",
+    entityId: row.id,
+    summary: `occurrence ${input.change.cancel ? "cancel" : `time ${input.change.time}`} ${input.change.date} reminder: ${row.itemLabel}`,
+    detail: { fireAt: fireAt.toISOString() },
+  });
+  scheduleSoon(fireAt);
+  return { ...base, fireAt };
+}
+
 /** A remove/update of an existing clock, so everyone else it involves can be told. */
 export type ReminderChange = {
   action: "remove" | "update";
@@ -1137,6 +1260,48 @@ export async function applyReminders(input: {
     const key = itemKey(reminder.item);
     if (reminder.action === "update" && !reminderId) {
       skipped.push({ item: reminder.item.trim() || "(missing reminder_id)", reason: "db" });
+      continue;
+    }
+    if (reminder.action === "update" && reminder.occurrenceChange) {
+      try {
+        const applied = await applyReminderOccurrenceChange({
+          userId: input.userId,
+          actorEmployeeId: input.actor.id,
+          reminderId,
+          change: reminder.occurrenceChange,
+        });
+        if (!applied) {
+          missed.push(reminder.item.trim() || reminderId);
+          continue;
+        }
+        if (applied.fireAt) {
+          const fireLabel = formatJerusalemDateTime(applied.fireAt);
+          saved.push({
+            id: applied.id,
+            item: reminder.item.trim(),
+            itemKey: applied.itemKey,
+            itemLabel: applied.label,
+            fireAt: fireLabel,
+            ping: applied.pingIds.map((id) => formatPingLabel(id, input.employees)).join(","),
+          });
+          changes.push({
+            action: "update",
+            label: applied.label,
+            fireAt: fireLabel,
+            involvedIds: applied.involvedIds,
+          });
+        } else {
+          removed.push(applied.label);
+          changes.push({
+            action: "remove",
+            label: applied.label,
+            fireAt: formatJerusalemDateTime(applied.previousFireAt),
+            involvedIds: applied.involvedIds,
+          });
+        }
+      } catch {
+        skipped.push({ item: reminder.item.trim() || reminderId, reason: "db" });
+      }
       continue;
     }
     if (reminder.action === "add" && !key) {

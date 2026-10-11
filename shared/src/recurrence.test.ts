@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import { formatJerusalemDateTime } from "./jerusalem-time.js";
 import {
   anchorRecurrence,
+  applyRecurrenceException,
+  baseRecurrenceOccurrence,
   firstOccurrence,
+  formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   legacyRepeatFor,
   listOccurrences,
   nextOccurrence,
   nextRecurrenceFire,
   parseRecurrence,
+  parseRecurrenceException,
+  pruneRecurrenceExceptions,
+  serializeRecurrence,
+  withRecurrenceException,
   type Recurrence,
 } from "./recurrence.js";
 
@@ -156,6 +163,90 @@ describe("count and until", () => {
     const fired = new Date("2026-10-01T06:00:00Z");
     const next = nextRecurrenceFire({ rec, fired, now: NOW, firedCount: 1 });
     expect(next && fmt(next)).toBe("2026-10-08 09:00");
+  });
+});
+
+describe("per-occurrence exceptions", () => {
+  // Every Friday 12:00; 16.10 / 23.10 / 30.10 are Fridays.
+  const fridays: Recurrence = { freq: "weekly", interval: 1, weekdays: [5], time: "12:00" };
+  const horizon = new Date("2026-12-31T00:00:00Z");
+  const fri16 = new Date("2026-10-16T09:00:00Z");
+
+  it("parses, dedupes by day and round-trips exceptions", () => {
+    const parsed = parseRecurrence({
+      ...serializeRecurrence(fridays),
+      exceptions: [
+        { date: "2026-10-30", time: "9:15" },
+        { date: "2026-10-23", time: "11:00" },
+        { date: "2026-10-23", cancel: true },
+        { date: "bad", cancel: true },
+        { date: "2026-11-06" },
+      ],
+    });
+    expect(parsed?.exceptions).toEqual([
+      { date: "2026-10-23", cancel: true },
+      { date: "2026-10-30", time: "09:15" },
+    ]);
+    expect(parseRecurrence(serializeRecurrence(parsed!))).toEqual(parsed);
+    expect(parseRecurrenceException({ date: "2026-10-23", time: "25:00" })).toBeNull();
+  });
+
+  it("listOccurrences skips a cancelled day and moves a changed one", () => {
+    const rec = withRecurrenceException(
+      withRecurrenceException(fridays, { date: "2026-10-23", cancel: true }, "2026-10-12"),
+      { date: "2026-10-30", time: "11:00" },
+      "2026-10-12",
+    );
+    expect(listOccurrences(rec, { first: fri16, limit: 3, horizon }).map(fmt)).toEqual([
+      "2026-10-16 12:00",
+      "2026-10-30 11:00",
+      "2026-11-06 12:00",
+    ]);
+    expect(formatRecurrenceExceptionsHe(rec)).toEqual(["23.10 בוטל", "30.10 ב־11:00"]);
+  });
+
+  it("a cancelled day does not use up count", () => {
+    const rec = withRecurrenceException(
+      { ...fridays, count: 3 },
+      { date: "2026-10-23", cancel: true },
+      "2026-10-12",
+    );
+    expect(listOccurrences(rec, { first: fri16, limit: 10, horizon }).map(fmt)).toEqual([
+      "2026-10-16 12:00",
+      "2026-10-30 12:00",
+      "2026-11-06 12:00",
+    ]);
+  });
+
+  it("nextRecurrenceFire skips a cancelled day", () => {
+    const rec = withRecurrenceException(fridays, { date: "2026-10-23", cancel: true }, "2026-10-12");
+    const next = nextRecurrenceFire({ rec, fired: fri16, now: fri16, firedCount: 1 });
+    expect(next && fmt(next)).toBe("2026-10-30 12:00");
+  });
+
+  it("a moved fire is not repeated later the same day", () => {
+    const rec = withRecurrenceException(fridays, { date: "2026-10-23", time: "11:00" }, "2026-10-12");
+    const moved = nextRecurrenceFire({ rec, fired: fri16, now: fri16, firedCount: 1 });
+    expect(moved && fmt(moved)).toBe("2026-10-23 11:00");
+    const after = nextRecurrenceFire({ rec, fired: moved!, now: moved!, firedCount: 2 });
+    expect(after && fmt(after)).toBe("2026-10-30 12:00");
+  });
+
+  it("a day moved later fires at the new time", () => {
+    const rec = withRecurrenceException(fridays, { date: "2026-10-23", time: "15:30" }, "2026-10-12");
+    const next = nextRecurrenceFire({ rec, fired: fri16, now: fri16, firedCount: 1 });
+    expect(next && fmt(next)).toBe("2026-10-23 15:30");
+    expect(fmt(baseRecurrenceOccurrence(rec, next!))).toBe("2026-10-23 12:00");
+  });
+
+  it("prunes exceptions before today", () => {
+    const rec = withRecurrenceException(fridays, { date: "2026-10-16", cancel: true }, "2026-10-12");
+    expect(pruneRecurrenceExceptions(rec, "2026-10-17").exceptions).toBeUndefined();
+    expect(pruneRecurrenceExceptions(rec, "2026-10-16")).toBe(rec);
+  });
+
+  it("applyRecurrenceException leaves untouched days alone", () => {
+    expect(applyRecurrenceException(fridays, fri16)).toBe(fri16);
   });
 });
 

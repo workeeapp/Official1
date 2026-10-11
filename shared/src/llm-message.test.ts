@@ -967,6 +967,24 @@ describe("parseLlmReply", () => {
     expect(keep).not.toHaveProperty("recurrence");
   });
 
+  it("reads occurrence_change on a reminders update only", () => {
+    const [cancel, move, add] = parseReplyMetadata(
+      JSON.stringify({
+        response: "עדכנתי",
+        metadata: {
+          reminders: [
+            { action: "update", reminder_id: "r1", occurrence_change: { date: "2026-10-23", cancel: true } },
+            { action: "update", reminder_id: "r2", occurrence_change: { date: "2026-10-23", time: "11:00" } },
+            { action: "add", item: "x", time: "10:00", occurrence_change: { date: "2026-10-23", cancel: true } },
+          ],
+        },
+      }),
+    ).reminders!;
+    expect(cancel.occurrenceChange).toEqual({ date: "2026-10-23", cancel: true });
+    expect(move.occurrenceChange).toEqual({ date: "2026-10-23", time: "11:00" });
+    expect(add).not.toHaveProperty("occurrenceChange");
+  });
+
   it("does not translate Hebrew when or every fields", () => {
     expect(
       parseReplyMetadata(

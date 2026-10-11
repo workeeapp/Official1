@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { itemNextOccurrences } from "../src/services/list-recurrence.js";
 
 const {
   listFindMany,
@@ -1353,6 +1354,88 @@ describe("employee records", () => {
           "שם מטלה": "להזכיר לטל לבדוק מייל",
         }),
       }),
+    });
+  });
+
+  describe("standing task occurrence_change", () => {
+    const list = { id: "amit-tasks", employeeId, listType: "tasks", name: "" };
+    const kids = {
+      id: "kids-1",
+      listId: list.id,
+      itemKey: "לאסוף את הילדים",
+      data: {
+        "שם מטלה": "לאסוף את הילדים",
+        חוזר: "כל יום שישי ב־12:00",
+        __recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "12:00", start: "2026-10-10" },
+      },
+      scope: "personal",
+      addedById: employeeId,
+      visibleTo: [employeeId],
+    };
+    const updateKids = (occurrence_change: Record<string, unknown>) =>
+      applyEmployeeMetadata(employeeId, {
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            items: [{ item_id: "kids-1", occurrence_change }],
+            targets: [],
+          },
+        ],
+        filing: [],
+      });
+    const storedRule = () =>
+      (itemUpdate.mock.calls[0][0].data.data as Record<string, Record<string, unknown>>).__recurrence;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-11T22:00:00.000Z"));
+      listFindFirst.mockResolvedValue(list);
+      itemFindFirst.mockResolvedValue(kids);
+      itemFindMany.mockResolvedValue([]);
+      itemUpdate.mockResolvedValue({ id: "kids-1" });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("cancels only 23.10 and keeps the rule", async () => {
+      await updateKids({ date: "2026-10-23", cancel: true });
+      expect(storedRule()).toMatchObject({
+        weekdays: [5],
+        time: "12:00",
+        start: "2026-10-10",
+        exceptions: [{ date: "2026-10-23", cancel: true }],
+      });
+      expect(itemNextOccurrences(itemUpdate.mock.calls[0][0].data.data)?.slice(0, 2)).toEqual([
+        "2026-10-16 12:00",
+        "2026-10-30 12:00",
+      ]);
+    });
+
+    it("moves only 23.10 to 11:00", async () => {
+      await updateKids({ date: "2026-10-23", time: "11:00" });
+      expect(storedRule().exceptions).toEqual([{ date: "2026-10-23", time: "11:00" }]);
+      expect(itemNextOccurrences(itemUpdate.mock.calls[0][0].data.data)?.slice(0, 3)).toEqual([
+        "2026-10-16 12:00",
+        "2026-10-23 11:00",
+        "2026-10-30 12:00",
+      ]);
+    });
+
+    it("writes nothing for a day the rule does not land on", async () => {
+      await updateKids({ date: "2026-10-22", cancel: true });
+      expect(itemUpdate).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing on a task without a rule", async () => {
+      itemFindFirst.mockResolvedValue({
+        ...kids,
+        data: { "שם מטלה": "לאסוף את הילדים" },
+      });
+      await updateKids({ date: "2026-10-23", cancel: true });
+      expect(itemUpdate).not.toHaveBeenCalled();
     });
   });
 

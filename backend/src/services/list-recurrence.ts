@@ -2,14 +2,19 @@ import {
   addJerusalemDays,
   firstOccurrence,
   formatJerusalemDateTime,
+  formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   jerusalemParts,
   jerusalemWallTimeToDate,
   listOccurrences,
   nextOccurrence,
   parseRecurrence,
+  parseRecurrenceException,
+  pruneRecurrenceExceptions,
   serializeRecurrence,
+  withRecurrenceException,
   type Recurrence,
+  type RecurrenceException,
 } from "@workee/shared";
 
 /**
@@ -95,8 +100,35 @@ export function keepRecurrenceStart(
   return { ...data, [RECURRENCE_META_KEY]: { ...meta, start: prevStart } };
 }
 
+/**
+ * A re-sent rule replaces the stored one; keep the per-occurrence marks (done days,
+ * one-off exceptions) the new rule did not carry itself.
+ */
+export function keepOccurrenceMarks(
+  data: Record<string, unknown>,
+  previous: unknown,
+): Record<string, unknown> {
+  const meta = asRecord(data[RECURRENCE_META_KEY]);
+  const prev = asRecord(asRecord(previous)[RECURRENCE_META_KEY]);
+  if (!parseRecurrence(meta) || !parseRecurrence(prev)) {
+    return data;
+  }
+  const carried: Record<string, unknown> = {};
+  for (const key of [DONE_DATES_KEY, LEGACY_DONE_THROUGH_KEY, "exceptions"]) {
+    if (!(key in meta) && key in prev) {
+      carried[key] = prev[key];
+    }
+  }
+  return Object.keys(carried).length
+    ? { ...data, [RECURRENCE_META_KEY]: { ...meta, ...carried } }
+    : data;
+}
+
 /** lists.update field: this occurrence of a standing task was done (true = today, or YYYY-MM-DD). */
 export const OCCURRENCE_DONE_KEY = "occurrence_done";
+const DONE_DATES_KEY = "done_dates";
+/** Older rows stored a single cutoff; still honoured on read. */
+const LEGACY_DONE_THROUGH_KEY = "done_through";
 
 export function extractOccurrenceDone(
   item: Record<string, unknown>,
@@ -114,31 +146,105 @@ export function extractOccurrenceDone(
 }
 
 /**
- * Record that a standing task's occurrence on `doneDate` is done. Occurrences up to
- * that day drop out of next_occurrences; the row and its rule stay. No-op on a task
- * without a rule.
+ * Record that a standing task's occurrence on `doneDate` is done. Only that day drops
+ * out of next_occurrences; the row and its rule stay. Done days before today are
+ * dropped from storage. No-op on a task without a rule.
  */
 export function markOccurrenceDone(
   data: Record<string, unknown>,
   doneDate: string,
+  now = new Date(),
 ): Record<string, unknown> {
   const meta = asRecord(data[RECURRENCE_META_KEY]);
   if (!parseRecurrence(meta)) {
     return data;
   }
-  const previous = typeof meta.done_through === "string" ? meta.done_through : "";
+  const today = ymd(now);
+  const doneDates = [...new Set([...itemDoneDates(data), doneDate])]
+    .filter((day) => day >= today || day === doneDate)
+    .sort();
   return {
     ...data,
-    [RECURRENCE_META_KEY]: {
-      ...meta,
-      done_through: previous > doneDate ? previous : doneDate,
-    },
+    [RECURRENCE_META_KEY]: { ...meta, [DONE_DATES_KEY]: doneDates },
   };
 }
 
-export function itemDoneThrough(data: unknown): string {
+/** Occurrence days explicitly marked done (YYYY-MM-DD, sorted). */
+export function itemDoneDates(data: unknown): string[] {
   const meta = asRecord(asRecord(data)[RECURRENCE_META_KEY]);
-  return typeof meta.done_through === "string" ? meta.done_through : "";
+  const raw = Array.isArray(meta[DONE_DATES_KEY]) ? (meta[DONE_DATES_KEY] as unknown[]) : [];
+  return raw
+    .filter((day): day is string => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day))
+    .sort();
+}
+
+function isOccurrenceDone(data: unknown, day: string): boolean {
+  const meta = asRecord(asRecord(data)[RECURRENCE_META_KEY]);
+  const legacy = meta[LEGACY_DONE_THROUGH_KEY];
+  if (typeof legacy === "string" && legacy && day <= legacy) {
+    return true;
+  }
+  return itemDoneDates(data).includes(day);
+}
+
+/** lists.update field: change one occurrence of a standing task ({date, cancel} / {date, time}). */
+export const OCCURRENCE_CHANGE_KEY = "occurrence_change";
+
+export function extractOccurrenceChange(item: Record<string, unknown>): {
+  item: Record<string, unknown>;
+  change: RecurrenceException | null;
+} {
+  if (!(OCCURRENCE_CHANGE_KEY in item)) {
+    return { item, change: null };
+  }
+  const { [OCCURRENCE_CHANGE_KEY]: raw, ...rest } = item;
+  return { item: rest, change: parseRecurrenceException(raw) };
+}
+
+/** True when `day` (YYYY-MM-DD) is one of the rule's own occurrence days on/after its start. */
+function isRuleOccurrenceDay(rule: Recurrence, start: string, day: string): boolean {
+  const startIso = start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const dayIso = day.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!dayIso || (startIso && day < start)) {
+    return false;
+  }
+  const from = startIso
+    ? jerusalemWallTimeToDate(Number(startIso[1]), Number(startIso[2]), Number(startIso[3]), 0, 0)
+    : jerusalemWallTimeToDate(Number(dayIso[1]), Number(dayIso[2]), Number(dayIso[3]), 0, 0);
+  let cursor = firstOccurrence(rule, from, true);
+  for (let guard = 0; ymd(cursor) < day && guard < 5000; guard += 1) {
+    cursor = nextOccurrence(rule, cursor);
+  }
+  return ymd(cursor) === day;
+}
+
+/**
+ * Store a one-off change for a single occurrence (same day replaces). Refused (data
+ * returned unchanged) on a task without a rule, a past day, or a day the rule does
+ * not land on.
+ */
+export function applyOccurrenceChange(
+  data: Record<string, unknown>,
+  change: RecurrenceException,
+  now = new Date(),
+): Record<string, unknown> {
+  const stored = itemRecurrence(data);
+  const today = ymd(now);
+  if (!stored || change.date < today || !isRuleOccurrenceDay(stored.rule, stored.start, change.date)) {
+    return data;
+  }
+  const updated = withRecurrenceException(stored.rule, change, today);
+  const { exceptions: _previous, ...meta } = asRecord(data[RECURRENCE_META_KEY]);
+  return {
+    ...data,
+    [RECURRENCE_META_KEY]: { ...meta, ...serializeRecurrence(updated) },
+  };
+}
+
+/** Product-Hebrew list of the row's one-off changes («23.10 בוטל», «23.10 ב־11:00»). */
+export function itemOccurrenceExceptions(data: unknown, now = new Date()): string[] {
+  const stored = itemRecurrence(data);
+  return stored ? formatRecurrenceExceptionsHe(pruneRecurrenceExceptions(stored.rule, ymd(now))) : [];
 }
 
 /**
@@ -155,13 +261,17 @@ export function applyClockRuleToTask(
   }
   const meta = asRecord(data[RECURRENCE_META_KEY]);
   const start = typeof meta.start === "string" ? meta.start : ymd(now);
-  const doneThrough = typeof meta.done_through === "string" ? meta.done_through : "";
+  const marks = Object.fromEntries(
+    [DONE_DATES_KEY, LEGACY_DONE_THROUGH_KEY]
+      .filter((key) => key in meta)
+      .map((key) => [key, meta[key]]),
+  );
   return {
     ...data,
     [RECURRENCE_META_KEY]: {
       ...serializeRecurrence(rule),
       start,
-      ...(doneThrough ? { done_through: doneThrough } : {}),
+      ...marks,
     },
     [RECURRENCE_DISPLAY_KEY]: formatRecurrenceHe(rule),
   };
@@ -210,9 +320,8 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
     ? jerusalemWallTimeToDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), 0, 0)
     : today;
   const horizon = addJerusalemDays(today, HORIZON_DAYS);
-  const doneThrough = itemDoneThrough(data);
   const pending = (value: Date) =>
-    value.getTime() >= today.getTime() && (!doneThrough || ymd(value) > doneThrough);
+    value.getTime() >= today.getTime() && !isOccurrenceDone(data, ymd(value));
   let occurrences: Date[];
   if (rule.count) {
     const first = firstOccurrence(rule, startDay, true);
@@ -229,7 +338,12 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
       horizon,
     }).filter(pending);
   }
+  const movedDays = new Set(
+    (rule.exceptions ?? []).filter((entry) => entry.time).map((entry) => entry.date),
+  );
   return occurrences
     .slice(0, OCCURRENCE_LIMIT)
-    .map((value) => (rule.time ? formatJerusalemDateTime(value) : ymd(value)));
+    .map((value) =>
+      rule.time || movedDays.has(ymd(value)) ? formatJerusalemDateTime(value) : ymd(value),
+    );
 }

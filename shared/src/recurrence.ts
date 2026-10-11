@@ -27,6 +27,17 @@ export interface Recurrence {
   until?: string;
   /** Total occurrences, including the first. */
   count?: number;
+  /** One-off changes to single occurrences, keyed by the original occurrence day. */
+  exceptions?: RecurrenceException[];
+}
+
+/** A single occurrence that is skipped (cancel) or moved to another time that day. */
+export interface RecurrenceException {
+  /** YYYY-MM-DD of the original occurrence. */
+  date: string;
+  cancel?: boolean;
+  /** HH:mm replacing the rule's time on that day only. */
+  time?: string;
 }
 
 const UNIT_MS: Record<RecurrenceUnit, number> = {
@@ -103,6 +114,34 @@ function weekdayList(value: unknown): number[] {
   ].sort((left, right) => left - right);
 }
 
+/** One `occurrence_change` / stored exception entry. Neither cancel nor a valid time → null. */
+export function parseRecurrenceException(value: unknown): RecurrenceException | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const date = ymdText(record.date);
+  if (!date) {
+    return null;
+  }
+  if (record.cancel === true || record.cancel === "true") {
+    return { date, cancel: true };
+  }
+  const time = clockText(record.time);
+  return time ? { date, time } : null;
+}
+
+function exceptionList(value: unknown): RecurrenceException[] {
+  const byDate = new Map<string, RecurrenceException>();
+  for (const entry of Array.isArray(value) ? value : []) {
+    const parsed = parseRecurrenceException(entry);
+    if (parsed) {
+      byDate.set(parsed.date, parsed);
+    }
+  }
+  return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
 /** Read the model's `recurrence` object (snake or camel case). null / "none" → no repeat. */
 export function parseRecurrence(value: unknown): Recurrence | null {
   const record = asRecord(value);
@@ -140,6 +179,7 @@ export function parseRecurrence(value: unknown): Recurrence | null {
   const time = clockText(record.time);
   const until = ymdText(record.until);
   const count = positiveInt(record.count ?? record.times);
+  const exceptions = kind === "interval" ? [] : exceptionList(record.exceptions);
   return {
     freq: kind,
     interval,
@@ -150,6 +190,7 @@ export function parseRecurrence(value: unknown): Recurrence | null {
     ...(time && kind !== "interval" ? { time } : {}),
     ...(until ? { until } : {}),
     ...(count ? { count } : {}),
+    ...(exceptions.length ? { exceptions } : {}),
   };
 }
 
@@ -165,7 +206,82 @@ export function serializeRecurrence(rec: Recurrence): Record<string, unknown> {
     ...(rec.time ? { time: rec.time } : {}),
     ...(rec.until ? { until: rec.until } : {}),
     ...(rec.count ? { count: rec.count } : {}),
+    ...(rec.exceptions?.length
+      ? {
+          exceptions: rec.exceptions.map((entry) =>
+            entry.cancel ? { date: entry.date, cancel: true } : { date: entry.date, time: entry.time },
+          ),
+        }
+      : {}),
   };
+}
+
+/** Rule with `change` merged in (same day replaces), dropping entries before `today` (YYYY-MM-DD). */
+export function withRecurrenceException(
+  rec: Recurrence,
+  change: RecurrenceException,
+  today: string,
+): Recurrence {
+  return pruneRecurrenceExceptions(
+    { ...rec, exceptions: exceptionList([...(rec.exceptions ?? []), change]) },
+    today,
+  );
+}
+
+/** Drop exceptions for days before `today` (YYYY-MM-DD) so stored rules do not grow forever. */
+export function pruneRecurrenceExceptions(rec: Recurrence, today: string): Recurrence {
+  if (!rec.exceptions) {
+    return rec;
+  }
+  const kept = rec.exceptions.filter((entry) => entry.date >= today);
+  if (kept.length === rec.exceptions.length) {
+    return rec;
+  }
+  const { exceptions: _dropped, ...rest } = rec;
+  return kept.length ? { ...rest, exceptions: kept } : rest;
+}
+
+function exceptionOn(rec: Recurrence, day: string): RecurrenceException | undefined {
+  return rec.exceptions?.find((entry) => entry.date === day);
+}
+
+/**
+ * Where a rule occurrence actually lands: null when that day is cancelled, the moved
+ * time when it was changed, else unchanged.
+ */
+export function applyRecurrenceException(rec: Recurrence, occurrence: Date): Date | null {
+  const change = exceptionOn(rec, ymdOf(occurrence));
+  if (!change) {
+    return occurrence;
+  }
+  if (change.cancel) {
+    return null;
+  }
+  const match = change.time?.match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return occurrence;
+  }
+  const p = jerusalemParts(occurrence);
+  return jerusalemWallTimeToDate(p.year, p.month, p.day, Number(match[1]), Number(match[2]));
+}
+
+/** The rule's own slot for a fire that may have been moved (same day, rule time). */
+export function baseRecurrenceOccurrence(rec: Recurrence, fired: Date): Date {
+  const change = exceptionOn(rec, ymdOf(fired));
+  const match = rec.time?.match(/^(\d{2}):(\d{2})$/);
+  if (!change?.time || !match) {
+    return fired;
+  }
+  const p = jerusalemParts(fired);
+  return jerusalemWallTimeToDate(p.year, p.month, p.day, Number(match[1]), Number(match[2]));
+}
+
+/** Product Hebrew per exception, e.g. «23.10 בוטל» / «23.10 ב־11:00». */
+export function formatRecurrenceExceptionsHe(rec: Recurrence): string[] {
+  return (rec.exceptions ?? []).map((entry) => {
+    const [, month, day] = entry.date.split("-").map(Number);
+    return entry.cancel ? `${day}.${month} בוטל` : `${day}.${month} ב־${entry.time}`;
+  });
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -306,14 +422,25 @@ export function nextRecurrenceFire(input: {
   if (input.rec.count && input.firedCount >= input.rec.count) {
     return null;
   }
-  let next = nextOccurrence(input.rec, input.fired);
-  for (let guard = 0; next.getTime() <= input.now.getTime() && guard < 5000; guard += 1) {
-    next = nextOccurrence(input.rec, next);
+  // Step from the rule's own slot so a moved fire (11:00 instead of 12:00) is not repeated that day.
+  let base = nextOccurrence(input.rec, baseRecurrenceOccurrence(input.rec, input.fired));
+  for (let guard = 0; guard < 5000; guard += 1) {
+    if (!withinUntil(input.rec, base)) {
+      return null;
+    }
+    const actual = applyRecurrenceException(input.rec, base);
+    if (actual && actual.getTime() > input.now.getTime()) {
+      return actual;
+    }
+    base = nextOccurrence(input.rec, base);
   }
-  return withinUntil(input.rec, next) ? next : null;
+  return null;
 }
 
-/** Upcoming occurrences, bounded by limit, horizon, until and the remaining count. */
+/**
+ * Upcoming occurrences, bounded by limit, horizon, until and the remaining count.
+ * Exceptions apply: a cancelled day is skipped and does not use up `count`.
+ */
 export function listOccurrences(
   rec: Recurrence,
   input: {
@@ -325,7 +452,7 @@ export function listOccurrences(
   },
 ): Date[] {
   const out: Date[] = [];
-  let cursor = input.first;
+  let cursor = baseRecurrenceOccurrence(rec, input.first);
   const fired = input.firedCount ?? 0;
   for (let guard = 0; guard < 1000 && out.length < input.limit; guard += 1) {
     if (cursor.getTime() > input.horizon.getTime() || !withinUntil(rec, cursor)) {
@@ -334,7 +461,10 @@ export function listOccurrences(
     if (rec.count && fired + out.length >= rec.count) {
       break;
     }
-    out.push(cursor);
+    const actual = applyRecurrenceException(rec, cursor);
+    if (actual) {
+      out.push(actual);
+    }
     cursor = nextOccurrence(rec, cursor);
   }
   return out;

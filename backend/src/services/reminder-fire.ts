@@ -1,12 +1,16 @@
 import {
   addReminderInterval,
   digitalEmployees,
+  formatJerusalemDateTime,
   isProtectedEmployee,
   nextRecurrenceFire,
   parseRecurrence,
   parseStoredRepeat,
+  pruneRecurrenceExceptions,
+  serializeRecurrence,
   type LlmReplyButton,
 } from "@workee/shared";
+import { Prisma } from "@prisma/client";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { isMissingTableError } from "../utils/errors.js";
@@ -119,10 +123,14 @@ export async function settleFiredReminder(
   const sentAt = sendStatus === "sent" ? now : null;
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
   const nextAt = nextFireAt(reminder, now, firedCount);
-  const hasRule = Boolean(parseRecurrence(reminder.recurrence));
+  const rule = parseRecurrence(reminder.recurrence);
+  const hasRule = Boolean(rule);
   const workerItemId = await workerItemIdForReminder(reminder.id);
 
   if (nextAt) {
+    const pruned = rule?.exceptions?.length
+      ? pruneRecurrenceExceptions(rule, formatJerusalemDateTime(nextAt).slice(0, 10))
+      : null;
     await prisma.reminder.update({
       where: { id: reminder.id },
       data: {
@@ -130,6 +138,9 @@ export async function settleFiredReminder(
         sendStatus,
         sentAt,
         ...(hasRule ? { occurrencesFired: firedCount } : {}),
+        ...(pruned && pruned !== rule
+          ? { recurrence: serializeRecurrence(pruned) as Prisma.InputJsonValue }
+          : {}),
       },
     });
     scheduleSoon(nextAt);

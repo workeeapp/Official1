@@ -315,7 +315,17 @@
                           },
                           "occurrence_done": {
                             "type": ["string", "boolean", "null"],
-                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Occurrences up to that day leave next_occurrences."
+                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Only that occurrence leaves next_occurrences."
+                          },
+                          "occurrence_change": {
+                            "type": ["object", "null"],
+                            "description": "lists.update on a standing task (row has חוזר): change ONE occurrence only, the rule stays for every other day. { date: YYYY-MM-DD of that occurrence (must be in next_occurrences), cancel: true } = skip that day («ב־23.10 אני לא צריך לאסוף»); { date, time: \"HH:mm\" } = that day only at another time («ב־23.10 לאסוף ב־11:00»). Never occurrence_done, lists.remove, a recurrence change, or a new task for this. Send with item_id and nothing else on the item.",
+                            "properties": {
+                              "date": { "type": "string" },
+                              "cancel": { "type": "boolean" },
+                              "time": { "type": "string" }
+                            },
+                            "required": ["date"]
                           },
                           "urgency": {
                             "type": "string",
@@ -607,6 +617,16 @@
                     "reminder_id": {
                       "type": "string",
                       "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id / active_reminders[].reminder_id. Required on reminders remove and update — omitting it skips the mutate."
+                    },
+                    "occurrence_change": {
+                      "type": ["object", "null"],
+                      "description": "reminders update on a REPEATING clock (has recurrence_text / next_occurrences): change ONE occurrence only, the rule stays. { date: YYYY-MM-DD of that occurrence (from next_occurrences), cancel: true } skips that day; { date, time: \"HH:mm\" } fires that day only at the new time. Send with reminder_id and nothing else changed. When the clock belongs to a standing task you are also changing, send the same occurrence_change on both.",
+                      "properties": {
+                        "date": { "type": "string" },
+                        "cancel": { "type": "boolean" },
+                        "time": { "type": "string" }
+                      },
+                      "required": ["date"]
                     }
                   }
                 }

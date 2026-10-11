@@ -106,18 +106,29 @@ export type { JerusalemParts } from "./jerusalem-time";
 export {
   RECURRENCE_FREQS,
   anchorRecurrence,
+  applyRecurrenceException,
+  baseRecurrenceOccurrence,
   firstOccurrence,
+  formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   legacyRepeatFor,
   listOccurrences,
   nextOccurrence,
   nextRecurrenceFire,
   parseRecurrence,
+  parseRecurrenceException,
+  pruneRecurrenceExceptions,
   recurrenceFromInterval,
   serializeRecurrence,
+  withRecurrenceException,
   withinUntil,
 } from "./recurrence";
-export type { Recurrence, RecurrenceFreq, RecurrenceUnit } from "./recurrence";
+export type {
+  Recurrence,
+  RecurrenceException,
+  RecurrenceFreq,
+  RecurrenceUnit,
+} from "./recurrence";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
 export { TYPING_PAUSE_MAX_MS, TYPING_PAUSE_MIN_MS, typingPauseMs } from "./typing-pause";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";

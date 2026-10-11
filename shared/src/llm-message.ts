@@ -1,5 +1,10 @@
 import { parseJobUrgency, type JobUrgency } from "./job-urgency.js";
-import { parseRecurrence, type Recurrence } from "./recurrence.js";
+import {
+  parseRecurrence,
+  parseRecurrenceException,
+  type Recurrence,
+  type RecurrenceException,
+} from "./recurrence.js";
 import { parseReminderInterval } from "./reminder-interval.js";
 
 export interface LlmReplyButton {
@@ -208,6 +213,8 @@ export interface LlmReminderAction {
   composeLookbackHours: number;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
+  /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
+  occurrenceChange?: RecurrenceException;
 }
 
 export interface LlmHandoffAction {
@@ -912,6 +919,10 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
       : null;
   const stopsRecurrence =
     String(recurrenceRecord?.freq ?? "").trim().toLowerCase() === "none";
+  const occurrenceChange =
+    action === "update"
+      ? parseRecurrenceException(record.occurrence_change ?? record.occurrenceChange)
+      : null;
   const repeatRaw = String(record.repeat ?? "").trim().toLowerCase();
   const repeat = REMINDER_REPEATS.has(repeatRaw as LlmReminderRepeat)
     ? (repeatRaw as LlmReminderRepeat)
@@ -966,6 +977,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeSource: parseComposeSource(record),
     composeLookbackHours: parseComposeLookbackHours(record),
     reminderId,
+    ...(occurrenceChange ? { occurrenceChange } : {}),
   };
 }
 

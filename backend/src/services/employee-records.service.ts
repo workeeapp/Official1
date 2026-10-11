@@ -17,9 +17,13 @@ import { recordAuditEvent } from "./audit.service.js";
 import { jobMetaFrom, stripJobMeta } from "./job-meta.js";
 import {
   clearItemRecurrence,
+  applyOccurrenceChange,
+  extractOccurrenceChange,
   extractOccurrenceDone,
-  itemDoneThrough,
+  itemDoneDates,
   itemNextOccurrences,
+  itemOccurrenceExceptions,
+  keepOccurrenceMarks,
   keepRecurrenceStart,
   markOccurrenceDone,
   shapeItemRecurrence,
@@ -2175,7 +2179,8 @@ async function applyListAction(
     }
 
     const done = extractOccurrenceDone(item);
-    const shaped = shapeItemRecurrence(done.item);
+    const occurrence = extractOccurrenceChange(done.item);
+    const shaped = shapeItemRecurrence(occurrence.item);
     const fieldsItem = shaped.item;
     const rowTitleField = list.titleField ?? "";
     const itemKey =
@@ -2227,13 +2232,29 @@ async function applyListAction(
         : normalizeListItemData(fieldsItem);
     const ruledRecord = shaped.clear
       ? clearItemRecurrence(mergedRecord)
-      : existing && !shaped.explicitStart
-        ? keepRecurrenceStart(mergedRecord, existing.data)
+      : existing
+        ? keepOccurrenceMarks(
+            shaped.explicitStart ? mergedRecord : keepRecurrenceStart(mergedRecord, existing.data),
+            existing.data,
+          )
         : mergedRecord;
-    const nextDataRecord =
+    const doneRecord =
       done.doneDate && resolvedAction.action === "update"
         ? markOccurrenceDone(ruledRecord, done.doneDate)
         : ruledRecord;
+    const nextDataRecord =
+      occurrence.change && resolvedAction.action === "update"
+        ? applyOccurrenceChange(doneRecord, occurrence.change)
+        : doneRecord;
+    const occurrenceChanged = nextDataRecord !== doneRecord;
+    if (
+      occurrence.change &&
+      !occurrenceChanged &&
+      Object.keys(shaped.item).every((key) => key === "item_id" || key === "itemId" || key === "id") &&
+      !done.doneDate
+    ) {
+      continue;
+    }
     const nextData = toJsonValue(nextDataRecord);
     const existingList = existing && "list" in existing
       ? (existing.list as { titleField?: string } | null)
@@ -2294,16 +2315,24 @@ async function applyListAction(
           : {}),
       });
       if (listOwner) {
-        const occurrenceDone = done.doneDate && itemDoneThrough(nextDataRecord);
+        const occurrenceDone =
+          Boolean(done.doneDate) && itemDoneDates(nextDataRecord).includes(done.doneDate ?? "");
+        const change = occurrenceChanged ? occurrence.change : null;
         await recordAuditEvent({
           userId: listOwner.userId,
           actorEmployeeId: actorId,
-          action: occurrenceDone ? "list_occurrence_done" : "list_update",
+          action: change
+            ? "list_occurrence_change"
+            : occurrenceDone
+              ? "list_occurrence_done"
+              : "list_update",
           entityType: "EmployeeListItem",
           entityId: existing.id,
-          summary: occurrenceDone
-            ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
-            : `update ${resolvedAction.listType}: ${existing.itemKey}`,
+          summary: change
+            ? `occurrence ${change.cancel ? "cancel" : `time ${change.time}`} ${change.date} ${resolvedAction.listType}: ${existing.itemKey}`
+            : occurrenceDone
+              ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
+              : `update ${resolvedAction.listType}: ${existing.itemKey}`,
         });
       }
     } else {
@@ -2344,7 +2373,7 @@ async function applyListAction(
       }
     }
     const onlyOccurrenceDone =
-      Boolean(done.doneDate) &&
+      (Boolean(done.doneDate) || Boolean(occurrence.change)) &&
       Object.keys(fieldsItem).every((key) => key === "item_id" || key === "itemId" || key === "id");
     if (onlyOccurrenceDone) {
       continue;
@@ -3009,13 +3038,15 @@ function withVisibility(
   const weekday =
     typeof dateRaw === "string" ? hebrewWeekdayFromYmd(dateRaw) : null;
   const nextOccurrences = itemNextOccurrences(raw);
-  const doneThrough = nextOccurrences ? itemDoneThrough(raw) : "";
+  const doneDates = nextOccurrences ? itemDoneDates(raw) : [];
+  const exceptions = nextOccurrences ? itemOccurrenceExceptions(raw) : [];
   return {
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
     ...(nextOccurrences ? { next_occurrences: nextOccurrences } : {}),
-    ...(doneThrough ? { done_through: doneThrough } : {}),
+    ...(doneDates.length ? { done_dates: doneDates } : {}),
+    ...(exceptions.length ? { exceptions } : {}),
     ...linked,
     scope,
     owner,
