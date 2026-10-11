@@ -21,6 +21,10 @@
     "keep-up:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-keep-up.ps1",
     "refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1",
     "refresh:no-inherit": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh-workee.ps1 -InheritConfig:$false",
+    "refresh:watch": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch-and-refresh.ps1",
+    "live:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-live-worktree.ps1",
+    "hooks:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1",
+    "push:live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/push-live.ps1",
     "lucy:sync-prompt": "tsx backend/src/scripts/sync-lucy-prompt.ts"
   },
   "prisma": {

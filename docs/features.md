@@ -197,8 +197,11 @@ Employee instructions field limit raised so Lucy’s full prompt can be saved fr
 - `CLIENT_ORIGIN` may be a comma-separated list.
 - `npm run refresh` → `scripts/refresh-workee.ps1`: pull, install, migrate, generate, build SPA, free ports, restart, health-check.
 - By default refresh also runs `lucy:sync-prompt` (push `LLM.config.json` into Lucy + digital workers still on her previous prompt). Skip with `-InheritConfig:$false`, `npm run refresh:no-inherit`, or `WORKEE_REFRESH_INHERIT_CONFIG=0`.
+- Live laptop layout: `npm run live:setup` creates sibling worktree `Official1-live`; edit in the primary folder. With `WORKEE_LIVE_ROOT` set, `refresh` / `refresh:watch` / `keep-up` run against live even if invoked from the primary checkout (`-Local` / `WORKEE_FORCE_LOCAL=1` to override).
+- `npm run refresh:watch` / scheduled task `WorkeeRefreshWatch`: fetch loop; if remote is ahead and the tree is clean → refresh `-RequireClean -NoWait`.
+- `npm run hooks:install` / `npm run push:live`: after local push, refresh `WORKEE_LIVE_ROOT` (or current repo).
 
-**Code:** `backend/src/utils/frontend-dist.ts`, `backend/src/app.ts`.
+**Code:** `backend/src/utils/frontend-dist.ts`, `backend/src/app.ts`, `scripts/refresh-workee.ps1`, `scripts/watch-and-refresh.ps1`, `scripts/setup-live-worktree.ps1`.
 
 ---
 

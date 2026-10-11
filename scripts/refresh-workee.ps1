@@ -4,13 +4,22 @@
 # -InheritConfig (default $true): push LLM.config.json into Lucy (+ digital workers
 #   that still share her previous prompt). Override with -InheritConfig:$false or
 #   env WORKEE_REFRESH_INHERIT_CONFIG=0|false|no (1|true|yes forces on).
+# -RequireClean: refuse to run if the working tree is dirty (no stash). Use for live/auto paths.
+# -NoWait: exit after health-check instead of Wait-Process on npm run dev (watcher / post-push).
 param(
-  [bool]$InheritConfig = $true
+  [bool]$InheritConfig = $true,
+  [switch]$RequireClean,
+  [switch]$NoWait,
+  [switch]$Local
 )
 
 $ErrorActionPreference = "Stop"
 $env:Path = @("C:\Program Files\nodejs", $env:Path) -join ";"
-$root = Split-Path -Parent $PSScriptRoot
+
+. (Join-Path $PSScriptRoot "workee-common.ps1")
+
+$scriptCheckout = Split-Path -Parent $PSScriptRoot
+$root = Get-WorkeeRuntimeRoot -ScriptCheckoutRoot $scriptCheckout -ForceLocal:$Local
 Set-Location $root
 
 if ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(0|false|no)$') {
@@ -19,11 +28,25 @@ if ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(0|false|no)$') {
   $InheritConfig = $true
 }
 
+if (-not (Enter-WorkeeRefreshLock "refresh-workee")) {
+  throw "Another refresh is already running (lock: $script:WorkeeRefreshLockFile)"
+}
+$script:WorkeeRefreshLockOwned = $true
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+  if ($script:WorkeeRefreshLockOwned) {
+    Exit-WorkeeRefreshLock
+  }
+} | Out-Null
+
 $PublicOrigin = "https://wa.workee.site"
 $VitePort = 5173
 
 function Write-Step([string]$message) {
   Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $message)
+}
+
+if ($root -ne $scriptCheckout) {
+  Write-Step "Live worktree: $root (primary was $scriptCheckout; use -Local or WORKEE_FORCE_LOCAL=1 to override)"
 }
 
 function Get-DotEnvPort {
@@ -245,8 +268,15 @@ function Assert-Cloudflared {
   }
 }
 
+try {
+
 Write-Step "Refreshing Workee in $root"
 $apiPort = Get-DotEnvPort
+
+$dirtyAny = @(git status --porcelain)
+if ($RequireClean -and $dirtyAny.Count -gt 0) {
+  throw "Working tree is dirty; -RequireClean refuses to refresh. Clean the live checkout or refresh manually."
+}
 
 # Tracked files only - never stash -u (would remove this script mid-run).
 $dirtyTracked = @(git status --porcelain --untracked-files=no)
@@ -341,12 +371,23 @@ try {
   Wait-WorkeeHealthy -apiPort $apiPort -devPid $dev.Id -logPaths @($outLog, $errLog) -timeoutSec 120
   Write-Step "Healthy - API http://localhost:$apiPort  Vite http://127.0.0.1:$VitePort/  SPA http://127.0.0.1:$apiPort/dashboard"
   Write-Step "Public (if tunnel up): $PublicOrigin/dashboard"
-  Write-Step "Dev is running (PID $($dev.Id)). Ctrl+C stops this watcher; stop node to free ports."
-  Wait-Process -Id $dev.Id
+  if ($NoWait) {
+    Write-Step "NoWait: leaving npm run dev running (PID $($dev.Id)) and exiting"
+  } else {
+    Write-Step "Dev is running (PID $($dev.Id)). Ctrl+C stops this watcher; stop node to free ports."
+    Wait-Process -Id $dev.Id
+  }
 } catch {
   if ($dev -and -not $dev.HasExited) {
     Stop-Process -Id $dev.Id -Force -ErrorAction SilentlyContinue
   }
   Stop-WorkeePorts
   throw
+}
+
+} finally {
+  if ($script:WorkeeRefreshLockOwned) {
+    Exit-WorkeeRefreshLock
+    $script:WorkeeRefreshLockOwned = $false
+  }
 }
