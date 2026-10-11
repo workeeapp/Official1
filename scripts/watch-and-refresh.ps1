@@ -39,9 +39,14 @@ Write-WatchLog "Watch started in $root (interval ${IntervalSec}s)"
 while ($true) {
   try {
     Set-Location $root
-    git fetch origin 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-      Write-WatchLog "git fetch failed (exit $LASTEXITCODE)"
+    # git writes "From https://..." to stderr; with 2>&1 + Stop that becomes a terminating error.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    git fetch origin --quiet
+    $fetchExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($fetchExit -ne 0) {
+      Write-WatchLog "git fetch failed (exit $fetchExit)"
       Start-Sleep -Seconds $IntervalSec
       continue
     }
