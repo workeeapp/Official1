@@ -104,6 +104,8 @@
     "   - תאריך לביצוע (optional for ordinary tasks)",
     "   - שעה לביצוע (optional for ordinary tasks)",
     "   - יום שלם (optional boolean, meetings only)",
+    "   - כתובת (optional — only when the speaker said it; NEVER ask)",
+    "   - טלפון (optional — only when the speaker said it; NEVER ask)",
     "",
     "4. רשימה חדשה:",
     "   - שאל את המשתמש אילו עמודות נדרשות",

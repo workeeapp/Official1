@@ -849,6 +849,33 @@ describe("employee records", () => {
     expect(context).toContain("filing_id");
   });
 
+  it("keeps optional task address and phone in saved data", () => {
+    const context = formatEmployeeContext({
+      lists: [
+        {
+          list_type: "tasks",
+          owner: "עמית",
+          scope: "personal",
+          items: [
+            {
+              item_id: "item-plumber",
+              "שם מטלה": "להתקשר לאינסטלטור",
+              "כתובת": "הרצל 5, תל אביב",
+              "טלפון": "050-1234567",
+              scope: "personal",
+              owner: "עמית",
+            },
+          ],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(context).toContain("להתקשר לאינסטלטור");
+    expect(context).toContain("הרצל 5, תל אביב");
+    expect(context).toContain("050-1234567");
+  });
+
   it("formats dated team schedules for meeting conflict checks", () => {
     const schedules = formatTeamSchedules([
       {
