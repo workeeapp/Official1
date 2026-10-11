@@ -289,7 +289,9 @@ if ($dirtyTracked.Count -gt 0) {
 }
 
 $branch = (git rev-parse --abbrev-ref HEAD).Trim()
-Write-Step "Pulling origin/$branch"
+$upstream = (git rev-parse --abbrev-ref "@{u}" 2>$null).Trim()
+if (-not $upstream) { $upstream = "origin/$branch" }
+Write-Step "Pulling $upstream (branch $branch)"
 git pull --ff-only
 if ($LASTEXITCODE -ne 0) {
   if ($didStash) {
