@@ -122,17 +122,24 @@ function Invoke-WorkeeRefresh {
   )
   if ($RequireClean) { $argList += "-RequireClean" }
   if ($NoWait) { $argList += "-NoWait" }
-  if ($InheritConfig) {
-    $argList += "-InheritConfig:true"
-  } else {
-    $argList += "-InheritConfig:false"
+  # Start-Process stringifies CLI args; "-InheritConfig:true/false/0" fails [bool]
+  # binding. refresh-workee.ps1 already honors WORKEE_REFRESH_INHERIT_CONFIG.
+  $prevInherit = $env:WORKEE_REFRESH_INHERIT_CONFIG
+  $env:WORKEE_REFRESH_INHERIT_CONFIG = if ($InheritConfig) { "1" } else { "0" }
+  try {
+    $proc = Start-Process -FilePath "powershell.exe" `
+      -ArgumentList $argList `
+      -WorkingDirectory $RepoRoot `
+      -Wait `
+      -PassThru `
+      -NoNewWindow
+  } finally {
+    if ($null -eq $prevInherit) {
+      Remove-Item Env:WORKEE_REFRESH_INHERIT_CONFIG -ErrorAction SilentlyContinue
+    } else {
+      $env:WORKEE_REFRESH_INHERIT_CONFIG = $prevInherit
+    }
   }
-  $proc = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $argList `
-    -WorkingDirectory $RepoRoot `
-    -Wait `
-    -PassThru `
-    -NoNewWindow
   if ($proc.ExitCode -ne 0) {
     throw "refresh-workee.ps1 failed (exit $($proc.ExitCode)) in $RepoRoot"
   }
