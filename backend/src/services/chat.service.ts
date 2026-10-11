@@ -35,6 +35,7 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  loadListItemOwners,
   readItemId,
   removeVisibleCustomItems,
   type FilingMutation,
@@ -52,6 +53,7 @@ import {
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  listActionItemIds,
   planPhoneRelays,
   planRelayDeliveries,
   planScheduledJobDeliveries,
@@ -1406,12 +1408,19 @@ export async function sendChatMessage(input: {
       input.userId,
       employee.id,
     );
+    const itemOwners = guestSpeaker
+      ? undefined
+      : await loadListItemOwners(
+          input.userId,
+          listActionItemIds(metadataForApply.lists),
+        );
     const plan = planTargetedActions({
       actor: employee,
       employees: humans,
       workers: digitalEmployees(employees),
       metadata: metadataForApply,
       sharedLists,
+      itemOwners,
     });
     const relays = planRelayDeliveries({
       actor: employee,

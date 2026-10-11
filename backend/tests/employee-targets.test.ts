@@ -84,7 +84,7 @@ describe("employee targets", () => {
     expect(plan.notifications.map((item) => item.employee.id)).toEqual([tal.id]);
   });
 
-  it("puts a meeting with Tal on both calendars and skips the assignment note", () => {
+  it("saves a meeting with Tal once, shared with both, and skips the assignment note", () => {
     const resolved = resolveSpokenMetadata(
       "שמור פגישה עם טל ליום ראשון בשעה 10",
       {
@@ -117,13 +117,18 @@ describe("employee targets", () => {
       metadata: resolved,
     });
 
-    expect(
-      plan.applications.filter((item) =>
-        item.metadata.lists.some((list) =>
-          list.items.some((entry) => entry["שם מטלה"] === "פגישה עם טל"),
-        ),
-      ).map((item) => item.employeeId).sort(),
-    ).toEqual([amit.id, tal.id].sort());
+    const meetingApps = plan.applications.filter((item) =>
+      item.metadata.lists.some((list) =>
+        list.items.some((entry) => entry["שם מטלה"] === "פגישה עם טל"),
+      ),
+    );
+    expect(meetingApps.map((item) => item.employeeId)).toEqual([amit.id]);
+    expect(meetingApps[0]?.visibility).toEqual({
+      scope: "shared",
+      addedById: amit.id,
+      visibleTo: [amit.id, tal.id],
+    });
+    expect(plan.notifications.map((item) => item.employee.id)).toEqual([tal.id]);
     expect(
       plan.applications.some((item) =>
         item.metadata.lists.some((list) =>
@@ -393,7 +398,7 @@ describe("employee targets", () => {
     expect(lists).toHaveLength(1);
   });
 
-  it("applies an everyone action to each employee", () => {
+  it("saves an everyone action once on the speaker, shared with every employee", () => {
     const plan = planTargetedActions({
       actor: amit,
       employees,
@@ -411,14 +416,11 @@ describe("employee targets", () => {
       },
     });
 
-    expect(
-      [...new Set(plan.applications.map((item) => item.employeeId))].sort(),
-    ).toEqual([amit.id, shani.id, tal.id].sort());
-    expect(
-      plan.applications.find(
-        (item) => item.employeeId === tal.id && item.visibility.scope === "shared",
-      )?.visibility.visibleTo,
-    ).toEqual(expect.arrayContaining([amit.id, tal.id, shani.id]));
+    expect(plan.applications.map((item) => item.employeeId)).toEqual([amit.id]);
+    expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([amit.id, tal.id, shani.id]),
+    );
     expect(plan.notifications.map((item) => item.employee.id).sort()).toEqual(
       [shani.id, tal.id].sort(),
     );
@@ -1637,7 +1639,7 @@ describe("employee targets", () => {
     ).toBe(false);
   });
 
-  it("does not collapse shopping item sharing when speaker is also in targets", () => {
+  it("saves shopping shared by speaker + partner as one row on the speaker", () => {
     const plan = planTargetedActions({
       actor: amit,
       employees,
@@ -1654,16 +1656,90 @@ describe("employee targets", () => {
         ],
       },
     });
-    expect(
-      [...new Set(plan.applications.map((row) => row.employeeId))].sort(),
-    ).toEqual([amit.id, tal.id].sort());
-    expect(
-      plan.applications.some(
-        (row) =>
-          row.employeeId === tal.id &&
-          row.metadata.lists[0]?.listType === "shopping",
-      ),
-    ).toBe(true);
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "shared", visibleTo: [amit.id, tal.id] },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.listType).toBe("shopping");
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
+  });
+
+  it("still saves work assigned only to Tal on Tal's list", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            targets: ["טל"],
+            items: [{ "שם מטלה": "לבדוק שמן" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([tal.id]);
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual([amit.id, tal.id]);
+  });
+
+  it("shares an existing item on its owner's list (update by item_id)", () => {
+    const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: ["טל"],
+            items: [{ item_id: coffeeId }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "shared", visibleTo: [amit.id, tal.id] },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { item_id: coffeeId },
+    ]);
+  });
+
+  it("routes a partner's remove of a shared item to the owner's list", () => {
+    const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "remove",
+            listType: "tasks",
+            listName: "",
+            targets: [],
+            items: [{ item_id: coffeeId }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "personal" },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.listType).toBe("shopping");
   });
 
   it("blocks list and filing mutations from guest speakers", () => {

@@ -575,6 +575,47 @@ function resolveNamedRelayTargets(
   return [...matched.values()];
 }
 
+/** Live list row addressed by an ACTION item_id: which employee's list holds it. */
+export type ListItemOwnerRef = {
+  ownerId: string;
+  listType: string;
+};
+
+function actionItemId(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "";
+  }
+  const record = raw as Record<string, unknown>;
+  for (const key of ["item_id", "itemId", "id"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+/** Collect every item_id the ACTION addresses on update/remove (for owner lookup). */
+export function listActionItemIds(lists: LlmListAction[]): string[] {
+  const ids = new Set<string>();
+  for (const list of lists) {
+    if (list.action !== "update" && list.action !== "remove") {
+      continue;
+    }
+    for (const raw of list.items) {
+      const id = actionItemId(raw);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  return [...ids];
+}
+
+function isOwnShoppingOrTasks(listType: string): boolean {
+  return listType === "shopping" || listType === "tasks";
+}
+
 export function planTargetedActions(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
@@ -582,6 +623,8 @@ export function planTargetedActions(input: {
   metadata: LlmMetadata;
   /** Shared custom lists visible to the actor (owned by anyone on the account). */
   sharedLists?: SharedListRef[];
+  /** Owner of each live shopping/tasks row addressed by item_id this turn. */
+  itemOwners?: Map<string, ListItemOwnerRef>;
 }): {
   applications: Array<{
     employeeId: string;
@@ -658,7 +701,80 @@ export function planTargetedActions(input: {
     workers: input.workers,
   });
 
-  for (const list of lists) {
+  const humanOwnerIds = new Set(
+    input.employees
+      .filter((employee) => !isDigitalEmployee(employee))
+      .map((employee) => employee.id),
+  );
+
+  for (const rawList of lists) {
+    let list = rawList;
+    if (
+      (list.action === "update" || list.action === "remove") &&
+      input.itemOwners &&
+      input.itemOwners.size > 0
+    ) {
+      // A shared shopping/tasks row lives once on its owner's list — mutate it there.
+      const byOwner = new Map<
+        string,
+        { listType: LlmListAction["listType"]; items: LlmListAction["items"] }
+      >();
+      const rest: LlmListAction["items"] = [];
+      for (const raw of list.items) {
+        const ref = input.itemOwners.get(actionItemId(raw));
+        if (
+          !ref ||
+          !isOwnShoppingOrTasks(ref.listType) ||
+          !humanOwnerIds.has(ref.ownerId)
+        ) {
+          rest.push(raw);
+          continue;
+        }
+        const bucket = byOwner.get(ref.ownerId) ?? {
+          listType: ref.listType as LlmListAction["listType"],
+          items: [],
+        };
+        bucket.items.push(raw);
+        byOwner.set(ref.ownerId, bucket);
+      }
+      if (byOwner.size > 0) {
+        const named = resolveNamedRelayTargets(list.targets, input.employees).filter(
+          (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
+        );
+        for (const [ownerId, bucket] of byOwner) {
+          const partners = named.filter(
+            (target) => target.id !== ownerId && target.id !== input.actor.id,
+          );
+          const share = list.action === "update" && partners.length > 0;
+          applications.push({
+            employeeId: ownerId,
+            metadata: {
+              lists: [
+                {
+                  ...list,
+                  listType: bucket.listType,
+                  listName: "",
+                  items: bucket.items,
+                  targets: [],
+                },
+              ],
+              filing: [],
+            },
+            visibility: {
+              scope: share ? "shared" : "personal",
+              addedById: input.actor.id,
+              visibleTo: share
+                ? uniqueIds([ownerId, input.actor.id, ...partners.map((p) => p.id)])
+                : [ownerId],
+            },
+          });
+        }
+        if (rest.length === 0) {
+          continue;
+        }
+        list = { ...list, items: rest };
+      }
+    }
     const normalizedList = normalizeSharedCustomList(list);
     const existingListMatches = findExistingCustomListsForActor(
       normalizedList,
@@ -769,6 +885,26 @@ export function planTargetedActions(input: {
     }
 
     const mutateTargets = targets.filter((target) => !isGuestEmployee(target));
+    const humanTargets = mutateTargets.filter(
+      (target) => !isDigitalEmployee(target),
+    );
+    const sharedSingleRow =
+      normalizedList.action === "add" &&
+      isOwnShoppingOrTasks(normalizedList.listType) &&
+      humanTargets.some((target) => target.id === input.actor.id) &&
+      humanTargets.some((target) => target.id !== input.actor.id);
+    if (sharedSingleRow) {
+      // One row on the speaker's list; partners see it through visible_to.
+      applications.push({ employeeId: input.actor.id, metadata, visibility });
+      for (const target of mutateTargets) {
+        if (isDigitalEmployee(target)) {
+          applications.push({ employeeId: target.id, metadata, visibility });
+        } else {
+          addNotification(target.id, metadata, partnerLabel(targets));
+        }
+      }
+      continue;
+    }
     for (const target of mutateTargets) {
       applications.push({ employeeId: target.id, metadata, visibility });
       if (!isDigitalEmployee(target)) {

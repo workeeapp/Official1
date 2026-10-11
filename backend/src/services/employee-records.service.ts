@@ -704,7 +704,7 @@ export async function getTeamSchedules(
   employeeId: string,
   options?: { accountOwner?: boolean },
 ): Promise<TeamScheduleEntry[]> {
-  const { speaker, guestMode, listWhere } = await resolveRecordVisibility(
+  const { speaker, guestMode, seeAll, listWhere } = await resolveRecordVisibility(
     employeeId,
     options,
   );
@@ -712,22 +712,52 @@ export async function getTeamSchedules(
     return [];
   }
 
-  const lists = await prisma.employeeList.findMany({
-    where: {
-      listType: "tasks",
-      deletedAt: null,
-      ...listWhere,
+  const [lists, sharedItems] = await Promise.all([
+    prisma.employeeList.findMany({
+      where: {
+        listType: "tasks",
+        deletedAt: null,
+        ...listWhere,
+      },
+      include: {
+        employee: { select: { name: true, nickname: true } },
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+      },
+    }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeListItem.findMany({
+          where: {
+            scope: "shared",
+            deletedAt: null,
+            list: {
+              listType: "tasks",
+              deletedAt: null,
+              employeeId: { not: employeeId },
+              employee: { kind: "human" },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        }),
+  ]);
+  const speakerName = speaker.nickname?.trim() || speaker.name;
+  const scheduleLists = [
+    ...lists.map((list) => ({
+      owner: list.employee.nickname?.trim() || list.employee.name,
+      items: list.items,
+    })),
+    // Tasks shared with the speaker from someone else's list are the speaker's schedule too.
+    {
+      owner: speakerName,
+      items: (sharedItems ?? []).filter((item) =>
+        visibleToIncludes(item.visibleTo, employeeId),
+      ),
     },
-    include: {
-      employee: { select: { name: true, nickname: true } },
-      items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
-    },
-  });
+  ];
 
   const entries: TeamScheduleEntry[] = [];
-  for (const list of lists) {
-    const owner = list.employee.nickname?.trim() || list.employee.name;
-    for (const item of list.items) {
+  for (const { owner, items } of scheduleLists) {
+    for (const item of items) {
       const data = asRecord(item.data);
       const date = readItemText(data, ["תאריך לביצוע", "date"]);
       if (!date) {
@@ -1151,7 +1181,8 @@ export async function getEmployeeRecordSnapshot(
     );
   }
 
-  // Item-level shared shopping/tasks on someone else's personal list (legacy path).
+  const viewerName = owner ? owner.nickname?.trim() || owner.name : "";
+  // Item-level shared items on someone else's personal list.
   for (const [owner, byType] of sharedByOwner) {
     for (const [bucketKey, items] of byType) {
       if (items.length === 0) {
@@ -1169,6 +1200,26 @@ export async function getEmployeeRecordSnapshot(
           (row.list_name ?? "") === (listName ?? ""),
       );
       if (already) {
+        continue;
+      }
+      // A shared shopping/tasks row is the viewer's own work too (one row, many partners).
+      if (
+        (listType === "shopping" || listType === "tasks") &&
+        viewerName &&
+        !guestMode
+      ) {
+        const mine = lists.find(
+          (row) =>
+            row.owner === viewerName &&
+            row.list_type === listType &&
+            !row.list_name &&
+            row.scope === "personal",
+        );
+        if (mine) {
+          mine.items.push(...items);
+        } else {
+          lists.push({ list_type: listType, owner: viewerName, scope: "personal", items });
+        }
         continue;
       }
       // Not a shared list: only these items of the owner's own list were shared;
@@ -1295,6 +1346,33 @@ async function workerTaskAccess(
   const allowed =
     cache.actor?.kind === "digital" || cache.actor?.isOwner === true;
   return { allowed, involvedIds };
+}
+
+/**
+ * Update/remove of a row on another human's list: only people it is shared
+ * with (visible_to / added_by), account owners, and server-side worker turns.
+ */
+async function humanItemAccessAllowed(
+  employeeId: string,
+  actorId: string,
+  item: { addedById?: string | null; visibleTo?: unknown },
+  cache: WorkerAccessCache,
+): Promise<boolean> {
+  if (actorId === employeeId || item.addedById === actorId) {
+    return true;
+  }
+  if (idList(item.visibleTo).includes(actorId)) {
+    return true;
+  }
+  if (cache.actor === undefined) {
+    cache.actor = prisma.employee?.findUnique
+      ? await prisma.employee.findUnique({
+          where: { id: actorId },
+          select: { kind: true, isOwner: true },
+        })
+      : null;
+  }
+  return cache.actor?.kind === "digital" || cache.actor?.isOwner === true;
 }
 
 export interface FilingMutation {
@@ -1969,6 +2047,12 @@ async function applyListAction(
       if (access && !access.allowed) {
         continue;
       }
+      if (
+        !access &&
+        !(await humanItemAccessAllowed(employeeId, actorId, existing, accessCache))
+      ) {
+        continue;
+      }
       const targetListId = existing.listId;
       const targetListName = list.name || listName;
       const removedKey = existing.itemKey;
@@ -2093,6 +2177,13 @@ async function applyListAction(
       ? await workerTaskAccess(employeeId, actorId, existing, accessCache)
       : null;
     if (access && !access.allowed) {
+      continue;
+    }
+    if (
+      existing &&
+      !access &&
+      !(await humanItemAccessAllowed(employeeId, actorId, existing, accessCache))
+    ) {
       continue;
     }
     // Editing a worker task never re-shares it; who it involves comes from the task itself.
@@ -2328,6 +2419,39 @@ async function resolveListActionAgainstSaved(
     listType: list.listType as LlmListType,
     listName: list.name ?? action.listName,
   };
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Owner list of each live row addressed by item_id, limited to this account. */
+export async function loadListItemOwners(
+  userId: string,
+  itemIds: string[],
+): Promise<Map<string, { ownerId: string; listType: string }>> {
+  const owners = new Map<string, { ownerId: string; listType: string }>();
+  const ids = itemIds.filter((id) => UUID_RE.test(id));
+  if (ids.length === 0) {
+    return owners;
+  }
+  const rows = await prisma.employeeListItem.findMany({
+    where: {
+      id: { in: ids },
+      deletedAt: null,
+      list: { deletedAt: null, employee: { userId } },
+    },
+    select: {
+      id: true,
+      list: { select: { employeeId: true, listType: true } },
+    },
+  });
+  for (const row of rows) {
+    owners.set(row.id, {
+      ownerId: row.list.employeeId,
+      listType: row.list.listType,
+    });
+  }
+  return owners;
 }
 
 async function findLiveListItemById(itemId: string, employeeId: string) {
