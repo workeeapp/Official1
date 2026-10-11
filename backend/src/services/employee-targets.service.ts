@@ -1237,7 +1237,11 @@ export function fallbackNotificationText(
   options?: {
     completed?: boolean;
     purchased?: boolean;
+    /** Recipient was just added to the item's visible_to (share, not edit). */
+    shared?: boolean;
     recipientIsOwner?: boolean;
+    /** Recipient co-owns the shared item (not its owner, not who assigned it). */
+    recipientIsPartner?: boolean;
     ownerName?: string;
     partnerNames?: string[];
   },
@@ -1299,11 +1303,25 @@ export function fallbackNotificationText(
   );
   const itemText = items.join(" ו") || "פריט";
   const yours = options?.recipientIsOwner !== false;
+  // A shared partner sees the item in their own list — never «של <owner>».
   const ownerList = yours
     ? "שלך"
-    : options?.ownerName
-      ? `של ${options.ownerName}`
-      : "";
+    : options?.recipientIsPartner
+      ? ""
+      : options?.ownerName
+        ? `של ${options.ownerName}`
+        : "";
+
+  if (options?.shared && list?.action === "update") {
+    if (list.listType === "shopping") {
+      return `${actorName} שיתף איתך ${itemText} ברשימת הקניות`;
+    }
+    if (list.listType === "tasks") {
+      return `${actorName} שיתף איתך מטלה: ${itemText}`;
+    }
+    const title = customListDerivedName(list) || "רשימה";
+    return `${actorName} שיתף איתך ${formatQuotedItems(items)} מרשימת «${title}»`;
+  }
   const partners = (options?.partnerNames ?? []).filter(Boolean);
   const partnerPhrase =
     partners.length === 0
@@ -1369,7 +1387,7 @@ export function fallbackNotificationText(
     const reminderHint = formatLinkedReminderHint(metadata.reminders ?? []);
     return yours
       ? `${actorName} הוסיף לך מטלה: ${itemText}${reminderHint}`
-      : `${actorName} הוסיף מטלה ${ownerList}: ${itemText}${reminderHint}`.trim();
+      : `${[actorName, "הוסיף מטלה", ownerList].filter(Boolean).join(" ")}: ${itemText}${reminderHint}`;
   }
 
   if (list?.listType === "custom" || (list?.listName && list.listName.trim())) {

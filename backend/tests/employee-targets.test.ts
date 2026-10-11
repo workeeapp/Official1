@@ -1715,6 +1715,67 @@ describe("employee targets", () => {
     ]);
   });
 
+  it("tells a newly added partner the item was shared, not updated", () => {
+    const metadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "update" as const,
+          listType: "shopping" as const,
+          listName: "",
+          targets: [],
+          items: [{ item_id: "x", "שם פריט": "קפה" }],
+        },
+      ],
+    };
+    expect(
+      fallbackNotificationText(amit, metadata, {
+        shared: true,
+        recipientIsOwner: false,
+        recipientIsPartner: true,
+        ownerName: "עמית",
+      }),
+    ).toBe("עמית שיתף איתך קפה ברשימת הקניות");
+    expect(
+      fallbackNotificationText(
+        amit,
+        {
+          ...metadata,
+          lists: [{ ...metadata.lists[0]!, listType: "tasks", items: [{ "שם מטלה": "לבדוק שמן" }] }],
+        },
+        { shared: true, recipientIsOwner: false, recipientIsPartner: true },
+      ),
+    ).toBe("עמית שיתף איתך מטלה: לבדוק שמן");
+  });
+
+  it("does not call a shared item «של <owner>» when updating it for a partner", () => {
+    const metadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "update" as const,
+          listType: "shopping" as const,
+          listName: "",
+          targets: [],
+          items: [{ "שם פריט": "קפה", כמות: 2 }],
+        },
+      ],
+    };
+    expect(
+      fallbackNotificationText(amit, metadata, {
+        recipientIsOwner: false,
+        recipientIsPartner: true,
+        ownerName: "עמית",
+      }),
+    ).toBe("עמית עדכן קפה ברשימת הקניות");
+    expect(
+      fallbackNotificationText(tal, metadata, {
+        recipientIsOwner: false,
+        ownerName: "טל",
+      }),
+    ).toBe("טל עדכן קפה ברשימת הקניות של טל");
+  });
+
   it("routes a partner's remove of a shared item to the owner's list", () => {
     const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
     const plan = planTargetedActions({

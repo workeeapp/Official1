@@ -873,7 +873,9 @@ async function pushTargetNotification(input: {
   metadata: LlmMetadata;
   savedLabels?: ReadonlyMap<string, string>;
   purchased?: boolean;
+  shared?: boolean;
   recipientIsOwner?: boolean;
+  recipientIsPartner?: boolean;
   ownerName?: string;
   partnerNames?: string[];
   assistantSpeaker?: string;
@@ -890,7 +892,9 @@ async function pushTargetNotification(input: {
   const labeled = withSavedItemLabels(input.metadata, input.savedLabels);
   const text = fallbackNotificationText(input.actor, labeled, {
     purchased: input.purchased,
+    shared: input.shared,
     recipientIsOwner: input.recipientIsOwner,
+    recipientIsPartner: input.recipientIsPartner,
     ownerName: input.ownerName,
     partnerNames: input.partnerNames,
   });
@@ -958,6 +962,7 @@ export async function notifySharedItemEvents(input: {
     notified.add(target.id);
     const event =
       events.find((item) => item.purchased) ??
+      events.find((item) => item.shared) ??
       events.find((item) => item.listOwnerId === target.id) ??
       events[0];
     const owner = input.employees.find((item) => item.id === event.listOwnerId);
@@ -968,7 +973,12 @@ export async function notifySharedItemEvents(input: {
       metadata: event.metadata,
       savedLabels: input.savedLabels,
       purchased: event.purchased,
+      shared: event.shared,
       recipientIsOwner: event.listOwnerId === target.id,
+      recipientIsPartner:
+        event.listOwnerId !== target.id &&
+        Boolean(event.addedById) &&
+        event.addedById !== target.id,
       ownerName: owner ? employeeDisplayName(owner) : undefined,
       partnerNames: event.partnerNames,
       assistantSpeaker: input.assistantSpeaker,

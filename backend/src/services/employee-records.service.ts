@@ -749,8 +749,10 @@ export async function getTeamSchedules(
     // Tasks shared with the speaker from someone else's list are the speaker's schedule too.
     {
       owner: speakerName,
-      items: (sharedItems ?? []).filter((item) =>
-        visibleToIncludes(item.visibleTo, employeeId),
+      items: (sharedItems ?? []).filter(
+        (item) =>
+          visibleToIncludes(item.visibleTo, employeeId) &&
+          item.addedById !== employeeId,
       ),
     },
   ];
@@ -1039,6 +1041,8 @@ export async function getEmployeeRecordSnapshot(
   );
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
+  const sharedIntoOwn = new Map<string, Record<string, unknown>[]>();
+  const viewerName = owner ? owner.nickname?.trim() || owner.name : "";
   const seenPartnerListIds = new Set<string>();
   for (const item of sharedItems) {
     if (!visibleToIncludes(item.visibleTo, employeeId)) {
@@ -1049,25 +1053,37 @@ export async function getEmployeeRecordSnapshot(
       continue;
     }
     const owner = item.list.employee.nickname?.trim() || item.list.employee.name;
+    const entry = withVisibility(
+      item.data,
+      "shared",
+      owner,
+      item.id,
+      {
+        ...linkedReminderField(item, activeReminders),
+        ...urgencySnapshotField(item.urgency),
+        ...itemSharedWithField(item.list.employee.id, item, names),
+      },
+    );
+    // Shopping/tasks someone else shared WITH the viewer are the viewer's own work
+    // (one row, many partners). Work the viewer assigned to someone else is not.
+    if (
+      (item.list.listType === "shopping" || item.list.listType === "tasks") &&
+      item.addedById !== employeeId &&
+      viewerName &&
+      !guestMode
+    ) {
+      const own = sharedIntoOwn.get(item.list.listType) ?? [];
+      own.push(entry);
+      sharedIntoOwn.set(item.list.listType, own);
+      continue;
+    }
     const byType = sharedByOwner.get(owner) ?? new Map<string, Record<string, unknown>[]>();
     const bucketKey =
       item.list.listType === "custom" && item.list.name.trim()
         ? `custom\0${item.list.name.trim()}`
         : item.list.listType;
     const items = byType.get(bucketKey) ?? [];
-    items.push(
-      withVisibility(
-        item.data,
-        "shared",
-        owner,
-        item.id,
-        {
-          ...linkedReminderField(item, activeReminders),
-          ...urgencySnapshotField(item.urgency),
-          ...itemSharedWithField(item.list.employee.id, item, names),
-        },
-      ),
-    );
+    items.push(entry);
     byType.set(bucketKey, items);
     sharedByOwner.set(owner, byType);
   }
@@ -1181,7 +1197,21 @@ export async function getEmployeeRecordSnapshot(
     );
   }
 
-  const viewerName = owner ? owner.nickname?.trim() || owner.name : "";
+  for (const [listType, items] of sharedIntoOwn) {
+    const mine = lists.find(
+      (row) =>
+        row.owner === viewerName &&
+        row.list_type === listType &&
+        !row.list_name &&
+        row.scope === "personal",
+    );
+    if (mine) {
+      mine.items.push(...items);
+    } else {
+      lists.push({ list_type: listType, owner: viewerName, scope: "personal", items });
+    }
+  }
+
   // Item-level shared items on someone else's personal list.
   for (const [owner, byType] of sharedByOwner) {
     for (const [bucketKey, items] of byType) {
@@ -1200,26 +1230,6 @@ export async function getEmployeeRecordSnapshot(
           (row.list_name ?? "") === (listName ?? ""),
       );
       if (already) {
-        continue;
-      }
-      // A shared shopping/tasks row is the viewer's own work too (one row, many partners).
-      if (
-        (listType === "shopping" || listType === "tasks") &&
-        viewerName &&
-        !guestMode
-      ) {
-        const mine = lists.find(
-          (row) =>
-            row.owner === viewerName &&
-            row.list_type === listType &&
-            !row.list_name &&
-            row.scope === "personal",
-        );
-        if (mine) {
-          mine.items.push(...items);
-        } else {
-          lists.push({ list_type: listType, owner: viewerName, scope: "personal", items });
-        }
         continue;
       }
       // Not a shared list: only these items of the owner's own list were shared;
@@ -1286,6 +1296,10 @@ export interface SharedItemEvent {
   listOwnerId: string;
   purchased?: boolean;
   partnerNames?: string[];
+  /** Recipients were just added to the item's visible_to by this update. */
+  shared?: boolean;
+  /** Who created / assigned the item (shared-item partners are everyone else but the owner). */
+  addedById?: string | null;
 }
 
 export interface ListItemMutation {
@@ -2150,6 +2164,7 @@ async function applyListAction(
             filing: [],
           },
           listOwnerId: employeeId,
+          addedById: existing.addedById,
         });
       }
       continue;
@@ -2323,22 +2338,44 @@ async function applyListAction(
     if (onlyOccurrenceDone) {
       continue;
     }
+    const eventMetadata = {
+      lists: [{ ...resolvedAction, items: [item] }],
+      filing: [],
+    };
+    // People this update just added to visible_to hear «שיתף איתך», not «עדכן».
+    const newlyShared = existing
+      ? newlySharedIds(existing, resolvedVisibility, employeeId, actorId)
+      : [];
+    if (newlyShared.length > 0) {
+      events.push({
+        notifyEmployeeIds: newlyShared,
+        metadata: eventMetadata,
+        listOwnerId: employeeId,
+        shared: true,
+        addedById: resolvedVisibility.addedById,
+      });
+    }
+    const contentChanged =
+      !existing ||
+      Object.keys(fieldsItem).some((key) => !ITEM_ID_KEYS.has(key));
     // Shared watchers for add/update — keep existing notify path below.
-    const watchers = await resolveWatchers({
-      existing,
-      visibility: resolvedVisibility,
-      ownerId: employeeId,
-      actorId,
-      itemKey: nextItemKey || existing?.itemKey || "",
-    });
+    const watchers = contentChanged
+      ? (
+          await resolveWatchers({
+            existing,
+            visibility: resolvedVisibility,
+            ownerId: employeeId,
+            actorId,
+            itemKey: nextItemKey || existing?.itemKey || "",
+          })
+        ).filter((id) => !newlyShared.includes(id))
+      : [];
     if (watchers.length > 0) {
       events.push({
         notifyEmployeeIds: watchers,
-        metadata: {
-          lists: [{ ...resolvedAction, items: [item] }],
-          filing: [],
-        },
+        metadata: eventMetadata,
         listOwnerId: employeeId,
+        addedById: resolvedVisibility.addedById,
       });
     }
   }
@@ -2577,6 +2614,24 @@ export async function removeVisibleCustomItems(input: {
   }
 
   return { events, mutations, cancelledReminders };
+}
+
+const ITEM_ID_KEYS = new Set(["item_id", "itemId", "id"]);
+
+function newlySharedIds(
+  existing: { addedById?: string | null; visibleTo?: unknown },
+  next: ItemVisibility,
+  ownerId: string,
+  actorId: string,
+): string[] {
+  const before = new Set([
+    ownerId,
+    existing.addedById ?? "",
+    ...idList(existing.visibleTo),
+  ]);
+  return uniqueIds(next.visibleTo).filter(
+    (id) => !before.has(id) && id !== actorId,
+  );
 }
 
 function mergeItemVisibility(
