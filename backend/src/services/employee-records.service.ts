@@ -48,6 +48,18 @@ export interface ItemVisibility {
   visibleTo: string[];
   /** Update by item_id: partners to drop from the row's visible_to (lists unshare_with). */
   removeIds?: string[];
+  /** Applies to the addressed rows only — never changes the list's scope / visible_to. */
+  itemOnly?: boolean;
+}
+
+/** Where a live row addressed by item_id lives, and who already sees it. */
+export interface ListItemOwnerRef {
+  ownerId: string;
+  listType: string;
+  listName: string;
+  listScope: ItemScope;
+  listVisibleTo: string[];
+  itemVisibleTo: string[];
 }
 
 export interface EmployeeRecordSnapshot {
@@ -1970,6 +1982,7 @@ async function applyListAction(
     itemsForApply = [];
   }
   const listShare =
+    !visibility.itemOnly &&
     visibility.scope === "shared" &&
     resolvedAction.listType === "custom" &&
     Boolean(listName.trim());
@@ -2515,8 +2528,8 @@ const UUID_RE =
 export async function loadListItemOwners(
   userId: string,
   itemIds: string[],
-): Promise<Map<string, { ownerId: string; listType: string }>> {
-  const owners = new Map<string, { ownerId: string; listType: string }>();
+): Promise<Map<string, ListItemOwnerRef>> {
+  const owners = new Map<string, ListItemOwnerRef>();
   const ids = itemIds.filter((id) => UUID_RE.test(id));
   if (ids.length === 0) {
     return owners;
@@ -2529,13 +2542,26 @@ export async function loadListItemOwners(
     },
     select: {
       id: true,
-      list: { select: { employeeId: true, listType: true } },
+      visibleTo: true,
+      list: {
+        select: {
+          employeeId: true,
+          listType: true,
+          name: true,
+          scope: true,
+          visibleTo: true,
+        },
+      },
     },
   });
   for (const row of rows) {
     owners.set(row.id, {
       ownerId: row.list.employeeId,
       listType: row.list.listType,
+      listName: row.list.name,
+      listScope: row.list.scope === "shared" ? "shared" : "personal",
+      listVisibleTo: idList(row.list.visibleTo),
+      itemVisibleTo: idList(row.visibleTo),
     });
   }
   return owners;
@@ -2602,14 +2628,15 @@ export async function removeVisibleCustomItems(input: {
       }
       for (const list of lists) {
         const visibleTo = idList(list.visibleTo);
-        const canSee =
-          list.employeeId === input.actorId ||
-          (list.scope === "shared" && visibleTo.includes(input.actorId));
-        if (!canSee) {
-          continue;
-        }
         const existing = list.items.find((row) => row.id === itemId);
         if (!existing) {
+          continue;
+        }
+        const canSee =
+          list.employeeId === input.actorId ||
+          (list.scope === "shared" && visibleTo.includes(input.actorId)) ||
+          idList(existing.visibleTo).includes(input.actorId);
+        if (!canSee) {
           continue;
         }
         if (mutations.some((row) => row.itemId === existing.id)) {
@@ -2647,6 +2674,7 @@ export async function removeVisibleCustomItems(input: {
         }
         const watchers = uniqueIds([
           ...idList(list.visibleTo),
+          ...idList(existing.visibleTo),
           list.employeeId,
         ]).filter((id) => id !== input.actorId);
         if (watchers.length > 0) {

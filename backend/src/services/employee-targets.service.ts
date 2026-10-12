@@ -17,7 +17,10 @@ import {
   type Recurrence,
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
-import type { ItemVisibility } from "./employee-records.service.js";
+import type {
+  ItemVisibility,
+  ListItemOwnerRef,
+} from "./employee-records.service.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
@@ -576,10 +579,7 @@ function resolveNamedRelayTargets(
 }
 
 /** Live list row addressed by an ACTION item_id: which employee's list holds it. */
-export type ListItemOwnerRef = {
-  ownerId: string;
-  listType: string;
-};
+export type { ListItemOwnerRef };
 
 function actionItemId(raw: unknown): string {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -643,6 +643,48 @@ function withoutUnshareField(
 
 function isOwnShoppingOrTasks(listType: string): boolean {
   return listType === "shopping" || listType === "tasks";
+}
+
+/**
+ * A partner reaches this custom-list row only through the item's own visible_to
+ * (not as a partner on the list) — their edit/remove must land on the owner's row.
+ */
+function isCustomItemSharedOnlyWithActor(
+  ref: ListItemOwnerRef,
+  actorId: string,
+): boolean {
+  return (
+    ref.listType === "custom" &&
+    ref.ownerId !== actorId &&
+    ref.itemVisibleTo.includes(actorId) &&
+    !(ref.listScope === "shared" && ref.listVisibleTo.includes(actorId))
+  );
+}
+
+/**
+ * Custom-list row update that changes who sees that one item: unshare_with, or
+ * targets naming someone who does not already see it (list or item audience).
+ * A plain field edit stays on the named-list path (DB audience, list notifies).
+ */
+function isCustomItemShareChange(
+  ref: ListItemOwnerRef,
+  raw: Record<string, unknown>,
+  named: PublicEmployee[],
+  actorId: string,
+): boolean {
+  if (ref.listType !== "custom") {
+    return false;
+  }
+  if (itemUnshareNames(raw).length > 0) {
+    return true;
+  }
+  const audience = new Set([
+    ref.ownerId,
+    actorId,
+    ...ref.itemVisibleTo,
+    ...(ref.listScope === "shared" ? ref.listVisibleTo : []),
+  ]);
+  return named.some((target) => !audience.has(target.id));
 }
 
 export function planTargetedActions(input: {
@@ -744,33 +786,49 @@ export function planTargetedActions(input: {
       input.itemOwners.size > 0
     ) {
       // A shared shopping/tasks row lives once on its owner's list — mutate it there.
+      // A custom-list row being shared/unshared by item_id is the same item-level share.
+      const named = resolveNamedRelayTargets(list.targets, input.employees).filter(
+        (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
+      );
       const byOwner = new Map<
         string,
-        { listType: LlmListAction["listType"]; items: LlmListAction["items"] }
+        {
+          ownerId: string;
+          listType: LlmListAction["listType"];
+          listName: string;
+          items: LlmListAction["items"];
+        }
       >();
       const rest: LlmListAction["items"] = [];
       for (const raw of list.items) {
         const ref = input.itemOwners.get(actionItemId(raw));
         if (
           !ref ||
-          !isOwnShoppingOrTasks(ref.listType) ||
-          !humanOwnerIds.has(ref.ownerId)
+          !humanOwnerIds.has(ref.ownerId) ||
+          !(
+            isOwnShoppingOrTasks(ref.listType) ||
+            isCustomItemSharedOnlyWithActor(ref, input.actor.id) ||
+            (list.action === "update" &&
+              isCustomItemShareChange(ref, raw, named, input.actor.id))
+          )
         ) {
           rest.push(raw);
           continue;
         }
-        const bucket = byOwner.get(ref.ownerId) ?? {
+        const listName = ref.listType === "custom" ? ref.listName : "";
+        const key = `${ref.ownerId}\u0000${ref.listType}\u0000${listName}`;
+        const bucket = byOwner.get(key) ?? {
+          ownerId: ref.ownerId,
           listType: ref.listType as LlmListAction["listType"],
+          listName,
           items: [],
         };
         bucket.items.push(raw);
-        byOwner.set(ref.ownerId, bucket);
+        byOwner.set(key, bucket);
       }
       if (byOwner.size > 0) {
-        const named = resolveNamedRelayTargets(list.targets, input.employees).filter(
-          (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
-        );
-        for (const [ownerId, bucket] of byOwner) {
+        for (const bucket of byOwner.values()) {
+          const ownerId = bucket.ownerId;
           const unshareNames = bucket.items.flatMap(itemUnshareNames);
           const removeIds =
             list.action === "update"
@@ -792,7 +850,7 @@ export function planTargetedActions(input: {
                 {
                   ...list,
                   listType: bucket.listType,
-                  listName: "",
+                  listName: bucket.listName,
                   items: bucket.items.map(withoutUnshareField),
                   targets: [],
                 },
@@ -806,6 +864,7 @@ export function planTargetedActions(input: {
                 ? uniqueIds([ownerId, input.actor.id, ...partners.map((p) => p.id)])
                 : [ownerId],
               ...(removeIds.length > 0 ? { removeIds } : {}),
+              itemOnly: true,
             },
           });
         }

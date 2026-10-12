@@ -17,7 +17,24 @@ import {
   resolveRelayMessages,
   resolveSpokenMetadata,
   showButtonsForNotify,
+  type ListItemOwnerRef,
 } from "../src/services/employee-targets.service.js";
+
+function ownerRef(
+  ownerId: string,
+  listType: string,
+  extra: Partial<ListItemOwnerRef> = {},
+): ListItemOwnerRef {
+  return {
+    ownerId,
+    listType,
+    listName: "",
+    listScope: "personal",
+    listVisibleTo: [],
+    itemVisibleTo: [ownerId],
+    ...extra,
+  };
+}
 
 const amit: PublicEmployee = {
   id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
@@ -1691,7 +1708,7 @@ describe("employee targets", () => {
     const plan = planTargetedActions({
       actor: amit,
       employees,
-      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      itemOwners: new Map([[coffeeId, ownerRef(amit.id, "shopping")]]),
       metadata: {
         ...emptyLlmMetadata(),
         lists: [
@@ -1713,6 +1730,250 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
       { item_id: coffeeId },
     ]);
+  });
+
+  it("shares one item of a personal custom list by item_id (not the whole list)", () => {
+    const aviId = "77201840-1bfb-45a3-9a26-d6d524e13953";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      sharedLists: [
+        {
+          ownerId: amit.id,
+          listName: "קישקושים פרטיים",
+          visibleTo: [],
+          scope: "personal",
+        },
+      ],
+      itemOwners: new Map([
+        [aviId, ownerRef(amit.id, "custom", { listName: "קישקושים פרטיים" })],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "קישקושים פרטיים",
+            targets: ["עמית", "טל"],
+            items: [{ item_id: aviId }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "shared", visibleTo: [amit.id, tal.id], itemOnly: true },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]).toMatchObject({
+      listType: "custom",
+      listName: "קישקושים פרטיים",
+      items: [{ item_id: aviId }],
+    });
+  });
+
+  describe("partner of one shared custom-list item", () => {
+    const aviId = "77201840-1bfb-45a3-9a26-d6d524e13953";
+    const aviOwner = () =>
+      new Map([
+        [
+          aviId,
+          ownerRef(amit.id, "custom", {
+            listName: "קישקושים פרטיים",
+            itemVisibleTo: [amit.id, tal.id],
+          }),
+        ],
+      ]);
+
+    it("routes the partner's edit to the owner's row (no list of their own)", () => {
+      const plan = planTargetedActions({
+        actor: tal,
+        employees,
+        sharedLists: [],
+        itemOwners: aviOwner(),
+        metadata: {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "custom",
+              listName: "קישקושים פרטיים",
+              targets: ["טל", "עמית"],
+              items: [{ item_id: aviId, תיאור: "שחקן" }],
+            },
+          ],
+        },
+      });
+      expect(plan.applications).toHaveLength(1);
+      expect(plan.applications[0]).toMatchObject({
+        employeeId: amit.id,
+        visibility: { scope: "personal", visibleTo: [amit.id], itemOnly: true },
+      });
+      expect(plan.applications[0]?.metadata.lists[0]).toMatchObject({
+        listName: "קישקושים פרטיים",
+        items: [{ item_id: aviId, תיאור: "שחקן" }],
+      });
+    });
+
+    it("routes the partner's remove to the owner's row", () => {
+      const plan = planTargetedActions({
+        actor: tal,
+        employees,
+        sharedLists: [],
+        itemOwners: aviOwner(),
+        metadata: {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "custom",
+              listName: "קישקושים פרטיים",
+              targets: [],
+              items: [{ item_id: aviId }],
+            },
+          ],
+        },
+      });
+      expect(plan.applications).toHaveLength(1);
+      expect(plan.applications[0]).toMatchObject({
+        employeeId: amit.id,
+        visibility: { itemOnly: true },
+      });
+      expect(plan.applications[0]?.metadata.lists[0]?.action).toBe("remove");
+    });
+
+    it("keeps a shared-list partner's edit on the list path", () => {
+      const bugId = "88201840-1bfb-45a3-9a26-d6d524e13953";
+      const plan = planTargetedActions({
+        actor: amit,
+        employees,
+        sharedLists: [
+          {
+            ownerId: tal.id,
+            listName: "בעיות",
+            visibleTo: [tal.id, amit.id],
+            scope: "shared",
+          },
+        ],
+        itemOwners: new Map([
+          [
+            bugId,
+            ownerRef(tal.id, "custom", {
+              listName: "בעיות",
+              listScope: "shared",
+              listVisibleTo: [tal.id, amit.id],
+              itemVisibleTo: [tal.id, amit.id],
+            }),
+          ],
+        ]),
+        metadata: {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "custom",
+              listName: "בעיות",
+              targets: [],
+              items: [{ item_id: bugId, סטטוס: "טופל" }],
+            },
+          ],
+        },
+      });
+      expect(plan.applications).toHaveLength(1);
+      expect(plan.applications[0]?.visibility.itemOnly).toBeUndefined();
+      expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    });
+  });
+
+  it("unshares one custom-list item by item_id", () => {
+    const aviId = "77201840-1bfb-45a3-9a26-d6d524e13953";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      sharedLists: [
+        {
+          ownerId: amit.id,
+          listName: "קישקושים פרטיים",
+          visibleTo: [],
+          scope: "personal",
+        },
+      ],
+      itemOwners: new Map([
+        [
+          aviId,
+          ownerRef(amit.id, "custom", {
+            listName: "קישקושים פרטיים",
+            itemVisibleTo: [amit.id, tal.id],
+          }),
+        ],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "קישקושים פרטיים",
+            targets: ["עמית"],
+            items: [{ item_id: aviId, unshare_with: ["טל"] }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: { scope: "personal", removeIds: [tal.id] },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { item_id: aviId },
+    ]);
+  });
+
+  it("keeps a field edit on a shared custom list on the list audience", () => {
+    const bugId = "88201840-1bfb-45a3-9a26-d6d524e13953";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      sharedLists: [
+        {
+          ownerId: tal.id,
+          listName: "בעיות",
+          visibleTo: [tal.id, amit.id],
+          scope: "shared",
+        },
+      ],
+      itemOwners: new Map([
+        [
+          bugId,
+          ownerRef(tal.id, "custom", {
+            listName: "בעיות",
+            listScope: "shared",
+            listVisibleTo: [tal.id, amit.id],
+            itemVisibleTo: [tal.id, amit.id],
+          }),
+        ],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "בעיות",
+            targets: ["עמית", "טל"],
+            items: [{ item_id: bugId, סטטוס: "טופל" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: tal.id,
+      visibility: { scope: "shared", visibleTo: [tal.id, amit.id] },
+    });
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
   });
 
   it("tells a newly added partner the item was shared, not updated", () => {
@@ -1781,7 +2042,7 @@ describe("employee targets", () => {
     const plan = planTargetedActions({
       actor: amit,
       employees,
-      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      itemOwners: new Map([[coffeeId, ownerRef(amit.id, "shopping")]]),
       metadata: {
         ...emptyLlmMetadata(),
         lists: [
@@ -1831,7 +2092,7 @@ describe("employee targets", () => {
     const plan = planTargetedActions({
       actor: tal,
       employees,
-      itemOwners: new Map([[coffeeId, { ownerId: amit.id, listType: "shopping" }]]),
+      itemOwners: new Map([[coffeeId, ownerRef(amit.id, "shopping")]]),
       metadata: {
         ...emptyLlmMetadata(),
         lists: [

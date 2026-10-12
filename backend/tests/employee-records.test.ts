@@ -127,6 +127,7 @@ import {
   mergeListItemData,
   normalizeListItemData,
   readItemUrgency,
+  removeVisibleCustomItems,
   urgencySnapshotField,
 } from "../src/services/employee-records.service.js";
 
@@ -623,6 +624,150 @@ describe("employee records", () => {
       const result = await removeAs(shareeId);
       expect(itemUpdate).not.toHaveBeenCalled();
       expect(result.mutations).toEqual([]);
+    });
+  });
+
+  describe("item-only share on a personal custom list", () => {
+    const aviId = "77201840-1bfb-45a3-9a26-d6d524e13953";
+    const custom = {
+      id: "amit-custom",
+      employeeId,
+      listType: "custom",
+      name: "קישקושים פרטיים",
+      scope: "personal",
+      visibleTo: [],
+      titleField: "",
+    };
+    const avi = {
+      id: aviId,
+      listId: custom.id,
+      itemKey: "אבי",
+      data: { שם: "אבי", תיאור: "מהמר" },
+      scope: "personal",
+      addedById: employeeId,
+      visibleTo: [employeeId],
+      deletedAt: null,
+      reminderId: null,
+      list: custom,
+    };
+    const shareAvi = (itemOnly: boolean) =>
+      applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "custom",
+              listName: custom.name,
+              items: [{ item_id: aviId }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          visibleTo: [employeeId, talId],
+          ...(itemOnly ? { itemOnly } : {}),
+        },
+        employeeId,
+      );
+
+    beforeEach(() => {
+      listFindFirst.mockResolvedValue(custom);
+      itemFindFirst.mockResolvedValue(avi);
+      itemUpdate.mockResolvedValue({ id: aviId });
+      employeeFindUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve({ userId: "user-1", kind: "human", isOwner: false, id: where.id }),
+      );
+    });
+
+    it("shares the row without sharing the list", async () => {
+      const result = await shareAvi(true);
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: aviId },
+          data: expect.objectContaining({
+            scope: "shared",
+            visibleTo: [employeeId, talId],
+          }),
+        }),
+      );
+      expect(listUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ scope: "shared" }),
+        }),
+      );
+      expect(result.events).toEqual([
+        expect.objectContaining({ notifyEmployeeIds: [talId], shared: true }),
+      ]);
+    });
+
+    it("fallback remove lets an item partner delete it from a personal list", async () => {
+      listFindMany.mockResolvedValue([
+        {
+          ...custom,
+          items: [{ ...avi, visibleTo: [employeeId, talId] }],
+          employee: { id: employeeId, userId: "user-1" },
+        },
+      ]);
+      const result = await removeVisibleCustomItems({
+        userId: "user-1",
+        actorId: talId,
+        lists: [
+          {
+            action: "remove",
+            listType: "custom",
+            listName: custom.name,
+            items: [{ item_id: aviId }],
+            targets: [],
+          },
+        ],
+      });
+      expect(itemUpdate).toHaveBeenCalledWith({
+        where: { id: aviId },
+        data: { deletedAt: expect.any(Date), reminderId: null },
+      });
+      expect(result.mutations).toEqual([
+        expect.objectContaining({ action: "remove", itemId: aviId, employeeId }),
+      ]);
+      expect(result.events[0]?.notifyEmployeeIds).toEqual([employeeId]);
+    });
+
+    it("fallback remove refuses someone the item is not shared with", async () => {
+      listFindMany.mockResolvedValue([
+        {
+          ...custom,
+          items: [avi],
+          employee: { id: employeeId, userId: "user-1" },
+        },
+      ]);
+      const result = await removeVisibleCustomItems({
+        userId: "user-1",
+        actorId: talId,
+        lists: [
+          {
+            action: "remove",
+            listType: "custom",
+            listName: custom.name,
+            items: [{ item_id: aviId }],
+            targets: [],
+          },
+        ],
+      });
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
+    });
+
+    it("still shares the named list for a list-level share", async () => {
+      await shareAvi(false);
+      expect(listUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: custom.id },
+          data: expect.objectContaining({ scope: "shared" }),
+        }),
+      );
     });
   });
 
