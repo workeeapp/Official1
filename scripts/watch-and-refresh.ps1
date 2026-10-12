@@ -89,8 +89,9 @@ while ($true) {
     }
 
     Write-WatchLog "$upstream is ahead by $behind (local ahead=$ahead on $branch) - refreshing"
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-WorkeeRefresh -RepoRoot $root -RequireClean -NoWait
-    Write-WatchLog "Refresh finished OK"
+    Write-WatchLog ("Refresh finished OK ({0}s)" -f [int]$sw.Elapsed.TotalSeconds)
   } catch {
     Write-WatchLog "Error: $_"
   }

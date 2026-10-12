@@ -33,8 +33,9 @@ if (Test-WorkeeRefreshLockHeld) {
 
 Write-PushLog "Refreshing after push in $target"
 try {
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
   Invoke-WorkeeRefresh -RepoRoot $target -RequireClean -NoWait
-  Write-PushLog "Refresh finished OK"
+  Write-PushLog ("Refresh finished OK ({0}s)" -f [int]$sw.Elapsed.TotalSeconds)
 } catch {
   Write-PushLog "Refresh failed: $_"
   exit 1
