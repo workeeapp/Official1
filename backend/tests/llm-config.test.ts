@@ -51,6 +51,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("metadata");
     expect(config.systemMessage).toContain("Do not emit metadata.query");
     expect(config.systemMessage).toContain("STATUS QUESTIONS");
+    expect(config.systemMessage).toContain("LIVE DATA ONLY");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: listing or naming items from earlier assistant/user messages",
+    );
     expect(config.systemMessage).toContain("WORKER_SAVED_DATA");
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");

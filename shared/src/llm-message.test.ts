@@ -177,6 +177,67 @@ describe("parseLlmReply", () => {
     expect(parsed.response).not.toContain("confirm");
   });
 
+  it("unwraps top-level text instead of leaking raw JSON", () => {
+    const hebrew =
+      "השבוע:\n• שני 12.10 — פגישה (עמית, חרש) ב־14:00.";
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        text: hebrew,
+        metadata: { lists: [], reminders: [] },
+      }),
+    );
+    expect(parsed.responses).toEqual([hebrew]);
+    expect(parsed.response).toBe(hebrew);
+    expect(parsed.response).not.toContain('"text"');
+    expect(parsed.response).not.toContain("metadata");
+  });
+
+  it("unwraps responses entries shaped as { text }", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: [{ text: "הי, איך אפשר לעזור?" }, { text: "אגב, ביקשת שאבדוק אם קנית חלב?" }],
+        metadata: { lists: [] },
+      }),
+    );
+    expect(parsed.responses).toEqual([
+      "הי, איך אפשר לעזור?",
+      "אגב, ביקשת שאבדוק אם קנית חלב?",
+    ]);
+  });
+
+  it("unwraps a stringified { text } inside responses", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: [JSON.stringify({ text: "השבוע: פגישה ב־14:00" })],
+        metadata: {},
+      }),
+    );
+    expect(parsed.responses).toEqual(["השבוע: פגישה ב־14:00"]);
+    expect(parsed.response).not.toContain('"text"');
+  });
+
+  it("unwraps legacy response object with text", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        response: { text: "הוספתי חלב" },
+        metadata: { lists: [] },
+      }),
+    );
+    expect(parsed.responses).toEqual(["הוספתי חלב"]);
+    expect(parsed.response).toBe("הוספתי חלב");
+  });
+
+  it("does not leak raw JSON when metadata-only payload has no spoken text", () => {
+    const raw = JSON.stringify({
+      metadata: { lists: [], confirm: true },
+    });
+    const parsed = parseLlmReply(raw);
+    expect(parsed.responses).toEqual([]);
+    expect(parsed.response).toBe("");
+    expect(parsed.response).not.toContain("metadata");
+    expect(parsed.response).not.toContain("confirm");
+  });
+
   it("reads show buttons from metadata", () => {
     const parsed = parseLlmReply(
       JSON.stringify({

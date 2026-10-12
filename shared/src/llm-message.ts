@@ -1207,16 +1207,61 @@ function readText(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
+/** Unwrap one spoken entry: string, {text}, or stringified {"text":"..."}. */
+function normalizeSpokenEntry(entry: unknown): string | null {
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      return null;
+    }
+    // Model sometimes embeds a stringified {"text":"..."} inside responses[].
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const nested = parseObject(trimmed);
+      if (nested) {
+        const fromNested = normalizeSpokenEntry(nested);
+        if (fromNested) {
+          return fromNested;
+        }
+      }
+    }
+    return trimmed;
+  }
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const text = (entry as { text?: unknown }).text;
+    if (typeof text === "string" && text.trim()) {
+      return text.trim();
+    }
+  }
+  return null;
+}
+
+function looksLikeLlmReplyPayload(parsed: Record<string, unknown>): boolean {
+  return (
+    "responses" in parsed ||
+    "response" in parsed ||
+    "text" in parsed ||
+    "metadata" in parsed
+  );
+}
+
 export function readSpokenResponses(parsed: Record<string, unknown>): string[] | null {
   if (Array.isArray(parsed.responses)) {
     return parsed.responses
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
+      .map(normalizeSpokenEntry)
+      .filter((entry): entry is string => Boolean(entry));
   }
   if (typeof parsed.response === "string") {
-    const legacy = parsed.response.trim();
+    const legacy = normalizeSpokenEntry(parsed.response);
     return legacy ? [legacy] : [];
+  }
+  if (parsed.response && typeof parsed.response === "object" && !Array.isArray(parsed.response)) {
+    const fromObject = normalizeSpokenEntry(parsed.response);
+    return fromObject ? [fromObject] : [];
+  }
+  // Shape drift: top-level text instead of responses / response.
+  if (typeof parsed.text === "string") {
+    const fromText = normalizeSpokenEntry(parsed.text);
+    return fromText ? [fromText] : [];
   }
   return null;
 }
@@ -1235,8 +1280,10 @@ function extractLlmPayload(text: string): {
     return null;
   }
 
-  // Only fall back to raw text when the payload has no response field.
-  const responses = readSpokenResponses(parsed) ?? [text];
+  const spoken = readSpokenResponses(parsed);
+  // Never leak raw JSON when we parsed an LLM-shaped payload but got no spoken text.
+  const responses =
+    spoken ?? (looksLikeLlmReplyPayload(parsed) ? [] : [text]);
 
   return {
     responses,
