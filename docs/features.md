@@ -92,6 +92,7 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 - Stored on `EmployeeListItems.urgency`; `EMPLOYEE_SAVED_DATA` shows `urgency` only when not `normal`.
 - Listing in `response`: append «דחוף» / «דחוף מאוד» on that • line. «מה יש לי דחוף» → only those rows.
 - Status / «הצג רשימת…» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, `WORKER_SAVED_DATA`, `OPEN_JOBS`, …); chat history must not resurrect soft-deleted rows.
+- «מה המטלות שלי» / «הצג רשימת מטלות» is **tasks-only** (not shopping/custom/filings); multi-section answers only for FULL DUMP (`כל מה ששמור` / `סיכום מלא`) or show-all-lists.
 
 **Migration:** `prisma/migrations/20261007150000_list_item_urgency`.  
 **Tests:** `backend/tests/employee-records.test.ts`, `backend/tests/chat.test.ts`.

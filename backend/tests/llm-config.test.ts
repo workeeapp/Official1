@@ -55,6 +55,16 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN: listing or naming items from earlier assistant/user messages",
     );
+    expect(config.systemMessage).toContain("TASKS ASK");
+    expect(config.systemMessage).toContain("מה המטלות שלי");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN on a tasks ask: shopping items, custom lists",
+    );
+    expect(config.systemMessage).toContain("LIST NAME MATCH");
+    expect(config.systemMessage).toContain("VERY SIMILAR");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: inventing a list_name or picking by topic/meaning alone",
+    );
     expect(config.systemMessage).toContain("WORKER_SAVED_DATA");
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");
