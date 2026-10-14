@@ -532,7 +532,7 @@ describe("formatReminderApplyNotice", () => {
     ).toBe("");
   });
 
-  it("still reports skips, removes, and misses", () => {
+  it("does not ack successful removes — still reports skips and misses", () => {
     expect(
       formatReminderApplyNotice({
         removed: [],
@@ -547,7 +547,7 @@ describe("formatReminderApplyNotice", () => {
         missed: [],
         skipped: [],
       }),
-    ).toContain("ביטלתי את התזכורת «חלב»");
+    ).toBe("");
     expect(
       formatReminderApplyNotice({
         removed: [],

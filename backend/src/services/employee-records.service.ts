@@ -2968,12 +2968,14 @@ function toListSnapshotEntry(input: {
         },
       ),
     );
-  // Keep named custom lists and any shared list even when empty so Lucy can
-  // answer "do we have X?" / "show shared lists" without inventing.
+  // Keep empty shells Lucy must still name: shared lists, named custom lists,
+  // and built-in personal shopping/tasks (SHAREABLE STATUS ASK shows both sections).
   if (items.length === 0) {
     const keepEmpty =
-      Boolean(derivedName) &&
-      (input.scope === "shared" || input.listType === "custom");
+      input.scope === "shared" ||
+      (input.listType === "custom" && Boolean(derivedName)) ||
+      (input.scope === "personal" &&
+        (input.listType === "shopping" || input.listType === "tasks"));
     if (!keepEmpty) {
       return null;
     }

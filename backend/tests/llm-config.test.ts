@@ -55,11 +55,31 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN: listing or naming items from earlier assistant/user messages",
     );
-    expect(config.systemMessage).toContain("TASKS ASK");
+    expect(config.systemMessage).toContain("SHAREABLE STATUS ASK");
+    expect(config.systemMessage).toContain("SHAREABLE STATUS ASK ABOUT X");
+    expect(config.systemMessage).toContain("קניות אישיות");
+    expect(config.systemMessage).toContain("מטלות אישיות");
+    expect(config.systemMessage).toContain("תיוקים אישיים");
+    expect(config.systemMessage).toContain(
+      "never «אין לך קניות משותפות»",
+    );
+    expect(config.systemMessage).toContain("ALWAYS print BOTH headers");
+    expect(config.systemMessage).toContain(
+      "רשימה משותפת עם מיכל:\\nריקה",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: dropping partner names from an empty shared list",
+    );
+    expect(config.systemMessage).toContain("Scan EVERY matching list_type");
+    expect(config.systemMessage).toContain(
+      "FULL DUMP / מה יש לי / הציגי הכל",
+    );
+    expect(config.systemMessage).toContain("NOT bare «מה יש לי»");
     expect(config.systemMessage).toContain("מה המטלות שלי");
     expect(config.systemMessage).toContain(
-      "FORBIDDEN on a tasks ask: shopping items, custom lists",
+      "ALWAYS name the object and its list",
     );
+    expect(config.systemMessage).toContain("FORBIDDEN: bare «בסדר, מחקתי!»");
     expect(config.systemMessage).toContain("LIST NAME MATCH");
     expect(config.systemMessage).toContain("VERY SIMILAR");
     expect(config.systemMessage).toContain(
@@ -110,6 +130,11 @@ describe("LLM action schema", () => {
       "FORBIDDEN: empty «אין לך…» when that date appears in any next_occurrences",
     );
     expect(config.systemMessage).toContain("RECURRING IN A DATE ANSWER");
+    expect(config.systemMessage).toContain("MULTI-DAY window");
+    expect(config.systemMessage).toContain("NEVER explode dense cadences");
+    expect(config.systemMessage).toContain("כל יום ב־09:00");
+    expect(config.systemMessage).toContain("DAY AGENDA FORMAT");
+    expect(config.systemMessage).toContain("FORBIDDEN: one packed • for the whole day");
     expect(config.systemMessage).toContain("RECURRENCE START (critical)");
     expect(config.systemMessage).toContain('start:"2026-10-20"');
     expect(config.systemMessage).not.toContain("confirm_share");
@@ -142,5 +167,15 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("reminder_id");
     expect(config.systemMessage).toContain("A raise is ALWAYS its own entry in responses");
     expect(config.systemMessage).toContain("אגב, ביקשת שאבדוק אם קנית חלב?");
+    expect(config.systemMessage).toContain("URGENCY FOLLOW-UP (critical)");
+    expect(config.systemMessage).toContain("one check, one clock");
+    expect(config.systemMessage).toContain("תבדקי איתי בעוד 10 דקות אם הלכתי לישון");
+    expect(config.systemMessage).toContain("CAPABILITIES (זהה לכל עובד)");
+    expect(config.systemMessage).toContain("תיאום מול המשתתפים");
+    expect(config.systemMessage).toContain("בירורים ונדנודים");
+    expect(config.systemMessage).toContain("שליחה מתוזמנת וסיכומים חיים");
+    expect(config.systemMessage).toContain("ספר טלפונים אישי");
+    expect(config.systemMessage).toContain("מעבר לשיחה עם עובד דיגיטלי אחר");
+    expect(config.systemMessage).toContain("Do NOT list platform-owner-only git digests");
   });
 });

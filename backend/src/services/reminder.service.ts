@@ -1665,8 +1665,8 @@ export function formatReminderApplyNotice(result: {
   }>;
 }): string {
   const parts: string[] = [];
-  // Success saves: no engine ack — the model's response already confirms
-  // (אזכיר לך… / אשלח לך…). Keep skip / remove / missed only.
+  // Success save/remove: no engine ack — the model's response already confirms
+  // (אזכיר לך… / ביטלתי…). Keep skip / missed corrections only.
   if (result.skipped && result.skipped.length > 0) {
     parts.push(
       result.skipped
@@ -1677,15 +1677,8 @@ export function formatReminderApplyNotice(result: {
               ? row.dest
                 ? `אין לי מספר ל«${row.dest}». מה המספר?`
                 : `אין לי מספר ליעד. מה המספר?`
-            : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
+              : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
         )
-        .join(" "),
-    );
-  }
-  if (result.removed.length > 0) {
-    parts.push(
-      result.removed
-        .map((name) => `ביטלתי את התזכורת «${name}».`)
         .join(" "),
     );
   }

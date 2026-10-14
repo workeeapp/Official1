@@ -19,6 +19,10 @@ import {
   sendWhatsAppTyping,
   startWhatsAppTyping,
 } from "./whatsapp-send.js";
+import {
+  formatWhatsAppReplyContext,
+  lookupWhatsAppOutbound,
+} from "./whatsapp-outbound-memory.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -37,6 +41,8 @@ export interface InboundWhatsAppText {
   from: string;
   text: string;
   messageId: string;
+  /** Quoted outbound body when the user swipe-replied (in-memory lookup; no DB). */
+  replyToText?: string;
 }
 
 export function verifyWhatsAppWebhook(query: WhatsAppVerifyQuery): string {
@@ -101,6 +107,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
           from?: unknown;
           text?: { body?: unknown };
           interactive?: { button_reply?: { id?: unknown } };
+          context?: { id?: unknown; from?: unknown };
         };
         const buttonCommand = record.interactive?.button_reply?.id;
         const body =
@@ -112,8 +119,18 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const text = body.trim();
         const from = typeof record.from === "string" ? record.from : "";
         const messageId = typeof record.id === "string" ? record.id : "";
+        const replyToId =
+          typeof record.context?.id === "string" ? record.context.id.trim() : "";
+        const replyToText = replyToId
+          ? lookupWhatsAppOutbound(replyToId)
+          : undefined;
         if (text && from && messageId) {
-          messages.push({ from, text, messageId });
+          messages.push({
+            from,
+            text,
+            messageId,
+            ...(replyToText ? { replyToText } : {}),
+          });
         }
       }
     }
@@ -166,7 +183,9 @@ export async function handleInboundWhatsAppTexts(
         userId: speaker.userId,
         employeeId: speaker.employeeId,
         digitalEmployeeId: digital.id,
-        message: message.text,
+        message: message.replyToText
+          ? formatWhatsAppReplyContext(message.replyToText, message.text)
+          : message.text,
       });
       const handoff =
         parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;

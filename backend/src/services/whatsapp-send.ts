@@ -12,6 +12,7 @@ import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
+import { rememberWhatsAppOutbound } from "./whatsapp-outbound-memory.js";
 import { hasWhatsAppSession } from "./whatsapp-window.js";
 
 export type WhatsAppTextResult = "sent" | "no_session" | "failed";
@@ -256,6 +257,7 @@ async function sendWhatsAppPayload(
     return "no_session";
   }
 
+  const body = payload(destination);
   const response = await fetch(
     `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
     {
@@ -264,7 +266,7 @@ async function sendWhatsAppPayload(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload(destination)),
+      body: JSON.stringify(body),
     },
   );
 
@@ -278,8 +280,37 @@ async function sendWhatsAppPayload(
     return result;
   }
 
+  const outboundText = outboundTextFromPayload(body);
+  if (outboundText) {
+    try {
+      const json = (await response.json()) as {
+        messages?: Array<{ id?: unknown }>;
+      };
+      const graphId = json.messages?.[0]?.id;
+      if (typeof graphId === "string" && graphId.trim()) {
+        rememberWhatsAppOutbound(graphId.trim(), outboundText);
+      }
+    } catch {
+      // send succeeded; missing id only skips reply-context memory
+    }
+  }
+
   recordWhatsAppEvent("send_ok", `to=…${destination.slice(-4)}`);
   return "sent";
+}
+
+function outboundTextFromPayload(body: Record<string, unknown>): string {
+  const text = body.text as { body?: unknown } | undefined;
+  if (typeof text?.body === "string" && text.body.trim()) {
+    return text.body;
+  }
+  const interactive = body.interactive as
+    | { body?: { text?: unknown }; type?: unknown }
+    | undefined;
+  if (typeof interactive?.body?.text === "string" && interactive.body.text.trim()) {
+    return interactive.body.text;
+  }
+  return "";
 }
 
 async function graphErrorDetail(response: Response): Promise<string> {

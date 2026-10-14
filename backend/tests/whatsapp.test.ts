@@ -26,6 +26,11 @@ import {
   extractInboundTexts,
   phonesMatch,
 } from "../src/services/whatsapp.service.js";
+import {
+  formatWhatsAppReplyContext,
+  rememberWhatsAppOutbound,
+  resetWhatsAppOutboundMemory,
+} from "../src/services/whatsapp-outbound-memory.js";
 
 describe("WhatsApp webhook", () => {
   beforeEach(() => {
@@ -87,6 +92,43 @@ describe("WhatsApp webhook", () => {
     expect(listWhatsAppEvents().some((event) => event.step === "webhook_post")).toBe(
       true,
     );
+  });
+
+  it("attaches in-memory quoted outbound text on swipe-reply", () => {
+    resetWhatsAppOutboundMemory();
+    rememberWhatsAppOutbound("wamid.out", "מה יש בקניות?");
+    expect(
+      extractInboundTexts({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      id: "wamid.in",
+                      from: "972501234567",
+                      text: { body: "תוריד את החלב" },
+                      context: { id: "wamid.out", from: "972501234567" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        from: "972501234567",
+        text: "תוריד את החלב",
+        messageId: "wamid.in",
+        replyToText: "מה יש בקניות?",
+      },
+    ]);
+    expect(
+      formatWhatsAppReplyContext("מה יש בקניות?", "תוריד את החלב"),
+    ).toBe('[בתשובה להודעה: "מה יש בקניות?"] תוריד את החלב');
   });
 
   it("reads a tapped reply button as the button's command", () => {
