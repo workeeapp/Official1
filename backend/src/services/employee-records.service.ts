@@ -498,8 +498,8 @@ export function formatEmployeeContext(
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
-    "scope=shared_items is NOT a shared list: it is another person's personal list (owner) from which only these items were shared with the viewer — each item has its own shared_with. Never count it, name it, or call it «רשימה משותפת» (no «מטלות» / «קניות» as a shared list). «איזה רשימות משותפות יש לי» → only scope=shared entries. Mention shared_items only when asked about items shared with them / what X shared / their tasks or shopping for a day — e.g. «ערן שיתף איתך: …».",
-    "A single item may carry its own shared_with (owner + partners of that item). It is the truth for that item — prefer it over the list's shared_with. When listing such an item, append the partners other than the viewer in parentheses on its • line, e.g. «ללכת לרופא (עם ערן) — 13.10» or on a custom list «אבי — מהמר (עם טל)», unless the item name already shows them (e.g. פגישה (עמית, ערן)). A scope=personal list can still hold such items.",
+    "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Status dumps → header «קניות של X» / «מטלות של X» only — FORBIDDEN «משותפת עם …» / «(עם …)» on that header. Custom shared_items: mention when asked what was shared. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
+    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Assignment on the speaker's list → אישיות line «1. חלב (טל)» using assigned_by (not «(עם טל)»). Co-owned / shared-with-me (shared_with, display under משותפות) → «(עם …)». Prefer item shared_with over list shared_with. A scope=personal list can still hold such items.",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, append «דחוף» / «דחוף מאוד» on that • line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
@@ -1089,6 +1089,7 @@ export async function getEmployeeRecordSnapshot(
         ...linkedReminderField(item, activeReminders),
         ...urgencySnapshotField(item.urgency),
         ...itemSharedWithField(item.list.employee.id, item, names),
+        ...assignedByField(item.list.employee.id, item.addedById, names),
       },
     );
     // Shopping/tasks someone else shared WITH the viewer are the viewer's own work
@@ -1142,6 +1143,7 @@ export async function getEmployeeRecordSnapshot(
           {
             ...linkedReminderField(item, activeReminders),
             ...urgencySnapshotField(item.urgency),
+            ...assignedByField(list.employee.id, item.addedById, names),
           },
         ),
       );
@@ -2975,6 +2977,7 @@ function toListSnapshotEntry(input: {
           ...(input.scope === "shared"
             ? {}
             : itemSharedWithField(input.ownerId, item, input.names)),
+          ...assignedByField(input.ownerId, item.addedById, input.names),
           ...(input.itemExtras?.(item) ?? {}),
         },
       ),
@@ -3064,6 +3067,20 @@ function itemSharedWithField(
   }
   const sharedWith = sharedWithNames(ownerId, item.visibleTo, names);
   return sharedWith.length > 1 ? { shared_with: sharedWith } : {};
+}
+
+/** Assigner display name when someone else put this row on the list owner's list. */
+function assignedByField(
+  listOwnerId: string,
+  addedById: string | null | undefined,
+  names: Map<string, string>,
+): Record<string, unknown> {
+  const assignerId = addedById?.trim() ?? "";
+  if (!assignerId || assignerId === listOwnerId) {
+    return {};
+  }
+  const name = names.get(assignerId)?.trim() ?? "";
+  return name ? { assigned_by: name } : {};
 }
 
 function withVisibility(

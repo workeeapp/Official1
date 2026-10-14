@@ -1989,6 +1989,58 @@ describe("employee records", () => {
     const snap = await getEmployeeRecordSnapshot(employeeId);
     expect(snap.lists).toHaveLength(1);
     expect(snap.lists[0]).toMatchObject({ list_type: "shopping", owner: "טל", scope: "shared_items" });
+    expect(snap.lists[0]?.items[0]).toMatchObject({
+      "שם פריט": "חלב",
+      assigned_by: "עמית",
+    });
+  });
+
+  it("exposes assigned_by on the assignee's own list when someone else assigned the row", async () => {
+    listFindMany.mockResolvedValueOnce([
+      {
+        id: "amit-shop",
+        listType: "shopping",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: null },
+        items: [
+          {
+            id: "milk-1",
+            itemKey: "חלב",
+            data: { "שם פריט": "חלב" },
+            scope: "shared",
+            addedById: talId,
+            visibleTo: [employeeId, talId],
+          },
+        ],
+      },
+    ]);
+    itemFindMany.mockResolvedValue([]);
+    employeeFindMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: null },
+      { id: talId, name: "טל", nickname: null },
+    ]);
+    employeeFindUnique.mockResolvedValue({
+      userId: "user-1",
+      isOwner: false,
+      kind: "human",
+      name: "עמית",
+      nickname: null,
+    });
+    filingFindMany.mockResolvedValue([]);
+
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    expect(snap.lists[0]).toMatchObject({
+      list_type: "shopping",
+      owner: "עמית",
+      scope: "personal",
+    });
+    expect(snap.lists[0]?.items[0]).toMatchObject({
+      "שם פריט": "חלב",
+      assigned_by: "טל",
+      shared_with: ["עמית", "טל"],
+    });
   });
 
   it("merges a shared shopping item into the viewer's existing shopping list", async () => {

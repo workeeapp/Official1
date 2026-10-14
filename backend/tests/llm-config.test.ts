@@ -59,20 +59,14 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SHAREABLE STATUS ASK ABOUT X");
     expect(config.systemMessage).toContain("קניות אישיות");
     expect(config.systemMessage).toContain("מטלות אישיות");
-    expect(config.systemMessage).toContain("תיוקים אישיים");
-    expect(config.systemMessage).toContain(
-      "never «אין לך קניות משותפות»",
-    );
-    expect(config.systemMessage).toContain("ALWAYS print BOTH headers");
-    expect(config.systemMessage).toContain("(עם מיכל)\\nריקה");
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN: the words «רשימה משותפת»",
-    );
+    expect(config.systemMessage).toContain("filings keep personal→shared two-section");
+    expect(config.systemMessage).toContain("ALWAYS print (1) and (2)");
+    expect(config.systemMessage).toContain("no word רשימה");
     expect(config.systemMessage).toContain("NUMBERED 1. 2. 3.");
     expect(config.systemMessage).toContain(
       "Numbering restarts at 1 for EVERY distinct list block",
     );
-    expect(config.systemMessage).toContain("personal→shared split");
+    expect(config.systemMessage).toContain("THREE-way assign/co-share split");
     expect(config.systemMessage).toContain(
       "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
@@ -87,6 +81,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("COUNTS ONLY");
     expect(config.systemMessage).toContain("ONLY מטלות enumerate");
     expect(config.systemMessage).toContain("לפירוט רשימה: הצג רשימת");
+    expect(config.systemMessage).toContain("THREE blocks");
+    expect(config.systemMessage).toContain("קניות של עמית");
+    expect(config.systemMessage).toContain("assigned_by");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN on (3): «משותפת עם …»",
+    );
+    expect(config.systemMessage).toContain("three-way layout");
     expect(config.systemMessage).toContain("NOT bare «מה יש לי»");
     expect(config.systemMessage).toContain("מה המטלות שלי");
     expect(config.systemMessage).toContain(
