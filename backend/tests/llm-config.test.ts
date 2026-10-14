@@ -76,6 +76,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
+    expect(config.systemMessage).toContain(
+      "Number each line 1. 2. 3. (never •); numbering restarts per block (WORKER tasks vs OPEN_JOBS)",
+    );
     expect(config.systemMessage).toContain("Scan EVERY matching list_type");
     expect(config.systemMessage).toContain(
       "FULL DUMP / מה יש לי / הציגי הכל",
