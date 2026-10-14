@@ -1,11 +1,13 @@
 import {
   digitalEmployees,
   humanEmployees,
+  parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
   typingPauseMs,
 } from "@workee/shared";
-import type { PublicEmployee } from "@workee/shared";
+import type { AttachmentKind, PublicEmployee } from "@workee/shared";
+import type { Attachment } from "@prisma/client";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
@@ -16,9 +18,18 @@ import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
   sendWhatsAppButtons,
   sendWhatsAppNavigate,
+  sendWhatsAppText,
   sendWhatsAppTyping,
   startWhatsAppTyping,
 } from "./whatsapp-send.js";
+import {
+  buildTurnAttachments,
+  deliverAttachmentsToPhone,
+  ingestInboundMedia,
+  resolveUsableAttachments,
+  type InboundMedia,
+} from "./attachment.service.js";
+import { createInboundBatcher } from "./whatsapp-inbound-batch.js";
 import {
   formatWhatsAppReplyContext,
   lookupWhatsAppOutbound,
@@ -39,10 +50,46 @@ export interface WhatsAppVerifyQuery {
 
 export interface InboundWhatsAppText {
   from: string;
+  /** Message body; for media this is the caption (may be empty). */
   text: string;
   messageId: string;
   /** Quoted outbound body when the user swipe-replied (in-memory lookup; no DB). */
   replyToText?: string;
+  /** Image / video / audio / document / sticker sent with this message. */
+  media?: InboundMedia;
+}
+
+const MEDIA_KINDS: AttachmentKind[] = ["image", "video", "audio", "document", "sticker"];
+
+/** WhatsApp media object (`image` / `video` / …) → inbound media. Formatting only. */
+export function readInboundMedia(record: Record<string, unknown>): InboundMedia | undefined {
+  const kind = parseAttachmentKind(record.type);
+  if (!kind || !MEDIA_KINDS.includes(kind)) {
+    return undefined;
+  }
+  const payload = record[kind];
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const media = payload as {
+    id?: unknown;
+    mime_type?: unknown;
+    caption?: unknown;
+    filename?: unknown;
+    voice?: unknown;
+  };
+  const mediaId = asTrimmed(media.id);
+  if (!mediaId) {
+    return undefined;
+  }
+  return {
+    kind,
+    mediaId,
+    mimeType: asTrimmed(media.mime_type),
+    caption: asTrimmed(media.caption),
+    fileName: asTrimmed(media.filename),
+    voice: media.voice === true,
+  };
 }
 
 export function verifyWhatsAppWebhook(query: WhatsAppVerifyQuery): string {
@@ -111,8 +158,10 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
           context?: { id?: unknown; from?: unknown };
         };
         const buttonCommand = record.interactive?.button_reply?.id;
-        const body =
-          typeof record.text?.body === "string"
+        const media = readInboundMedia(message as Record<string, unknown>);
+        const body = media
+          ? media.caption
+          : typeof record.text?.body === "string"
             ? record.text.body
             : typeof buttonCommand === "string"
               ? buttonCommand
@@ -125,12 +174,13 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const replyToText = replyToId
           ? lookupWhatsAppOutbound(replyToId)
           : undefined;
-        if (text && from && messageId) {
+        if ((text || media) && from && messageId) {
           messages.push({
             from,
             text,
             messageId,
             ...(replyToText ? { replyToText } : {}),
+            ...(media ? { media } : {}),
           });
         }
       }
@@ -227,76 +277,178 @@ export async function handleInboundWhatsAppTexts(
       }
     }
 
-    const stopTyping = startWhatsAppTyping(message.messageId);
-    try {
-      await markWhatsAppInbound(message.from);
-      const speaker = await resolveWhatsAppSpeaker(message.from);
-      const employees = await listEmployeesForUser(speaker.userId);
-      const digitals = digitalEmployees(employees);
-      const digital =
-        sessionDigital(message.from, digitals) ??
-        digitals.find((employee) => employee.protected) ??
-        digitals[0];
-      if (!digital) {
-        throw new ServiceUnavailableError();
-      }
+    if (inboundBatcher.offer(message.from, message, Boolean(message.media))) {
       recordWhatsAppEvent(
-        "chat_start",
-        `worker=${digital.name} speaker=${speaker.employeeId.slice(0, 8)}`,
+        "media_batch",
+        `kind=${message.media?.kind ?? "text"} pending=${inboundBatcher.pending(message.from)}`,
       );
-      const turn = await sendChatMessage({
+      continue;
+    }
+    await runSerialized(message.from, () => runWhatsAppTurn([message]));
+  }
+}
+
+const MEDIA_BATCH_IDLE_MS = 3_000;
+const MEDIA_BATCH_MAX_MS = 15_000;
+
+const inboundBatcher = createInboundBatcher<InboundWhatsAppText>({
+  idleMs: MEDIA_BATCH_IDLE_MS,
+  maxMs: MEDIA_BATCH_MAX_MS,
+  flush: (phone, batch) => {
+    void runSerialized(phone, () => runWhatsAppTurn(batch));
+  },
+});
+
+const phoneQueues = new Map<string, Promise<void>>();
+
+/** One turn at a time per phone, in arrival order. */
+function runSerialized(phone: string, task: () => Promise<void>): Promise<void> {
+  const previous = phoneQueues.get(phone) ?? Promise.resolve();
+  const next = previous.then(task, task);
+  phoneQueues.set(phone, next);
+  void next.finally(() => {
+    if (phoneQueues.get(phone) === next) {
+      phoneQueues.delete(phone);
+    }
+  });
+  return next;
+}
+
+const MEDIA_FAILED_NOTICE = "לא הצלחתי לקבל את הקובץ. אפשר לנסות לשלוח אותו שוב?";
+
+/** Caption / text of the batch, in order; a voice note with no text speaks for itself. */
+export function batchSpokenText(
+  batch: Array<Pick<InboundWhatsAppText, "text">>,
+  transcripts: string[],
+): string {
+  const text = batch
+    .map((message) => message.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  return text || transcripts.map((value) => value.trim()).filter(Boolean).join("\n");
+}
+
+async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
+  const last = batch[batch.length - 1];
+  if (!last) {
+    return;
+  }
+  const from = last.from;
+  const stopTyping = startWhatsAppTyping(last.messageId);
+  try {
+    await markWhatsAppInbound(from);
+    const speaker = await resolveWhatsAppSpeaker(from);
+    const employees = await listEmployeesForUser(speaker.userId);
+    const digitals = digitalEmployees(employees);
+    const digital =
+      sessionDigital(from, digitals) ??
+      digitals.find((employee) => employee.protected) ??
+      digitals[0];
+    if (!digital) {
+      throw new ServiceUnavailableError();
+    }
+
+    const stored: Array<{ row: Attachment; voice: boolean }> = [];
+    let mediaFailed = 0;
+    for (const message of batch) {
+      if (!message.media) {
+        continue;
+      }
+      const row = await ingestInboundMedia({
         userId: speaker.userId,
-        employeeId: speaker.employeeId,
-        digitalEmployeeId: digital.id,
-        message: message.replyToText
-          ? formatWhatsAppReplyContext(message.replyToText, message.text)
-          : message.text,
+        uploaderId: speaker.employeeId,
+        media: message.media,
       });
-      const handoff =
-        parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
-      applyWhatsAppHandoff(message.from, handoff, digitals);
-      if (handoff && handoff !== digital.name) {
-        recordWhatsAppEvent("handoff", `worker=${handoff}`);
+      if (row) {
+        stored.push({ row, voice: message.media.voice });
+      } else {
+        mediaFailed += 1;
       }
-      const parsed = parseLlmReply(turn.reply);
-      const replies = parsed.responses.map((text) => text.trim()).filter(Boolean);
-      const buttons = parsed.buttons ?? [];
-      recordWhatsAppEvent(
-        "llm_ok",
-        `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length}`,
+    }
+    const spoken = batchSpokenText(
+      batch,
+      stored.map(({ row }) => row.transcript),
+    );
+    if (stored.length === 0 && !spoken) {
+      if (mediaFailed > 0) {
+        await sendWhatsAppText(from, MEDIA_FAILED_NOTICE, { ignoreSession: true });
+      }
+      return;
+    }
+    const replyToText = batch.find((message) => message.replyToText)?.replyToText;
+    const attachments =
+      stored.length > 0 ? await buildTurnAttachments(stored) : undefined;
+
+    recordWhatsAppEvent(
+      "chat_start",
+      `worker=${digital.name} speaker=${speaker.employeeId.slice(0, 8)} files=${stored.length}`,
+    );
+    const turn = await sendChatMessage({
+      userId: speaker.userId,
+      employeeId: speaker.employeeId,
+      digitalEmployeeId: digital.id,
+      message: replyToText ? formatWhatsAppReplyContext(replyToText, spoken) : spoken,
+      ...(attachments ? { attachments } : {}),
+    });
+    const handoff =
+      parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
+    applyWhatsAppHandoff(from, handoff, digitals);
+    if (handoff && handoff !== digital.name) {
+      recordWhatsAppEvent("handoff", `worker=${handoff}`);
+    }
+    const parsed = parseLlmReply(turn.reply);
+    const replies = parsed.responses.map((text) => text.trim()).filter(Boolean);
+    const buttons = parsed.buttons ?? [];
+    recordWhatsAppEvent(
+      "llm_ok",
+      `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} files_out=${turn.outboundAttachmentIds.length}`,
+    );
+    let delivered = true;
+    for (const [index, reply] of replies.entries()) {
+      if (index > 0) {
+        await sendWhatsAppTyping(last.messageId);
+        await sleep(typingPauseMs(reply));
+      }
+      const sendResult = await sendWhatsAppButtons(
+        from,
+        reply,
+        index === 0 ? buttons : [],
+        { ignoreSession: true },
       );
-      for (const [index, reply] of replies.entries()) {
-        if (index > 0) {
-          await sendWhatsAppTyping(message.messageId);
-          await sleep(typingPauseMs(reply));
-        }
-        const sendResult = await sendWhatsAppButtons(
-          message.from,
-          reply,
-          index === 0 ? buttons : [],
+      recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);
+      if (sendResult !== "sent") {
+        delivered = false;
+        break;
+      }
+      if (index === 0 && parsed.navigateAddress) {
+        const navigateResult = await sendWhatsAppNavigate(
+          from,
+          parsed.navigateAddress,
           { ignoreSession: true },
         );
-        recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);
-        if (sendResult !== "sent") {
-          break;
-        }
-        if (index === 0 && parsed.navigateAddress) {
-          const navigateResult = await sendWhatsAppNavigate(
-            message.from,
-            parsed.navigateAddress,
-            { ignoreSession: true },
-          );
-          recordWhatsAppEvent("navigate_send", `result=${navigateResult}`);
-        }
+        recordWhatsAppEvent("navigate_send", `result=${navigateResult}`);
       }
-    } catch (error) {
-      recordWhatsAppEvent(
-        "reply_failed",
-        error instanceof Error ? error.message : "unknown",
-      );
-    } finally {
-      stopTyping();
     }
+    if (delivered && turn.outboundAttachmentIds.length > 0) {
+      const rows = await resolveUsableAttachments(
+        speaker.employeeId,
+        turn.outboundAttachmentIds,
+      );
+      const result = await deliverAttachmentsToPhone(from, rows, {
+        ignoreSession: true,
+      });
+      recordWhatsAppEvent(
+        "media_send",
+        `sent=${result.sent} failed=${result.failed}`,
+      );
+    }
+  } catch (error) {
+    recordWhatsAppEvent(
+      "reply_failed",
+      error instanceof Error ? error.message : "unknown",
+    );
+  } finally {
+    stopTyping();
   }
 }
 

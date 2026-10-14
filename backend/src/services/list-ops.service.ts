@@ -8,6 +8,7 @@ import {
 } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { applyAttachmentLinks } from "./attachment.service.js";
 import { jsonStringList, visibleListColumns } from "./employee-records.service.js";
 import { employeeDisplayName, matchEmployee } from "./employee-targets.service.js";
 import { toPlainJson } from "./llm-client.js";
@@ -95,6 +96,32 @@ async function applyListOp(
   if (!list) {
     return { ...base, refusal: { reason: "not_found" } };
   }
+  const attachmentsOnly =
+    op.action === "alter_list" &&
+    Boolean(op.addAttachments?.length || op.removeAttachments?.length) &&
+    !op.newName.trim() &&
+    op.addColumns.length === 0 &&
+    op.removeColumns.length === 0 &&
+    op.renameColumns.length === 0 &&
+    op.addParticipants.length === 0 &&
+    op.removeParticipants.length === 0;
+  if (attachmentsOnly) {
+    // Anyone the list is visible to may attach files to it.
+    const canSee =
+      list.employeeId === input.actor.id ||
+      isAccountOwner(input.actor) ||
+      jsonStringList(list.visibleTo).includes(input.actor.id);
+    if (!canSee) {
+      return { ...base, refusal: { reason: "not_owner" } };
+    }
+    await applyAttachmentLinks({
+      actorId: input.actor.id,
+      target: { listId: list.id },
+      attachmentIds: op.addAttachments,
+      detachIds: op.removeAttachments,
+    });
+    return { ...base, applied: true };
+  }
   const canMutate =
     list.employeeId === input.actor.id ||
     (isAccountOwner(input.actor) && list.employee.kind === "human");
@@ -103,9 +130,19 @@ async function applyListOp(
   }
 
   try {
-    return op.action === "delete_list"
-      ? await deleteList(input, list, base)
-      : await alterList(input, list, op, base);
+    if (op.action === "delete_list") {
+      return await deleteList(input, list, base);
+    }
+    const altered = await alterList(input, list, op, base);
+    if (altered.applied) {
+      await applyAttachmentLinks({
+        actorId: input.actor.id,
+        target: { listId: list.id },
+        attachmentIds: op.addAttachments,
+        detachIds: op.removeAttachments,
+      });
+    }
+    return altered;
   } catch (error) {
     if (error instanceof ListOpRefused) {
       return { ...base, refusal: { reason: error.reason, detail: error.detail } };

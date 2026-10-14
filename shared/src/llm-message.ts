@@ -1,3 +1,4 @@
+import { parseAttachmentIds, SEND_ATTACHMENTS_MAX } from "./attachments.js";
 import { parseJobUrgency, type JobUrgency } from "./job-urgency.js";
 import {
   parseRecurrence,
@@ -43,6 +44,8 @@ export interface LlmListAction {
   columns?: string[];
   items: Record<string, unknown>[];
   targets: string[];
+  /** Files attached to the list itself (lists[].list_attachment_ids). */
+  listAttachmentIds?: string[];
 }
 
 export type LlmListOpName = "alter_list" | "delete_list";
@@ -63,6 +66,8 @@ export interface LlmListOp {
   renameColumns: LlmColumnRename[];
   addParticipants: string[];
   removeParticipants: string[];
+  addAttachments?: string[];
+  removeAttachments?: string[];
 }
 
 export interface LlmFilingAction {
@@ -74,6 +79,8 @@ export interface LlmFilingAction {
   targets: string[];
   /** Copy from this turn's EMPLOYEE_SAVED_DATA filing[].filing_id on remove/update. */
   filingId: string;
+  attachmentIds?: string[];
+  detachAttachmentIds?: string[];
 }
 
 export interface LlmMessageAction {
@@ -224,6 +231,9 @@ export interface LlmReminderAction {
   reminderId: string;
   /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
   occurrenceChange?: RecurrenceException;
+  /** Files sent together with the reminder when it fires. */
+  attachmentIds?: string[];
+  detachAttachmentIds?: string[];
 }
 
 export interface LlmHandoffAction {
@@ -264,6 +274,8 @@ export interface LlmMetadata {
   reportHistoryKinds?: ReportHistoryKind[];
   confirm?: boolean | null;
   targets?: string[];
+  /** Saved files the engine sends to the speaker after the reply. */
+  sendAttachments?: string[];
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -350,6 +362,9 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const directory = parseDirectoryActions(meta);
   const messages = parseMessageActions(meta);
   const listOps = parseListOps(meta);
+  const sendAttachments = parseAttachmentIds(
+    meta.send_attachments ?? meta.sendAttachments,
+  ).slice(0, SEND_ATTACHMENTS_MAX);
   return {
     messages,
     reminders,
@@ -363,6 +378,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     lists,
     listOps,
     filing,
+    ...(sendAttachments.length > 0 ? { sendAttachments } : {}),
   };
 }
 
@@ -403,7 +419,20 @@ function toListOp(value: unknown): LlmListOp | null {
     removeParticipants: readStringList(
       record.remove_participants ?? record.removeParticipants,
     ),
+    ...optionalIds("addAttachments", record.add_attachments ?? record.addAttachments),
+    ...optionalIds(
+      "removeAttachments",
+      record.remove_attachments ?? record.removeAttachments,
+    ),
   };
+}
+
+function optionalIds<K extends string>(
+  key: K,
+  value: unknown,
+): Partial<Record<K, string[]>> {
+  const ids = parseAttachmentIds(value);
+  return ids.length > 0 ? ({ [key]: ids } as Record<K, string[]>) : {};
 }
 
 function readStringList(value: unknown): string[] {
@@ -529,6 +558,10 @@ function toListAction(value: unknown): LlmListAction | null {
     ...(columns.length > 0 ? { columns } : {}),
     items,
     targets: parseTargets(value),
+    ...optionalIds(
+      "listAttachmentIds",
+      value.list_attachment_ids ?? value.listAttachmentIds,
+    ),
   };
 }
 
@@ -559,6 +592,8 @@ function isTitleOnlyListItem(item: unknown): boolean {
     "list_type",
     "listType",
     "targets",
+    "attachment_ids",
+    "detach_attachment_ids",
   ]);
   const titleKeys = new Set([
     "name",
@@ -987,6 +1022,11 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeLookbackHours: parseComposeLookbackHours(record),
     reminderId,
     ...(occurrenceChange ? { occurrenceChange } : {}),
+    ...optionalIds("attachmentIds", record.attachment_ids ?? record.attachmentIds),
+    ...optionalIds(
+      "detachAttachmentIds",
+      record.detach_attachment_ids ?? record.detachAttachmentIds,
+    ),
   };
 }
 
@@ -1219,6 +1259,11 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
     ]),
     targets: parseTargets(value),
     filingId,
+    ...optionalIds("attachmentIds", value.attachment_ids ?? value.attachmentIds),
+    ...optionalIds(
+      "detachAttachmentIds",
+      value.detach_attachment_ids ?? value.detachAttachmentIds,
+    ),
   };
 }
 

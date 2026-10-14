@@ -324,6 +324,46 @@ describe("Chat page", () => {
     );
   });
 
+  it("shows message attachments from history", async () => {
+    historyMock.mockResolvedValue({
+      employeeId: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
+      digitalEmployeeId: "7aaae1a2-c4c1-4edc-9d87-fe5ac740c1f4",
+      messages: [
+        {
+          id: "u1",
+          author: "you",
+          speaker: "עמית",
+          text: "תוסיפי מיץ לרשימת קניות",
+          createdAt: new Date().toISOString(),
+          attachments: [
+            { id: "11111111-1111-4111-8111-111111111111", kind: "image", file_name: "" },
+            { id: "22222222-2222-4222-8222-222222222222", kind: "document", file_name: "חוזה.pdf" },
+          ],
+        },
+      ],
+      raw: null,
+    });
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    const files = await screen.findByTestId("chat-attachments");
+    expect(within(files).getByRole("img", { name: "תמונה" })).toHaveAttribute(
+      "src",
+      "/api/attachments/11111111-1111-4111-8111-111111111111/content",
+    );
+    expect(within(files).getByRole("link", { name: /חוזה\.pdf/ })).toHaveAttribute(
+      "href",
+      "/api/attachments/22222222-2222-4222-8222-222222222222/content",
+    );
+  });
+
   it("keeps the speaker message before the assistant when history timestamps tie", async () => {
     const sameTime = new Date().toISOString();
     historyMock.mockResolvedValue({

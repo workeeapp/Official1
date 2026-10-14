@@ -57,6 +57,7 @@
     "      }",
     "    ],",
     "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
+    "    \"send_attachments\": [],",
     "    \"navigate_address\": null",
     "  }",
     "}",
@@ -233,6 +234,19 @@
     "- While asking for תיאור: filing=[]. Next turn emit the complete add_filing (known fields + the description). Do not claim saved until item_description is set.",
     "",
     "------------------------------------------------------------",
+    "ATTACHMENTS (קבצים מצורפים)",
+    "------------------------------------------------------------",
+    "Files the speaker sends (תמונות, סרטונים, הקלטות קוליות / אודיו, מסמכים, מדבקות) arrive under «[קבצים שהתקבלו בהודעה זו]» as new_attachments [{attachment_id, kind, file_name, caption, transcript, voice_note}]. You also SEE attached images. PENDING_ATTACHMENTS = files they sent in the last 48 hours that are not attached to anything yet. Saved rows in EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA carry attachments [{attachment_id, kind, file_name}]; a list with files has has_attachments: true.",
+    "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); list_ops alter_list add_attachments / remove_attachments (an existing whole list, with list_id); filing[].attachment_ids (add_filing, or update_filing with filing_id); reminders[].attachment_ids (sent together with the reminder when it fires). Detach: detach_attachment_ids (items / filing / reminders) or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
+    "CAPTION / VOICE TEXT IS THE REQUEST: when files come with a caption (or a voice note's transcript), handle it exactly like a normal message and attach the files to the action it creates. Example: photo with caption «תוסיפי מיץ לרשימת קניות» → lists add shopping מיץ with attachment_ids [that photo]; response «הוספתי מיץ לרשימת הקניות (עם התמונה)».",
+    "NO CAPTION: ask briefly where to file or attach them, naming what arrived — «איך לתייק את 2 התמונות והסרטון?» / «היכן לתייק את 2 הקבצים?» — with all actions empty. The answer completes it with the ids from PENDING_ATTACHMENTS: «תייקי תחת תמונות מהחתונה בתאילנד» → add_filing item_name «תמונות מהחתונה בתאילנד», item_description = item_name, attachment_ids = all those files. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id from EMPLOYEE_SAVED_DATA + attachment_ids (no such meeting → ask whether to create it).",
+    "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
+    "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the reminders add (the files are sent with the reminder).",
+    "A filing made from files: item_description = item_name unless they said otherwise — do not ask for תיאור.",
+    "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder that has attachments → answer in response AND set metadata.send_attachments to its attachment_ids (max 10); the files are sent right after your reply. When you SHOW a list whose has_attachments is true → also add to metadata.buttons { \"label\": \"קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
+    "Video and documents: you only know kind, file name and caption — never invent their content.",
+    "",
+    "------------------------------------------------------------",
     "OUTPUT RULES",
     "------------------------------------------------------------",
     "",
@@ -294,6 +308,11 @@
                       "items": { "type": "string" },
                       "description": "Custom lists only, on creation: every column the user chose, in order. Ignored for lists that already exist — change columns with list_ops alter_list."
                     },
+                    "list_attachment_ids": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Files attached to the list itself (not to one row). For an existing list prefer list_ops alter_list add_attachments."
+                    },
                     "targets": {
                       "type": "array",
                       "items": {
@@ -336,6 +355,16 @@
                               "time": { "type": "string" }
                             },
                             "required": ["date"]
+                          },
+                          "attachment_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Files to attach to this item — copy attachment_id from this turn's new_attachments / PENDING_ATTACHMENTS / saved attachments. On add, or on update with item_id (an attach-only update may send just item_id + attachment_ids)."
+                          },
+                          "detach_attachment_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "lists.update only: attachment_ids to remove from this item."
                           },
                           "urgency": {
                             "type": "string",
@@ -383,7 +412,9 @@
                       }
                     },
                     "add_participants": { "type": "array", "items": { "type": "string" } },
-                    "remove_participants": { "type": "array", "items": { "type": "string" } }
+                    "remove_participants": { "type": "array", "items": { "type": "string" } },
+                    "add_attachments": { "type": "array", "items": { "type": "string" }, "description": "alter_list: attachment_ids to attach to the whole list." },
+                    "remove_attachments": { "type": "array", "items": { "type": "string" }, "description": "alter_list: attachment_ids to remove from the whole list." }
                   },
                   "required": ["action", "list_id"]
                 }
@@ -419,6 +450,16 @@
                     "filing_id": {
                       "type": "string",
                       "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA filing[].filing_id. Required on remove_filing and update_filing — omitting it skips the mutate."
+                    },
+                    "attachment_ids": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Files to file under this filing (add_filing, or update_filing with filing_id). An attach-only update may send just filing_id + attachment_ids."
+                    },
+                    "detach_attachment_ids": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "update_filing only: attachment_ids to remove from this filing."
                     }
                   },
                   "required": [
@@ -631,6 +672,16 @@
                     },
                     "compose_lookback_hours": { "type": "number" },
                     "confirmed": { "type": "boolean" },
+                    "attachment_ids": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Files sent together with this reminder when it fires (add, or update with reminder_id)."
+                    },
+                    "detach_attachment_ids": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "reminders update only: attachment_ids to stop sending with this reminder."
+                    },
                     "reminder_id": {
                       "type": "string",
                       "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id / active_reminders[].reminder_id. Required on reminders remove and update — omitting it skips the mutate."
@@ -663,6 +714,12 @@
                   },
                   "required": ["label", "command"]
                 }
+              },
+              "send_attachments": {
+                "type": "array",
+                "maxItems": 10,
+                "items": { "type": "string" },
+                "description": "attachment_ids of saved files to send to the speaker right after the reply (a question about one item that has files, or the «קבצים מצורפים» button). Empty otherwise."
               },
               "navigate_address": {
                 "type": ["string", "null"],

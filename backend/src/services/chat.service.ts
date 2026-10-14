@@ -7,9 +7,11 @@ import {
   isGuestEmployee,
   isSubHourlyRecurrence,
   JOB_URGENCY_POLICY,
+  parseChatAttachmentRefs,
   parseLlmReply,
   parseReplyMetadata,
   toReplyButtons,
+  type ChatAttachmentRef,
   type ChatHistoryResponse,
   type ChatThreadMessage,
   type ChatThreadNotification,
@@ -39,6 +41,7 @@ import {
   loadListItemOwners,
   readItemId,
   removeVisibleCustomItems,
+  type EmployeeRecordSnapshot,
   type FilingMutation,
   type ListItemMutation,
   type SharedItemEvent,
@@ -117,6 +120,15 @@ import {
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
+import {
+  formatNewAttachmentsBlock,
+  formatPendingAttachmentsContext,
+  listPendingAttachments,
+  resolveUsableAttachments,
+  toChatAttachmentRef,
+  withAttachmentRefs,
+  type TurnAttachments,
+} from "./attachment.service.js";
 
 function speakerName(employee: {
   name: string;
@@ -221,6 +233,7 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     ? row.actions.filter((action): action is string => typeof action === "string")
     : [];
   const buttons = toReplyButtons({ buttons: row.buttons });
+  const attachments = parseChatAttachmentRefs(row.attachments);
 
   return {
     id: row.id,
@@ -231,6 +244,7 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     ...(actions.length > 0 ? { actions } : {}),
     ...(buttons.length > 0 ? { buttons } : {}),
     ...(row.navigateAddress ? { navigateAddress: row.navigateAddress } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
 }
 
@@ -301,6 +315,19 @@ export function shouldAttachLucyRuntimeEngine(
  * Jobs are bookkeeping around a turn that already happened — the reply is
  * written and the relay is out. A job problem must never fail the turn.
  */
+const ATTACHMENTS_RULE =
+  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments and lists with files have has_attachments. A caption / voice transcript is the request — handle it like any message and put the files' attachment_id values on the action it creates (lists items[].attachment_ids, filing[].attachment_ids, reminders[].attachment_ids, list_ops add_attachments, lists[].list_attachment_ids). No caption → ask where to file / attach them («איך לתייק את 2 התמונות?») with actions empty, then emit the action with those ids from PENDING_ATTACHMENTS. A reminder with files → same ids on the task and on the reminder (sent at fire). A question about ONE saved item with files → also metadata.send_attachments with its ids. Showing a list with has_attachments → add button { label «קבצים מצורפים», command «שלחי את הקבצים של רשימת <list name>» }; on that command → send_attachments = the list's and its items' files (max 10). Never speak ids; never invent video/document content.";
+
+async function withAttachmentRefsSafe(
+  snapshot: EmployeeRecordSnapshot,
+): Promise<EmployeeRecordSnapshot> {
+  return (
+    (await withoutFailingTurn("attachments_refs_failed", () =>
+      withAttachmentRefs(snapshot),
+    )) ?? snapshot
+  );
+}
+
 async function withoutFailingTurn<T>(
   label: string,
   run: () => Promise<T>,
@@ -655,6 +682,7 @@ async function saveTurn(input: {
   reply: string;
   raw: unknown;
   request: unknown;
+  userAttachments?: ChatAttachmentRef[];
 }): Promise<ChatTurnMessageIds & { assistantAt: Date }> {
   const parsed = parseLlmReply(input.reply);
   const userAt = new Date();
@@ -669,6 +697,9 @@ async function saveTurn(input: {
         author: "you",
         speaker: input.speaker,
         text: input.message,
+        ...(input.userAttachments?.length
+          ? { attachments: toJsonValue(input.userAttachments) }
+          : {}),
         createdAt: userAt,
       },
       {
@@ -699,11 +730,19 @@ async function syncTurnReplies(input: {
   assistantSpeaker: string;
   saved: ChatTurnMessageIds & { assistantAt: Date };
   responses: string[];
+  /** Files the engine sends with this reply (metadata.send_attachments). */
+  attachments?: ChatAttachmentRef[];
 }): Promise<ChatTurnMessageIds> {
   const [first = "", ...rest] = input.responses;
   await prisma.chatMessage.update({
     where: { id: input.saved.assistant },
-    data: { text: first, actions: Prisma.JsonNull },
+    data: {
+      text: first,
+      actions: Prisma.JsonNull,
+      ...(input.attachments?.length
+        ? { attachments: toJsonValue(input.attachments) }
+        : {}),
+    },
   });
   const extra = rest.map((text, index) => ({
     id: randomUUID(),
@@ -1145,6 +1184,8 @@ export async function sendChatMessage(input: {
    * still decides permissions and saved data.
    */
   consult?: { fromWorkerId: string; fromWorkerName: string };
+  /** Files that arrived with this message (stored already). */
+  attachments?: TurnAttachments;
 }): Promise<{
   reply: string;
   raw: unknown;
@@ -1153,6 +1194,9 @@ export async function sendChatMessage(input: {
   timing: { llmMs: number; afterLlmMs: number };
   request: unknown;
   messageIds: ChatTurnMessageIds;
+  /** Validated metadata.send_attachments — the channel sends these after the reply. */
+  outboundAttachmentIds: string[];
+  outboundAttachments?: ChatAttachmentRef[];
 }> {
   const client = getLlmClient();
   const [employee, employees] = await Promise.all([
@@ -1209,19 +1253,37 @@ export async function sendChatMessage(input: {
       )) ?? []);
   const context = [
     formatSessionClockContext(),
-    formatEmployeeContext(await getEmployeeRecordSnapshot(input.employeeId)),
+    formatEmployeeContext(
+      await withAttachmentRefsSafe(await getEmployeeRecordSnapshot(input.employeeId)),
+    ),
     guestSpeaker
       ? ""
       : formatEmployeeContext(
-          await getEmployeeRecordSnapshot(digital.id, {
-            scopeItemsToViewerId: input.employeeId,
-          }),
+          await withAttachmentRefsSafe(
+            await getEmployeeRecordSnapshot(digital.id, {
+              scopeItemsToViewerId: input.employeeId,
+            }),
+          ),
           "WORKER_SAVED_DATA",
         ),
     guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
     guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
+    guestSpeaker || consultFrom
+      ? ""
+      : formatPendingAttachmentsContext(
+          (
+            (await withoutFailingTurn("attachments_pending_failed", () =>
+              listPendingAttachments(input.employeeId),
+            )) ?? []
+          ).filter(
+            (fact) =>
+              !input.attachments?.facts.some(
+                (fresh) => fresh.attachment_id === fact.attachment_id,
+              ),
+          ),
+        ),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1312,6 +1374,7 @@ export async function sendChatMessage(input: {
         guestSpeaker
           ? ""
           : "Ping clocks only → active_reminders. Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+        guestSpeaker ? "" : ATTACHMENTS_RULE,
         guestSpeaker
           ? ""
           : "LAST CHECK before you answer: every entry in metadata.messages must have all five fields — targets, text, expects_reply, ask_summary, urgency (normal unless the speaker stressed it). expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
@@ -1335,9 +1398,11 @@ export async function sendChatMessage(input: {
   const message = [
     context,
     `${turnSpeaker}: ${input.message}`,
+    formatNewAttachmentsBlock(input.attachments?.facts ?? []),
   ]
     .filter(Boolean)
     .join("\n\n");
+  const imageUrls = input.attachments?.imageUrls ?? [];
 
   try {
     let turn;
@@ -1360,6 +1425,7 @@ export async function sendChatMessage(input: {
         reasoningEffort: config.reasoningEffort,
         instructions,
         textFormat: config.responseFormat,
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
       });
     } catch (error) {
       if (!isContextTooLargeError(error)) {
@@ -1385,6 +1451,7 @@ export async function sendChatMessage(input: {
         reasoningEffort: config.reasoningEffort,
         instructions,
         textFormat: config.responseFormat,
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
       });
     }
     const llmMs = Date.now() - llmStarted;
@@ -1405,6 +1472,7 @@ export async function sendChatMessage(input: {
       reply: turn.reply,
       raw: turn.raw,
       request: openaiRequest,
+      userAttachments: input.attachments?.refs,
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
@@ -2009,11 +2077,17 @@ export async function sendChatMessage(input: {
           (current, extra) => appendEngineNotice(current, extra),
           workingReply,
         );
+    const outboundAttachments = guestSpeaker
+      ? []
+      : ((await withoutFailingTurn("attachments_send_failed", () =>
+          resolveUsableAttachments(employee.id, metadata.sendAttachments ?? []),
+        )) ?? []);
     const turnMessageIds = await syncTurnReplies({
       conversationId: conversation.id,
       assistantSpeaker,
       saved: messageIds,
       responses: parseLlmReply(reply).responses,
+      attachments: outboundAttachments.map(toChatAttachmentRef),
     });
 
     if (conversation.needsContext) {
@@ -2043,6 +2117,8 @@ export async function sendChatMessage(input: {
       answeredBy: digital.name,
       timing: { llmMs, afterLlmMs: Date.now() - afterLlmStarted },
       messageIds: turnMessageIds,
+      outboundAttachmentIds: outboundAttachments.map((row) => row.id),
+      outboundAttachments: outboundAttachments.map(toChatAttachmentRef),
     };
   } catch (error) {
     const table = missingTableName(error);

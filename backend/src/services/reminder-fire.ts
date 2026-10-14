@@ -24,6 +24,11 @@ import { loadComposeFacts } from "./compose-facts.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
+import {
+  deliverAttachmentsToPhone,
+  listReminderAttachments,
+  toChatAttachmentRef,
+} from "./attachment.service.js";
 import { jobMetaFrom } from "./job-meta.js";
 
 function pingIds(value: unknown): string[] {
@@ -366,6 +371,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       continue;
     }
 
+    const files = await listReminderAttachments(reminder.id).catch(() => []);
+    const fileRefs = files.map(toChatAttachmentRef);
+
     for (const dest of dests) {
       const target =
         employees.find((employee) => employee.id === dest) ??
@@ -412,6 +420,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
                     buttons: buttons.map(({ label, command }) => ({ label, command })),
                   }
                 : {}),
+              ...(fileRefs.length > 0
+                ? { attachments: fileRefs as unknown as Prisma.InputJsonValue }
+                : {}),
               raw: { reminder: true },
             },
           });
@@ -425,6 +436,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
               text: created.text,
               createdAt: created.createdAt.toISOString(),
               ...(buttons.length > 0 ? { buttons } : {}),
+              ...(fileRefs.length > 0 ? { attachments: fileRefs } : {}),
             },
             raw: { reminder: true },
           });
@@ -443,6 +455,15 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             ignoreSession: true,
           });
           sendResults.push(result === "sent");
+          if (result === "sent" && files.length > 0) {
+            const delivered = await deliverAttachmentsToPhone(phone, files, {
+              ignoreSession: true,
+            });
+            recordWhatsAppEvent(
+              "reminder_files",
+              `sent=${delivered.sent} failed=${delivered.failed}`,
+            );
+          }
         } catch (error) {
           console.error(
             "Reminder WhatsApp failed",

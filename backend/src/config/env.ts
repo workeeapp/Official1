@@ -20,6 +20,10 @@ const envSchema = z.object({
   WHATSAPP_APP_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
+  /** Root folder for uploaded attachment bytes. */
+  UPLOADS_DIR: z.string().default(".data/uploads"),
+  /** OpenAI model for voice/audio transcription. */
+  TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
 });
 
 export type Env = z.infer<typeof envSchema>;

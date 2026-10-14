@@ -44,6 +44,7 @@ model Employee {
   ownedReminders           Reminder[]         @relation("ReminderOwner")
   actedReminders           Reminder[]         @relation("ReminderActor")
   contacts                 Contact[]
+  attachments              Attachment[]
 
   @@index([userId])
   @@map("Employees")
@@ -79,6 +80,8 @@ model ChatMessage {
   actions        Json?
   buttons        Json?
   navigateAddress String?         @map("navigate_address") @db.VarChar(300)
+  /// Files shown on this bubble: [{ id, kind, file_name }].
+  attachments    Json?
   raw            Json?
   createdAt      DateTime         @default(now()) @map("created_at")
   conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -145,6 +148,7 @@ model EmployeeList {
   updatedAt  DateTime           @updatedAt @map("updated_at")
   employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   items      EmployeeListItem[]
+  attachmentLinks AttachmentLink[]
 
   /// Name uniqueness is a partial index (deleted_at IS NULL) in the migration.
   @@index([employeeId, listType, name])
@@ -174,6 +178,7 @@ model EmployeeListItem {
   /** Same-turn clock for a speaker/shared item; deleting the clock keeps the item. */
   linkedReminderId String?   @map("linked_reminder_id") @db.Uuid
   linkedReminder   Reminder? @relation("ClockLinksItem", fields: [linkedReminderId], references: [id], onDelete: SetNull)
+  attachmentLinks  AttachmentLink[]
 
   @@index([listId, itemKey])
   @@index([linkedReminderId])
@@ -195,6 +200,7 @@ model EmployeeFiling {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  attachmentLinks AttachmentLink[]
 
   @@index([employeeId, itemName])
   @@index([employeeId])
@@ -238,10 +244,67 @@ model Reminder {
   workerItem EmployeeListItem? @relation("TaskOwnsClock", fields: [workerItemId], references: [id], onDelete: Cascade)
   ownedTask  EmployeeListItem? @relation("ClockOwnsTask")
   linkedItems EmployeeListItem[] @relation("ClockLinksItem")
+  attachmentLinks AttachmentLink[]
 
   @@index([userId, status, fireAt])
   @@index([ownerId, itemKey])
   @@map("Reminders")
+}
+
+/// A file the speaker sent (WhatsApp media). Bytes live in attachment storage under `storage_key`.
+model Attachment {
+  id                   String    @id @default(uuid()) @db.Uuid
+  userId               String    @map("user_id") @db.Uuid
+  uploaderId           String    @map("uploader_id") @db.Uuid
+  /** image | video | audio | document | sticker */
+  kind                 String    @db.VarChar(16)
+  mimeType             String    @map("mime_type") @db.VarChar(127)
+  fileName             String    @default("") @map("file_name") @db.VarChar(255)
+  sizeBytes            Int       @default(0) @map("size_bytes")
+  sha256               String    @default("") @db.VarChar(64)
+  storageKey           String    @map("storage_key") @db.VarChar(300)
+  caption              String    @default("") @db.Text
+  /** Voice/audio transcription. */
+  transcript           String    @default("") @db.Text
+  waInboundMediaId     String    @default("") @map("wa_inbound_media_id") @db.VarChar(128)
+  /** Media id from our own upload to WhatsApp (valid about 30 days). */
+  waOutboundMediaId    String    @default("") @map("wa_outbound_media_id") @db.VarChar(128)
+  waOutboundUploadedAt DateTime? @map("wa_outbound_uploaded_at")
+  deletedAt            DateTime? @map("deleted_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  uploader             Employee  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  links                AttachmentLink[]
+
+  @@index([userId, createdAt])
+  @@index([uploaderId, createdAt])
+  @@map("Attachments")
+}
+
+/// Exactly one target per row (SQL CHECK in the migration).
+model AttachmentLink {
+  id           String            @id @default(uuid()) @db.Uuid
+  attachmentId String            @map("attachment_id") @db.Uuid
+  listId       String?           @map("list_id") @db.Uuid
+  listItemId   String?           @map("list_item_id") @db.Uuid
+  filingId     String?           @map("filing_id") @db.Uuid
+  reminderId   String?           @map("reminder_id") @db.Uuid
+  addedById    String?           @map("added_by_id") @db.Uuid
+  createdAt    DateTime          @default(now()) @map("created_at")
+  attachment   Attachment        @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  list         EmployeeList?     @relation(fields: [listId], references: [id], onDelete: Cascade)
+  listItem     EmployeeListItem? @relation(fields: [listItemId], references: [id], onDelete: Cascade)
+  filing       EmployeeFiling?   @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  reminder     Reminder?         @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+
+  @@unique([attachmentId, listId])
+  @@unique([attachmentId, listItemId])
+  @@unique([attachmentId, filingId])
+  @@unique([attachmentId, reminderId])
+  @@index([listId])
+  @@index([listItemId])
+  @@index([filingId])
+  @@index([reminderId])
+  @@map("AttachmentLinks")
 }
 
 model AuditEvent {

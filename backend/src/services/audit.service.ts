@@ -18,7 +18,10 @@ export type AuditAction =
   | "job_answer"
   | "job_decline"
   | "job_counter"
-  | "job_close";
+  | "job_close"
+  | "attachment_add"
+  | "attachment_link"
+  | "attachment_unlink";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;

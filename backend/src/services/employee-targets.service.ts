@@ -1185,6 +1185,8 @@ function looksLikeListTitleOnly(item: unknown): boolean {
     "list_type",
     "listType",
     "targets",
+    "attachment_ids",
+    "detach_attachment_ids",
   ]);
   const titleKeys = new Set([
     "name",

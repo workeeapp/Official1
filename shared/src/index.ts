@@ -133,6 +133,16 @@ export type {
   RecurrenceFreq,
   RecurrenceUnit,
 } from "./recurrence";
+export {
+  ATTACHMENT_KINDS,
+  ATTACHMENT_MAX_BYTES,
+  SEND_ATTACHMENTS_MAX,
+  attachmentContentUrl,
+  parseAttachmentIds,
+  parseAttachmentKind,
+  parseChatAttachmentRefs,
+} from "./attachments";
+export type { AttachmentKind, ChatAttachmentRef } from "./attachments";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
 export { TYPING_PAUSE_MAX_MS, TYPING_PAUSE_MIN_MS, typingPauseMs } from "./typing-pause";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";

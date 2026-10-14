@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   isGuestEmployee,
+  parseAttachmentIds,
   parseJobUrgency,
   type EmployeeRecordField,
   type EmployeeRecordsResponse,
@@ -14,6 +15,7 @@ import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { applyAttachmentLinks } from "./attachment.service.js";
 import { jobMetaFrom, stripJobMeta } from "./job-meta.js";
 import {
   clearItemRecurrence,
@@ -111,6 +113,11 @@ const CUSTOM_ITEM_META_KEYS = new Set([
   "owner",
   "urgency",
   "דחיפות",
+  "attachment_ids",
+  "attachmentIds",
+  "detach_attachment_ids",
+  "detachAttachmentIds",
+  "attachments",
 ]);
 
 /** Read urgency from an ACTION item; undefined when the model omitted it. */
@@ -1512,6 +1519,26 @@ export async function applyEmployeeRecords(
       if (!existingFiling) {
         continue;
       }
+      const attachOnly =
+        !action.itemName.trim() &&
+        !action.itemInfo.trim() &&
+        !action.itemDescription.trim() &&
+        Boolean(action.attachmentIds?.length || action.detachAttachmentIds?.length);
+      if (attachOnly) {
+        await applyAttachmentLinks({
+          actorId: actor,
+          target: { filingId: existingFiling.id },
+          attachmentIds: action.attachmentIds,
+          detachIds: action.detachAttachmentIds,
+        });
+        filingMutations.push({
+          action: "update",
+          itemName: existingFiling.itemName,
+          itemInfo: existingFiling.itemInfo,
+          itemDescription: existingFiling.itemDescription ?? "",
+        });
+        continue;
+      }
       const itemDescription = action.itemDescription.trim().slice(0, 4000);
       const nextDescription =
         itemDescription || existingFiling.itemDescription || "";
@@ -1540,6 +1567,12 @@ export async function applyEmployeeRecords(
       const nextName = action.itemName.trim()
         ? action.itemName.trim().slice(0, 200)
         : existingFiling.itemName;
+      await applyAttachmentLinks({
+        actorId: actor,
+        target: { filingId: existingFiling.id },
+        attachmentIds: action.attachmentIds,
+        detachIds: action.detachAttachmentIds,
+      });
       filingMutations.push({
         action: "update",
         itemName: nextName,
@@ -1584,6 +1617,11 @@ export async function applyEmployeeRecords(
               : {}),
           },
         });
+        await applyAttachmentLinks({
+          actorId: actor,
+          target: { filingId: existingFiling.id },
+          attachmentIds: action.attachmentIds,
+        });
         filingMutations.push({
           action: "update",
           itemName,
@@ -1618,6 +1656,11 @@ export async function applyEmployeeRecords(
               ? { scope: "shared", visibleTo: resolved.visibleTo }
               : {}),
           },
+        });
+        await applyAttachmentLinks({
+          actorId: actor,
+          target: { filingId: created.id },
+          attachmentIds: action.attachmentIds,
         });
         filingMutations.push({
           action: "add",
@@ -1952,7 +1995,11 @@ async function applyListAction(
   const cancelledReminders: string[] = [];
   const seenCascadeTaskIds = new Set<string>();
   const accessCache: WorkerAccessCache = {};
-  const resolvedAction = await resolveListActionAgainstSaved(employeeId, action);
+  const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
+  const resolvedAction = await resolveListActionAgainstSaved(employeeId, {
+    ...action,
+    items: itemAttachments.map((entry) => entry.item),
+  });
   let listName = resolvedAction.listName.slice(0, 100);
   if (!listName && resolvedAction.listType === "custom") {
     for (const raw of resolvedAction.items) {
@@ -2066,7 +2113,9 @@ async function applyListAction(
   }
 
   const itemMutationsBefore = mutations.length;
-  for (const rawItem of itemsForApply) {
+  for (const [itemIndex, rawItem] of itemsForApply.entries()) {
+    const attachments =
+      itemsForApply === resolvedAction.items ? itemAttachments[itemIndex] : undefined;
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
     if (
       resolvedAction.listType === "custom" &&
@@ -2341,6 +2390,12 @@ async function applyListAction(
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
       });
+      await applyAttachmentLinks({
+        actorId,
+        target: { listItemId: existing.id },
+        attachmentIds: attachments?.attach,
+        detachIds: attachments?.detach,
+      });
       if (listOwner) {
         const occurrenceDone = Boolean(done.doneDate) && doneRecord !== ruledRecord;
         const change = occurrenceChanged ? occurrence.change : null;
@@ -2386,6 +2441,11 @@ async function applyListAction(
             effectiveTitleField,
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
+      });
+      await applyAttachmentLinks({
+        actorId,
+        target: { listItemId: created.id },
+        attachmentIds: attachments?.attach,
       });
       if (listOwner) {
         await recordAuditEvent({
@@ -2495,7 +2555,39 @@ async function applyListAction(
     }
   }
 
+  if (resolvedAction.action !== "remove" && resolvedAction.listAttachmentIds?.length) {
+    await applyAttachmentLinks({
+      actorId,
+      target: { listId: list.id },
+      attachmentIds: resolvedAction.listAttachmentIds,
+    });
+  }
+
   return { events, mutations, cancelledReminders };
+}
+
+const ITEM_ATTACH_KEYS = ["attachment_ids", "attachmentIds"];
+const ITEM_DETACH_KEYS = ["detach_attachment_ids", "detachAttachmentIds"];
+
+/** Attachment ids ride on the ACTION item but are links, never item data. */
+export function splitItemAttachments(record: Record<string, unknown>): {
+  item: Record<string, unknown>;
+  attach: string[];
+  detach: string[];
+} {
+  const item: Record<string, unknown> = {};
+  let attach: string[] = [];
+  let detach: string[] = [];
+  for (const [key, value] of Object.entries(record)) {
+    if (ITEM_ATTACH_KEYS.includes(key)) {
+      attach = [...attach, ...parseAttachmentIds(value)];
+    } else if (ITEM_DETACH_KEYS.includes(key)) {
+      detach = [...detach, ...parseAttachmentIds(value)];
+    } else {
+      item[key] = value;
+    }
+  }
+  return { item, attach: [...new Set(attach)], detach: [...new Set(detach)] };
 }
 
 /**

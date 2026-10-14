@@ -37,7 +37,7 @@ export function receiveWebhook(req: Request, res: Response): void {
     for (const message of inbound) {
       recordWhatsAppEvent(
         "inbound_text",
-        `from=${maskPhone(message.from)} chars=${message.text.length}`,
+        `from=${maskPhone(message.from)} chars=${message.text.length}${message.media ? ` media=${message.media.kind}` : ""}`,
       );
     }
     void handleInboundWhatsAppTexts(inbound);

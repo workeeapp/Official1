@@ -1,3 +1,4 @@
+import type { ChatAttachmentRef } from "./attachments.js";
 import type { LlmReplyButton } from "./llm-message.js";
 
 export interface PublicUser {
@@ -215,6 +216,8 @@ export interface ChatMessageResponse {
   notifications?: ChatThreadNotification[];
   timing?: ChatReplyTiming;
   messageIds?: ChatTurnMessageIds;
+  /** Files sent with this reply (metadata.send_attachments). */
+  attachments?: ChatAttachmentRef[];
 }
 
 export interface ChatThreadNotification {
@@ -235,6 +238,8 @@ export interface ChatThreadMessage {
   actions?: string[];
   buttons?: LlmReplyButton[];
   navigateAddress?: string;
+  /** Files on this message (view-only in the web chat). */
+  attachments?: ChatAttachmentRef[];
   llmMs?: number;
   afterLlmMs?: number;
 }

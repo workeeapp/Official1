@@ -3,6 +3,11 @@ import { ApiError } from "@/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
+/** Absolute URL for API resources the browser loads directly (img/video src). */
+export function apiUrl(path: string): string {
+  return `${API_BASE}${path}`;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }

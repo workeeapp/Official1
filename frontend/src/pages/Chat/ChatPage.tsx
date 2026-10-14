@@ -5,6 +5,7 @@ import { WazeIcon } from "@/components/WazeIcon";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
 import { employeeDisplayName } from "@/services/employee.service";
+import { ChatAttachments } from "./ChatAttachments";
 import {
   chatDayKey,
   formatChatDate,
@@ -332,6 +333,9 @@ export function ChatPage() {
                       </span>
                     ) : null}
                   </p>
+                  {message.attachments?.length ? (
+                    <ChatAttachments attachments={message.attachments} />
+                  ) : null}
                   {message.author === "assistant" &&
                   (message.buttons?.length || message.navigateAddress) ? (
                     <div

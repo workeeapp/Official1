@@ -5,6 +5,7 @@ import {
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_MAX,
   wazeNavigateUrl,
+  type AttachmentKind,
   type LlmReplyButton,
   type PublicEmployee,
 } from "@workee/shared";
@@ -216,6 +217,51 @@ export async function sendWhatsAppNavigate(
     return sendWhatsAppText(to, `${WHATSAPP_NAVIGATE_LABEL}: ${url}`, options);
   }
   return result;
+}
+
+export interface WhatsAppMediaMessage {
+  kind: AttachmentKind;
+  /** Media id from our upload to WhatsApp. */
+  mediaId: string;
+  caption?: string;
+  fileName?: string;
+}
+
+const WHATSAPP_CAPTION_MAX = 1024;
+
+/** Audio and stickers cannot carry a caption; documents also carry their file name. */
+export function whatsappMediaBody(
+  destination: string,
+  media: WhatsAppMediaMessage,
+): Record<string, unknown> {
+  const caption = media.caption?.trim()
+    ? toWhatsAppFormatting(media.caption.trim()).slice(0, WHATSAPP_CAPTION_MAX)
+    : "";
+  const object: Record<string, unknown> = { id: media.mediaId };
+  if (caption && media.kind !== "audio" && media.kind !== "sticker") {
+    object.caption = caption;
+  }
+  if (media.kind === "document" && media.fileName?.trim()) {
+    object.filename = media.fileName.trim().slice(0, 240);
+  }
+  return {
+    messaging_product: "whatsapp",
+    to: destination,
+    type: media.kind,
+    [media.kind]: object,
+  };
+}
+
+export async function sendWhatsAppMedia(
+  to: string,
+  media: WhatsAppMediaMessage,
+  options?: { ignoreSession?: boolean },
+): Promise<WhatsAppTextResult> {
+  return sendWhatsAppPayload(
+    to,
+    (destination) => whatsappMediaBody(destination, media),
+    options,
+  );
 }
 
 export async function sendWhatsAppText(

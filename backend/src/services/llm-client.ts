@@ -30,6 +30,8 @@ export type LlmResponseInput = {
   reasoningEffort?: ReasoningEffort;
   instructions: string;
   textFormat?: LlmJsonSchemaFormat;
+  /** Images (data or https URLs) the model looks at together with `message`. */
+  imageUrls?: string[];
 };
 
 export interface LlmClient {
@@ -50,7 +52,7 @@ export function toResponsesCreateBody(
     model: input.model,
     instructions: input.instructions,
     conversation: input.conversationId,
-    input: input.message,
+    input: toResponsesInput(input.message, input.imageUrls),
     truncation: "auto",
   };
   if (input.textFormat) {
@@ -67,6 +69,29 @@ export function toResponsesCreateBody(
   }
   body.temperature = input.temperature;
   return body;
+}
+
+export function toResponsesInput(
+  message: string,
+  imageUrls?: string[],
+): string | Array<Record<string, unknown>> {
+  const images = (imageUrls ?? []).filter(Boolean);
+  if (images.length === 0) {
+    return message;
+  }
+  return [
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: message },
+        ...images.map((url) => ({
+          type: "input_image",
+          image_url: url,
+          detail: "auto",
+        })),
+      ],
+    },
+  ];
 }
 
 let override: LlmClient | null = null;

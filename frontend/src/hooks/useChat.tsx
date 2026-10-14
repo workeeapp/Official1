@@ -15,6 +15,7 @@ import {
   chatThreadKey,
   parseLlmReply,
   typingPauseMs,
+  type ChatAttachmentRef,
   type ChatHistoryResponse,
   type ChatLiveEvent,
   type ChatThreadMessage,
@@ -208,7 +209,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       abortRef.current = abort;
 
       try {
-        const { reply, raw, request, timing, messageIds } = await chatApi.send(
+        const { reply, raw, request, timing, messageIds, attachments } = await chatApi.send(
           {
             message: input.text,
             employeeId: input.employeeId,
@@ -223,6 +224,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           messageIds,
           speaker: input.assistantSpeaker ?? "Assistant",
           timing,
+          attachments,
         });
         for (const message of replies) {
           if (!messageIds) {
@@ -594,6 +596,7 @@ export function buildTurnReplies(input: {
   messageIds?: ChatTurnMessageIds;
   speaker: string;
   timing?: { llmMs?: number; afterLlmMs?: number };
+  attachments?: ChatAttachmentRef[];
 }): ChatMessage[] {
   const parsed = parseLlmReply(input.reply);
   const texts = parsed.responses.length > 0 ? parsed.responses : [parsed.response];
@@ -612,6 +615,7 @@ export function buildTurnReplies(input: {
           actions: parsed.actions,
           ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
           ...(parsed.navigateAddress ? { navigateAddress: parsed.navigateAddress } : {}),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           llmMs: input.timing?.llmMs,
           afterLlmMs: input.timing?.afterLlmMs,
         }

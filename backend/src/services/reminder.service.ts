@@ -36,6 +36,7 @@ import { isMissingTableError } from "../utils/errors.js";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { recordAuditEvent } from "./audit.service.js";
+import { applyAttachmentLinks } from "./attachment.service.js";
 import { applyClockRuleToTask } from "./list-recurrence.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
@@ -1201,6 +1202,21 @@ function ownerIdFor(
   return named ?? fallbackId;
 }
 
+/** An update that only (de)attaches files — the clock itself stays as it is. */
+export function isAttachmentOnlyReminderUpdate(reminder: LlmReminderAction): boolean {
+  return (
+    Boolean(reminder.attachmentIds?.length || reminder.detachAttachmentIds?.length) &&
+    !reminder.time.trim() &&
+    !reminder.date.trim() &&
+    !(typeof reminder.inSeconds === "number" && reminder.inSeconds > 0) &&
+    reminder.recurrence === undefined &&
+    !reminder.text.trim() &&
+    !reminder.everyCount &&
+    !(reminder.weekdays && reminder.weekdays.length > 0) &&
+    reminder.ping.every((part) => !String(part).trim())
+  );
+}
+
 export async function applyReminders(input: {
   userId: string;
   actor: PublicEmployee;
@@ -1325,6 +1341,23 @@ export async function applyReminders(input: {
       } catch {
         skipped.push({ item: reminder.item.trim() || reminderId, reason: "db" });
       }
+      continue;
+    }
+    if (reminder.action === "update" && isAttachmentOnlyReminderUpdate(reminder)) {
+      const clock = await prisma.reminder.findFirst({
+        where: { id: reminderId, userId: input.userId, status: "active" },
+        select: { id: true },
+      });
+      if (!clock) {
+        missed.push(reminder.item.trim() || reminderId);
+        continue;
+      }
+      await applyAttachmentLinks({
+        actorId: input.actor.id,
+        target: { reminderId: clock.id },
+        attachmentIds: reminder.attachmentIds,
+        detachIds: reminder.detachAttachmentIds,
+      });
       continue;
     }
     if (reminder.action === "add" && !key) {
@@ -1515,6 +1548,12 @@ export async function applyReminders(input: {
           pingIds,
         });
       }
+      await applyAttachmentLinks({
+        actorId: input.actor.id,
+        target: { reminderId: row.id },
+        attachmentIds: reminder.attachmentIds,
+        detachIds: reminder.detachAttachmentIds,
+      });
       await syncLinkedWorkerTaskClock({
         reminderId: row.id,
         workerItemId: linkedWorkerItemId,
