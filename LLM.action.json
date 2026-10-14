@@ -311,14 +311,14 @@
                           },
                           "recurrence": {
                             "type": ["object", "null"],
-                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Plus start = YYYY-MM-DD from which the rule applies (first occurrence = first matching day on/after it). Set start whenever they say when it begins (החל מעוד 10 ימים / מהשבוע הבא / החל מ־23.10 / מנובמבר) — resolve via SESSION_CLOCK calendar. For every-N rules (interval > 1: כל שבועיים / כל 3 שבועות / כל חודשיים) start is REQUIRED: it fixes which weeks/months are on; if they gave no starting point, ask once which is first (e.g. «שישי הקרוב 16.10 או זה שאחריו 23.10?») with lists empty. Omitted start = today. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating; a re-sent rule without start keeps the row's start.",
+                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Plus start = YYYY-MM-DD from which the rule applies (first occurrence = first matching day on/after it). Set start whenever they say when it begins (החל מעוד 10 ימים / מהשבוע הבא / החל מ־23.10 / מנובמבר) — resolve via SESSION_CLOCK calendar. For every-N rules (interval > 1: כל שבועיים / כל 3 שבועות / כל חודשיים) start is REQUIRED: it fixes which weeks/months are on; if they gave no starting point, ask once which is first (e.g. «שישי הקרוב 16.10 או זה שאחריו 23.10?») with lists empty. Omitted start = today. EVERY X HOURS («כל שלוש שעות אני צריך להוריד את הכלב»; every N minutes/seconds is refused — no actions) → {freq:\"interval\",interval:3,unit:\"hours\"}: time = HH:mm of the FIRST occurrence only (optional — omit it and the first occurrence is now); start optional; NEVER ask which is first or באיזו שעה for an interval rule. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating; a re-sent rule without start keeps the row's start.",
                             "properties": {
                               "start": { "type": "string", "description": "YYYY-MM-DD the rule starts from. «כל שבועיים ביום שישי החל מעוד 10 ימים» on Sat 2026-10-10 → start 2026-10-20 (first occurrence Fri 2026-10-23)." }
                             }
                           },
                           "occurrence_done": {
                             "type": ["string", "boolean", "null"],
-                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Only that occurrence leaves next_occurrences."
+                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Interval rules (כל X שעות): true = the slot due now, or \"YYYY-MM-DD HH:mm\" of that slot from next_occurrences. Only that occurrence leaves next_occurrences."
                           },
                           "occurrence_change": {
                             "type": ["object", "null"],
@@ -583,19 +583,19 @@
                     },
                     "recurrence": {
                       "type": ["object", "null"],
-                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly). The first occurrence is anchored by reminders[].date: put the start day there (החל מעוד 10 ימים / החל מ־23.10 → that YYYY-MM-DD). For every-N rules (interval > 1) without a stated start, ask which occurrence is first.",
+                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly). The first occurrence is anchored by reminders[].date: put the start day there (החל מעוד 10 ימים / החל מ־23.10 → that YYYY-MM-DD). For every-N calendar rules (daily/weekly/monthly/yearly with interval > 1) without a stated start, ask which occurrence is first. Never for freq=interval (כל שעתיים / כל 3 שעות): the first fire is now + interval unless they said when to begin (בעוד שעה → in; החל מ־10:00 → time) — no question.",
                       "properties": {
                         "freq": {
                           "type": "string",
                           "enum": ["interval", "daily", "weekly", "monthly", "yearly", "none"],
-                          "description": "interval = every N seconds/minutes/hours; daily = every N days; weekly = on weekdays every N weeks; monthly = on month_day every N months; yearly = on month+month_day every N years (birthdays, anniversaries)."
+                          "description": "interval = every N hours (minimum: every hour — every N minutes/seconds is refused; emit no actions and say so); daily = every N days; weekly = on weekdays every N weeks; monthly = on month_day every N months; yearly = on month+month_day every N years (birthdays, anniversaries)."
                         },
                         "interval": { "type": "number", "description": "Every N (default 1). כל יומיים → 2, כל שבועיים → 2, כל 10 ימים → daily 10." },
-                        "unit": { "type": "string", "enum": ["seconds", "minutes", "hours"], "description": "Only for freq=interval." },
+                        "unit": { "type": "string", "enum": ["hours"], "description": "Only for freq=interval." },
                         "weekdays": { "type": "array", "items": { "type": "number" }, "description": "weekly: 0=Sunday … 6=Saturday. כל רביעי וחמישי → [3,4]." },
                         "month_day": { "type": "number", "description": "monthly / yearly: day of month 1–31 (short months clamp to the last day)." },
                         "month": { "type": "number", "description": "yearly: 1–12." },
-                        "time": { "type": "string", "description": "HH:mm of every occurrence." },
+                        "time": { "type": "string", "description": "HH:mm of every occurrence. freq=interval: HH:mm of the first occurrence only (optional)." },
                         "until": { "type": "string", "description": "YYYY-MM-DD, inclusive last day. «עד דצמבר» → last day of that December (from SESSION_CLOCK calendar)." },
                         "count": { "type": "number", "description": "Total number of occurrences including the first. «חזור 3 פעמים» → 3." }
                       },

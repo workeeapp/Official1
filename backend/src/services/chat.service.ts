@@ -5,6 +5,7 @@ import {
   humanEmployees,
   isDigitalEmployee,
   isGuestEmployee,
+  isSubHourlyRecurrence,
   JOB_URGENCY_POLICY,
   parseLlmReply,
   parseReplyMetadata,
@@ -90,6 +91,8 @@ import {
   formatReminderApplyNotice,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  reminderRepeatsSubHourly,
+  SUB_HOURLY_REFUSAL,
   type ReminderChange,
   type WorkerTaskRef,
 } from "./reminder.service.js";
@@ -511,10 +514,10 @@ function workerTargetingInstructions(
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר / תשלחי לי בעוד 10 שניות את רשימת הקניות המשותפת עם מיכל) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said שלחי לי, brief=the question; «עם מיכל» is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
-    "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל 10 דקות ≠ חביתה כל 10 דקות → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
+    "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל שעה ≠ חביתה כל שעה → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
     "RELATED TO THESE items (קשורות למטלות האלה / לפריטים שמחקנו): answer only active clocks that match those items by meaning. If none, say none. Never list unrelated active clocks. Never invent past deletes or completed history — the system does not load it.",
     "Ask until the reminder schema is complete. Empty reminders while you ask. date empty or YYYY-MM-DD.",
-    "RECURRING CLOCK → reminders[].recurrence {freq, interval, unit, weekdays, month_day, month, time, until, count}; leave every_count/every_unit/weekdays empty. freq: interval (every N minutes/hours + unit) | daily | weekly (weekdays 0=Sun … 6=Sat) | monthly (month_day) | yearly (month + month_day). daily/weekly/monthly/yearly need time HH:mm — missing → ask באיזו שעה? with reminders empty. until = inclusive last day YYYY-MM-DD from SESSION_CLOCK calendar (עד סוף החודש → last day of this month; עד דצמבר → Dec 31). count = total sends including the first. A stated start (החל מעוד 10 ימים / החל מ־23.10 / מהשבוע הבא) → YYYY-MM-DD from calendar in reminders[].date (standing task: lists item recurrence.start) — never drop it. Every-N rule (interval > 1) with no start → ask which occurrence is first.",
+    "RECURRING CLOCK → reminders[].recurrence {freq, interval, unit, weekdays, month_day, month, time, until, count}; leave every_count/every_unit/weekdays empty. freq: interval (every N hours, unit:\"hours\") | daily | weekly (weekdays 0=Sun … 6=Sat) | monthly (month_day) | yearly (month + month_day). Minimum repeat is every hour: every N minutes/seconds («כל 10 דקות») → no actions at all this turn, answer «אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.» (a one-time «בעוד 10 דקות» is fine). daily/weekly/monthly/yearly need time HH:mm — missing → ask באיזו שעה? with reminders empty. until = inclusive last day YYYY-MM-DD from SESSION_CLOCK calendar (עד סוף החודש → last day of this month; עד דצמבר → Dec 31). count = total sends including the first. A stated start (החל מעוד 10 ימים / החל מ־23.10 / מהשבוע הבא) → YYYY-MM-DD from calendar in reminders[].date (standing task: lists item recurrence.start) — never drop it. Every-N rule (interval > 1) with no start → ask which occurrence is first.",
     "Examples: «כל ראשון, שלישי וחמישי ב־8:00 תזכירי לי לקחת כדור» → {freq:\"weekly\",interval:1,weekdays:[0,2,4],time:\"08:00\"}. «כל 1 לחודש ב־9 לשלם ארנונה» → {freq:\"monthly\",interval:1,month_day:1,time:\"09:00\"}. «כל יום ב־20:00 עד סוף החודש» → {freq:\"daily\",interval:1,time:\"20:00\",until:\"<last day of this month>\"}. «כל יום ב־8 תשלחי לי את המטלות שלי» → compose:true, compose_source:\"saved_data\", ping=speaker, text=«מה המטלות שלי היום», recurrence {freq:\"daily\",interval:1,time:\"08:00\"}.",
     "YEARLY OFFER: when the speaker saves something that repeats by nature every year (יום הולדת, יום נישואין, אזכרה / יום זיכרון, חידוש מנוי שנתי) — you decide by meaning — save what they asked, then OFFER in response: «להוסיף תזכורת כל שנה ב־<day.month>? באיזו שעה? רוצה גם יום לפני?». Nothing yearly is saved before they agree. On כן (+ time) → reminders add {freq:\"yearly\",interval:1,month,month_day,time}, same item and ping. «גם יום לפני» → a second yearly add on the previous calendar day (item e.g. «מחר יום ההולדת של יוסי»). Agreed without a time → ask the time with reminders empty.",
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
@@ -1087,6 +1090,19 @@ export async function resetChatConversation(
   );
 }
 
+/** The ACTION asks for a new repeat every N seconds/minutes (clock, standing task or scheduled message). */
+export function actionRepeatsSubHourly(metadata: LlmMetadata): boolean {
+  return (
+    (metadata.reminders ?? []).some((row) => reminderRepeatsSubHourly(row)) ||
+    (metadata.lists ?? []).some(
+      (row) =>
+        row.action !== "remove" &&
+        row.items.some((item) => isSubHourlyRecurrence(item.recurrence)),
+    ) ||
+    (metadata.messages ?? []).some((row) => isSubHourlyRecurrence(row.recurrence))
+  );
+}
+
 function matchHandoffWorker(
   workerName: string | undefined,
   digitals: PublicEmployee[],
@@ -1412,6 +1428,20 @@ export async function sendChatMessage(input: {
       if (booked.length > 0 && !alreadyBooked) {
         metadata = { ...metadata, lists: [...(metadata.lists ?? []), ...booked] };
       }
+    }
+    // A repeat every N seconds/minutes is refused with its companion tasks/messages,
+    // so no half of a self-nudge is saved.
+    const subHourlyRepeat = !guestSpeaker && actionRepeatsSubHourly(metadata);
+    if (subHourlyRepeat) {
+      metadata = {
+        ...metadata,
+        lists: [],
+        listOps: [],
+        filing: [],
+        messages: [],
+        reminders: [],
+        directory: [],
+      };
     }
     const metadataForApply = {
       ...metadata,
@@ -1947,7 +1977,9 @@ export async function sendChatMessage(input: {
     const noTimeSkipped = reminderResult.skipped.some(
       (row) => row.reason === "no_time",
     );
-    if (noTimeSkipped || incompleteComposeClocks.length > 0) {
+    if (subHourlyRepeat) {
+      workingReply = setEngineResponse(workingReply, SUB_HOURLY_REFUSAL);
+    } else if (noTimeSkipped || incompleteComposeClocks.length > 0) {
       workingReply = setEngineResponse(
         workingReply,
         "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",

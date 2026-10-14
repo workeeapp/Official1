@@ -7,6 +7,7 @@ import {
   firstOccurrence,
   formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
+  isSubHourlyRecurrence,
   legacyRepeatFor,
   listOccurrences,
   nextOccurrence,
@@ -54,7 +55,18 @@ describe("parseRecurrence", () => {
       interval: 5,
       unit: "minutes",
     });
+    expect(
+      parseRecurrence({ freq: "interval", interval: 3, unit: "hours", time: "10:00" }),
+    ).toEqual({ freq: "interval", interval: 3, unit: "hours", time: "10:00" });
     expect(parseRecurrence({ freq: "none" })).toBeNull();
+  });
+
+  it("flags repeats faster than hourly", () => {
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 10, unit: "minutes" })).toBe(true);
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 30, unit: "seconds" })).toBe(true);
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 1, unit: "hours" })).toBe(false);
+    expect(isSubHourlyRecurrence({ freq: "daily", interval: 1, time: "09:00" })).toBe(false);
+    expect(isSubHourlyRecurrence(null)).toBe(false);
     expect(parseRecurrence({ freq: "hourly" })).toBeNull();
     expect(parseRecurrence("weekly")).toBeNull();
   });
@@ -276,6 +288,10 @@ describe("formatting", () => {
     expect(formatRecurrenceHe({ freq: "daily", interval: 10, count: 3 })).toBe(
       "כל 10 ימים (3 פעמים)",
     );
+    expect(
+      formatRecurrenceHe({ freq: "interval", interval: 3, unit: "hours", time: "10:00" }),
+    ).toBe("כל 3 שעות");
+    expect(formatRecurrenceHe({ freq: "interval", interval: 2, unit: "hours" })).toBe("כל שעתיים");
   });
 
   it("keeps a legacy repeat token", () => {

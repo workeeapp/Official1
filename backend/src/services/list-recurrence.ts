@@ -4,6 +4,7 @@ import {
   formatJerusalemDateTime,
   formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
+  isSubHourlyRecurrence,
   jerusalemParts,
   jerusalemWallTimeToDate,
   listOccurrences,
@@ -12,6 +13,7 @@ import {
   parseRecurrenceException,
   pruneRecurrenceExceptions,
   serializeRecurrence,
+  withinUntil,
   withRecurrenceException,
   type Recurrence,
   type RecurrenceException,
@@ -59,23 +61,37 @@ function wantsClear(value: unknown): boolean {
 export function shapeItemRecurrence(
   item: Record<string, unknown>,
   now = new Date(),
-): { item: Record<string, unknown>; clear: boolean; explicitStart: boolean } {
+): {
+  item: Record<string, unknown>;
+  clear: boolean;
+  explicitStart: boolean;
+  /** Every N seconds / minutes: the whole item is refused. */
+  tooFrequent?: true;
+} {
   if (!("recurrence" in item)) {
     return { item, clear: false, explicitStart: false };
   }
   const { recurrence, ...rest } = item;
-  const rule = parseRecurrence(recurrence);
-  if (!rule || rule.freq === "interval") {
+  if (isSubHourlyRecurrence(recurrence)) {
+    return { item: rest, clear: false, explicitStart: false, tooFrequent: true };
+  }
+  const parsed = parseRecurrence(recurrence);
+  if (!parsed) {
     return { item: rest, clear: wantsClear(recurrence), explicitStart: false };
   }
   const raw = asRecord(recurrence).start;
-  const explicitStart = typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim());
+  const hasStart = typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim());
+  const isInterval = parsed.freq === "interval";
+  // An interval rule is anchored by start + time; an explicit time pins the anchor too.
+  const explicitStart = hasStart || (isInterval && Boolean(parsed.time));
+  const rule: Recurrence =
+    isInterval && !parsed.time ? { ...parsed, time: clockOf(now) } : parsed;
   return {
     item: {
       ...rest,
       [RECURRENCE_META_KEY]: {
         ...serializeRecurrence(rule),
-        start: explicitStart ? (raw as string).trim() : ymd(now),
+        start: hasStart ? (raw as string).trim() : ymd(now),
       },
       [RECURRENCE_DISPLAY_KEY]: formatRecurrenceHe(rule),
     },
@@ -84,20 +100,31 @@ export function shapeItemRecurrence(
   };
 }
 
+function clockOf(value: Date): string {
+  return formatJerusalemDateTime(value).slice(11, 16);
+}
+
 /**
- * lists.update that re-sends a rule without `start` keeps the row's original start,
- * so an every-N cycle does not shift to the edit day.
+ * lists.update that re-sends a rule without `start` keeps the row's original start
+ * (and, for interval rules, its start time), so the cycle does not shift to the edit moment.
  */
 export function keepRecurrenceStart(
   data: Record<string, unknown>,
   previous: unknown,
 ): Record<string, unknown> {
   const meta = asRecord(data[RECURRENCE_META_KEY]);
-  const prevStart = asRecord(asRecord(previous)[RECURRENCE_META_KEY]).start;
-  if (!parseRecurrence(meta) || typeof prevStart !== "string" || !prevStart) {
+  const prevMeta = asRecord(asRecord(previous)[RECURRENCE_META_KEY]);
+  const prevStart = prevMeta.start;
+  const rule = parseRecurrence(meta);
+  if (!rule || typeof prevStart !== "string" || !prevStart) {
     return data;
   }
-  return { ...data, [RECURRENCE_META_KEY]: { ...meta, start: prevStart } };
+  const prevRule = parseRecurrence(prevMeta);
+  const keepTime =
+    rule.freq === "interval" && prevRule?.freq === "interval" && prevRule.time
+      ? { time: prevRule.time }
+      : {};
+  return { ...data, [RECURRENCE_META_KEY]: { ...meta, start: prevStart, ...keepTime } };
 }
 
 /**
@@ -138,17 +165,24 @@ export function extractOccurrenceDone(
     return { item, doneDate: null };
   }
   const { [OCCURRENCE_DONE_KEY]: raw, ...rest } = item;
-  if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
-    return { item: rest, doneDate: raw.trim() };
+  if (typeof raw === "string") {
+    const slot = raw.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})$/);
+    if (slot) {
+      return { item: rest, doneDate: `${slot[1]} ${slot[2]}` };
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+      return { item: rest, doneDate: raw.trim() };
+    }
   }
   const today = raw === true || (typeof raw === "string" && raw.trim() !== "");
   return { item: rest, doneDate: today ? ymd(now) : null };
 }
 
 /**
- * Record that a standing task's occurrence on `doneDate` is done. Only that day drops
- * out of next_occurrences; the row and its rule stay. Done days before today are
- * dropped from storage. No-op on a task without a rule.
+ * Record that a standing task's occurrence on `doneDate` is done. Only that occurrence
+ * drops out of next_occurrences; the row and its rule stay. Calendar rules mark a day
+ * (YYYY-MM-DD); interval rules mark one slot (YYYY-MM-DD HH:mm). Marks before today
+ * are dropped from storage. No-op on a task without a rule.
  */
 export function markOccurrenceDone(
   data: Record<string, unknown>,
@@ -156,12 +190,20 @@ export function markOccurrenceDone(
   now = new Date(),
 ): Record<string, unknown> {
   const meta = asRecord(data[RECURRENCE_META_KEY]);
-  if (!parseRecurrence(meta)) {
+  const stored = itemRecurrence(data);
+  if (!stored) {
+    return data;
+  }
+  const mark =
+    stored.rule.freq === "interval"
+      ? intervalDoneSlot(stored.rule, stored.start, doneDate, now)
+      : doneDate.slice(0, 10);
+  if (!mark) {
     return data;
   }
   const today = ymd(now);
-  const doneDates = [...new Set([...itemDoneDates(data), doneDate])]
-    .filter((day) => day >= today || day === doneDate)
+  const doneDates = [...new Set([...itemDoneDates(data), mark])]
+    .filter((day) => day >= today || day === mark)
     .sort();
   return {
     ...data,
@@ -169,22 +211,91 @@ export function markOccurrenceDone(
   };
 }
 
-/** Occurrence days explicitly marked done (YYYY-MM-DD, sorted). */
+/** Occurrences explicitly marked done (YYYY-MM-DD, or YYYY-MM-DD HH:mm for interval rules), sorted. */
 export function itemDoneDates(data: unknown): string[] {
   const meta = asRecord(asRecord(data)[RECURRENCE_META_KEY]);
   const raw = Array.isArray(meta[DONE_DATES_KEY]) ? (meta[DONE_DATES_KEY] as unknown[]) : [];
   return raw
-    .filter((day): day is string => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day))
+    .filter(
+      (day): day is string =>
+        typeof day === "string" && /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(day),
+    )
     .sort();
 }
 
-function isOccurrenceDone(data: unknown, day: string): boolean {
+/** `key` is a day for calendar rules and a "YYYY-MM-DD HH:mm" slot for interval rules. */
+function isOccurrenceDone(data: unknown, key: string): boolean {
   const meta = asRecord(asRecord(data)[RECURRENCE_META_KEY]);
   const legacy = meta[LEGACY_DONE_THROUGH_KEY];
-  if (typeof legacy === "string" && legacy && day <= legacy) {
+  if (typeof legacy === "string" && legacy && key.slice(0, 10) <= legacy) {
     return true;
   }
-  return itemDoneDates(data).includes(day);
+  return itemDoneDates(data).includes(key);
+}
+
+/** First occurrence of an interval rule: its start day at its start time (Jerusalem). */
+function intervalAnchor(rule: Recurrence, start: string): Date | null {
+  const iso = start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!iso) {
+    return null;
+  }
+  const clock = (rule.time ?? "00:00").match(/^(\d{2}):(\d{2})$/);
+  return jerusalemWallTimeToDate(
+    Number(iso[1]),
+    Number(iso[2]),
+    Number(iso[3]),
+    clock ? Number(clock[1]) : 0,
+    clock ? Number(clock[2]) : 0,
+  );
+}
+
+function intervalStepMs(rule: Recurrence, anchor: Date): number {
+  return Math.max(1000, nextOccurrence(rule, anchor).getTime() - anchor.getTime());
+}
+
+/** Index of the last slot at or before `at` (-1 when `at` is before the first slot). */
+function intervalSlotIndex(anchor: Date, step: number, at: Date): number {
+  return Math.floor((at.getTime() - anchor.getTime()) / step);
+}
+
+/**
+ * Which slot a done mark refers to. A slot time snaps to the slot at or before it; a day
+ * means the slot due now when it is today, else that day's first slot.
+ */
+function intervalDoneSlot(
+  rule: Recurrence,
+  start: string,
+  doneDate: string,
+  now: Date,
+): string | null {
+  const anchor = intervalAnchor(rule, start);
+  if (!anchor) {
+    return null;
+  }
+  const step = intervalStepMs(rule, anchor);
+  const slotAt = (index: number) => new Date(anchor.getTime() + Math.max(0, index) * step);
+  const timed = doneDate.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+  if (timed) {
+    const at = jerusalemWallTimeToDate(
+      Number(timed[1]),
+      Number(timed[2]),
+      Number(timed[3]),
+      Number(timed[4]),
+      Number(timed[5]),
+    );
+    return formatJerusalemDateTime(slotAt(intervalSlotIndex(anchor, step, at)));
+  }
+  if (doneDate === ymd(now)) {
+    return formatJerusalemDateTime(slotAt(intervalSlotIndex(anchor, step, now)));
+  }
+  const day = doneDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!day) {
+    return null;
+  }
+  const dayStartAt = jerusalemWallTimeToDate(Number(day[1]), Number(day[2]), Number(day[3]), 0, 0);
+  const index = Math.ceil((dayStartAt.getTime() - anchor.getTime()) / step);
+  const slot = slotAt(index);
+  return ymd(slot) === doneDate ? formatJerusalemDateTime(slot) : null;
 }
 
 /** lists.update field: change one occurrence of a standing task ({date, cancel} / {date, time}). */
@@ -230,7 +341,12 @@ export function applyOccurrenceChange(
 ): Record<string, unknown> {
   const stored = itemRecurrence(data);
   const today = ymd(now);
-  if (!stored || change.date < today || !isRuleOccurrenceDay(stored.rule, stored.start, change.date)) {
+  if (
+    !stored ||
+    stored.rule.freq === "interval" ||
+    change.date < today ||
+    !isRuleOccurrenceDay(stored.rule, stored.start, change.date)
+  ) {
     return data;
   }
   const updated = withRecurrenceException(stored.rule, change, today);
@@ -248,19 +364,27 @@ export function itemOccurrenceExceptions(data: unknown, now = new Date()): strin
 }
 
 /**
- * A worker task FK-linked to a clock mirrors the clock's calendar rule, so «מה את צריכה
- * לעשות ביום שלישי» lists it per occurrence. Interval / one-shot clocks drop the rule.
+ * A worker task FK-linked to a clock mirrors the clock's rule, so «מה את צריכה
+ * לעשות ביום שלישי» lists it per occurrence. An interval rule is anchored at the clock's
+ * `anchor` (its fire time) so the task's slots match the clock. One-shot clocks drop the rule.
  */
 export function applyClockRuleToTask(
   data: Record<string, unknown>,
   rule: Recurrence | null,
   now = new Date(),
+  anchor?: Date,
 ): Record<string, unknown> {
-  if (!rule || rule.freq === "interval") {
+  if (!rule) {
     return RECURRENCE_META_KEY in data ? clearItemRecurrence(data) : data;
   }
   const meta = asRecord(data[RECURRENCE_META_KEY]);
-  const start = typeof meta.start === "string" ? meta.start : ymd(now);
+  const isInterval = rule.freq === "interval";
+  const start =
+    isInterval && anchor ? ymd(anchor) : typeof meta.start === "string" ? meta.start : ymd(now);
+  const prevTime = typeof meta.time === "string" ? meta.time : "";
+  const mirrored: Recurrence = isInterval
+    ? { ...rule, time: anchor ? clockOf(anchor) : rule.time || prevTime || clockOf(now) }
+    : rule;
   const marks = Object.fromEntries(
     [DONE_DATES_KEY, LEGACY_DONE_THROUGH_KEY]
       .filter((key) => key in meta)
@@ -269,11 +393,11 @@ export function applyClockRuleToTask(
   return {
     ...data,
     [RECURRENCE_META_KEY]: {
-      ...serializeRecurrence(rule),
+      ...serializeRecurrence(mirrored),
       start,
       ...marks,
     },
-    [RECURRENCE_DISPLAY_KEY]: formatRecurrenceHe(rule),
+    [RECURRENCE_DISPLAY_KEY]: formatRecurrenceHe(mirrored),
   };
 }
 
@@ -314,6 +438,9 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
     return null;
   }
   const { rule, start } = stored;
+  if (rule.freq === "interval") {
+    return intervalNextOccurrences(data, rule, start, now);
+  }
   const today = dayStart(now);
   const iso = start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const startDay = iso
@@ -346,4 +473,34 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
     .map((value) =>
       rule.time || movedDays.has(ymd(value)) ? formatJerusalemDateTime(value) : ymd(value),
     );
+}
+
+/**
+ * Interval slots: the one due now (unless done) and the ones after it. Computed from the
+ * anchor directly so short intervals on old rows stay cheap.
+ */
+function intervalNextOccurrences(
+  data: unknown,
+  rule: Recurrence,
+  start: string,
+  now: Date,
+): string[] {
+  const anchor = intervalAnchor(rule, start) ?? now;
+  const step = intervalStepMs(rule, anchor);
+  const out: string[] = [];
+  let index = Math.max(0, intervalSlotIndex(anchor, step, now));
+  for (let guard = 0; guard < 1000 && out.length < OCCURRENCE_LIMIT; guard += 1, index += 1) {
+    if (rule.count && index >= rule.count) {
+      break;
+    }
+    const slot = new Date(anchor.getTime() + index * step);
+    if (!withinUntil(rule, slot)) {
+      break;
+    }
+    const key = formatJerusalemDateTime(slot);
+    if (!isOccurrenceDone(data, key)) {
+      out.push(key);
+    }
+  }
+  return out;
 }

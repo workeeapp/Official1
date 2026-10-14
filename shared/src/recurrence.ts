@@ -21,7 +21,7 @@ export interface Recurrence {
   monthDay?: number;
   /** 1–12 (yearly). */
   month?: number;
-  /** HH:mm on Jerusalem clocks. */
+  /** HH:mm on Jerusalem clocks. For freq=interval: the time of the first occurrence only. */
   time?: string;
   /** Last allowed calendar day, YYYY-MM-DD, inclusive. */
   until?: string;
@@ -187,11 +187,20 @@ export function parseRecurrence(value: unknown): Recurrence | null {
     ...(kind === "weekly" && weekdays.length > 0 ? { weekdays } : {}),
     ...((kind === "monthly" || kind === "yearly") && monthDay ? { monthDay } : {}),
     ...(kind === "yearly" && month ? { month } : {}),
-    ...(time && kind !== "interval" ? { time } : {}),
+    ...(time ? { time } : {}),
     ...(until ? { until } : {}),
     ...(count ? { count } : {}),
     ...(exceptions.length ? { exceptions } : {}),
   };
+}
+
+/**
+ * New repeats faster than hourly (every N seconds / minutes) are refused. Accepts a
+ * parsed rule or the model's raw `recurrence` object.
+ */
+export function isSubHourlyRecurrence(value: unknown): boolean {
+  const rule = parseRecurrence(value);
+  return rule?.freq === "interval" && (rule.unit === "seconds" || rule.unit === "minutes");
 }
 
 /** Stored / injected JSON shape (snake case, same as the model emits). */
@@ -570,7 +579,7 @@ export function formatRecurrenceHe(rec: Recurrence): string {
     }
   }
   const parts = [base];
-  if (rec.time) {
+  if (rec.time && rec.freq !== "interval") {
     parts.push(`ב־${rec.time}`);
   }
   if (rec.until) {

@@ -238,4 +238,34 @@ describe("reminder worker link", () => {
       }),
     });
   });
+
+  it("mirrors an every-2-hours clock onto the worker task, anchored at its fire", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "w1",
+      itemKey: "להזכיר לעמית לשתות שוקו",
+      data: { "שם מטלה": "להזכיר לעמית לשתות שוקו" },
+    });
+    itemUpdate.mockResolvedValue({});
+    await syncLinkedWorkerTaskClock({
+      reminderId: "r1",
+      workerItemId: "w1",
+      fireAt: new Date("2026-10-07T11:00:00.000Z"),
+      rule: { freq: "interval", interval: 2, unit: "hours" },
+    });
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "w1" },
+      data: expect.objectContaining({
+        data: expect.objectContaining({
+          __recurrence: {
+            freq: "interval",
+            interval: 2,
+            unit: "hours",
+            time: "14:00",
+            start: "2026-10-07",
+          },
+          חוזר: "כל שעתיים",
+        }),
+      }),
+    });
+  });
 });

@@ -2194,6 +2194,9 @@ async function applyListAction(
     const done = extractOccurrenceDone(item);
     const occurrence = extractOccurrenceChange(done.item);
     const shaped = shapeItemRecurrence(occurrence.item);
+    if (shaped.tooFrequent) {
+      continue;
+    }
     const fieldsItem = shaped.item;
     const rowTitleField = list.titleField ?? "";
     const itemKey =
@@ -2328,8 +2331,7 @@ async function applyListAction(
           : {}),
       });
       if (listOwner) {
-        const occurrenceDone =
-          Boolean(done.doneDate) && itemDoneDates(nextDataRecord).includes(done.doneDate ?? "");
+        const occurrenceDone = Boolean(done.doneDate) && doneRecord !== ruledRecord;
         const change = occurrenceChanged ? occurrence.change : null;
         await recordAuditEvent({
           userId: listOwner.userId,

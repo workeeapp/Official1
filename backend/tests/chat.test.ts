@@ -769,6 +769,47 @@ describe("chat API", () => {
     );
   });
 
+  it("refuses a repeat every 10 minutes and saves none of its actions", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        response: "אשלח לך בוקר טוב כל 10 דקות",
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "tasks",
+              targets: ["לוסי"],
+              items: [{ "שם מטלה": "לשלוח לעמית בוקר טוב" }],
+            },
+          ],
+          filing: [],
+          messages: [],
+          reminders: [
+            {
+              action: "add",
+              item: "בוקר טוב",
+              time: "",
+              recurrence: { freq: "interval", interval: 10, unit: "minutes" },
+            },
+          ],
+        },
+      }),
+      raw: {},
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תשלחי לי בוקר טוב כל 10 דקות", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("הכי תכוף שאפשר הוא כל שעה");
+    expect(response.body.reply).not.toContain("אשלח לך בוקר טוב");
+    expect(itemCreate).not.toHaveBeenCalled();
+  });
+
   it("follows a handoff when the speaker asks to talk to David", async () => {
     const cookie = await login();
     mockOwnedEmployee();

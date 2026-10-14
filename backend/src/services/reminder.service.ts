@@ -11,6 +11,7 @@ import {
   formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   formatReminderIntervalHe,
+  isSubHourlyRecurrence,
   jerusalemParts,
   jerusalemWallTimeToDate,
   legacyRepeatFor,
@@ -77,6 +78,24 @@ export interface ReminderSnapshotRow {
   remaining_times?: number;
   /** Repeating clocks: one-off changes still ahead («23.10 בוטל» / «23.10 ב־11:00»). */
   exceptions?: string[];
+}
+
+export type ReminderSkipReason = "no_time" | "db" | "no_phone" | "too_frequent";
+
+export const SUB_HOURLY_REFUSAL =
+  "אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.";
+
+/** A new / changed clock that would repeat every N seconds or minutes (refused). */
+export function reminderRepeatsSubHourly(
+  reminder: Pick<LlmReminderAction, "action" | "recurrence" | "everyUnit">,
+): boolean {
+  if (reminder.action === "remove") {
+    return false;
+  }
+  if (reminder.recurrence) {
+    return isSubHourlyRecurrence(reminder.recurrence);
+  }
+  return reminder.everyUnit === "minutes" || reminder.everyUnit === "seconds";
 }
 
 function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
@@ -199,7 +218,7 @@ export function resolveRecurringFireAt(
   inSeconds?: number | null,
 ): { fireAt: Date; recurrence: Recurrence } | null {
   if (rec.freq === "interval") {
-    const fireAt = resolveReminderFireAt(dateText, timeText, now, inSeconds, {
+    const fireAt = resolveReminderFireAt(dateText, timeText || rec.time || "", now, inSeconds, {
       count: rec.interval,
       unit: rec.unit ?? "hours",
     });
@@ -350,7 +369,9 @@ export async function syncLinkedWorkerTaskClock(input: {
         : item.itemKey;
     const nextName = applyTimeToTaskLabel(currentName, time);
     const ruled =
-      input.rule === undefined ? data : applyClockRuleToTask(data, input.rule);
+      input.rule === undefined
+        ? data
+        : applyClockRuleToTask(data, input.rule, new Date(), input.fireAt);
     await prisma.employeeListItem.update({
       where: { id: item.id },
       data: {
@@ -511,13 +532,15 @@ export async function linkRemindersToWorkerTasks(
         data: { workerItemId: pair.workerItemId },
       });
       const rule = clock && task ? storedReminderRule(clock) : null;
-      if (rule && rule.freq !== "interval" && task?.data && typeof task.data === "object") {
+      if (rule && task?.data && typeof task.data === "object") {
         await prisma.employeeListItem.update({
           where: { id: pair.workerItemId },
           data: {
             data: applyClockRuleToTask(
               task.data as Record<string, unknown>,
               rule,
+              new Date(),
+              clock.fireAt instanceof Date ? clock.fireAt : undefined,
             ) as Prisma.InputJsonValue,
           },
         });
@@ -1199,7 +1222,7 @@ export async function applyReminders(input: {
   }>;
   skipped: Array<{
     item: string;
-    reason: "no_time" | "db" | "no_phone";
+    reason: ReminderSkipReason;
     dest?: string;
   }>;
   changes: ReminderChange[];
@@ -1220,7 +1243,7 @@ export async function applyReminders(input: {
   }> = [];
   const skipped: Array<{
     item: string;
-    reason: "no_time" | "db" | "no_phone";
+    reason: ReminderSkipReason;
     dest?: string;
   }> = [];
   if (!prisma.reminder) {
@@ -1305,6 +1328,10 @@ export async function applyReminders(input: {
       continue;
     }
     if (reminder.action === "add" && !key) {
+      continue;
+    }
+    if (reminderRepeatsSubHourly(reminder)) {
+      skipped.push({ item: reminder.item.trim() || reminderId, reason: "too_frequent" });
       continue;
     }
 
@@ -1660,7 +1687,7 @@ export function formatReminderApplyNotice(result: {
   }>;
   skipped?: Array<{
     item: string;
-    reason: "no_time" | "db" | "no_phone";
+    reason: ReminderSkipReason;
     dest?: string;
   }>;
 }): string {
@@ -1677,7 +1704,9 @@ export function formatReminderApplyNotice(result: {
               ? row.dest
                 ? `אין לי מספר ל«${row.dest}». מה המספר?`
                 : `אין לי מספר ליעד. מה המספר?`
-              : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
+              : row.reason === "too_frequent"
+                ? `לא נשמרה «${row.item}» — ${SUB_HOURLY_REFUSAL}`
+                : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
         )
         .join(" "),
     );

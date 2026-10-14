@@ -28,14 +28,24 @@ The model emits a `recurrence` object (never invent clocks from weekday words in
 | `weekdays` | 0=Sunday … 6=Saturday |
 | `month_day` | 1–31 (clamped on short months) |
 | `month` | 1–12 (yearly) |
-| `time` | `HH:mm` Jerusalem; **required** for reminder clocks; **optional** for standing tasks (all-day ok) |
+| `time` | `HH:mm` Jerusalem; **required** for calendar reminder clocks; **optional** for standing tasks (all-day ok). For `freq=interval` it is the time of the **first** occurrence only (optional) |
 | `until` | Last calendar day `YYYY-MM-DD` inclusive |
 | `count` | Total occurrences including the first |
 
 **Reminders:** `metadata.reminders[].recurrence` plus the usual `in` / `time` / `ping` / `text` / `compose`.  
 **Standing tasks:** `metadata.lists` add/update with `list_type: tasks`, clean task name, **no** `תאריך לביצוע`, and `recurrence` on the item. Stop repeating with `lists.update` + `recurrence: null`.
 
-**Occurrence done:** `lists.update` with `item_id` + `occurrence_done` (`YYYY-MM-DD` or `true` for today). The standing row stays; occurrences up through that day leave `next_occurrences`. Do **not** `lists.remove` a standing task just because they finished today’s gym.
+**Occurrence done:** `lists.update` with `item_id` + `occurrence_done` (`YYYY-MM-DD` or `true` for today). The standing row stays; only that occurrence leaves `next_occurrences`. Do **not** `lists.remove` a standing task just because they finished today’s gym.
+
+**Minimum repeat is every hour.** A new or changed repeat every N seconds/minutes (`freq=interval` with `unit` `seconds`/`minutes`, or legacy `every_unit`) is refused on every path (`isSubHourlyRecurrence`): reminders are skipped as `too_frequent`, list items are not saved, scheduled messages are not created, and when the model emits one anyway the server drops that turn's actions and replies «אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.». One-time delays in minutes (`in`) are unaffected; clocks already stored with minutes keep firing.
+
+**Every X hours** (`freq=interval`, «כל שלוש שעות אני צריך להוריד את הכלב» / «תזכירי לי לשתות שוקו כל שעתיים»):
+
+- Reminder: first fire is now + interval, unless the ACTION has `in` / `time`. No “which is first” question; fires 24/7.
+- Standing task: stored with `start` + `time` as the anchor (default: the save moment). Slots are `anchor + k × interval`; `next_occurrences` lists the slot due now plus the following ones as `YYYY-MM-DD HH:mm`.
+- Done marks are per slot: `occurrence_done: true` marks the slot due now; `"YYYY-MM-DD HH:mm"` snaps to the slot at or before it.
+- A worker task linked to an interval clock mirrors the rule, anchored at the clock’s `fireAt`.
+- `occurrence_change` (single-occurrence cancel/move) is not supported for interval rules.
 
 ## Engine
 

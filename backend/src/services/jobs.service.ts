@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import {
   JOB_URGENCIES,
   JOB_URGENCY_POLICY,
+  isSubHourlyRecurrence,
   legacyRepeatFor,
   parseJobUrgency,
   serializeRecurrence,
@@ -308,6 +309,9 @@ function resolveScheduledJobFireAt(input: {
 }): { fireAt: Date; recurrence?: Recurrence } | null {
   const now = input.now ?? new Date();
   if (input.recurrence) {
+    if (isSubHourlyRecurrence(input.recurrence)) {
+      return null;
+    }
     return resolveRecurringFireAt(
       input.recurrence,
       input.date ?? "",

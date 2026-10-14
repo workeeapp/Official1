@@ -105,6 +105,37 @@ describe("applyReminders recurrence updates", () => {
     expect(data.fireAt).toEqual(existing.fireAt);
   });
 
+  it("refuses a new clock that repeats every N minutes or seconds", async () => {
+    const result = await run({
+      ...base,
+      action: "add",
+      item: "לשלוח בוקר טוב",
+      reminderId: "",
+      recurrence: { freq: "interval", interval: 10, unit: "minutes" },
+    });
+    expect(result.skipped).toEqual([{ item: "לשלוח בוקר טוב", reason: "too_frequent" }]);
+    expect(reminderCreate).not.toHaveBeenCalled();
+    const legacy = await run({
+      ...base,
+      action: "add",
+      item: "לשתות מים",
+      reminderId: "",
+      everyCount: 30,
+      everyUnit: "seconds",
+    });
+    expect(legacy.skipped[0]?.reason).toBe("too_frequent");
+    expect(reminderCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses changing an existing clock to every N minutes", async () => {
+    const result = await run({
+      ...base,
+      recurrence: { freq: "interval", interval: 15, unit: "minutes" },
+    });
+    expect(result.skipped[0]?.reason).toBe("too_frequent");
+    expect(reminderUpdate).not.toHaveBeenCalled();
+  });
+
   it("freq none stops repeating and keeps the next fire", async () => {
     await run({ ...base, recurrence: null });
     const data = reminderUpdate.mock.calls[0][0].data;

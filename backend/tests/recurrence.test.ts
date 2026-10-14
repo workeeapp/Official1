@@ -406,15 +406,159 @@ describe("worker task mirrors its clock rule", () => {
     expect(next[RECURRENCE_DISPLAY_KEY]).toBe("כל שלישי וחמישי ב־19:00");
   });
 
-  it("drops the rule for interval or one-shot clocks", () => {
+  it("drops the rule for one-shot clocks", () => {
     const task = shapeItemRecurrence(
       { "שם מטלה": "x", recurrence: { freq: "daily", time: "09:00" } },
       NOW,
     ).item;
     expect(applyClockRuleToTask(task, null)).toEqual({ "שם מטלה": "x" });
-    expect(
-      applyClockRuleToTask(task, { freq: "interval", interval: 10, unit: "minutes" }),
-    ).toEqual({ "שם מטלה": "x" });
+  });
+
+  it("copies an interval rule anchored at the clock's fire time", () => {
+    const task = { "שם מטלה": "להזכיר לעמית לשתות שוקו" };
+    // Clock fires first at 14:00 Jerusalem, every two hours.
+    const fireAt = new Date("2026-10-07T11:00:00.000Z");
+    const next = applyClockRuleToTask(
+      task,
+      { freq: "interval", interval: 2, unit: "hours" },
+      NOW,
+      fireAt,
+    );
+    expect(next[RECURRENCE_META_KEY]).toEqual({
+      freq: "interval",
+      interval: 2,
+      unit: "hours",
+      time: "14:00",
+      start: "2026-10-07",
+    });
+    expect(next[RECURRENCE_DISPLAY_KEY]).toBe("כל שעתיים");
+    expect(itemNextOccurrences(next, NOW)?.slice(0, 3)).toEqual([
+      "2026-10-07 14:00",
+      "2026-10-07 16:00",
+      "2026-10-07 18:00",
+    ]);
+  });
+});
+
+describe("standing task every X hours", () => {
+  // «כל שלוש שעות אני צריך להוריד את הכלב» at 12:00 Wed 2026-10-07.
+  const dog = shapeItemRecurrence(
+    {
+      "שם מטלה": "להוריד את הכלב",
+      recurrence: { freq: "interval", interval: 3, unit: "hours" },
+    },
+    NOW,
+  );
+
+  it("keeps the rule, anchored now", () => {
+    expect(dog.explicitStart).toBe(false);
+    expect(dog.item[RECURRENCE_META_KEY]).toEqual({
+      freq: "interval",
+      interval: 3,
+      unit: "hours",
+      time: "12:00",
+      start: "2026-10-07",
+    });
+    expect(dog.item[RECURRENCE_DISPLAY_KEY]).toBe("כל 3 שעות");
+  });
+
+  it("lists the slot due now and the ones after it, across midnight", () => {
+    const later = new Date("2026-10-07T17:30:00.000Z"); // 20:30
+    expect(itemNextOccurrences(dog.item, later)).toEqual([
+      "2026-10-07 18:00",
+      "2026-10-07 21:00",
+      "2026-10-08 00:00",
+      "2026-10-08 03:00",
+      "2026-10-08 06:00",
+      "2026-10-08 09:00",
+    ]);
+  });
+
+  it("an explicit first time pins the anchor", () => {
+    const shaped = shapeItemRecurrence(
+      { recurrence: { freq: "interval", interval: 3, unit: "hours", time: "10:00" } },
+      NOW,
+    );
+    expect(shaped.explicitStart).toBe(true);
+    expect(itemNextOccurrences(shaped.item, NOW)?.slice(0, 2)).toEqual([
+      "2026-10-07 10:00",
+      "2026-10-07 13:00",
+    ]);
+  });
+
+  it("an update re-sending the rule keeps the original start time", () => {
+    const resent = shapeItemRecurrence(
+      { recurrence: { freq: "interval", interval: 2, unit: "hours" } },
+      new Date("2026-10-08T06:17:00.000Z"),
+    );
+    const merged = keepRecurrenceStart({ ...dog.item, ...resent.item }, dog.item);
+    expect(merged[RECURRENCE_META_KEY]).toMatchObject({
+      interval: 2,
+      time: "12:00",
+      start: "2026-10-07",
+    });
+  });
+
+  it("occurrence_done true hides only the slot due now", () => {
+    const at = new Date("2026-10-07T13:10:00.000Z"); // 16:10, slot 15:00 is due
+    const done = extractOccurrenceDone({ occurrence_done: true }, at).doneDate!;
+    const marked = markOccurrenceDone(dog.item, done, at);
+    expect(itemDoneDates(marked)).toEqual(["2026-10-07 15:00"]);
+    expect(itemNextOccurrences(marked, at)?.slice(0, 2)).toEqual([
+      "2026-10-07 18:00",
+      "2026-10-07 21:00",
+    ]);
+  });
+
+  it("a slot time snaps to its slot", () => {
+    expect(extractOccurrenceDone({ occurrence_done: "2026-10-07 18:05" }, NOW).doneDate).toBe(
+      "2026-10-07 18:05",
+    );
+    const marked = markOccurrenceDone(dog.item, "2026-10-07 18:05", NOW);
+    expect(itemDoneDates(marked)).toEqual(["2026-10-07 18:00"]);
+  });
+
+  it("honours count and until", () => {
+    const counted = shapeItemRecurrence(
+      { recurrence: { freq: "interval", interval: 3, unit: "hours", count: 3 } },
+      NOW,
+    ).item;
+    expect(itemNextOccurrences(counted, NOW)).toEqual([
+      "2026-10-07 12:00",
+      "2026-10-07 15:00",
+      "2026-10-07 18:00",
+    ]);
+    const bounded = shapeItemRecurrence(
+      { recurrence: { freq: "interval", interval: 3, unit: "hours", until: "2026-10-07" } },
+      NOW,
+    ).item;
+    expect(itemNextOccurrences(bounded, NOW)).toEqual([
+      "2026-10-07 12:00",
+      "2026-10-07 15:00",
+      "2026-10-07 18:00",
+      "2026-10-07 21:00",
+    ]);
+  });
+
+  it("refuses a task that repeats every N minutes or seconds", () => {
+    for (const unit of ["minutes", "seconds"]) {
+      const shaped = shapeItemRecurrence(
+        { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 10, unit } },
+        NOW,
+      );
+      expect(shaped.tooFrequent).toBe(true);
+      expect(shaped.item[RECURRENCE_META_KEY]).toBeUndefined();
+    }
+    expect(dog).not.toHaveProperty("tooFrequent");
+  });
+
+  it("refuses a single-occurrence change", () => {
+    const changed = applyOccurrenceChange(
+      dog.item,
+      { date: "2026-10-08", cancel: true },
+      NOW,
+    );
+    expect(changed).toBe(dog.item);
   });
 });
 

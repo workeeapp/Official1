@@ -114,6 +114,7 @@ export {
   firstOccurrence,
   formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
+  isSubHourlyRecurrence,
   legacyRepeatFor,
   listOccurrences,
   nextOccurrence,
