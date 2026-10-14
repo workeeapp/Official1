@@ -191,6 +191,16 @@ function Invoke-WorkeeRefresh {
       Clear-WorkeeRefreshLockForPid -LockPid $proc.Id
       throw "refresh-workee.ps1 timed out after ${timeoutMs}ms in $RepoRoot (killed PID $($proc.Id))"
     }
+    # WaitForExit(timeout) + -NoNewWindow often leaves ExitCode $null briefly even on
+    # success; treating null as failure caused false "failed (exit )" in the watcher.
+    $deadline = (Get-Date).AddSeconds(3)
+    do {
+      $proc.Refresh()
+      if ($null -ne $proc.ExitCode) {
+        break
+      }
+      Start-Sleep -Milliseconds 50
+    } while ((Get-Date) -lt $deadline)
   } finally {
     if ($null -eq $prevInherit) {
       Remove-Item Env:WORKEE_REFRESH_INHERIT_CONFIG -ErrorAction SilentlyContinue
@@ -198,7 +208,12 @@ function Invoke-WorkeeRefresh {
       $env:WORKEE_REFRESH_INHERIT_CONFIG = $prevInherit
     }
   }
-  if ($null -eq $proc.ExitCode -or $proc.ExitCode -ne 0) {
-    throw "refresh-workee.ps1 failed (exit $($proc.ExitCode)) in $RepoRoot"
+  $proc.Refresh()
+  $exitCode = $proc.ExitCode
+  if ($null -eq $exitCode) {
+    throw "refresh-workee.ps1 finished but ExitCode stayed unset in $RepoRoot (PID $($proc.Id))"
+  }
+  if ($exitCode -ne 0) {
+    throw "refresh-workee.ps1 failed (exit $exitCode) in $RepoRoot"
   }
 }
