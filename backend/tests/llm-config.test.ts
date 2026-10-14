@@ -83,6 +83,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FULL DUMP / מה יש לי / הציגי הכל",
     );
+    expect(config.systemMessage).toContain("FULL DUMP DETAIL RULE");
+    expect(config.systemMessage).toContain("COUNTS ONLY");
+    expect(config.systemMessage).toContain("ONLY מטלות enumerate");
+    expect(config.systemMessage).toContain("לפירוט רשימה: הצג רשימת");
     expect(config.systemMessage).toContain("NOT bare «מה יש לי»");
     expect(config.systemMessage).toContain("מה המטלות שלי");
     expect(config.systemMessage).toContain(

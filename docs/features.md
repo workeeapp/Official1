@@ -93,7 +93,7 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 - Listing in `response`: append «דחוף» / «דחוף מאוד» on that numbered line. «מה יש לי דחוף» → only those rows.
 - Status / «הצג רשימת…» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, `WORKER_SAVED_DATA`, `OPEN_JOBS`, …); chat history must not resurrect soft-deleted rows.
 - **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category, consecutive **אישיות → משותפות**; shared partners as `(עם X)` (not «רשימה משותפת»); items numbered `1. 2. 3.` restarting per list block.
-- **FULL DUMP** (bare «מה יש לי» / «הציגי הכל» / `כל מה ששמור` / `סיכום מלא`): all sections; shopping/tasks use the same personal→shared split; linked clocks on the item line; **תזכורות פעילות** only for clocks not already attached; same per-list numbering.
+- **FULL DUMP** (bare «מה יש לי» / «הציגי הכל» / `כל מה ששמור` / `סיכום מלא`): all sections; **מטלות** only are fully enumerated (personal→shared + linked clocks on task lines); **קניות** and **רשימות אחרות** show **counts only** (`N פריטים` / ריקה); hint «לפירוט רשימה: הצג רשימת …». **תזכורות פעילות** only for clocks not already on a task line. Explicit «הצג רשימת X» / SHAREABLE STATUS ASK stay full item dumps.
 
 **Migration:** `prisma/migrations/20261007150000_list_item_urgency`.  
 **Tests:** `backend/tests/employee-records.test.ts`, `backend/tests/chat.test.ts`.

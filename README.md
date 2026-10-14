@@ -17,8 +17,8 @@ npm run dev
 `npm run dev` also runs `predev` → `prisma migrate deploy`, so pending schema migrations are applied before the API/frontend start.
 Or point `DATABASE_URL` at an existing PostgreSQL database. `docker-compose.yml` publishes Postgres on **5432**. If that port is taken, remap the container (this repo’s local box uses **5435**) and set `DATABASE_URL` to match.
 
-- Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite; local override may use **5174**)
-- API: [http://localhost:3001](http://localhost:3001) (`PORT`; local override may use **3003**)
+- Frontend: [http://localhost:5173](http://localhost:5173) (`CLIENT_ORIGIN` / Vite)
+- API: [http://localhost:3001](http://localhost:3001) (`PORT`; this box often uses **3003**)
 
 Seeded user (from `.env` `SEED_*`):
 
