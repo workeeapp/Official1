@@ -64,11 +64,17 @@ describe("LLM action schema", () => {
       "never «אין לך קניות משותפות»",
     );
     expect(config.systemMessage).toContain("ALWAYS print BOTH headers");
+    expect(config.systemMessage).toContain("(עם מיכל)\\nריקה");
     expect(config.systemMessage).toContain(
-      "רשימה משותפת עם מיכל:\\nריקה",
+      "FORBIDDEN: the words «רשימה משותפת»",
     );
+    expect(config.systemMessage).toContain("NUMBERED 1. 2. 3.");
     expect(config.systemMessage).toContain(
-      "FORBIDDEN: dropping partner names from an empty shared list",
+      "Numbering restarts at 1 for EVERY distinct list block",
+    );
+    expect(config.systemMessage).toContain("personal→shared split");
+    expect(config.systemMessage).toContain(
+      "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
     expect(config.systemMessage).toContain("Scan EVERY matching list_type");
     expect(config.systemMessage).toContain(
@@ -134,7 +140,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("NEVER explode dense cadences");
     expect(config.systemMessage).toContain("כל יום ב־09:00");
     expect(config.systemMessage).toContain("DAY AGENDA FORMAT");
-    expect(config.systemMessage).toContain("FORBIDDEN: one packed • for the whole day");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: one packed line for the whole day",
+    );
     expect(config.systemMessage).toContain("RECURRENCE START (critical)");
     expect(config.systemMessage).toContain('start:"2026-10-20"');
     expect(config.systemMessage).not.toContain("confirm_share");
