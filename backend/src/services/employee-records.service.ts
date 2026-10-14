@@ -521,6 +521,10 @@ export interface TeamScheduleEntry {
   item_name: string;
   date: string;
   time: string | null;
+  /** HH:mm end of a timed range (שעת סיום). */
+  end_time?: string;
+  /** YYYY-MM-DD last day of a multi-day span (תאריך סיום), inclusive. */
+  end_date?: string;
   all_day: boolean;
 }
 
@@ -709,6 +713,7 @@ export function formatTeamSchedules(entries: TeamScheduleEntry[]): string {
   return [
     "TEAM_SCHEDULES:",
     "Dated tasks/meetings visible under the same ownership rules as EMPLOYEE_SAVED_DATA (owners: all humans; non-owners: speaker only). For conflict checks and «מה יש לX ביום…» when that person is in scope.",
+    "time…end_time is a range [start, end); end_date (inclusive) means the row covers every day from date to end_date. Overlap with any of it is a conflict.",
     "Each row has owner — that person owns the item. For «מה אני צריך לעשות / מה יש לי» use ONLY the current speaker's rows from EMPLOYEE_SAVED_DATA (and their active_reminders) — do NOT list other owners as the speaker's work.",
     JSON.stringify(entries),
   ].join("\n");
@@ -784,6 +789,8 @@ export async function getTeamSchedules(
         continue;
       }
       const time = readItemText(data, ["שעה לביצוע", "time"]) || null;
+      const endTime = time ? readItemText(data, ["שעת סיום", "end_time"]) : "";
+      const endDate = readItemText(data, ["תאריך סיום", "end_date"]);
       const allDayValue = data["יום שלם"];
       entries.push({
         owner,
@@ -791,6 +798,8 @@ export async function getTeamSchedules(
           readItemText(data, ITEM_NAME_KEYS.tasks) || item.itemKey,
         date,
         time,
+        ...(endTime ? { end_time: endTime } : {}),
+        ...(endDate && endDate !== date ? { end_date: endDate } : {}),
         all_day: allDayValue === true || allDayValue === "true",
       });
     }
@@ -3069,6 +3078,9 @@ function withVisibility(
   const dateRaw = normalized["תאריך לביצוע"];
   const weekday =
     typeof dateRaw === "string" ? hebrewWeekdayFromYmd(dateRaw) : null;
+  const endDateRaw = normalized["תאריך סיום"];
+  const endWeekday =
+    typeof endDateRaw === "string" ? hebrewWeekdayFromYmd(endDateRaw) : null;
   const nextOccurrences = itemNextOccurrences(raw);
   const doneDates = nextOccurrences ? itemDoneDates(raw) : [];
   const exceptions = nextOccurrences ? itemOccurrenceExceptions(raw) : [];
@@ -3076,6 +3088,7 @@ function withVisibility(
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
+    ...(endWeekday ? { "יום בשבוע סיום": endWeekday } : {}),
     ...(nextOccurrences ? { next_occurrences: nextOccurrences } : {}),
     ...(doneDates.length ? { done_dates: doneDates } : {}),
     ...(exceptions.length ? { exceptions } : {}),

@@ -95,6 +95,8 @@ function bookFields(book: LlmMessageBook | undefined): Partial<JobMeta> {
     needsBook: true,
     bookDate: book.date,
     bookTime: book.time,
+    ...(book.endTime ? { bookEndTime: book.endTime } : {}),
+    ...(book.window ? { bookWindow: true } : {}),
     ...(book.title.trim() ? { bookTitle: book.title.trim() } : {}),
   };
 }
@@ -637,6 +639,7 @@ export function meetingListsForAnswers(
           "שם מטלה": job.meta.bookTitle || "פגישה",
           "תאריך לביצוע": job.meta.bookDate,
           "שעה לביצוע": job.meta.bookTime,
+          ...(job.meta.bookEndTime ? { "שעת סיום": job.meta.bookEndTime } : {}),
           "יום שלם": false,
         },
       ],
@@ -710,6 +713,8 @@ export function formatOpenJobsContext(
             book_on_yes: true,
             ...(job.meta.bookDate ? { book_date: job.meta.bookDate } : {}),
             ...(job.meta.bookTime ? { book_time: job.meta.bookTime } : {}),
+            ...(job.meta.bookEndTime ? { book_end_time: job.meta.bookEndTime } : {}),
+            ...(job.meta.bookWindow ? { book_window: true } : {}),
             ...(job.meta.bookTitle ? { book_title: job.meta.bookTitle } : {}),
           }
         : {}),
@@ -725,7 +730,7 @@ export function formatOpenJobsContext(
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. scheduled=true means a deferred check is waiting for its clock — do not ask yet; the server will send at fire; still list it on INVENTORY. deferred=true means they said not now, with no clock: still raisable. Raise only when not answering an inventory ask, at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
     "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
-    "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time. The server also saves that meeting from these fields when you forget the list.",
+    "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time (plus שעת סיום=book_end_time when present). book_window=true → the slot is a window: a reply naming one time inside it is a counter (time + end_time only if they said an end), not an answer. The server also saves that meeting from these fields when you forget the list.",
     JSON.stringify(rows),
   ].join("\n");
 }
@@ -1311,6 +1316,9 @@ export async function applyJobActions(input: {
           needsBook: true,
           ...(action.date ? { bookDate: action.date } : {}),
           ...(action.time ? { bookTime: action.time } : {}),
+          // A counter is a concrete slot: the old end and window never carry over.
+          bookEndTime: action.endTime || undefined,
+          bookWindow: undefined,
         };
         const label = `לבדוק עם ${meta.subjectName}: ${proposed}`.trim();
         await rewriteJob(job.id, meta, label);

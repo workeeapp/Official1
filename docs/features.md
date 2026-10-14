@@ -216,6 +216,26 @@ Clock digits count as שעה לביצוע even when glued to ב (`ב08:00`) or n
 
 ---
 
+## 14b. Time ranges (hours or days)
+
+The model emits every field; the server never parses «בין 10 ל־12».
+
+| Spoken | Saved |
+|--------|-------|
+| «פגישה עם טל ביום שלישי בין 10 ל־12» | tasks item `שעה לביצוע: 10:00`, `שעת סיום: 12:00` |
+| «כל יום שני מ־10:00 למשך שעתיים» | standing task `recurrence.time: 10:00`, `recurrence.end_time: 12:00` |
+| «מיום שלישי עד חמישי אני בחו"ל» | one item `תאריך לביצוע` = Tue, `תאריך סיום` = Thu (inclusive), `יום שלם: true` |
+
+- **Overlap check (model only):** any tasks add/update with a date and time is checked against the speaker's rows that day (ranges, multi-day spans, standing `next_occurrences`). On overlap Lucy asks «יש לך באותו זמן … לשמור בכל זאת?» and saves only on כן. Meetings with participants also check `TEAM_SCHEDULES`. No server enforcement.
+- **Answers:** ranges show as «10:00–12:00»; a multi-day row matches every day in its span (agenda, delete by day).
+- **Coordination:** `messages[].book` carries `end_time` and `window`. `window: false` (default / unclear) = the meeting's length; `window: true` («מתישהו בין 10 ל־12») = pick a time inside it. A reply naming one time («מתאים ב־11:00») is a `counter`, so the asker approves. The counter's `end_time` replaces the old end; without one the end is dropped (`bookEndTime` never carries over), and `bookWindow` is cleared. On the final yes the meeting is saved on both with `שעת סיום` when known.
+- **Injected facts:** `TEAM_SCHEDULES` rows carry `end_time` / `end_date`; saved task rows with `תאריך סיום` also get `יום בשבוע סיום`; OPEN_JOBS shows `book_end_time` / `book_window`.
+
+**Code:** `LLM.config.json`, `LLM.action.json`, `chat.service.ts` runtime prompts, `shared/src/recurrence.ts`, `shared/src/llm-message.ts`, `list-recurrence.ts`, `employee-records.service.ts`, `jobs.service.ts`, `job-meta.ts`.  
+**Tests:** `shared/src/recurrence.test.ts`, `shared/src/llm-message.test.ts`, `backend/tests/recurrence.test.ts`, `backend/tests/employee-records.test.ts`, `backend/tests/jobs.test.ts`.
+
+---
+
 ## 15. Send by meaning + send-me free text
 
 - **Send by meaning:** any deliver-words intent (תשלחי / תגידי / תמסרי / תכתבי / … — judged by meaning, not a closed verb list) → `messages` NOW or scheduled `reminders` + worker `לשלוח הודעה ל…`. Not assign-without-tell; not «תעדכני את התזכורת».
@@ -236,7 +256,7 @@ Clock digits count as שעה לביצוע even when glued to ב (`ב08:00`) or n
 | `list_ops` | Whole-list alter / delete by `list_id` |
 | `filing` | Durable facts |
 | `directory` | Personal contacts |
-| `messages` | Send now / open jobs (`expects_reply`, `ask_summary`, `urgency`, `book`) |
+| `messages` | Send now / open jobs (`expects_reply`, `ask_summary`, `urgency`, `book` with optional `end_time` / `window`) |
 | `reminders` | Clocks (`recurrence`, compose, ping) |
 | `jobs` | answer / decline / progress / counter / snooze / clear_clock / close by `job_id` |
 | `query` | `todos` / `self` / `reminders` (read hints only) |

@@ -44,6 +44,10 @@ export interface JobMeta {
   bookDate?: string;
   /** HH:mm captured on the counter. */
   bookTime?: string;
+  /** HH:mm end of the slot (שעת סיום on the booked meeting). */
+  bookEndTime?: string;
+  /** The asked range is a window to pick a time in, not the meeting's length. */
+  bookWindow?: boolean;
   /** Meeting title saved on both lists when it is booked. */
   bookTitle?: string;
   /**
@@ -114,6 +118,10 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
     ...(typeof meta.bookTime === "string" && meta.bookTime
       ? { bookTime: meta.bookTime }
       : {}),
+    ...(typeof meta.bookEndTime === "string" && meta.bookEndTime
+      ? { bookEndTime: meta.bookEndTime }
+      : {}),
+    ...(meta.bookWindow === true ? { bookWindow: true } : {}),
     ...(typeof meta.bookTitle === "string" && meta.bookTitle
       ? { bookTitle: meta.bookTitle }
       : {}),

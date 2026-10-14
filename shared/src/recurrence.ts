@@ -23,6 +23,8 @@ export interface Recurrence {
   month?: number;
   /** HH:mm on Jerusalem clocks. For freq=interval: the time of the first occurrence only. */
   time?: string;
+  /** HH:mm end of each occurrence (a range / duration). Calendar rules with a time only. */
+  endTime?: string;
   /** Last allowed calendar day, YYYY-MM-DD, inclusive. */
   until?: string;
   /** Total occurrences, including the first. */
@@ -177,6 +179,7 @@ export function parseRecurrence(value: unknown): Recurrence | null {
   const monthRaw = positiveInt(record.month);
   const month = monthRaw && monthRaw <= 12 ? monthRaw : null;
   const time = clockText(record.time);
+  const endTime = time && kind !== "interval" ? clockText(record.end_time ?? record.endTime) : "";
   const until = ymdText(record.until);
   const count = positiveInt(record.count ?? record.times);
   const exceptions = kind === "interval" ? [] : exceptionList(record.exceptions);
@@ -188,6 +191,7 @@ export function parseRecurrence(value: unknown): Recurrence | null {
     ...((kind === "monthly" || kind === "yearly") && monthDay ? { monthDay } : {}),
     ...(kind === "yearly" && month ? { month } : {}),
     ...(time ? { time } : {}),
+    ...(endTime ? { endTime } : {}),
     ...(until ? { until } : {}),
     ...(count ? { count } : {}),
     ...(exceptions.length ? { exceptions } : {}),
@@ -213,6 +217,7 @@ export function serializeRecurrence(rec: Recurrence): Record<string, unknown> {
     ...(rec.monthDay ? { month_day: rec.monthDay } : {}),
     ...(rec.month ? { month: rec.month } : {}),
     ...(rec.time ? { time: rec.time } : {}),
+    ...(rec.endTime ? { end_time: rec.endTime } : {}),
     ...(rec.until ? { until: rec.until } : {}),
     ...(rec.count ? { count: rec.count } : {}),
     ...(rec.exceptions?.length
@@ -580,7 +585,7 @@ export function formatRecurrenceHe(rec: Recurrence): string {
   }
   const parts = [base];
   if (rec.time && rec.freq !== "interval") {
-    parts.push(`ב־${rec.time}`);
+    parts.push(rec.endTime ? `ב־${rec.time}–${rec.endTime}` : `ב־${rec.time}`);
   }
   if (rec.until) {
     parts.push(`עד ${formatYmdHe(rec.until)}`);

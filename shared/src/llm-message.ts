@@ -129,6 +129,10 @@ export interface LlmMessageBook {
   date: string;
   /** HH:mm */
   time: string;
+  /** HH:mm end of the asked range. */
+  endTime?: string;
+  /** The range is a window to pick a slot in, not the meeting's length. */
+  window?: boolean;
 }
 
 export type LlmJobActionName =
@@ -154,6 +158,8 @@ export interface LlmJobAction {
   in: number | null;
   /** Counter only: the proposed meeting date, YYYY-MM-DD. */
   date?: string;
+  /** Counter only: HH:mm end of the proposed slot. */
+  endTime?: string;
 }
 
 export type LlmDirectoryActionName = "add" | "remove";
@@ -915,7 +921,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     ? (listRaw as LlmListType)
     : "shopping";
   const interval = parseReminderInterval(record);
-  const recurrence = parseRecurrence(record.recurrence);
+  const recurrence = clockRecurrence(record.recurrence);
   const recurrenceRecord =
     record.recurrence && typeof record.recurrence === "object"
       ? (record.recurrence as Record<string, unknown>)
@@ -1095,7 +1101,7 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
   const inSeconds = parseInSeconds(record);
   const date = readText(record, ["date"]);
   const time = parseClockField(readText(record, ["time"]));
-  const recurrence = parseRecurrence(record.recurrence);
+  const recurrence = clockRecurrence(record.recurrence);
   return {
     text,
     targets,
@@ -1110,6 +1116,16 @@ function toMessageAction(value: unknown): LlmMessageAction | null {
   };
 }
 
+/** Clocks fire at a point in time; an `end_time` on their rule is dropped. */
+function clockRecurrence(value: unknown): Recurrence | null {
+  const rule = parseRecurrence(value);
+  if (!rule?.endTime) {
+    return rule;
+  }
+  const { endTime: _dropped, ...rest } = rule;
+  return rest;
+}
+
 function toMessageBook(value: unknown): LlmMessageBook | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -1120,7 +1136,15 @@ function toMessageBook(value: unknown): LlmMessageBook | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) {
     return null;
   }
-  return { title: readText(record, ["title", "name"]), date, time };
+  const endTime = parseClockField(readText(record, ["end_time", "endTime"]));
+  const window = record.window === true || record.window === "true";
+  return {
+    title: readText(record, ["title", "name"]),
+    date,
+    time,
+    ...(endTime ? { endTime } : {}),
+    ...(endTime && window ? { window: true } : {}),
+  };
 }
 
 function parseJobActions(meta: Record<string, unknown>): LlmJobAction[] {
@@ -1144,6 +1168,7 @@ function toJobAction(value: unknown): LlmJobAction | null {
     return null;
   }
   const jobId = readText(record, ["job_id", "jobId", "id"]);
+  const endTime = parseClockField(readText(record, ["end_time", "endTime"]));
   return {
     action: name as LlmJobActionName,
     jobId,
@@ -1158,6 +1183,7 @@ function toJobAction(value: unknown): LlmJobAction | null {
     time: parseClockField(readText(record, ["time", "at", "שעה"])),
     in: parseInSeconds(record),
     date: calendarDate(readText(record, ["date", "on", "תאריך"])),
+    ...(endTime ? { endTime } : {}),
   };
 }
 

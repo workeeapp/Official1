@@ -430,7 +430,8 @@ export function stripRecurrenceMeta(data: Record<string, unknown>): Record<strin
 
 /**
  * Upcoming dates of a standing task, from today (inclusive) — "YYYY-MM-DD HH:mm",
- * or "YYYY-MM-DD" when the rule has no time. count counts from the stored start.
+ * "YYYY-MM-DD HH:mm–HH:mm" when the rule has an end_time, or "YYYY-MM-DD" when the
+ * rule has no time. count counts from the stored start.
  */
 export function itemNextOccurrences(data: unknown, now = new Date()): string[] | null {
   const stored = itemRecurrence(data);
@@ -468,11 +469,15 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
   const movedDays = new Set(
     (rule.exceptions ?? []).filter((entry) => entry.time).map((entry) => entry.date),
   );
-  return occurrences
-    .slice(0, OCCURRENCE_LIMIT)
-    .map((value) =>
-      rule.time || movedDays.has(ymd(value)) ? formatJerusalemDateTime(value) : ymd(value),
-    );
+  return occurrences.slice(0, OCCURRENCE_LIMIT).map((value) => {
+    const moved = movedDays.has(ymd(value));
+    if (!rule.time && !moved) {
+      return ymd(value);
+    }
+    const at = formatJerusalemDateTime(value);
+    // A moved day keeps only its new start; the rule's end belongs to the rule's slot.
+    return rule.endTime && !moved ? `${at}–${rule.endTime}` : at;
+  });
 }
 
 /**

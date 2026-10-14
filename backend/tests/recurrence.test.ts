@@ -182,6 +182,22 @@ describe("recurring tasks", () => {
     ]);
   });
 
+  it("a ranged rule shows start–end in חוזר and next_occurrences", () => {
+    const meeting = shapeItemRecurrence(
+      {
+        "שם מטלה": "פגישה (עמית, טל)",
+        recurrence: { freq: "weekly", interval: 1, weekdays: [1], time: "10:00", end_time: "12:00" },
+      },
+      NOW,
+    );
+    expect(meeting.item[RECURRENCE_DISPLAY_KEY]).toBe("כל יום שני ב־10:00–12:00");
+    expect(meeting.item[RECURRENCE_META_KEY]).toMatchObject({ time: "10:00", end_time: "12:00" });
+    expect(itemNextOccurrences(meeting.item, NOW)?.slice(0, 2)).toEqual([
+      "2026-10-12 10:00–12:00",
+      "2026-10-19 10:00–12:00",
+    ]);
+  });
+
   it("all-day rule lists dates only, including today", () => {
     const shaped = shapeItemRecurrence(
       { "שם מטלה": "להשקות", recurrence: { freq: "weekly", weekdays: [3] } },

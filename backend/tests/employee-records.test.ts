@@ -1038,6 +1038,58 @@ describe("employee records", () => {
     expect(schedules).toContain("10:00");
   });
 
+  it("carries time ranges and multi-day spans into team schedules", async () => {
+    listFindMany.mockResolvedValueOnce([
+      {
+        listType: "tasks",
+        employee: { name: "טל", nickname: null },
+        items: [
+          {
+            itemKey: "פגישה (עמית, טל)",
+            data: {
+              "שם מטלה": "פגישה (עמית, טל)",
+              "תאריך לביצוע": "2026-10-20",
+              "שעה לביצוע": "10:00",
+              "שעת סיום": "12:00",
+              "יום שלם": false,
+            },
+            deletedAt: null,
+          },
+          {
+            itemKey: "בחו\"ל",
+            data: {
+              "שם מטלה": "בחו\"ל",
+              "תאריך לביצוע": "2026-10-20",
+              "תאריך סיום": "2026-10-22",
+              "יום שלם": true,
+            },
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+
+    expect(await getTeamSchedules(employeeId)).toEqual([
+      {
+        owner: "טל",
+        item_name: "פגישה (עמית, טל)",
+        date: "2026-10-20",
+        time: "10:00",
+        end_time: "12:00",
+        all_day: false,
+      },
+      {
+        owner: "טל",
+        item_name: "בחו\"ל",
+        date: "2026-10-20",
+        time: null,
+        end_date: "2026-10-22",
+        all_day: true,
+      },
+    ]);
+    expect(formatTeamSchedules([])).toContain("TEAM_SCHEDULES");
+  });
+
   it("scopes team schedules with the same ownership gate as saved data", async () => {
     listFindMany.mockResolvedValueOnce([
       {

@@ -29,6 +29,7 @@ The model emits a `recurrence` object (never invent clocks from weekday words in
 | `month_day` | 1–31 (clamped on short months) |
 | `month` | 1–12 (yearly) |
 | `time` | `HH:mm` Jerusalem; **required** for calendar reminder clocks; **optional** for standing tasks (all-day ok). For `freq=interval` it is the time of the **first** occurrence only (optional) |
+| `end_time` | Standing tasks only: `HH:mm` end of each occurrence («כל יום שני מ־10:00 למשך שעתיים» → `time` 10:00, `end_time` 12:00 — the model computes it). Needs `time`; dropped on `interval` rules and on reminder clocks. Shows in `חוזר` as «ב־10:00–12:00» and in `next_occurrences` as `YYYY-MM-DD HH:mm–HH:mm` (a moved day keeps only its new start). |
 | `until` | Last calendar day `YYYY-MM-DD` inclusive |
 | `count` | Total occurrences including the first |
 

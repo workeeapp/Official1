@@ -741,6 +741,62 @@ describe("parseLlmReply", () => {
     expect(parsed[1].book).toBeUndefined();
   });
 
+  it("reads a booking range, a window flag, and a counter end", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "שלחתי לטל",
+        metadata: {
+          messages: [
+            {
+              targets: ["טל"],
+              text: "עמית רוצה לתאם איתך פגישה ביום רביעי בין 10:00 ל־12:00. באיזו שעה נוח לך?",
+              expects_reply: true,
+              ask_summary: "לתאם פגישה ביום רביעי בין 10:00 ל־12:00",
+              book: { title: "פגישה", date: "2026-10-07", time: "10:00", end_time: "12:00", window: true },
+            },
+          ],
+          jobs: [
+            { action: "counter", job_id: "job-1", time: "11:00", end_time: "13:00", date: "2026-10-07" },
+            { action: "counter", job_id: "job-2", time: "11:00", end_time: "", date: "2026-10-07" },
+          ],
+        },
+      }),
+    );
+    expect(parsed.messages?.[0]?.book).toEqual({
+      title: "פגישה",
+      date: "2026-10-07",
+      time: "10:00",
+      endTime: "12:00",
+      window: true,
+    });
+    expect(parsed.jobs?.[0]?.endTime).toBe("13:00");
+    expect(parsed.jobs?.[1]?.endTime).toBeUndefined();
+  });
+
+  it("drops end_time from a clock's recurrence", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "אזכיר לך",
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "פגישה",
+              ping: ["עמית"],
+              recurrence: { freq: "weekly", weekdays: [1], time: "10:00", end_time: "12:00" },
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.reminders?.[0]?.recurrence).toEqual({
+      freq: "weekly",
+      interval: 1,
+      weekdays: [1],
+      time: "10:00",
+    });
+  });
+
   it("keeps a job action that forgot its id and drops unknown actions", () => {
     const parsed = parseReplyMetadata(
       JSON.stringify({

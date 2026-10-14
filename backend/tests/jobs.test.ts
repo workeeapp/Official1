@@ -1038,6 +1038,71 @@ describe("applyJobActions", () => {
     expect(data.data["שם מטלה"]).toBe("לבדוק עם עמית: יום שלישי ב-15:00");
   });
 
+  it("drops the old range end and window when a counter names one time", async () => {
+    await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: ERAN, name: "ערן" },
+      actions: [
+        {
+          action: "counter",
+          jobId: "job-1",
+          answerText: "מתאים ב־11:00",
+          reportText: "ערן מציע ביום רביעי ב־11:00. לאשר?",
+          time: "11:00",
+          date: "2026-10-07",
+          in: null,
+        },
+      ],
+      jobs: [
+        jobRow({
+          ask: "לתאם פגישה ליום רביעי בין 10:00 ל־12:00",
+          needsBook: true,
+          bookDate: "2026-10-07",
+          bookTime: "10:00",
+          bookEndTime: "12:00",
+          bookWindow: true,
+        }),
+      ],
+    });
+    const meta = itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY];
+    expect(meta.bookTime).toBe("11:00");
+    expect(meta.bookEndTime).toBeUndefined();
+    expect(meta.bookWindow).toBeUndefined();
+  });
+
+  it("keeps the end a counter names", async () => {
+    await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: ERAN, name: "ערן" },
+      actions: [
+        {
+          action: "counter",
+          jobId: "job-1",
+          answerText: "מתאים מ־11 עד 13",
+          reportText: "",
+          time: "11:00",
+          endTime: "13:00",
+          date: "2026-10-07",
+          in: null,
+        },
+      ],
+      jobs: [
+        jobRow({
+          ask: "לתאם פגישה ליום רביעי בין 10:00 ל־12:00",
+          needsBook: true,
+          bookDate: "2026-10-07",
+          bookTime: "10:00",
+          bookEndTime: "12:00",
+        }),
+      ],
+    });
+    const meta = itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY];
+    expect(meta.bookTime).toBe("11:00");
+    expect(meta.bookEndTime).toBe("13:00");
+  });
+
   it("applies a counter that omitted the job id when only one job is open", async () => {
     const result = await applyJobActions({
       userId: "u1",
@@ -1178,6 +1243,41 @@ describe("applyJobActions", () => {
             "יום שלם": false,
           },
         ],
+      },
+    ]);
+  });
+
+  it("books a ranged meeting with שעת סיום for both people", () => {
+    const lists = meetingListsForAnswers(
+      [
+        jobRow({
+          ask: "לתאם פגישה ליום רביעי בין 10:00 ל־12:00",
+          needsBook: true,
+          bookDate: "2026-10-07",
+          bookTime: "10:00",
+          bookEndTime: "12:00",
+        }),
+      ],
+      [
+        {
+          action: "answer",
+          jobId: "job-1",
+          answerText: "כן",
+          reportText: "",
+          time: "",
+          date: "",
+          in: null,
+        },
+      ],
+    );
+    expect(lists[0]?.targets).toEqual(["עמית", "ערן"]);
+    expect(lists[0]?.items).toEqual([
+      {
+        "שם מטלה": "פגישה",
+        "תאריך לביצוע": "2026-10-07",
+        "שעה לביצוע": "10:00",
+        "שעת סיום": "12:00",
+        "יום שלם": false,
       },
     ]);
   });

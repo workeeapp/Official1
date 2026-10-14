@@ -45,6 +45,41 @@ describe("parseRecurrence", () => {
     });
   });
 
+  it("keeps end_time on a timed calendar rule and round-trips it", () => {
+    const rule = parseRecurrence({
+      freq: "weekly",
+      interval: 1,
+      weekdays: [1],
+      time: "10:00",
+      end_time: "12:00",
+    });
+    expect(rule).toEqual({
+      freq: "weekly",
+      interval: 1,
+      weekdays: [1],
+      time: "10:00",
+      endTime: "12:00",
+    });
+    expect(serializeRecurrence(rule!)).toEqual({
+      freq: "weekly",
+      interval: 1,
+      weekdays: [1],
+      time: "10:00",
+      end_time: "12:00",
+    });
+    expect(formatRecurrenceHe(rule!)).toBe("כל יום שני ב־10:00–12:00");
+  });
+
+  it("drops end_time without a start time or on an interval rule", () => {
+    expect(parseRecurrence({ freq: "daily", interval: 1, end_time: "12:00" })).toEqual({
+      freq: "daily",
+      interval: 1,
+    });
+    expect(
+      parseRecurrence({ freq: "interval", interval: 2, unit: "hours", time: "10:00", end_time: "11:00" }),
+    ).toEqual({ freq: "interval", interval: 2, unit: "hours", time: "10:00" });
+  });
+
   it("maps interval days to daily and rejects junk", () => {
     expect(parseRecurrence({ freq: "interval", interval: 10, unit: "days" })).toEqual({
       freq: "daily",
