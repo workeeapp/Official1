@@ -107,6 +107,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
           from?: unknown;
           text?: { body?: unknown };
           interactive?: { button_reply?: { id?: unknown } };
+          contacts?: unknown;
           context?: { id?: unknown; from?: unknown };
         };
         const buttonCommand = record.interactive?.button_reply?.id;
@@ -115,7 +116,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
             ? record.text.body
             : typeof buttonCommand === "string"
               ? buttonCommand
-              : "";
+              : formatSharedContactsMessage(record.contacts);
         const text = body.trim();
         const from = typeof record.from === "string" ? record.from : "";
         const messageId = typeof record.id === "string" ? record.id : "";
@@ -137,6 +138,70 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
   }
 
   return messages;
+}
+
+export const SHARED_CONTACTS_MARKER = "[כרטיס איש קשר שותף בוואטסאפ]";
+
+/** WhatsApp `contacts` payload → structured block for the model. Formatting only. */
+export function formatSharedContactsMessage(contacts: unknown): string {
+  if (!Array.isArray(contacts)) {
+    return "";
+  }
+  const cards: Array<{ name: string; phones: string[] }> = [];
+  for (const card of contacts) {
+    if (!card || typeof card !== "object") {
+      continue;
+    }
+    const record = card as {
+      name?: { formatted_name?: unknown; first_name?: unknown; last_name?: unknown };
+      phones?: unknown;
+    };
+    const formatted = asTrimmed(record.name?.formatted_name);
+    const name =
+      formatted ||
+      [asTrimmed(record.name?.first_name), asTrimmed(record.name?.last_name)]
+        .filter(Boolean)
+        .join(" ");
+    const phones: string[] = [];
+    if (Array.isArray(record.phones)) {
+      const waIds: string[] = [];
+      const raw: string[] = [];
+      for (const entry of record.phones) {
+        if (!entry || typeof entry !== "object") {
+          continue;
+        }
+        const phone = entry as { phone?: unknown; wa_id?: unknown };
+        const waId = asTrimmed(phone.wa_id);
+        const number = asTrimmed(phone.phone);
+        if (waId) {
+          waIds.push(waId);
+        }
+        if (number) {
+          raw.push(number);
+        }
+      }
+      const seenDigits = new Set<string>();
+      for (const value of [...waIds, ...raw]) {
+        const digits = value.replace(/\D/g, "");
+        if (!digits || seenDigits.has(digits)) {
+          continue;
+        }
+        seenDigits.add(digits);
+        phones.push(value);
+      }
+    }
+    if (name || phones.length > 0) {
+      cards.push({ name, phones });
+    }
+  }
+  if (cards.length === 0) {
+    return "";
+  }
+  return `${SHARED_CONTACTS_MARKER}\n${JSON.stringify({ shared_contacts: cards })}`;
+}
+
+function asTrimmed(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 const recentInboundIds = new Set<string>();

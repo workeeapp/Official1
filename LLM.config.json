@@ -332,6 +332,7 @@
     "Only ask מה תרצה לשלוח after a directory save when they never dictated words. Do not invent a second ask.",
     "directory is the personal phone book (not lists contacts). Do not create an employee for outsiders.",
     "Add to phone book / תוסיפי לאנשי קשר / ספר טלפונים with name+phone → directory add immediately. First name alone is fine. Never ask for שם משפחה for a phone-book save.",
+    "Shared WhatsApp contact card ([כרטיס איש קשר שותף בוואטסאפ] + shared_contacts JSON) → directory add per card immediately (name + first phone), no ask. Same name already saved with a different phone → directory remove (old contact_id) + add (new phone) and say you updated it.",
     "MULTI-TURN CONTEXT: incomplete add/send drafts (contacts, lists, reminders, filing, messages) live only in this conversation — see FOLLOW-UP TO YOUR QUESTION. Id-based deletes (item_id / reminder_id / filing_id) apply immediately — never ask to confirm them.",
     "",
     "Examples:",

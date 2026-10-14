@@ -24,7 +24,9 @@ import {
 import {
   applyWhatsAppHandoff,
   extractInboundTexts,
+  formatSharedContactsMessage,
   phonesMatch,
+  SHARED_CONTACTS_MARKER,
 } from "../src/services/whatsapp.service.js";
 import {
   formatWhatsAppReplyContext,
@@ -159,6 +161,83 @@ describe("WhatsApp webhook", () => {
     ).toEqual([
       { from: "972501234567", text: "הצג רשימת קניות", messageId: "wamid.btn" },
     ]);
+  });
+
+  it("turns a shared contact card into a structured shared_contacts turn", () => {
+    const contactsMessage = (contacts: unknown, extra: Record<string, unknown> = {}) => ({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.card",
+                    from: "972501234567",
+                    type: "contacts",
+                    contacts,
+                    ...extra,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      extractInboundTexts(
+        contactsMessage([
+          {
+            name: { formatted_name: "דני כהן", first_name: "דני" },
+            phones: [
+              { phone: "+972 52-123-4567", wa_id: "972521234567", type: "CELL" },
+            ],
+          },
+        ]),
+      ),
+    ).toEqual([
+      {
+        from: "972501234567",
+        messageId: "wamid.card",
+        text: `${SHARED_CONTACTS_MARKER}\n{"shared_contacts":[{"name":"דני כהן","phones":["972521234567"]}]}`,
+      },
+    ]);
+
+    expect(
+      formatSharedContactsMessage([
+        {
+          name: { first_name: "מיכל", last_name: "לוי" },
+          phones: [{ phone: "052-111-2222" }, { phone: "03-555-6666" }],
+        },
+        { name: { formatted_name: "יוסי" }, phones: [{ wa_id: "972533333333" }] },
+      ]),
+    ).toBe(
+      `${SHARED_CONTACTS_MARKER}\n${JSON.stringify({
+        shared_contacts: [
+          { name: "מיכל לוי", phones: ["052-111-2222", "03-555-6666"] },
+          { name: "יוסי", phones: ["972533333333"] },
+        ],
+      })}`,
+    );
+
+    expect(
+      formatSharedContactsMessage([{ name: { formatted_name: "ללא מספר" } }]),
+    ).toBe(
+      `${SHARED_CONTACTS_MARKER}\n{"shared_contacts":[{"name":"ללא מספר","phones":[]}]}`,
+    );
+    expect(formatSharedContactsMessage(undefined)).toBe("");
+    expect(formatSharedContactsMessage([{}])).toBe("");
+
+    expect(
+      extractInboundTexts(
+        contactsMessage(
+          [{ name: { formatted_name: "דני" }, phones: [{ wa_id: "972521234567" }] }],
+          { id: undefined },
+        ),
+      ),
+    ).toEqual([]);
   });
 
   it("builds an interactive reply-button message", () => {

@@ -31,12 +31,20 @@ export async function listContactsForEmployee(
   }));
 }
 
+const SHARED_CONTACT_RULES = [
+  "SHARED CONTACT CARD: a speaker message starting with [כרטיס איש קשר שותף בוואטסאפ] followed by {\"shared_contacts\":[{name, phones}]} is a contact the speaker shared with WhatsApp's contact-share. It means: save it to their phone book.",
+  "→ Same turn, without asking: metadata.directory add per card with its name and the first phone. If one card has several clearly different numbers, ask which to save (directory []).",
+  "If SPEAKER_CONTACTS already has that phone, add it again — it updates the saved name. If the same name exists with a different phone, update it: directory remove with the old contact_id + add with the new phone, and say you updated it.",
+  "A card without any phone cannot be saved — say so. A card without a name → ask what name to save it under (directory []).",
+];
+
 export function formatSpeakerContacts(contacts: SpeakerContact[]): string {
   if (contacts.length === 0) {
     return [
       "SPEAKER_CONTACTS:",
       "No personal contacts saved yet.",
       "Unknown names need a WhatsApp number. After the speaker gives digits, ask to save.",
+      ...SHARED_CONTACT_RULES,
     ].join("\n");
   }
 
@@ -44,6 +52,7 @@ export function formatSpeakerContacts(contacts: SpeakerContact[]): string {
     "SPEAKER_CONTACTS:",
     "Personal phone book for this speaker only. Resolve these names without asking for a number.",
     "MUTATE BY ID: directory.remove MUST copy contact_id from this turn — never omit it, never invent it, never speak ids aloud.",
+    ...SHARED_CONTACT_RULES,
     JSON.stringify(
       contacts.map((row) => ({
         contact_id: row.id,
