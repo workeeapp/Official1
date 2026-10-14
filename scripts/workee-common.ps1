@@ -173,34 +173,45 @@ function Invoke-WorkeeRefresh {
   $timeoutMs = Get-WorkeeRefreshTimeoutMs
   $prevInherit = $env:WORKEE_REFRESH_INHERIT_CONFIG
   $env:WORKEE_REFRESH_INHERIT_CONFIG = if ($InheritConfig) { "1" } else { "0" }
+  Ensure-WorkeeAppData
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $outLog = Join-Path $script:WorkeeAppData "refresh-invoke-$stamp.out.log"
+  $errLog = Join-Path $script:WorkeeAppData "refresh-invoke-$stamp.err.log"
   $proc = $null
   try {
-    # Do not use Start-Process -Wait: it can hang forever after npm/dev children
-    # exit oddly under -NoNewWindow, which blocks watch-and-refresh's poll loop.
-    $proc = Start-Process -FilePath "powershell.exe" `
-      -ArgumentList $argList `
-      -WorkingDirectory $RepoRoot `
-      -PassThru `
-      -NoNewWindow
-    if (-not $proc) {
+    # Start-Process -PassThru often leaves ExitCode $null after WaitForExit (even with
+    # redirects), which made the watcher false-fail with "exit )". Use raw
+    # System.Diagnostics.Process so ExitCode is reliable. Avoid Start-Process -Wait:
+    # it can hang forever after npm/dev children under -NoNewWindow.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = ($argList | ForEach-Object {
+      if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }) -join ' '
+    $psi.WorkingDirectory = $RepoRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    if (-not $proc.Start()) {
       throw "failed to start refresh-workee.ps1 in $RepoRoot"
     }
+    $outTask = $proc.StandardOutput.ReadToEndAsync()
+    $errTask = $proc.StandardError.ReadToEndAsync()
     $finished = $proc.WaitForExit($timeoutMs)
     if (-not $finished) {
       Stop-WorkeeProcessTree -ProcessId $proc.Id
       Clear-WorkeeRefreshLockForPid -LockPid $proc.Id
       throw "refresh-workee.ps1 timed out after ${timeoutMs}ms in $RepoRoot (killed PID $($proc.Id))"
     }
-    # WaitForExit(timeout) + -NoNewWindow often leaves ExitCode $null briefly even on
-    # success; treating null as failure caused false "failed (exit )" in the watcher.
-    $deadline = (Get-Date).AddSeconds(3)
-    do {
-      $proc.Refresh()
-      if ($null -ne $proc.ExitCode) {
-        break
-      }
-      Start-Sleep -Milliseconds 50
-    } while ((Get-Date) -lt $deadline)
+    try { [void]$outTask.Wait(5000) } catch { }
+    try { [void]$errTask.Wait(5000) } catch { }
+    $outText = if ($outTask.IsCompleted) { $outTask.Result } else { "" }
+    $errText = if ($errTask.IsCompleted) { $errTask.Result } else { "" }
+    Set-Content -LiteralPath $outLog -Value $outText -Encoding UTF8
+    Set-Content -LiteralPath $errLog -Value $errText -Encoding UTF8
   } finally {
     if ($null -eq $prevInherit) {
       Remove-Item Env:WORKEE_REFRESH_INHERIT_CONFIG -ErrorAction SilentlyContinue
@@ -208,12 +219,11 @@ function Invoke-WorkeeRefresh {
       $env:WORKEE_REFRESH_INHERIT_CONFIG = $prevInherit
     }
   }
-  $proc.Refresh()
   $exitCode = $proc.ExitCode
   if ($null -eq $exitCode) {
-    throw "refresh-workee.ps1 finished but ExitCode stayed unset in $RepoRoot (PID $($proc.Id))"
+    throw "refresh-workee.ps1 finished but ExitCode stayed unset in $RepoRoot (PID $($proc.Id); logs $outLog / $errLog)"
   }
   if ($exitCode -ne 0) {
-    throw "refresh-workee.ps1 failed (exit $exitCode) in $RepoRoot"
+    throw "refresh-workee.ps1 failed (exit $exitCode) in $RepoRoot (logs $outLog / $errLog)"
   }
 }
