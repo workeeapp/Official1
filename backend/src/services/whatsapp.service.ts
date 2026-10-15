@@ -34,6 +34,7 @@ import {
   formatWhatsAppReplyContext,
   lookupWhatsAppOutbound,
 } from "./whatsapp-outbound-memory.js";
+import { isExactShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -387,7 +388,10 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       userId: speaker.userId,
       employeeId: speaker.employeeId,
       digitalEmployeeId: digital.id,
-      message: replyToText ? formatWhatsAppReplyContext(replyToText, spoken) : spoken,
+      message:
+        replyToText && !isExactShowButtonCommand(spoken)
+          ? formatWhatsAppReplyContext(replyToText, spoken)
+          : spoken,
       ...(attachments ? { attachments } : {}),
     });
     const handoff =

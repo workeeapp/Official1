@@ -45,3 +45,10 @@ export function formatWhatsAppReplyContext(
   }
   return `[בתשובה להודעה: "${quote}"] ${body}`;
 }
+
+/** Strip `[בתשובה להודעה: "…"] ` prefix when present. */
+export function stripWhatsAppReplyPrefix(message: string): string {
+  const trimmed = message.trim();
+  const match = trimmed.match(/^\[בתשובה להודעה: "[\s\S]*?"\]\s*([\s\S]*)$/);
+  return (match?.[1] ?? trimmed).trim();
+}

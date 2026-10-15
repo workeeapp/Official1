@@ -117,6 +117,11 @@ import {
   setEngineResponse,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
+import {
+  formatShowButtonDump,
+  isExactShowButtonCommand,
+} from "./show-button-dump.js";
+import { stripWhatsAppReplyPrefix } from "./whatsapp-outbound-memory.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
@@ -1321,7 +1326,7 @@ export async function sendChatMessage(input: {
           ? "GUEST MODE: shared-list Q&A only. Never claim you (Lucy) are the guest. Off-topic → «אני יכולה לעזור רק עם הרשימות ששותפו איתך.»"
           : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
         "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
-        "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המטלות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המטלות…» reply if they are not in this turn's JSON. Empty section → one empty sentence; never re-show chat-history-only titles.",
+        "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המטלות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המטלות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump.",
         guestSpeaker
           ? ""
           : "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently (family, לשון פנייה, job…). מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
@@ -2062,6 +2067,17 @@ export async function sendChatMessage(input: {
         workingReply,
         "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",
       );
+    }
+    // Exact «הצג רשימת…» / «הצג תזכורות» button commands → live DB dump (never chat history).
+    const showCommand = stripWhatsAppReplyPrefix(input.message);
+    if (isExactShowButtonCommand(showCommand)) {
+      const liveSnapshot = await withAttachmentRefsSafe(
+        await getEmployeeRecordSnapshot(input.employeeId),
+      );
+      const showDump = formatShowButtonDump(showCommand, liveSnapshot);
+      if (showDump) {
+        workingReply = setEngineResponse(workingReply, showDump);
+      }
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const notice = [
