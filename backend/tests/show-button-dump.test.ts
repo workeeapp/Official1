@@ -3,6 +3,8 @@ import type { EmployeeRecordSnapshot } from "../src/services/employee-records.se
 import {
   formatLinkedReminderParen,
   formatNumberedItem,
+  formatRelativeDayLabel,
+  formatRelativeFireAt,
   formatReminderWhen,
   formatScheduleSuffix,
   formatShoppingTitle,
@@ -177,23 +179,68 @@ describe("formatShowButtonDump", () => {
     expect(formatShoppingTitle({ "שם פריט": "חלב" })).toBe("חלב - 1");
   });
 
+  it("formats relative day labels for near calendar dates", () => {
+    expect(formatRelativeDayLabel("2026-10-15", now)).toBe("היום");
+    expect(formatRelativeDayLabel("2026-10-16", now)).toBe("מחר");
+    expect(formatRelativeDayLabel("2026-10-17", now)).toBe("מחרתיים");
+    expect(formatRelativeDayLabel("2026-10-18", now)).toBe("ראשון");
+    expect(formatRelativeDayLabel("2026-10-21", now)).toBe("רביעי");
+    expect(formatRelativeDayLabel("2026-10-12", now)).toBe("12.10.2026");
+    expect(formatRelativeDayLabel("2026-11-15", now)).toBe("15.11.2026");
+    expect(formatRelativeFireAt("2026-10-17 09:00", now)).toBe(
+      "מחרתיים ב־09:00",
+    );
+    expect(formatRelativeFireAt("2026-10-18 14:30", now)).toBe("ראשון ב־14:30");
+  });
+
   it("formats schedule and linked reminder like status lines", () => {
     expect(
       formatScheduleSuffix(
         { חוזר: "שני ושלישי ב־19:00" },
         "tasks",
+        now,
       ),
     ).toBe("— שני ושלישי ב־19:00 (קבוע)");
     expect(
       formatScheduleSuffix(
+        { "תאריך לביצוע": "2026-10-15", "שעה לביצוע": "19:30" },
+        "tasks",
+        now,
+      ),
+    ).toBe("— היום ב־19:30");
+    expect(
+      formatScheduleSuffix(
+        { "תאריך לביצוע": "2026-10-16", "שעה לביצוע": "09:00" },
+        "tasks",
+        now,
+      ),
+    ).toBe("— מחר ב־09:00");
+    expect(
+      formatScheduleSuffix(
+        { "תאריך לביצוע": "2026-10-17", "שעה לביצוע": "11:00" },
+        "tasks",
+        now,
+      ),
+    ).toBe("— מחרתיים ב־11:00");
+    expect(
+      formatScheduleSuffix(
+        { "תאריך לביצוע": "2026-10-18", "שעה לביצוע": "20:00" },
+        "tasks",
+        now,
+      ),
+    ).toBe("— ראשון ב־20:00");
+    expect(
+      formatScheduleSuffix(
         { "תאריך לביצוע": "2026-10-12", "שעה לביצוע": "19:30" },
         "tasks",
+        now,
       ),
     ).toBe("— 12.10.2026 ב־19:30");
     expect(
       formatScheduleSuffix(
         { "תאריך לביצוע": "2027-05-08", "שעה לביצוע": "13:00" },
         "tasks",
+        now,
       ),
     ).toBe("— 8.5.2027 ב־13:00");
     expect(
@@ -202,6 +249,12 @@ describe("formatShowButtonDump", () => {
         now,
       ),
     ).toBe("(תזכורת: היום ב־20:30)");
+    expect(
+      formatLinkedReminderParen(
+        { reminder: { fire_at: "2026-10-17 09:00", repeat: "none" } },
+        now,
+      ),
+    ).toBe("(תזכורת: מחרתיים ב־09:00)");
     expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-11-15 09:00", repeat: "none" } },
@@ -242,6 +295,18 @@ describe("formatShowButtonDump", () => {
         now,
       ),
     ).toBe("מחר ב־09:00 (כל יום)");
+    expect(
+      formatReminderWhen(
+        { fire_at: "2026-10-17 09:00", repeat: "none" },
+        now,
+      ),
+    ).toBe("מחרתיים ב־09:00");
+    expect(
+      formatReminderWhen(
+        { fire_at: "2026-10-18 14:00", repeat: "none" },
+        now,
+      ),
+    ).toBe("ראשון ב־14:00");
     expect(
       formatReminderWhen(
         { fire_at: "2026-11-15 09:00", repeat: "none" },

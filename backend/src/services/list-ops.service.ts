@@ -40,6 +40,7 @@ export interface ListOpResult {
   /** In-thread + WhatsApp notices for partners (never the actor). */
   notices: Array<{ employeeId: string; text: string }>;
   cancelledReminders: string[];
+  cancelledReminderIds: string[];
 }
 
 const BUILTIN_LABELS: Record<string, string> = {
@@ -92,6 +93,7 @@ async function applyListOp(
     applied: false,
     notices: [],
     cancelledReminders: [],
+    cancelledReminderIds: [],
   };
   if (!list) {
     return { ...base, refusal: { reason: "not_found" } };
@@ -170,8 +172,14 @@ async function deleteList(
   const now = new Date();
 
   // Clock links are read from the live item rows, so cancel before soft-deleting them.
+  const cancelledReminders: string[] = [];
+  const cancelledReminderIds: string[] = [];
   for (const item of list.items) {
-    await cancelReminderLinkedToWorkerItem(item.id);
+    const linked = await cancelReminderLinkedToWorkerItem(item.id);
+    if (linked) {
+      cancelledReminders.push(linked.label);
+      cancelledReminderIds.push(linked.reminderId);
+    }
   }
   await prisma.$transaction(async (tx) => {
     await tx.employeeListItem.updateMany({
@@ -186,7 +194,6 @@ async function deleteList(
     }
   });
 
-  const cancelledReminders: string[] = [];
   for (const item of list.items) {
     const cascade = await cancelActiveRemindersMatchingWork({
       userId: input.userId,
@@ -195,6 +202,7 @@ async function deleteList(
       actorEmployeeId: input.actor.id,
     });
     cancelledReminders.push(...cascade.cancelledReminders);
+    cancelledReminderIds.push(...cascade.cancelledReminderIds);
   }
 
   const label = listLabel(list);
@@ -220,6 +228,7 @@ async function deleteList(
     ...(builtin ? { cleared: true } : {}),
     notices: watcherIds(list, input.actor.id).map((employeeId) => ({ employeeId, text })),
     cancelledReminders,
+    cancelledReminderIds,
   };
 }
 

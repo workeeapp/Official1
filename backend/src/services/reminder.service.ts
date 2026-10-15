@@ -708,9 +708,9 @@ export async function removeReminderAndLinkedWorkerTask(match: {
 
 export async function cancelReminderLinkedToWorkerItem(
   workerItemId: string,
-): Promise<void> {
+): Promise<{ reminderId: string; label: string } | null> {
   if (!prisma.reminder?.findFirst && !prisma.employeeListItem?.findUnique) {
-    return;
+    return null;
   }
   try {
     const item = prisma.employeeListItem?.findUnique
@@ -734,20 +734,29 @@ export async function cancelReminderLinkedToWorkerItem(
       : null;
     const id = clock?.id ?? reminderId;
     if (!id) {
-      return;
+      return null;
     }
     const linkedWorkerId =
       clock && "workerItemId" in clock && typeof clock.workerItemId === "string"
         ? clock.workerItemId
         : workerItemId;
+    const label =
+      (clock &&
+        "itemLabel" in clock &&
+        typeof clock.itemLabel === "string" &&
+        clock.itemLabel.trim()) ||
+      id;
     await removeReminderAndLinkedWorkerTask({
       id,
       workerItemId: linkedWorkerId,
+      label,
     });
+    return { reminderId: id, label };
   } catch (error) {
     if (!isMissingTableError(error)) {
       throw error;
     }
+    return null;
   }
 }
 
@@ -763,6 +772,7 @@ export async function cancelActiveRemindersMatchingWork(input: {
   actorEmployeeId?: string | null;
 }): Promise<{
   cancelledReminders: string[];
+  cancelledReminderIds: string[];
   removedWorkerTasks: Array<{
     id: string;
     itemKey: string;
@@ -771,12 +781,20 @@ export async function cancelActiveRemindersMatchingWork(input: {
   }>;
 }> {
   if (!prisma.reminder?.findMany) {
-    return { cancelledReminders: [], removedWorkerTasks: [] };
+    return {
+      cancelledReminders: [],
+      cancelledReminderIds: [],
+      removedWorkerTasks: [],
+    };
   }
   const wantedKey = itemKey(input.itemKey);
   const wantedLabel = (input.itemLabel ?? input.itemKey).trim();
   if (!wantedKey && !wantedLabel) {
-    return { cancelledReminders: [], removedWorkerTasks: [] };
+    return {
+      cancelledReminders: [],
+      cancelledReminderIds: [],
+      removedWorkerTasks: [],
+    };
   }
   try {
     const rows = await prisma.reminder.findMany({
@@ -791,6 +809,7 @@ export async function cancelActiveRemindersMatchingWork(input: {
           : false),
     );
     const cancelledReminders: string[] = [];
+    const cancelledReminderIds: string[] = [];
     const removedWorkerTasks: Array<{
       id: string;
       itemKey: string;
@@ -811,6 +830,7 @@ export async function cancelActiveRemindersMatchingWork(input: {
         label: match.itemLabel,
       });
       cancelledReminders.push(match.itemLabel);
+      cancelledReminderIds.push(match.id);
       for (const task of removed) {
         if (seenWorker.has(task.id)) {
           continue;
@@ -819,10 +839,14 @@ export async function cancelActiveRemindersMatchingWork(input: {
         removedWorkerTasks.push(task);
       }
     }
-    return { cancelledReminders, removedWorkerTasks };
+    return { cancelledReminders, cancelledReminderIds, removedWorkerTasks };
   } catch (error) {
     if (isMissingTableError(error)) {
-      return { cancelledReminders: [], removedWorkerTasks: [] };
+      return {
+        cancelledReminders: [],
+        cancelledReminderIds: [],
+        removedWorkerTasks: [],
+      };
     }
     throw error;
   }
@@ -1223,6 +1247,8 @@ export async function applyReminders(input: {
   employees: PublicEmployee[];
   reminders: LlmReminderAction[];
   contacts?: SpeakerContact[];
+  /** Reminder ids already cancelled this turn (e.g. list-remove cascade). */
+  alreadyCancelledReminderIds?: Iterable<string>;
 }): Promise<{
   removed: string[];
   missed: string[];
@@ -1244,6 +1270,11 @@ export async function applyReminders(input: {
   changes: ReminderChange[];
 }> {
   const contacts = input.contacts ?? [];
+  const alreadyCancelled = new Set(
+    [...(input.alreadyCancelledReminderIds ?? [])]
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
   const removed: string[] = [];
   const missed: string[] = [];
   const changes: ReminderChange[] = [];
@@ -1283,12 +1314,16 @@ export async function applyReminders(input: {
       );
       if (cancelled) {
         removed.push(cancelled.label);
+        alreadyCancelled.add(reminderId);
         changes.push({
           action: "remove",
           label: cancelled.label,
           fireAt: formatJerusalemDateTime(cancelled.fireAt),
           involvedIds: cancelled.involvedIds,
         });
+      } else if (alreadyCancelled.has(reminderId)) {
+        // Same-turn list cascade already cancelled this clock — not a miss.
+        removed.push(reminder.item.trim() || reminderId);
       } else {
         missed.push(reminder.item.trim() || reminderId);
       }

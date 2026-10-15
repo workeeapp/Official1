@@ -563,6 +563,7 @@ function workerTargetingInstructions(
     "Examples: «כל ראשון, שלישי וחמישי ב־8:00 תזכירי לי לקחת כדור» → {freq:\"weekly\",interval:1,weekdays:[0,2,4],time:\"08:00\"}. «כל 1 לחודש ב־9 לשלם ארנונה» → {freq:\"monthly\",interval:1,month_day:1,time:\"09:00\"}. «כל יום ב־20:00 עד סוף החודש» → {freq:\"daily\",interval:1,time:\"20:00\",until:\"<last day of this month>\"}. «כל יום ב־8 תשלחי לי את המטלות שלי» → compose:true, compose_source:\"saved_data\", ping=speaker, text=«מה המטלות שלי היום», recurrence {freq:\"daily\",interval:1,time:\"08:00\"}.",
     "YEARLY OFFER: when the speaker saves something that repeats by nature every year (יום הולדת, יום נישואין, אזכרה / יום זיכרון, חידוש מנוי שנתי) — you decide by meaning — save what they asked, then OFFER in response: «להוסיף תזכורת כל שנה ב־<day.month>? באיזו שעה? רוצה גם יום לפני?». Nothing yearly is saved before they agree. On כן (+ time) → reminders add {freq:\"yearly\",interval:1,month,month_day,time}, same item and ping. «גם יום לפני» → a second yearly add on the previous calendar day (item e.g. «מחר יום ההולדת של יוסי»). Agreed without a time → ask the time with reminders empty.",
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
+    "Delete a task/shopping row that shows a reminder field («מחקי את 3» after הצג מטלות): lists.remove with that item_id only — the server cancels the linked clock. Do NOT also reminders.remove for the same clock. reminders.remove only when cancelling the clock itself (nudge cancel path above).",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id. A multi-day row (תאריך לביצוע … תאריך סיום) counts for every day in its span.",
     "RANGES IN ANSWERS: a row with שעת סיום (or a standing occurrence with end_time) shows as «10:00–12:00», never only the start. A multi-day row (תאריך לביצוע … תאריך סיום) matches EVERY day inside its span — «מה יש לי ביום רביעי» lists «בחו\"ל (שלישי–חמישי)». Scan spans before «אין לך…».",
@@ -1577,8 +1578,8 @@ export async function sendChatMessage(input: {
     const collectedEvents: SharedItemEvent[] = [];
     const listMutations: ListItemMutation[] = [];
     const filingMutations: FilingMutation[] = [];
-    const cancelledReminders: string[] = listOpResults.flatMap(
-      (row) => row.cancelledReminders,
+    const cancelledReminderIds: string[] = listOpResults.flatMap(
+      (row) => row.cancelledReminderIds,
     );
     for (const application of plan.applications) {
       const applied = await applyEmployeeRecords(
@@ -1590,7 +1591,7 @@ export async function sendChatMessage(input: {
       collectedEvents.push(...applied.events);
       listMutations.push(...applied.mutations);
       filingMutations.push(...applied.filingMutations);
-      cancelledReminders.push(...applied.cancelledReminders);
+      cancelledReminderIds.push(...applied.cancelledReminderIds);
     }
     const customRemoves = metadataForApply.lists.filter(
       (row) => row.action === "remove" && row.listType === "custom",
@@ -1607,7 +1608,7 @@ export async function sendChatMessage(input: {
       });
       collectedEvents.push(...recovered.events);
       listMutations.push(...recovered.mutations);
-      cancelledReminders.push(...recovered.cancelledReminders);
+      cancelledReminderIds.push(...recovered.cancelledReminderIds);
     }
     const guestMutationNotice =
       guestSpeaker &&
@@ -1641,6 +1642,7 @@ export async function sendChatMessage(input: {
       employees: humans,
       reminders: reminderWrites,
       contacts: speakerContacts,
+      alreadyCancelledReminderIds: cancelledReminderIds,
     });
     const directoryResult = guestSpeaker
       ? { saved: [], removed: [] }

@@ -206,7 +206,8 @@ describe("reminder worker link", () => {
     ]);
     itemUpdateMany.mockResolvedValue({ count: 1 });
     reminderUpdate.mockResolvedValue({});
-    await cancelReminderLinkedToWorkerItem("w1");
+    const linked = await cancelReminderLinkedToWorkerItem("w1");
+    expect(linked).toEqual({ reminderId: "r1", label: "r1" });
     expect(itemUpdateMany).toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r1" },

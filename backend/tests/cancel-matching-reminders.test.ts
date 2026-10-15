@@ -60,6 +60,7 @@ describe("cancelActiveRemindersMatchingWork", () => {
     });
 
     expect(cancelled.cancelledReminders).toEqual(["להישקל"]);
+    expect(cancelled.cancelledReminderIds).toEqual(["r-scale"]);
     expect(reminderUpdate).toHaveBeenCalledTimes(1);
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r-scale" },
@@ -86,6 +87,7 @@ describe("cancelActiveRemindersMatchingWork", () => {
 
     expect(cancelled).toEqual({
       cancelledReminders: [],
+      cancelledReminderIds: [],
       removedWorkerTasks: [],
     });
     expect(reminderUpdate).not.toHaveBeenCalled();

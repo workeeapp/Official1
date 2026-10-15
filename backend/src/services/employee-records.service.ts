@@ -1464,6 +1464,7 @@ export async function applyEmployeeRecords(
   mutations: ListItemMutation[];
   filingMutations: FilingMutation[];
   cancelledReminders: string[];
+  cancelledReminderIds: string[];
 }> {
   if (metadata.lists.length === 0 && metadata.filing.length === 0) {
     return {
@@ -1471,6 +1472,7 @@ export async function applyEmployeeRecords(
       mutations: [],
       filingMutations: [],
       cancelledReminders: [],
+      cancelledReminderIds: [],
     };
   }
 
@@ -1484,12 +1486,14 @@ export async function applyEmployeeRecords(
   const mutations: ListItemMutation[] = [];
   const filingMutations: FilingMutation[] = [];
   const cancelledReminders: string[] = [];
+  const cancelledReminderIds: string[] = [];
 
   for (const action of metadata.lists) {
     const result = await applyListAction(employeeId, action, resolved, actor);
     events.push(...result.events);
     mutations.push(...result.mutations);
     cancelledReminders.push(...result.cancelledReminders);
+    cancelledReminderIds.push(...result.cancelledReminderIds);
   }
 
   const filingOwner = await prisma.employee.findUnique({
@@ -1711,7 +1715,13 @@ export async function applyEmployeeRecords(
     }
   }
 
-  return { events, mutations, filingMutations, cancelledReminders };
+  return {
+    events,
+    mutations,
+    filingMutations,
+    cancelledReminders,
+    cancelledReminderIds,
+  };
 }
 
 export async function applyEmployeeMetadata(
@@ -2009,10 +2019,12 @@ async function applyListAction(
   events: SharedItemEvent[];
   mutations: ListItemMutation[];
   cancelledReminders: string[];
+  cancelledReminderIds: string[];
 }> {
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
   const cancelledReminders: string[] = [];
+  const cancelledReminderIds: string[] = [];
   const seenCascadeTaskIds = new Set<string>();
   const accessCache: WorkerAccessCache = {};
   const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
@@ -2172,7 +2184,11 @@ async function applyListAction(
       const targetListName = list.name || listName;
       const removedKey = existing.itemKey;
       const removedTitleField = existing.list?.titleField ?? "";
-      await cancelReminderLinkedToWorkerItem(existing.id);
+      const linked = await cancelReminderLinkedToWorkerItem(existing.id);
+      if (linked) {
+        cancelledReminders.push(linked.label);
+        cancelledReminderIds.push(linked.reminderId);
+      }
       mutations.push({
         action: "remove",
         itemId: existing.id,
@@ -2214,6 +2230,7 @@ async function applyListAction(
           actorEmployeeId: actorId,
         });
         cancelledReminders.push(...cascade.cancelledReminders);
+        cancelledReminderIds.push(...cascade.cancelledReminderIds);
         for (const task of cascade.removedWorkerTasks) {
           if (seenCascadeTaskIds.has(task.id)) {
             continue;
@@ -2589,7 +2606,7 @@ async function applyListAction(
     });
   }
 
-  return { events, mutations, cancelledReminders };
+  return { events, mutations, cancelledReminders, cancelledReminderIds };
 }
 
 const ITEM_ATTACH_KEYS = ["attachment_ids", "attachmentIds"];
@@ -2727,15 +2744,17 @@ export async function removeVisibleCustomItems(input: {
   events: SharedItemEvent[];
   mutations: ListItemMutation[];
   cancelledReminders: string[];
+  cancelledReminderIds: string[];
 }> {
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
   const cancelledReminders: string[] = [];
+  const cancelledReminderIds: string[] = [];
   const removes = input.lists.filter(
     (row) => row.action === "remove" && row.listType === "custom",
   );
   if (removes.length === 0) {
-    return { events, mutations, cancelledReminders };
+    return { events, mutations, cancelledReminders, cancelledReminderIds };
   }
 
   const lists = await prisma.employeeList.findMany({
@@ -2773,7 +2792,11 @@ export async function removeVisibleCustomItems(input: {
         if (mutations.some((row) => row.itemId === existing.id)) {
           continue;
         }
-        await cancelReminderLinkedToWorkerItem(existing.id);
+        const linked = await cancelReminderLinkedToWorkerItem(existing.id);
+        if (linked) {
+          cancelledReminders.push(linked.label);
+          cancelledReminderIds.push(linked.reminderId);
+        }
         await prisma.employeeListItem.update({
           where: { id: existing.id },
           data: { deletedAt: new Date(), reminderId: null },
@@ -2802,6 +2825,7 @@ export async function removeVisibleCustomItems(input: {
             actorEmployeeId: input.actorId,
           });
           cancelledReminders.push(...cascade.cancelledReminders);
+          cancelledReminderIds.push(...cascade.cancelledReminderIds);
         }
         const watchers = uniqueIds([
           ...idList(list.visibleTo),
@@ -2822,7 +2846,7 @@ export async function removeVisibleCustomItems(input: {
     }
   }
 
-  return { events, mutations, cancelledReminders };
+  return { events, mutations, cancelledReminders, cancelledReminderIds };
 }
 
 const ITEM_ID_KEYS = new Set(["item_id", "itemId", "id"]);

@@ -3,7 +3,10 @@
  * Builds the spoken reply from the same live snapshot as EMPLOYEE_SAVED_DATA.
  */
 import { addJerusalemDays } from "@workee/shared";
-import { jerusalemYmd } from "../utils/relative-date.js";
+import {
+  hebrewWeekdayFromYmd,
+  jerusalemYmd,
+} from "../utils/relative-date.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
@@ -384,7 +387,7 @@ export function formatNumberedItem(
     body += ` (${opts.assignedBy})`;
   }
   if (listType === "tasks" || listType === "shopping") {
-    const schedule = formatScheduleSuffix(item, listType);
+    const schedule = formatScheduleSuffix(item, listType, opts?.now);
     if (schedule) {
       body += ` ${schedule}`;
     }
@@ -404,10 +407,11 @@ export function formatNumberedItem(
   return line;
 }
 
-/** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— 12.10.2026 ב־19:30». */
+/** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30». */
 export function formatScheduleSuffix(
   item: Record<string, unknown>,
   listType: string,
+  now = new Date(),
 ): string {
   if (listType !== "tasks") {
     return "";
@@ -422,10 +426,10 @@ export function formatScheduleSuffix(
   const date = readText(item, ["תאריך לביצוע", "date"]);
   const time = readText(item, ["שעה לביצוע", "time", "שעה"]);
   if (date && time) {
-    return `— ${formatDisplayDate(date)} ב־${normalizeHm(time)}`;
+    return `— ${formatRelativeDayLabel(date, now)} ב־${normalizeHm(time)}`;
   }
   if (date) {
-    return `— ${formatDisplayDate(date)}`;
+    return `— ${formatRelativeDayLabel(date, now)}`;
   }
   if (time) {
     return `— ${normalizeHm(time)}`;
@@ -465,20 +469,39 @@ export function formatLinkedReminderParen(
   return when ? `(תזכורת: ${when})` : "";
 }
 
-/** «היום ב־19:00» / «מחר ב־09:00» / «8.5.2027 ב־13:00». */
+/**
+ * Near-calendar labels vs Asia/Jerusalem today:
+ * 0 היום · 1 מחר · 2 מחרתיים · 3–6 weekday · else D.M.YYYY.
+ */
+export function formatRelativeDayLabel(ymd: string, now = new Date()): string {
+  const datePart = ymd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return formatDisplayDate(ymd);
+  }
+  for (let offset = 0; offset <= 6; offset += 1) {
+    const candidate = jerusalemYmd(addJerusalemDays(now, offset));
+    if (candidate !== datePart) {
+      continue;
+    }
+    if (offset === 0) {
+      return "היום";
+    }
+    if (offset === 1) {
+      return "מחר";
+    }
+    if (offset === 2) {
+      return "מחרתיים";
+    }
+    return hebrewWeekdayFromYmd(datePart) ?? formatDisplayDate(datePart);
+  }
+  return formatDisplayDate(datePart);
+}
+
+/** «היום ב־19:00» / «מחרתיים ב־09:00» / «8.5.2027 ב־13:00». */
 export function formatRelativeFireAt(fireAt: string, now: Date): string {
   const datePart = fireAt.slice(0, 10);
   const timePart = fireAt.length >= 16 ? fireAt.slice(11, 16) : "";
-  const today = jerusalemYmd(now);
-  const tomorrow = jerusalemYmd(addJerusalemDays(now, 1));
-  let dayLabel = formatDisplayDate(datePart);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-    if (datePart === today) {
-      dayLabel = "היום";
-    } else if (datePart === tomorrow) {
-      dayLabel = "מחר";
-    }
-  }
+  const dayLabel = formatRelativeDayLabel(datePart, now);
   return timePart ? `${dayLabel} ב־${timePart}` : dayLabel;
 }
 

@@ -111,10 +111,14 @@ describe("list ops", () => {
     itemUpdate.mockReset().mockResolvedValue({});
     itemUpdateMany.mockReset().mockResolvedValue({ count: 0 });
     recordAuditEvent.mockReset();
-    cancelReminderLinkedToWorkerItem.mockReset().mockResolvedValue(undefined);
+    cancelReminderLinkedToWorkerItem.mockReset().mockResolvedValue(null);
     cancelActiveRemindersMatchingWork
       .mockReset()
-      .mockResolvedValue({ cancelledReminders: [], removedWorkerTasks: [] });
+      .mockResolvedValue({
+        cancelledReminders: [],
+        cancelledReminderIds: [],
+        removedWorkerTasks: [],
+      });
   });
 
   it("applies rename, column changes, and the new list name in one alter_list", async () => {
