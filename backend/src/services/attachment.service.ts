@@ -274,7 +274,10 @@ type SnapshotShape = {
   reminders?: Array<{ reminder_id: string }>;
 };
 
-/** Adds `attachments` to saved rows that have files, and `has_attachments` to lists. */
+/**
+ * Adds `attachments` to saved rows that have files.
+ * `has_attachments` is true only when the list itself has files (not item roll-up).
+ */
 export async function withAttachmentRefs<T extends SnapshotShape>(snapshot: T): Promise<T> {
   const itemIdOf = (item: Record<string, unknown>) =>
     typeof item.item_id === "string" ? item.item_id : "";
@@ -301,12 +304,10 @@ export async function withAttachmentRefs<T extends SnapshotShape>(snapshot: T): 
         return own ? { ...item, attachments: own } : item;
       });
       const listRefs = list.list_id ? refs.lists.get(list.list_id) : undefined;
-      const hasAny = Boolean(listRefs) || items.some((item) => "attachments" in item);
       return {
         ...list,
         items,
-        ...(listRefs ? { attachments: listRefs } : {}),
-        ...(hasAny ? { has_attachments: true } : {}),
+        ...(listRefs ? { attachments: listRefs, has_attachments: true } : {}),
       };
     }),
     filing: snapshot.filing.map((row) => {
