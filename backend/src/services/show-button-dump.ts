@@ -768,55 +768,47 @@ const CUSTOM_META_KEYS = new Set([
 ]);
 
 /**
- * Custom list line: title_field value plus every other non-empty column.
- * One extra → «טל — נשוי למיכל»; several → «טל — תיאור: נשוי · עיר: ת״א».
+ * Custom list line: every non-empty column as «מפתח: ערך», joined with ·.
+ * Includes title_field. Example: «שם: טל · תיאור: נשוי למיכל».
  */
 export function formatCustomItemBody(
   item: Record<string, unknown>,
   titleField?: string,
   columns?: string[],
 ): string {
-  const title = itemTitle("custom", item, titleField) || "פריט";
-  const titleKey = (titleField ?? "").trim();
-  const extras: Array<{ key: string; value: string }> = [];
+  const parts: string[] = [];
   const seen = new Set<string>();
 
-  const pushExtra = (key: string, value: unknown) => {
-    if (CUSTOM_META_KEYS.has(key) || key === titleKey || seen.has(key)) {
+  const pushField = (key: string, value: unknown) => {
+    const col = key.trim();
+    if (!col || CUSTOM_META_KEYS.has(col) || seen.has(col)) {
       return;
     }
     if (typeof value !== "string" || !value.trim()) {
       return;
     }
-    const text = value.trim();
-    if (text === title) {
-      return;
-    }
-    seen.add(key);
-    extras.push({ key, value: text });
+    seen.add(col);
+    parts.push(`${col}: ${value.trim()}`);
   };
 
   if (Array.isArray(columns) && columns.length > 0) {
     for (const col of columns) {
-      const key = typeof col === "string" ? col.trim() : "";
-      if (!key) {
+      if (typeof col !== "string") {
         continue;
       }
-      pushExtra(key, item[key]);
+      pushField(col, item[col.trim()]);
     }
   } else {
+    const titleKey = (titleField ?? "").trim();
+    if (titleKey) {
+      pushField(titleKey, item[titleKey]);
+    }
     for (const [key, value] of Object.entries(item)) {
-      pushExtra(key, value);
+      pushField(key, value);
     }
   }
 
-  if (extras.length === 0) {
-    return title;
-  }
-  if (extras.length === 1) {
-    return `${title} — ${extras[0].value}`;
-  }
-  return `${title} — ${extras.map((entry) => `${entry.key}: ${entry.value}`).join(" · ")}`;
+  return parts.length > 0 ? parts.join(" · ") : "פריט";
 }
 
 /** Shopping line body: «אורז - 2» / «עגבניות - 1 ק"ג» (missing כמות → 1). */

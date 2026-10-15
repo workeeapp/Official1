@@ -690,26 +690,26 @@ describe("formatShowButtonDump", () => {
       viewerName: "טל",
     });
     expect(custom).toContain("רשימת «בעיות» 📎:");
-    expect(custom).toContain("1. דליפה");
+    expect(custom).toContain("1. בעיה: דליפה");
   });
 
-  it("dumps custom list rows with non-title columns", () => {
+  it("dumps custom list rows with every column labeled", () => {
     expect(
       formatCustomItemBody(
         { שם: "טל", תיאור: "נשוי למיכל" },
         "שם",
         ["שם", "תיאור"],
       ),
-    ).toBe("טל — נשוי למיכל");
+    ).toBe("שם: טל · תיאור: נשוי למיכל");
     expect(
       formatCustomItemBody(
         { שם: "טל", תיאור: "נשוי למיכל", עיר: "תל אביב" },
         "שם",
         ["שם", "תיאור", "עיר"],
       ),
-    ).toBe("טל — תיאור: נשוי למיכל · עיר: תל אביב");
+    ).toBe("שם: טל · תיאור: נשוי למיכל · עיר: תל אביב");
     expect(formatCustomItemBody({ שם: "טל" }, "שם", ["שם", "תיאור"])).toBe(
-      "טל",
+      "שם: טל",
     );
 
     const snapshot: EmployeeRecordSnapshot = {
@@ -727,6 +727,11 @@ describe("formatShowButtonDump", () => {
               שם: "טל",
               תיאור: "נשוי למיכל",
             },
+            {
+              item_id: "2",
+              שם: "מיכל",
+              תיאור: "נשואה לטל",
+            },
           ],
         },
       ],
@@ -736,7 +741,8 @@ describe("formatShowButtonDump", () => {
       viewerName: "טל",
     });
     expect(text).toContain("רשימת «אני ומיכל»:");
-    expect(text).toContain("1. טל — נשוי למיכל");
+    expect(text).toContain("1. שם: טל · תיאור: נשוי למיכל");
+    expect(text).toContain("2. שם: מיכל · תיאור: נשואה לטל");
   });
 
   it("does not put header 📎 when only items have files", () => {
