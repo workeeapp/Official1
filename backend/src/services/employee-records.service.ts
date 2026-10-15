@@ -506,7 +506,7 @@ export function formatEmployeeContext(
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Status dumps → header «קניות של X» / «מטלות של X» only — FORBIDDEN «משותפת עם …» / «(עם …)» on that header. Custom shared_items: mention when asked what was shared. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
-    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Assignment on the speaker's list → אישיות line «1. חלב (טל)» using assigned_by (not «(עם טל)»). Co-owned / shared-with-me (shared_with, display under משותפות) → «(עם …)». Prefer item shared_with over list shared_with. A scope=personal list can still hold such items.",
+    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Pure one-way assignment has assigned_by and NO shared_with → אישיות «1. חלב (טל)» (not «(עם טל)» / not משותפות). Co-owned / shared-with-me (shared_with present) → משותפות «(עם …)». If both ever appear, assigned_by wins for block placement. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items.",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, append «דחוף» / «דחוף מאוד» on that • line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
@@ -3148,14 +3148,30 @@ export function linkedReminderField(
   };
 }
 
-/** Item-level partners (owner + item visible_to) when the item itself is shared. */
+/**
+ * Item-level partners (owner + item visible_to) when the item itself is shared.
+ * One-way assignment (someone else put the row on the owner's list, and the only
+ * audience is owner + assigner) must not emit shared_with — only assigned_by —
+ * so status/«הצג» place it under אישיות as «חלב (טל)», not משותפות.
+ */
 function itemSharedWithField(
   ownerId: string,
-  item: { scope?: string; visibleTo?: unknown },
+  item: { scope?: string; visibleTo?: unknown; addedById?: string | null },
   names: Map<string, string>,
 ): Record<string, unknown> {
   if (item.scope !== "shared") {
     return {};
+  }
+  const assignerId = item.addedById?.trim() ?? "";
+  if (assignerId && assignerId !== ownerId) {
+    const audience = uniqueIds([ownerId, assignerId, ...idList(item.visibleTo)]);
+    const assignOnly =
+      audience.length === 2 &&
+      audience.includes(ownerId) &&
+      audience.includes(assignerId);
+    if (assignOnly) {
+      return {};
+    }
   }
   const sharedWith = sharedWithNames(ownerId, item.visibleTo, names);
   return sharedWith.length > 1 ? { shared_with: sharedWith } : {};
