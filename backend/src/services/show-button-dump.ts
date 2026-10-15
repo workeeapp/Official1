@@ -108,12 +108,15 @@ function formatResolvedShowDump(
   opts?: ShowDumpOptions,
 ): string | null {
   if (parsed.kind === "reminders") {
-    return formatRemindersDump(snapshot.reminders ?? []);
+    return formatRemindersDump(snapshot.reminders ?? [], opts?.now);
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
 
-function formatRemindersDump(rows: ReminderSnapshotRow[]): string {
+function formatRemindersDump(
+  rows: ReminderSnapshotRow[],
+  now = new Date(),
+): string {
   const active = rows.filter((row) => row.status === "active");
   if (active.length === 0) {
     return "אין לך תזכורות פעילות כרגע.";
@@ -124,12 +127,59 @@ function formatRemindersDump(rows: ReminderSnapshotRow[]): string {
       if (hasAttachments(row)) {
         title += " 📎";
       }
-      const when = row.fire_at?.trim() || "";
-      return when
-        ? `${index + 1}. ${title} — ${when}`
-        : `${index + 1}. ${title}`;
+      const when = formatReminderWhen(row, now);
+      return when ? `${index + 1}. ${title} — ${when}` : `${index + 1}. ${title}`;
     })
     .join("\n");
+}
+
+/**
+ * Next fire + optional short cadence: «היום ב־19:00 (כל יום)» / «8.5.2027 ב־13:00 (כל שנה)».
+ */
+export function formatReminderWhen(
+  row: Pick<ReminderSnapshotRow, "fire_at" | "repeat" | "recurrence_text">,
+  now = new Date(),
+): string {
+  const fireAt = row.fire_at?.trim() || "";
+  const cadence = shortCadenceParen(row.recurrence_text, row.repeat);
+  if (!fireAt) {
+    return cadence.replace(/^\(|\)$/g, "");
+  }
+  const relative = formatRelativeFireAt(fireAt, now);
+  return cadence ? `${relative} ${cadence}` : relative;
+}
+
+/** «(כל יום)» / «(כל שנה)» from recurrence_text — strips time, calendar clause, until, count. */
+export function shortCadenceParen(
+  recurrenceText?: string | null,
+  repeat?: string | null,
+): string {
+  let base = (recurrenceText ?? "").trim();
+  if (!base) {
+    const r = (repeat ?? "").trim().toLowerCase();
+    if (r === "daily") {
+      return "(כל יום)";
+    }
+    if (r === "weekly") {
+      return "(כל שבוע)";
+    }
+    if (r === "monthly") {
+      return "(כל חודש)";
+    }
+    if (r === "hourly") {
+      return "(כל שעה)";
+    }
+    return "";
+  }
+  // Drop trailing clock « ב־19:00» / range « ב־19:00–20:00».
+  base = base.replace(/\s+ב־\d{1,2}:\d{2}(?:–\d{1,2}:\d{2})?/g, "");
+  // Drop yearly calendar « ב־8 במאי» / « ב־12 באוקטובר».
+  base = base.replace(/\s+ב־\d{1,2}\s+ב[\u0590-\u05FF]+/g, "");
+  // Drop until / count tail.
+  base = base.replace(/\s+עד\s+\S+/g, "");
+  base = base.replace(/\s+\(\d+\s+פעמים\)/g, "");
+  base = base.trim();
+  return base ? `(${base})` : "";
 }
 
 function formatListDump(
@@ -383,7 +433,7 @@ export function formatScheduleSuffix(
   return "";
 }
 
-/** «(תזכורת: היום 20:30)» / cadence from recurrence_text. */
+/** «(תזכורת: היום ב־20:30)» — same relative when as reminder dump lines. */
 export function formatLinkedReminderParen(
   item: Record<string, unknown>,
   now = new Date(),
@@ -393,29 +443,30 @@ export function formatLinkedReminderParen(
     return "";
   }
   const reminder = raw as Record<string, unknown>;
+  const fireAt =
+    typeof reminder.fire_at === "string" ? reminder.fire_at.trim() : "";
   const recurrenceText =
     typeof reminder.recurrence_text === "string"
       ? reminder.recurrence_text.trim()
       : "";
   const repeat =
-    typeof reminder.repeat === "string" ? reminder.repeat.trim().toLowerCase() : "";
-  if (
-    recurrenceText &&
-    repeat &&
-    repeat !== "none" &&
-    repeat !== "once"
-  ) {
-    return `(תזכורת: ${recurrenceText})`;
-  }
-  const fireAt =
-    typeof reminder.fire_at === "string" ? reminder.fire_at.trim() : "";
-  if (!fireAt) {
+    typeof reminder.repeat === "string" ? reminder.repeat.trim() : "";
+  if (!fireAt && !recurrenceText && (!repeat || repeat === "none" || repeat === "once")) {
     return "";
   }
-  return `(תזכורת: ${formatRelativeFireAt(fireAt, now)})`;
+  const when = formatReminderWhen(
+    {
+      fire_at: fireAt,
+      repeat,
+      recurrence_text: recurrenceText || undefined,
+    },
+    now,
+  );
+  return when ? `(תזכורת: ${when})` : "";
 }
 
-function formatRelativeFireAt(fireAt: string, now: Date): string {
+/** «היום ב־19:00» / «מחר ב־09:00» / «8.5.2027 ב־13:00». */
+export function formatRelativeFireAt(fireAt: string, now: Date): string {
   const datePart = fireAt.slice(0, 10);
   const timePart = fireAt.length >= 16 ? fireAt.slice(11, 16) : "";
   const today = jerusalemYmd(now);
@@ -428,15 +479,16 @@ function formatRelativeFireAt(fireAt: string, now: Date): string {
       dayLabel = "מחר";
     }
   }
-  return timePart ? `${dayLabel} ${timePart}` : dayLabel;
+  return timePart ? `${dayLabel} ב־${timePart}` : dayLabel;
 }
 
-function formatDisplayDate(ymd: string): string {
+/** Unpadded D.M.YYYY (e.g. 8.5.2027). */
+export function formatDisplayDate(ymd: string): string {
   const match = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) {
     return ymd.trim();
   }
-  return `${match[3]}.${match[2]}.${match[1]}`;
+  return `${Number(match[3])}.${Number(match[2])}.${match[1]}`;
 }
 
 function normalizeHm(time: string): string {

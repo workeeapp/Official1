@@ -3,12 +3,14 @@ import type { EmployeeRecordSnapshot } from "../src/services/employee-records.se
 import {
   formatLinkedReminderParen,
   formatNumberedItem,
+  formatReminderWhen,
   formatScheduleSuffix,
   formatShoppingTitle,
   formatShowButtonDump,
   formatShowDumpFromKind,
   isExactShowButtonCommand,
   parseExactShowButtonCommand,
+  shortCadenceParen,
 } from "../src/services/show-button-dump.js";
 import {
   formatWhatsAppReplyContext,
@@ -189,17 +191,23 @@ describe("formatShowButtonDump", () => {
       ),
     ).toBe("— 12.10.2026 ב־19:30");
     expect(
+      formatScheduleSuffix(
+        { "תאריך לביצוע": "2027-05-08", "שעה לביצוע": "13:00" },
+        "tasks",
+      ),
+    ).toBe("— 8.5.2027 ב־13:00");
+    expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
         now,
       ),
-    ).toBe("(תזכורת: היום 20:30)");
+    ).toBe("(תזכורת: היום ב־20:30)");
     expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-11-15 09:00", repeat: "none" } },
         now,
       ),
-    ).toBe("(תזכורת: 15.11.2026 09:00)");
+    ).toBe("(תזכורת: 15.11.2026 ב־09:00)");
     expect(
       formatNumberedItem(
         1,
@@ -209,6 +217,47 @@ describe("formatShowButtonDump", () => {
         { now },
       ),
     ).toBe("1. ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
+  });
+
+  it("formats reminder dump lines like מה התזכורות שלי", () => {
+    expect(shortCadenceParen("כל יום ב־19:00")).toBe("(כל יום)");
+    expect(shortCadenceParen("כל שנה ב־8 במאי ב־13:00")).toBe("(כל שנה)");
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2026-10-15 19:00",
+          repeat: "daily",
+          recurrence_text: "כל יום ב־19:00",
+        },
+        now,
+      ),
+    ).toBe("היום ב־19:00 (כל יום)");
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2026-10-16 09:00",
+          repeat: "daily",
+          recurrence_text: "כל יום ב־09:00",
+        },
+        now,
+      ),
+    ).toBe("מחר ב־09:00 (כל יום)");
+    expect(
+      formatReminderWhen(
+        { fire_at: "2026-11-15 09:00", repeat: "none" },
+        now,
+      ),
+    ).toBe("15.11.2026 ב־09:00");
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2027-05-08 13:00",
+          repeat: "none",
+          recurrence_text: "כל שנה ב־8 במאי ב־13:00",
+        },
+        now,
+      ),
+    ).toBe("8.5.2027 ב־13:00 (כל שנה)");
   });
 
   it("dumps shopping without soft-deleted rice (not in snapshot)", () => {
@@ -230,11 +279,11 @@ describe("formatShowButtonDump", () => {
       viewerName: "טל",
       now,
     });
-    expect(text).toContain("לבדוק את הבאג הזה (תזכורת: היום 20:30)");
+    expect(text).toContain("לבדוק את הבאג הזה (תזכורת: היום ב־20:30)");
     expect(text).toContain("ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
     expect(text).toContain("חתונה של תום 📎 — 12.10.2026 ב־19:30");
     expect(text).toContain(
-      "לראות מה קורה עם הביט (תזכורת: 15.11.2026 09:00)",
+      "לראות מה קורה עם הביט (תזכורת: 15.11.2026 ב־09:00)",
     );
     expect(text).toContain("(עם עמית)");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
@@ -255,10 +304,11 @@ describe("formatShowButtonDump", () => {
     );
   });
 
-  it("dumps only active reminders", () => {
-    const text = formatShowButtonDump("הצג תזכורות", snapshot);
-    expect(text).toContain("1. לקנות חלב — 2026-10-16 09:00");
+  it("dumps only active reminders with relative when", () => {
+    const text = formatShowButtonDump("הצג תזכורות", snapshot, { now });
+    expect(text).toContain("1. לקנות חלב — מחר ב־09:00");
     expect(text).not.toContain("ישן");
+    expect(text).not.toContain("2026-10-16 09:00");
   });
 
   it("returns null for free-form asks", () => {
