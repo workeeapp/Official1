@@ -1,15 +1,30 @@
 import type { Employee } from "@prisma/client";
 import type {
+  AddressGender,
   DigitalEmployeeDefaults,
   EmployeeInput,
   PublicEmployee,
 } from "@workee/shared";
-import { humanEmployees, parseReasoningEffort } from "@workee/shared";
+import {
+  humanEmployees,
+  parseAddressGender,
+  parseReasoningEffort,
+} from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
 import { ConflictError, NotFoundError } from "../utils/errors.js";
 
 const LUCY_NAME = "לוסי";
+
+function publicAddressGender(
+  kind: "human" | "digital",
+  value: string | null | undefined,
+): AddressGender | null {
+  if (kind !== "human") {
+    return null;
+  }
+  return parseAddressGender(value) ?? null;
+}
 
 export function toPublicEmployee(employee: Employee): PublicEmployee {
   const kind = employee.kind === "digital" ? "digital" : "human";
@@ -27,6 +42,7 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     instructions: employee.instructions,
     protected: employee.isProtected,
     isOwner: kind === "human" ? employee.isOwner : false,
+    addressGender: publicAddressGender(kind, employee.addressGender),
   };
 }
 
@@ -184,8 +200,11 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
       reasoningEffort,
       instructions,
       isOwner: false,
+      addressGender: null,
     };
   }
+
+  const addressGender = parseAddressGender(input.addressGender) ?? null;
 
   return {
     kind: "human" as const,
@@ -199,6 +218,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
     reasoningEffort: null,
     instructions: null,
     isOwner: input.isOwner === true,
+    addressGender,
   };
 }
 

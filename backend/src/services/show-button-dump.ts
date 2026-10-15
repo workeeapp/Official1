@@ -434,7 +434,10 @@ function formatContactsOrCustomDump(
   const listFiles = lists.some((list) => listHasListLevelFiles(list));
   const items = lists.flatMap((list) =>
     list.items.map((item) => ({
-      title: itemTitle(listType, item, list.title_field),
+      title:
+        listType === "custom"
+          ? formatCustomItemBody(item, list.title_field, list.columns)
+          : itemTitle(listType, item, list.title_field),
       item,
     })),
   );
@@ -740,6 +743,80 @@ function listHasListLevelFiles(
 
 function paperclipSuffix(show: boolean): string {
   return show ? " 📎" : "";
+}
+
+const CUSTOM_META_KEYS = new Set([
+  "item_id",
+  "scope",
+  "owner",
+  "urgency",
+  "shared_with",
+  "assigned_by",
+  "attachments",
+  "reminder",
+  "חוזר",
+  "recurrence_text",
+  "תאריך לביצוע",
+  "שעה לביצוע",
+  "תאריך סיום",
+  "שעת סיום",
+  "next_occurrences",
+  "done_dates",
+  "exceptions",
+  "יום בשבוע",
+  "יום בשבוע סיום",
+]);
+
+/**
+ * Custom list line: title_field value plus every other non-empty column.
+ * One extra → «טל — נשוי למיכל»; several → «טל — תיאור: נשוי · עיר: ת״א».
+ */
+export function formatCustomItemBody(
+  item: Record<string, unknown>,
+  titleField?: string,
+  columns?: string[],
+): string {
+  const title = itemTitle("custom", item, titleField) || "פריט";
+  const titleKey = (titleField ?? "").trim();
+  const extras: Array<{ key: string; value: string }> = [];
+  const seen = new Set<string>();
+
+  const pushExtra = (key: string, value: unknown) => {
+    if (CUSTOM_META_KEYS.has(key) || key === titleKey || seen.has(key)) {
+      return;
+    }
+    if (typeof value !== "string" || !value.trim()) {
+      return;
+    }
+    const text = value.trim();
+    if (text === title) {
+      return;
+    }
+    seen.add(key);
+    extras.push({ key, value: text });
+  };
+
+  if (Array.isArray(columns) && columns.length > 0) {
+    for (const col of columns) {
+      const key = typeof col === "string" ? col.trim() : "";
+      if (!key) {
+        continue;
+      }
+      pushExtra(key, item[key]);
+    }
+  } else {
+    for (const [key, value] of Object.entries(item)) {
+      pushExtra(key, value);
+    }
+  }
+
+  if (extras.length === 0) {
+    return title;
+  }
+  if (extras.length === 1) {
+    return `${title} — ${extras[0].value}`;
+  }
+  return `${title} — ${extras.map((entry) => `${entry.key}: ${entry.value}`).join(" · ")}`;
 }
 
 /** Shopping line body: «אורז - 2» / «עגבניות - 1 ק"ג» (missing כמות → 1). */

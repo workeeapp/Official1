@@ -35,6 +35,8 @@ model Employee {
   instructions String?  @db.Text
   isProtected  Boolean  @default(false) @map("is_protected")
   isOwner      Boolean  @default(false) @map("is_owner")
+  /** How Lucy addresses this human in Hebrew: male | female | null (ask once). */
+  addressGender String?  @map("address_gender") @db.VarChar(16)
   createdAt    DateTime @default(now()) @map("created_at")
   user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   chatConversations        ChatConversation[] @relation("ConversationSpeaker")

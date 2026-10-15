@@ -1,5 +1,6 @@
 import {
   hasEmployeeFieldErrors,
+  parseAddressGender,
   parseEmployeeKind,
   parseReasoningEffort,
   validateEmployeeInput,
@@ -41,6 +42,7 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     temperature: record.temperature,
     reasoningEffort: record.reasoningEffort,
     instructions: record.instructions,
+    addressGender: record.addressGender,
   });
 
   if (hasEmployeeFieldErrors(errors)) {
@@ -75,6 +77,7 @@ export function parseEmployeeBody(body: unknown): EmployeeInput {
     email: optionalText(record.email),
     phone: optionalText(record.phone),
     isOwner: record.isOwner === true,
+    addressGender: parseAddressGender(record.addressGender) ?? null,
   };
 }
 

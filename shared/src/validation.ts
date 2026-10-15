@@ -91,6 +91,31 @@ export interface EmployeeFieldErrors {
   temperature?: string;
   reasoningEffort?: string;
   instructions?: string;
+  addressGender?: string;
+}
+
+/** Parse optional address gender; empty/null → null. Invalid non-empty → undefined (caller errors). */
+export function parseAddressGender(
+  value: unknown,
+): "male" | "female" | null | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === "male" || trimmed === "זכר") {
+    return "male";
+  }
+  if (lower === "female" || trimmed === "נקבה") {
+    return "female";
+  }
+  return undefined;
 }
 
 function validatePersonName(value: unknown, label: string): string | undefined {
@@ -138,6 +163,7 @@ export function validateEmployeeInput(input: {
   temperature?: unknown;
   reasoningEffort?: unknown;
   instructions?: unknown;
+  addressGender?: unknown;
 }): EmployeeFieldErrors {
   const errors: EmployeeFieldErrors = {};
   const kind = parseEmployeeKind(input.kind);
@@ -215,6 +241,13 @@ export function validateEmployeeInput(input: {
     }
   }
 
+  if (
+    input.addressGender !== undefined &&
+    parseAddressGender(input.addressGender) === undefined
+  ) {
+    errors.addressGender = "Address gender must be male, female, or empty";
+  }
+
   return errors;
 }
 
@@ -229,7 +262,8 @@ export function hasEmployeeFieldErrors(errors: EmployeeFieldErrors): boolean {
       errors.model ||
       errors.temperature ||
       errors.reasoningEffort ||
-      errors.instructions,
+      errors.instructions ||
+      errors.addressGender,
   );
 }
 

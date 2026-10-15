@@ -32,6 +32,7 @@ import {
   stripRecurrenceMeta,
 } from "./list-recurrence.js";
 import { toPlainJson } from "./llm-client.js";
+import { syncSpeakerAddressGenderFromFiling } from "./speaker-address.js";
 import {
   cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
@@ -1616,6 +1617,12 @@ export async function applyEmployeeRecords(
         itemInfo: action.itemInfo,
         itemDescription: nextDescription,
       });
+      await syncSpeakerAddressGenderFromFiling({
+        employeeId,
+        itemName: nextName,
+        itemInfo: action.itemInfo,
+        itemDescription: nextDescription,
+      });
       if (filingOwner) {
         await recordAuditEvent({
           userId: filingOwner.userId,
@@ -1665,6 +1672,12 @@ export async function applyEmployeeRecords(
           itemInfo: action.itemInfo,
           itemDescription: nextDescription,
         });
+        await syncSpeakerAddressGenderFromFiling({
+          employeeId,
+          itemName,
+          itemInfo: action.itemInfo,
+          itemDescription: nextDescription,
+        });
         if (filingOwner) {
           await recordAuditEvent({
             userId: filingOwner.userId,
@@ -1701,6 +1714,12 @@ export async function applyEmployeeRecords(
         });
         filingMutations.push({
           action: "add",
+          itemName,
+          itemInfo: action.itemInfo,
+          itemDescription,
+        });
+        await syncSpeakerAddressGenderFromFiling({
+          employeeId,
           itemName,
           itemInfo: action.itemInfo,
           itemDescription,

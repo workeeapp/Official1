@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  formatCustomItemBody,
   formatLinkedReminderParen,
   formatNumberedItem,
   formatRelativeDayLabel,
@@ -690,6 +691,52 @@ describe("formatShowButtonDump", () => {
     });
     expect(custom).toContain("רשימת «בעיות» 📎:");
     expect(custom).toContain("1. דליפה");
+  });
+
+  it("dumps custom list rows with non-title columns", () => {
+    expect(
+      formatCustomItemBody(
+        { שם: "טל", תיאור: "נשוי למיכל" },
+        "שם",
+        ["שם", "תיאור"],
+      ),
+    ).toBe("טל — נשוי למיכל");
+    expect(
+      formatCustomItemBody(
+        { שם: "טל", תיאור: "נשוי למיכל", עיר: "תל אביב" },
+        "שם",
+        ["שם", "תיאור", "עיר"],
+      ),
+    ).toBe("טל — תיאור: נשוי למיכל · עיר: תל אביב");
+    expect(formatCustomItemBody({ שם: "טל" }, "שם", ["שם", "תיאור"])).toBe(
+      "טל",
+    );
+
+    const snapshot: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "אני ומיכל",
+          owner: "טל",
+          scope: "shared",
+          columns: ["שם", "תיאור"],
+          title_field: "שם",
+          items: [
+            {
+              item_id: "1",
+              שם: "טל",
+              תיאור: "נשוי למיכל",
+            },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const text = formatShowButtonDump("הצג רשימת אני ומיכל", snapshot, {
+      viewerName: "טל",
+    });
+    expect(text).toContain("רשימת «אני ומיכל»:");
+    expect(text).toContain("1. טל — נשוי למיכל");
   });
 
   it("does not put header 📎 when only items have files", () => {

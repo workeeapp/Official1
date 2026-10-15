@@ -77,6 +77,40 @@ describe("validateEmployeeInput", () => {
     ).toEqual({});
   });
 
+  it("accepts optional addressGender male/female/empty", () => {
+    expect(
+      validateEmployeeInput({
+        name: "Tal",
+        surname: "Cohen",
+        addressGender: "male",
+      }),
+    ).toEqual({});
+    expect(
+      validateEmployeeInput({
+        name: "Michal",
+        surname: "Cohen",
+        addressGender: "female",
+      }),
+    ).toEqual({});
+    expect(
+      validateEmployeeInput({
+        name: "Tal",
+        surname: "Cohen",
+        addressGender: "",
+      }),
+    ).toEqual({});
+  });
+
+  it("rejects invalid addressGender", () => {
+    expect(
+      validateEmployeeInput({
+        name: "Tal",
+        surname: "Cohen",
+        addressGender: "other",
+      }).addressGender,
+    ).toMatch(/male, female/);
+  });
+
   it("rejects an invalid email or phone", () => {
     const errors = validateEmployeeInput({
       name: "Dana",

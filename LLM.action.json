@@ -217,7 +217,7 @@
     "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
     "When they clearly state stable identity/household/work facts, emit add_filing in the same turn. Prefer item_description = item_name when the label is clear; put the spoken detail in item_info. Do NOT only say «אזכור» — without filing metadata nothing is saved.",
     "Examples (item_name → item_info; item_description usually = item_name):",
-    "- Address form / gender: \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", מידע \"זכר — לפנות בלשון זכר\" (same for נקבה). Then use that filing when speaking to them.",
+    "- Address form / gender: follow SPEAKER_ADDRESS every turn. If unknown → ask «לפנות אליך בלשון זכר או נקבה?». \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", מידע \"זכר — לפנות בלשון זכר\" (same for נקבה). Server stores address gender from that filing.",
     "- Family: \"יש לי שני ילדים\" → SAME TURN add_filing שם \"משפחה\", מידע = their words. May ask ages after — never skip filing while only asking. Ages later → update_filing.",
     "- Home address / city: \"אני גר בתל אביב…\" → שם \"כתובת מגורים\" or \"עיר מגורים\", מידע = detail.",
     "- Marital status: \"אני נשוי\" / \"רווק\" → שם \"מצב משפחתי\", מידע = what they said.",

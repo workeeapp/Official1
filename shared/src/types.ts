@@ -36,6 +36,9 @@ export function parseReasoningEffort(value: unknown): ReasoningEffort | null {
     : null;
 }
 
+/** How Lucy addresses a human speaker in Hebrew second person. */
+export type AddressGender = "male" | "female";
+
 export interface PublicEmployee {
   id: string;
   kind?: EmployeeKind;
@@ -50,6 +53,8 @@ export interface PublicEmployee {
   instructions?: string | null;
   protected?: boolean;
   isOwner?: boolean;
+  /** Humans only: male | female | null/undefined when unknown. */
+  addressGender?: AddressGender | null;
 }
 
 export interface EmployeesResponse {
@@ -131,6 +136,8 @@ export interface EmployeeInput {
   reasoningEffort?: ReasoningEffort | null;
   instructions?: string | null;
   isOwner?: boolean;
+  /** Humans only; omit / null = unknown (Lucy asks once). */
+  addressGender?: AddressGender | null;
 }
 
 export interface DigitalEmployeeDefaults {

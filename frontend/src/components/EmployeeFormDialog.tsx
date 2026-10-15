@@ -6,6 +6,7 @@ import {
   parseEmployeeKind,
   parseReasoningEffort,
   validateEmployeeInput,
+  type AddressGender,
   type EmployeeFieldErrors,
   type EmployeeInput,
   type EmployeeKind,
@@ -42,6 +43,11 @@ export function EmployeeFormDialog({
   const [email, setEmail] = useState(employee?.email ?? "");
   const [phone, setPhone] = useState(employee?.phone ?? "");
   const [isOwner, setIsOwner] = useState(employee?.isOwner === true);
+  const [addressGender, setAddressGender] = useState<AddressGender | "">(
+    employee?.addressGender === "male" || employee?.addressGender === "female"
+      ? employee.addressGender
+      : "",
+  );
   const [model, setModel] = useState(employee?.model ?? "");
   const [temperature, setTemperature] = useState(
     employee?.temperature != null ? String(employee.temperature) : "0",
@@ -217,6 +223,7 @@ export function EmployeeFormDialog({
       email: email.trim(),
       phone: phone.trim(),
       isOwner,
+      addressGender: addressGender === "" ? null : addressGender,
     });
   }
 
@@ -463,6 +470,36 @@ export function EmployeeFormDialog({
                   onBlur={() => setTouched((current) => ({ ...current, phone: true }))}
                   onChange={(event) => setPhone(event.target.value)}
                 />
+                <div className="flex w-full flex-col gap-1.5">
+                  <label
+                    htmlFor="employee-address-gender"
+                    className="text-sm font-medium text-text-primary"
+                  >
+                    Address as (Hebrew)
+                  </label>
+                  <select
+                    id="employee-address-gender"
+                    name="employee-address-gender"
+                    value={addressGender}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-text-primary"
+                    onChange={(event) =>
+                      setAddressGender(
+                        event.target.value === "male" ||
+                          event.target.value === "female"
+                          ? event.target.value
+                          : "",
+                      )
+                    }
+                  >
+                    <option value="">Ask Lucy (unknown)</option>
+                    <option value="male">זכר (אתה)</option>
+                    <option value="female">נקבה (את)</option>
+                  </select>
+                  <p className="text-xs text-text-secondary">
+                    How Lucy addresses this person in chat. Leave empty and she
+                    asks once.
+                  </p>
+                </div>
                 <label className="flex items-start gap-2 text-sm text-text-primary">
                   <input
                     type="checkbox"

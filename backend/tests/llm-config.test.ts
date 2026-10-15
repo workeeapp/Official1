@@ -88,6 +88,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("FULL DUMP DETAIL RULE");
     expect(config.systemMessage).toContain("COUNTS ONLY");
     expect(config.systemMessage).toContain("ONLY מטלות enumerate");
+    expect(config.systemMessage).toContain("SHOW MY LISTS / הציגי את הרשימות שלי");
+    expect(config.systemMessage).toContain(
+      "ONLY מטלות enumerate item lines; קניות + רשימות מותאמות",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN enumerating custom rows",
+    );
     expect(config.systemMessage).toContain("לפירוט רשימה: הצג רשימת");
     expect(config.systemMessage).toContain("THREE blocks");
     expect(config.systemMessage).toContain("קניות של עמית");
