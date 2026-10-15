@@ -554,7 +554,24 @@ describe("formatReminderApplyNotice", () => {
         missed: ["חלב"],
         skipped: [],
       }),
-    ).toContain("לא נמצאה תזכורת פעילה");
+    ).toContain("לא נמצאה תזכורת פעילה בשם: חלב");
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: ["44689d29-42f8-4137-8859-7cf8b1352171"],
+        skipped: [],
+      }),
+    ).toBe("לא נמצאה תזכורת פעילה.");
+    expect(
+      formatReminderApplyNotice({
+        removed: [],
+        missed: [
+          "44689d29-42f8-4137-8859-7cf8b1352171",
+          "להוריד את סקאזי",
+        ],
+        skipped: [],
+      }),
+    ).toBe("לא נמצאה תזכורת פעילה בשם: להוריד את סקאזי.");
   });
 });
 

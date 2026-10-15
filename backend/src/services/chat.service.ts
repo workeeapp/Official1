@@ -122,6 +122,7 @@ import {
   formatShowDumpFromKind,
   isExactShowButtonCommand,
 } from "./show-button-dump.js";
+import { stripShowTurnMutates } from "./show-turn-guard.js";
 import { stripWhatsAppReplyPrefix } from "./whatsapp-outbound-memory.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
@@ -1527,6 +1528,11 @@ export async function sendChatMessage(input: {
         directory: [],
       };
     }
+    // Exact «הצג …» / show_dump: display-only — drop spurious removes the model re-emits.
+    metadata = stripShowTurnMutates(
+      stripWhatsAppReplyPrefix(input.message),
+      metadata,
+    );
     const metadataForApply = {
       ...metadata,
       lists: [

@@ -1751,9 +1751,30 @@ export function formatReminderApplyNotice(result: {
     );
   }
   if (result.missed.length > 0) {
-    parts.push(`לא נמצאה תזכורת פעילה בשם: ${result.missed.join(", ")}.`);
+    const labels = result.missed
+      .map((row) => row.trim())
+      .filter((row) => row && !looksLikeOpaqueId(row));
+    parts.push(
+      labels.length > 0
+        ? `לא נמצאה תזכורת פעילה בשם: ${labels.join(", ")}.`
+        : "לא נמצאה תזכורת פעילה.",
+    );
   }
   return parts.join(" ");
+}
+
+/** UUID / opaque engine ids must never appear in user-facing miss text. */
+function looksLikeOpaqueId(value: string): boolean {
+  const trimmed = value.trim();
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  // Compact hex ids (no hyphens) of typical UUID length.
+  return /^[0-9a-f]{32}$/i.test(trimmed);
 }
 
 export async function listReminderRowsForUser(userId: string) {
