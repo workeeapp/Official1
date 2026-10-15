@@ -13,7 +13,7 @@ describe("show-turn-guard", () => {
     expect(isReadOnlyShowTurn("מה התזכורות שלי", "reminders")).toBe(true);
   });
 
-  it("strips mutates on show turns but keeps showDump", () => {
+  it("strips mutates on exact הצג even when lists/reminders are present", () => {
     const meta = {
       ...emptyLlmMetadata(),
       showDump: "reminders",
@@ -46,11 +46,62 @@ describe("show-turn-guard", () => {
     expect(stripped.lists).toEqual([]);
     expect(stripped.reminders).toEqual([]);
     expect(stripped.showDump).toBe("reminders");
+  });
 
-    const kept = stripShowTurnMutates("מחקי 1", {
-      ...meta,
+  it("keeps mutates when showDump is absent", () => {
+    const meta = {
+      ...emptyLlmMetadata(),
       showDump: undefined,
-    });
+      reminders: [
+        {
+          action: "remove" as const,
+          item: "",
+          listType: "tasks" as const,
+          time: "",
+          inSeconds: null,
+          ping: [],
+          targets: [],
+          reminderId: "44689d29-42f8-4137-8859-7cf8b1352171",
+        },
+      ],
+    };
+    const kept = stripShowTurnMutates("מחקי 1", meta);
     expect(kept.reminders).toHaveLength(1);
+  });
+
+  it("prefers mutates over show_dump on delete-by-number turns", () => {
+    const meta = {
+      ...emptyLlmMetadata(),
+      showDump: "tasks",
+      lists: [
+        {
+          action: "remove" as const,
+          listType: "tasks" as const,
+          listName: "",
+          targets: [],
+          items: [{ item_id: "a" }, { item_id: "b" }],
+        },
+      ],
+      reminders: [],
+      directory: [],
+      filing: [],
+      listOps: [],
+    };
+    const result = stripShowTurnMutates("תמחק את 3,4", meta);
+    expect(result.lists).toHaveLength(1);
+    expect(result.lists[0]?.items).toHaveLength(2);
+    expect(result.showDump).toBeUndefined();
+  });
+
+  it("strips mutates when show_dump alone with no mutates", () => {
+    const meta = {
+      ...emptyLlmMetadata(),
+      showDump: "shopping",
+      lists: [],
+      reminders: [],
+    };
+    const result = stripShowTurnMutates("מה יש לי לקנות", meta);
+    expect(result.lists).toEqual([]);
+    expect(result.showDump).toBe("shopping");
   });
 });

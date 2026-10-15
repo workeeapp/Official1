@@ -176,6 +176,7 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("פגישה נוספת בנושא פורים (עמית, טל)");
     expect(config.systemMessage).toContain("DELETE BY DAY");
+    expect(config.systemMessage).toContain("DELETE BY LINE NUMBER");
     expect(config.systemMessage).toContain("תמחקי את הפגישה / המטלה ביום חמישי");
     expect(config.systemMessage).toContain("MUTATE BY ID");
     expect(config.systemMessage).toContain("item_id");
