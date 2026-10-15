@@ -282,6 +282,16 @@ describe("parseLlmReply", () => {
     expect(parsed.navigateAddress).toBe("הרצל 12, תל אביב");
   });
 
+  it("reads show_dump from metadata", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: { lists: [], show_dump: " tasks " },
+      }),
+    );
+    expect(meta.showDump).toBe("tasks");
+  });
+
   it("omits navigate_address when null, empty, or not a string", () => {
     for (const navigate_address of [null, "", "   ", 12]) {
       const parsed = parseLlmReply(

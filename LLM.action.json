@@ -58,7 +58,8 @@
     "    ],",
     "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
     "    \"send_attachments\": [],",
-    "    \"navigate_address\": null",
+    "    \"navigate_address\": null,",
+    "    \"show_dump\": null",
     "  }",
     "}",
     "",
@@ -726,6 +727,11 @@
                 "type": ["string", "null"],
                 "maxLength": 300,
                 "description": "Exactly one physical address mentioned in responses (full, with city) — shown as a Waze navigate button. null when responses mention no address or more than one."
+              },
+              "show_dump": {
+                "type": ["string", "null"],
+                "maxLength": 100,
+                "description": "When the speaker asks to SHOW their shopping/tasks/contacts/reminders/a named custom list (SHAREABLE STATUS ASK / הצג רשימת X / מה יש לי לקנות / מה המטלות שלי / הצג תזכורות free-form): set to shopping | tasks | contacts | reminders | the exact custom list_name. lists/reminders stay empty. The server replaces response with a live DB dump — do not invent item lines. null otherwise. NOT for ABOUT X or bare FULL DUMP (מה יש לי)."
               }
             }
           }

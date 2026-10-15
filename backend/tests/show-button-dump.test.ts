@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  formatLinkedReminderParen,
+  formatNumberedItem,
+  formatScheduleSuffix,
   formatShoppingTitle,
   formatShowButtonDump,
+  formatShowDumpFromKind,
   isExactShowButtonCommand,
   parseExactShowButtonCommand,
 } from "../src/services/show-button-dump.js";
@@ -62,6 +66,55 @@ describe("formatShowButtonDump", () => {
           },
         ],
       },
+      {
+        list_type: "tasks",
+        list_name: "",
+        owner: "טל",
+        scope: "personal",
+        items: [
+          {
+            item_id: "t1",
+            "שם מטלה": "לבדוק את הבאג הזה",
+            reminder: { reminder_id: "r3", fire_at: "2026-10-15 20:30", repeat: "none" },
+          },
+          {
+            item_id: "t2",
+            "שם מטלה": "ללכת לשוק 🍅",
+            חוזר: "שני ושלישי ב־19:00",
+            attachments: [{ id: "a1" }],
+          },
+          {
+            item_id: "t3",
+            "שם מטלה": "חתונה של תום",
+            "תאריך לביצוע": "2026-10-12",
+            "שעה לביצוע": "19:30",
+            attachments: [{ id: "a2" }],
+          },
+          {
+            item_id: "t4",
+            "שם מטלה": "לראות מה קורה עם הביט",
+            reminder: {
+              reminder_id: "r4",
+              fire_at: "2026-11-15 09:00",
+              repeat: "none",
+            },
+          },
+        ],
+      },
+      {
+        list_type: "tasks",
+        list_name: "",
+        owner: "טל",
+        scope: "shared",
+        shared_with: ["טל", "עמית"],
+        items: [
+          {
+            item_id: "t5",
+            "שם מטלה": "פגישה (טל, עמית)",
+            חוזר: "ראשון ורביעי ב־21:30",
+          },
+        ],
+      },
     ],
     filing: [],
     reminders: [
@@ -108,6 +161,8 @@ describe("formatShowButtonDump", () => {
     ],
   };
 
+  const now = new Date("2026-10-15T10:00:00+03:00");
+
   it("dumps shopping with quantity (default 1) and unit", () => {
     expect(formatShoppingTitle({ "שם פריט": "אורז", כמות: 2 })).toBe("אורז - 2");
     expect(
@@ -120,15 +175,84 @@ describe("formatShowButtonDump", () => {
     expect(formatShoppingTitle({ "שם פריט": "חלב" })).toBe("חלב - 1");
   });
 
+  it("formats schedule and linked reminder like status lines", () => {
+    expect(
+      formatScheduleSuffix(
+        { חוזר: "שני ושלישי ב־19:00" },
+        "tasks",
+      ),
+    ).toBe("— שני ושלישי ב־19:00 (קבוע)");
+    expect(
+      formatScheduleSuffix(
+        { "תאריך לביצוע": "2026-10-12", "שעה לביצוע": "19:30" },
+        "tasks",
+      ),
+    ).toBe("— 12.10.2026 ב־19:30");
+    expect(
+      formatLinkedReminderParen(
+        { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
+        now,
+      ),
+    ).toBe("(תזכורת: היום 20:30)");
+    expect(
+      formatLinkedReminderParen(
+        { reminder: { fire_at: "2026-11-15 09:00", repeat: "none" } },
+        now,
+      ),
+    ).toBe("(תזכורת: 15.11.2026 09:00)");
+    expect(
+      formatNumberedItem(
+        1,
+        "ללכת לשוק 🍅",
+        { חוזר: "שני ושלישי ב־19:00", attachments: [{ id: "a" }] },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
+  });
+
   it("dumps shopping without soft-deleted rice (not in snapshot)", () => {
-    const text = formatShowButtonDump("הצג רשימת קניות", snapshot);
+    const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+      viewerName: "טל",
+    });
     expect(text).toContain("ספוג אדום - 1");
     expect(text).toContain("קמח מלא - 2");
     expect(text).toContain('עגבניות - 1 ק"ג');
     expect(text).not.toContain("אורז");
     expect(text).toContain("קניות אישיות:");
     expect(text).toContain("קניות משותפות:");
-    expect(text).toContain("(עם טל, מיכל)");
+    expect(text).toContain("(עם מיכל)");
+    expect(text).not.toContain("(עם טל, מיכל)");
+  });
+
+  it("dumps tasks with schedule, reminder, and partners without viewer", () => {
+    const text = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+      viewerName: "טל",
+      now,
+    });
+    expect(text).toContain("לבדוק את הבאג הזה (תזכורת: היום 20:30)");
+    expect(text).toContain("ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
+    expect(text).toContain("חתונה של תום 📎 — 12.10.2026 ב־19:30");
+    expect(text).toContain(
+      "לראות מה קורה עם הביט (תזכורת: 15.11.2026 09:00)",
+    );
+    expect(text).toContain("(עם עמית)");
+    expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
+  });
+
+  it("dumps from show_dump kind the same as the button command", () => {
+    const fromKind = formatShowDumpFromKind("tasks", snapshot, {
+      viewerName: "טל",
+      now,
+    });
+    const fromButton = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+      viewerName: "טל",
+      now,
+    });
+    expect(fromKind).toBe(fromButton);
+    expect(formatShowDumpFromKind("shopping", snapshot, { viewerName: "טל" })).toBe(
+      formatShowButtonDump("הצג רשימת קניות", snapshot, { viewerName: "טל" }),
+    );
   });
 
   it("dumps only active reminders", () => {

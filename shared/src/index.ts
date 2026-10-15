@@ -77,6 +77,7 @@ export {
   parseReplyMetadata,
   parseReportSections,
   parseReportHistoryKinds,
+  parseShowDump,
   parseTargets,
   llmItemLabel,
   toReplyButtons,

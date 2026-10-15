@@ -276,6 +276,12 @@ export interface LlmMetadata {
   targets?: string[];
   /** Saved files the engine sends to the speaker after the reply. */
   sendAttachments?: string[];
+  /**
+   * Status dump signal: model understood a show/status ask; engine replaces
+   * response with a live DB dump. Values: shopping|tasks|contacts|reminders
+   * or a custom list name (same as «הצג רשימת <name>»).
+   */
+  showDump?: string;
 }
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
@@ -365,6 +371,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const sendAttachments = parseAttachmentIds(
     meta.send_attachments ?? meta.sendAttachments,
   ).slice(0, SEND_ATTACHMENTS_MAX);
+  const showDump = parseShowDump(meta);
   return {
     messages,
     reminders,
@@ -379,7 +386,17 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     listOps,
     filing,
     ...(sendAttachments.length > 0 ? { sendAttachments } : {}),
+    ...(showDump ? { showDump } : {}),
   };
+}
+
+/** metadata.show_dump — category or custom list name for engine status dump. */
+export function parseShowDump(meta: Record<string, unknown>): string {
+  const raw = meta.show_dump ?? meta.showDump;
+  if (typeof raw !== "string") {
+    return "";
+  }
+  return raw.trim().slice(0, 100);
 }
 
 const LIST_OP_ACTIONS = new Set<LlmListOpName>(["alter_list", "delete_list"]);

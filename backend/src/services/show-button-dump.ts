@@ -1,7 +1,9 @@
 /**
- * Engine dump for exact «הצג» button commands only — not free-form status asks.
+ * Engine dump for exact «הצג» button commands and model `show_dump` signals.
  * Builds the spoken reply from the same live snapshot as EMPLOYEE_SAVED_DATA.
  */
+import { addJerusalemDays } from "@workee/shared";
+import { jerusalemYmd } from "../utils/relative-date.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
@@ -13,6 +15,12 @@ const TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
   tasks: ["שם מטלה", "name", "task", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
+};
+
+export type ShowDumpOptions = {
+  /** Current speaker display name — omitted from `(עם …)` partner headers. */
+  viewerName?: string;
+  now?: Date;
 };
 
 /**
@@ -41,18 +49,68 @@ export function isExactShowButtonCommand(text: string): boolean {
   return parseExactShowButtonCommand(text) !== null;
 }
 
+/** Map metadata.show_dump / list Hebrew labels to a dump target. */
+export function resolveShowDumpKind(
+  raw: string,
+): { kind: "reminders" } | { kind: "list"; name: string } | null {
+  const value = raw.trim();
+  if (!value) {
+    return null;
+  }
+  const lower = value.toLowerCase();
+  if (
+    lower === "reminders" ||
+    value === "תזכורות" ||
+    value === SHOW_REMINDERS_COMMAND
+  ) {
+    return { kind: "reminders" };
+  }
+  if (lower === "shopping" || value === "קניות") {
+    return { kind: "list", name: "קניות" };
+  }
+  if (lower === "tasks" || value === "מטלות") {
+    return { kind: "list", name: "מטלות" };
+  }
+  if (lower === "contacts" || value === "אנשי קשר") {
+    return { kind: "list", name: "אנשי קשר" };
+  }
+  return { kind: "list", name: value };
+}
+
 export function formatShowButtonDump(
   command: string,
   snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
 ): string | null {
   const parsed = parseExactShowButtonCommand(command);
   if (!parsed) {
     return null;
   }
+  return formatResolvedShowDump(parsed, snapshot, opts);
+}
+
+/** Dump from model `show_dump` (shopping|tasks|contacts|reminders|custom name). */
+export function formatShowDumpFromKind(
+  kind: string,
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string | null {
+  const resolved = resolveShowDumpKind(kind);
+  if (!resolved) {
+    return null;
+  }
+  return formatResolvedShowDump(resolved, snapshot, opts);
+}
+
+function formatResolvedShowDump(
+  parsed: { kind: "reminders" } | { kind: "list"; name: string },
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string | null {
   if (parsed.kind === "reminders") {
     return formatRemindersDump(snapshot.reminders ?? []);
   }
-  return formatListDump(parsed.name, snapshot);
+  return formatListDump(parsed.name, snapshot, opts);
 }
 
 function formatRemindersDump(rows: ReminderSnapshotRow[]): string {
@@ -77,18 +135,19 @@ function formatRemindersDump(rows: ReminderSnapshotRow[]): string {
 function formatListDump(
   name: string,
   snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
 ): string | null {
   if (name === "קניות") {
-    return formatThreeWayDump("shopping", "קניות", snapshot);
+    return formatThreeWayDump("shopping", "קניות", snapshot, opts);
   }
   if (name === "מטלות") {
-    return formatThreeWayDump("tasks", "מטלות", snapshot);
+    return formatThreeWayDump("tasks", "מטלות", snapshot, opts);
   }
   if (name === "אנשי קשר") {
-    return formatContactsOrCustomDump("contacts", "", snapshot, "אנשי קשר");
+    return formatContactsOrCustomDump("contacts", "", snapshot, "אנשי קשר", opts);
   }
   // Unknown custom name → null so free-form «הצג רשימת … בבקשה» stays model-written.
-  return formatContactsOrCustomDump("custom", name, snapshot, name);
+  return formatContactsOrCustomDump("custom", name, snapshot, name, opts);
 }
 
 type DumpItem = {
@@ -101,11 +160,13 @@ function formatThreeWayDump(
   listType: "shopping" | "tasks",
   label: string,
   snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
 ): string {
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
   const personal: DumpItem[] = [];
   const sharedByPartner = new Map<string, DumpItem[]>();
   const byOwner = new Map<string, DumpItem[]>();
+  const viewer = opts?.viewerName?.trim() ?? "";
 
   for (const list of lists) {
     if (list.scope === "shared_items") {
@@ -121,10 +182,7 @@ function formatThreeWayDump(
     }
 
     if (list.scope === "shared") {
-      const partners = (list.shared_with ?? [])
-        .map((name) => name.trim())
-        .filter(Boolean);
-      const partnerKey = partners.length > 0 ? partners.join(", ") : "משותף";
+      const partnerKey = partnersKey(list.shared_with ?? [], viewer);
       const bucket = sharedByPartner.get(partnerKey) ?? [];
       for (const item of list.items) {
         bucket.push({
@@ -150,7 +208,7 @@ function formatThreeWayDump(
         continue;
       }
       if (sharedWith.length > 0) {
-        const partnerKey = sharedWith.join(", ");
+        const partnerKey = partnersKey(sharedWith, viewer);
         const bucket = sharedByPartner.get(partnerKey) ?? [];
         bucket.push({
           title: itemTitle(listType, item, list.title_field),
@@ -173,8 +231,9 @@ function formatThreeWayDump(
   } else {
     blocks.push(
       ...personal.map((row, i) =>
-        formatNumberedItem(i + 1, row.title, row.item, {
+        formatNumberedItem(i + 1, row.title, row.item, listType, {
           assignedBy: row.partnerLine,
+          now: opts?.now,
         }),
       ),
     );
@@ -192,7 +251,9 @@ function formatThreeWayDump(
       } else {
         blocks.push(
           ...items.map((row, i) =>
-            formatNumberedItem(i + 1, row.title, row.item),
+            formatNumberedItem(i + 1, row.title, row.item, listType, {
+              now: opts?.now,
+            }),
           ),
         );
       }
@@ -207,7 +268,9 @@ function formatThreeWayDump(
     } else {
       blocks.push(
         ...items.map((row, i) =>
-          formatNumberedItem(i + 1, row.title, row.item),
+          formatNumberedItem(i + 1, row.title, row.item, listType, {
+            now: opts?.now,
+          }),
         ),
       );
     }
@@ -221,6 +284,7 @@ function formatContactsOrCustomDump(
   listName: string,
   snapshot: EmployeeRecordSnapshot,
   emptyLabel: string,
+  opts?: ShowDumpOptions,
 ): string | null {
   const lists = snapshot.lists.filter((list) => {
     if (list.list_type !== listType) {
@@ -246,15 +310,21 @@ function formatContactsOrCustomDump(
       : `רשימת «${emptyLabel}» ריקה.`;
   }
   return items
-    .map((row, i) => formatNumberedItem(i + 1, row.title, row.item))
+    .map((row, i) =>
+      formatNumberedItem(i + 1, row.title, row.item, listType, {
+        now: opts?.now,
+      }),
+    )
     .join("\n");
 }
 
-function formatNumberedItem(
+/** Exported for unit tests. */
+export function formatNumberedItem(
   n: number,
   title: string,
   item: Record<string, unknown>,
-  opts?: { assignedBy?: string },
+  listType: string,
+  opts?: { assignedBy?: string; now?: Date },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
@@ -262,6 +332,16 @@ function formatNumberedItem(
   }
   if (opts?.assignedBy) {
     body += ` (${opts.assignedBy})`;
+  }
+  if (listType === "tasks" || listType === "shopping") {
+    const schedule = formatScheduleSuffix(item, listType);
+    if (schedule) {
+      body += ` ${schedule}`;
+    }
+  }
+  const reminder = formatLinkedReminderParen(item, opts?.now);
+  if (reminder) {
+    body += ` ${reminder}`;
   }
   let line = `${n}. ${body}`;
   const urgency = item.urgency;
@@ -274,6 +354,107 @@ function formatNumberedItem(
   return line;
 }
 
+/** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— 12.10.2026 ב־19:30». */
+export function formatScheduleSuffix(
+  item: Record<string, unknown>,
+  listType: string,
+): string {
+  if (listType !== "tasks") {
+    return "";
+  }
+  const recurring = readText(item, ["חוזר", "recurrence_text"]);
+  if (recurring) {
+    const withMark = /קבוע/.test(recurring)
+      ? recurring
+      : `${recurring} (קבוע)`;
+    return `— ${withMark}`;
+  }
+  const date = readText(item, ["תאריך לביצוע", "date"]);
+  const time = readText(item, ["שעה לביצוע", "time", "שעה"]);
+  if (date && time) {
+    return `— ${formatDisplayDate(date)} ב־${normalizeHm(time)}`;
+  }
+  if (date) {
+    return `— ${formatDisplayDate(date)}`;
+  }
+  if (time) {
+    return `— ${normalizeHm(time)}`;
+  }
+  return "";
+}
+
+/** «(תזכורת: היום 20:30)» / cadence from recurrence_text. */
+export function formatLinkedReminderParen(
+  item: Record<string, unknown>,
+  now = new Date(),
+): string {
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "";
+  }
+  const reminder = raw as Record<string, unknown>;
+  const recurrenceText =
+    typeof reminder.recurrence_text === "string"
+      ? reminder.recurrence_text.trim()
+      : "";
+  const repeat =
+    typeof reminder.repeat === "string" ? reminder.repeat.trim().toLowerCase() : "";
+  if (
+    recurrenceText &&
+    repeat &&
+    repeat !== "none" &&
+    repeat !== "once"
+  ) {
+    return `(תזכורת: ${recurrenceText})`;
+  }
+  const fireAt =
+    typeof reminder.fire_at === "string" ? reminder.fire_at.trim() : "";
+  if (!fireAt) {
+    return "";
+  }
+  return `(תזכורת: ${formatRelativeFireAt(fireAt, now)})`;
+}
+
+function formatRelativeFireAt(fireAt: string, now: Date): string {
+  const datePart = fireAt.slice(0, 10);
+  const timePart = fireAt.length >= 16 ? fireAt.slice(11, 16) : "";
+  const today = jerusalemYmd(now);
+  const tomorrow = jerusalemYmd(addJerusalemDays(now, 1));
+  let dayLabel = formatDisplayDate(datePart);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    if (datePart === today) {
+      dayLabel = "היום";
+    } else if (datePart === tomorrow) {
+      dayLabel = "מחר";
+    }
+  }
+  return timePart ? `${dayLabel} ${timePart}` : dayLabel;
+}
+
+function formatDisplayDate(ymd: string): string {
+  const match = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return ymd.trim();
+  }
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
+function normalizeHm(time: string): string {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return time.trim();
+  }
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function partnersKey(names: string[], viewerName: string): string {
+  const partners = names
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .filter((name) => !viewerName || name !== viewerName);
+  return partners.length > 0 ? partners.join(", ") : "משותף";
+}
+
 /** Shopping line body: «אורז - 2» / «עגבניות - 1 ק"ג» (missing כמות → 1). */
 export function formatShoppingTitle(item: Record<string, unknown>): string {
   const name =
@@ -284,7 +465,9 @@ export function formatShoppingTitle(item: Record<string, unknown>): string {
   const qty =
     typeof qtyRaw === "number" && Number.isFinite(qtyRaw)
       ? qtyRaw
-      : typeof qtyRaw === "string" && qtyRaw.trim() !== "" && Number.isFinite(Number(qtyRaw))
+      : typeof qtyRaw === "string" &&
+          qtyRaw.trim() !== "" &&
+          Number.isFinite(Number(qtyRaw))
         ? Number(qtyRaw)
         : 1;
   const unit = readText(item, ["יחידת מידה", "unit", "יחידה"]);
@@ -326,7 +509,10 @@ function itemTitle(
         key === "shared_with" ||
         key === "assigned_by" ||
         key === "attachments" ||
-        key === "reminder"
+        key === "reminder" ||
+        key === "חוזר" ||
+        key === "תאריך לביצוע" ||
+        key === "שעה לביצוע"
       ) {
         continue;
       }
