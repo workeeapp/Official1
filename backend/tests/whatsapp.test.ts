@@ -292,6 +292,7 @@ describe("WhatsApp webhook", () => {
     expect(toWhatsAppFormatting("ראיתי גם וה«משימה»ות")).toBe("ראיתי גם *והמשימהות*");
     expect(toWhatsAppFormatting("ב«בית», ש«שם»!")).toBe("*בבית*, *ששם*!");
     expect(toWhatsAppFormatting("(«חלב»)")).toBe("(*חלב*)");
+    expect(toWhatsAppFormatting("«1. לשתות מים» ‼️")).toBe("*1. לשתות מים* ‼️");
     expect(toWhatsAppFormatting("«לא סגור\nשורה»")).toBe("«לא סגור\nשורה»");
     expect(toWhatsAppFormatting("«»")).toBe("«»");
     expect(

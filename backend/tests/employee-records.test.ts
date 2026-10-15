@@ -2337,7 +2337,9 @@ describe("employee records", () => {
 
     const context = formatEmployeeContext(snapshot);
     expect(context).toContain('"urgency":"urgent"');
-    expect(context).toContain("«דחוף»");
+    expect(context).toContain("wrap that whole numbered line");
+    expect(context).toContain("‼️");
+    expect(context).not.toContain("«דחוף»");
   });
 
   it("derives list_name from שם הרשימה when the list row name is empty", async () => {

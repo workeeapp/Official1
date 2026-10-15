@@ -13,6 +13,7 @@ import {
   formatDurationMs,
   sortChatMessages,
 } from "./chatTime";
+import { renderChatText } from "./formatChatText";
 
 export function ChatPage() {
   const { tableEmployees, digitalEmployees, status } = useEmployees();
@@ -298,7 +299,7 @@ export function ChatPage() {
                     }`}
                   >
                     <span className="block whitespace-pre-wrap" dir="auto">
-                      {message.text}
+                      {renderChatText(message.text)}
                     </span>
                     {time ||
                     message.llmMs != null ||

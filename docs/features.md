@@ -90,7 +90,7 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 
 - ACTION: `lists[].items[].urgency` (keep the title clean — no «דחוף» inside the name).
 - Stored on `EmployeeListItems.urgency`; `EMPLOYEE_SAVED_DATA` shows `urgency` only when not `normal`.
-- Listing in `response`: append «דחוף» / «דחוף מאוד» on that numbered line. «מה יש לי דחוף» → only those rows.
+- Listing in `response`: wrap the whole numbered line in «…» so it is bold (`urgent`). `very_urgent` adds ‼️ after the closing guillemet. Do not write דחוף / דחוף מאוד on the line. «מה יש לי דחוף» → only those rows.
 - Status / «הצג רשימת…» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, `WORKER_SAVED_DATA`, `OPEN_JOBS`, …); chat history must not resurrect soft-deleted rows.
 - **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category. Shopping|tasks use **three** blocks — **אישיות** (incl. one-way assignments as `חלב (טל)` via `assigned_by`) → **משותפות** co-owned/shared items with `(עם X)` → **`קניות/מטלות של <owner>`** for `scope=shared_items` (assigner outbound; never «משותפת עם»). Filings keep אישיים→משותפים. Items numbered `1. 2. 3.` restarting per block.
 - **Assign vs co-share:** «עמית צריך לקנות חלב» → `targets: [עמית]` only; assignee sees אישיות `(טל)` via `assigned_by` (snapshot omits `shared_with` when the only audience is owner+assigner); assigner sees **קניות של עמית** (not משותפת עם טל). «אני ועמית» / פגישה / שתפי פריט → משותפות for both.
