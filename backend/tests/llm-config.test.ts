@@ -184,7 +184,14 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("פגישה נוספת בנושא פורים (עמית, טל)");
     expect(config.systemMessage).toContain("DELETE BY DAY");
-    expect(config.systemMessage).toContain("DELETE BY LINE NUMBER");
+    expect(config.systemMessage).toContain("BY LINE NUMBER (critical)");
+    expect(config.systemMessage).toContain(
+      "whatever ACTION the speaker asked for",
+    );
+    expect(config.systemMessage).toContain("תשלחי את 3 ל…");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN treating it as 03:00 vs 15:00",
+    );
     expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
     expect(config.systemMessage).toContain(
       "רוצה שאשלח לך תזכורת בוואטסאפ כל 3 ימים ב־12:00?",
