@@ -111,6 +111,7 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
   |------|------|------|
   | One-way assign («עמית צריך לקנות חלב») | `assigned_by`, no co-share `shared_with` | **אישיות** — `חלב (טל)` / `חלב (עמית)` — name **without** «עם» |
   | Item share on personal list («שתפי» / «אני ועמית») | personal list + item `shared_with` | **אישיות** — `קפה (עם עמית)` — **with** «עם» on the line |
+  | Meeting with participants in the title | personal list + `shared_with` + `פגישה (טל, מיכל)` | **אישיות** — title only; **no** extra `(עם מיכל)` (partners already in the name) |
   | Whole shared list | list `scope=shared` + list `shared_with` | **משותפות** — partner header `(עם מיכל)`, then items |
   | Assigner outbound | `scope=shared_items` | **קניות/מטלות של X** (never «משותפת עם») |
 

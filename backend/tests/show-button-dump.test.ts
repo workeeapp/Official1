@@ -15,6 +15,7 @@ import {
   parseExactShowButtonCommand,
   partnersKey,
   shortCadenceParen,
+  titleAlreadyListsPartners,
 } from "../src/services/show-button-dump.js";
 import {
   formatWhatsAppReplyContext,
@@ -506,9 +507,9 @@ describe("formatShowButtonDump", () => {
     })!;
     expect(tasks).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
     expect(tasks).toContain("לבדוק שמן (עמית)");
-    expect(tasks).toMatch(
-      /מטלות אישיות:[\s\S]*פגישה \(טל, עמית\) \(עם עמית\)/,
-    );
+    // Meeting title already lists partners — no redundant «(עם עמית)».
+    expect(tasks).toMatch(/מטלות אישיות:[\s\S]*פגישה \(טל, עמית\)/);
+    expect(tasks).not.toMatch(/פגישה \(טל, עמית\) \(עם/);
     expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*פגישה/);
     expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*לבדוק שמן/);
     expect(tasks).toContain("מטלות של עמית:");
@@ -709,6 +710,16 @@ describe("formatShowButtonDump", () => {
 
   it("does not override for unknown custom names", () => {
     expect(formatShowButtonDump("הצג רשימת בעיות", snapshot)).toBeNull();
+  });
+
+  it("titleAlreadyListsPartners detects meeting-style titles", () => {
+    expect(titleAlreadyListsPartners("פגישה (טל, עמית)", "עמית")).toBe(true);
+    expect(titleAlreadyListsPartners("פגישה (טל, מיכל)", "מיכל")).toBe(true);
+    expect(titleAlreadyListsPartners("קפה", "מיכל")).toBe(false);
+    expect(titleAlreadyListsPartners("פגישה", "עמית")).toBe(false);
+    expect(
+      titleAlreadyListsPartners("פגישת עבודה (עמית, ערן)", "עמית, ערן"),
+    ).toBe(true);
   });
 
   it("normalizeShowListName strips polite and builtin section suffixes", () => {

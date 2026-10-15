@@ -317,10 +317,15 @@ function formatThreeWayDump(
       }
       if (sharedWith.length > 0) {
         const partnerKey = partnersKey(sharedWith, viewer, aliases);
+        // Meetings already name partners in the title («פגישה (טל, מיכל)») —
+        // skip redundant «(עם מיכל)» on the dump line.
+        const showShareMark =
+          Boolean(partnerKey) &&
+          !titleAlreadyListsPartners(title, partnerKey);
         personal.push({
           title,
           item,
-          ...(partnerKey ? { sharedWithLabel: partnerKey } : {}),
+          ...(showShareMark ? { sharedWithLabel: partnerKey } : {}),
         });
         continue;
       }
@@ -448,9 +453,13 @@ export function formatNumberedItem(
   }
   // Assign vs co-share marks: «(Name)» = assigned_by; «(עם Name)» = shared_with.
   // Prefer assignedBy when both are set (matches block-placement rule).
+  // Skip «(עם …)» when the title already lists those partners (meetings).
   if (opts?.assignedBy) {
     body += ` (${opts.assignedBy})`;
-  } else if (opts?.sharedWithLabel) {
+  } else if (
+    opts?.sharedWithLabel &&
+    !titleAlreadyListsPartners(body, opts.sharedWithLabel)
+  ) {
     body += ` (עם ${opts.sharedWithLabel})`;
   }
   const standing =
@@ -606,6 +615,29 @@ function normalizeHm(time: string): string {
     return time.trim();
   }
   return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+/**
+ * True when the item title already enumerates co-share partners inside `(…)`,
+ * e.g. «פגישה (טל, עמית)» — so the dump must not also append «(עם עמית)».
+ */
+export function titleAlreadyListsPartners(
+  title: string,
+  partnerKey: string,
+): boolean {
+  const partners = partnerKey
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0 && name !== "משותף");
+  if (partners.length === 0) {
+    return false;
+  }
+  const groups = [...title.matchAll(/\(([^)]+)\)/g)].map((match) => match[1]);
+  if (groups.length === 0) {
+    return false;
+  }
+  const haystack = groups.join(" , ");
+  return partners.every((name) => haystack.includes(name));
 }
 
 /**

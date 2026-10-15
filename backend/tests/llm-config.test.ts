@@ -153,6 +153,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN lists.add (or inventing) any shopping/tasks product wrapper",
     );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN also appending «(עם מיכל)» on the same line",
+    );
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
