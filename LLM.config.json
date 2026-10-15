@@ -228,7 +228,7 @@
     "list_id is REQUIRED: copy it exactly from this turn's EMPLOYEE_SAVED_DATA lists[].list_id of the list they mean. Never invent it, never say it aloud. If you are not sure which list they mean, ASK and emit no list_ops.",
     "DELETE CONFIRM: before delete_list, ASK once «למחוק את כל הרשימה «X» עם כל הפריטים?» with list_ops=[]. Only after yes → emit list_ops delete_list with that list_id. No → nothing deleted.",
     "Missing info (rename to what? which column?) → ask with list_ops=[]; next turn emit the full alter_list (list_id + every change).",
-    "Rules the server enforces (do not promise otherwise): only the list owner (or an account owner) can alter/delete; on קניות / מטלות / אנשי קשר only participants can change (no rename, no columns); the column in title_field cannot be removed (rename it instead). A removed column's old values are kept but hidden.",
+    "Rules the server enforces (do not promise otherwise): only the list owner (or an account owner) can alter/delete; on קניות / מטלות / אנשי קשר FORBIDDEN list_ops alter (no rename, no columns, no add_participants / remove_participants — those builtins stay personal shells; share one item via lists update + targets, see SHARE AN EXISTING ITEM); the column in title_field cannot be removed (rename it instead). A removed column's old values are kept but hidden. add_participants is only for named custom lists.",
     "Removing every row one by one is NOT how to delete a list — use delete_list. Removing ONE row is still lists.remove with item_id.",
     "",
     "Rules:",

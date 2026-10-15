@@ -247,7 +247,11 @@ async function alterList(
   if (!structural && op.addParticipants.length === 0 && op.removeParticipants.length === 0) {
     throw new ListOpRefused("empty");
   }
-  if (structural && list.listType !== "custom") {
+  const builtin = list.listType !== "custom";
+  const participantsOnly =
+    op.addParticipants.length > 0 || op.removeParticipants.length > 0;
+  // Builtins (קניות/מטלות/אנשי קשר) stay personal shells — share is item-level via lists, not whole-list scope=shared.
+  if (builtin && (structural || participantsOnly)) {
     throw new ListOpRefused("builtin");
   }
 
@@ -463,7 +467,7 @@ const REFUSAL_TEXT: Record<ListOpRefusalReason, (detail: string, label: string) 
   not_owner: (_detail, label) =>
     `רק הבעלים של הרשימה${label ? ` «${label}»` : ""} יכול לשנות או למחוק אותה.`,
   builtin: (_detail, label) =>
-    `ברשימת «${label}» אפשר לשנות רק את השיתוף — לא שם ולא עמודות.`,
+    `ברשימת «${label}» אי אפשר לשנות שם, עמודות או שיתוף רשימה שלם — שתפי פריט בודד דרך המטלות/קניות.`,
   empty: () => "לא ציינת מה לשנות ברשימה.",
   name_taken: (detail) => `כבר יש רשימה בשם «${detail}».`,
   unknown_column: (detail, label) => `אין ברשימה «${label}» עמודה בשם «${detail}».`,

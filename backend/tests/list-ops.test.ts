@@ -207,7 +207,7 @@ describe("list ops", () => {
     expect(listUpdate).not.toHaveBeenCalled();
   });
 
-  it("allows only participant changes on a built-in list", async () => {
+  it("refuses rename and participant changes on a built-in list", async () => {
     listFindFirst.mockResolvedValue(
       bugsList({ listType: "shopping", name: "", titleField: "", columns: [] }),
     );
@@ -215,8 +215,13 @@ describe("list ops", () => {
     const [renamed] = await run([op({ newName: "סופר" })]);
     expect(renamed.refusal?.reason).toBe("builtin");
 
-    const [shared] = await run([op({ removeParticipants: ["טל"] })]);
-    expect(shared.applied).toBe(true);
+    const [shared] = await run([op({ addParticipants: ["טל"] })]);
+    expect(shared.refusal?.reason).toBe("builtin");
+    expect(shared.applied).toBe(false);
+    expect(listUpdate).not.toHaveBeenCalled();
+
+    const [removed] = await run([op({ removeParticipants: ["טל"] })]);
+    expect(removed.refusal?.reason).toBe("builtin");
   });
 
   it("removes a participant from the list and from its rows", async () => {

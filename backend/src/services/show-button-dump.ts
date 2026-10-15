@@ -271,7 +271,8 @@ function formatThreeWayDump(
       const assignedBy =
         typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
       const sharedWith = stringArray(item.shared_with);
-      if (assignedBy && sharedWith.length === 0) {
+      // assigned_by wins for block placement (אישיות) even if shared_with is also present.
+      if (assignedBy) {
         personal.push({
           title: itemTitle(listType, item, list.title_field),
           item,

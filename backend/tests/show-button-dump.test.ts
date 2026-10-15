@@ -418,6 +418,97 @@ describe("formatShowButtonDump", () => {
     expect(text).not.toContain("(עם טל, מיכל)");
   });
 
+  it("three-way: one-way assign under אישיות; שתפי on personal under משותפות; shared_items under של X", () => {
+    const threeWay: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", "שם פריט": "לחם", כמות: 1 },
+            {
+              item_id: "a1",
+              "שם פריט": "חלב",
+              כמות: 1,
+              assigned_by: "עמית",
+            },
+            {
+              item_id: "s1",
+              "שם פריט": "קפה",
+              כמות: 1,
+              shared_with: ["טל", "מיכל"],
+            },
+            {
+              item_id: "both",
+              "שם פריט": "ביצים",
+              כמות: 1,
+              assigned_by: "עמית",
+              shared_with: ["טל", "עמית", "מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "מיכל",
+          scope: "shared_items",
+          items: [{ item_id: "out1", "שם פריט": "שמן", כמות: 1 }],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "tp1", "שם מטלה": "לטפל בעמידר" },
+            {
+              item_id: "ta1",
+              "שם מטלה": "לבדוק שמן",
+              assigned_by: "עמית",
+            },
+            {
+              item_id: "ts1",
+              "שם מטלה": "פגישה (טל, עמית)",
+              shared_with: ["טל", "עמית"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "עמית",
+          scope: "shared_items",
+          items: [{ item_id: "tout1", "שם מטלה": "לעשות טסט לרכב" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    const shopping = formatShowButtonDump("הצג רשימת קניות", threeWay, {
+      viewerName: "טל",
+    })!;
+    expect(shopping).toMatch(/קניות אישיות:[\s\S]*1\. לחם - 1/);
+    expect(shopping).toContain("חלב - 1 (עמית)");
+    expect(shopping).toContain("ביצים - 1 (עמית)");
+    expect(shopping).toMatch(/קניות משותפות:[\s\S]*\(עם מיכל\)[\s\S]*קפה - 1/);
+    expect(shopping).not.toMatch(/קניות משותפות:[\s\S]*חלב/);
+    expect(shopping).toContain("קניות של מיכל:");
+    expect(shopping).toContain("שמן - 1");
+    expect(shopping).not.toMatch(/קניות של מיכל:[\s\S]*\(עם/);
+
+    const tasks = formatShowButtonDump("הצג רשימת מטלות", threeWay, {
+      viewerName: "טל",
+    })!;
+    expect(tasks).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
+    expect(tasks).toContain("לבדוק שמן (עמית)");
+    expect(tasks).toMatch(/מטלות משותפות:[\s\S]*\(עם עמית\)[\s\S]*פגישה \(טל, עמית\)/);
+    expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*לבדוק שמן/);
+    expect(tasks).toContain("מטלות של עמית:");
+    expect(tasks).toContain("לעשות טסט לרכב");
+  });
+
   it("drops viewer from (עם …) via aliases when viewerName mismatches", () => {
     const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
       viewerName: "טלי",
