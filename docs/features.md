@@ -23,6 +23,10 @@ Architecture rules: `.cursor/rules/architecture.mdc`, `.cursor/rules/model-under
 
 **Standing vs WhatsApp ping:** a standing chore with a time is calendar work on מטלות (`חוזר` / `(קבוע)`). A WhatsApp reminder clock is separate — either they said «תזכירי לי» (self-nudge now), or after a standing save **with** `recurrence.time` Lucy offers «רוצה שאשלח לך תזכורת בוואטסאפ…?» and only on כן emits `reminders` + her `להזכיר` task. On dumps, standing + linked clock folds into `(קבוע + תזכורת)` (no second `(תזכורת: …)` on that line); non-standing linked items still use `(תזכורת: …)`. `הצג תזכורות` keeps next-fire + cadence. All-day standing (no time) gets no clock offer.
 
+**Clock vs standing time edits:** updating only the WhatsApp clock (`reminders.update`) must not change the speaker standing `חוזר` — the engine syncs Lucy’s `להזכיר` worker task to the new fire time, not the soft-linked standing row. Moving a standing series that already has a linked clock → model asks «לעדכן גם את תזכורת הוואטסאפ בהתאם?» before cascading. After any reminder mutate, the engine ensures an `הצג תזכורות` reply button even if the model omitted `metadata.buttons`.
+
+**Cancel / delete after a ping (standing + linked clock):** «בטל את המטלה» after a WhatsApp nudge is ambiguous — Lucy must **ASK** «למחוק את המטלה הקבועה «…» (וגם את תזכורות הוואטסאפ), או רק להפסיק את התזכורות?» (empty actions while asking). Confirm delete standing → `lists.remove` that speaker `item_id` only; the engine cancels the linked clock (`linkedReminderId` / worker FK) and soft-deletes Lucy’s `להזכיר`. Reminders-only → `reminders.remove`; standing stays. Explicit «תמחקי את המטלה הקבועה» / «בטלי את התזכורת» skip the ask. **FORBIDDEN:** removing only the worker `להזכיר` / נדנוד job while the standing chore remains (that produced «ביטלתי את המטלה לנדנד…» without deleting the real task).
+
 **Tests:** `shared/src/recurrence.test.ts`, `shared/src/jerusalem-time.test.ts`, `backend/tests/recurrence.test.ts`, `backend/tests/reminder-recurrence-apply.test.ts`, `backend/tests/reminder-fire.test.ts`.
 
 **Deep dive:** [docs/recurrence.md](./recurrence.md).
@@ -94,15 +98,40 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 - Stored on `EmployeeListItems.urgency`; `EMPLOYEE_SAVED_DATA` shows `urgency` only when not `normal`.
 - Listing in `response`: wrap the whole numbered line in «…» so it is bold (`urgent`). `very_urgent` adds ‼️ after the closing guillemet. Do not write דחוף / דחוף מאוד on the line. «מה יש לי דחוף» → only those rows.
 - Status / free-form «מה יש לי לקנות» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, …); chat history must not resurrect soft-deleted rows.
-- **Show / status dump (engine):** exact commands `הצג רשימת קניות|מטלות|אנשי קשר|<custom>` and `הצג תזכורות` get a **server dump from live DB** (replaces the model `response`). Free-form SHAREABLE STATUS ASK for shopping/tasks/contacts/reminders: the model sets `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`reminders`|custom name); the engine prints the **same** rich dump — shopping|tasks use the Assign vs co-share **three-way** (אישיות / משותפות `(עם X)` / `של X`; `assigned_by` wins over `shared_with` for block placement), plus schedule `— … (קבוע)` or `— … (קבוע + תזכורת)` when standing + linked clock; else `(תזכורת: …)`, qty, partners without the viewer. Near calendar days use relative labels (`היום` / `מחר` / `מחרתיים` / weekday for +3–6, else `D.M.YYYY`). Exact «הצג …» turns are **read-only** (stale mutates cleared). A free-form turn with both `show_dump` and mutates (e.g. «תמחק את 3,4» after a numbered dump) **keeps the mutates** and drops `show_dump`. **BY LINE NUMBER:** after a numbered dump, spoken indices («3» / «ל3» / «סעיף 3») map dump titles → live ids; the model then emits **any** supported ACTION on that row (remove, update, add/cancel reminder, send «תשלחי את 3…», …) — not delete-only; bare «ל3» after a dump is a line index, not 03:00. ABOUT X and FULL DUMP stay model-written. WhatsApp does not attach reply-context to exact button commands.
+- **Show / status dump (engine):** exact commands `הצג רשימת קניות|מטלות|אנשי קשר|<custom>` and `הצג תזכורות` get a **server dump from live DB** (replaces the model `response`). Free-form SHAREABLE STATUS ASK for shopping/tasks/contacts/reminders: the model sets `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`reminders`|custom name); the engine prints the **same** rich dump — shopping|tasks use the **three-way** layout below, plus schedule `— … (קבוע)` or `— … (קבוע + תזכורת)` when standing + linked clock; else `(תזכורת: …)`, qty, partners without the viewer. Near calendar days use relative labels (`היום` / `מחר` / `מחרתיים` / weekday for +3–6, else `D.M.YYYY`). Exact «הצג …» turns are **read-only** (stale mutates cleared). A free-form turn with both `show_dump` and mutates (e.g. «תמחק את 3,4» after a numbered dump) **keeps the mutates** and drops `show_dump`. **BY LINE NUMBER:** after a numbered dump, spoken indices («3» / «ל3» / «סעיף 3») map dump titles → live ids; the model then emits **any** supported ACTION on that row (remove, update, add/cancel reminder, send «תשלחי את 3…», …) — not delete-only; bare «ל3» after a dump is a line index, not 03:00. ABOUT X and FULL DUMP stay model-written. WhatsApp does not attach reply-context to exact button commands.
 - **Shopping quantity:** every shopping row stores `כמות` (default `1` on apply if missing) and optional `יחידת מידה`. Dumps show `שם - כמות` or `שם - כמות יחידה` (e.g. `אורז - 2`, `עגבניות - 1 ק"ג`).
-- **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category. Shopping|tasks use **three** blocks — **אישיות** (incl. one-way assignments as `חלב (טל)` via `assigned_by`) → **משותפות** co-owned/shared items with `(עם X)` → **`קניות/מטלות של <owner>`** for `scope=shared_items` (assigner outbound; never «משותפת עם»). Filings keep אישיים→משותפים. Items numbered `1. 2. 3.` restarting per block.
-- **Assign vs co-share:** «עמית צריך לקנות חלב» → `targets: [עמית]` only; assignee sees אישיות `(טל)` via `assigned_by` (snapshot omits `shared_with` when the only audience is owner+assigner); assigner sees **קניות של עמית** (not משותפת עם טל). «אני ועמית» / פגישה / שתפי פריט → item stays on a **personal** shell with `shared_with` → dump משותפות `(עם X)` for both (does **not** promote the whole קניות/מטלות list to `scope=shared`).
+- **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category. Shopping|tasks use **three** blocks — see **Item share vs list share vs assign** below. Filings keep אישיים→משותפים. Items numbered `1. 2. 3.` restarting per block.
+- **Item share vs list share vs assign (do not collapse these again):**
+
+  | Case | Data | Dump |
+  |------|------|------|
+  | One-way assign («עמית צריך לקנות חלב») | `assigned_by`, no co-share `shared_with` | **אישיות** — `חלב (טל)` / `חלב (עמית)` — name **without** «עם» |
+  | Item share on personal list («שתפי» / «אני ועמית») | personal list + item `shared_with` | **אישיות** — `קפה (עם עמית)` — **with** «עם» on the line |
+  | Whole shared list | list `scope=shared` + list `shared_with` | **משותפות** — partner header `(עם מיכל)`, then items |
+  | Assigner outbound | `scope=shared_items` | **קניות/מטלות של X** (never «משותפת עם») |
+
+  Example:
+
+  ```text
+  קניות אישיות:
+  1. לחם - 1
+  2. חלב - 1 (עמית)           ← assigned_by
+  3. מלפפונים - 1 (עם עמית)   ← personal item shared_with
+
+  קניות משותפות:
+  (עם מיכל)
+  1. קמח מלא - 1              ← scope=shared list only
+
+  קניות של מיכל:
+  1. שמן - 1
+  ```
+
+  Snapshot omits `shared_with` on pure one-way assign (audience = owner+assigner only) so Lucy/engine place it under אישיות as `(Name)`. Item share does **not** promote built-in קניות/מטלות to `scope=shared` (`list_ops add_participants` refused on builtins). **Regression note:** briefly after `67ae2e0` personal `shared_with` was dumped under משותפות (looked identical to a shared list); engine + prompts restored the table above — keep `formatThreeWayDump` and SHAREABLE STATUS ASK wording in sync.
 - **FULL DUMP** (bare «מה יש לי» / «הציגי הכל» / `כל מה ששמור` / `סיכום מלא`): all sections; **מטלות** fully enumerated with the same three-way split; **קניות** and **רשימות אחרות** show **counts only**; hint «לפירוט רשימה: הצג רשימת …». **תזכורות פעילות** only for clocks not already on a task line — numbered `1. 2. 3.` (same as «הצג תזכורות»). **אנשי קשר** = built-in contacts list from `EMPLOYEE_SAVED_DATA`; **ספר הטלפונים** = `SPEAKER_CONTACTS` (directory) — separate section, never skip when the phone book has rows. Explicit «הצג רשימת X» / SHAREABLE STATUS ASK stay full item dumps.
 - **תזכורות vs מטלות שלך:** any ask with «תזכורת/תזכורות» (including «התזכורות שלך» / «איזה תזכורות יש לך») → speaker ping clocks from `active_reminders` (same as «הצג תזכורות»). «מה את צריכה לעשות» / «מה המטלות שלך» → worker inventory from `WORKER_SAVED_DATA` (+ `OPEN_JOBS`); consults appear once under ממתינים לתשובה (not also as shadow `לבדוק עם…` under מטלות); linked clocks show as `(תזכורת: …)` or standing `(קבוע + תזכורת)` on those task lines.
 
 **Migration:** `prisma/migrations/20261007150000_list_item_urgency`.  
-**Tests:** `backend/tests/employee-records.test.ts`, `backend/tests/chat.test.ts`.
+**Tests:** `backend/tests/employee-records.test.ts`, `backend/tests/chat.test.ts`, `backend/tests/show-button-dump.test.ts` (item share vs list share vs assign).
 
 ---
 
@@ -163,6 +192,7 @@ Speaker-only meetings with an outside party («פגישה עם אלסטיק») s
 Lucy (and engine notifies) can attach tap buttons: show list / show reminders / snooze, etc.
 
 - Model may emit reply buttons; partner notify path also builds «הצג» buttons (`showButtonsForNotify`).
+- Speaker path: when `metadata.reminders` has add/update/remove, `ensureSpeakerShowButtons` appends `הצג תזכורות` if the model omitted it (patched onto the reply JSON + persisted on the assistant row).
 - Web chat renders them; WhatsApp sends interactive buttons when available.
 - Server-sent thread messages stay in the worker’s model memory.
 

@@ -208,7 +208,10 @@ function formatListDump(
 type DumpItem = {
   title: string;
   item: Record<string, unknown>;
-  partnerLine?: string;
+  /** One-way assigner name → shown as «(Name)» under אישיות. */
+  assignedBy?: string;
+  /** Co-share partners (viewer stripped) → shown as «(עם …)» under אישיות. */
+  sharedWithLabel?: string;
 };
 
 function formatThreeWayDump(
@@ -266,34 +269,29 @@ function formatThreeWayDump(
       personalListFiles = true;
     }
 
-    // personal list (may still hold shared/assigned items)
+    // personal list (may still hold shared/assigned items).
+    // Item-level shared_with STAYS under אישיות as «(עם …)» so it is distinct
+    // from a whole scope=shared list (which uses משותפות + partner headers).
     for (const item of list.items) {
       const assignedBy =
         typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
       const sharedWith = stringArray(item.shared_with);
-      // assigned_by wins for block placement (אישיות) even if shared_with is also present.
+      const title = itemTitle(listType, item, list.title_field);
+      // assigned_by wins for the line mark (אישיות «(Name)») even if shared_with is also present.
       if (assignedBy) {
-        personal.push({
-          title: itemTitle(listType, item, list.title_field),
-          item,
-          partnerLine: assignedBy,
-        });
+        personal.push({ title, item, assignedBy });
         continue;
       }
       if (sharedWith.length > 0) {
         const partnerKey = partnersKey(sharedWith, viewer, aliases);
-        const bucket = sharedByPartner.get(partnerKey) ?? [];
-        bucket.push({
-          title: itemTitle(listType, item, list.title_field),
+        personal.push({
+          title,
           item,
+          ...(partnerKey ? { sharedWithLabel: partnerKey } : {}),
         });
-        sharedByPartner.set(partnerKey, bucket);
         continue;
       }
-      personal.push({
-        title: itemTitle(listType, item, list.title_field),
-        item,
-      });
+      personal.push({ title, item });
     }
   }
 
@@ -305,7 +303,8 @@ function formatThreeWayDump(
     blocks.push(
       ...personal.map((row, i) =>
         formatNumberedItem(i + 1, row.title, row.item, listType, {
-          assignedBy: row.partnerLine,
+          assignedBy: row.assignedBy,
+          sharedWithLabel: row.sharedWithLabel,
           now: opts?.now,
         }),
       ),
@@ -408,14 +407,18 @@ export function formatNumberedItem(
   title: string,
   item: Record<string, unknown>,
   listType: string,
-  opts?: { assignedBy?: string; now?: Date },
+  opts?: { assignedBy?: string; sharedWithLabel?: string; now?: Date },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
     body += " 📎";
   }
+  // Assign vs co-share marks: «(Name)» = assigned_by; «(עם Name)» = shared_with.
+  // Prefer assignedBy when both are set (matches block-placement rule).
   if (opts?.assignedBy) {
     body += ` (${opts.assignedBy})`;
+  } else if (opts?.sharedWithLabel) {
+    body += ` (עם ${opts.sharedWithLabel})`;
   }
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));

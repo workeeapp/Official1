@@ -545,6 +545,29 @@ export function setEngineResponse(reply: string, response: string): string {
   return record ? withResponses(record, [response]) : response;
 }
 
+/** Patches metadata.buttons on a JSON LLM reply (WhatsApp + web read this). */
+export function setEngineButtons(
+  reply: string,
+  buttons: Array<{ label: string; command: string }>,
+): string {
+  const record = parseReplyRecord(reply);
+  if (!record) {
+    return reply;
+  }
+  const metadata =
+    record.metadata &&
+    typeof record.metadata === "object" &&
+    !Array.isArray(record.metadata)
+      ? { ...(record.metadata as Record<string, unknown>) }
+      : {};
+  if (buttons.length === 0) {
+    delete metadata.buttons;
+  } else {
+    metadata.buttons = buttons.map(({ label, command }) => ({ label, command }));
+  }
+  return JSON.stringify({ ...record, metadata });
+}
+
 /** Adds an engine notice as its own message after the model's messages. */
 export function appendEngineNotice(reply: string, notice: string): string {
   if (!notice.trim()) {

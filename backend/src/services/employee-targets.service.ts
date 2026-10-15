@@ -1279,6 +1279,41 @@ function visibilityFor(
   };
 }
 
+const SHOW_REMINDERS_BUTTON: LlmReplyButton = {
+  label: "הצג",
+  command: "הצג תזכורות",
+};
+
+function reminderMutates(metadata: LlmMetadata): boolean {
+  return (metadata.reminders ?? []).some(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
+  );
+}
+
+/**
+ * Engine fallback for the speaker: if this turn mutates reminders and the
+ * model omitted «הצג תזכורות», append it (keep any existing show buttons).
+ */
+export function ensureSpeakerShowButtons(
+  metadata: LlmMetadata,
+  existing: LlmReplyButton[] = [],
+): LlmReplyButton[] {
+  const buttons = existing.slice(0, REPLY_BUTTON_MAX);
+  if (!reminderMutates(metadata)) {
+    return buttons;
+  }
+  if (buttons.some((button) => button.command === SHOW_REMINDERS_BUTTON.command)) {
+    return buttons;
+  }
+  if (buttons.length >= REPLY_BUTTON_MAX) {
+    return buttons;
+  }
+  return [...buttons, SHOW_REMINDERS_BUTTON];
+}
+
 /**
  * Engine-built «הצג» buttons for partner notifies (add/remove/update lists).
  * Same product names as the speaker SHOW BUTTON rule — not LLM-emitted.
@@ -1309,14 +1344,8 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
     }
   }
 
-  const reminderMutate = (metadata.reminders ?? []).some(
-    (row) =>
-      row.action === "add" ||
-      row.action === "remove" ||
-      row.action === "update",
-  );
-  if (buttons.length === 0 && reminderMutate) {
-    buttons.push({ label: "הצג", command: "הצג תזכורות" });
+  if (buttons.length === 0 && reminderMutates(metadata)) {
+    buttons.push(SHOW_REMINDERS_BUTTON);
   }
   return buttons;
 }

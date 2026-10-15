@@ -96,6 +96,14 @@ describe("LLM action schema", () => {
       "FORBIDDEN on (3): «משותפת עם …»",
     );
     expect(config.systemMessage).toContain("three-way layout");
+    expect(config.systemMessage).toContain("ITEM vs LIST SHARE (critical)");
+    expect(config.systemMessage).toContain(
+      "personal-list shared_with stays under אישיות",
+    );
+    expect(config.systemMessage).toContain("קפה - 1 (עם עמית)");
+    expect(config.systemMessage).toContain(
+      "ASSIGN vs CO-SHARE marks: «(טל)» = assigned_by; «(עם עמית)» = shared_with",
+    );
     expect(config.systemMessage).toContain("NOT bare «מה יש לי»");
     expect(config.systemMessage).toContain("מה המטלות שלי");
     expect(config.systemMessage).toContain(
@@ -195,6 +203,24 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
     expect(config.systemMessage).toContain(
       "רוצה שאשלח לך תזכורת בוואטסאפ כל 3 ימים ב־12:00?",
+    );
+    expect(config.systemMessage).toContain("CLOCK-ONLY");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN lists.update on the speaker standing chore",
+    );
+    expect(config.systemMessage).toContain("STANDING + LINKED CLOCK MOVE ASK");
+    expect(config.systemMessage).toContain(
+      "לעדכן גם את תזכורת הוואטסאפ בהתאם?",
+    );
+    expect(config.systemMessage).toContain("STANDING + LINKED CLOCK DELETE ASK");
+    expect(config.systemMessage).toContain(
+      "למחוק את המטלה הקבועה «<title>» (וגם את תזכורות הוואטסאפ), או רק להפסיק את התזכורות?",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: answering «ביטלתי את המטלה לנדנד / להזכיר ל…»",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: lists.remove of your להזכיר / לשלוח נדנוד worker task alone",
     );
     expect(config.systemMessage).toContain("תמחקי את הפגישה / המטלה ביום חמישי");
     expect(config.systemMessage).toContain("MUTATE BY ID");

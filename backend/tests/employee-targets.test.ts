@@ -16,6 +16,7 @@ import {
   resolveActionTargets,
   resolveRelayMessages,
   resolveSpokenMetadata,
+  ensureSpeakerShowButtons,
   showButtonsForNotify,
   type ListItemOwnerRef,
 } from "../src/services/employee-targets.service.js";
@@ -566,6 +567,51 @@ describe("employee targets", () => {
       }),
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
     expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
+  });
+
+  it("ensures speaker הצג תזכורות when reminders mutate and model omitted buttons", () => {
+    const reminderAdd: LlmReminderAction = {
+      action: "update",
+      item: "לקחת אקמול",
+      listType: "tasks",
+      date: "",
+      time: "14:50",
+      repeat: "daily",
+      ping: [],
+      targets: [],
+      text: "",
+      inSeconds: null,
+      everyCount: null,
+      everyUnit: null,
+      weekdays: null,
+      confirmed: false,
+      compose: false,
+      composeSource: "",
+      composeLookbackHours: 0,
+      reminderId: "r1",
+    };
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        reminders: [reminderAdd],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    expect(
+      ensureSpeakerShowButtons(
+        { ...emptyLlmMetadata(), reminders: [reminderAdd] },
+        [{ label: "הצג", command: "הצג תזכורות" }],
+      ),
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    expect(
+      ensureSpeakerShowButtons(
+        { ...emptyLlmMetadata(), reminders: [reminderAdd] },
+        [{ label: "הצג", command: "הצג רשימת מטלות" }],
+      ),
+    ).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג תזכורות" },
+    ]);
+    expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
   it("appends a linked reminder clock to a task notification", () => {

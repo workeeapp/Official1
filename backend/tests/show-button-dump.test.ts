@@ -418,7 +418,7 @@ describe("formatShowButtonDump", () => {
     expect(text).not.toContain("(עם טל, מיכל)");
   });
 
-  it("three-way: one-way assign under אישיות; שתפי on personal under משותפות; shared_items under של X", () => {
+  it("three-way: assign + personal שתפי under אישיות; scope=shared under משותפות; shared_items under של X", () => {
     const threeWay: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -492,7 +492,9 @@ describe("formatShowButtonDump", () => {
     expect(shopping).toMatch(/קניות אישיות:[\s\S]*1\. לחם - 1/);
     expect(shopping).toContain("חלב - 1 (עמית)");
     expect(shopping).toContain("ביצים - 1 (עמית)");
-    expect(shopping).toMatch(/קניות משותפות:[\s\S]*\(עם מיכל\)[\s\S]*קפה - 1/);
+    // Personal-list שתפי stays under אישיות as «(עם …)» — not משותפות.
+    expect(shopping).toMatch(/קניות אישיות:[\s\S]*קפה - 1 \(עם מיכל\)/);
+    expect(shopping).not.toMatch(/קניות משותפות:[\s\S]*קפה/);
     expect(shopping).not.toMatch(/קניות משותפות:[\s\S]*חלב/);
     expect(shopping).toContain("קניות של מיכל:");
     expect(shopping).toContain("שמן - 1");
@@ -503,10 +505,58 @@ describe("formatShowButtonDump", () => {
     })!;
     expect(tasks).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
     expect(tasks).toContain("לבדוק שמן (עמית)");
-    expect(tasks).toMatch(/מטלות משותפות:[\s\S]*\(עם עמית\)[\s\S]*פגישה \(טל, עמית\)/);
+    expect(tasks).toMatch(
+      /מטלות אישיות:[\s\S]*פגישה \(טל, עמית\) \(עם עמית\)/,
+    );
+    expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*פגישה/);
     expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*לבדוק שמן/);
     expect(tasks).toContain("מטלות של עמית:");
     expect(tasks).toContain("לעשות טסט לרכב");
+  });
+
+  it("distinguishes personal item share from scope=shared list in the same dump", () => {
+    const mixed: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", "שם פריט": "לחם", כמות: 1 },
+            {
+              item_id: "s1",
+              "שם פריט": "מלפפונים",
+              כמות: 1,
+              shared_with: ["טל", "עמית"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל", "מיכל"],
+          items: [
+            { item_id: "l1", "שם פריט": "קמח מלא", כמות: 1 },
+            { item_id: "l2", "שם פריט": "אורז", כמות: 2 },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    const text = formatShowButtonDump("הצג רשימת קניות", mixed, {
+      viewerName: "טל",
+    })!;
+    const personalBlock = text.split("קניות משותפות:")[0] ?? "";
+    const sharedBlock = text.split("קניות משותפות:")[1] ?? "";
+    expect(personalBlock).toContain("לחם - 1");
+    expect(personalBlock).toContain("מלפפונים - 1 (עם עמית)");
+    expect(personalBlock).not.toContain("קמח מלא");
+    expect(sharedBlock).toMatch(/\(עם מיכל\)[\s\S]*קמח מלא - 1[\s\S]*אורז - 2/);
+    expect(sharedBlock).not.toContain("מלפפונים");
   });
 
   it("drops viewer from (עם …) via aliases when viewerName mismatches", () => {

@@ -8,6 +8,7 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   sendWhatsAppTyping,
+  setEngineButtons,
   toWhatsAppFormatting,
   whatsappButtonsBody,
   whatsappCtaUrlBody,
@@ -519,6 +520,24 @@ describe("WhatsApp webhook", () => {
       "הוואטסאפ אל מיכל לא נשלח.",
     ]);
     expect(parsed.response).toBeUndefined();
+  });
+
+  it("patches metadata.buttons on a JSON LLM reply", () => {
+    const patched = setEngineButtons(
+      JSON.stringify({
+        responses: ["עדכנתי את התזכורת ל־14:50"],
+        metadata: { reminders: [], buttons: [] },
+      }),
+      [{ label: "הצג", command: "הצג תזכורות" }],
+    );
+    const parsed = JSON.parse(patched) as {
+      responses: string[];
+      metadata: { buttons: Array<{ label: string; command: string }> };
+    };
+    expect(parsed.responses).toEqual(["עדכנתי את התזכורת ל־14:50"]);
+    expect(parsed.metadata.buttons).toEqual([
+      { label: "הצג", command: "הצג תזכורות" },
+    ]);
   });
 });
 
