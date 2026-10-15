@@ -271,6 +271,76 @@ describe("formatShowButtonDump", () => {
         { now },
       ),
     ).toBe("1. ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
+    expect(
+      formatScheduleSuffix(
+        {
+          חוזר: "כל יומיים ב־15:00",
+          reminder: {
+            fire_at: "2026-10-15 15:00",
+            repeat: "custom",
+            recurrence_text: "כל יומיים ב־15:00",
+          },
+        },
+        "tasks",
+        now,
+      ),
+    ).toBe("— כל יומיים ב־15:00 (קבוע + תזכורת)");
+    expect(
+      formatNumberedItem(
+        5,
+        "לקחת אקמול",
+        {
+          חוזר: "כל יומיים ב־15:00",
+          reminder: {
+            fire_at: "2026-10-15 15:00",
+            repeat: "custom",
+            recurrence_text: "כל יומיים ב־15:00",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("5. לקחת אקמול — כל יומיים ב־15:00 (קבוע + תזכורת)");
+    expect(
+      formatNumberedItem(
+        5,
+        "לקחת אקמול",
+        {
+          חוזר: "כל יומיים ב־15:00",
+          reminder: {
+            fire_at: "2026-10-15 15:00",
+            repeat: "custom",
+            recurrence_text: "כל יומיים ב־15:00",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).not.toContain("(תזכורת:");
+    expect(
+      formatNumberedItem(
+        2,
+        "לבדוק באג",
+        { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
+        "tasks",
+        { now },
+      ),
+    ).toBe("2. לבדוק באג (תזכורת: היום ב־20:30)");
+    expect(
+      formatNumberedItem(
+        3,
+        "להתקשר לאמא",
+        {
+          reminder: {
+            fire_at: "2026-10-15 19:00",
+            repeat: "daily",
+            recurrence_text: "כל יום ב־19:00",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 (כל יום))");
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {

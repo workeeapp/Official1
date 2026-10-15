@@ -1825,7 +1825,7 @@ async function deleteOwnedListItem(
     where: { id: existing.id },
     data: { deletedAt: new Date(), reminderId: null },
   });
-  await cancelReminderLinkedToWorkerItem(existing.id);
+  const linked = await cancelReminderLinkedToWorkerItem(existing.id);
   const owner = await prisma.employee.findUnique({
     where: { id: existing.list.employeeId },
     select: { userId: true },
@@ -1838,12 +1838,15 @@ async function deleteOwnedListItem(
         existing.itemKey,
         existing.list?.titleField,
       ) || existing.itemKey;
-    await cancelActiveRemindersMatchingWork({
-      userId: owner.userId,
-      itemKey: existing.itemKey,
-      itemLabel: label,
-      actorEmployeeId: actorId,
-    });
+    // Linked clock already cancelled — skip key-wide cancel (twin standing times).
+    if (!linked) {
+      await cancelActiveRemindersMatchingWork({
+        userId: owner.userId,
+        itemKey: existing.itemKey,
+        itemLabel: label,
+        actorEmployeeId: actorId,
+      });
+    }
     await recordAuditEvent({
       userId: owner.userId,
       actorEmployeeId: actorId,
@@ -2236,27 +2239,31 @@ async function applyListAction(
             removedKey,
             removedTitleField,
           ) || removedKey;
-        const cascade = await cancelActiveRemindersMatchingWork({
-          userId: owner.userId,
-          itemKey: removedKey,
-          itemLabel: label,
-          actorEmployeeId: actorId,
-        });
-        cancelledReminders.push(...cascade.cancelledReminders);
-        cancelledReminderIds.push(...cascade.cancelledReminderIds);
-        for (const task of cascade.removedWorkerTasks) {
-          if (seenCascadeTaskIds.has(task.id)) {
-            continue;
-          }
-          seenCascadeTaskIds.add(task.id);
-          mutations.push({
-            action: "remove",
-            itemId: task.id,
-            employeeId: task.employeeId,
-            listType: "tasks",
-            itemKey: task.itemKey,
-            itemLabel: task.itemLabel,
+        // Linked clock already cancelled — skip key-wide cancel so a twin
+        // standing row (same name, other time) keeps its own clock.
+        if (!linked) {
+          const cascade = await cancelActiveRemindersMatchingWork({
+            userId: owner.userId,
+            itemKey: removedKey,
+            itemLabel: label,
+            actorEmployeeId: actorId,
           });
+          cancelledReminders.push(...cascade.cancelledReminders);
+          cancelledReminderIds.push(...cascade.cancelledReminderIds);
+          for (const task of cascade.removedWorkerTasks) {
+            if (seenCascadeTaskIds.has(task.id)) {
+              continue;
+            }
+            seenCascadeTaskIds.add(task.id);
+            mutations.push({
+              action: "remove",
+              itemId: task.id,
+              employeeId: task.employeeId,
+              listType: "tasks",
+              itemKey: task.itemKey,
+              itemLabel: task.itemLabel,
+            });
+          }
         }
       }
       if (owner) {
@@ -2830,7 +2837,7 @@ export async function removeVisibleCustomItems(input: {
           itemLabel: label,
           listName: list.name || action.listName || undefined,
         });
-        if (list.employee.userId) {
+        if (list.employee.userId && !linked) {
           const cascade = await cancelActiveRemindersMatchingWork({
             userId: list.employee.userId,
             itemKey: existing.itemKey,
@@ -3031,6 +3038,7 @@ async function deleteRelatedAssignmentTasks(
     return [];
   }
 
+  const needle = itemKey.trim();
   const where = {
     itemKey: { contains: itemKey },
     deletedAt: null,
@@ -3044,11 +3052,19 @@ async function deleteRelatedAssignmentTasks(
     where,
     include: { list: { select: { employeeId: true, listType: true } } },
   });
+  // Exact-key peers (twin standing morning/evening) must survive; only longer
+  // assignment keys that contain the shopping/task name are cascaded.
   const labeled = doomed.filter(
-    (row) => row.list?.listType === "tasks" && Boolean(row.list.employeeId),
+    (row) =>
+      row.list?.listType === "tasks" &&
+      Boolean(row.list.employeeId) &&
+      row.itemKey.trim() !== needle,
   );
 
-  if (labeled.length > 0) {
+  if (doomed.length > 0) {
+    if (labeled.length === 0) {
+      return [];
+    }
     await prisma.employeeListItem.updateMany({
       where: { id: { in: labeled.map((row) => row.id) } },
       data: { deletedAt: new Date(), reminderId: null },

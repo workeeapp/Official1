@@ -1754,6 +1754,143 @@ describe("employee records", () => {
     });
   });
 
+  it("removing one standing twin keeps the sibling with the same itemKey", async () => {
+    const list = {
+      id: "tal-tasks",
+      employeeId: talId,
+      listType: "tasks",
+      name: "",
+      titleField: null,
+    };
+    listFindFirst.mockResolvedValue(list);
+    const morning = {
+      id: "skazi-am",
+      listId: list.id,
+      itemKey: "להוריד את סקאזי",
+      scope: "personal",
+      addedById: talId,
+      visibleTo: [],
+      reminderId: null,
+      linkedReminderId: "r-am",
+      data: {
+        "שם מטלה": "להוריד את סקאזי",
+        חוזר: "כל יום ב־09:00",
+      },
+      list,
+    };
+    itemFindFirst.mockResolvedValue(morning);
+    itemFindUnique.mockResolvedValue(morning);
+    reminderFindFirst.mockResolvedValue({
+      id: "r-am",
+      workerItemId: null,
+      itemLabel: "להוריד את סקאזי",
+      status: "active",
+    });
+    const eveningTwin = {
+      id: "skazi-pm",
+      itemKey: "להוריד את סקאזי",
+      reminderId: null,
+      linkedReminderId: "r-pm",
+      data: {
+        "שם מטלה": "להוריד את סקאזי",
+        חוזר: "כל יום ב־21:00",
+      },
+      list: { employeeId: talId, listType: "tasks" },
+    };
+    const assignNote = {
+      id: "assign-note",
+      itemKey: "להזכיר להוריד את סקאזי",
+      reminderId: null,
+      data: { "שם מטלה": "להזכיר להוריד את סקאזי" },
+      list: { employeeId: employeeId, listType: "tasks" },
+    };
+    // Peer evening standing row — same key, must not be cascade-deleted.
+    itemFindMany.mockImplementation(
+      async (args?: {
+        where?: {
+          itemKey?: { contains?: string };
+          OR?: Array<{ reminderId?: string; id?: string }>;
+          linkedReminderId?: string;
+        };
+      }) => {
+        // removeReminderAndLinkedWorkerTask: only rows with reminderId = r-am
+        if (args?.where?.OR) {
+          return [];
+        }
+        // clear soft links by linkedReminderId
+        if (args?.where?.linkedReminderId) {
+          return [];
+        }
+        // deleteRelatedAssignmentTasks: contains key
+        if (args?.where?.itemKey?.contains) {
+          return [eveningTwin, assignNote];
+        }
+        return [];
+      },
+    );
+    itemUpdate.mockResolvedValue({ id: "skazi-am" });
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    reminderUpdate.mockResolvedValue({});
+    reminderFindMany.mockResolvedValue([
+      {
+        id: "r-am",
+        itemKey: "להוריד את סקאזי",
+        itemLabel: "להוריד את סקאזי",
+        workerItemId: null,
+        status: "active",
+      },
+      {
+        id: "r-pm",
+        itemKey: "להוריד את סקאזי",
+        itemLabel: "להוריד את סקאזי",
+        workerItemId: null,
+        status: "active",
+      },
+    ]);
+
+    await applyEmployeeMetadata(
+      talId,
+      {
+        lists: [
+          {
+            action: "remove",
+            listType: "tasks",
+            listName: "",
+            items: [{ item_id: "skazi-am", "שם מטלה": "להוריד את סקאזי" }],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      undefined,
+      talId,
+    );
+
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "skazi-am" },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
+    // Exact-key twin kept; longer assignment key still cascaded.
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["assign-note"] } },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
+    const twinWiped = itemUpdateMany.mock.calls.some(
+      (call) =>
+        Array.isArray(call[0]?.where?.id?.in) &&
+        call[0].where.id.in.includes("skazi-pm"),
+    );
+    expect(twinWiped).toBe(false);
+    // Linked morning clock cancelled; evening twin clock must stay (no key-wide cancel).
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "r-am" },
+      data: { status: "cancelled", workerItemId: null },
+    });
+    expect(reminderUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "r-pm" } }),
+    );
+  });
+
   it("returns a snapshot of saved lists and filings", async () => {
     listFindMany.mockResolvedValue([
       {

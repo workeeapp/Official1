@@ -21,6 +21,8 @@ Architecture rules: `.cursor/rules/architecture.mdc`, `.cursor/rules/model-under
 
 **Freq values:** `interval` (seconds/minutes/hours), `daily`, `weekly`, `monthly`, `yearly`. Standing-task `time` is optional (all-day ok — do not ask באיזו שעה).
 
+**Standing vs WhatsApp ping:** a standing chore with a time is calendar work on מטלות (`חוזר` / `(קבוע)`). A WhatsApp reminder clock is separate — either they said «תזכירי לי» (self-nudge now), or after a standing save **with** `recurrence.time` Lucy offers «רוצה שאשלח לך תזכורת בוואטסאפ…?» and only on כן emits `reminders` + her `להזכיר` task. On dumps, standing + linked clock folds into `(קבוע + תזכורת)` (no second `(תזכורת: …)` on that line); non-standing linked items still use `(תזכורת: …)`. `הצג תזכורות` keeps next-fire + cadence. All-day standing (no time) gets no clock offer.
+
 **Tests:** `shared/src/recurrence.test.ts`, `shared/src/jerusalem-time.test.ts`, `backend/tests/recurrence.test.ts`, `backend/tests/reminder-recurrence-apply.test.ts`, `backend/tests/reminder-fire.test.ts`.
 
 **Deep dive:** [docs/recurrence.md](./recurrence.md).
@@ -73,7 +75,7 @@ Speaker asks Lucy to check **later** (self or third party), including recurring 
 | ACTION | Same job-opening `messages[]` entry (`expects_reply` + `ask_summary` + `urgency`) **plus** `in` / `date`+`time` / `recurrence`. `lists: []`. Response = ack only (no ask yet). |
 | Create | `createScheduledJobsFromRelays` saves Lucy’s `לבדוק עם …` task with `תאריך לביצוע` / `שעה לביצוע`, `__job.pendingActivation`, and a linked Reminder. No WhatsApp; no urgency follow-ups yet. |
 | OPEN_JOBS | Shows `scheduled: true`, `raisable: false` until fire. |
-| Inventory | «מה את צריכה לעשות / לברר» lists every OPEN_JOBS row including scheduled (from `ask`, note not yet due) — does **not** RAISE a different raisable job. |
+| Inventory | «מה את צריכה לעשות / לברר» lists every OPEN_JOBS row including scheduled (from `ask`, note not yet due) once under waiting-for-reply; skips the shadow `לבדוק עם…` worker task under מטלות so consults are not duplicated — does **not** RAISE a different raisable job. |
 | Fire | Reminder sends the ask; `activateScheduledJob` clears date/time, drops `pendingActivation`, starts urgency follow-ups. Job row is kept (not soft-deleted). |
 | Recurring | Clock advances as usual. On job answer/close, if the Reminder is still active with a future `fireAt`, the same row resets to pending with the next תאריך/שעה. |
 
@@ -92,12 +94,12 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 - Stored on `EmployeeListItems.urgency`; `EMPLOYEE_SAVED_DATA` shows `urgency` only when not `normal`.
 - Listing in `response`: wrap the whole numbered line in «…» so it is bold (`urgent`). `very_urgent` adds ‼️ after the closing guillemet. Do not write דחוף / דחוף מאוד on the line. «מה יש לי דחוף» → only those rows.
 - Status / free-form «מה יש לי לקנות» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, …); chat history must not resurrect soft-deleted rows.
-- **Show / status dump (engine):** exact commands `הצג רשימת קניות|מטלות|אנשי קשר|<custom>` and `הצג תזכורות` get a **server dump from live DB** (replaces the model `response`). Free-form SHAREABLE STATUS ASK for shopping/tasks/contacts/reminders: the model sets `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`reminders`|custom name); the engine prints the **same** rich dump (schedule `— … (קבוע)`, `(תזכורת: …)`, qty, partners without the viewer). Near calendar days use relative labels (`היום` / `מחר` / `מחרתיים` / weekday for +3–6, else `D.M.YYYY`). Exact «הצג …» turns are **read-only** (stale mutates cleared). A free-form turn with both `show_dump` and mutates (e.g. «תמחק את 3,4» after a numbered dump) **keeps the mutates** and drops `show_dump`. Delete-by-index maps last dump line numbers → `item_id` (model). ABOUT X and FULL DUMP stay model-written. WhatsApp does not attach reply-context to exact button commands.
+- **Show / status dump (engine):** exact commands `הצג רשימת קניות|מטלות|אנשי קשר|<custom>` and `הצג תזכורות` get a **server dump from live DB** (replaces the model `response`). Free-form SHAREABLE STATUS ASK for shopping/tasks/contacts/reminders: the model sets `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`reminders`|custom name); the engine prints the **same** rich dump (schedule `— … (קבוע)` or `— … (קבוע + תזכורת)` when standing + linked clock; else `(תזכורת: …)`, qty, partners without the viewer). Near calendar days use relative labels (`היום` / `מחר` / `מחרתיים` / weekday for +3–6, else `D.M.YYYY`). Exact «הצג …» turns are **read-only** (stale mutates cleared). A free-form turn with both `show_dump` and mutates (e.g. «תמחק את 3,4» after a numbered dump) **keeps the mutates** and drops `show_dump`. Delete-by-index maps last dump line numbers → `item_id` (model). ABOUT X and FULL DUMP stay model-written. WhatsApp does not attach reply-context to exact button commands.
 - **Shopping quantity:** every shopping row stores `כמות` (default `1` on apply if missing) and optional `יחידת מידה`. Dumps show `שם - כמות` or `שם - כמות יחידה` (e.g. `אורז - 2`, `עגבניות - 1 ק"ג`).
 - **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category. Shopping|tasks use **three** blocks — **אישיות** (incl. one-way assignments as `חלב (טל)` via `assigned_by`) → **משותפות** co-owned/shared items with `(עם X)` → **`קניות/מטלות של <owner>`** for `scope=shared_items` (assigner outbound; never «משותפת עם»). Filings keep אישיים→משותפים. Items numbered `1. 2. 3.` restarting per block.
 - **Assign vs co-share:** «עמית צריך לקנות חלב» → `targets: [עמית]` only; assignee sees אישיות `(טל)` via `assigned_by` (snapshot omits `shared_with` when the only audience is owner+assigner); assigner sees **קניות של עמית** (not משותפת עם טל). «אני ועמית» / פגישה / שתפי פריט → משותפות for both.
 - **FULL DUMP** (bare «מה יש לי» / «הציגי הכל» / `כל מה ששמור` / `סיכום מלא`): all sections; **מטלות** fully enumerated with the same three-way split; **קניות** and **רשימות אחרות** show **counts only**; hint «לפירוט רשימה: הצג רשימת …». **תזכורות פעילות** only for clocks not already on a task line — numbered `1. 2. 3.` (same as «הצג תזכורות»). **אנשי קשר** = built-in contacts list from `EMPLOYEE_SAVED_DATA`; **ספר הטלפונים** = `SPEAKER_CONTACTS` (directory) — separate section, never skip when the phone book has rows. Explicit «הצג רשימת X» / SHAREABLE STATUS ASK stay full item dumps.
-- **תזכורות vs מטלות שלך:** any ask with «תזכורת/תזכורות» (including «התזכורות שלך» / «איזה תזכורות יש לך») → speaker ping clocks from `active_reminders` (same as «הצג תזכורות»). «מה את צריכה לעשות» / «מה המטלות שלך» → worker inventory from `WORKER_SAVED_DATA` (+ `OPEN_JOBS`); linked clocks still show as `(תזכורת: …)` on those task lines.
+- **תזכורות vs מטלות שלך:** any ask with «תזכורת/תזכורות» (including «התזכורות שלך» / «איזה תזכורות יש לך») → speaker ping clocks from `active_reminders` (same as «הצג תזכורות»). «מה את צריכה לעשות» / «מה המטלות שלך» → worker inventory from `WORKER_SAVED_DATA` (+ `OPEN_JOBS`); consults appear once under ממתינים לתשובה (not also as shadow `לבדוק עם…` under מטלות); linked clocks show as `(תזכורת: …)` or standing `(קבוע + תזכורת)` on those task lines.
 
 **Migration:** `prisma/migrations/20261007150000_list_item_urgency`.  
 **Tests:** `backend/tests/employee-records.test.ts`, `backend/tests/chat.test.ts`.
@@ -140,7 +142,7 @@ Speaker-only meetings with an outside party («פגישה עם אלסטיק») s
 
 `lists.update` / `lists.remove` apply **only** with a matching `item_id` from this turn’s saved data. No fuzzy title match. Missing id → engine ignores the mutate.
 
-`item_key` is a derived label only (not unique). Multiple live rows on the same list may share a key.
+`item_key` is a derived label only (not unique). Multiple live rows on the same list may share a key. Deleting one standing time (e.g. morning «להוריד את סקאזי») cancels only that row’s linked clock — it does **not** delete a sibling standing row with the same name and a different schedule (evening), nor cancel that sibling’s clock. Key-wide clock cancel still runs when the removed row had no linked reminder (shopping / self-nudge wrappers).
 
 **Migration:** `prisma/migrations/20261007220000_drop_list_item_key_unique`.
 

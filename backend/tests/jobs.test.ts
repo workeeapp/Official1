@@ -124,6 +124,9 @@ describe("open jobs context", () => {
     expect(block).toContain('"raisable":true');
     expect(block).toMatch(/"job_id"\s*:\s*"/);
     expect(block).toContain("using its job_id");
+    expect(block).toContain(
+      "On INVENTORY do NOT also list that shadow under מטלות",
+    );
   });
 
   it("marks a scheduled job as not raisable and stays empty with no jobs", () => {

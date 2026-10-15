@@ -416,15 +416,21 @@ export function formatNumberedItem(
   if (opts?.assignedBy) {
     body += ` (${opts.assignedBy})`;
   }
+  const standing =
+    listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));
+  const linkedOnStanding = standing && itemHasLinkedReminder(item);
   if (listType === "tasks" || listType === "shopping") {
     const schedule = formatScheduleSuffix(item, listType, opts?.now);
     if (schedule) {
       body += ` ${schedule}`;
     }
   }
-  const reminder = formatLinkedReminderParen(item, opts?.now);
-  if (reminder) {
-    body += ` ${reminder}`;
+  // Standing + linked clock already folds into «(קבוע + תזכורת)» on the schedule.
+  if (!linkedOnStanding) {
+    const reminder = formatLinkedReminderParen(item, opts?.now);
+    if (reminder) {
+      body += ` ${reminder}`;
+    }
   }
   let line = `${n}. ${body}`;
   const urgency = item.urgency;
@@ -437,7 +443,14 @@ export function formatNumberedItem(
   return line;
 }
 
-/** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30». */
+/** True when the item carries a linked active-clock object (any non-array object). */
+export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
+  const raw = item.reminder;
+  return Boolean(raw) && typeof raw === "object" && !Array.isArray(raw);
+}
+
+/** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30».
+ * Standing + linked clock → «(קבוע + תזכורת)» instead of a separate תזכורת paren. */
 export function formatScheduleSuffix(
   item: Record<string, unknown>,
   listType: string,
@@ -448,10 +461,16 @@ export function formatScheduleSuffix(
   }
   const recurring = readText(item, ["חוזר", "recurrence_text"]);
   if (recurring) {
-    const withMark = /קבוע/.test(recurring)
-      ? recurring
-      : `${recurring} (קבוע)`;
-    return `— ${withMark}`;
+    const mark = itemHasLinkedReminder(item)
+      ? "(קבוע + תזכורת)"
+      : "(קבוע)";
+    if (/\(קבוע(?:\s*\+\s*תזכורת)?\)/.test(recurring)) {
+      return `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת)?\)/g, mark)}`;
+    }
+    if (/קבוע/.test(recurring)) {
+      return `— ${recurring}`;
+    }
+    return `— ${recurring} ${mark}`;
   }
   const date = readText(item, ["תאריך לביצוע", "date"]);
   const time = readText(item, ["שעה לביצוע", "time", "שעה"]);

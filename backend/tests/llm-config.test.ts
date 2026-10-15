@@ -70,9 +70,17 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
+    expect(config.systemMessage).toContain("(קבוע + תזכורת)");
     expect(config.systemMessage).toContain(
-      "Number each line 1. 2. 3. (never •); numbering restarts per block (WORKER tasks vs OPEN_JOBS)",
+      "FORBIDDEN a second «(תזכורת: …)» paren on that line",
     );
+    expect(config.systemMessage).toContain(
+      "Number each line 1. 2. 3. (never •); numbering restarts per block",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה",
+    );
+    expect(config.systemMessage).toContain("INVENTORY dedupe (critical)");
     expect(config.systemMessage).toContain("Scan EVERY matching list_type");
     expect(config.systemMessage).toContain(
       "FULL DUMP / מה יש לי / הציגי הכל",
@@ -177,6 +185,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("פגישה נוספת בנושא פורים (עמית, טל)");
     expect(config.systemMessage).toContain("DELETE BY DAY");
     expect(config.systemMessage).toContain("DELETE BY LINE NUMBER");
+    expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
+    expect(config.systemMessage).toContain(
+      "רוצה שאשלח לך תזכורת בוואטסאפ כל 3 ימים ב־12:00?",
+    );
     expect(config.systemMessage).toContain("תמחקי את הפגישה / המטלה ביום חמישי");
     expect(config.systemMessage).toContain("MUTATE BY ID");
     expect(config.systemMessage).toContain("item_id");

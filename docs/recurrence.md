@@ -34,7 +34,8 @@ The model emits a `recurrence` object (never invent clocks from weekday words in
 | `count` | Total occurrences including the first |
 
 **Reminders:** `metadata.reminders[].recurrence` plus the usual `in` / `time` / `ping` / `text` / `compose`.  
-**Standing tasks:** `metadata.lists` add/update with `list_type: tasks`, clean task name, **no** `תאריך לביצוע`, and `recurrence` on the item. Stop repeating with `lists.update` + `recurrence: null`.
+**Standing tasks:** `metadata.lists` add/update with `list_type: tasks`, clean task name, **no** `תאריך לביצוע`, and `recurrence` on the item. Stop repeating with `lists.update` + `recurrence: null`.  
+**Clock offer:** saving a standing task that has `recurrence.time` (and they did not already say «תזכירי לי») → confirm the standing row, then offer a WhatsApp ping; on כן emit `reminders` with the same recurrence + Lucy `להזכיר…` (no second speaker standing row). The engine does not invent clocks from standing `recurrence.time` alone.
 
 **Occurrence done:** `lists.update` with `item_id` + `occurrence_done` (`YYYY-MM-DD` or `true` for today). The standing row stays; only that occurrence leaves `next_occurrences`. Do **not** `lists.remove` a standing task just because they finished today’s gym.
 
