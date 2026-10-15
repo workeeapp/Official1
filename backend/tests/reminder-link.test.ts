@@ -40,6 +40,7 @@ import {
   cancelReminderLinkedToWorkerItem,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  listLiveHumanItemsForReminderLink,
   pairLinkedItemsToReminders,
   removeReminderAndLinkedWorkerTask,
   shareWorkerTaskWithPingRecipients,
@@ -168,6 +169,40 @@ describe("reminder worker link", () => {
     expect(reminderUpdate).not.toHaveBeenCalled();
   });
 
+  it("loads live human shopping/tasks for re-linking existing rows", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        itemKey: "לקנות חלב",
+        data: { "שם פריט": "לקנות חלב" },
+      },
+      {
+        id: "existing-2",
+        itemKey: "לבדוק באג",
+        data: { "שם מטלה": "לבדוק באג" },
+      },
+    ]);
+    const rows = await listLiveHumanItemsForReminderLink({
+      userId: "user-1",
+      humanIds: [TAL],
+    });
+    expect(rows).toEqual([
+      { id: "existing-1", itemKey: "לקנות חלב", itemLabel: "לקנות חלב" },
+      { id: "existing-2", itemKey: "לבדוק באג", itemLabel: "לבדוק באג" },
+    ]);
+    expect(itemFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deletedAt: null,
+          list: expect.objectContaining({
+            listType: { in: ["shopping", "tasks"] },
+            employeeId: { in: [TAL] },
+          }),
+        }),
+      }),
+    );
+  });
+
   it("soft-deletes the worker task and cancels the clock together", async () => {
     itemFindMany.mockResolvedValue([
       {
@@ -187,6 +222,10 @@ describe("reminder worker link", () => {
       where: { id: { in: ["w1"] } },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { linkedReminderId: "r1", deletedAt: null },
+      data: { linkedReminderId: null },
+    });
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r1" },
       data: { status: "cancelled", workerItemId: null },
@@ -195,7 +234,12 @@ describe("reminder worker link", () => {
 
   it("cancels the clock when the worker task is removed", async () => {
     itemFindUnique.mockResolvedValue({ id: "w1", reminderId: "r1" });
-    reminderFindFirst.mockResolvedValue({ id: "r1", workerItemId: "w1" });
+    reminderFindFirst.mockResolvedValue({
+      id: "r1",
+      workerItemId: "w1",
+      itemLabel: "להזכיר לעמית לאכול פיצה",
+      status: "active",
+    });
     itemFindMany.mockResolvedValue([
       {
         id: "w1",
@@ -207,11 +251,56 @@ describe("reminder worker link", () => {
     itemUpdateMany.mockResolvedValue({ count: 1 });
     reminderUpdate.mockResolvedValue({});
     const linked = await cancelReminderLinkedToWorkerItem("w1");
-    expect(linked).toEqual({ reminderId: "r1", label: "r1" });
+    expect(linked).toEqual({
+      reminderId: "r1",
+      label: "להזכיר לעמית לאכול פיצה",
+    });
     expect(itemUpdateMany).toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r1" },
       data: { status: "cancelled", workerItemId: null },
+    });
+  });
+
+  it("clears speaker linkedReminderId when the clock is cancelled", async () => {
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 1 });
+    reminderUpdate.mockResolvedValue({});
+    await removeReminderAndLinkedWorkerTask({
+      id: "r1",
+      workerItemId: "w1",
+      label: "לקנות חלב",
+    });
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { linkedReminderId: "r1", deletedAt: null },
+      data: { linkedReminderId: null },
+    });
+  });
+
+  it("cancels via item.linkedReminderId when reminderId is empty", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "speaker-1",
+      reminderId: null,
+      linkedReminderId: "r-soft",
+    });
+    reminderFindFirst
+      .mockResolvedValueOnce({
+        id: "r-soft",
+        workerItemId: null,
+        itemLabel: "לקנות חלב",
+        status: "active",
+      })
+      .mockResolvedValueOnce(null);
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 0 });
+    reminderUpdate.mockResolvedValue({});
+    const linked = await cancelReminderLinkedToWorkerItem("speaker-1");
+    expect(linked).toEqual({ reminderId: "r-soft", label: "לקנות חלב" });
+    expect(reminderFindFirst).toHaveBeenCalledWith({
+      where: {
+        status: "active",
+        OR: [{ workerItemId: "speaker-1" }, { id: { in: ["r-soft"] } }],
+      },
     });
   });
 

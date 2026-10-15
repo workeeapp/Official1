@@ -618,6 +618,50 @@ export async function linkRemindersToItems(
   }
 }
 
+/**
+ * Live human shopping/tasks for soft-linking clocks after reminders.save
+ * (includes rows that already existed — not only same-turn adds).
+ */
+export async function listLiveHumanItemsForReminderLink(input: {
+  userId: string;
+  humanIds: string[];
+}): Promise<LinkedItemRef[]> {
+  if (
+    input.humanIds.length === 0 ||
+    !prisma.employeeListItem?.findMany
+  ) {
+    return [];
+  }
+  try {
+    const rows = await prisma.employeeListItem.findMany({
+      where: {
+        deletedAt: null,
+        list: {
+          deletedAt: null,
+          listType: { in: ["shopping", "tasks"] },
+          employeeId: { in: input.humanIds },
+          employee: { userId: input.userId, kind: "human" },
+        },
+      },
+      select: { id: true, itemKey: true, data: true },
+    });
+    return rows.map((row) => {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const itemLabel =
+        (typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()) ||
+        (typeof data["שם פריט"] === "string" && data["שם פריט"].trim()) ||
+        (typeof data.name === "string" && data.name.trim()) ||
+        row.itemKey;
+      return { id: row.id, itemKey: row.itemKey, itemLabel };
+    });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 function isMissingRecord(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025"
@@ -676,6 +720,13 @@ export async function removeReminderAndLinkedWorkerTask(match: {
       });
     }
   }
+  if (prisma.employeeListItem?.updateMany) {
+    // Speaker/shared soft links must not keep pointing at a cancelled clock.
+    await prisma.employeeListItem.updateMany({
+      where: { linkedReminderId: match.id, deletedAt: null },
+      data: { linkedReminderId: null },
+    });
+  }
   if (!prisma.reminder?.update) {
     return removedWorkerTasks;
   }
@@ -722,17 +773,44 @@ export async function cancelReminderLinkedToWorkerItem(
       item && "reminderId" in item && typeof item.reminderId === "string"
         ? item.reminderId
         : null;
+    const softLinkedId =
+      item &&
+      "linkedReminderId" in item &&
+      typeof item.linkedReminderId === "string"
+        ? item.linkedReminderId
+        : null;
+    const idCandidates = [
+      ...new Set(
+        [reminderId, softLinkedId].filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        ),
+      ),
+    ];
+    // Prefer an active clock; fall back to any matching row.
     const clock = prisma.reminder?.findFirst
-      ? await prisma.reminder.findFirst({
+      ? ((await prisma.reminder.findFirst({
+          where: {
+            status: "active",
+            OR: [
+              { workerItemId },
+              ...(idCandidates.length > 0
+                ? [{ id: { in: idCandidates } }]
+                : []),
+            ],
+          },
+        })) ??
+        (await prisma.reminder.findFirst({
           where: {
             OR: [
               { workerItemId },
-              ...(reminderId ? [{ id: reminderId }] : []),
+              ...(idCandidates.length > 0
+                ? [{ id: { in: idCandidates } }]
+                : []),
             ],
           },
-        })
+        })))
       : null;
-    const id = clock?.id ?? reminderId;
+    const id = clock?.id ?? reminderId ?? softLinkedId;
     if (!id) {
       return null;
     }

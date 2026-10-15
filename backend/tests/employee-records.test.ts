@@ -1893,6 +1893,51 @@ describe("employee records", () => {
     });
   });
 
+  it("resolves reminder via reverse workerItemId when item FKs are empty", async () => {
+    listFindMany.mockResolvedValue([
+      {
+        listType: "tasks",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+        items: [
+          {
+            id: "task-reverse",
+            data: { "שם מטלה": "לבדוק את הבאג" },
+            scope: "personal",
+            reminderId: null,
+            linkedReminderId: null,
+          },
+        ],
+      },
+    ]);
+    reminderFindMany.mockResolvedValue([
+      {
+        id: "rem-reverse",
+        itemLabel: "לבדוק את הבאג",
+        listType: "tasks",
+        fireAt: new Date("2026-10-15T17:30:00.000Z"),
+        repeat: "none",
+        pingIds: [employeeId],
+        ownerId: employeeId,
+        messageText: "",
+        status: "active",
+        workerItemId: "task-reverse",
+      },
+    ]);
+
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    expect(snap.lists[0]?.items[0]).toMatchObject({
+      item_id: "task-reverse",
+      reminder: {
+        reminder_id: "rem-reverse",
+        fire_at: "2026-10-15 20:30",
+        repeat: "none",
+      },
+    });
+  });
+
   it("includes empty shared custom lists with shared_with partners", async () => {
     listFindMany.mockResolvedValue([
       {

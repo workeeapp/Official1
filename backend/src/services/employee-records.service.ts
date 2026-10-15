@@ -1088,11 +1088,22 @@ export async function getEmployeeRecordSnapshot(
   const names = new Map(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );
-  const activeReminders = new Map<string, LinkedReminderRow>(
-    reminderRows
-      .filter((row) => row.status === "active")
-      .map((row) => [row.id, row] as const),
+  const activeReminderRows = reminderRows.filter(
+    (row) => row.status === "active",
   );
+  const activeReminders = new Map<string, LinkedReminderRow>(
+    activeReminderRows.map((row) => [row.id, row] as const),
+  );
+  const activeByWorkerItemId = new Map<string, LinkedReminderRow>();
+  for (const row of activeReminderRows) {
+    const workerItemId =
+      "workerItemId" in row && typeof row.workerItemId === "string"
+        ? row.workerItemId.trim()
+        : "";
+    if (workerItemId && !activeByWorkerItemId.has(workerItemId)) {
+      activeByWorkerItemId.set(workerItemId, row);
+    }
+  }
 
   const sharedByOwner = new Map<string, Map<string, Record<string, unknown>[]>>();
   const sharedIntoOwn = new Map<string, Record<string, unknown>[]>();
@@ -1113,7 +1124,7 @@ export async function getEmployeeRecordSnapshot(
       owner,
       item.id,
       {
-        ...linkedReminderField(item, activeReminders),
+        ...linkedReminderField(item, activeReminders, activeByWorkerItemId),
         ...urgencySnapshotField(item.urgency),
         ...itemSharedWithField(item.list.employee.id, item, names),
         ...assignedByField(item.list.employee.id, item.addedById, names),
@@ -1168,7 +1179,7 @@ export async function getEmployeeRecordSnapshot(
           owner,
           item.id,
           {
-            ...linkedReminderField(item, activeReminders),
+            ...linkedReminderField(item, activeReminders, activeByWorkerItemId),
             ...urgencySnapshotField(item.urgency),
             ...assignedByField(list.employee.id, item.addedById, names),
           },
@@ -1215,6 +1226,7 @@ export async function getEmployeeRecordSnapshot(
         items: list.items,
         names,
         activeReminders,
+        activeByWorkerItemId,
         ...(workerViewerId
           ? {
               itemExtras: (item: WorkerTaskRow) =>
@@ -1249,6 +1261,7 @@ export async function getEmployeeRecordSnapshot(
         items: list.items,
         names,
         activeReminders,
+        activeByWorkerItemId,
       }),
     );
   }
@@ -3097,6 +3110,7 @@ function toListSnapshotEntry(input: {
   }>;
   names: Map<string, string>;
   activeReminders?: Map<string, LinkedReminderRow>;
+  activeByWorkerItemId?: Map<string, LinkedReminderRow>;
   itemExtras?: (item: WorkerTaskRow) => Record<string, unknown>;
 }): EmployeeRecordSnapshot["lists"][number] | null {
   const derivedName =
@@ -3114,7 +3128,11 @@ function toListSnapshotEntry(input: {
         input.ownerName,
         item.id,
         {
-          ...linkedReminderField(item, input.activeReminders ?? new Map()),
+          ...linkedReminderField(
+            item,
+            input.activeReminders ?? new Map(),
+            input.activeByWorkerItemId,
+          ),
           ...urgencySnapshotField(item.urgency),
           ...(input.scope === "shared"
             ? {}
@@ -3172,19 +3190,30 @@ export type LinkedReminderRow = {
   repeat: string;
   recurrence?: unknown;
   occurrencesFired?: number;
+  workerItemId?: string | null;
 };
 
 /**
- * The active clock FK-linked to this item: reminder_id (worker task) or
- * linked_reminder_id (speaker/shared item from the same turn).
+ * The active clock FK-linked to this item: reminder_id (worker task),
+ * linked_reminder_id (speaker/shared soft link), or reverse worker_item_id.
  */
 export function linkedReminderField(
-  item: { reminderId?: string | null; linkedReminderId?: string | null },
+  item: {
+    id?: string;
+    reminderId?: string | null;
+    linkedReminderId?: string | null;
+  },
   activeReminders: Map<string, LinkedReminderRow>,
+  activeByWorkerItemId?: Map<string, LinkedReminderRow>,
 ): Record<string, unknown> {
-  const reminder = [item.reminderId, item.linkedReminderId]
-    .map((id) => (id ? activeReminders.get(id) : undefined))
-    .find(Boolean);
+  const itemId = typeof item.id === "string" ? item.id.trim() : "";
+  const reminder =
+    [item.reminderId, item.linkedReminderId]
+      .map((id) => (id ? activeReminders.get(id) : undefined))
+      .find(Boolean) ??
+    (itemId && activeByWorkerItemId
+      ? activeByWorkerItemId.get(itemId)
+      : undefined);
   if (!reminder) {
     return {};
   }

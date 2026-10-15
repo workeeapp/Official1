@@ -23,6 +23,8 @@ const TITLE_KEYS: Record<string, string[]> = {
 export type ShowDumpOptions = {
   /** Current speaker display name — omitted from `(עם …)` partner headers. */
   viewerName?: string;
+  /** Extra viewer labels (nickname + legal name) so partner headers never keep the viewer. */
+  viewerAliases?: string[];
   now?: Date;
 };
 
@@ -219,9 +221,15 @@ function formatThreeWayDump(
   const personal: DumpItem[] = [];
   const sharedByPartner = new Map<string, DumpItem[]>();
   const byOwner = new Map<string, DumpItem[]>();
+  const partnerListFiles = new Map<string, boolean>();
+  const ownerListFiles = new Map<string, boolean>();
+  let personalListFiles = false;
+  let sharedSectionListFiles = false;
   const viewer = opts?.viewerName?.trim() ?? "";
+  const aliases = opts?.viewerAliases;
 
   for (const list of lists) {
+    const listFiles = listHasListLevelFiles(list);
     if (list.scope === "shared_items") {
       const bucket = byOwner.get(list.owner) ?? [];
       for (const item of list.items) {
@@ -231,11 +239,14 @@ function formatThreeWayDump(
         });
       }
       byOwner.set(list.owner, bucket);
+      if (listFiles) {
+        ownerListFiles.set(list.owner, true);
+      }
       continue;
     }
 
     if (list.scope === "shared") {
-      const partnerKey = partnersKey(list.shared_with ?? [], viewer);
+      const partnerKey = partnersKey(list.shared_with ?? [], viewer, aliases);
       const bucket = sharedByPartner.get(partnerKey) ?? [];
       for (const item of list.items) {
         bucket.push({
@@ -244,7 +255,15 @@ function formatThreeWayDump(
         });
       }
       sharedByPartner.set(partnerKey, bucket);
+      if (listFiles) {
+        sharedSectionListFiles = true;
+        partnerListFiles.set(partnerKey, true);
+      }
       continue;
+    }
+
+    if (listFiles) {
+      personalListFiles = true;
     }
 
     // personal list (may still hold shared/assigned items)
@@ -261,7 +280,7 @@ function formatThreeWayDump(
         continue;
       }
       if (sharedWith.length > 0) {
-        const partnerKey = partnersKey(sharedWith, viewer);
+        const partnerKey = partnersKey(sharedWith, viewer, aliases);
         const bucket = sharedByPartner.get(partnerKey) ?? [];
         bucket.push({
           title: itemTitle(listType, item, list.title_field),
@@ -278,7 +297,7 @@ function formatThreeWayDump(
   }
 
   const blocks: string[] = [];
-  blocks.push(`${label} אישיות:`);
+  blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
   if (personal.length === 0) {
     blocks.push("ריקה");
   } else {
@@ -293,12 +312,14 @@ function formatThreeWayDump(
   }
 
   blocks.push("");
-  blocks.push(`${label} משותפות:`);
+  blocks.push(`${label} משותפות${paperclipSuffix(sharedSectionListFiles)}:`);
   if (sharedByPartner.size === 0) {
     blocks.push("ריקה");
   } else {
     for (const [partners, items] of sharedByPartner) {
-      blocks.push(`(עם ${partners})`);
+      blocks.push(
+        `(עם ${partners})${paperclipSuffix(partnerListFiles.get(partners) === true)}`,
+      );
       if (items.length === 0) {
         blocks.push("ריקה");
       } else {
@@ -315,7 +336,9 @@ function formatThreeWayDump(
 
   for (const [owner, items] of byOwner) {
     blocks.push("");
-    blocks.push(`${label} של ${owner}:`);
+    blocks.push(
+      `${label} של ${owner}${paperclipSuffix(ownerListFiles.get(owner) === true)}:`,
+    );
     if (items.length === 0) {
       blocks.push("ריקה");
     } else {
@@ -351,6 +374,7 @@ function formatContactsOrCustomDump(
   if (lists.length === 0) {
     return listType === "custom" ? null : `לא מצאתי רשימה בשם «${emptyLabel}».`;
   }
+  const listFiles = lists.some((list) => listHasListLevelFiles(list));
   const items = lists.flatMap((list) =>
     list.items.map((item) => ({
       title: itemTitle(listType, item, list.title_field),
@@ -358,17 +382,23 @@ function formatContactsOrCustomDump(
     })),
   );
   if (items.length === 0) {
-    return listType === "contacts"
-      ? "רשימת אנשי הקשר ריקה."
-      : `רשימת «${emptyLabel}» ריקה.`;
+    if (listType === "contacts") {
+      return "רשימת אנשי הקשר ריקה.";
+    }
+    return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} ריקה.`;
   }
-  return items
-    .map((row, i) =>
-      formatNumberedItem(i + 1, row.title, row.item, listType, {
-        now: opts?.now,
-      }),
-    )
-    .join("\n");
+  const lines = items.map((row, i) =>
+    formatNumberedItem(i + 1, row.title, row.item, listType, {
+      now: opts?.now,
+    }),
+  );
+  // Contacts have no list-level files; custom lists may show a titled header + 📎.
+  if (listType === "custom") {
+    return [`רשימת «${emptyLabel}»${paperclipSuffix(listFiles)}:`, ...lines].join(
+      "\n",
+    );
+  }
+  return lines.join("\n");
 }
 
 /** Exported for unit tests. */
@@ -522,12 +552,39 @@ function normalizeHm(time: string): string {
   return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
 
-function partnersKey(names: string[], viewerName: string): string {
+/**
+ * Partner header body for `(עם …)` — never includes the viewer (by name or aliases).
+ */
+export function partnersKey(
+  names: string[],
+  viewerName: string,
+  viewerAliases: string[] = [],
+): string {
+  const excluded = new Set(
+    [viewerName, ...viewerAliases]
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
   const partners = names
     .map((name) => name.trim())
     .filter(Boolean)
-    .filter((name) => !viewerName || name !== viewerName);
+    .filter((name) => !excluded.has(name));
   return partners.length > 0 ? partners.join(", ") : "משותף";
+}
+
+/** List-level files only (`has_attachments` / list attachments) — not item roll-up. */
+function listHasListLevelFiles(
+  list: EmployeeRecordSnapshot["lists"][number],
+): boolean {
+  const row = list as Record<string, unknown>;
+  if (row.has_attachments === true) {
+    return true;
+  }
+  return hasAttachments(row);
+}
+
+function paperclipSuffix(show: boolean): string {
+  return show ? " 📎" : "";
 }
 
 /** Shopping line body: «אורז - 2» / «עגבניות - 1 ק"ג» (missing כמות → 1). */

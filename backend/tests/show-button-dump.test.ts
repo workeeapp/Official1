@@ -12,6 +12,7 @@ import {
   formatShowDumpFromKind,
   isExactShowButtonCommand,
   parseExactShowButtonCommand,
+  partnersKey,
   shortCadenceParen,
 } from "../src/services/show-button-dump.js";
 import {
@@ -325,6 +326,14 @@ describe("formatShowButtonDump", () => {
     ).toBe("8.5.2027 ב־13:00 (כל שנה)");
   });
 
+  it("partnersKey never keeps the viewer (name or aliases)", () => {
+    expect(partnersKey(["טל", "עמית"], "טל")).toBe("עמית");
+    expect(partnersKey(["טל", "עמית"], "טלי", ["טל"])).toBe("עמית");
+    expect(partnersKey(["טל", "עמית"], "", ["טל"])).toBe("עמית");
+    expect(partnersKey(["טל"], "טל")).toBe("משותף");
+    expect(partnersKey(["טל"], "", ["טל"])).toBe("משותף");
+  });
+
   it("dumps shopping without soft-deleted rice (not in snapshot)", () => {
     const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
       viewerName: "טל",
@@ -337,6 +346,103 @@ describe("formatShowButtonDump", () => {
     expect(text).toContain("קניות משותפות:");
     expect(text).toContain("(עם מיכל)");
     expect(text).not.toContain("(עם טל, מיכל)");
+  });
+
+  it("drops viewer from (עם …) via aliases when viewerName mismatches", () => {
+    const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+      viewerName: "טלי",
+      viewerAliases: ["טל"],
+    });
+    expect(text).toContain("(עם מיכל)");
+    expect(text).not.toContain("(עם טל");
+  });
+
+  it("puts 📎 on list headers only for list-level has_attachments", () => {
+    const withListFiles: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          has_attachments: true,
+          items: [
+            {
+              item_id: "1",
+              "שם פריט": "חלב",
+              attachments: [{ id: "a1" }],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "custom",
+          list_name: "בעיות",
+          owner: "טל",
+          scope: "personal",
+          has_attachments: true,
+          items: [{ item_id: "c1", בעיה: "דליפה" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const shopping = formatShowButtonDump("הצג רשימת קניות", withListFiles, {
+      viewerName: "טל",
+    });
+    expect(shopping).toContain("קניות אישיות 📎:");
+    expect(shopping).toContain("חלב - 1 📎");
+
+    const custom = formatShowButtonDump("הצג רשימת בעיות", withListFiles, {
+      viewerName: "טל",
+    });
+    expect(custom).toContain("רשימת «בעיות» 📎:");
+    expect(custom).toContain("1. דליפה");
+  });
+
+  it("does not put header 📎 when only items have files", () => {
+    const itemOnly: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "1",
+              "שם פריט": "חלב",
+              attachments: [{ id: "a1" }],
+            },
+          ],
+        },
+        {
+          list_type: "custom",
+          list_name: "בעיות",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "c1",
+              בעיה: "דליפה",
+              attachments: [{ id: "a2" }],
+            },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const shopping = formatShowButtonDump("הצג רשימת קניות", itemOnly, {
+      viewerName: "טל",
+    });
+    expect(shopping).toContain("קניות אישיות:");
+    expect(shopping).not.toContain("קניות אישיות 📎:");
+    expect(shopping).toContain("חלב - 1 📎");
+
+    const custom = formatShowButtonDump("הצג רשימת בעיות", itemOnly, {
+      viewerName: "טל",
+    });
+    expect(custom).toContain("רשימת «בעיות»:");
+    expect(custom).not.toContain("רשימת «בעיות» 📎:");
+    expect(custom).toContain("דליפה 📎");
   });
 
   it("dumps tasks with schedule, reminder, and partners without viewer", () => {
@@ -352,6 +458,15 @@ describe("formatShowButtonDump", () => {
     );
     expect(text).toContain("(עם עמית)");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
+  });
+
+  it("show_dump tasks prints linked reminders the same as the button", () => {
+    const fromKind = formatShowDumpFromKind("tasks", snapshot, {
+      viewerName: "טל",
+      now,
+    });
+    expect(fromKind).toContain("(תזכורת: היום ב־20:30)");
+    expect(fromKind).toContain("(תזכורת: 15.11.2026 ב־09:00)");
   });
 
   it("dumps from show_dump kind the same as the button command", () => {

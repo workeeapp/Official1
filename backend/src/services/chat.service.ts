@@ -94,6 +94,7 @@ import {
   formatReminderApplyNotice,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  listLiveHumanItemsForReminderLink,
   reminderRepeatsSubHourly,
   SUB_HOURLY_REFUSAL,
   type ReminderChange,
@@ -1673,18 +1674,38 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
-    await linkRemindersToItems(
-      savedClocks,
-      listMutations
-        .filter(
-          (row) =>
-            row.action === "add" &&
-            !row.listShell &&
-            row.itemId &&
-            humans.some((human) => human.id === row.employeeId),
-        )
-        .map((row) => ({ id: row.itemId, itemKey: row.itemKey, itemLabel: row.itemLabel })),
-    );
+    // Soft-link clocks to speaker/human shopping+tasks: same-turn adds plus
+    // existing live rows (so a later reminders.add still gets linked_reminder_id).
+    const linkFromMutations = listMutations
+      .filter(
+        (row) =>
+          row.action === "add" &&
+          !row.listShell &&
+          row.itemId &&
+          humans.some((human) => human.id === row.employeeId),
+      )
+      .map((row) => ({
+        id: row.itemId,
+        itemKey: row.itemKey,
+        itemLabel: row.itemLabel,
+      }));
+    const linkFromLive =
+      savedClocks.length > 0
+        ? await listLiveHumanItemsForReminderLink({
+            userId: input.userId,
+            humanIds: humans.map((human) => human.id),
+          })
+        : [];
+    const linkCandidates = new Map<
+      string,
+      { id: string; itemKey: string; itemLabel: string }
+    >();
+    for (const row of [...linkFromMutations, ...linkFromLive]) {
+      if (!linkCandidates.has(row.id)) {
+        linkCandidates.set(row.id, row);
+      }
+    }
+    await linkRemindersToItems(savedClocks, [...linkCandidates.values()]);
     recordWhatsAppEvent(
       "reminder_apply",
       `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderWrites.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,
@@ -2084,7 +2105,16 @@ export async function sendChatMessage(input: {
       const liveSnapshot = await withAttachmentRefsSafe(
         await getEmployeeRecordSnapshot(input.employeeId),
       );
-      const dumpOpts = { viewerName: speaker };
+      const dumpOpts = {
+        viewerName: speaker,
+        viewerAliases: [
+          ...new Set(
+            [employee.nickname?.trim() ?? "", employee.name.trim()].filter(
+              Boolean,
+            ),
+          ),
+        ],
+      };
       const showDump = isExactShowButtonCommand(showCommand)
         ? formatShowButtonDump(showCommand, liveSnapshot, dumpOpts)
         : formatShowDumpFromKind(showDumpKind, liveSnapshot, dumpOpts);
