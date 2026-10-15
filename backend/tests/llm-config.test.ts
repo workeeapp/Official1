@@ -141,6 +141,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("Do NOT add a tasks row on the speaker");
     expect(config.systemMessage).toContain("EXAMPLE NAMES ARE NOT REAL");
     expect(config.systemMessage).toContain("SNOOZE / REMIND AGAIN");
+    expect(config.systemMessage).toContain("REUSE EXISTING WRAPPER");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN lists.add of a second copy",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN second shopping חלב",
+    );
+    expect(config.systemMessage).toContain("REMINDER-ON-ITEM");
+    expect(config.systemMessage).toContain("הוסף תזכורת ל־X");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN lists.add (or inventing) any shopping/tasks product wrapper",
+    );
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
