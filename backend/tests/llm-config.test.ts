@@ -145,6 +145,16 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
     expect(config.systemMessage).toContain("מה יש לי משותף עם X");
+    expect(config.systemMessage).toContain("מה יש לי עם X");
+    expect(config.systemMessage).toContain("מה אנחנו חולקים עם X");
+    expect(config.systemMessage).toContain(
+      "shared LISTS are COUNTS ONLY",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN enumerating custom-list / scope=shared list item titles on this overview",
+    );
+    expect(config.systemMessage).toContain("לפירוט רשימה: הצג רשימת …");
+    expect(config.systemMessage).toContain("Enumerate ONLY atomic co-shares");
     expect(config.systemMessage).toContain("אסור לומר אין/לא מופיעות עם X");
     expect(config.systemMessage).toContain("NEVER ask for quantity");
     expect(config.systemMessage).toContain("NEVER ask for unit");
