@@ -490,7 +490,7 @@ export function formatNumberedItem(
       body += ` ${schedule}`;
     }
   }
-  // Standing + linked clock already folds into «(קבוע + תזכורת)» on the schedule.
+  // Standing + linked clock folds into «(קבוע + תזכורת)» / «… ב־HH:mm» on the schedule.
   if (!linkedOnStanding) {
     const reminder = formatLinkedReminderParen(item, opts?.now);
     if (reminder) {
@@ -514,8 +514,54 @@ export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
   return Boolean(raw) && typeof raw === "object" && !Array.isArray(raw);
 }
 
+/**
+ * Standing + linked clock mark. Same ping time as the chore → «(קבוע + תזכורת)»;
+ * different (e.g. chore 21:00, ping 20:45) → «(קבוע + תזכורת ב־20:45)».
+ */
+export function standingLinkedReminderMark(
+  item: Record<string, unknown>,
+  standingRuleText: string,
+): string {
+  if (!itemHasLinkedReminder(item)) {
+    return "(קבוע)";
+  }
+  const taskHm = extractHmFromText(standingRuleText);
+  const reminderHm = linkedReminderSeriesHm(item);
+  if (reminderHm && reminderHm !== taskHm) {
+    return `(קבוע + תזכורת ב־${reminderHm})`;
+  }
+  return "(קבוע + תזכורת)";
+}
+
+/** HH:mm from «ב־21:00» / «ב־21:00–22:00» in product-Hebrew rule text. */
+function extractHmFromText(text: string): string | null {
+  const match = text.match(/ב־(\d{1,2}:\d{2})/);
+  return match ? normalizeHm(match[1]) : null;
+}
+
+/** Series ping HH:mm from linked `reminder` (recurrence_text first, else fire_at). */
+function linkedReminderSeriesHm(item: Record<string, unknown>): string | null {
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const reminder = raw as Record<string, unknown>;
+  const recurrenceText =
+    typeof reminder.recurrence_text === "string"
+      ? reminder.recurrence_text.trim()
+      : "";
+  const fromRule = extractHmFromText(recurrenceText);
+  if (fromRule) {
+    return fromRule;
+  }
+  const fireAt =
+    typeof reminder.fire_at === "string" ? reminder.fire_at.trim() : "";
+  const fromFire = fireAt.match(/(?:^|\s)(\d{1,2}:\d{2})(?:\s|$)/);
+  return fromFire ? normalizeHm(fromFire[1]) : null;
+}
+
 /** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30».
- * Standing + linked clock → «(קבוע + תזכורת)» instead of a separate תזכורת paren.
+ * Standing + linked clock → «(קבוע + תזכורת)» / «(קבוע + תזכורת ב־20:45)» when ping ≠ chore time.
  * Live `exceptions` append « · 18.10 ב־21:30» / « · 23.10 בוטל». */
 export function formatScheduleSuffix(
   item: Record<string, unknown>,
@@ -528,12 +574,10 @@ export function formatScheduleSuffix(
   const extras = formatExceptionsSuffix(item.exceptions);
   const recurring = readText(item, ["חוזר", "recurrence_text"]);
   if (recurring) {
-    const mark = itemHasLinkedReminder(item)
-      ? "(קבוע + תזכורת)"
-      : "(קבוע)";
+    const mark = standingLinkedReminderMark(item, recurring);
     let base: string;
-    if (/\(קבוע(?:\s*\+\s*תזכורת)?\)/.test(recurring)) {
-      base = `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת)?\)/g, mark)}`;
+    if (/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־\d{1,2}:\d{2})?)?\)/.test(recurring)) {
+      base = `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־\d{1,2}:\d{2})?)?\)/g, mark)}`;
     } else if (/קבוע/.test(recurring)) {
       base = `— ${recurring}`;
     } else {
