@@ -1375,7 +1375,7 @@ export async function sendChatMessage(input: {
           ? ""
           : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Dedup: מטלות = WORKER rows that are NOT an OPEN_JOBS shadow (skip title matching OPEN_JOBS.task / «לבדוק עם…»); ממתינים = every OPEN_JOBS row once including scheduled=true — phrase from ask; scheduled → not yet due, do not ask the check now; OPEN_JOBS empty → all WORKER_SAVED_DATA. FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה. Do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. Numbered 1. 2. 3. per block (never •; restart at 1). A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no reminder parentheses. Before that, name the humans the row involves (asked_by + for, de-duplicated, never yourself, viewer included) in parentheses when there are two or more and the item name does not already show them — e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks.`,
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
-        "Status / דוח / show a list / «הצג רשימת X»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts / exact «הצג רשימת …» → metadata.show_dump + empty lists; server replaces response. Filings / ABOUT X / bare FULL DUMP (מה יש לי / הציגי הכל) stay model-written from EMPLOYEE_SAVED_DATA. Custom titled list → show_dump = that list_name. Empty model-written section → empty sentence — never reuse «מחקתי…». Urgency/📎 rules still apply when you write filings/FULL DUMP yourself. כל מה ששמור / סיכום מלא → FULL DUMP (no show_dump).",
+        "Status / דוח / show a list / «הצג רשימת X»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts / exact «הצג רשימת …» → metadata.show_dump + empty lists; server replaces response. «הצג רשימת קניות אישית/משותפת» / מטלות אישית (+ בבקשה) → show_dump=shopping|tasks same as bare. Filings / ABOUT X / bare FULL DUMP (מה יש לי / הציגי הכל) stay model-written from EMPLOYEE_SAVED_DATA. Custom titled list → show_dump = that list_name. Empty model-written section → empty sentence — never reuse «מחקתי…». Urgency/📎 rules still apply when you write filings/FULL DUMP yourself. כל מה ששמור / סיכום מלא → FULL DUMP (no show_dump).",
         `Ping clocks (${SPEAKER_CLOCK_ASKS}) → metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
         "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Any listed task/reminder row with non-empty attachments → append 📎 after the title on that numbered line (same as status dumps — including השבוע / שבוע הבא). Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — a short היי after מה תרצה שאשלח is still the answer to your question). Ask about X by name → that person's visible rows. STANDING / recurring: before «אין לך…», scan חוזר / next_occurrences (and clock next_occurrences); match next_occurrences first then תאריך לביצוע (a multi-day row matches every day from תאריך לביצוע to תאריך סיום; a row with שעת סיום shows «10:00–12:00»); SINGLE-DAY → DAY AGENDA FORMAT (day header + numbered 1. 2. 3. items by time; never one packed line with semicolons); MULTI-DAY (השבוע / שבוע הבא) → dense daily/interval ONE numbered rule line per row — never one line per next_occurrences hit. FORBIDDEN empty answer when the asked date is in next_occurrences. Empty timed window only after that scan → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
         "הציגי את הרשימות שלי / show my lists: one block per list — header (list_name + shared_with if shared), then • items with CURRENT field values plus partners in parentheses when the item has its own shared_with (e.g. «• אבי — מהמר (עם טל)»); blank line between lists. Never one run-on paragraph. Empty → «ריקה».",
@@ -2129,9 +2129,25 @@ export async function sendChatMessage(input: {
           ),
         ],
       };
-      const showDump = isExactShowButtonCommand(showCommand)
-        ? formatShowButtonDump(showCommand, liveSnapshot, dumpOpts)
-        : formatShowDumpFromKind(showDumpKind, liveSnapshot, dumpOpts);
+      let showDump: string | null = null;
+      if (isExactShowButtonCommand(showCommand)) {
+        showDump = formatShowButtonDump(showCommand, liveSnapshot, dumpOpts);
+        // Exact-looking utterance with unrecognized name (e.g. before normalize
+        // edge cases) — still honor model show_dump when present.
+        if (!showDump && showDumpKind) {
+          showDump = formatShowDumpFromKind(
+            showDumpKind,
+            liveSnapshot,
+            dumpOpts,
+          );
+        }
+      } else if (showDumpKind) {
+        showDump = formatShowDumpFromKind(
+          showDumpKind,
+          liveSnapshot,
+          dumpOpts,
+        );
+      }
       if (showDump) {
         workingReply = setEngineResponse(workingReply, showDump);
       }

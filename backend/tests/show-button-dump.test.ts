@@ -11,6 +11,7 @@ import {
   formatShowButtonDump,
   formatShowDumpFromKind,
   isExactShowButtonCommand,
+  normalizeShowListName,
   parseExactShowButtonCommand,
   partnersKey,
   shortCadenceParen,
@@ -706,8 +707,49 @@ describe("formatShowButtonDump", () => {
     expect(formatShowButtonDump("מה יש לי לקנות", snapshot)).toBeNull();
   });
 
-  it("does not override for unknown custom / free-form-looking names", () => {
+  it("does not override for unknown custom names", () => {
     expect(formatShowButtonDump("הצג רשימת בעיות", snapshot)).toBeNull();
-    expect(formatShowButtonDump("הצג רשימת קניות בבקשה", snapshot)).toBeNull();
+  });
+
+  it("normalizeShowListName strips polite and builtin section suffixes", () => {
+    expect(normalizeShowListName("קניות אישית")).toBe("קניות");
+    expect(normalizeShowListName("קניות אישיות")).toBe("קניות");
+    expect(normalizeShowListName("מטלות משותפת")).toBe("מטלות");
+    expect(normalizeShowListName("מטלות משותפות")).toBe("מטלות");
+    expect(normalizeShowListName("קניות בבקשה")).toBe("קניות");
+    expect(normalizeShowListName("קניות אישית בבקשה")).toBe("קניות");
+    expect(normalizeShowListName("אנשי קשר אישית")).toBe("אנשי קשר");
+    expect(normalizeShowListName("באגים בבקשה")).toBe("באגים");
+    expect(normalizeShowListName("באגים אישית")).toBe("באגים אישית");
+  });
+
+  it("dumps shopping/tasks when trailing אישית|משותפת|בבקשה", () => {
+    const bare = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+      viewerName: "טל",
+    });
+    expect(bare).toContain("קניות אישיות:");
+    for (const cmd of [
+      "הצג רשימת קניות אישית",
+      "הצג רשימת קניות אישיות",
+      "הצג רשימת קניות משותפת",
+      "הצג רשימת קניות בבקשה",
+      "הצג רשימת קניות אישית בבקשה",
+    ]) {
+      expect(formatShowButtonDump(cmd, snapshot, { viewerName: "טל" })).toBe(
+        bare,
+      );
+    }
+    const tasksBare = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+      viewerName: "טל",
+    });
+    expect(tasksBare).toContain("מטלות אישיות:");
+    expect(
+      formatShowButtonDump("הצג רשימת מטלות אישית", snapshot, {
+        viewerName: "טל",
+      }),
+    ).toBe(tasksBare);
+    expect(formatShowDumpFromKind("קניות אישית", snapshot, { viewerName: "טל" })).toBe(
+      bare,
+    );
   });
 });

@@ -148,6 +148,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("מה יש לי עם X");
     expect(config.systemMessage).toContain("מה אנחנו חולקים עם X");
     expect(config.systemMessage).toContain(
+      "הצג רשימת קניות אישית/משותפת",
+    );
+    expect(config.systemMessage).toContain(
       "shared LISTS are COUNTS ONLY",
     );
     expect(config.systemMessage).toContain(

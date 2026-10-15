@@ -54,29 +54,61 @@ export function isExactShowButtonCommand(text: string): boolean {
   return parseExactShowButtonCommand(text) !== null;
 }
 
+const SHOW_POLITE_SUFFIX = /(?:\s+(?:בבקשה|please))+$/iu;
+const SHOW_SECTION_SUFFIX = /(?:\s+(?:אישית|אישיות|משותפת|משותפות))+$/u;
+
+const BUILTIN_SHOW_LISTS = new Set(["קניות", "מטלות", "אנשי קשר"]);
+
+/**
+ * Normalize a show-list name from an exact «הצג רשימת …» command or show_dump.
+ * Strips trailing בבקשה/please. For builtins only, also strips אישית|משותפת
+ * (and plural forms) so «קניות אישית» → קניות. Custom names keep אישית.
+ */
+export function normalizeShowListName(raw: string): string {
+  let name = raw.trim().replace(SHOW_POLITE_SUFFIX, "").trim();
+  if (!name) {
+    return "";
+  }
+  const withoutSection = name.replace(SHOW_SECTION_SUFFIX, "").trim();
+  if (BUILTIN_SHOW_LISTS.has(withoutSection)) {
+    return withoutSection;
+  }
+  return name;
+}
+
 /** Map metadata.show_dump / list Hebrew labels to a dump target. */
 export function resolveShowDumpKind(
   raw: string,
 ): { kind: "reminders" } | { kind: "list"; name: string } | null {
-  const value = raw.trim();
-  if (!value) {
+  const trimmed = raw.trim();
+  if (!trimmed) {
     return null;
   }
-  const lower = value.toLowerCase();
+  const lower = trimmed.toLowerCase();
   if (
     lower === "reminders" ||
-    value === "תזכורות" ||
-    value === SHOW_REMINDERS_COMMAND
+    trimmed === "תזכורות" ||
+    trimmed === SHOW_REMINDERS_COMMAND
   ) {
     return { kind: "reminders" };
   }
-  if (lower === "shopping" || value === "קניות") {
+  if (lower === "shopping") {
     return { kind: "list", name: "קניות" };
   }
-  if (lower === "tasks" || value === "מטלות") {
+  if (lower === "tasks") {
     return { kind: "list", name: "מטלות" };
   }
-  if (lower === "contacts" || value === "אנשי קשר") {
+  if (lower === "contacts") {
+    return { kind: "list", name: "אנשי קשר" };
+  }
+  const value = normalizeShowListName(trimmed);
+  if (value === "קניות") {
+    return { kind: "list", name: "קניות" };
+  }
+  if (value === "מטלות") {
+    return { kind: "list", name: "מטלות" };
+  }
+  if (value === "אנשי קשר") {
     return { kind: "list", name: "אנשי קשר" };
   }
   return { kind: "list", name: value };
@@ -188,10 +220,11 @@ export function shortCadenceParen(
 }
 
 function formatListDump(
-  name: string,
+  rawName: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): string | null {
+  const name = normalizeShowListName(rawName);
   if (name === "קניות") {
     return formatThreeWayDump("shopping", "קניות", snapshot, opts);
   }
@@ -201,7 +234,7 @@ function formatListDump(
   if (name === "אנשי קשר") {
     return formatContactsOrCustomDump("contacts", "", snapshot, "אנשי קשר", opts);
   }
-  // Unknown custom name → null so free-form «הצג רשימת … בבקשה» stays model-written.
+  // Unknown custom name → null (model-written). Trailing בבקשה already stripped.
   return formatContactsOrCustomDump("custom", name, snapshot, name, opts);
 }
 
