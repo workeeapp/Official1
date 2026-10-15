@@ -197,6 +197,26 @@ export function mergeListItemData(
   return normalizeListItemData({ ...existing, ...patch });
 }
 
+/** Shopping rows always store כמות (default 1). Does not invent יחידת מידה. */
+export function ensureShoppingQuantity(
+  listType: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  if (listType !== "shopping") {
+    return data;
+  }
+  const qty = data["כמות"] ?? data.quantity ?? data.qty;
+  if (
+    (typeof qty === "number" && Number.isFinite(qty)) ||
+    (typeof qty === "string" &&
+      qty.trim() !== "" &&
+      Number.isFinite(Number(qty)))
+  ) {
+    return data;
+  }
+  return { ...data, כמות: 1 };
+}
+
 export function jsonStringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter(
@@ -2306,14 +2326,20 @@ async function applyListAction(
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
         : normalizeListItemData(fieldsItem);
+    const quantityRecord = ensureShoppingQuantity(
+      resolvedAction.listType,
+      mergedRecord,
+    );
     const ruledRecord = shaped.clear
-      ? clearItemRecurrence(mergedRecord)
+      ? clearItemRecurrence(quantityRecord)
       : existing
         ? keepOccurrenceMarks(
-            shaped.explicitStart ? mergedRecord : keepRecurrenceStart(mergedRecord, existing.data),
+            shaped.explicitStart
+              ? quantityRecord
+              : keepRecurrenceStart(quantityRecord, existing.data),
             existing.data,
           )
-        : mergedRecord;
+        : quantityRecord;
     const doneRecord =
       done.doneDate && resolvedAction.action === "update"
         ? markOccurrenceDone(ruledRecord, done.doneDate)

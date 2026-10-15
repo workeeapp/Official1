@@ -124,6 +124,7 @@ import {
   updateEmployeeRecord,
   itemIdentity,
   isPhantomCustomListItem,
+  ensureShoppingQuantity,
   mergeListItemData,
   normalizeListItemData,
   readItemUrgency,
@@ -180,6 +181,29 @@ describe("employee records", () => {
     expect(
       itemIdentity("contacts", { "שם פרטי": "דנה", "שם משפחה": "לוי" }),
     ).toBe("דנה|לוי");
+  });
+
+  it("defaults missing shopping כמות to 1 and leaves other lists alone", () => {
+    expect(
+      ensureShoppingQuantity("shopping", { "שם פריט": "אורז" }),
+    ).toEqual({ "שם פריט": "אורז", כמות: 1 });
+    expect(
+      ensureShoppingQuantity("shopping", { "שם פריט": "אורז", כמות: 2 }),
+    ).toEqual({ "שם פריט": "אורז", כמות: 2 });
+    expect(
+      ensureShoppingQuantity("shopping", {
+        "שם פריט": "עגבניות",
+        כמות: 1,
+        "יחידת מידה": 'ק"ג',
+      }),
+    ).toEqual({
+      "שם פריט": "עגבניות",
+      כמות: 1,
+      "יחידת מידה": 'ק"ג',
+    });
+    expect(
+      ensureShoppingQuantity("tasks", { "שם מטלה": "לקנות מתנה" }),
+    ).toEqual({ "שם מטלה": "לקנות מתנה" });
   });
 
   it("collapses update-draft keys onto the real column", () => {

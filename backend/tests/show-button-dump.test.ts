@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  formatShoppingTitle,
   formatShowButtonDump,
   isExactShowButtonCommand,
   parseExactShowButtonCommand,
@@ -52,8 +53,13 @@ describe("formatShowButtonDump", () => {
         scope: "shared",
         shared_with: ["טל", "מיכל"],
         items: [
-          { item_id: "2", "שם פריט": "קמח מלא" },
-          { item_id: "3", "שם פריט": "נייר טואלט" },
+          { item_id: "2", "שם פריט": "קמח מלא", כמות: 2 },
+          {
+            item_id: "3",
+            "שם פריט": "עגבניות",
+            כמות: 1,
+            "יחידת מידה": 'ק"ג',
+          },
         ],
       },
     ],
@@ -102,11 +108,23 @@ describe("formatShowButtonDump", () => {
     ],
   };
 
+  it("dumps shopping with quantity (default 1) and unit", () => {
+    expect(formatShoppingTitle({ "שם פריט": "אורז", כמות: 2 })).toBe("אורז - 2");
+    expect(
+      formatShoppingTitle({
+        "שם פריט": "עגבניות",
+        כמות: 1,
+        "יחידת מידה": 'ק"ג',
+      }),
+    ).toBe('עגבניות - 1 ק"ג');
+    expect(formatShoppingTitle({ "שם פריט": "חלב" })).toBe("חלב - 1");
+  });
+
   it("dumps shopping without soft-deleted rice (not in snapshot)", () => {
     const text = formatShowButtonDump("הצג רשימת קניות", snapshot);
-    expect(text).toContain("ספוג אדום");
-    expect(text).toContain("קמח מלא");
-    expect(text).toContain("נייר טואלט");
+    expect(text).toContain("ספוג אדום - 1");
+    expect(text).toContain("קמח מלא - 2");
+    expect(text).toContain('עגבניות - 1 ק"ג');
     expect(text).not.toContain("אורז");
     expect(text).toContain("קניות אישיות:");
     expect(text).toContain("קניות משותפות:");

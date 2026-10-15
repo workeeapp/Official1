@@ -274,11 +274,31 @@ function formatNumberedItem(
   return line;
 }
 
+/** Shopping line body: «אורז - 2» / «עגבניות - 1 ק"ג» (missing כמות → 1). */
+export function formatShoppingTitle(item: Record<string, unknown>): string {
+  const name =
+    readText(item, TITLE_KEYS.shopping) ||
+    readText(item, ["name", "item_name"]) ||
+    "פריט";
+  const qtyRaw = item["כמות"] ?? item.quantity ?? item.qty;
+  const qty =
+    typeof qtyRaw === "number" && Number.isFinite(qtyRaw)
+      ? qtyRaw
+      : typeof qtyRaw === "string" && qtyRaw.trim() !== "" && Number.isFinite(Number(qtyRaw))
+        ? Number(qtyRaw)
+        : 1;
+  const unit = readText(item, ["יחידת מידה", "unit", "יחידה"]);
+  return unit ? `${name} - ${qty} ${unit}` : `${name} - ${qty}`;
+}
+
 function itemTitle(
   listType: string,
   item: Record<string, unknown>,
   titleField?: string,
 ): string {
+  if (listType === "shopping") {
+    return formatShoppingTitle(item);
+  }
   if (listType === "contacts") {
     const first = readText(item, TITLE_KEYS.contacts);
     const last = readText(item, ["שם משפחה", "last_name", "surname"]);
