@@ -304,6 +304,71 @@ describe("formatShowButtonDump", () => {
       ),
     ).toBe("5. לקחת אקמול — כל יומיים ב־15:00 (קבוע + תזכורת)");
     expect(
+      formatScheduleSuffix(
+        {
+          חוזר: "כל יום ראשון ב־21:00",
+          exceptions: ["18.10 ב־21:30"],
+        },
+        "tasks",
+        now,
+      ),
+    ).toBe("— כל יום ראשון ב־21:00 (קבוע) · 18.10 ב־21:30");
+    expect(
+      formatScheduleSuffix(
+        {
+          חוזר: "כל יום ראשון ב־21:00",
+          exceptions: ["23.10 בוטל"],
+        },
+        "tasks",
+        now,
+      ),
+    ).toBe("— כל יום ראשון ב־21:00 (קבוע) · 23.10 בוטל");
+    expect(
+      formatScheduleSuffix(
+        {
+          חוזר: "כל יום ראשון ב־21:00",
+          exceptions: ["18.10 ב־21:30"],
+          reminder: {
+            fire_at: "2026-10-18 21:30",
+            repeat: "custom",
+            recurrence_text: "כל יום ראשון ב־20:45",
+          },
+        },
+        "tasks",
+        now,
+      ),
+    ).toBe("— כל יום ראשון ב־21:00 (קבוע + תזכורת) · 18.10 ב־21:30");
+    expect(
+      formatNumberedItem(
+        6,
+        "חוג טיסנים",
+        {
+          חוזר: "כל יום ראשון ב־21:00",
+          exceptions: ["18.10 ב־21:30"],
+          reminder: {
+            fire_at: "2026-10-18 21:30",
+            repeat: "custom",
+            recurrence_text: "כל יום ראשון ב־20:45",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe(
+      "6. חוג טיסנים — כל יום ראשון ב־21:00 (קבוע + תזכורת) · 18.10 ב־21:30",
+    );
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2026-10-18 20:45",
+          repeat: "custom",
+          recurrence_text: "כל יום ראשון ב־20:45",
+          exceptions: ["18.10 ב־21:30"],
+        },
+        now,
+      ),
+    ).toBe("ראשון ב־20:45 (כל יום ראשון) · 18.10 ב־21:30");
+    expect(
       formatNumberedItem(
         5,
         "לקחת אקמול",

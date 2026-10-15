@@ -172,18 +172,37 @@ function formatRemindersDump(
 
 /**
  * Next fire + optional short cadence: «היום ב־19:00 (כל יום)» / «8.5.2027 ב־13:00 (כל שנה)».
+ * One-off moves/cancels append ` · 18.10 ב־21:30` from snapshot `exceptions`.
  */
 export function formatReminderWhen(
-  row: Pick<ReminderSnapshotRow, "fire_at" | "repeat" | "recurrence_text">,
+  row: Pick<
+    ReminderSnapshotRow,
+    "fire_at" | "repeat" | "recurrence_text" | "exceptions"
+  >,
   now = new Date(),
 ): string {
   const fireAt = row.fire_at?.trim() || "";
   const cadence = shortCadenceParen(row.recurrence_text, row.repeat);
+  const extras = formatExceptionsSuffix(row.exceptions);
   if (!fireAt) {
-    return cadence.replace(/^\(|\)$/g, "");
+    const base = cadence.replace(/^\(|\)$/g, "");
+    return base ? `${base}${extras}` : extras.replace(/^\s*·\s*/, "");
   }
   const relative = formatRelativeFireAt(fireAt, now);
-  return cadence ? `${relative} ${cadence}` : relative;
+  const when = cadence ? `${relative} ${cadence}` : relative;
+  return `${when}${extras}`;
+}
+
+/** « · 18.10 ב־21:30» / « · 23.10 בוטל» from snapshot exception labels. */
+export function formatExceptionsSuffix(exceptions: unknown): string {
+  if (!Array.isArray(exceptions) || exceptions.length === 0) {
+    return "";
+  }
+  const labels = exceptions
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return labels.length ? ` · ${labels.join(" · ")}` : "";
 }
 
 /** «(כל יום)» / «(כל שנה)» from recurrence_text — strips time, calendar clause, until, count. */
@@ -496,7 +515,8 @@ export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
 }
 
 /** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30».
- * Standing + linked clock → «(קבוע + תזכורת)» instead of a separate תזכורת paren. */
+ * Standing + linked clock → «(קבוע + תזכורת)» instead of a separate תזכורת paren.
+ * Live `exceptions` append « · 18.10 ב־21:30» / « · 23.10 בוטל». */
 export function formatScheduleSuffix(
   item: Record<string, unknown>,
   listType: string,
@@ -505,18 +525,21 @@ export function formatScheduleSuffix(
   if (listType !== "tasks") {
     return "";
   }
+  const extras = formatExceptionsSuffix(item.exceptions);
   const recurring = readText(item, ["חוזר", "recurrence_text"]);
   if (recurring) {
     const mark = itemHasLinkedReminder(item)
       ? "(קבוע + תזכורת)"
       : "(קבוע)";
+    let base: string;
     if (/\(קבוע(?:\s*\+\s*תזכורת)?\)/.test(recurring)) {
-      return `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת)?\)/g, mark)}`;
+      base = `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת)?\)/g, mark)}`;
+    } else if (/קבוע/.test(recurring)) {
+      base = `— ${recurring}`;
+    } else {
+      base = `— ${recurring} ${mark}`;
     }
-    if (/קבוע/.test(recurring)) {
-      return `— ${recurring}`;
-    }
-    return `— ${recurring} ${mark}`;
+    return `${base}${extras}`;
   }
   const date = readText(item, ["תאריך לביצוע", "date"]);
   const time = readText(item, ["שעה לביצוע", "time", "שעה"]);

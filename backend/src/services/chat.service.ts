@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
   digitalEmployees,
+  emptyLlmMetadata,
   humanEmployees,
   isDigitalEmployee,
   isGuestEmployee,
@@ -16,6 +17,7 @@ import {
   type ChatThreadMessage,
   type ChatThreadNotification,
   type ChatTurnMessageIds,
+  type LlmListAction,
   type LlmMetadata,
   type LlmReplyButton,
   type PublicEmployee,
@@ -1009,6 +1011,113 @@ async function pushTargetNotification(input: {
   return { notification, whatsappSkips: whatsappDelivery.skips };
 }
 
+type SharedNotifyClass =
+  | "purchased"
+  | "shared"
+  | "unshared"
+  | "owner"
+  | "other";
+
+function sharedNotifyClass(
+  event: SharedItemEvent,
+  targetId: string,
+): SharedNotifyClass {
+  if (event.purchased) {
+    return "purchased";
+  }
+  if (event.shared) {
+    return "shared";
+  }
+  if (event.unshared) {
+    return "unshared";
+  }
+  if (event.listOwnerId === targetId) {
+    return "owner";
+  }
+  return "other";
+}
+
+function pickSharedNotifyClass(
+  events: SharedItemEvent[],
+  targetId: string,
+): SharedNotifyClass {
+  if (events.some((event) => event.purchased)) {
+    return "purchased";
+  }
+  if (events.some((event) => event.shared)) {
+    return "shared";
+  }
+  if (events.some((event) => event.unshared)) {
+    return "unshared";
+  }
+  if (events.some((event) => event.listOwnerId === targetId)) {
+    return "owner";
+  }
+  return "other";
+}
+
+function listMergeKey(list: LlmListAction): string {
+  return `${list.listType}\0${list.listName ?? ""}\0${list.action}`;
+}
+
+/**
+ * One partner gets one notify per turn. Merge same-class events (e.g. three
+ * newly shared shopping rows) so the message names every item, not only the first.
+ */
+export function mergeEventsForTargetNotify(
+  events: SharedItemEvent[],
+  targetId: string,
+): SharedItemEvent {
+  if (events.length === 0) {
+    throw new Error("mergeEventsForTargetNotify requires at least one event");
+  }
+  const notifyClass = pickSharedNotifyClass(events, targetId);
+  const cohort = events.filter(
+    (event) => sharedNotifyClass(event, targetId) === notifyClass,
+  );
+  const representative = cohort[0] ?? events[0]!;
+  if (cohort.length <= 1) {
+    return representative;
+  }
+
+  const listBuckets = new Map<string, LlmListAction>();
+  for (const event of cohort) {
+    for (const list of event.metadata.lists ?? []) {
+      const key = listMergeKey(list);
+      const existing = listBuckets.get(key);
+      if (!existing) {
+        listBuckets.set(key, { ...list, items: [...list.items] });
+        continue;
+      }
+      const seenIds = new Set(
+        existing.items
+          .map((item) => readItemId(item as Record<string, unknown>))
+          .filter(Boolean),
+      );
+      for (const item of list.items) {
+        const id = readItemId(item as Record<string, unknown>);
+        if (id && seenIds.has(id)) {
+          continue;
+        }
+        if (id) {
+          seenIds.add(id);
+        }
+        existing.items.push(item);
+      }
+    }
+  }
+
+  return {
+    ...representative,
+    metadata: {
+      ...emptyLlmMetadata(),
+      ...representative.metadata,
+      lists: [...listBuckets.values()],
+      filing: representative.metadata.filing ?? [],
+    },
+  };
+}
+
 export async function notifySharedItemEvents(input: {
   userId: string;
   actor: PublicEmployee;
@@ -1041,11 +1150,7 @@ export async function notifySharedItemEvents(input: {
       continue;
     }
     notified.add(target.id);
-    const event =
-      events.find((item) => item.purchased) ??
-      events.find((item) => item.shared || item.unshared) ??
-      events.find((item) => item.listOwnerId === target.id) ??
-      events[0];
+    const event = mergeEventsForTargetNotify(events, targetId);
     const owner = input.employees.find((item) => item.id === event.listOwnerId);
     const pushed = await pushTargetNotification({
       userId: input.userId,
