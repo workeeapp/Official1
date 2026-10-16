@@ -379,7 +379,7 @@ const URGENCY_RULE = (() => {
     "The text to the recipient carries it: urgent → «עמית מבקש בדחיפות: מה שלומך?»; very_urgent → «דחוף מאוד — עמית מבקש תשובה עכשיו: מה שלומך?».",
     `On a job (expects_reply true) the server follows up with the recipient on its own: urgent → ${urgent.autoNudges} more times, every ${englishDuration(urgent.intervalSeconds)}; very_urgent → ${veryUrgent.autoNudges} more times, every ${englishDuration(veryUrgent.intervalSeconds)}; normal → none (you only raise it when they write). After the last follow-up the server tells the asker.`,
     "Never emit reminders, jobs.snooze or lists for those follow-ups. Response to the asker quotes the EXACT messages.text: «שלחתי לערן בדחיפות את ההודעה «עמית מבקש בדחיפות: מה שלומך?», ואזכיר לו שוב אם לא יענה.»",
-    "URGENCY FOLLOW-UP (critical): the same ask repeated more urgently (תבדקי שוב / «דחוף» / «זה דחוף» / «ממש דחוף» right after you scheduled or opened that check) → ONE messages entry matching that ask (same targets, same ask_summary meaning, same in/date/recurrence if still deferred) with only the higher urgency; the server raises/escalates that open job — one check, one clock.",
+    "URGENCY FOLLOW-UP (critical): the same ask repeated more urgently (תבדקי שוב / «דחוף» / «זה דחוף» / «ממש דחוף» right after you scheduled or opened that check) → prefer metadata.jobs [{ action:\"escalate\", job_id from OPEN_JOBS, urgency:\"urgent\"|\"very_urgent\" }] (asker only — subject cannot change urgency). Or ONE messages entry with the higher urgency (same targets/ask); the server escalates that one open job when it is the only asker→subject row — never a second check. Never reminders.add.",
     "FORBIDDEN: a second messages entry with a new clock, a second deferred check, metadata.reminders add, or lists.add for the same check.",
     "Example: «תבדקי איתי בעוד 10 דקות אם הלכתי לישון» then «זה דחוף» → messages [{ targets:[speaker], text:\"הלכת לישון?\", expects_reply:true, ask_summary:\"אם הלכת לישון?\", urgency:\"urgent\", in:600 }], reminders=[], lists:[]; response short ack that it is urgent.",
   ].join(" ");
@@ -418,8 +418,8 @@ const OPEN_JOBS_RULES = [
   "DECLINE (לא אספיק / לא רלוונטי) → action decline + report_text, job closes. «לא כרגע» / «אחר כך» with no hour is NOT a decline.",
   "PROGRESS (אתאם איתו מחר / לא כרגע with no hour) → action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only — never progress.",
   `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (היי / מה נשמע) or switch to a new topic. A raise is ALWAYS its own entry in responses — never inside the answer entry. The answer entry is written as if no job were open (greeting «הי» → «הי, איך אפשר לעזור?»); a normal raise is the NEXT entry and starts with «אגב,». Example: עמית «הי» with a raisable self-check «אם קנית חלב?» → responses: ["הי, איך אפשר לעזור?", "אגב, ביקשת שאבדוק אם קנית חלב?"]. A meeting raise entry is the question: «אגב, עמית ביקש לתאם איתך פגישה ביום ראשון ב-12:00. מתאים לך שעה זו כדי שאקבע?» Do not stop at «אני צריכה לתאם איתך». Skip the raise only while your own question is still unanswered, or in the same reply where they just said לא כרגע. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) — that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) → wait, do not raise early. A row with urgency=urgent → the raise entry comes FIRST in responses, before the answer entry, and says it is urgent (no «אגב»). urgency=very_urgent → that first raise entry appears in EVERY reply while it is open, even right after לא כרגע (one short line).`,
-  "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised job → metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server creates the clock AND its own «להזכיר ל…» task — never emit the three-action self-nudge pattern for a job and never add a second task for it. «לא כרגע» / «אחר כך» with no time → action snooze with no time and no in, report_text empty, and do not ask again in this reply. The asker hears nothing until the job is answered or declined. Vague hour → ask.",
-  "CANCEL: «בטלי את התזכורת» on a job → action clear_clock. If this speaker is the job's asker, say the reminder and the task were both cancelled; if they are not the asker, say only the reminder was cancelled and the task stays open — that is exactly what the server applies. «תשכחי מזה» → action close. A report you deliver is the end of that job — never set expects_reply on it.",
+  "SNOOZE: «תזכירי לי בעוד 10 דקות» / «בערב» about a raised OPEN_JOBS raise → ONLY metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server moves that job's nudge clock (or creates one if none) — FORBIDDEN reminders.add / lists three-action self-nudge / a second להזכיר for that job. «לא כרגע» / «אחר כך» with no time → snooze with no time (deferred, still raisable); asker not told. Vague hour → ask.",
+  "CANCEL / STOP THE CHECK: «אל תשאלי יותר» / «תפסיקי» / «תבטלי את זה» / «תשכחי מזה» on a raised OPEN_JOBS row → jobs.close or decline with job_id + report_text (ends chat raises AND the nudge clock). response short ack that you will update the asker («בסדר, ביטלתי — אעדכן את עמית.»). No regret turn, no «זה דחוף בטוח?». FORBIDDEN reminders.remove or clear_clock alone when they mean stop the whole check. «בטלי את התזכורת» only (clearly the WhatsApp ping, not the check) → clear_clock: asker closes the job + subject is told; subject only drops the clock and the job stays (asker not told). Silent full-cancel does not exist: «בטל אבל אל תגיד לו» → do NOT close yet; explain ending the check always updates the asker; ask cancel+notify or leave open. A report you deliver is the end of that job — never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a «<worker> עונה: …» line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (כמה אנשים / לאן בדיוק / מתי) and the speaker now gives them (3 אנשים / למנצ'סטר), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details («לגבי טיסה ללונדון ביום שלישי: נוסעים 3 אנשים»), ask_summary with the full topic. Never answer it yourself, never «לא הבנתי», and never ask the speaker what the details are for.",
   `INVENTORY (${WORKER_INVENTORY_ASKS}): two blocks, each consult once. (1) WORKER tasks — WORKER_SAVED_DATA rows that are NOT the shadow of an OPEN_JOBS job: skip any task whose title/שם מטלה matches an OPEN_JOBS task (or the same «לבדוק עם <subject>: <ask>»). Keep להזכיר / לשלוח הודעה / other chores. (2) Waiting / OPEN_JOBS — list EVERY OPEN_JOBS row once (including scheduled=true), phrased from ask (self-job → «לבדוק איתך אם סגרת את המזגן»); scheduled=true → say it is scheduled / not yet due (do NOT ask the check now). OPEN_JOBS empty → list all WORKER_SAVED_DATA. FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה. Numbered 1. 2. 3. per block — never •; restart at 1 for each block. Never RAISE in that reply. Never invent or prefer an older chat topic that is missing from this JSON. Never say job / job_id / expects_reply / OPEN_JOBS in response.`,
 ].join("\n");
@@ -1862,22 +1862,25 @@ export async function sendChatMessage(input: {
             jobs: openJobs,
           }),
         );
-    // Removing a job task through lists.remove must also drop its follow-up clock.
-    await withoutFailingTurn("job_sweep_failed", () =>
-      sweepJobNudgesForRemovedItems({
-        userId: input.userId,
-        actorId: employee.id,
-        itemIds: listMutations
-          .filter(
-            (row) =>
-              row.action === "remove" &&
-              row.employeeId === digital.id &&
-              row.listType === "tasks" &&
-              row.itemId,
-          )
-          .map((row) => row.itemId),
-      }),
-    );
+    // Removing a job task through lists.remove must also drop its follow-up clock
+    // and notify the other party (full job end).
+    const removedJobReports =
+      (await withoutFailingTurn("job_sweep_failed", () =>
+        sweepJobNudgesForRemovedItems({
+          userId: input.userId,
+          actorId: employee.id,
+          actorName: speakerName(employee),
+          itemIds: listMutations
+            .filter(
+              (row) =>
+                row.action === "remove" &&
+                row.employeeId === digital.id &&
+                row.listType === "tasks" &&
+                row.itemId,
+            )
+            .map((row) => row.itemId),
+        }),
+      )) ?? [];
     const phoneRelays = planPhoneRelays(
       guestSpeaker ? [] : metadata.messages ?? [],
       employees,
@@ -2129,12 +2132,14 @@ export async function sendChatMessage(input: {
     }
     // Reports back to the asker: Lucy's own words about the subject, not a
     // forwarded relay, so they skip the "מאת X" attribution.
-    const jobReports = (jobResult?.reports ?? []).flatMap((report) => {
-      const target = employees.find((row) => row.id === report.employeeId);
-      return target && !isDigitalEmployee(target) && target.id !== employee.id
-        ? [{ target, text: report.text }]
-        : [];
-    });
+    const jobReports = [...(jobResult?.reports ?? []), ...removedJobReports].flatMap(
+      (report) => {
+        const target = employees.find((row) => row.id === report.employeeId);
+        return target && !isDigitalEmployee(target) && target.id !== employee.id
+          ? [{ target, text: report.text }]
+          : [];
+      },
+    );
     for (const report of jobReports) {
       notifications.push(
         await pushRelayMessage({

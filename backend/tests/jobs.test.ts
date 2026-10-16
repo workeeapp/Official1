@@ -62,6 +62,7 @@ import {
   formatOpenJobsContext,
   listOpenJobsForViewer,
   meetingListsForAnswers,
+  sweepJobNudgesForRemovedItems,
   type OpenJobRow,
 } from "../src/services/jobs.service.js";
 import { JOB_META_KEY, jobMetaFrom, stripJobMeta } from "../src/services/job-meta.js";
@@ -337,10 +338,11 @@ describe("createJobsFromRelays", () => {
     );
   });
 
-  it("skips a second row when the same ask is already open", async () => {
+  it("opens another job when the same pair already has one at the same urgency", async () => {
     itemFindMany.mockResolvedValue([
       {
         id: "job-1",
+        urgency: "normal",
         data: {
           "שם מטלה": "לבדוק עם ערן: לתאם פגישה",
           [JOB_META_KEY]: {
@@ -356,6 +358,7 @@ describe("createJobsFromRelays", () => {
         },
       },
     ]);
+    itemCreate.mockResolvedValue({ id: "job-2" });
     const created = await createJobsFromRelays({
       userId: "u1",
       digitalEmployeeId: LUCY,
@@ -369,9 +372,10 @@ describe("createJobsFromRelays", () => {
         },
       ],
     });
-    expect(created).toEqual([]);
-    expect(itemCreate).not.toHaveBeenCalled();
-    expect(itemUpdate).not.toHaveBeenCalled();
+    // Same urgency → no escalate-by-pair; a second row is allowed (no ask-text match).
+    expect(created).toHaveLength(1);
+    expect(created[0].id).toBe("job-2");
+    expect(itemCreate).toHaveBeenCalled();
   });
 
   it("updates the existing job when this turn already progressed that row", async () => {
@@ -415,10 +419,11 @@ describe("createJobsFromRelays", () => {
     );
   });
 
-  it("does not open a second job when the same ask is already open in the other direction", async () => {
+  it("opens a new job when a reverse-direction job is already open", async () => {
     itemFindMany.mockResolvedValue([
       {
         id: "job-1",
+        urgency: "normal",
         data: {
           "שם מטלה": "לבדוק עם עמית: יום שלישי ב-15:00",
           [JOB_META_KEY]: {
@@ -434,6 +439,7 @@ describe("createJobsFromRelays", () => {
         },
       },
     ]);
+    itemCreate.mockResolvedValue({ id: "job-2" });
     const created = await createJobsFromRelays({
       userId: "u1",
       digitalEmployeeId: LUCY,
@@ -447,9 +453,10 @@ describe("createJobsFromRelays", () => {
         },
       ],
     });
-    expect(created).toEqual([]);
-    expect(itemCreate).not.toHaveBeenCalled();
-    expect(itemUpdate).not.toHaveBeenCalled();
+    // Reverse pair is a different asker→subject; never match by ask text.
+    expect(created).toHaveLength(1);
+    expect(created[0].id).toBe("job-2");
+    expect(itemCreate).toHaveBeenCalled();
   });
 
   it("opens a new job when the reverse pair is open with a different ask", async () => {
@@ -1379,6 +1386,97 @@ describe("applyJobActions", () => {
     expect(itemUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("reschedules an existing nudge Reminder in place on snooze", async () => {
+    reminderUpdate.mockResolvedValue({});
+    itemFindUnique.mockResolvedValue({
+      id: "job-1",
+      data: {
+        "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+        [JOB_META_KEY]: {
+          ...jobRow().meta,
+          nudgeReminderId: "clock-1",
+          nudgeItemId: "nudge-1",
+        },
+      },
+    });
+    const result = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: ERAN, name: "ערן" },
+      actions: [
+        {
+          action: "snooze",
+          jobId: "job-1",
+          answerText: "",
+          reportText: "",
+          time: "",
+          in: 900,
+        },
+      ],
+      jobs: [jobRow({ nudgeReminderId: "clock-1", nudgeItemId: "nudge-1" })],
+    });
+    expect(result.snoozed).toHaveLength(1);
+    expect(reminderCreate).not.toHaveBeenCalled();
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(reminderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "clock-1" },
+        data: expect.objectContaining({ status: "active" }),
+      }),
+    );
+  });
+
+  it("lets the asker escalate urgency and ignores subject escalate", async () => {
+    itemFindUnique.mockResolvedValue({ id: "job-1", data: {} });
+    itemCreate.mockResolvedValue({ id: "nudge-1" });
+    reminderCreate.mockResolvedValue({ id: "clock-1" });
+    reminderUpdate.mockResolvedValue({});
+    const asAsker = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      actions: [
+        {
+          action: "escalate",
+          jobId: "job-1",
+          answerText: "",
+          reportText: "",
+          time: "",
+          in: null,
+          urgency: "urgent",
+        },
+      ],
+      jobs: [jobRow()],
+    });
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { urgency: "urgent" },
+    });
+    expect(asAsker.reports).toEqual([]);
+
+    itemUpdate.mockClear();
+    reminderCreate.mockClear();
+    const asSubject = await applyJobActions({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: ERAN, name: "ערן" },
+      actions: [
+        {
+          action: "escalate",
+          jobId: "job-1",
+          answerText: "",
+          reportText: "",
+          time: "",
+          in: null,
+          urgency: "very_urgent",
+        },
+      ],
+      jobs: [{ ...jobRow(), urgency: "urgent" }],
+    });
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(asSubject.reports).toEqual([]);
+  });
+
   it("defers without a clock when no time was named", async () => {
     const result = await applyJobActions({
       userId: "u1",
@@ -1446,10 +1544,37 @@ describe("applyJobActions", () => {
       jobs: [jobRow({ nudgeReminderId: "clock-1", nudgeItemId: "nudge-1" })],
     });
     expect(result.closed).toEqual(["job-1"]);
+    expect(result.reports[0]?.employeeId).toBe(ERAN);
+    expect(result.reports[0]?.text).toContain("עמית");
     expect(itemUpdateMany).toHaveBeenCalledWith({
       where: { id: "job-1", deletedAt: null },
       data: expect.objectContaining({ reminderId: null }),
     });
+  });
+
+  it("notifies the other party when a job row is removed via lists.remove", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "job-1",
+        data: {
+          "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+          [JOB_META_KEY]: jobRow().meta,
+        },
+      },
+    ]);
+    reminderFindFirst.mockResolvedValue(null);
+    const reports = await sweepJobNudgesForRemovedItems({
+      userId: "u1",
+      actorId: ERAN,
+      actorName: "ערן",
+      itemIds: ["job-1"],
+    });
+    expect(reports).toEqual([
+      expect.objectContaining({
+        employeeId: AMIT,
+        text: expect.stringContaining("ערן"),
+      }),
+    ]);
   });
 
   it("tells the other person when a job is cancelled outright", async () => {

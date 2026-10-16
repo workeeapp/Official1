@@ -55,6 +55,9 @@ Architecture rules: `.cursor/rules/architecture.mdc`, `.cursor/rules/model-under
 - Server creates the open job, schedules auto-nudges, exposes `follow_ups_sent` / `follow_ups_left` / `next_follow_up_at` in `OPEN_JOBS`.
 - When auto-nudges run out, the **asker** is notified (skipped for self-jobs — see §3).
 - After a nudge clock fires, the job becomes raisable again.
+- **Escalate:** asker-only `jobs.escalate` (or one higher-urgency `messages` entry when asker→subject has exactly one open job). Never a second job for the same check; subject cannot change urgency.
+- **Snooze:** `jobs.snooze` moves the existing nudge Reminder in place when one exists — never a parallel `reminders.add` for that raise.
+- **End job notify:** closing the whole check (`close` / `decline` / asker `clear_clock` / `lists.remove` of the job) notifies the other party. Clock-only clear by the subject does not.
 
 **Code:** `shared/src/job-urgency.ts`, `backend/src/services/jobs.service.ts`.  
 **Tests:** `backend/tests/jobs.test.ts`.

@@ -110,8 +110,9 @@ async function tasksListIdFor(employeeId: string): Promise<string | null> {
 
 /**
  * Open one job per relayed question the asker expects an answer to.
- * Several jobs may be open for the same two people; only an identical ask
- * is skipped. A job this turn already progressed may reuse that row.
+ * Several jobs may be open for the same two people. Reuse via reuseJobIds
+ * (progressed this turn), or escalate when asker+subject have exactly one
+ * open job and delivery urgency is strictly higher — never by ask text.
  * The row lives on the digital worker and is visible to both people.
  */
 export async function createJobsFromRelays(input: {
@@ -157,15 +158,20 @@ export async function createJobsFromRelays(input: {
   for (const delivery of input.deliveries) {
     const urgency = delivery.urgency ?? "normal";
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
-    // Escalate/reuse only via explicit job_id (reuseJobIds) — never by ask text.
-    const reusable = openJobs.filter(
+    const samePair = openJobs.filter(
       (job) =>
-        reuse.has(job.id) &&
         job.meta.askerId === input.asker.id &&
         job.meta.subjectId === delivery.subjectId,
     );
-    if (reusable.length === 1) {
-      const existing = reusable[0];
+    const reusable = samePair.filter((job) => reuse.has(job.id));
+    const escalateOnly =
+      reusable.length !== 1 &&
+      samePair.length === 1 &&
+      urgencyRank(urgency) > urgencyRank(samePair[0].urgency)
+        ? samePair[0]
+        : null;
+    const existing = reusable.length === 1 ? reusable[0] : escalateOnly;
+    if (existing) {
       const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
       const nextMeta: JobMeta = {
         ...existing.meta,
@@ -324,6 +330,28 @@ export async function createScheduledJobsFromRelays(input: {
     return [];
   }
   const now = input.now ?? new Date();
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  const openJobs: Array<{
+    id: string;
+    meta: JobMeta;
+    data: Record<string, unknown>;
+    urgency: JobUrgency;
+  }> = [];
+  for (const row of live ?? []) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (meta?.kind !== "job") {
+      continue;
+    }
+    openJobs.push({
+      id: row.id,
+      meta,
+      data,
+      urgency: parseJobUrgency(row.urgency),
+    });
+  }
   const created: OpenJobRow[] = [];
   for (const delivery of input.deliveries) {
     const resolved = resolveScheduledJobFireAt({
@@ -338,6 +366,24 @@ export async function createScheduledJobsFromRelays(input: {
     }
     const urgency = delivery.urgency ?? "normal";
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
+    const samePair = openJobs.filter(
+      (job) =>
+        job.meta.askerId === input.asker.id &&
+        job.meta.subjectId === delivery.subjectId,
+    );
+    if (
+      samePair.length === 1 &&
+      urgencyRank(urgency) > urgencyRank(samePair[0].urgency)
+    ) {
+      await escalateJob({
+        userId: input.userId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        actorId: input.asker.id,
+        job: samePair[0],
+        urgency,
+      });
+      continue;
+    }
     const label = `לבדוק עם ${delivery.subjectName}: ${ask}`.trim();
     const { date, time } = jerusalemDateAndTime(resolved.fireAt);
     const meta: JobMeta = {
@@ -404,6 +450,12 @@ export async function createScheduledJobsFromRelays(input: {
         scheduleSoon(resolved.fireAt);
       }
       created.push({ id: row.id, label, meta, urgency });
+      openJobs.push({
+        id: row.id,
+        meta,
+        data: { [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta },
+        urgency,
+      });
       await recordAuditEvent({
         userId: input.userId,
         actorEmployeeId: input.asker.id,
@@ -1023,6 +1075,10 @@ async function escalateJob(input: {
     return;
   }
   input.job.urgency = input.urgency;
+  // Deferred first-ask: only the urgency level changes; keep the activation clock.
+  if (input.job.meta.pendingActivation) {
+    return;
+  }
   // A snooze the subject asked for stays; an older follow-up is replaced by the faster cadence.
   if (input.job.meta.nudgeReminderId && !input.job.meta.nudgeAuto) {
     return;
@@ -1319,7 +1375,29 @@ export async function applyJobActions(input: {
           });
           continue;
         }
-        await sweepNudge(job.meta, input.userId, input.speaker.id);
+        if (job.meta.nudgeReminderId) {
+          try {
+            await prisma.reminder.update({
+              where: { id: job.meta.nudgeReminderId },
+              data: {
+                fireAt,
+                messageText: nudgeText(job),
+                status: "active",
+              },
+            });
+            scheduleSoon(fireAt);
+          } catch {
+            continue;
+          }
+          await patchJobMeta(job.id, {
+            ...job.meta,
+            deferredAt: undefined,
+            nudgeFireAt: fireAt.toISOString(),
+            nudgeAuto: undefined,
+          });
+          result.snoozed.push({ jobId: job.id, fireAt });
+          continue;
+        }
         const nudge = await openNudge({
           userId: input.userId,
           digitalEmployeeId: input.digitalEmployeeId,
@@ -1349,6 +1427,13 @@ export async function applyJobActions(input: {
         if (speakerIsAsker) {
           await closeJobRow(job.id);
           result.closed.push(job.id);
+          addReport(
+            result,
+            input.speaker.id,
+            job.meta.subjectId,
+            action.reportText.trim() ||
+              defaultEndJobReport(input.speaker.name, job.meta.ask),
+          );
           continue;
         }
         await patchJobMeta(job.id, {
@@ -1357,6 +1442,25 @@ export async function applyJobActions(input: {
           nudgeItemId: undefined,
           nudgeFireAt: undefined,
           nudgeAuto: undefined,
+        });
+        continue;
+      }
+      if (action.action === "escalate") {
+        // Only the asker may raise urgency; subject cannot change it.
+        if (!speakerIsAsker) {
+          continue;
+        }
+        const nextUrgency = parseJobUrgency(action.urgency ?? "urgent");
+        await escalateJob({
+          userId: input.userId,
+          digitalEmployeeId: input.digitalEmployeeId,
+          actorId: input.speaker.id,
+          job: {
+            id: job.id,
+            meta: job.meta,
+            urgency: job.urgency ?? "normal",
+          },
+          urgency: nextUrgency,
         });
         continue;
       }
@@ -1370,7 +1474,7 @@ export async function applyJobActions(input: {
         input.speaker.id,
         other,
         action.reportText.trim() ||
-          `${input.speaker.name} ביטל את הבקשה${job.meta.ask ? ` בקשר ל«${job.meta.ask}»` : ""}.`,
+          defaultEndJobReport(input.speaker.name, job.meta.ask),
       );
       await recordAuditEvent({
         userId: input.userId,
@@ -1387,14 +1491,23 @@ export async function applyJobActions(input: {
   return result;
 }
 
-/** Drop the follow-up clock when a job row is removed through lists.remove. */
+function defaultEndJobReport(speakerName: string, ask: string): string {
+  return `${speakerName} ביטל את הבקשה${ask ? ` בקשר ל«${ask}»` : ""}.`;
+}
+
+/**
+ * Drop the follow-up clock when a job row is removed through lists.remove.
+ * Ending the job this way notifies the other party (skip self-check).
+ */
 export async function sweepJobNudgesForRemovedItems(input: {
   userId: string;
   actorId: string;
+  actorName: string;
   itemIds: string[];
-}): Promise<void> {
+}): Promise<JobReport[]> {
+  const reports: JobReport[] = [];
   if (input.itemIds.length === 0 || !prisma.employeeListItem?.findMany) {
-    return;
+    return reports;
   }
   try {
     const rows = await prisma.employeeListItem.findMany({
@@ -1402,11 +1515,25 @@ export async function sweepJobNudgesForRemovedItems(input: {
     });
     for (const row of rows ?? []) {
       const meta = jobMetaFrom(row.data);
-      if (meta?.kind === "job") {
-        await sweepNudge(meta, input.userId, input.actorId);
+      if (meta?.kind !== "job") {
+        continue;
       }
+      await sweepNudge(meta, input.userId, input.actorId);
+      if (meta.askerId === meta.subjectId) {
+        continue;
+      }
+      const other =
+        input.actorId === meta.askerId ? meta.subjectId : meta.askerId;
+      if (other === input.actorId) {
+        continue;
+      }
+      reports.push({
+        employeeId: other,
+        text: defaultEndJobReport(input.actorName, meta.ask),
+      });
     }
   } catch {
     // Sweeping is best-effort cleanup.
   }
+  return reports;
 }

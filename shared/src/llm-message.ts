@@ -151,7 +151,8 @@ export type LlmJobActionName =
   | "counter"
   | "snooze"
   | "clear_clock"
-  | "close";
+  | "close"
+  | "escalate";
 
 /** Lifecycle of an open job the digital worker holds for one person about another. */
 export interface LlmJobAction {
@@ -169,6 +170,8 @@ export interface LlmJobAction {
   date?: string;
   /** Counter only: HH:mm end of the proposed slot. */
   endTime?: string;
+  /** Escalate only: the new urgency (must be higher than the job's current level). Asker only. */
+  urgency?: JobUrgency;
 }
 
 export type LlmDirectoryActionName = "add" | "remove" | "update";
@@ -332,6 +335,7 @@ const JOB_ACTIONS = new Set<LlmJobActionName>([
   "snooze",
   "clear_clock",
   "close",
+  "escalate",
 ]);
 
 const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "update"]);
@@ -1383,6 +1387,10 @@ function toJobAction(value: unknown): LlmJobAction | null {
   }
   const jobId = readText(record, ["job_id", "jobId", "id"]);
   const endTime = parseClockField(readText(record, ["end_time", "endTime"]));
+  const urgency =
+    record.urgency !== undefined && record.urgency !== null && record.urgency !== ""
+      ? parseJobUrgency(record.urgency)
+      : undefined;
   return {
     action: name as LlmJobActionName,
     jobId,
@@ -1398,6 +1406,7 @@ function toJobAction(value: unknown): LlmJobAction | null {
     in: parseInSeconds(record),
     date: calendarDate(readText(record, ["date", "on", "תאריך"])),
     ...(endTime ? { endTime } : {}),
+    ...(urgency && name === "escalate" ? { urgency } : {}),
   };
 }
 

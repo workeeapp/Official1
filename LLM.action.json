@@ -46,14 +46,15 @@
     "    ],",
     "    \"jobs\": [",
     "      {",
-    "        \"action\": \"<answer | decline | progress | counter | snooze | clear_clock | close>\",",
+    "        \"action\": \"<answer | decline | progress | counter | snooze | clear_clock | close | escalate>\",",
     "        \"job_id\": \"<job_id from OPEN_JOBS>\",",
     "        \"answer_text\": \"<what the speaker said>\",",
     "        \"report_text\": \"<sentence to deliver to the asker>\",",
     "        \"time\": \"<HH:mm or empty>\",",
     "        \"date\": \"<YYYY-MM-DD on counter, else empty>\",",
     "        \"end_time\": \"<HH:mm on counter when a range end is known, else empty>\",",
-    "        \"in\": null",
+    "        \"in\": null,",
+    "        \"urgency\": \"<urgent | very_urgent on escalate only>\"",
     "      }",
     "    ],",
     "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
@@ -70,7 +71,7 @@
     "}",
     "",
     "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
-    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated.",
+    "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close / escalate them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated. Escalate (asker only): jobs.escalate with higher urgency — never a second job for the same check.",
     "",
     "------------------------------------------------------------",
     "CAPABILITIES (זהה לכל עובד)",
@@ -510,7 +511,7 @@
                     "urgency": {
                       "type": "string",
                       "enum": ["normal", "urgent", "very_urgent"],
-                      "description": "How hard the speaker stressed the ask, judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). On an open job the server sends follow-ups to the recipient on its own: urgent 2 more, very_urgent 4 more, normal none."
+                      "description": "How hard the speaker stressed the ask, judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). On an open job the server sends follow-ups to the recipient on its own: urgent 2 more every 60 minutes, very_urgent 6 more every 20 minutes, normal none."
                     },
                     "book": {
                       "type": "object",
@@ -565,7 +566,8 @@
                         "counter",
                         "snooze",
                         "clear_clock",
-                        "close"
+                        "close",
+                        "escalate"
                       ]
                     },
                     "job_id": {
@@ -589,6 +591,11 @@
                     "end_time": {
                       "type": "string",
                       "description": "Counter only. HH:mm end of the proposed slot — only when the subject said an end, or a duration booking (book_window false with book_end_time) is moved as a whole (keep the same length: 10:00–12:00 moved to 11:00 → 12:00 becomes 13:00). Empty otherwise; the server drops the old end."
+                    },
+                    "urgency": {
+                      "type": "string",
+                      "enum": ["urgent", "very_urgent"],
+                      "description": "Escalate only (asker). New urgency must be higher than the job's current level. Subject cannot escalate."
                     }
                   },
                   "required": ["action", "job_id"]
