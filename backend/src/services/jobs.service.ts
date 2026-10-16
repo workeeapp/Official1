@@ -81,12 +81,6 @@ function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 255);
 }
 
-function asksMatch(left: string, right: string): boolean {
-  const a = normalizeKey(left);
-  const b = normalizeKey(right);
-  return Boolean(a) && a === b;
-}
-
 function bookFields(book: LlmMessageBook | undefined): Partial<JobMeta> {
   if (!book) {
     return {};
@@ -99,19 +93,6 @@ function bookFields(book: LlmMessageBook | undefined): Partial<JobMeta> {
     ...(book.window ? { bookWindow: true } : {}),
     ...(book.title.trim() ? { bookTitle: book.title.trim() } : {}),
   };
-}
-
-/** Same two people, either direction — used only to skip an identical ask. */
-function samePeople(
-  leftAsker: string,
-  leftSubject: string,
-  rightAsker: string,
-  rightSubject: string,
-): boolean {
-  return (
-    (leftAsker === rightAsker && leftSubject === rightSubject) ||
-    (leftAsker === rightSubject && leftSubject === rightAsker)
-  );
 }
 
 async function tasksListIdFor(employeeId: string): Promise<string | null> {
@@ -176,26 +157,7 @@ export async function createJobsFromRelays(input: {
   for (const delivery of input.deliveries) {
     const urgency = delivery.urgency ?? "normal";
     const ask = (delivery.ask.trim() || delivery.text.trim()).replace(/[.!]+$/, "");
-    const duplicate = openJobs.find(
-      (job) =>
-        asksMatch(job.meta.ask, ask) &&
-        samePeople(
-          job.meta.askerId,
-          job.meta.subjectId,
-          input.asker.id,
-          delivery.subjectId,
-        ),
-    );
-    if (duplicate) {
-      await escalateJob({
-        userId: input.userId,
-        digitalEmployeeId: input.digitalEmployeeId,
-        actorId: input.asker.id,
-        job: duplicate,
-        urgency,
-      });
-      continue;
-    }
+    // Escalate/reuse only via explicit job_id (reuseJobIds) — never by ask text.
     const reusable = openJobs.filter(
       (job) =>
         reuse.has(job.id) &&

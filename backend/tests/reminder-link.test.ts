@@ -130,10 +130,10 @@ describe("reminder worker link", () => {
     });
   });
 
-  it("links same-turn speaker and shared items to their clock by the action labels", () => {
+  it("links same-turn items to clocks by exact itemKey only", () => {
     const clocks = [
       { id: "r-nonsense", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" },
-      { id: "r-apples", itemKey: "ערן צריך לקנות תפוחים", itemLabel: "ערן צריך לקנות תפוחים" },
+      { id: "r-apples", itemKey: "תפוחים", itemLabel: "תפוחים" },
     ];
     expect(
       pairLinkedItemsToReminders(clocks, [
@@ -145,6 +145,13 @@ describe("reminder worker link", () => {
       { reminderId: "r-nonsense", itemId: "eran-task" },
       { reminderId: "r-apples", itemId: "shared-apples" },
     ]);
+    // Fuzzy substring (תפוחים inside a longer clock key) must not pair.
+    expect(
+      pairLinkedItemsToReminders(
+        [{ id: "r-long", itemKey: "ערן צריך לקנות תפוחים", itemLabel: "ערן צריך לקנות תפוחים" }],
+        [{ id: "shared-apples", itemKey: "תפוחים", itemLabel: "תפוחים" }],
+      ),
+    ).toEqual([]);
   });
 
   it("never pairs a lone item with a lone clock when the labels differ", () => {

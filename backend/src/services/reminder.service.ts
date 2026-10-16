@@ -112,7 +112,7 @@ function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
   return null;
 }
 
-/** Match an active clock by key/label across the whole account (any owner). */
+/** Exact itemKey match only (tests / display). Never used to mutate on add. */
 export function findMatchingActiveReminder<
   T extends { itemKey: string; itemLabel: string },
 >(rows: T[], item: string): T | undefined {
@@ -120,12 +120,7 @@ export function findMatchingActiveReminder<
   if (!key) {
     return undefined;
   }
-  return rows.find(
-    (row) =>
-      row.itemKey === key ||
-      reminderLabelsMatch(row.itemLabel, item) ||
-      reminderLabelsMatch(row.itemKey, key),
-  );
+  return rows.find((row) => row.itemKey === key);
 }
 
 /** Text-only / clock update with no new time → keep the saved fireAt, ping, and repeat. */
@@ -496,15 +491,13 @@ export function pairWorkerItemsToReminders(
       { reminderId: reminders[0].id, workerItemId: workerItems[0].id },
     ];
   }
+  // Multi: exact itemKey equality only — never fuzzy label contains.
   const used = new Set<string>();
   const pairs: Array<{ reminderId: string; workerItemId: string }> = [];
   for (const reminder of reminders) {
+    const want = itemKey(reminder.itemKey);
     const match = workerItems.find(
-      (item) =>
-        !used.has(item.id) &&
-        (item.itemKey === reminder.itemKey ||
-          reminderLabelsMatch(reminder.itemLabel, item.itemKey) ||
-          reminderLabelsMatch(reminder.itemKey, item.itemKey)),
+      (item) => !used.has(item.id) && itemKey(item.itemKey) === want,
     );
     if (!match) {
       continue;
@@ -568,29 +561,27 @@ export interface LinkedItemRef {
 }
 
 /**
- * Same-turn speaker/shared items (שוקו, לבדוק שטויות, תפוחים for ערן+עמית) ↔ the clock
- * the model emitted in that turn. Labels must match — no lone-pair shortcut, because a
- * turn can add an unrelated item next to a reminder.
+ * Same-turn speaker/shared items ↔ clocks from that turn.
+ * Exact itemKey equality only (no fuzzy label). No lone-pair shortcut — a turn
+ * can add an unrelated item next to a reminder.
  */
 export function pairLinkedItemsToReminders(
   reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
   items: LinkedItemRef[],
 ): Array<{ reminderId: string; itemId: string }> {
   const pairs: Array<{ reminderId: string; itemId: string }> = [];
+  const usedClocks = new Set<string>();
   for (const item of items) {
-    const labels = [item.itemKey, item.itemLabel].filter((label) => label.trim());
-    const match =
-      reminders.find((reminder) =>
-        labels.some((label) => itemKey(label) === reminder.itemKey),
-      ) ??
-      reminders.find((reminder) =>
-        labels.some(
-          (label) =>
-            reminderLabelsMatch(reminder.itemLabel, label) ||
-            reminderLabelsMatch(reminder.itemKey, label),
-        ),
-      );
+    const want = itemKey(item.itemKey) || itemKey(item.itemLabel);
+    if (!want) {
+      continue;
+    }
+    const match = reminders.find(
+      (reminder) =>
+        !usedClocks.has(reminder.id) && itemKey(reminder.itemKey) === want,
+    );
     if (match) {
+      usedClocks.add(match.id);
       pairs.push({ reminderId: match.id, itemId: item.id });
     }
   }
@@ -839,11 +830,10 @@ export async function cancelReminderLinkedToWorkerItem(
 }
 
 /**
- * When a speaker shopping/task wrapper is removed, cancel active clocks that
- * are the same work by key/label (self-nudge clocks are linked to the worker
- * task, not the speaker row).
+ * @deprecated No-op. List remove must cancel clocks only via FK
+ * (`cancelReminderLinkedToWorkerItem`). Never match by key/label.
  */
-export async function cancelActiveRemindersMatchingWork(input: {
+export async function cancelActiveRemindersMatchingWork(_input: {
   userId: string;
   itemKey: string;
   itemLabel?: string;
@@ -858,76 +848,11 @@ export async function cancelActiveRemindersMatchingWork(input: {
     employeeId: string;
   }>;
 }> {
-  if (!prisma.reminder?.findMany) {
-    return {
-      cancelledReminders: [],
-      cancelledReminderIds: [],
-      removedWorkerTasks: [],
-    };
-  }
-  const wantedKey = itemKey(input.itemKey);
-  const wantedLabel = (input.itemLabel ?? input.itemKey).trim();
-  if (!wantedKey && !wantedLabel) {
-    return {
-      cancelledReminders: [],
-      cancelledReminderIds: [],
-      removedWorkerTasks: [],
-    };
-  }
-  try {
-    const rows = await prisma.reminder.findMany({
-      where: { userId: input.userId, status: "active" },
-    });
-    const matches = rows.filter(
-      (row) =>
-        (wantedKey.length > 0 && row.itemKey === wantedKey) ||
-        reminderLabelsMatch(row.itemLabel, wantedLabel) ||
-        (wantedKey.length > 0
-          ? reminderLabelsMatch(row.itemKey, wantedKey)
-          : false),
-    );
-    const cancelledReminders: string[] = [];
-    const cancelledReminderIds: string[] = [];
-    const removedWorkerTasks: Array<{
-      id: string;
-      itemKey: string;
-      itemLabel: string;
-      employeeId: string;
-    }> = [];
-    const seenWorker = new Set<string>();
-    for (const match of matches) {
-      const workerItemId =
-        "workerItemId" in match && typeof match.workerItemId === "string"
-          ? match.workerItemId
-          : null;
-      const removed = await removeReminderAndLinkedWorkerTask({
-        id: match.id,
-        workerItemId,
-        userId: input.userId,
-        actorEmployeeId: input.actorEmployeeId,
-        label: match.itemLabel,
-      });
-      cancelledReminders.push(match.itemLabel);
-      cancelledReminderIds.push(match.id);
-      for (const task of removed) {
-        if (seenWorker.has(task.id)) {
-          continue;
-        }
-        seenWorker.add(task.id);
-        removedWorkerTasks.push(task);
-      }
-    }
-    return { cancelledReminders, cancelledReminderIds, removedWorkerTasks };
-  } catch (error) {
-    if (isMissingTableError(error)) {
-      return {
-        cancelledReminders: [],
-        cancelledReminderIds: [],
-        removedWorkerTasks: [],
-      };
-    }
-    throw error;
-  }
+  return {
+    cancelledReminders: [],
+    cancelledReminderIds: [],
+    removedWorkerTasks: [],
+  };
 }
 
 /**
@@ -1103,63 +1028,6 @@ export type ReminderChange = {
   fireAt: string;
   involvedIds: string[];
 };
-
-async function cancelActiveReminder(
-  userId: string,
-  ownerId: string,
-  wanted: string,
-): Promise<string | null> {
-  const rows = await prisma.reminder.findMany({
-    where: { userId, status: "active" },
-  });
-  const owned = rows.filter((row) => row.ownerId === ownerId);
-  const pool = owned.length > 0 ? owned : rows;
-  const match = pool.find(
-    (row) =>
-      row.itemKey === itemKey(wanted) || reminderLabelsMatch(row.itemLabel, wanted),
-  );
-  if (!match) {
-    return null;
-  }
-  const workerItemId =
-    "workerItemId" in match && typeof match.workerItemId === "string"
-      ? match.workerItemId
-      : null;
-  await removeReminderAndLinkedWorkerTask({
-    id: match.id,
-    workerItemId,
-    userId,
-    label: match.itemLabel,
-  });
-  return match.itemLabel;
-}
-
-async function cancelActiveReminderAnyOwner(
-  userId: string,
-  wanted: string,
-): Promise<string | null> {
-  const rows = await prisma.reminder.findMany({
-    where: { userId, status: "active" },
-  });
-  const match = rows.find(
-    (row) =>
-      row.itemKey === itemKey(wanted) || reminderLabelsMatch(row.itemLabel, wanted),
-  );
-  if (!match) {
-    return null;
-  }
-  const workerItemId =
-    "workerItemId" in match && typeof match.workerItemId === "string"
-      ? match.workerItemId
-      : null;
-  await removeReminderAndLinkedWorkerTask({
-    id: match.id,
-    workerItemId,
-    userId,
-    label: match.itemLabel,
-  });
-  return match.itemLabel;
-}
 
 function displayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
@@ -1504,10 +1372,11 @@ export async function applyReminders(input: {
     const rows = await prisma.reminder.findMany({
       where: { userId: input.userId, status: "active" },
     });
+    // Update only by reminder_id. Add always creates — never reuse a clock by label.
     const existing =
       reminder.action === "update" && reminderId
         ? rows.find((row) => row.id === reminderId)
-        : findMatchingActiveReminder(rows, reminder.item);
+        : undefined;
     // Clocks stay on the speaker who created them; do not re-scope by targets.
     const ownerId = existing?.ownerId ?? input.actor.id;
 

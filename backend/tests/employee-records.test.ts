@@ -1390,16 +1390,14 @@ describe("employee records", () => {
     itemUpdate.mockResolvedValue({ id: "item-1" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
     itemFindMany.mockResolvedValue([]);
-    filingFindFirst
-      .mockResolvedValueOnce(null) // add_filing no existing name
-      .mockResolvedValueOnce({
-        // remove_filing by filing_id
-        id: "filing-old",
-        employeeId,
-        itemName: "רישיון ישן",
-        itemInfo: "",
-        itemDescription: "",
-      });
+    filingFindFirst.mockResolvedValueOnce({
+      // remove_filing by filing_id only (add never looks up by itemName)
+      id: "filing-old",
+      employeeId,
+      itemName: "רישיון ישן",
+      itemInfo: "",
+      itemDescription: "",
+    });
     filingCreate.mockResolvedValue({ id: "filing-1" });
     filingUpdate.mockResolvedValue({ id: "filing-old" });
     filingFindMany.mockResolvedValue([{ id: "filing-old" }]);
@@ -1741,17 +1739,14 @@ describe("employee records", () => {
       where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        itemKey: { contains: "קופסת טונה" },
-        deletedAt: null,
-        list: {
-          listType: "tasks",
-          employeeId: { in: [talId, employeeId] },
-        },
-      },
-      data: { deletedAt: expect.any(Date), reminderId: null },
-    });
+    // No contains-key cascade of assignment tasks.
+    expect(itemUpdateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          itemKey: { contains: "קופסת טונה" },
+        }),
+      }),
+    );
   });
 
   it("removing one standing twin keeps the sibling with the same itemKey", async () => {
@@ -1870,18 +1865,15 @@ describe("employee records", () => {
       where: { id: "skazi-am" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    // Exact-key twin kept; longer assignment key still cascaded.
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["assign-note"] } },
-      data: { deletedAt: expect.any(Date), reminderId: null },
-    });
-    const twinWiped = itemUpdateMany.mock.calls.some(
+    // No text/contains cascade: assignment twin and evening twin stay.
+    const anyContainsCascade = itemUpdateMany.mock.calls.some(
       (call) =>
         Array.isArray(call[0]?.where?.id?.in) &&
-        call[0].where.id.in.includes("skazi-pm"),
+        (call[0].where.id.in.includes("assign-note") ||
+          call[0].where.id.in.includes("skazi-pm")),
     );
-    expect(twinWiped).toBe(false);
-    // Linked morning clock cancelled; evening twin clock must stay (no key-wide cancel).
+    expect(anyContainsCascade).toBe(false);
+    // Linked morning clock cancelled via FK; evening twin clock must stay.
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r-am" },
       data: { status: "cancelled", workerItemId: null },
@@ -3035,7 +3027,7 @@ describe("employee records", () => {
     });
   });
 
-  it("notifies assignment watchers when a bought item was not marked shared", async () => {
+  it("does not invent assignment watchers by itemKey contains when item is personal", async () => {
     const list = { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" };
     listFindFirst.mockResolvedValue(list);
     itemFindFirst.mockResolvedValue({
@@ -3069,8 +3061,8 @@ describe("employee records", () => {
       talId,
     );
 
-    expect(events[0]?.notifyEmployeeIds).toEqual([employeeId]);
-    expect(events[0]?.purchased).toBeUndefined();
+    // Personal row has no visible_to partners — no notify via text lookup.
+    expect(events).toEqual([]);
   });
 
   it("notifies watchers when a shared item is updated from employee records", async () => {

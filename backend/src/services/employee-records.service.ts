@@ -34,7 +34,6 @@ import {
 import { toPlainJson } from "./llm-client.js";
 import { syncSpeakerAddressGenderFromFiling } from "./speaker-address.js";
 import {
-  cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
   formatJerusalemDateTime,
   listReminderRowsForUser,
@@ -1691,106 +1690,53 @@ export async function applyEmployeeRecords(
         });
       }
     } else {
+      // add_filing: always insert. Update only via filing_id (never by itemName).
       const itemName = action.itemName.slice(0, 200);
       const itemDescription = action.itemDescription.trim().slice(0, 4000);
-      const existingFiling = await prisma.employeeFiling.findFirst({
-        where: { employeeId, itemName, deletedAt: null },
+      if (!itemDescription) {
+        // Incomplete add — model should ask for תיאור first.
+        continue;
+      }
+      const shareFiling =
+        resolved.scope === "shared" || resolved.visibleTo.length > 1;
+      const created = await prisma.employeeFiling.create({
+        data: {
+          employeeId,
+          itemName,
+          itemInfo: action.itemInfo,
+          itemDescription,
+          addedById: resolved.addedById,
+          ...(shareFiling
+            ? { scope: "shared", visibleTo: resolved.visibleTo }
+            : {}),
+        },
       });
-      if (existingFiling) {
-        const shareFiling =
-          resolved.scope === "shared" || resolved.visibleTo.length > 1;
-        const nextDescription =
-          itemDescription || existingFiling.itemDescription || "";
-        await prisma.employeeFiling.update({
-          where: { id: existingFiling.id },
-          data: {
-            itemInfo: action.itemInfo,
-            itemDescription: nextDescription,
-            ...(shareFiling
-              ? {
-                  scope: "shared",
-                  visibleTo: uniqueIds([
-                    employeeId,
-                    ...resolved.visibleTo,
-                    ...idList(existingFiling.visibleTo),
-                  ]),
-                }
-              : {}),
-          },
+      await applyAttachmentLinks({
+        actorId: actor,
+        target: { filingId: created.id },
+        attachmentIds: action.attachmentIds,
+      });
+      filingMutations.push({
+        action: "add",
+        itemName,
+        itemInfo: action.itemInfo,
+        itemDescription,
+      });
+      await syncSpeakerAddressGenderFromFiling({
+        employeeId,
+        itemName,
+        itemInfo: action.itemInfo,
+        itemDescription,
+      });
+      if (filingOwner) {
+        await recordAuditEvent({
+          userId: filingOwner.userId,
+          actorEmployeeId: actor,
+          action: "filing_add",
+          entityType: "EmployeeFiling",
+          entityId: created.id,
+          summary: `add filing: ${itemName}`,
         });
-        await applyAttachmentLinks({
-          actorId: actor,
-          target: { filingId: existingFiling.id },
-          attachmentIds: action.attachmentIds,
-        });
-        filingMutations.push({
-          action: "update",
-          itemName,
-          itemInfo: action.itemInfo,
-          itemDescription: nextDescription,
-        });
-        await syncSpeakerAddressGenderFromFiling({
-          employeeId,
-          itemName,
-          itemInfo: action.itemInfo,
-          itemDescription: nextDescription,
-        });
-        if (filingOwner) {
-          await recordAuditEvent({
-            userId: filingOwner.userId,
-            actorEmployeeId: actor,
-            action: "filing_update",
-            entityType: "EmployeeFiling",
-            entityId: existingFiling.id,
-            summary: `update filing: ${itemName}`,
-          });
-        }
-      } else {
-        if (!itemDescription) {
-          // Incomplete add — model should ask for תיאור first.
-          continue;
-        }
-        const shareFiling =
-          resolved.scope === "shared" || resolved.visibleTo.length > 1;
-        const created = await prisma.employeeFiling.create({
-          data: {
-            employeeId,
-            itemName,
-            itemInfo: action.itemInfo,
-            itemDescription,
-            addedById: resolved.addedById,
-            ...(shareFiling
-              ? { scope: "shared", visibleTo: resolved.visibleTo }
-              : {}),
-          },
-        });
-        await applyAttachmentLinks({
-          actorId: actor,
-          target: { filingId: created.id },
-          attachmentIds: action.attachmentIds,
-        });
-        filingMutations.push({
-          action: "add",
-          itemName,
-          itemInfo: action.itemInfo,
-          itemDescription,
-        });
-        await syncSpeakerAddressGenderFromFiling({
-          employeeId,
-          itemName,
-          itemInfo: action.itemInfo,
-          itemDescription,
-        });
-        if (filingOwner) {
-          await recordAuditEvent({
-            userId: filingOwner.userId,
-            actorEmployeeId: actor,
-            action: "filing_add",
-            entityType: "EmployeeFiling",
-            entityId: created.id,
-            summary: `add filing: ${itemName}`,
-          });
-        }
       }
     }
 
@@ -1907,22 +1853,6 @@ async function deleteOwnedListItem(
     select: { userId: true },
   });
   if (owner) {
-    const label =
-      ownedItemTitle(
-        listType,
-        asRecord(existing.data),
-        existing.itemKey,
-        existing.list?.titleField,
-      ) || existing.itemKey;
-    // Linked clock already cancelled — skip key-wide cancel (twin standing times).
-    if (!linked) {
-      await cancelActiveRemindersMatchingWork({
-        userId: owner.userId,
-        itemKey: existing.itemKey,
-        itemLabel: label,
-        actorEmployeeId: actorId,
-      });
-    }
     await recordAuditEvent({
       userId: owner.userId,
       actorEmployeeId: actorId,
@@ -1932,11 +1862,8 @@ async function deleteOwnedListItem(
       summary: `remove ${listType}: ${existing.itemKey}`,
     });
   }
-  const watchers = mutationAudience(existing.list.employeeId, actorId, existing);
-  await deleteRelatedAssignmentTasks(
-    uniqueIds([actorId, existing.list.employeeId, ...watchers]),
-    existing.itemKey,
-  );
+  // Cascade clocks only via FK (cancelReminderLinkedToWorkerItem above).
+  // Never soft-delete sibling tasks or cancel clocks by itemKey/label.
   return mutationEvents({
     ownerId: existing.list.employeeId,
     actorId,
@@ -2117,7 +2044,6 @@ async function applyListAction(
   const mutations: ListItemMutation[] = [];
   const cancelledReminders: string[] = [];
   const cancelledReminderIds: string[] = [];
-  const seenCascadeTaskIds = new Set<string>();
   const accessCache: WorkerAccessCache = {};
   const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, {
@@ -2308,41 +2234,6 @@ async function applyListAction(
         select: { userId: true },
       });
       if (owner) {
-        const label =
-          ownedItemTitle(
-            resolvedAction.listType,
-            asRecord(existing.data),
-            removedKey,
-            removedTitleField,
-          ) || removedKey;
-        // Linked clock already cancelled — skip key-wide cancel so a twin
-        // standing row (same name, other time) keeps its own clock.
-        if (!linked) {
-          const cascade = await cancelActiveRemindersMatchingWork({
-            userId: owner.userId,
-            itemKey: removedKey,
-            itemLabel: label,
-            actorEmployeeId: actorId,
-          });
-          cancelledReminders.push(...cascade.cancelledReminders);
-          cancelledReminderIds.push(...cascade.cancelledReminderIds);
-          for (const task of cascade.removedWorkerTasks) {
-            if (seenCascadeTaskIds.has(task.id)) {
-              continue;
-            }
-            seenCascadeTaskIds.add(task.id);
-            mutations.push({
-              action: "remove",
-              itemId: task.id,
-              employeeId: task.employeeId,
-              listType: "tasks",
-              itemKey: task.itemKey,
-              itemLabel: task.itemLabel,
-            });
-          }
-        }
-      }
-      if (owner) {
         await recordAuditEvent({
           userId: owner.userId,
           actorEmployeeId: actorId,
@@ -2352,6 +2243,8 @@ async function applyListAction(
           summary: `remove ${resolvedAction.listType}: ${removedKey}`,
         });
       }
+      // FK-linked clock already handled by cancelReminderLinkedToWorkerItem.
+      // Do not cancel other clocks or soft-delete tasks by key/label contains.
       const watchers = await resolveWatchers({
         existing,
         visibility,
@@ -2359,17 +2252,6 @@ async function applyListAction(
         actorId,
         itemKey: removedKey,
       });
-      const related = await deleteRelatedAssignmentTasks(
-        [...new Set([actorId, employeeId, ...watchers])],
-        removedKey,
-      );
-      for (const task of related) {
-        if (seenCascadeTaskIds.has(task.itemId)) {
-          continue;
-        }
-        seenCascadeTaskIds.add(task.itemId);
-        mutations.push(task);
-      }
       if (watchers.length > 0) {
         events.push({
           notifyEmployeeIds: watchers,
@@ -2946,16 +2828,7 @@ export async function removeVisibleCustomItems(input: {
           itemLabel: label,
           listName: list.name || action.listName || undefined,
         });
-        if (list.employee.userId && !linked) {
-          const cascade = await cancelActiveRemindersMatchingWork({
-            userId: list.employee.userId,
-            itemKey: existing.itemKey,
-            itemLabel: label,
-            actorEmployeeId: input.actorId,
-          });
-          cancelledReminders.push(...cascade.cancelledReminders);
-          cancelledReminderIds.push(...cascade.cancelledReminderIds);
-        }
+        // FK cascade only (cancelReminderLinkedToWorkerItem). No label/key match.
         const watchers = uniqueIds([
           ...idList(list.visibleTo),
           ...idList(existing.visibleTo),
@@ -3069,12 +2942,7 @@ async function resolveWatchers(input: {
     input.ownerId,
     input.actorId,
   );
-  const watchers = uniqueIds([...fromItem, ...fromVisibility]);
-  if (watchers.length > 0) {
-    return watchers;
-  }
-
-  return findAssignmentWatcherIds(input.ownerId, input.actorId, input.itemKey);
+  return uniqueIds([...fromItem, ...fromVisibility]);
 }
 
 function sharedAudience(
@@ -3111,93 +2979,6 @@ function idList(value: unknown): string[] {
 
 function uniqueIds(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
-}
-
-async function findAssignmentWatcherIds(
-  ownerId: string,
-  actorId: string,
-  itemKey: string,
-): Promise<string[]> {
-  if (!itemKey) {
-    return [];
-  }
-
-  const items = await prisma.employeeListItem.findMany({
-    where: {
-      itemKey: { contains: itemKey },
-      deletedAt: null,
-      list: {
-        listType: "tasks",
-        employeeId: { not: ownerId },
-      },
-    },
-    select: { list: { select: { employeeId: true } } },
-  });
-
-  return uniqueIds(items.map((item) => item.list.employeeId)).filter(
-    (id) => id !== actorId,
-  );
-}
-
-async function deleteRelatedAssignmentTasks(
-  employeeIds: string[],
-  itemKey: string,
-): Promise<ListItemMutation[]> {
-  if (employeeIds.length === 0 || !itemKey) {
-    return [];
-  }
-
-  const needle = itemKey.trim();
-  const where = {
-    itemKey: { contains: itemKey },
-    deletedAt: null,
-    list: {
-      listType: "tasks" as const,
-      employeeId: { in: employeeIds },
-    },
-  };
-
-  const doomed = await prisma.employeeListItem.findMany({
-    where,
-    include: { list: { select: { employeeId: true, listType: true } } },
-  });
-  // Exact-key peers (twin standing morning/evening) must survive; only longer
-  // assignment keys that contain the shopping/task name are cascaded.
-  const labeled = doomed.filter(
-    (row) =>
-      row.list?.listType === "tasks" &&
-      Boolean(row.list.employeeId) &&
-      row.itemKey.trim() !== needle,
-  );
-
-  if (doomed.length > 0) {
-    if (labeled.length === 0) {
-      return [];
-    }
-    await prisma.employeeListItem.updateMany({
-      where: { id: { in: labeled.map((row) => row.id) } },
-      data: { deletedAt: new Date(), reminderId: null },
-    });
-    return labeled.map((row) => {
-      const data = asRecord(row.data);
-      return {
-        action: "remove" as const,
-        itemId: row.id,
-        employeeId: row.list.employeeId,
-        listType: "tasks",
-        itemKey: row.itemKey,
-        itemLabel:
-          ownedItemTitle("tasks", data, row.itemKey) || row.itemKey,
-      };
-    });
-  }
-
-  // Fallback when findMany is stubbed / empty: still soft-delete by key.
-  await prisma.employeeListItem.updateMany({
-    where,
-    data: { deletedAt: new Date(), reminderId: null },
-  });
-  return [];
 }
 
 function sharedWithNames(

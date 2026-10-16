@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-const { reminderFindMany, reminderUpdate, itemUpdateMany } = vi.hoisted(() => ({
+const { reminderFindMany, reminderUpdate } = vi.hoisted(() => ({
   reminderFindMany: vi.fn(),
   reminderUpdate: vi.fn(),
-  itemUpdateMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -13,7 +12,7 @@ vi.mock("../src/database/prisma.js", () => ({
       update: reminderUpdate,
     },
     employeeListItem: {
-      updateMany: itemUpdateMany,
+      updateMany: vi.fn(),
     },
     auditEvent: {
       create: vi.fn(),
@@ -28,26 +27,13 @@ vi.mock("../src/services/audit.service.js", () => ({
 import { cancelActiveRemindersMatchingWork } from "../src/services/reminder.service.js";
 
 describe("cancelActiveRemindersMatchingWork", () => {
-  beforeEach(() => {
-    reminderFindMany.mockReset();
-    reminderUpdate.mockReset().mockResolvedValue({});
-    itemUpdateMany.mockReset().mockResolvedValue({ count: 0 });
-  });
-
-  it("cancels clocks that match the removed work and leaves unrelated ones", async () => {
+  it("is a no-op — clocks cancel only via FK, never by key/label", async () => {
     reminderFindMany.mockResolvedValue([
       {
         id: "r-scale",
         itemKey: "להישקל",
         itemLabel: "להישקל",
         workerItemId: "w1",
-        status: "active",
-      },
-      {
-        id: "r-michal",
-        itemKey: "לשלוח הודעה למיכל",
-        itemLabel: "לשלוח הודעה למיכל",
-        workerItemId: "w2",
         status: "active",
       },
     ]);
@@ -59,37 +45,12 @@ describe("cancelActiveRemindersMatchingWork", () => {
       actorEmployeeId: "tal-1",
     });
 
-    expect(cancelled.cancelledReminders).toEqual(["להישקל"]);
-    expect(cancelled.cancelledReminderIds).toEqual(["r-scale"]);
-    expect(reminderUpdate).toHaveBeenCalledTimes(1);
-    expect(reminderUpdate).toHaveBeenCalledWith({
-      where: { id: "r-scale" },
-      data: { status: "cancelled", workerItemId: null },
-    });
-  });
-
-  it("returns empty when no active clock matches", async () => {
-    reminderFindMany.mockResolvedValue([
-      {
-        id: "r-michal",
-        itemKey: "לשלוח הודעה למיכל",
-        itemLabel: "לשלוח הודעה למיכל",
-        workerItemId: null,
-        status: "active",
-      },
-    ]);
-
-    const cancelled = await cancelActiveRemindersMatchingWork({
-      userId: "user-1",
-      itemKey: "להישקל",
-      itemLabel: "להישקל",
-    });
-
     expect(cancelled).toEqual({
       cancelledReminders: [],
       cancelledReminderIds: [],
       removedWorkerTasks: [],
     });
+    expect(reminderFindMany).not.toHaveBeenCalled();
     expect(reminderUpdate).not.toHaveBeenCalled();
   });
 });

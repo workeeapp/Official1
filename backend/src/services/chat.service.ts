@@ -102,7 +102,6 @@ import {
   formatReminderApplyNotice,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
-  listLiveHumanItemsForReminderLink,
   reminderRepeatsSubHourly,
   SUB_HOURLY_REFUSAL,
   type ReminderChange,
@@ -1832,8 +1831,8 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
-    // Soft-link clocks to speaker/human shopping+tasks: same-turn adds plus
-    // existing live rows (so a later reminders.add still gets linked_reminder_id).
+    // Soft-link clocks only to same-turn human adds (exact key). Never scan live
+    // inventory by label — that wrote wrong linked_reminder_id links.
     const linkFromMutations = listMutations
       .filter(
         (row) =>
@@ -1847,23 +1846,7 @@ export async function sendChatMessage(input: {
         itemKey: row.itemKey,
         itemLabel: row.itemLabel,
       }));
-    const linkFromLive =
-      savedClocks.length > 0
-        ? await listLiveHumanItemsForReminderLink({
-            userId: input.userId,
-            humanIds: humans.map((human) => human.id),
-          })
-        : [];
-    const linkCandidates = new Map<
-      string,
-      { id: string; itemKey: string; itemLabel: string }
-    >();
-    for (const row of [...linkFromMutations, ...linkFromLive]) {
-      if (!linkCandidates.has(row.id)) {
-        linkCandidates.set(row.id, row);
-      }
-    }
-    await linkRemindersToItems(savedClocks, [...linkCandidates.values()]);
+    await linkRemindersToItems(savedClocks, linkFromMutations);
     recordWhatsAppEvent(
       "reminder_apply",
       `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderWrites.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,

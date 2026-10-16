@@ -271,7 +271,22 @@ describe("pairWorkerItemsToReminders", () => {
     ).toEqual([{ reminderId: "r1", workerItemId: "w1" }]);
   });
 
-  it("pairs by matching item text when there are several clocks", () => {
+  it("pairs several clocks only on exact itemKey (no fuzzy label)", () => {
+    expect(
+      pairWorkerItemsToReminders(
+        [
+          { id: "r1", itemKey: "להזכיר חלב", itemLabel: "להזכיר חלב" },
+          { id: "r2", itemKey: "להזכיר מייל", itemLabel: "להזכיר מייל" },
+        ],
+        [
+          { id: "w1", itemKey: "להזכיר מייל" },
+          { id: "w2", itemKey: "להזכיר חלב" },
+        ],
+      ),
+    ).toEqual([
+      { reminderId: "r1", workerItemId: "w2" },
+      { reminderId: "r2", workerItemId: "w1" },
+    ]);
     expect(
       pairWorkerItemsToReminders(
         [
@@ -283,10 +298,7 @@ describe("pairWorkerItemsToReminders", () => {
           { id: "w2", itemKey: "להזכיר חלב" },
         ],
       ),
-    ).toEqual([
-      { reminderId: "r1", workerItemId: "w2" },
-      { reminderId: "r2", workerItemId: "w1" },
-    ]);
+    ).toEqual([]);
   });
 });
 
@@ -481,9 +493,10 @@ describe("findMatchingActiveReminder", () => {
     },
   ];
 
-  it("matches across owners by label", () => {
+  it("matches exact itemKey only", () => {
     const hit = findMatchingActiveReminder(rows, "לשלוח הודעה לעמית");
     expect(hit?.ownerId).toBe("owner-amit");
+    expect(findMatchingActiveReminder(rows, "עמית")).toBeUndefined();
   });
 
   it("returns undefined when nothing matches", () => {

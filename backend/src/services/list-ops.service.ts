@@ -13,7 +13,6 @@ import { jsonStringList, visibleListColumns } from "./employee-records.service.j
 import { employeeDisplayName, matchEmployee } from "./employee-targets.service.js";
 import { toPlainJson } from "./llm-client.js";
 import {
-  cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
 } from "./reminder.service.js";
 import { builtinListHebrew, isBuiltinListType } from "./builtin-lists.js";
@@ -189,16 +188,7 @@ async function deleteList(
     }
   });
 
-  for (const item of list.items) {
-    const cascade = await cancelActiveRemindersMatchingWork({
-      userId: input.userId,
-      itemKey: item.itemKey,
-      itemLabel: item.itemKey,
-      actorEmployeeId: input.actor.id,
-    });
-    cancelledReminders.push(...cascade.cancelledReminders);
-    cancelledReminderIds.push(...cascade.cancelledReminderIds);
-  }
+  // Clocks already cancelled above via FK only — never by itemKey/label.
 
   const label = listLabel(list);
   await recordAuditEvent({
