@@ -36,6 +36,7 @@ import {
 import {
   alignListTypeInReply,
   applyEmployeeRecords,
+  correctListMutationClaimReply,
   formatAppliedMutationFallback,
   formatEmployeeContext,
   formatTeamSchedules,
@@ -100,6 +101,7 @@ import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
   formatReminderApplyNotice,
+  itemsFromListMutationsForSoftLink,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
   reminderRepeatsSubHourly,
@@ -1487,7 +1489,7 @@ export async function sendChatMessage(input: {
           : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / מטלות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → show_dump=full (+ show_dump_about=X).",
         guestSpeaker
           ? ""
-          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק».",
+          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק». Claim past-tense success ONLY for actions in THIS turn's metadata. MULTI-INTENT CONFIRM: כן after an offer of several mutations → re-emit EVERY offered ACTION this turn, not a subset.",
         guestSpeaker
           ? ""
           : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Dedup: מטלות = WORKER rows that are NOT an OPEN_JOBS shadow (skip title matching OPEN_JOBS.task / «לבדוק עם…»); ממתינים = every OPEN_JOBS row once including scheduled=true — phrase from ask; scheduled → not yet due, do not ask the check now; OPEN_JOBS empty → all WORKER_SAVED_DATA. FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה. Do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. Numbered 1. 2. 3. per block (never •; restart at 1). A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no reminder parentheses. Before that, name the humans the row involves (asked_by + for, de-duplicated, never yourself, viewer included) in parentheses when there are two or more and the item name does not already show them — e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks.`,
@@ -1512,7 +1514,7 @@ export async function sendChatMessage(input: {
           : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
         guestSpeaker
           ? ""
-          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. On כן to an offer, emit exactly that offered action (same targets). Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
+          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
         guestSpeaker
           ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
           : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
@@ -1831,21 +1833,12 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
-    // Soft-link clocks only to same-turn human adds (exact key). Never scan live
-    // inventory by label — that wrote wrong linked_reminder_id links.
-    const linkFromMutations = listMutations
-      .filter(
-        (row) =>
-          row.action === "add" &&
-          !row.listShell &&
-          row.itemId &&
-          humans.some((human) => human.id === row.employeeId),
-      )
-      .map((row) => ({
-        id: row.itemId,
-        itemKey: row.itemKey,
-        itemLabel: row.itemLabel,
-      }));
+    // Soft-link clocks to same-turn human adds/updates (exact key). Never scan
+    // live inventory by label — that wrote wrong linked_reminder_id links.
+    const linkFromMutations = itemsFromListMutationsForSoftLink(
+      listMutations,
+      humans.map((human) => human.id),
+    );
     await linkRemindersToItems(savedClocks, linkFromMutations);
     recordWhatsAppEvent(
       "reminder_apply",
@@ -2217,12 +2210,15 @@ export async function sendChatMessage(input: {
         workingReply = setEngineResponse(workingReply, fallback);
       }
     }
-    // Model often claims «הסרתי» even when no row matched — correct that.
+    // Model often claims mutate success when that kind did not apply — correct.
     const requestedListRemove = (metadata.lists ?? []).some(
       (row) => row.action === "remove",
     );
     const requestedListUpdate = (metadata.lists ?? []).some(
       (row) => row.action === "update",
+    );
+    const requestedListAdd = (metadata.lists ?? []).some(
+      (row) => row.action === "add",
     );
     const appliedListRemove = listMutations.some(
       (row) => row.action === "remove" && !row.listShell,
@@ -2230,23 +2226,30 @@ export async function sendChatMessage(input: {
     const appliedListUpdate = listMutations.some(
       (row) => row.action === "update" && !row.listShell,
     );
+    const appliedListAdd = listMutations.some(
+      (row) => row.action === "add" && !row.listShell,
+    );
+    const appliedFallback = formatAppliedMutationFallback(
+      listMutations,
+      filingMutations,
+    );
+    workingReply = correctListMutationClaimReply({
+      reply: workingReply,
+      requestedRemove: requestedListRemove,
+      requestedUpdate: requestedListUpdate,
+      requestedAdd: requestedListAdd,
+      appliedRemove: appliedListRemove,
+      appliedUpdate: appliedListUpdate,
+      appliedAdd: appliedListAdd,
+      appliedFallback,
+      setResponse: setEngineResponse,
+    });
     if (
-      (requestedListRemove && !appliedListRemove) ||
-      (requestedListUpdate && !appliedListUpdate)
-    ) {
-      workingReply = setEngineResponse(
-        workingReply,
-        "לא מצאתי את הפריט ברשימה.",
-      );
-    } else if (
       requestedListRemove &&
       appliedListRemove &&
       !parseLlmReply(workingReply).response.trim()
     ) {
-      workingReply = setEngineResponse(
-        workingReply,
-        formatAppliedMutationFallback(listMutations, filingMutations),
-      );
+      workingReply = setEngineResponse(workingReply, appliedFallback);
     }
     // The model already said «שיניתי/מחקתי» — correct it when the engine refused the list op.
     const listOpRefusal = formatListOpRefusals(listOpResults);

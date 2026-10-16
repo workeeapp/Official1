@@ -38,6 +38,7 @@ vi.mock("../src/database/prisma.js", () => ({
 
 import {
   cancelReminderLinkedToWorkerItem,
+  itemsFromListMutationsForSoftLink,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
   listLiveHumanItemsForReminderLink,
@@ -174,6 +175,134 @@ describe("reminder worker link", () => {
       data: { linkedReminderId: "r1" },
     });
     expect(reminderUpdate).not.toHaveBeenCalled();
+  });
+
+  it("includes same-turn lists.update rows for soft-link (not only add)", () => {
+    const rows = itemsFromListMutationsForSoftLink(
+      [
+        {
+          action: "update",
+          itemId: "morning",
+          itemKey: "להוריד את סקאזי לטיול",
+          itemLabel: "להוריד את סקאזי לטיול",
+          employeeId: TAL,
+        },
+        {
+          action: "add",
+          itemId: "evening",
+          itemKey: "להוריד את סקאזי לטיול ערב",
+          itemLabel: "להוריד את סקאזי לטיול ערב",
+          employeeId: TAL,
+        },
+        {
+          action: "remove",
+          itemId: "gone",
+          itemKey: "חוג",
+          itemLabel: "חוג",
+          employeeId: TAL,
+        },
+        {
+          action: "add",
+          listShell: true,
+          itemId: "shell",
+          itemKey: "",
+          itemLabel: "",
+          employeeId: TAL,
+        },
+        {
+          action: "add",
+          itemId: "worker",
+          itemKey: "להזכיר",
+          itemLabel: "להזכיר",
+          employeeId: LUCY,
+        },
+      ],
+      [TAL],
+    );
+    expect(rows).toEqual([
+      {
+        id: "morning",
+        itemKey: "להוריד את סקאזי לטיול",
+        itemLabel: "להוריד את סקאזי לטיול",
+      },
+      {
+        id: "evening",
+        itemKey: "להוריד את סקאזי לטיול ערב",
+        itemLabel: "להוריד את סקאזי לטיול ערב",
+      },
+    ]);
+  });
+
+  it("soft-links a same-turn update row to a matching new clock", async () => {
+    itemUpdate.mockResolvedValue({});
+    const items = itemsFromListMutationsForSoftLink(
+      [
+        {
+          action: "update",
+          itemId: "skazi-am",
+          itemKey: "להוריד את סקאזי לטיול",
+          itemLabel: "להוריד את סקאזי לטיול",
+          employeeId: TAL,
+        },
+      ],
+      [TAL],
+    );
+    await linkRemindersToItems(
+      [
+        {
+          id: "r-0830",
+          itemKey: "להוריד את סקאזי לטיול",
+          itemLabel: "להוריד את סקאזי לטיול",
+        },
+      ],
+      items,
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "skazi-am" },
+      data: { linkedReminderId: "r-0830" },
+    });
+  });
+
+  it("pairs morning update + evening add to two clocks by distinct keys", () => {
+    const items = itemsFromListMutationsForSoftLink(
+      [
+        {
+          action: "update",
+          itemId: "am",
+          itemKey: "להוריד את סקאזי לטיול",
+          itemLabel: "להוריד את סקאזי לטיול",
+          employeeId: TAL,
+        },
+        {
+          action: "add",
+          itemId: "pm",
+          itemKey: "להוריד את סקאזי לטיול ערב",
+          itemLabel: "להוריד את סקאזי לטיול ערב",
+          employeeId: TAL,
+        },
+      ],
+      [TAL],
+    );
+    expect(
+      pairLinkedItemsToReminders(
+        [
+          {
+            id: "r-am",
+            itemKey: "להוריד את סקאזי לטיול",
+            itemLabel: "להוריד את סקאזי לטיול",
+          },
+          {
+            id: "r-pm",
+            itemKey: "להוריד את סקאזי לטיול ערב",
+            itemLabel: "להוריד את סקאזי לטיול ערב",
+          },
+        ],
+        items,
+      ),
+    ).toEqual([
+      { reminderId: "r-am", itemId: "am" },
+      { reminderId: "r-pm", itemId: "pm" },
+    ]);
   });
 
   it("loads live human shopping/tasks for re-linking existing rows", async () => {

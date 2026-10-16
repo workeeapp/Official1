@@ -495,6 +495,51 @@ export function formatAppliedMutationFallback(
   return "";
 }
 
+const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
+const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
+
+/**
+ * When metadata requested a list mutate kind that did not apply, replace the
+ * spoken reply so it does not keep a false past-tense claim. Partial success
+ * (e.g. remove applied, add did not) keeps an applied fallback + add miss.
+ */
+export function correctListMutationClaimReply(input: {
+  reply: string;
+  requestedRemove: boolean;
+  requestedUpdate: boolean;
+  requestedAdd: boolean;
+  appliedRemove: boolean;
+  appliedUpdate: boolean;
+  appliedAdd: boolean;
+  appliedFallback: string;
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  const {
+    requestedRemove,
+    requestedUpdate,
+    requestedAdd,
+    appliedRemove,
+    appliedUpdate,
+    appliedAdd,
+    appliedFallback,
+    setResponse,
+  } = input;
+  if (
+    (requestedRemove && !appliedRemove) ||
+    (requestedUpdate && !appliedUpdate)
+  ) {
+    return setResponse(input.reply, LIST_FIND_MISS);
+  }
+  if (requestedAdd && !appliedAdd) {
+    if (appliedRemove || appliedUpdate) {
+      const parts = [appliedFallback.trim(), LIST_ADD_MISS].filter(Boolean);
+      return setResponse(input.reply, parts.join("\n"));
+    }
+    return setResponse(input.reply, LIST_ADD_MISS);
+  }
+  return input.reply;
+}
+
 export function listItemLabels(
   snapshot: EmployeeRecordSnapshot,
   listType: "shopping" | "tasks",

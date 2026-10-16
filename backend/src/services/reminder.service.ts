@@ -561,6 +561,38 @@ export interface LinkedItemRef {
 }
 
 /**
+ * Same-turn human list rows eligible for soft-linking new clocks.
+ * Includes add and update (exact itemKey later). Never live inventory.
+ */
+export function itemsFromListMutationsForSoftLink(
+  rows: Array<{
+    action: string;
+    listShell?: boolean;
+    itemId?: string | null;
+    itemKey?: string;
+    itemLabel?: string;
+    employeeId: string;
+  }>,
+  humanIds: ReadonlySet<string> | Iterable<string>,
+): LinkedItemRef[] {
+  const humans =
+    humanIds instanceof Set ? humanIds : new Set(humanIds);
+  return rows
+    .filter(
+      (row) =>
+        (row.action === "add" || row.action === "update") &&
+        !row.listShell &&
+        Boolean(row.itemId) &&
+        humans.has(row.employeeId),
+    )
+    .map((row) => ({
+      id: row.itemId as string,
+      itemKey: row.itemKey ?? "",
+      itemLabel: row.itemLabel ?? "",
+    }));
+}
+
+/**
  * Same-turn speaker/shared items ↔ clocks from that turn.
  * Exact itemKey equality only (no fuzzy label). No lone-pair shortcut — a turn
  * can add an unrelated item next to a reminder.

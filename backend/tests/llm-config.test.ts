@@ -182,6 +182,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("From a recipe / ingredient list");
     expect(config.systemMessage).toContain("MUST copy into כמות + יחידת מידה");
     expect(config.systemMessage).toContain("FOLLOW-UP TO YOUR QUESTION");
+    expect(config.systemMessage).toContain("MULTI-INTENT CONFIRM");
+    expect(config.systemMessage).toContain(
+      "re-emit EVERY mutation you offered",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN past-tense success for an action absent from this turn's metadata",
+    );
     expect(config.systemMessage).toContain("היום/מחר/אתמול");
     expect(config.systemMessage).toContain("bare מחר");
     expect(config.systemMessage).toContain("WHEN/TODAY");

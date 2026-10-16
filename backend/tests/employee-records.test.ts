@@ -114,6 +114,7 @@ import {
   chooseSavedListType,
   deleteEmployeeRecord,
   deriveCustomListName,
+  correctListMutationClaimReply,
   formatAppliedMutationFallback,
   formatEmployeeContext,
   formatTeamSchedules,
@@ -442,6 +443,70 @@ describe("employee records", () => {
         },
       ]),
     ).toBe('הסרתי את «לבדוק שוב את הפונקציונליות» מרשימת «בעיות».');
+  });
+
+  it("corrects reply when lists.add was requested but none applied (remove succeeded)", () => {
+    const setResponse = (reply: string, response: string) => response;
+    const fallback = formatAppliedMutationFallback([
+      {
+        action: "remove",
+        itemId: "1",
+        employeeId: talId,
+        listType: "tasks",
+        itemKey: "חוג",
+        itemLabel: "חוג טיסנים",
+        listName: "מטלות",
+      },
+    ]);
+    expect(
+      correctListMutationClaimReply({
+        reply: JSON.stringify({
+          response: "מחקתי את חוג הטיסנים והוספתי מטלה ב־18:30.",
+          metadata: {},
+        }),
+        requestedRemove: true,
+        requestedUpdate: false,
+        requestedAdd: true,
+        appliedRemove: true,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: fallback,
+        setResponse,
+      }),
+    ).toBe(`${fallback}\nלא הצלחתי להוסיף את הפריט.`);
+  });
+
+  it("replaces reply when only lists.add was requested and none applied", () => {
+    expect(
+      correctListMutationClaimReply({
+        reply: "הוספתי מטלה.",
+        requestedRemove: false,
+        requestedUpdate: false,
+        requestedAdd: true,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: "",
+        setResponse: (_reply, response) => response,
+      }),
+    ).toBe("לא הצלחתי להוסיף את הפריט.");
+  });
+
+  it("leaves reply when requested list kinds all applied", () => {
+    const reply = "מחקתי והוספתי.";
+    expect(
+      correctListMutationClaimReply({
+        reply,
+        requestedRemove: true,
+        requestedUpdate: false,
+        requestedAdd: true,
+        appliedRemove: true,
+        appliedUpdate: false,
+        appliedAdd: true,
+        appliedFallback: "בוצע.",
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
   });
 
   it("removes a custom row found on another list name for the same owner", async () => {
