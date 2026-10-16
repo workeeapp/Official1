@@ -59,14 +59,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("SHAREABLE STATUS ASK ABOUT X");
     expect(config.systemMessage).toContain("קניות אישיות");
     expect(config.systemMessage).toContain("מטלות אישיות");
-    expect(config.systemMessage).toContain("filings keep personal→shared two-section");
-    expect(config.systemMessage).toContain("ALWAYS print (1) and (2)");
-    expect(config.systemMessage).toContain("no word רשימה");
+    expect(config.systemMessage).toContain("Stage 2 live dump");
+    expect(config.systemMessage).toContain("משותפות עם X for co-share");
     expect(config.systemMessage).toContain("NUMBERED 1. 2. 3.");
     expect(config.systemMessage).toContain(
       "Numbering restarts at 1 for EVERY distinct list block",
     );
-    expect(config.systemMessage).toContain("THREE-way assign/co-share split");
+    expect(config.systemMessage).toContain("Stage 2 three-way");
     expect(config.systemMessage).toContain(
       "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
@@ -81,10 +80,12 @@ describe("LLM action schema", () => {
       "FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה",
     );
     expect(config.systemMessage).toContain("INVENTORY dedupe (critical)");
-    expect(config.systemMessage).toContain("Scan EVERY matching list_type");
+    expect(config.systemMessage).toContain("Set metadata.show_dump to that category");
     expect(config.systemMessage).toContain(
       "FULL DUMP / מה יש לי / הציגי הכל",
     );
+    expect(config.systemMessage).toContain('show_dump = "full"');
+    expect(config.systemMessage).toContain("FORBIDDEN model-written");
     expect(config.systemMessage).toContain("FULL DUMP DETAIL RULE");
     expect(config.systemMessage).toContain("COUNTS ONLY");
     expect(config.systemMessage).toContain("ONLY מטלות enumerate");
@@ -260,7 +261,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("A raise is ALWAYS its own entry in responses");
     expect(config.systemMessage).toContain("אגב, ביקשת שאבדוק אם קנית חלב?");
     expect(config.systemMessage).toContain("URGENCY FOLLOW-UP (critical)");
-    expect(config.systemMessage).toContain("one check, one clock");
+    expect(config.systemMessage).toContain("never a second check");
     expect(config.systemMessage).toContain("תבדקי איתי בעוד 10 דקות אם הלכתי לישון");
     expect(config.systemMessage).toContain("CAPABILITIES (זהה לכל עובד)");
     expect(config.systemMessage).toContain("תיאום מול המשתתפים");

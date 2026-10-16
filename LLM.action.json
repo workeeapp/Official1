@@ -759,7 +759,7 @@
               "show_dump": {
                 "type": ["string", "null"],
                 "maxLength": 100,
-                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category («מה מיכל צריכה לקנות» / «מה טל צריך לעשות»): set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. lists/reminders stay empty. Server replaces response with a live dump. null otherwise. NOT for bare FULL DUMP (מה יש לי). Pair with show_dump_section / show_dump_partner / show_dump_assignee / show_dump_about / show_dump_from / show_dump_to."
+                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category («מה מיכל צריכה לקנות» / «מה טל צריך לעשות»): set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP («מה יש לי» / הציגי הכל / סיכום מלא / כל מה ששמור) → set to full. lists/reminders stay empty. Server replaces response with a live dump. null otherwise. Pair with show_dump_section / show_dump_partner / show_dump_assignee / show_dump_about / show_dump_from / show_dump_to."
               },
               "show_dump_section": {
                 "type": ["string", "null"],

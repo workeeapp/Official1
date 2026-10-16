@@ -520,8 +520,8 @@ describe("formatShowDumpFromKind", () => {
         },
         now,
       ),
-    ).toBe("ראשון ב־20:45 (כל יום ראשון ב־20:45) · 18.10 ב־21:30");
-    // Next fire already moved to the exception time — no duplicate suffix; series clock stays in cadence.
+    ).toBe("ראשון ב־20:45 (קבוע כל יום ראשון ב־20:45) · 18.10 ב־21:30");
+    // Next fire already moved to the exception time — still keep · suffix so series vs one-off stays clear.
     expect(
       formatReminderWhen(
         {
@@ -532,7 +532,7 @@ describe("formatShowDumpFromKind", () => {
         },
         now,
       ),
-    ).toBe("ראשון ב־21:30 (כל יום ראשון ב־20:45)");
+    ).toBe("ראשון ב־21:30 (קבוע כל יום ראשון ב־20:45) · 18.10 ב־21:30");
     expect(
       formatNumberedItem(
         5,
@@ -572,7 +572,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 (כל יום))");
+    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 (קבוע כל יום))");
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {
@@ -587,7 +587,7 @@ describe("formatShowDumpFromKind", () => {
         },
         now,
       ),
-    ).toBe("היום ב־19:00 (כל יום)");
+    ).toBe("היום ב־19:00 (קבוע כל יום)");
     expect(
       formatReminderWhen(
         {
@@ -597,7 +597,7 @@ describe("formatShowDumpFromKind", () => {
         },
         now,
       ),
-    ).toBe("מחר ב־09:00 (כל יום)");
+    ).toBe("מחר ב־09:00 (קבוע כל יום)");
     expect(
       formatReminderWhen(
         { fire_at: "2026-10-17 09:00", repeat: "none" },
@@ -625,7 +625,7 @@ describe("formatShowDumpFromKind", () => {
         },
         now,
       ),
-    ).toBe("8.5.2027 ב־13:00 (כל שנה)");
+    ).toBe("8.5.2027 ב־13:00 (קבוע כל שנה)");
   });
 
   it("partnersKey never keeps the viewer (name or aliases)", () => {
@@ -1307,5 +1307,58 @@ describe("formatShowDumpFromKind", () => {
     })!;
     expect(text).toContain("בטווח");
     expect(text).not.toContain("מחוץ");
+  });
+
+  it("show_dump=full: item co-share with Michal → קניות משותפות עם מיכל count ≥ 1", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", "שם פריט": "לחם", כמות: 1 },
+            {
+              item_id: "s1",
+              "שם פריט": "קפה",
+              כמות: 1,
+              shared_with: ["מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "t1", "שם מטלה": "לטפל בעמידר" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+
+    const text = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      phoneBook: [{ name: "דני", phone: "0501234567" }],
+    })!;
+
+    // Shopping counts only — Stage 2: co-share under משותפות עם מיכל.
+    expect(text).toMatch(/קניות אישיות: 1 פריט/);
+    expect(text).toMatch(/קניות משותפות עם מיכל: 1 פריט/);
+    expect(text).not.toMatch(/קניות משותפות:\s*ריקה/);
+    expect(text).not.toContain("קפה"); // counts only — no item titles
+    expect(text).not.toContain("לחם");
+
+    // Tasks still enumerate.
+    expect(text).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
+
+    expect(text).toContain("רשימות אחרות:");
+    expect(text).toContain("תזכורות פעילות:");
+    expect(text).toContain("תיוקים אישיים:");
+    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("דני — 0501234567");
+    expect(text).toContain("לפירוט רשימה: הצג רשימת …");
   });
 });

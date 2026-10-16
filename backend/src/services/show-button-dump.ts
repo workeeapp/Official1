@@ -64,6 +64,13 @@ export type ShowDumpOptions = {
   dateFrom?: string | null;
   /** Inclusive YYYY-MM-DD — tasks/reminders only. */
   dateTo?: string | null;
+  /**
+   * shopping/tasks three-way: bucket headers with counts only (no item lines).
+   * Used by show_dump=full for קניות.
+   */
+  countsOnly?: boolean;
+  /** SPEAKER_CONTACTS rows for show_dump=full ספר הטלפונים section. */
+  phoneBook?: Array<{ name: string; phone?: string }>;
 };
 
 /** Normalize dump filter name(s) to a trimmed list. */
@@ -141,6 +148,7 @@ export function isKnownShowButtonCommand(
 export function resolveShowDumpKind(
   raw: string,
 ):
+  | { kind: "full" }
   | { kind: "reminders" }
   | { kind: "filings" }
   | { kind: "list"; name: string }
@@ -150,6 +158,14 @@ export function resolveShowDumpKind(
     return null;
   }
   const lower = trimmed.toLowerCase();
+  if (
+    lower === "full" ||
+    trimmed === "הכל" ||
+    trimmed === "סיכום" ||
+    trimmed === "סיכום מלא"
+  ) {
+    return { kind: "full" };
+  }
   if (
     lower === "reminders" ||
     trimmed === "תזכורות" ||
@@ -192,12 +208,16 @@ export function formatShowDumpFromKind(
 
 function formatResolvedShowDump(
   parsed:
+    | { kind: "full" }
     | { kind: "reminders" }
     | { kind: "filings" }
     | { kind: "list"; name: string },
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): string | null {
+  if (parsed.kind === "full") {
+    return formatFullDump(snapshot, opts);
+  }
   if (parsed.kind === "reminders") {
     return formatRemindersDump(snapshot.reminders ?? [], opts);
   }
@@ -205,6 +225,128 @@ function formatResolvedShowDump(
     return formatFilingsDump(snapshot.filing ?? [], opts);
   }
   return formatListDump(parsed.name, snapshot, opts);
+}
+
+/**
+ * Bare overview («מה יש לי» / הציגי הכל): stitch Stage-2 category dumps.
+ * Shopping = counts only; tasks = full item lines; custom = counts; then
+ * reminders / filings / contacts / phone book.
+ */
+export function formatFullDump(
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string {
+  const sections: string[] = [];
+
+  sections.push(
+    formatThreeWayDump("shopping", "קניות", snapshot, {
+      ...opts,
+      countsOnly: true,
+    }),
+  );
+  sections.push(formatThreeWayDump("tasks", "מטלות", snapshot, opts));
+  sections.push(formatCustomListsCountsDump(snapshot, opts));
+
+  const linkedIds = linkedReminderIdsFromTasks(snapshot);
+  const standaloneReminders = (snapshot.reminders ?? []).filter(
+    (row) => !linkedIds.has(row.reminder_id),
+  );
+  const remBody = formatRemindersDump(standaloneReminders, opts);
+  sections.push(
+    remBody.startsWith("אין לך")
+      ? "תזכורות פעילות:\nריק"
+      : `תזכורות פעילות:\n${remBody}`,
+  );
+
+  sections.push(formatFilingsDump(snapshot.filing ?? [], opts));
+
+  const hasContacts = snapshot.lists.some(
+    (list) => list.list_type === "contacts",
+  );
+  sections.push(
+    hasContacts
+      ? (formatContactsOrCustomDump(
+          "contacts",
+          "",
+          snapshot,
+          builtinListHebrew("contacts"),
+          opts,
+        ) ?? "אנשי קשר אישיים:\nריקה\n\nאנשי קשר משותפים:\nריקה")
+      : "אנשי קשר אישיים:\nריקה\n\nאנשי קשר משותפים:\nריקה",
+  );
+
+  sections.push(formatPhoneBookDump(opts?.phoneBook));
+  sections.push("לפירוט רשימה: הצג רשימת …");
+
+  return sections.filter(Boolean).join("\n\n");
+}
+
+function hebrewItemCount(n: number): string {
+  return n === 1 ? "1 פריט" : `${n} פריטים`;
+}
+
+/** Custom lists: one count line each (FULL DUMP רשימות אחרות). */
+function formatCustomListsCountsDump(
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string {
+  const customs = snapshot.lists.filter((list) => list.list_type === "custom");
+  if (customs.length === 0) {
+    return "רשימות אחרות:\nריק";
+  }
+  const viewer = opts?.viewerName?.trim() ?? "";
+  const aliases = opts?.viewerAliases ?? [];
+  const lines = customs.map((list) => {
+    const name = (list.list_name ?? "").trim() || "ללא שם";
+    const n = list.items.length;
+    const partners =
+      list.scope === "shared"
+        ? partnersKey(list.shared_with ?? [], viewer, aliases)
+        : "";
+    const withMark =
+      partners && partners !== "משותף" ? ` (עם ${partners})` : "";
+    const count = n === 0 ? "ריקה" : hebrewItemCount(n);
+    return `*${name}*${withMark} — ${count}`;
+  });
+  return ["רשימות אחרות:", ...lines].join("\n");
+}
+
+function formatPhoneBookDump(
+  phoneBook: Array<{ name: string; phone?: string }> | undefined,
+): string {
+  const rows = phoneBook ?? [];
+  if (rows.length === 0) {
+    return "ספר הטלפונים:\nריק";
+  }
+  const lines = rows.map((row, i) => {
+    const name = row.name.trim() || "איש קשר";
+    const phone = (row.phone ?? "").trim();
+    return phone ? `${i + 1}. ${name} — ${phone}` : `${i + 1}. ${name}`;
+  });
+  return ["ספר הטלפונים:", ...lines].join("\n");
+}
+
+/** reminder_id values already shown via LINKED REMINDER on a task line. */
+function linkedReminderIdsFromTasks(
+  snapshot: EmployeeRecordSnapshot,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const list of snapshot.lists) {
+    if (list.list_type !== "tasks") {
+      continue;
+    }
+    for (const item of list.items) {
+      const raw = item.reminder;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        continue;
+      }
+      const id = (raw as { reminder_id?: unknown }).reminder_id;
+      if (typeof id === "string" && id.trim()) {
+        ids.add(id.trim());
+      }
+    }
+  }
+  return ids;
 }
 
 /** Labeled filing line: «שם: … · מידע: … · תיאור: …» (omit empty). */
@@ -469,9 +611,10 @@ export function reminderMatchesDateRange(
 }
 
 /**
- * Next fire + optional short cadence: «היום ב־19:00 (כל יום)» / «8.5.2027 ב־13:00 (כל שנה)».
- * One-off moves/cancels append ` · 18.10 ב־21:30` from snapshot `exceptions`
- * — except when that day is already the primary `fire_at` (avoid «21:30 · 18.10 ב־21:30»).
+ * Next fire + optional short cadence: «היום ב־19:00 (קבוע כל יום)» / «8.5.2027 ב־13:00 (קבוע כל שנה)».
+ * One-off moves/cancels always append ` · 18.10 ב־21:30` from snapshot `exceptions`
+ * (even when that day is already the primary `fire_at`) so standing + exception stay visible.
+ * Cadence paren is labeled «קבוע …» so the series rule is not read as the next-fire time.
  */
 export function formatReminderWhen(
   row: Pick<
@@ -482,10 +625,12 @@ export function formatReminderWhen(
 ): string {
   const fireAt = row.fire_at?.trim() || "";
   const hasExceptions = exceptionLabels(row.exceptions).length > 0;
-  const cadence = shortCadenceParen(row.recurrence_text, row.repeat, {
-    keepSeriesClock: hasExceptions,
-  });
-  const extras = formatExceptionsSuffix(row.exceptions, fireAt);
+  const cadence = standingCadenceParen(
+    shortCadenceParen(row.recurrence_text, row.repeat, {
+      keepSeriesClock: hasExceptions,
+    }),
+  );
+  const extras = formatExceptionsSuffix(row.exceptions);
   if (!fireAt) {
     const base = cadence.replace(/^\(|\)$/g, "");
     return base ? `${base}${extras}` : extras.replace(/^\s*·\s*/, "");
@@ -495,15 +640,22 @@ export function formatReminderWhen(
   return `${when}${extras}`;
 }
 
+/** «(כל יום)» → «(קבוע כל יום)» so reminder dumps name the standing rule. */
+export function standingCadenceParen(cadence: string): string {
+  const trimmed = cadence.trim();
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+    return trimmed;
+  }
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner || inner.startsWith("קבוע")) {
+    return trimmed;
+  }
+  return `(קבוע ${inner})`;
+}
+
 /** « · 18.10 ב־21:30» / « · 23.10 בוטל» from snapshot exception labels. */
-export function formatExceptionsSuffix(
-  exceptions: unknown,
-  /** When set, omit move labels that already match fire_at day+time (moved next fire). */
-  fireAt?: string,
-): string {
-  const labels = exceptionLabels(exceptions).filter(
-    (label) => !exceptionMatchesMovedFireAt(label, fireAt ?? ""),
-  );
+export function formatExceptionsSuffix(exceptions: unknown): string {
+  const labels = exceptionLabels(exceptions);
   return labels.length ? ` · ${labels.join(" · ")}` : "";
 }
 
@@ -515,34 +667,6 @@ function exceptionLabels(exceptions: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-/** True when label is «D.M ב־HH:mm» for the same day+time as fire_at. */
-function exceptionMatchesMovedFireAt(label: string, fireAt: string): boolean {
-  const dayMonth = fireAtDayMonth(fireAt);
-  const time = fireAtHm(fireAt);
-  if (!dayMonth || !time) {
-    return false;
-  }
-  const move = label.match(/^(\d{1,2}\.\d{1,2})\s+ב־(\d{1,2}:\d{2})$/);
-  if (!move) {
-    return false;
-  }
-  return move[1] === dayMonth && normalizeHm(move[2]) === normalizeHm(time);
-}
-
-/** Unpadded D.M from `YYYY-MM-DD…` fire_at (matches exception label prefix). */
-function fireAtDayMonth(fireAt: string): string {
-  const match = fireAt.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) {
-    return "";
-  }
-  return `${Number(match[3])}.${Number(match[2])}`;
-}
-
-function fireAtHm(fireAt: string): string {
-  const trimmed = fireAt.trim();
-  return trimmed.length >= 16 ? trimmed.slice(11, 16) : "";
 }
 
 /**
@@ -773,6 +897,34 @@ function formatThreeWayDump(
   }
 
   const blocks: string[] = [];
+  const countsOnly = opts?.countsOnly === true;
+
+  if (countsOnly) {
+    if (showPersonal) {
+      const n = filteredPersonal.length;
+      blocks.push(
+        n === 0
+          ? `${label} אישיות: ריקה`
+          : `${label} אישיות${paperclipSuffix(personalListFiles)}: ${hebrewItemCount(n)}`,
+      );
+    }
+    if (showShared) {
+      if (filteredShared.size === 0) {
+        if (section === "shared" && partnerFilters.length > 0) {
+          return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
+        }
+        blocks.push(`${label} משותפות: ריקה`);
+      } else {
+        for (const [partners, items] of filteredShared) {
+          blocks.push(
+            `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}: ${hebrewItemCount(items.length)}`,
+          );
+        }
+      }
+    }
+    return blocks.join("\n").trim();
+  }
+
   if (showPersonal && filteredPersonal.length > 0) {
     blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
     blocks.push(
