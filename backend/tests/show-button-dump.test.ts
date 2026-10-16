@@ -135,6 +135,44 @@ describe("filings two-section dump", () => {
     expect(dump).not.toContain("של ");
   });
 
+  it("treats scope=shared with no non-viewer partners as personal", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f-empty",
+          item_name: "לשון פנייה",
+          item_info: "זכר",
+          item_description: "",
+          owner: "טל",
+          scope: "shared",
+        },
+        {
+          filing_id: "f-self",
+          item_name: "כתובת",
+          item_info: "רחוב שחם",
+          item_description: "",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל"],
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(dump).toContain("תיוקים אישיים:");
+    expect(dump).toContain("שם: לשון פנייה · תיאור: זכר");
+    expect(dump).toContain("שם: כתובת · תיאור: רחוב שחם");
+    expect(dump).not.toContain("(עם ");
+    const sharedIdx = dump.indexOf("תיוקים משותפים:");
+    expect(sharedIdx).toBeGreaterThan(-1);
+    const sharedBlock = dump.slice(sharedIdx);
+    expect(sharedBlock).toContain("ריקה");
+    expect(sharedBlock).not.toContain("לשון פנייה");
+    expect(sharedBlock).not.toContain("כתובת");
+  });
+
   it("never marks filing partners as the viewer even if shared_with still lists them", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],

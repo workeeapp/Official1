@@ -398,7 +398,8 @@ export function visibleFilingsForDump(
       .map((name) => name.trim())
       .filter(Boolean)
       .filter((name) => !viewerNames.has(name));
-    const isShared = row.scope === "shared";
+    // Same as contacts: shared section only when a non-viewer partner remains.
+    const isShared = row.scope === "shared" && partners.length > 0;
     if (isShared) {
       if (section === "personal") {
         continue;
@@ -454,9 +455,9 @@ export function formatFilingsDump(
       .map((name) => name.trim())
       .filter(Boolean)
       .filter((name) => !viewerNames.has(name));
-    const isShared = row.scope === "shared";
-    const mark =
-      isShared && partners.length > 0 ? ` (עם ${partners.join(", ")})` : "";
+    // Same as contacts: shared section only when a non-viewer partner remains.
+    const isShared = row.scope === "shared" && partners.length > 0;
+    const mark = isShared ? ` (עם ${partners.join(", ")})` : "";
     const line = `${body}${clip}${mark}`;
     if (isShared) {
       shared.push(line);
