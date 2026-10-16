@@ -375,6 +375,27 @@ describe("parseLlmReply", () => {
     expect(bad.showDumpTo).toBeUndefined();
   });
 
+  it("reads show_dump_urgency", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_urgency: "urgent",
+        },
+      }),
+    );
+    expect(meta.showDumpUrgency).toBe("urgent");
+    const bad = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: { lists: [], show_dump: "tasks", show_dump_urgency: "normal" },
+      }),
+    );
+    expect(bad.showDumpUrgency).toBeUndefined();
+  });
+
   it("omits navigate_address when null, empty, or not a string", () => {
     for (const navigate_address of [null, "", "   ", 12]) {
       const parsed = parseLlmReply(

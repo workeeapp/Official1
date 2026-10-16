@@ -65,11 +65,16 @@ export type ShowDumpOptions = {
   /** Inclusive YYYY-MM-DD — tasks/reminders only. */
   dateTo?: string | null;
   /**
+   * Urgency filter: urgent = urgent|very_urgent; very_urgent = only that.
+   * null = no filter.
+   */
+  urgency?: "urgent" | "very_urgent" | null;
+  /**
    * shopping/tasks three-way: bucket headers with counts only (no item lines).
    * Used by show_dump=full for קניות.
    */
   countsOnly?: boolean;
-  /** SPEAKER_CONTACTS rows for show_dump=full ספר הטלפונים section. */
+  /** SPEAKER_CONTACTS rows for show_dump=full / phone_book ספר הטלפונים. */
   phoneBook?: Array<{ name: string; phone?: string }>;
 };
 
@@ -151,6 +156,7 @@ export function resolveShowDumpKind(
   | { kind: "full" }
   | { kind: "reminders" }
   | { kind: "filings" }
+  | { kind: "phone_book" }
   | { kind: "list"; name: string }
   | null {
   const trimmed = raw.trim();
@@ -179,6 +185,13 @@ export function resolveShowDumpKind(
     trimmed === SHOW_FILINGS_COMMAND
   ) {
     return { kind: "filings" };
+  }
+  if (
+    lower === "phone_book" ||
+    lower === "phonebook" ||
+    trimmed === "ספר הטלפונים"
+  ) {
+    return { kind: "phone_book" };
   }
   if (isBuiltinListType(lower)) {
     return {
@@ -211,6 +224,7 @@ function formatResolvedShowDump(
     | { kind: "full" }
     | { kind: "reminders" }
     | { kind: "filings" }
+    | { kind: "phone_book" }
     | { kind: "list"; name: string },
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
@@ -223,6 +237,9 @@ function formatResolvedShowDump(
   }
   if (parsed.kind === "filings") {
     return formatFilingsDump(snapshot.filing ?? [], opts);
+  }
+  if (parsed.kind === "phone_book") {
+    return formatPhoneBookDump(opts?.phoneBook);
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
@@ -260,22 +277,29 @@ export function formatFullDump(
 
   sections.push(formatFilingsDump(snapshot.filing ?? [], opts));
 
-  const hasContacts = snapshot.lists.some(
-    (list) => list.list_type === "contacts",
-  );
-  sections.push(
-    hasContacts
-      ? (formatContactsOrCustomDump(
-          "contacts",
-          "",
-          snapshot,
-          builtinListHebrew("contacts"),
-          opts,
-        ) ?? "אנשי קשר אישיים:\nריקה\n\nאנשי קשר משותפים:\nריקה")
-      : "אנשי קשר אישיים:\nריקה\n\nאנשי קשר משותפים:\nריקה",
-  );
+  const partnerOnly =
+    Boolean(opts?.section === "shared") ||
+    dumpFilterNames(opts?.partner).length > 0;
 
-  sections.push(formatPhoneBookDump(opts?.phoneBook));
+  if (!partnerOnly) {
+    const hasContacts = snapshot.lists.some(
+      (list) => list.list_type === "contacts",
+    );
+    sections.push(
+      hasContacts
+        ? (formatContactsOrCustomDump(
+            "contacts",
+            "",
+            snapshot,
+            builtinListHebrew("contacts"),
+            opts,
+          ) ?? "אנשי קשר אישיים:\nריקה")
+        : "אנשי קשר אישיים:\nריקה",
+    );
+
+    sections.push(formatPhoneBookDump(opts?.phoneBook));
+  }
+
   sections.push("לפירוט רשימה: הצג רשימת …");
 
   return sections.filter(Boolean).join("\n\n");
@@ -291,27 +315,47 @@ function formatCustomListsCountsDump(
   opts?: ShowDumpOptions,
 ): string {
   const customs = snapshot.lists.filter((list) => list.list_type === "custom");
-  if (customs.length === 0) {
-    return "רשימות אחרות:\nריק";
-  }
   const viewer = opts?.viewerName?.trim() ?? "";
   const aliases = opts?.viewerAliases ?? [];
-  const lines = customs.map((list) => {
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const lines: string[] = [];
+  for (const list of customs) {
+    const isShared = list.scope === "shared";
+    if (section === "personal" && isShared) {
+      continue;
+    }
+    if (section === "shared" && !isShared) {
+      continue;
+    }
+    const partners = isShared
+      ? partnersKey(list.shared_with ?? [], viewer, aliases)
+      : "";
+    if (
+      partnerNeedles.length > 0 &&
+      !partnerNeedles.some((needle) =>
+        partnerBucketMatches(partners, needle),
+      )
+    ) {
+      continue;
+    }
     const name = (list.list_name ?? "").trim() || "ללא שם";
     const n = list.items.length;
-    const partners =
-      list.scope === "shared"
-        ? partnersKey(list.shared_with ?? [], viewer, aliases)
-        : "";
     const withMark =
       partners && partners !== "משותף" ? ` (עם ${partners})` : "";
     const count = n === 0 ? "ריקה" : hebrewItemCount(n);
-    return `*${name}*${withMark} — ${count}`;
-  });
+    lines.push(`*${name}*${withMark} — ${count}`);
+  }
+  if (lines.length === 0) {
+    if (partnerNeedles.length > 0 || section === "shared") {
+      return "";
+    }
+    return "רשימות אחרות:\nריק";
+  }
   return ["רשימות אחרות:", ...lines].join("\n");
 }
 
-function formatPhoneBookDump(
+export function formatPhoneBookDump(
   phoneBook: Array<{ name: string; phone?: string }> | undefined,
 ): string {
   const rows = phoneBook ?? [];
@@ -485,7 +529,8 @@ export function formatFilingsDump(
         partnerNeedles.some((needle) => line.includes(needle)),
       );
     }
-    if (section === "shared" || sharedLines.length > 0 || !section) {
+    // Hide empty shared unless the speaker asked for shared only.
+    if (section === "shared" || sharedLines.length > 0) {
       if (blocks.length > 0) {
         blocks.push("");
       }
@@ -500,7 +545,7 @@ export function formatFilingsDump(
     }
   }
   if (rows.length === 0 && !section) {
-    return "תיוקים אישיים:\nריקה\n\nתיוקים משותפים:\nריקה";
+    return "תיוקים אישיים:\nריקה";
   }
   return blocks.join("\n");
 }
@@ -870,9 +915,13 @@ function formatThreeWayDump(
     );
   };
 
-  const filteredPersonal = showPersonal
-    ? filterDate(filterAssignee(personal))
-    : [];
+  const filterUrgency = (rows: DumpItem[]): DumpItem[] =>
+    rows.filter((row) => itemMatchesUrgencyFilter(row.item, opts?.urgency));
+
+  const applyItemFilters = (rows: DumpItem[]): DumpItem[] =>
+    filterUrgency(filterDate(filterAssignee(rows)));
+
+  const filteredPersonal = showPersonal ? applyItemFilters(personal) : [];
 
   const filteredShared = new Map<string, DumpItem[]>();
   if (showShared) {
@@ -885,7 +934,7 @@ function formatThreeWayDump(
       ) {
         continue;
       }
-      const kept = filterDate(filterAssignee(items));
+      const kept = applyItemFilters(items);
       if (kept.length === 0) {
         continue;
       }
@@ -910,7 +959,10 @@ function formatThreeWayDump(
         if (section === "shared" && partnerFilters.length > 0) {
           return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
         }
-        blocks.push(`${label} משותפות: ריקה`);
+        // Hide empty shared counts unless they asked for shared only.
+        if (section === "shared") {
+          blocks.push(`${label} משותפות: ריקה`);
+        }
       } else {
         for (const [partners, items] of filteredShared) {
           blocks.push(
@@ -986,6 +1038,21 @@ export function allInvolvedNames(
   return `${partners}, ${viewer}`;
 }
 
+/** Urgency dump filter: urgent = urgent|very_urgent; very_urgent = exact. */
+export function itemMatchesUrgencyFilter(
+  item: Record<string, unknown>,
+  urgency?: "urgent" | "very_urgent" | null,
+): boolean {
+  if (!urgency) {
+    return true;
+  }
+  const value = item.urgency;
+  if (urgency === "very_urgent") {
+    return value === "very_urgent";
+  }
+  return value === "urgent" || value === "very_urgent";
+}
+
 /** Assignee filter against responsibility mark (sole name only when filter set). */
 export function itemMatchesAssigneeFilter(
   responsibilityMark: string | undefined,
@@ -1012,6 +1079,70 @@ export function itemMatchesAssigneeFilter(
       raw.toLowerCase() === "self" ? selfNames : [raw];
     return needles.some((name) => name === mark);
   });
+}
+
+/** Drop list items whose item_id is in `itemIds` (OPEN_JOBS shadows before dump). */
+export function excludeItemIdsFromSnapshot(
+  snapshot: EmployeeRecordSnapshot,
+  itemIds: ReadonlySet<string>,
+): EmployeeRecordSnapshot {
+  if (itemIds.size === 0) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    lists: snapshot.lists
+      .map((list) => ({
+        ...list,
+        items: list.items.filter((raw) => {
+          const item = raw as Record<string, unknown>;
+          const id =
+            typeof item.item_id === "string"
+              ? item.item_id.trim()
+              : typeof item.itemId === "string"
+                ? item.itemId.trim()
+                : typeof item.id === "string"
+                  ? item.id.trim()
+                  : "";
+          return !id || !itemIds.has(id);
+        }),
+      }))
+      .filter((list) => list.items.length > 0),
+  };
+}
+
+/** True when a list dump is the engine empty sentence (no item lines). */
+export function isEmptyListDump(text: string | null | undefined): boolean {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) {
+    return true;
+  }
+  return /^אין .+ שמורות\.$/.test(trimmed) || / ריקה\.$/.test(trimmed);
+}
+
+/**
+ * Stitch a tasks dump with an optional ממתינים (OPEN_JOBS) block.
+ * Empty tasks + waiting → waiting only; both empty → tasks empty sentence.
+ */
+export function composeTasksDumpWithWaiting(
+  tasksDump: string | null,
+  waitingDump: string,
+): string | null {
+  const waiting = waitingDump.trim();
+  const tasks = (tasksDump ?? "").trim();
+  if (!waiting) {
+    return tasks || null;
+  }
+  if (isEmptyListDump(tasks)) {
+    return waiting;
+  }
+  return `${tasks}\n\n${waiting}`;
+}
+
+/** True when show_dump resolves to the built-in tasks list. */
+export function isTasksShowDumpKind(kind: string): boolean {
+  const resolved = resolveShowDumpKind(kind);
+  return resolved?.kind === "list" && resolved.name === "מטלות";
 }
 
 /**
@@ -1230,7 +1361,8 @@ function formatContactsTwoSectionDump(
         ),
       );
     }
-    if (section === "shared" || sharedRows.length > 0 || !section) {
+    // Hide empty shared unless the speaker asked for shared only.
+    if (section === "shared" || sharedRows.length > 0) {
       if (blocks.length > 0) {
         blocks.push("");
       }

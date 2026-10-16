@@ -680,9 +680,8 @@ describe("chat API", () => {
     const instructions = createResponse.mock.calls[0][0].instructions as string;
     expect(instructions).toMatch(/INVENTORY \([^)]*מה יש לך/);
     expect(instructions).toContain("WHO A STATUS QUESTION IS ABOUT");
-    expect(instructions).toContain(
-      "Never answer «אין לי…» while WORKER_SAVED_DATA has a list item",
-    );
+    expect(instructions).toContain("show_dump=tasks");
+    expect(instructions).toContain("show_dump_about=YOUR display name");
   });
 
   it("wires SEND BY MEANING and SEND-ME FREE TEXT into Lucy runtime instructions", async () => {

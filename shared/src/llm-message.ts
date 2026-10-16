@@ -315,9 +315,14 @@ export interface LlmMetadata {
   showDumpFrom?: string | null;
   /** Inclusive dump date filter end YYYY-MM-DD (Asia/Jerusalem). */
   showDumpTo?: string | null;
+  /**
+   * Urgency dump filter: urgent = urgent|very_urgent; very_urgent = only that.
+   */
+  showDumpUrgency?: "urgent" | "very_urgent" | null;
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
+export type LlmShowDumpUrgency = "urgent" | "very_urgent";
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
 const LIST_TYPES = new Set<LlmListType>(["shopping", "contacts", "tasks", "custom"]);
@@ -420,6 +425,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   );
   const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
+  const showDumpUrgency = parseShowDumpUrgency(meta);
   return {
     messages,
     reminders,
@@ -460,6 +466,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
       : {}),
     ...(showDumpFrom ? { showDumpFrom } : {}),
     ...(showDumpTo ? { showDumpTo } : {}),
+    ...(showDumpUrgency ? { showDumpUrgency } : {}),
   };
 }
 
@@ -531,6 +538,21 @@ export function showDumpNames(
   value: string | string[] | null | undefined,
 ): string[] {
   return parseShowDumpNameList(value ?? null);
+}
+
+/** metadata.show_dump_urgency — urgent | very_urgent. */
+export function parseShowDumpUrgency(
+  meta: Record<string, unknown>,
+): LlmShowDumpUrgency | null {
+  const raw = meta.show_dump_urgency ?? meta.showDumpUrgency;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === "urgent" || trimmed === "very_urgent") {
+    return trimmed;
+  }
+  return null;
 }
 
 /** metadata.show_dump_from / show_dump_to — YYYY-MM-DD inclusive. */

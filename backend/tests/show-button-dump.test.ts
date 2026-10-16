@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  composeTasksDumpWithWaiting,
+  excludeItemIdsFromSnapshot,
   formatCustomItemBody,
   formatFilingDumpBody,
   formatLinkedReminderParen,
@@ -11,7 +13,9 @@ import {
   formatScheduleSuffix,
   formatShoppingTitle,
   formatShowDumpFromKind,
+  isEmptyListDump,
   isKnownShowButtonCommand,
+  isTasksShowDumpKind,
   itemMatchesDateRange,
   mapShowButtonCommandToDump,
   navigateAddressFromFilingsDump,
@@ -165,12 +169,37 @@ describe("filings two-section dump", () => {
     expect(dump).toContain("שם: לשון פנייה · תיאור: זכר");
     expect(dump).toContain("שם: כתובת · תיאור: רחוב שחם");
     expect(dump).not.toContain("(עם ");
-    const sharedIdx = dump.indexOf("תיוקים משותפים:");
-    expect(sharedIdx).toBeGreaterThan(-1);
-    const sharedBlock = dump.slice(sharedIdx);
-    expect(sharedBlock).toContain("ריקה");
-    expect(sharedBlock).not.toContain("לשון פנייה");
-    expect(sharedBlock).not.toContain("כתובת");
+    expect(dump).not.toContain("תיוקים משותפים:");
+  });
+
+  it("omits empty shared filings section unless section=shared", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    const full = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(full).toContain("תיוקים אישיים:");
+    expect(full).toContain("רישיון");
+    expect(full).not.toContain("תיוקים משותפים:");
+
+    const sharedOnly = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      section: "shared",
+    })!;
+    expect(sharedOnly).toContain("תיוקים משותפים:");
+    expect(sharedOnly).toContain("ריקה");
+    expect(sharedOnly).not.toContain("תיוקים אישיים:");
   });
 
   it("never marks filing partners as the viewer even if shared_with still lists them", () => {
@@ -1434,8 +1463,204 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("רשימות אחרות:");
     expect(text).toContain("תזכורות פעילות:");
     expect(text).toContain("תיוקים אישיים:");
+    expect(text).not.toContain("תיוקים משותפים:");
+    expect(text).toContain("אנשי קשר אישיים:");
+    expect(text).not.toContain("אנשי קשר משותפים:");
+    expect(text).not.toMatch(/מטלות משותפות:\s*ריקה/);
     expect(text).toContain("ספר הטלפונים:");
     expect(text).toContain("דני — 0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
+  });
+
+  it("contacts: omits empty shared unless section=shared", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "contacts",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "c1",
+              "שם פרטי": "דני",
+              scope: "personal",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const full = formatShowDumpFromKind("contacts", snap, {
+      viewerName: "טל",
+    })!;
+    expect(full).toContain("אנשי קשר אישיים:");
+    expect(full).toContain("דני");
+    expect(full).not.toContain("אנשי קשר משותפים:");
+
+    const sharedOnly = formatShowDumpFromKind("contacts", snap, {
+      viewerName: "טל",
+      section: "shared",
+    })!;
+    expect(sharedOnly).toContain("אנשי קשר משותפים:");
+    expect(sharedOnly).toContain("ריקה");
+    expect(sharedOnly).not.toContain("אנשי קשר אישיים:");
+  });
+
+  it("shopping countsOnly: omits empty משותפות unless section=shared", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "p1", "שם פריט": "לחם", כמות: 1 }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const counts = formatShowDumpFromKind("shopping", snap, {
+      viewerName: "טל",
+      countsOnly: true,
+    })!;
+    expect(counts).toMatch(/קניות אישיות: 1 פריט/);
+    expect(counts).not.toContain("משותפות");
+
+    const sharedCounts = formatShowDumpFromKind("shopping", snap, {
+      viewerName: "טל",
+      countsOnly: true,
+      section: "shared",
+    })!;
+    expect(sharedCounts).toContain("קניות משותפות: ריקה");
+  });
+});
+
+describe("worker inventory tasks dump helpers", () => {
+  it("recognizes tasks show_dump kinds", () => {
+    expect(isTasksShowDumpKind("tasks")).toBe(true);
+    expect(isTasksShowDumpKind("מטלות")).toBe(true);
+    expect(isTasksShowDumpKind("shopping")).toBe(false);
+    expect(isTasksShowDumpKind("full")).toBe(false);
+  });
+
+  it("excludes OPEN_JOBS shadow item_ids then dumps remaining tasks", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "לוסי",
+          scope: "personal",
+          items: [
+            { item_id: "job-shadow", "שם מטלה": "לבדוק עם ערן: אם קנית חלב?" },
+            { item_id: "standing", "שם מטלה": "להזכיר לטל לקנות חלב" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const filtered = excludeItemIdsFromSnapshot(snap, new Set(["job-shadow"]));
+    const text = formatShowDumpFromKind("tasks", filtered, {
+      viewerName: "לוסי",
+    })!;
+    expect(text).toContain("להזכיר לטל לקנות חלב");
+    expect(text).not.toContain("לבדוק עם ערן");
+  });
+
+  it("stitches ממתינים after tasks and omits empty tasks sentence when waiting", () => {
+    expect(isEmptyListDump("אין מטלות שמורות.")).toBe(true);
+    expect(
+      composeTasksDumpWithWaiting("אין מטלות שמורות.", "ממתינים לתשובה:\n1. א"),
+    ).toBe("ממתינים לתשובה:\n1. א");
+    expect(
+      composeTasksDumpWithWaiting(
+        "מטלות אישיות:\n1. להזכיר לטל",
+        "ממתינים לתשובה:\n1. א",
+      ),
+    ).toBe("מטלות אישיות:\n1. להזכיר לטל\n\nממתינים לתשובה:\n1. א");
+    expect(
+      composeTasksDumpWithWaiting("מטלות אישיות:\n1. להזכיר לטל", ""),
+    ).toBe("מטלות אישיות:\n1. להזכיר לטל");
+  });
+
+  it("filters tasks by urgency", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "1", "שם מטלה": "רגיל" },
+            { item_id: "2", "שם מטלה": "דחוף", urgency: "urgent" },
+            { item_id: "3", "שם מטלה": "ממש דחוף", urgency: "very_urgent" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const urgent = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      urgency: "urgent",
+    })!;
+    expect(urgent).toContain("דחוף");
+    expect(urgent).toContain("ממש דחוף");
+    expect(urgent).not.toContain("רגיל");
+    const very = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      urgency: "very_urgent",
+    })!;
+    expect(very).toContain("ממש דחוף");
+    expect(very).not.toContain("1. דחוף");
+  });
+
+  it("dumps phone_book from opts.phoneBook", () => {
+    expect(isTasksShowDumpKind("phone_book")).toBe(false);
+    const text = formatShowDumpFromKind("phone_book", { lists: [], filing: [] }, {
+      phoneBook: [{ name: "דני", phone: "050" }],
+    })!;
+    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("1. דני — 050");
+  });
+
+  it("full dump with partner skips phone book and filters custom lists", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "p", "שם מטלה": "פרטי" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "custom",
+          list_name: "באגים",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["עמית"],
+          items: [{ item_id: "c1", שם: "a" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "custom",
+          list_name: "פרטי",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "c2", שם: "b" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const text = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "עמית",
+      phoneBook: [{ name: "דני", phone: "050" }],
+    })!;
+    expect(text).toContain("*באגים*");
+    expect(text).not.toContain("*פרטי* —");
+    expect(text).not.toContain("ספר הטלפונים");
   });
 });

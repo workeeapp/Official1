@@ -60,6 +60,7 @@ import {
   createJobsFromRelays,
   createScheduledJobsFromRelays,
   formatOpenJobsContext,
+  formatOpenJobsWaitingDump,
   listOpenJobsForViewer,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
@@ -125,9 +126,37 @@ describe("open jobs context", () => {
     expect(block).toContain('"raisable":true');
     expect(block).toMatch(/"job_id"\s*:\s*"/);
     expect(block).toContain("using its job_id");
-    expect(block).toContain(
-      "On INVENTORY do NOT also list that shadow under מטלות",
+    expect(block).toContain("metadata.show_dump=tasks");
+    expect(block).toContain("ממתינים");
+  });
+
+  it("formats ממתינים dump for asker, subject, and self-job", () => {
+    expect(formatOpenJobsWaitingDump([jobRow()], AMIT)).toBe(
+      ["ממתינים לתשובה:", "1. לבדוק עם ערן: אם קנית חלב?"].join("\n"),
     );
+    expect(formatOpenJobsWaitingDump([jobRow()], ERAN)).toBe(
+      ["ממתינים לתשובה:", "1. עמית ביקש ממני אם קנית חלב?"].join("\n"),
+    );
+    expect(
+      formatOpenJobsWaitingDump(
+        [
+          jobRow({
+            askerId: AMIT,
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "אם קנית שוקו?",
+            pendingActivation: true,
+          }),
+        ],
+        AMIT,
+      ),
+    ).toBe(
+      [
+        "ממתינים לתשובה:",
+        "1. לבדוק איתך אם קנית שוקו? (מתוזמן — עדיין לא להיום)",
+      ].join("\n"),
+    );
+    expect(formatOpenJobsWaitingDump([], AMIT)).toBe("");
   });
 
   it("marks a scheduled job as not raisable and stays empty with no jobs", () => {
@@ -231,9 +260,9 @@ describe("open jobs context", () => {
     );
     expect(block).toContain('"scheduled":true');
     expect(block).toContain('"raisable":false');
-    expect(block).toContain("INVENTORY");
+    expect(block).toContain("Inventory asks");
     expect(block).toContain("scheduled=true");
-    expect(block).toMatch(/do not RAISE/i);
+    expect(block).toMatch(/do NOT RAISE/i);
   });
 });
 

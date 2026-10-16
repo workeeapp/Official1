@@ -686,6 +686,43 @@ function urgencyFields(job: OpenJobRow, clock: string | null): Record<string, un
   };
 }
 
+/**
+ * Spoken ממתינים block for worker inventory (after tasks dump).
+ * Phrasing matches OPEN_JOBS inventory rules for this viewer.
+ */
+export function formatOpenJobsWaitingDump(
+  jobs: OpenJobRow[],
+  viewerId: string,
+): string {
+  if (jobs.length === 0) {
+    return "";
+  }
+  const lines = jobs.map((job, index) => {
+    const ask = job.meta.ask.trim();
+    const scheduled = Boolean(job.meta.pendingActivation);
+    const selfJob = job.meta.askerId === job.meta.subjectId;
+    let title: string;
+    if (selfJob) {
+      title = ask
+        ? ask.startsWith("לבדוק")
+          ? ask
+          : `לבדוק איתך ${ask}`
+        : job.label;
+    } else if (job.meta.subjectId === viewerId) {
+      title = ask
+        ? `${job.meta.askerName} ביקש ממני ${ask}`
+        : job.label;
+    } else {
+      title = ask
+        ? `לבדוק עם ${job.meta.subjectName}: ${ask}`
+        : job.label;
+    }
+    const suffix = scheduled ? " (מתוזמן — עדיין לא להיום)" : "";
+    return `${index + 1}. ${title}${suffix}`;
+  });
+  return ["ממתינים לתשובה:", ...lines].join("\n");
+}
+
 export function formatOpenJobsContext(
   jobs: OpenJobRow[],
   viewerId: string,
@@ -737,12 +774,12 @@ export function formatOpenJobsContext(
   });
   return [
     "OPEN_JOBS:",
-    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work: when asked what you need to do/check (מה את צריכה לעשות / לברר / מה יש לך / מה פתוח אצלך), list EVERY row — including scheduled=true — even if WORKER_SAVED_DATA looks empty. That ask is INVENTORY: do not RAISE; phrase each from ask; scheduled=true → say it is scheduled / not yet due.",
-    "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line (for mutate/cancel). On INVENTORY do NOT also list that shadow under מטלות — show the consult only in the waiting / OPEN_JOBS section. Never read that label out loud — say it the way THIS speaker should hear it:",
-    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…», «<name> מחכה לתשובה», or first-person ask copy (הכנתי / קניתי). On INVENTORY do not append the live question — list the check only.",
+    "Jobs you still owe for these people. Only these exist — never invent a job. These ARE your work. Inventory asks (מה את צריכה לעשות / לברר / מה יש לך / מה פתוח אצלך) → metadata.show_dump=tasks + show_dump_about=YOUR display name; lists=[]; the server dumps your tasks and appends ממתינים from these rows — do NOT write inventory lines yourself; do NOT RAISE that turn.",
+    "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line (for mutate/cancel). The server omits that shadow from the מטלות dump and shows the consult only under ממתינים. Never read that label out loud when raising — say it the way THIS speaker should hear it:",
+    "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…», «<name> מחכה לתשובה», or first-person ask copy (הכנתי / קניתי).",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
-    "raisable=false means a reminder clock is already set — wait for it, do not raise early. scheduled=true means a deferred check is waiting for its clock — do not ask yet; the server will send at fire; still list it on INVENTORY. deferred=true means they said not now, with no clock: still raisable. Raise only when not answering an inventory ask, at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
-    "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
+    "raisable=false means a reminder clock is already set — wait for it, do not raise early. scheduled=true means a deferred check is waiting for its clock — do not ask yet; the server will send at fire; inventory dump still lists it under ממתינים. deferred=true means they said not now, with no clock: still raisable. Raise only when not answering an inventory ask, not while a DELETE CONFIRM («האם מאשר?») is the open yes/no (one responses entry; no «אגב» raise that turn), at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
+    "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…») — still FORBIDDEN in the same turn as DELETE CONFIRM («האם מאשר?»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent — except during DELETE CONFIRM. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
     "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time (plus שעת סיום=book_end_time when present). book_window=true → the slot is a window: a reply naming one time inside it is a counter (time + end_time only if they said an end), not an answer. The server also saves that meeting from these fields when you forget the list.",
     JSON.stringify(rows),
