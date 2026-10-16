@@ -1075,6 +1075,7 @@ describe("employee records", () => {
     expect(context).toContain("מספר רכב");
     expect(context).toContain("רכב שלי");
     expect(context).toContain("item_description");
+    expect(context).toContain("product תיאור");
     expect(context).toContain("durable personal facts");
     expect(context).toContain("filing");
     expect(context).toContain("LIVE FACTS THIS TURN");
@@ -1549,6 +1550,32 @@ describe("employee records", () => {
     expect(filingUpdate).toHaveBeenCalledWith({
       where: { id: "filing-old" },
       data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  it("allows add_filing with empty item_description", async () => {
+    filingCreate.mockResolvedValue({ id: "filing-empty-desc" });
+    await applyEmployeeMetadata(employeeId, {
+      lists: [],
+      filing: [
+        {
+          action: "add_filing",
+          itemName: "שרון וטרינרית",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+          filingId: "",
+        },
+      ],
+    });
+    expect(filingCreate).toHaveBeenCalledWith({
+      data: {
+        employeeId,
+        itemName: "שרון וטרינרית",
+        itemInfo: "",
+        itemDescription: "",
+        addedById: employeeId,
+      },
     });
   });
 

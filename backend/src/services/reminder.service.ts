@@ -561,6 +561,24 @@ export interface LinkedItemRef {
 }
 
 /**
+ * Soft-link candidates: same-turn mutations first, then live rows by id.
+ * Exact itemKey pairing happens later — never fuzzy label.
+ */
+export function unionSoftLinkItemCandidates(
+  sameTurn: LinkedItemRef[],
+  live: LinkedItemRef[],
+): LinkedItemRef[] {
+  const byId = new Map<string, LinkedItemRef>();
+  for (const row of live) {
+    byId.set(row.id, row);
+  }
+  for (const row of sameTurn) {
+    byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
+/**
  * Same-turn human list rows eligible for soft-linking new clocks.
  * Includes add and update (exact itemKey later). Never live inventory.
  */

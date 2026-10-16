@@ -46,6 +46,7 @@ import {
   removeReminderAndLinkedWorkerTask,
   shareWorkerTaskWithPingRecipients,
   syncLinkedWorkerTaskClock,
+  unionSoftLinkItemCandidates,
 } from "../src/services/reminder.service.js";
 
 const AMIT = "11111111-1111-4111-8111-111111111111";
@@ -175,6 +176,95 @@ describe("reminder worker link", () => {
       data: { linkedReminderId: "r1" },
     });
     expect(reminderUpdate).not.toHaveBeenCalled();
+  });
+
+  it("soft-links a new clock to an existing live human row by exact key (REUSE, no list mutate)", async () => {
+    itemUpdate.mockResolvedValue({});
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing-maya",
+        itemKey: "לאסוף את מאיה",
+        data: {
+          "שם מטלה": "לאסוף את מאיה",
+          "תאריך לביצוע": "2026-10-23",
+          "שעה לביצוע": "15:00",
+        },
+      },
+    ]);
+    const live = await listLiveHumanItemsForReminderLink({
+      userId: "user-1",
+      humanIds: [TAL],
+    });
+    expect(itemsFromListMutationsForSoftLink([], [TAL])).toEqual([]);
+    await linkRemindersToItems(
+      [
+        {
+          id: "r-ping",
+          itemKey: "לאסוף את מאיה",
+          itemLabel: "לאסוף את מאיה",
+        },
+      ],
+      live,
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "existing-maya" },
+      data: { linkedReminderId: "r-ping" },
+    });
+  });
+
+  it("unions same-turn mutate with live rows so REUSE still links when another list mutates", async () => {
+    itemUpdate.mockResolvedValue({});
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing-maya",
+        itemKey: "לאסוף את מאיה",
+        data: { "שם מטלה": "לאסוף את מאיה" },
+      },
+    ]);
+    const sameTurn = itemsFromListMutationsForSoftLink(
+      [
+        {
+          action: "add",
+          itemId: "unrelated-milk",
+          itemKey: "חלב",
+          itemLabel: "חלב",
+          employeeId: TAL,
+        },
+      ],
+      [TAL],
+    );
+    const live = await listLiveHumanItemsForReminderLink({
+      userId: "user-1",
+      humanIds: [TAL],
+    });
+    const candidates = unionSoftLinkItemCandidates(sameTurn, live);
+    expect(candidates.map((row) => row.id).sort()).toEqual([
+      "existing-maya",
+      "unrelated-milk",
+    ]);
+    await linkRemindersToItems(
+      [
+        {
+          id: "r-ping",
+          itemKey: "לאסוף את מאיה",
+          itemLabel: "לאסוף את מאיה",
+        },
+      ],
+      candidates,
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "existing-maya" },
+      data: { linkedReminderId: "r-ping" },
+    });
+  });
+
+  it("unionSoftLinkItemCandidates prefers same-turn row when ids collide", () => {
+    expect(
+      unionSoftLinkItemCandidates(
+        [{ id: "i1", itemKey: "new-key", itemLabel: "new" }],
+        [{ id: "i1", itemKey: "old-key", itemLabel: "old" }],
+      ),
+    ).toEqual([{ id: "i1", itemKey: "new-key", itemLabel: "new" }]);
   });
 
   it("includes same-turn lists.update rows for soft-link (not only add)", () => {

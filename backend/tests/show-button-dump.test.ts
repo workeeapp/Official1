@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
   formatCustomItemBody,
+  formatFilingDumpBody,
   formatLinkedReminderParen,
   formatNumberedItem,
   formatRelativeDayLabel,
@@ -73,6 +74,31 @@ describe("closed show button allowlist", () => {
   });
 });
 
+describe("formatFilingDumpBody", () => {
+  it("labels item_info as תיאור and omits item_description", () => {
+    expect(
+      formatFilingDumpBody({
+        filing_id: "f1",
+        item_name: "כתובת מרב",
+        item_info: "יערה אבן יהודה",
+        item_description: "כתובת מרב",
+        owner: "טל",
+        scope: "personal",
+      }),
+    ).toBe("שם: כתובת מרב · תיאור: יערה אבן יהודה");
+    expect(
+      formatFilingDumpBody({
+        filing_id: "f2",
+        item_name: "שרון וטרינרית",
+        item_info: "",
+        item_description: "שרון וטרינרית",
+        owner: "טל",
+        scope: "personal",
+      }),
+    ).toBe("שם: שרון וטרינרית");
+  });
+});
+
 describe("filings two-section dump", () => {
   it("splits personal vs shared with (עם) marks — no של X", () => {
     const snap: EmployeeRecordSnapshot = {
@@ -101,11 +127,10 @@ describe("filings two-section dump", () => {
       viewerName: "טל",
     });
     expect(dump).toContain("תיוקים אישיים:");
-    expect(dump).toContain("1. שם: רישיון · מידע: בתוקף · תיאור: רישיון");
+    expect(dump).toContain("1. שם: רישיון · תיאור: בתוקף");
+    expect(dump).not.toContain("מידע:");
     expect(dump).toContain("תיוקים משותפים:");
-    expect(dump).toContain(
-      "1. שם: קוד שער · מידע: 1234 · תיאור: קוד שער (עם מיכל)",
-    );
+    expect(dump).toContain("1. שם: קוד שער · תיאור: 1234 (עם מיכל)");
     expect(dump).not.toContain("(עם טל)");
     expect(dump).not.toContain("של ");
   });
@@ -573,6 +598,20 @@ describe("formatShowDumpFromKind", () => {
         { now },
       ),
     ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 (קבוע כל יום))");
+    // Appointment time ≠ ping time: schedule from שעה לביצוע, paren from fire_at.
+    expect(
+      formatNumberedItem(
+        1,
+        "לאסוף את מאיה",
+        {
+          "תאריך לביצוע": "2026-10-16",
+          "שעה לביצוע": "15:00",
+          reminder: { fire_at: "2026-10-16 14:20", repeat: "none" },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. לאסוף את מאיה — מחר ב־15:00 (תזכורת: מחר ב־14:20)");
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {

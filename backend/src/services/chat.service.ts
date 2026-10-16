@@ -104,8 +104,10 @@ import {
   itemsFromListMutationsForSoftLink,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
+  listLiveHumanItemsForReminderLink,
   reminderRepeatsSubHourly,
   SUB_HOURLY_REFUSAL,
+  unionSoftLinkItemCandidates,
   type ReminderChange,
   type WorkerTaskRef,
 } from "./reminder.service.js";
@@ -518,7 +520,7 @@ function workerTargetingInstructions(
     'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW; lists=[]. Offer shared shopping with lists=[]. On כן emit lists add with targets [speaker,\"טל\"] — never private speaker shopping.',
     'Example: "תגידי לטל ולעמית לקנות ביצים" → messages to both; offer a shared list; on כן targets speaker+טל+עמית.',
     'Example: "תגידי לטל להכין מצגת" / "תגידי למיכל שיש פגישה ב־10" / "תגידי לעמית שהקוד 1234" → messages NOW; lists/filing=[] until they accept an offer to save.',
-    'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders.',
+    'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders. APPOINTMENT VS PING: chore/event time ≠ WhatsApp ping time — after a reminder offer, כן / ping time → reminders + להזכיר only; FORBIDDEN lists.update that sets speaker שעה/תאריך לביצוע to the ping. Example: task at T1, ping at T2 → dump «— … ב־T1 (תזכורת: … ב־T2)».',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
     `Example: "שמור פגישה עם טל ביום ראשון בשעה 10" → tasks add, targets: ["${speaker}", "טל"], שם מטלה includes (${speaker}, טל) in parentheses.`,
@@ -581,7 +583,7 @@ function workerTargetingInstructions(
     "RECURRING CLOCK → reminders[].recurrence {freq, interval, unit, weekdays, month_day, month, time, until, count}; leave every_count/every_unit/weekdays empty. freq: interval (every N hours, unit:\"hours\") | daily | weekly (weekdays 0=Sun … 6=Sat) | monthly (month_day) | yearly (month + month_day). Minimum repeat is every hour: every N minutes/seconds («כל 10 דקות») → no actions at all this turn, answer «אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.» (a one-time «בעוד 10 דקות» is fine). daily/weekly/monthly/yearly need time HH:mm — missing → ask באיזו שעה? with reminders empty. until = inclusive last day YYYY-MM-DD from SESSION_CLOCK calendar (עד סוף החודש → last day of this month; עד דצמבר → Dec 31). count = total sends including the first. A stated start (החל מעוד 10 ימים / החל מ־23.10 / מהשבוע הבא) → YYYY-MM-DD from calendar in reminders[].date (standing task: lists item recurrence.start) — never drop it. Every-N rule (interval > 1) with no start → ask which occurrence is first.",
     "Examples: «כל ראשון, שלישי וחמישי ב־8:00 תזכירי לי לקחת כדור» → {freq:\"weekly\",interval:1,weekdays:[0,2,4],time:\"08:00\"}. «כל 1 לחודש ב־9 לשלם ארנונה» → {freq:\"monthly\",interval:1,month_day:1,time:\"09:00\"}. «כל יום ב־20:00 עד סוף החודש» → {freq:\"daily\",interval:1,time:\"20:00\",until:\"<last day of this month>\"}. «כל יום ב־8 תשלחי לי את המטלות שלי» → compose:true, compose_source:\"saved_data\", ping=speaker, text=«מה המטלות שלי היום», recurrence {freq:\"daily\",interval:1,time:\"08:00\"}.",
     "YEARLY OFFER: when the speaker saves something that repeats by nature every year (יום הולדת, יום נישואין, אזכרה / יום זיכרון, חידוש מנוי שנתי) — you decide by meaning — save what they asked, then OFFER in response: «להוסיף תזכורת כל שנה ב־<day.month>? באיזו שעה? רוצה גם יום לפני?». Nothing yearly is saved before they agree. On כן (+ time) → reminders add {freq:\"yearly\",interval:1,month,month_day,time}, same item and ping. «גם יום לפני» → a second yearly add on the previous calendar day (item e.g. «מחר יום ההולדת של יוסי»). Agreed without a time → ask the time with reminders empty.",
-    "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (reminders=[]), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → reminders add same recurrence + your להזכיר task; no second speaker standing row. Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
+    "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (reminders=[]), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → reminders add same recurrence (or a different ping time they named) + your להזכיר task; no second speaker standing row; FORBIDDEN lists.update standing time to the ping (APPOINTMENT VS PING). Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
     "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → LAST dump line only → id from THIS turn's live JSON → ACTION on THAT entity. After תיוקים dump, line N = that filing (detail from live JSON); FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → DELETE CONFIRM ask first; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
@@ -603,7 +605,7 @@ function workerTargetingInstructions(
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/מטלות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL list_name → mutate NOW, no ask. (2) VERY SIMILAR but not identical (shortened/extra word/close synonym) → lists=[] and ASK once «התכוונת לרשימת «X»?» — never mutate until confirm. (3) Several close candidates or none → lists=[] and ASK which (brief candidates). FORBIDDEN: inventing list_name or picking by topic alone. Server will not fix a wrong list_name.",
     "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» with empty actions; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. Never ignore SPEAKER_ADDRESS.",
-    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB: תייקי/תתייקי → add_filing only; תשמרי without list → infer or ASK. Do NOT auto-file soft plans. item_description usually = item_name. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
+    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB: תייקי/תתייקי → add_filing only; תשמרי without list → infer or ASK. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description \"\". מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
 
@@ -1514,7 +1516,7 @@ export async function sendChatMessage(input: {
           : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
         guestSpeaker
           ? ""
-          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
+          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ להזכיר) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
         guestSpeaker
           ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
           : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
@@ -1833,13 +1835,24 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
-    // Soft-link clocks to same-turn human adds/updates (exact key). Never scan
-    // live inventory by label — that wrote wrong linked_reminder_id links.
-    const linkFromMutations = itemsFromListMutationsForSoftLink(
+    // Soft-link: same-turn human add/update union live shopping/tasks (exact
+    // itemKey later). Never fuzzy label — that wrote wrong links.
+    const humanIds = humans.map((human) => human.id);
+    const sameTurnItems = itemsFromListMutationsForSoftLink(
       listMutations,
-      humans.map((human) => human.id),
+      humanIds,
     );
-    await linkRemindersToItems(savedClocks, linkFromMutations);
+    const liveItems =
+      savedClocks.length > 0
+        ? await listLiveHumanItemsForReminderLink({
+            userId: input.userId,
+            humanIds,
+          })
+        : [];
+    await linkRemindersToItems(
+      savedClocks,
+      unionSoftLinkItemCandidates(sameTurnItems, liveItems),
+    );
     recordWhatsAppEvent(
       "reminder_apply",
       `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderWrites.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,

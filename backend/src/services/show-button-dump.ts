@@ -349,22 +349,18 @@ function linkedReminderIdsFromTasks(
   return ids;
 }
 
-/** Labeled filing line: «שם: … · מידע: … · תיאור: …» (omit empty). */
+/** Labeled filing line: «שם: … · תיאור: …» (תיאור = item_info; omit empty). */
 export function formatFilingDumpBody(
   row: EmployeeRecordSnapshot["filing"][number],
 ): string {
   const parts: string[] = [];
   const name = row.item_name?.trim() ?? "";
   const info = row.item_info?.trim() ?? "";
-  const description = row.item_description?.trim() ?? "";
   if (name) {
     parts.push(`שם: ${name}`);
   }
   if (info) {
-    parts.push(`מידע: ${info}`);
-  }
-  if (description) {
-    parts.push(`תיאור: ${description}`);
+    parts.push(`תיאור: ${info}`);
   }
   return parts.length > 0 ? parts.join(" · ") : "תיוק";
 }

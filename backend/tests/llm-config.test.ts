@@ -213,6 +213,11 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("TELL vs ASSIGN");
     expect(config.systemMessage).toContain("תגידי לטל לקנות");
     expect(config.systemMessage).toContain("TIMED TASK WITHOUT CLOCK");
+    expect(config.systemMessage).toContain("APPOINTMENT VS PING");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: lists.add / lists.update that changes the speaker row's date/time/recurrence to the ping time",
+    );
+    expect(config.systemMessage).toContain("REMINDER OFFER follow-up");
     expect(config.systemMessage).toContain("רוצה שאשלח לך תזכורת");
     expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
     expect(config.systemMessage).toContain("PERSONAL TASK vs SHARED CUSTOM");
@@ -264,6 +269,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("MUTATE BY ID");
     expect(config.systemMessage).toContain("item_id");
     expect(config.systemMessage).toContain("filing_id");
+    expect(config.systemMessage).toContain(
+      "Product Hebrew תיאור = this field",
+    );
+    expect(config.systemMessage).toContain(
+      'item_description — leave ""',
+    );
+    expect(config.systemMessage).not.toContain(
+      "Prefer item_description = item_name",
+    );
+    expect(config.systemMessage).not.toContain(
+      "Never save add_filing without item_description",
+    );
     expect(config.systemMessage).toContain("reminder_id");
     expect(config.systemMessage).toContain("A raise is ALWAYS its own entry in responses");
     expect(config.systemMessage).toContain("אגב, ביקשת שאבדוק אם קנית חלב?");
