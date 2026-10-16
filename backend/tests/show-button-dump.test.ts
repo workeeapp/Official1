@@ -106,7 +106,39 @@ describe("filings two-section dump", () => {
     expect(dump).toContain(
       "1. שם: קוד שער · מידע: 1234 · תיאור: קוד שער (עם מיכל)",
     );
+    expect(dump).not.toContain("(עם טל)");
     expect(dump).not.toContain("של ");
+  });
+
+  it("never marks filing partners as the viewer even if shared_with still lists them", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "ת.ז",
+          item_info: "",
+          item_description: "ת.ז",
+          owner: "מיכל",
+          scope: "shared",
+          shared_with: ["מיכל", "טל"],
+        },
+      ],
+    };
+    const asTal = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      viewerAliases: ["טל"],
+    })!;
+    expect(asTal).toContain("תיוקים משותפים:");
+    expect(asTal).toContain("(עם מיכל)");
+    expect(asTal).not.toContain("(עם טל)");
+
+    const asMichal = formatShowDumpFromKind("filings", snap, {
+      viewerName: "מיכל",
+      viewerAliases: ["מיכל"],
+    })!;
+    expect(asMichal).toContain("(עם טל)");
+    expect(asMichal).not.toMatch(/\(עם מיכל\)/);
   });
 
   it("sets navigate address only when exactly one address-bearing filing is shown", () => {

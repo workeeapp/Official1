@@ -1323,32 +1323,20 @@ export async function getEmployeeRecordSnapshot(
     }
   }
 
+  const viewerDisplayNames = viewerDisplayNameSet(employeeId, names, owner);
   const filingRows = [
     ...ownFilings
       .filter((filing) => !guestMode || filing.scope === "shared")
-      .map((filing) => ({
-        filing_id: filing.id,
-        item_name: filing.itemName,
-        item_info: filing.itemInfo,
-        item_description: filing.itemDescription ?? "",
-        owner: filing.employee.nickname?.trim() || filing.employee.name,
-        scope: (filing.scope === "shared" ? "shared" : "personal") as
-          | "shared"
-          | "personal",
-        // Share-only family: partners via shared_with; never assigned_by.
-        ...itemSharedWithField(filing.employeeId, filing, names),
-      })),
+      .map((filing) =>
+        toFilingSnapshotRow(filing, names, viewerDisplayNames),
+      ),
     ...partnerFilings
       .filter((filing) => visibleToIncludes(filing.visibleTo, employeeId))
-      .map((filing) => ({
-        filing_id: filing.id,
-        item_name: filing.itemName,
-        item_info: filing.itemInfo,
-        item_description: filing.itemDescription ?? "",
-        owner: filing.employee.nickname?.trim() || filing.employee.name,
-        scope: "shared" as const,
-        ...itemSharedWithField(filing.employeeId, filing, names),
-      })),
+      .map((filing) =>
+        toFilingSnapshotRow(filing, names, viewerDisplayNames, {
+          forceShared: true,
+        }),
+      ),
   ];
 
   return {
@@ -3221,6 +3209,82 @@ function sharedWithNames(
   return ordered
     .map((id) => names.get(id) ?? "")
     .filter((name) => Boolean(name));
+}
+
+/** Display names that mean "the snapshot viewer" (must not appear as עם …). */
+function viewerDisplayNameSet(
+  viewerId: string,
+  names: Map<string, string>,
+  speaker: { name: string; nickname: string | null } | null,
+): Set<string> {
+  const out = new Set<string>();
+  const fromMap = names.get(viewerId)?.trim() ?? "";
+  if (fromMap) {
+    out.add(fromMap);
+  }
+  const nick = speaker?.nickname?.trim() ?? "";
+  const legal = speaker?.name?.trim() ?? "";
+  if (nick) {
+    out.add(nick);
+  }
+  if (legal) {
+    out.add(legal);
+  }
+  return out;
+}
+
+/**
+ * Drop the viewing speaker from filing shared_with so dumps / model replies
+ * never say «משותף עם טל» to טל.
+ */
+function partnersExcludingViewer(
+  sharedWith: string[] | undefined,
+  viewerNames: Set<string>,
+): string[] | undefined {
+  if (!sharedWith || sharedWith.length === 0) {
+    return sharedWith;
+  }
+  const partners = sharedWith.filter((name) => !viewerNames.has(name.trim()));
+  return partners.length > 0 ? partners : undefined;
+}
+
+function toFilingSnapshotRow(
+  filing: {
+    id: string;
+    itemName: string;
+    itemInfo: string;
+    itemDescription: string | null;
+    employeeId: string;
+    scope?: string;
+    visibleTo?: unknown;
+    addedById?: string | null;
+    employee: { name: string; nickname: string | null };
+  },
+  names: Map<string, string>,
+  viewerNames: Set<string>,
+  opts?: { forceShared?: boolean },
+): EmployeeRecordSnapshot["filing"][number] {
+  const shareField = itemSharedWithField(filing.employeeId, filing, names);
+  const rawShared = Array.isArray(shareField.shared_with)
+    ? (shareField.shared_with as string[])
+    : undefined;
+  const sharedWith = partnersExcludingViewer(rawShared, viewerNames);
+  const scope: "shared" | "personal" = opts?.forceShared
+    ? "shared"
+    : filing.scope === "shared"
+      ? "shared"
+      : "personal";
+  return {
+    filing_id: filing.id,
+    item_name: filing.itemName,
+    item_info: filing.itemInfo,
+    item_description: filing.itemDescription ?? "",
+    owner: filing.employee.nickname?.trim() || filing.employee.name,
+    scope,
+    ...(sharedWith && sharedWith.length > 0
+      ? { shared_with: sharedWith }
+      : {}),
+  };
 }
 
 function toListSnapshotEntry(input: {

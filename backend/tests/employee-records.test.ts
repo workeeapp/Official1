@@ -2110,6 +2110,63 @@ describe("employee records", () => {
     });
   });
 
+  it("omits the viewing speaker from filing shared_with", async () => {
+    filingFindMany
+      .mockResolvedValueOnce([
+        {
+          id: "f-own",
+          itemName: "באגים",
+          itemInfo: "",
+          itemDescription: "באגים",
+          scope: "shared",
+          visibleTo: [employeeId, talId],
+          employeeId,
+          employee: { name: "עמית", nickname: "עמית" },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "f-partner",
+          itemName: "ת.ז",
+          itemInfo: "",
+          itemDescription: "ת.ז",
+          scope: "shared",
+          visibleTo: [talId, employeeId],
+          employeeId: talId,
+          employee: { name: "טל", nickname: "טל" },
+        },
+      ]);
+    employeeFindMany.mockResolvedValue([
+      { id: employeeId, name: "עמית", nickname: "עמית" },
+      { id: talId, name: "טל", nickname: "טל" },
+    ]);
+    employeeFindUnique.mockResolvedValue({
+      userId: "user-1",
+      isOwner: false,
+      kind: "human",
+      name: "עמית",
+      nickname: "עמית",
+    });
+
+    const snap = await getEmployeeRecordSnapshot(employeeId);
+    expect(snap.filing).toEqual([
+      expect.objectContaining({
+        filing_id: "f-own",
+        scope: "shared",
+        shared_with: ["טל"],
+      }),
+      expect.objectContaining({
+        filing_id: "f-partner",
+        scope: "shared",
+        owner: "טל",
+        shared_with: ["טל"],
+      }),
+    ]);
+    expect(snap.filing.every((row) => !(row.shared_with ?? []).includes("עמית"))).toBe(
+      true,
+    );
+  });
+
   it("shopping/tasks items shared with the viewer appear in the viewer's own list", async () => {
     const eranId = "eran-id";
     const eranTasks = {

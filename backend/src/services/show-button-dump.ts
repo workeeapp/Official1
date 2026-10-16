@@ -251,13 +251,16 @@ export function visibleFilingsForDump(
   const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
   const section = opts?.section ?? null;
   const partnerNeedles = dumpFilterNames(opts?.partner);
+  const viewerNames = new Set(
+    [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
+  );
   const out: EmployeeRecordSnapshot["filing"] = [];
   for (const row of rows) {
     const partners = (row.shared_with ?? [])
       .map((name) => name.trim())
       .filter(Boolean)
-      .filter((name) => name !== viewer && !aliases.includes(name));
-    const isShared = row.scope === "shared" && partners.length > 0;
+      .filter((name) => !viewerNames.has(name));
+    const isShared = row.scope === "shared";
     if (isShared) {
       if (section === "personal") {
         continue;
@@ -302,14 +305,18 @@ export function formatFilingsDump(
   const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
   const personal: string[] = [];
   const shared: string[] = [];
+  const viewerNames = new Set(
+    [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
+  );
   for (const row of rows) {
     const body = formatFilingDumpBody(row);
     const clip = hasAttachments(row as Record<string, unknown>) ? " 📎" : "";
+    // Never name the viewer in (עם …) — including when snapshot still lists them.
     const partners = (row.shared_with ?? [])
       .map((name) => name.trim())
       .filter(Boolean)
-      .filter((name) => name !== viewer && !aliases.includes(name));
-    const isShared = row.scope === "shared" && partners.length > 0;
+      .filter((name) => !viewerNames.has(name));
+    const isShared = row.scope === "shared";
     const mark =
       isShared && partners.length > 0 ? ` (עם ${partners.join(", ")})` : "";
     const line = `${body}${clip}${mark}`;
