@@ -1,19 +1,68 @@
 import { describe, expect, it } from "vitest";
 import { emptyLlmMetadata } from "@workee/shared";
 import {
+  clearMutatingMetadata,
   isReadOnlyShowTurn,
   stripShowTurnMutates,
 } from "../src/services/show-turn-guard.js";
 
 describe("show-turn-guard", () => {
-  it("treats exact הצג commands and show_dump as read-only", () => {
-    expect(isReadOnlyShowTurn("הצג תזכורות")).toBe(true);
-    expect(isReadOnlyShowTurn("הצג רשימת מטלות")).toBe(true);
-    expect(isReadOnlyShowTurn("מה התזכורות שלי")).toBe(false);
-    expect(isReadOnlyShowTurn("מה התזכורות שלי", "reminders")).toBe(true);
+  it("treats show_dump as read-only — not user utterance text", () => {
+    expect(isReadOnlyShowTurn()).toBe(false);
+    expect(isReadOnlyShowTurn("")).toBe(false);
+    expect(isReadOnlyShowTurn("reminders")).toBe(true);
+    expect(isReadOnlyShowTurn("shopping")).toBe(true);
   });
 
-  it("strips mutates on exact הצג even when lists/reminders are present", () => {
+  it("clearMutatingMetadata empties ACTION mutate arrays and keeps the rest", () => {
+    const meta = {
+      ...emptyLlmMetadata(),
+      showDump: "shopping",
+      response: "שלום",
+      lists: [
+        {
+          action: "add" as const,
+          listType: "shopping" as const,
+          listName: "",
+          targets: [],
+          items: [{ name: "אורז" }],
+        },
+      ],
+      reminders: [
+        {
+          action: "add" as const,
+          item: "ping",
+          listType: "tasks" as const,
+          time: "מחר",
+          inSeconds: null,
+          ping: [],
+          targets: [],
+          reminderId: "",
+        },
+      ],
+      directory: [
+        {
+          action: "add" as const,
+          name: "דן",
+          phone: "050",
+          contactId: "",
+          targets: [],
+        },
+      ],
+      filing: [{ action: "add" as const, itemDescription: "עובדה" }],
+      listOps: [],
+    };
+    const cleared = clearMutatingMetadata(meta);
+    expect(cleared.lists).toEqual([]);
+    expect(cleared.listOps).toEqual([]);
+    expect(cleared.filing).toEqual([]);
+    expect(cleared.reminders).toEqual([]);
+    expect(cleared.directory).toEqual([]);
+    expect(cleared.showDump).toBe("shopping");
+    expect(cleared.response).toBe("שלום");
+  });
+
+  it("strips mutates when show_dump alone", () => {
     const meta = {
       ...emptyLlmMetadata(),
       showDump: "reminders",
@@ -42,10 +91,18 @@ describe("show-turn-guard", () => {
       filing: [],
       listOps: [],
     };
-    const stripped = stripShowTurnMutates("הצג תזכורות", meta);
-    expect(stripped.lists).toEqual([]);
-    expect(stripped.reminders).toEqual([]);
-    expect(stripped.showDump).toBe("reminders");
+    // With mutates + showDump → mutates win, showDump dropped
+    const withBoth = stripShowTurnMutates(meta);
+    expect(withBoth.lists).toHaveLength(1);
+    expect(withBoth.showDump).toBeUndefined();
+
+    const showOnly = stripShowTurnMutates({
+      ...meta,
+      lists: [],
+      reminders: [],
+    });
+    expect(showOnly.lists).toEqual([]);
+    expect(showOnly.showDump).toBe("reminders");
   });
 
   it("keeps mutates when showDump is absent", () => {
@@ -65,7 +122,7 @@ describe("show-turn-guard", () => {
         },
       ],
     };
-    const kept = stripShowTurnMutates("מחקי 1", meta);
+    const kept = stripShowTurnMutates(meta);
     expect(kept.reminders).toHaveLength(1);
   });
 
@@ -73,6 +130,8 @@ describe("show-turn-guard", () => {
     const meta = {
       ...emptyLlmMetadata(),
       showDump: "tasks",
+      showDumpSection: "personal" as const,
+      showDumpPartner: "מיכל",
       lists: [
         {
           action: "remove" as const,
@@ -87,10 +146,12 @@ describe("show-turn-guard", () => {
       filing: [],
       listOps: [],
     };
-    const result = stripShowTurnMutates("תמחק את 3,4", meta);
+    const result = stripShowTurnMutates(meta);
     expect(result.lists).toHaveLength(1);
     expect(result.lists[0]?.items).toHaveLength(2);
     expect(result.showDump).toBeUndefined();
+    expect(result.showDumpSection).toBeUndefined();
+    expect(result.showDumpPartner).toBeUndefined();
   });
 
   it("strips mutates when show_dump alone with no mutates", () => {
@@ -100,7 +161,7 @@ describe("show-turn-guard", () => {
       lists: [],
       reminders: [],
     };
-    const result = stripShowTurnMutates("מה יש לי לקנות", meta);
+    const result = stripShowTurnMutates(meta);
     expect(result.lists).toEqual([]);
     expect(result.showDump).toBe("shopping");
   });

@@ -568,6 +568,30 @@ export function setEngineButtons(
   return JSON.stringify({ ...record, metadata });
 }
 
+/** Patches metadata.navigate_address (Waze) on a JSON LLM reply. */
+export function setEngineNavigateAddress(
+  reply: string,
+  address: string | null,
+): string {
+  const record = parseReplyRecord(reply);
+  if (!record) {
+    return reply;
+  }
+  const metadata =
+    record.metadata &&
+    typeof record.metadata === "object" &&
+    !Array.isArray(record.metadata)
+      ? { ...(record.metadata as Record<string, unknown>) }
+      : {};
+  const trimmed = address?.trim() ?? "";
+  if (!trimmed) {
+    delete metadata.navigate_address;
+  } else {
+    metadata.navigate_address = trimmed;
+  }
+  return JSON.stringify({ ...record, metadata });
+}
+
 /** Adds an engine notice as its own message after the model's messages. */
 export function appendEngineNotice(reply: string, notice: string): string {
   if (!notice.trim()) {

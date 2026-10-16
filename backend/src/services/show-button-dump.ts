@@ -1,18 +1,34 @@
 /**
- * Engine dump for exact «הצג» button commands and model `show_dump` signals.
- * Builds the spoken reply from the same live snapshot as EMPLOYEE_SAVED_DATA.
+ * Engine dump from model `show_dump` (+ section/partner). Builds the spoken
+ * reply from the same live snapshot as EMPLOYEE_SAVED_DATA.
+ * Dump intent never comes from free-form user text — only ACTION fields, or a
+ * closed equality allowlist of known UI button command strings.
  */
-import { addJerusalemDays } from "@workee/shared";
+import { addJerusalemDays, type LlmShowDumpSection } from "@workee/shared";
 import {
   hebrewWeekdayFromYmd,
   jerusalemYmd,
 } from "../utils/relative-date.js";
+import {
+  builtinListHebrew,
+  builtinListTypeFromHebrew,
+  isBuiltinListType,
+  SHOW_FILINGS_COMMAND,
+  SHOW_REMINDERS_COMMAND,
+  showListButtonCommand,
+  staticShowButtonDumpMap,
+} from "./builtin-lists.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
-export const SHOW_REMINDERS_COMMAND = "הצג תזכורות";
+export {
+  SHOW_REMINDERS_COMMAND,
+  SHOW_FILINGS_COMMAND,
+  SHOW_LIST_PREFIX,
+} from "./builtin-lists.js";
 
-const SHOW_LIST_PREFIX = "הצג רשימת ";
+/** Opaque button payloads the engine emits — equality only, no prefix/regex. */
+const STATIC_SHOW_BUTTON_DUMP = staticShowButtonDumpMap();
 
 const TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
@@ -21,65 +37,114 @@ const TITLE_KEYS: Record<string, string[]> = {
 };
 
 export type ShowDumpOptions = {
-  /** Current speaker display name — omitted from `(עם …)` partner headers. */
+  /**
+   * Subject of the dump (speaker, or about-person when show_dump_about).
+   * Omitted from `משותפות עם …` partner headers.
+   */
   viewerName?: string;
   /** Extra viewer labels (nickname + legal name) so partner headers never keep the viewer. */
   viewerAliases?: string[];
   now?: Date;
+  /** shopping/tasks: personal | shared | omit for full dump. */
+  section?: LlmShowDumpSection | null;
+  /**
+   * With section=shared: partner משותפות bucket(s).
+   * string | string[] — multiple = OR.
+   */
+  partner?: string | string[] | null;
+  /**
+   * Responsibility filter: `self` | display name(s).
+   * string | string[] — multiple = OR.
+   * `self` matches assigneeSelfNames (speaker), even when dumping about someone else.
+   */
+  assignee?: string | string[] | null;
+  /** When assignee=self — speaker display names / nicknames. */
+  assigneeSelfNames?: string[];
+  /** Inclusive YYYY-MM-DD — tasks/reminders only. */
+  dateFrom?: string | null;
+  /** Inclusive YYYY-MM-DD — tasks/reminders only. */
+  dateTo?: string | null;
 };
 
-/**
- * Parse when the whole message is exactly a SHOW button command we emit
- * (`הצג תזכורות` or `הצג רשימת <name>` including multi-word custom names).
- * Free-form asks («מה יש לי לקנות», «הציגי את הקניות») return null.
- */
-export function parseExactShowButtonCommand(
-  text: string,
-): { kind: "reminders" } | { kind: "list"; name: string } | null {
-  const trimmed = text.trim();
-  if (trimmed === SHOW_REMINDERS_COMMAND) {
-    return { kind: "reminders" };
+/** Normalize dump filter name(s) to a trimmed list. */
+export function dumpFilterNames(
+  value: string | string[] | null | undefined,
+): string[] {
+  if (value == null) {
+    return [];
   }
-  if (!trimmed.startsWith(SHOW_LIST_PREFIX)) {
-    return null;
+  const parts = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const part of parts) {
+    const trimmed = typeof part === "string" ? part.trim() : "";
+    if (trimmed && !out.includes(trimmed)) {
+      out.push(trimmed);
+    }
   }
-  const name = trimmed.slice(SHOW_LIST_PREFIX.length).trim();
-  if (!name) {
-    return null;
-  }
-  return { kind: "list", name };
+  return out;
 }
 
-export function isExactShowButtonCommand(text: string): boolean {
-  return parseExactShowButtonCommand(text) !== null;
-}
-
-const SHOW_POLITE_SUFFIX = /(?:\s+(?:בבקשה|please))+$/iu;
-const SHOW_SECTION_SUFFIX = /(?:\s+(?:אישית|אישיות|משותפת|משותפות))+$/u;
-
-const BUILTIN_SHOW_LISTS = new Set(["קניות", "מטלות", "אנשי קשר"]);
-
-/**
- * Normalize a show-list name from an exact «הצג רשימת …» command or show_dump.
- * Strips trailing בבקשה/please. For builtins only, also strips אישית|משותפת
- * (and plural forms) so «קניות אישית» → קניות. Custom names keep אישית.
- */
-export function normalizeShowListName(raw: string): string {
-  let name = raw.trim().replace(SHOW_POLITE_SUFFIX, "").trim();
-  if (!name) {
+function partnerFilterLabel(partners: string[]): string {
+  if (partners.length === 0) {
     return "";
   }
-  const withoutSection = name.replace(SHOW_SECTION_SUFFIX, "").trim();
-  if (BUILTIN_SHOW_LISTS.has(withoutSection)) {
-    return withoutSection;
+  if (partners.length === 1) {
+    return partners[0]!;
   }
-  return name;
+  return partners.join(" או ");
 }
 
-/** Map metadata.show_dump / list Hebrew labels to a dump target. */
+/**
+ * Closed allowlist: exact UI button command → show_dump value.
+ * Custom lists: only when command equals «הצג רשימת <list_name>» for a live
+ * custom list in the snapshot (opaque button id), never free-form variants.
+ */
+export function mapShowButtonCommandToDump(
+  text: string,
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
+): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const staticKind = STATIC_SHOW_BUTTON_DUMP[trimmed];
+  if (staticKind) {
+    return staticKind;
+  }
+  if (!snapshot) {
+    return null;
+  }
+  for (const list of snapshot.lists) {
+    if (list.list_type !== "custom") {
+      continue;
+    }
+    const listName = (list.list_name ?? "").trim();
+    if (!listName) {
+      continue;
+    }
+    if (trimmed === showListButtonCommand(listName)) {
+      return listName;
+    }
+  }
+  return null;
+}
+
+/** True when the message is an exact known show-button command string. */
+export function isKnownShowButtonCommand(
+  text: string,
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
+): boolean {
+  return mapShowButtonCommandToDump(text, snapshot) !== null;
+}
+
+/** Map metadata.show_dump labels to a dump target (no section/polite stripping). */
 export function resolveShowDumpKind(
   raw: string,
-): { kind: "reminders" } | { kind: "list"; name: string } | null {
+):
+  | { kind: "reminders" }
+  | { kind: "filings" }
+  | { kind: "list"; name: string }
+  | null {
   const trimmed = raw.trim();
   if (!trimmed) {
     return null;
@@ -92,41 +157,27 @@ export function resolveShowDumpKind(
   ) {
     return { kind: "reminders" };
   }
-  if (lower === "shopping") {
-    return { kind: "list", name: "קניות" };
+  if (
+    lower === "filings" ||
+    trimmed === "תיוקים" ||
+    trimmed === SHOW_FILINGS_COMMAND
+  ) {
+    return { kind: "filings" };
   }
-  if (lower === "tasks") {
-    return { kind: "list", name: "מטלות" };
+  if (isBuiltinListType(lower)) {
+    return {
+      kind: "list",
+      name: builtinListHebrew(lower),
+    };
   }
-  if (lower === "contacts") {
-    return { kind: "list", name: "אנשי קשר" };
+  const fromHebrew = builtinListTypeFromHebrew(trimmed);
+  if (fromHebrew) {
+    return { kind: "list", name: builtinListHebrew(fromHebrew) };
   }
-  const value = normalizeShowListName(trimmed);
-  if (value === "קניות") {
-    return { kind: "list", name: "קניות" };
-  }
-  if (value === "מטלות") {
-    return { kind: "list", name: "מטלות" };
-  }
-  if (value === "אנשי קשר") {
-    return { kind: "list", name: "אנשי קשר" };
-  }
-  return { kind: "list", name: value };
+  return { kind: "list", name: trimmed };
 }
 
-export function formatShowButtonDump(
-  command: string,
-  snapshot: EmployeeRecordSnapshot,
-  opts?: ShowDumpOptions,
-): string | null {
-  const parsed = parseExactShowButtonCommand(command);
-  if (!parsed) {
-    return null;
-  }
-  return formatResolvedShowDump(parsed, snapshot, opts);
-}
-
-/** Dump from model `show_dump` (shopping|tasks|contacts|reminders|custom name). */
+/** Dump from model `show_dump` (+ optional section/partner on opts). */
 export function formatShowDumpFromKind(
   kind: string,
   snapshot: EmployeeRecordSnapshot,
@@ -140,21 +191,185 @@ export function formatShowDumpFromKind(
 }
 
 function formatResolvedShowDump(
-  parsed: { kind: "reminders" } | { kind: "list"; name: string },
+  parsed:
+    | { kind: "reminders" }
+    | { kind: "filings" }
+    | { kind: "list"; name: string },
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): string | null {
   if (parsed.kind === "reminders") {
-    return formatRemindersDump(snapshot.reminders ?? [], opts?.now);
+    return formatRemindersDump(snapshot.reminders ?? [], opts);
+  }
+  if (parsed.kind === "filings") {
+    return formatFilingsDump(snapshot.filing ?? [], opts);
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
 
+/** Labeled filing line: «שם: … · מידע: … · תיאור: …» (omit empty). */
+export function formatFilingDumpBody(
+  row: EmployeeRecordSnapshot["filing"][number],
+): string {
+  const parts: string[] = [];
+  const name = row.item_name?.trim() ?? "";
+  const info = row.item_info?.trim() ?? "";
+  const description = row.item_description?.trim() ?? "";
+  if (name) {
+    parts.push(`שם: ${name}`);
+  }
+  if (info) {
+    parts.push(`מידע: ${info}`);
+  }
+  if (description) {
+    parts.push(`תיאור: ${description}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "תיוק";
+}
+
+/**
+ * Address text from a filing row for Waze: prefer item_info, else item_name
+ * when the name encodes a place (כתובת / מגורים / …).
+ */
+export function filingDumpAddressText(
+  row: EmployeeRecordSnapshot["filing"][number],
+): string | null {
+  const name = row.item_name?.trim() ?? "";
+  const info = row.item_info?.trim() ?? "";
+  if (!/כתובת|מגורים|address|מיקום|רחוב/i.test(name)) {
+    return null;
+  }
+  return info || name || null;
+}
+
+/** Filings visible under section/partner (same set as the dump lines). */
+export function visibleFilingsForDump(
+  rows: EmployeeRecordSnapshot["filing"],
+  opts?: ShowDumpOptions,
+): EmployeeRecordSnapshot["filing"] {
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const out: EmployeeRecordSnapshot["filing"] = [];
+  for (const row of rows) {
+    const partners = (row.shared_with ?? [])
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .filter((name) => name !== viewer && !aliases.includes(name));
+    const isShared = row.scope === "shared" && partners.length > 0;
+    if (isShared) {
+      if (section === "personal") {
+        continue;
+      }
+      if (
+        partnerNeedles.length > 0 &&
+        !partnerNeedles.some(
+          (needle) =>
+            partners.some((name) => name.includes(needle)) ||
+            partners.join(", ").includes(needle),
+        )
+      ) {
+        continue;
+      }
+      out.push(row);
+    } else if (section !== "shared") {
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+/**
+ * When a filings dump shows exactly one address-bearing row, that address for Waze.
+ */
+export function navigateAddressFromFilingsDump(
+  rows: EmployeeRecordSnapshot["filing"],
+  opts?: ShowDumpOptions,
+): string | null {
+  const addresses = visibleFilingsForDump(rows, opts)
+    .map(filingDumpAddressText)
+    .filter((value): value is string => Boolean(value));
+  return addresses.length === 1 ? addresses[0]! : null;
+}
+
+/** Two-section share-only dump (no assign / של X). */
+export function formatFilingsDump(
+  rows: EmployeeRecordSnapshot["filing"],
+  opts?: ShowDumpOptions,
+): string {
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const personal: string[] = [];
+  const shared: string[] = [];
+  for (const row of rows) {
+    const body = formatFilingDumpBody(row);
+    const clip = hasAttachments(row as Record<string, unknown>) ? " 📎" : "";
+    const partners = (row.shared_with ?? [])
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .filter((name) => name !== viewer && !aliases.includes(name));
+    const isShared = row.scope === "shared" && partners.length > 0;
+    const mark =
+      isShared && partners.length > 0 ? ` (עם ${partners.join(", ")})` : "";
+    const line = `${body}${clip}${mark}`;
+    if (isShared) {
+      shared.push(line);
+    } else {
+      personal.push(line);
+    }
+  }
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const blocks: string[] = [];
+  if (section !== "shared") {
+    blocks.push("תיוקים אישיים:");
+    if (personal.length === 0) {
+      blocks.push("ריקה");
+    } else {
+      personal.forEach((line, i) => {
+        blocks.push(`${i + 1}. ${line}`);
+      });
+    }
+  }
+  if (section !== "personal") {
+    let sharedLines = shared;
+    if (partnerNeedles.length > 0) {
+      sharedLines = shared.filter((line) =>
+        partnerNeedles.some((needle) => line.includes(needle)),
+      );
+    }
+    if (section === "shared" || sharedLines.length > 0 || !section) {
+      if (blocks.length > 0) {
+        blocks.push("");
+      }
+      blocks.push("תיוקים משותפים:");
+      if (sharedLines.length === 0) {
+        blocks.push("ריקה");
+      } else {
+        sharedLines.forEach((line, i) => {
+          blocks.push(`${i + 1}. ${line}`);
+        });
+      }
+    }
+  }
+  if (rows.length === 0 && !section) {
+    return "תיוקים אישיים:\nריקה\n\nתיוקים משותפים:\nריקה";
+  }
+  return blocks.join("\n");
+}
+
 function formatRemindersDump(
   rows: ReminderSnapshotRow[],
-  now = new Date(),
+  opts?: ShowDumpOptions,
 ): string {
-  const active = rows.filter((row) => row.status === "active");
+  const now = opts?.now ?? new Date();
+  const active = rows.filter((row) => {
+    if (row.status !== "active") {
+      return false;
+    }
+    return reminderMatchesDateRange(row, opts?.dateFrom, opts?.dateTo);
+  });
   if (active.length === 0) {
     return "אין לך תזכורות פעילות כרגע.";
   }
@@ -170,9 +385,86 @@ function formatRemindersDump(
     .join("\n");
 }
 
+/** YYYY-MM-DD from a date / datetime string. */
+export function ymdFromDumpValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1]! : null;
+}
+
+function ymdInInclusiveRange(
+  ymd: string,
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean {
+  if (from && ymd < from) {
+    return false;
+  }
+  if (to && ymd > to) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Tasks: keep when date span [תאריך לביצוע, תאריך סיום] or any
+ * next_occurrences day intersects [from, to]. No date filter → keep all.
+ * Untimed / undated rows drop out when a range is set.
+ */
+export function itemMatchesDateRange(
+  item: Record<string, unknown>,
+  dateFrom?: string | null,
+  dateTo?: string | null,
+): boolean {
+  const from = dateFrom?.trim().slice(0, 10) || null;
+  const to = dateTo?.trim().slice(0, 10) || null;
+  if (!from && !to) {
+    return true;
+  }
+  const start = ymdFromDumpValue(item["תאריך לביצוע"] ?? item.date);
+  const end = ymdFromDumpValue(item["תאריך סיום"]) ?? start;
+  if (start && end) {
+    // [start, end] intersects [from, to] (inclusive; null bound = open).
+    if ((!from || end >= from) && (!to || start <= to)) {
+      return true;
+    }
+  }
+  const next = item.next_occurrences;
+  if (Array.isArray(next)) {
+    for (const occ of next) {
+      const ymd = ymdFromDumpValue(occ);
+      if (ymd && ymdInInclusiveRange(ymd, from, to)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Reminders: filter by fire_at calendar day when a dump date range is set. */
+export function reminderMatchesDateRange(
+  row: Pick<ReminderSnapshotRow, "fire_at">,
+  dateFrom?: string | null,
+  dateTo?: string | null,
+): boolean {
+  const from = dateFrom?.trim().slice(0, 10) || null;
+  const to = dateTo?.trim().slice(0, 10) || null;
+  if (!from && !to) {
+    return true;
+  }
+  const ymd = ymdFromDumpValue(row.fire_at);
+  if (!ymd) {
+    return false;
+  }
+  return ymdInInclusiveRange(ymd, from, to);
+}
+
 /**
  * Next fire + optional short cadence: «היום ב־19:00 (כל יום)» / «8.5.2027 ב־13:00 (כל שנה)».
- * One-off moves/cancels append ` · 18.10 ב־21:30` from snapshot `exceptions`.
+ * One-off moves/cancels append ` · 18.10 ב־21:30` from snapshot `exceptions`
+ * — except when that day is already the primary `fire_at` (avoid «21:30 · 18.10 ב־21:30»).
  */
 export function formatReminderWhen(
   row: Pick<
@@ -182,8 +474,11 @@ export function formatReminderWhen(
   now = new Date(),
 ): string {
   const fireAt = row.fire_at?.trim() || "";
-  const cadence = shortCadenceParen(row.recurrence_text, row.repeat);
-  const extras = formatExceptionsSuffix(row.exceptions);
+  const hasExceptions = exceptionLabels(row.exceptions).length > 0;
+  const cadence = shortCadenceParen(row.recurrence_text, row.repeat, {
+    keepSeriesClock: hasExceptions,
+  });
+  const extras = formatExceptionsSuffix(row.exceptions, fireAt);
   if (!fireAt) {
     const base = cadence.replace(/^\(|\)$/g, "");
     return base ? `${base}${extras}` : extras.replace(/^\s*·\s*/, "");
@@ -194,21 +489,64 @@ export function formatReminderWhen(
 }
 
 /** « · 18.10 ב־21:30» / « · 23.10 בוטל» from snapshot exception labels. */
-export function formatExceptionsSuffix(exceptions: unknown): string {
-  if (!Array.isArray(exceptions) || exceptions.length === 0) {
-    return "";
-  }
-  const labels = exceptions
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+export function formatExceptionsSuffix(
+  exceptions: unknown,
+  /** When set, omit move labels that already match fire_at day+time (moved next fire). */
+  fireAt?: string,
+): string {
+  const labels = exceptionLabels(exceptions).filter(
+    (label) => !exceptionMatchesMovedFireAt(label, fireAt ?? ""),
+  );
   return labels.length ? ` · ${labels.join(" · ")}` : "";
 }
 
-/** «(כל יום)» / «(כל שנה)» from recurrence_text — strips time, calendar clause, until, count. */
+function exceptionLabels(exceptions: unknown): string[] {
+  if (!Array.isArray(exceptions) || exceptions.length === 0) {
+    return [];
+  }
+  return exceptions
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/** True when label is «D.M ב־HH:mm» for the same day+time as fire_at. */
+function exceptionMatchesMovedFireAt(label: string, fireAt: string): boolean {
+  const dayMonth = fireAtDayMonth(fireAt);
+  const time = fireAtHm(fireAt);
+  if (!dayMonth || !time) {
+    return false;
+  }
+  const move = label.match(/^(\d{1,2}\.\d{1,2})\s+ב־(\d{1,2}:\d{2})$/);
+  if (!move) {
+    return false;
+  }
+  return move[1] === dayMonth && normalizeHm(move[2]) === normalizeHm(time);
+}
+
+/** Unpadded D.M from `YYYY-MM-DD…` fire_at (matches exception label prefix). */
+function fireAtDayMonth(fireAt: string): string {
+  const match = fireAt.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return "";
+  }
+  return `${Number(match[3])}.${Number(match[2])}`;
+}
+
+function fireAtHm(fireAt: string): string {
+  const trimmed = fireAt.trim();
+  return trimmed.length >= 16 ? trimmed.slice(11, 16) : "";
+}
+
+/**
+ * «(כל יום)» / «(כל שנה)» from recurrence_text — strips time, calendar clause, until, count.
+ * With keepSeriesClock (when exceptions exist): keep « ב־HH:mm» so the series time
+ * stays visible next to a moved fire_at.
+ */
 export function shortCadenceParen(
   recurrenceText?: string | null,
   repeat?: string | null,
+  options?: { keepSeriesClock?: boolean },
 ): string {
   let base = (recurrenceText ?? "").trim();
   if (!base) {
@@ -227,8 +565,10 @@ export function shortCadenceParen(
     }
     return "";
   }
-  // Drop trailing clock « ב־19:00» / range « ב־19:00–20:00».
-  base = base.replace(/\s+ב־\d{1,2}:\d{2}(?:–\d{1,2}:\d{2})?/g, "");
+  if (!options?.keepSeriesClock) {
+    // Drop trailing clock « ב־19:00» / range « ב־19:00–20:00».
+    base = base.replace(/\s+ב־\d{1,2}:\d{2}(?:–\d{1,2}:\d{2})?/g, "");
+  }
   // Drop yearly calendar « ב־8 במאי» / « ב־12 באוקטובר».
   base = base.replace(/\s+ב־\d{1,2}\s+ב[\u0590-\u05FF]+/g, "");
   // Drop until / count tail.
@@ -243,28 +583,44 @@ function formatListDump(
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): string | null {
-  const name = normalizeShowListName(rawName);
-  if (name === "קניות") {
-    return formatThreeWayDump("shopping", "קניות", snapshot, opts);
+  const name = rawName.trim();
+  const builtin = builtinListTypeFromHebrew(name);
+  if (builtin === "shopping" || builtin === "tasks") {
+    return formatThreeWayDump(builtin, builtinListHebrew(builtin), snapshot, opts);
   }
-  if (name === "מטלות") {
-    return formatThreeWayDump("tasks", "מטלות", snapshot, opts);
+  if (builtin === "contacts") {
+    return formatContactsOrCustomDump(
+      "contacts",
+      "",
+      snapshot,
+      builtinListHebrew("contacts"),
+      opts,
+    );
   }
-  if (name === "אנשי קשר") {
-    return formatContactsOrCustomDump("contacts", "", snapshot, "אנשי קשר", opts);
-  }
-  // Unknown custom name → null (model-written). Trailing בבקשה already stripped.
   return formatContactsOrCustomDump("custom", name, snapshot, name, opts);
 }
 
 type DumpItem = {
   title: string;
   item: Record<string, unknown>;
-  /** One-way assigner name → shown as «(Name)» under אישיות. */
-  assignedBy?: string;
-  /** Co-share partners (viewer stripped) → shown as «(עם …)» under אישיות. */
-  sharedWithLabel?: string;
+  /**
+   * Responsibility / co-share mark body (no parens).
+   * Assign → assignee only («מיכל»); co-share → all involved («מיכל, טל»).
+   */
+  responsibilityMark?: string;
+  /** List-level 📎 for this row's source list. */
+  listFiles?: boolean;
 };
+
+function pushPartnerBucket(
+  map: Map<string, DumpItem[]>,
+  partnerKey: string,
+  row: DumpItem,
+): void {
+  const bucket = map.get(partnerKey) ?? [];
+  bucket.push(row);
+  map.set(partnerKey, bucket);
+}
 
 function formatThreeWayDump(
   listType: "shopping" | "tasks",
@@ -275,133 +631,165 @@ function formatThreeWayDump(
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
   const personal: DumpItem[] = [];
   const sharedByPartner = new Map<string, DumpItem[]>();
-  const byOwner = new Map<string, DumpItem[]>();
   const partnerListFiles = new Map<string, boolean>();
-  const ownerListFiles = new Map<string, boolean>();
   let personalListFiles = false;
-  let sharedSectionListFiles = false;
   const viewer = opts?.viewerName?.trim() ?? "";
-  const aliases = opts?.viewerAliases;
+  const aliases = opts?.viewerAliases ?? [];
 
   for (const list of lists) {
     const listFiles = listHasListLevelFiles(list);
+
+    // Assigner view: work on someone else's book → משותפות עם <owner> + (assignee).
     if (list.scope === "shared_items") {
-      const bucket = byOwner.get(list.owner) ?? [];
+      const owner = (list.owner ?? "").trim() || "משותף";
       for (const item of list.items) {
-        bucket.push({
-          title: itemTitle(listType, item, list.title_field),
+        const title = itemTitle(listType, item, list.title_field);
+        pushPartnerBucket(sharedByPartner, owner, {
+          title,
           item,
+          responsibilityMark: owner,
+          listFiles,
         });
       }
-      byOwner.set(list.owner, bucket);
       if (listFiles) {
-        ownerListFiles.set(list.owner, true);
+        partnerListFiles.set(owner, true);
       }
       continue;
     }
 
+    // Whole scope=shared list → one משותפות עם <partners> bucket (no per-line mark).
     if (list.scope === "shared") {
       const partnerKey = partnersKey(list.shared_with ?? [], viewer, aliases);
-      const bucket = sharedByPartner.get(partnerKey) ?? [];
       for (const item of list.items) {
-        bucket.push({
+        pushPartnerBucket(sharedByPartner, partnerKey, {
           title: itemTitle(listType, item, list.title_field),
           item,
+          listFiles,
         });
       }
-      sharedByPartner.set(partnerKey, bucket);
       if (listFiles) {
-        sharedSectionListFiles = true;
         partnerListFiles.set(partnerKey, true);
       }
       continue;
     }
 
-    if (listFiles) {
-      personalListFiles = true;
-    }
-
-    // personal list (may still hold shared/assigned items).
-    // Item-level shared_with STAYS under אישיות as «(עם …)» so it is distinct
-    // from a whole scope=shared list (which uses משותפות + partner headers).
+    // Personal list: private → אישיות; share/assign → משותפות עם X.
     for (const item of list.items) {
       const assignedBy =
         typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
       const sharedWith = stringArray(item.shared_with);
       const title = itemTitle(listType, item, list.title_field);
-      // assigned_by wins for the line mark (אישיות «(Name)») even if shared_with is also present.
+
       if (assignedBy) {
-        personal.push({ title, item, assignedBy });
-        continue;
-      }
-      if (sharedWith.length > 0) {
-        const partnerKey = partnersKey(sharedWith, viewer, aliases);
-        // Meetings already name partners in the title («פגישה (טל, מיכל)») —
-        // skip redundant «(עם מיכל)» on the dump line.
-        const showShareMark =
-          Boolean(partnerKey) &&
-          !titleAlreadyListsPartners(title, partnerKey);
-        personal.push({
+        // Assignee is the list owner (viewer). Partner header = assigner.
+        // Mark = assignee only (same text both parties see).
+        const assigneeMark =
+          viewer ||
+          (aliases.map((name) => name.trim()).find(Boolean) ?? "");
+        pushPartnerBucket(sharedByPartner, assignedBy, {
           title,
           item,
-          ...(showShareMark ? { sharedWithLabel: partnerKey } : {}),
+          responsibilityMark: assigneeMark || undefined,
+          listFiles,
         });
+        if (listFiles) {
+          partnerListFiles.set(assignedBy, true);
+        }
         continue;
       }
-      personal.push({ title, item });
+
+      if (sharedWith.length > 0) {
+        const partnerKey = partnersKey(sharedWith, viewer, aliases);
+        const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
+        const showMark =
+          Boolean(allInvolved) &&
+          !titleAlreadyListsPartners(title, allInvolved);
+        pushPartnerBucket(sharedByPartner, partnerKey, {
+          title,
+          item,
+          ...(showMark ? { responsibilityMark: allInvolved } : {}),
+          listFiles,
+        });
+        if (listFiles) {
+          partnerListFiles.set(partnerKey, true);
+        }
+        continue;
+      }
+
+      if (listFiles) {
+        personalListFiles = true;
+      }
+      personal.push({ title, item, listFiles });
+    }
+  }
+
+  const section = opts?.section ?? null;
+  const partnerFilters = dumpFilterNames(opts?.partner);
+  const showPersonal = section === null || section === "personal";
+  const showShared = section === null || section === "shared";
+
+  const filterAssignee = (rows: DumpItem[]): DumpItem[] =>
+    rows.filter((row) =>
+      itemMatchesAssigneeFilter(row.responsibilityMark, opts),
+    );
+
+  const filterDate = (rows: DumpItem[]): DumpItem[] => {
+    if (listType !== "tasks") {
+      return rows;
+    }
+    return rows.filter((row) =>
+      itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo),
+    );
+  };
+
+  const filteredPersonal = showPersonal
+    ? filterDate(filterAssignee(personal))
+    : [];
+
+  const filteredShared = new Map<string, DumpItem[]>();
+  if (showShared) {
+    for (const [partners, items] of sharedByPartner) {
+      if (
+        partnerFilters.length > 0 &&
+        !partnerFilters.some((needle) =>
+          partnerBucketMatches(partners, needle),
+        )
+      ) {
+        continue;
+      }
+      const kept = filterDate(filterAssignee(items));
+      if (kept.length === 0) {
+        continue;
+      }
+      filteredShared.set(partners, kept);
     }
   }
 
   const blocks: string[] = [];
-  blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
-  if (personal.length === 0) {
-    blocks.push("ריקה");
-  } else {
+  if (showPersonal && filteredPersonal.length > 0) {
+    blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
     blocks.push(
-      ...personal.map((row, i) =>
+      ...filteredPersonal.map((row, i) =>
         formatNumberedItem(i + 1, row.title, row.item, listType, {
-          assignedBy: row.assignedBy,
-          sharedWithLabel: row.sharedWithLabel,
+          responsibilityMark: row.responsibilityMark,
           now: opts?.now,
         }),
       ),
     );
   }
 
-  blocks.push("");
-  blocks.push(`${label} משותפות${paperclipSuffix(sharedSectionListFiles)}:`);
-  if (sharedByPartner.size === 0) {
-    blocks.push("ריקה");
-  } else {
-    for (const [partners, items] of sharedByPartner) {
-      blocks.push(
-        `(עם ${partners})${paperclipSuffix(partnerListFiles.get(partners) === true)}`,
-      );
-      if (items.length === 0) {
-        blocks.push("ריקה");
-      } else {
-        blocks.push(
-          ...items.map((row, i) =>
-            formatNumberedItem(i + 1, row.title, row.item, listType, {
-              now: opts?.now,
-            }),
-          ),
-        );
+  if (showShared) {
+    for (const [partners, items] of filteredShared) {
+      if (blocks.length > 0) {
+        blocks.push("");
       }
-    }
-  }
-
-  for (const [owner, items] of byOwner) {
-    blocks.push("");
-    blocks.push(
-      `${label} של ${owner}${paperclipSuffix(ownerListFiles.get(owner) === true)}:`,
-    );
-    if (items.length === 0) {
-      blocks.push("ריקה");
-    } else {
+      blocks.push(
+        `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}:`,
+      );
       blocks.push(
         ...items.map((row, i) =>
           formatNumberedItem(i + 1, row.title, row.item, listType, {
+            responsibilityMark: row.responsibilityMark,
             now: opts?.now,
           }),
         ),
@@ -409,7 +797,148 @@ function formatThreeWayDump(
     }
   }
 
+  if (blocks.length === 0) {
+    if (section === "personal") {
+      return `${label} אישיות ריקה.`;
+    }
+    if (section === "shared" && partnerFilters.length > 0) {
+      return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
+    }
+    if (section === "shared") {
+      return `${label} משותפות ריקה.`;
+    }
+    return `אין ${label} שמורות.`;
+  }
+
   return blocks.join("\n").trim();
+}
+
+/** Co-share mark: partners then viewer — e.g. «מיכל, טל». */
+export function allInvolvedNames(
+  names: string[],
+  viewerName: string,
+  viewerAliases: string[] = [],
+): string {
+  const viewer = viewerName.trim();
+  const partners = partnersKey(names, viewerName, viewerAliases);
+  if (!viewer) {
+    return partners === "משותף" ? "" : partners;
+  }
+  if (!partners || partners === "משותף") {
+    return viewer;
+  }
+  return `${partners}, ${viewer}`;
+}
+
+/** Assignee filter against responsibility mark (sole name only when filter set). */
+export function itemMatchesAssigneeFilter(
+  responsibilityMark: string | undefined,
+  opts?: Pick<ShowDumpOptions, "assignee" | "assigneeSelfNames" | "viewerName" | "viewerAliases">,
+): boolean {
+  const assignees = dumpFilterNames(opts?.assignee);
+  if (assignees.length === 0) {
+    return true;
+  }
+  const mark = (responsibilityMark ?? "").trim();
+  if (!mark) {
+    return false;
+  }
+  // Multi-party co-share has no single owner — drop when filtering by assignee.
+  if (mark.includes(",")) {
+    return false;
+  }
+  // Each assignee is OR'd; `self` = speaking human only (assigneeSelfNames).
+  const selfNames = (opts?.assigneeSelfNames ?? [])
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return assignees.some((raw) => {
+    const needles =
+      raw.toLowerCase() === "self" ? selfNames : [raw];
+    return needles.some((name) => name === mark);
+  });
+}
+
+/**
+ * Non-owner ABOUT X: keep only rows involving that person from the speaker's
+ * already-visible snapshot (no private rows of X).
+ */
+export function filterSnapshotForAboutPerson(
+  snapshot: EmployeeRecordSnapshot,
+  aboutName: string,
+  aboutAliases: string[] = [],
+): EmployeeRecordSnapshot {
+  const needles = new Set(
+    [aboutName, ...aboutAliases]
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+  if (needles.size === 0) {
+    return { lists: [], filing: [], reminders: [] };
+  }
+  const nameHit = (value: string | undefined | null) =>
+    Boolean(value && needles.has(value.trim()));
+  const namesHit = (values: string[] | undefined) =>
+    (values ?? []).some((name) => nameHit(name));
+
+  const lists = snapshot.lists
+    .map((list) => {
+      if (list.list_type !== "shopping" && list.list_type !== "tasks" && list.list_type !== "contacts") {
+        // Custom / other: keep if owner is about or shared_with includes them.
+        if (nameHit(list.owner) || namesHit(list.shared_with)) {
+          return list;
+        }
+        return null;
+      }
+      if (list.scope === "shared_items" && nameHit(list.owner)) {
+        return list;
+      }
+      if (list.scope === "shared" && namesHit(list.shared_with)) {
+        return list;
+      }
+      if (list.scope === "personal" || !list.scope) {
+        if (nameHit(list.owner)) {
+          return list;
+        }
+        const items = list.items.filter((item) => {
+          const assignedBy =
+            typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
+          if (nameHit(assignedBy)) {
+            return true;
+          }
+          return namesHit(stringArray(item.shared_with));
+        });
+        if (items.length === 0) {
+          return null;
+        }
+        return { ...list, items };
+      }
+      return null;
+    })
+    .filter((row): row is EmployeeRecordSnapshot["lists"][number] => row !== null);
+
+  const filing = (snapshot.filing ?? []).filter((row) => {
+    if (nameHit(row.owner)) {
+      return true;
+    }
+    return namesHit(row.shared_with);
+  });
+
+  return { lists, filing, reminders: [] };
+}
+
+/** Partner bucket key contains the requested partner name (exact segment). */
+export function partnerBucketMatches(
+  bucketKey: string,
+  partner: string,
+): boolean {
+  const needle = partner.trim();
+  if (!needle) {
+    return true;
+  }
+  if (bucketKey === needle) {
+    return true;
+  }
+  return bucketKey.split(",").some((part) => part.trim() === needle);
 }
 
 function formatContactsOrCustomDump(
@@ -432,19 +961,16 @@ function formatContactsOrCustomDump(
     return listType === "custom" ? null : `לא מצאתי רשימה בשם «${emptyLabel}».`;
   }
   const listFiles = lists.some((list) => listHasListLevelFiles(list));
+  if (listType === "contacts") {
+    return formatContactsTwoSectionDump(lists, opts);
+  }
   const items = lists.flatMap((list) =>
     list.items.map((item) => ({
-      title:
-        listType === "custom"
-          ? formatCustomItemBody(item, list.title_field, list.columns)
-          : itemTitle(listType, item, list.title_field),
+      title: formatCustomItemBody(item, list.title_field, list.columns),
       item,
     })),
   );
   if (items.length === 0) {
-    if (listType === "contacts") {
-      return "רשימת אנשי הקשר ריקה.";
-    }
     return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} ריקה.`;
   }
   const lines = items.map((row, i) =>
@@ -452,13 +978,122 @@ function formatContactsOrCustomDump(
       now: opts?.now,
     }),
   );
-  // Contacts have no list-level files; custom lists may show a titled header + 📎.
-  if (listType === "custom") {
-    return [`רשימת «${emptyLabel}»${paperclipSuffix(listFiles)}:`, ...lines].join(
-      "\n",
-    );
+  return [`רשימת «${emptyLabel}»${paperclipSuffix(listFiles)}:`, ...lines].join(
+    "\n",
+  );
+}
+
+/** Contacts: personal vs shared with (עם …) — share-only, no assign bucket. */
+function formatContactsTwoSectionDump(
+  lists: EmployeeRecordSnapshot["lists"],
+  opts?: ShowDumpOptions,
+): string {
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const personal: Array<{ title: string; item: Record<string, unknown> }> = [];
+  const shared: Array<{
+    title: string;
+    item: Record<string, unknown>;
+    sharedWithLabel: string;
+  }> = [];
+  for (const list of lists) {
+    // Whole-list contacts share (list_ops participants) → all rows under משותפים.
+    if (list.scope === "shared") {
+      const listPartners = partnersKey(list.shared_with ?? [], viewer, aliases);
+      for (const item of list.items) {
+        const title = itemTitle("contacts", item, list.title_field);
+        const itemPartners = stringArray(item.shared_with).filter(
+          (name) => name !== viewer && !aliases.includes(name),
+        );
+        shared.push({
+          title,
+          item,
+          sharedWithLabel:
+            itemPartners.length > 0 ? itemPartners.join(", ") : listPartners,
+        });
+      }
+      continue;
+    }
+    if (list.scope === "shared_items") {
+      const owner = (list.owner ?? "").trim();
+      for (const item of list.items) {
+        const title = itemTitle("contacts", item, list.title_field);
+        const itemPartners = stringArray(item.shared_with).filter(
+          (name) => name !== viewer && !aliases.includes(name),
+        );
+        shared.push({
+          title,
+          item,
+          sharedWithLabel:
+            itemPartners.length > 0
+              ? itemPartners.join(", ")
+              : owner || "משותף",
+        });
+      }
+      continue;
+    }
+    for (const item of list.items) {
+      const title = itemTitle("contacts", item, list.title_field);
+      const sharedWith = stringArray(item.shared_with);
+      const partners = sharedWith
+        .filter((name) => name !== viewer && !aliases.includes(name));
+      if (item.scope === "shared" && partners.length > 0) {
+        shared.push({
+          title,
+          item,
+          sharedWithLabel: partners.join(", "),
+        });
+      } else {
+        personal.push({ title, item });
+      }
+    }
   }
-  return lines.join("\n");
+  const section = opts?.section ?? null;
+  const blocks: string[] = [];
+  if (section !== "shared") {
+    blocks.push("אנשי קשר אישיים:");
+    if (personal.length === 0) {
+      blocks.push("ריקה");
+    } else {
+      personal.forEach((row, i) => {
+        blocks.push(
+          formatNumberedItem(i + 1, row.title, row.item, "contacts", {
+            now: opts?.now,
+          }),
+        );
+      });
+    }
+  }
+  if (section !== "personal") {
+    let sharedRows = shared;
+    const partnerNeedles = dumpFilterNames(opts?.partner);
+    if (partnerNeedles.length > 0) {
+      sharedRows = shared.filter((row) =>
+        partnerNeedles.some((needle) =>
+          row.sharedWithLabel.includes(needle),
+        ),
+      );
+    }
+    if (section === "shared" || sharedRows.length > 0 || !section) {
+      if (blocks.length > 0) {
+        blocks.push("");
+      }
+      blocks.push("אנשי קשר משותפים:");
+      if (sharedRows.length === 0) {
+        blocks.push("ריקה");
+      } else {
+        sharedRows.forEach((row, i) => {
+          blocks.push(
+            formatNumberedItem(i + 1, row.title, row.item, "contacts", {
+              sharedWithLabel: row.sharedWithLabel,
+              now: opts?.now,
+            }),
+          );
+        });
+      }
+    }
+  }
+  return blocks.join("\n");
 }
 
 /** Exported for unit tests. */
@@ -467,22 +1102,34 @@ export function formatNumberedItem(
   title: string,
   item: Record<string, unknown>,
   listType: string,
-  opts?: { assignedBy?: string; sharedWithLabel?: string; now?: Date },
+  opts?: {
+    /** Assign = assignee only; co-share = all involved — no «עם» prefix. */
+    responsibilityMark?: string;
+    /** @deprecated Stage-1 assign mark — prefer responsibilityMark. */
+    assignedBy?: string;
+    /** @deprecated Stage-1 co-share — prefer responsibilityMark (no עם). */
+    sharedWithLabel?: string;
+    now?: Date;
+  },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
     body += " 📎";
   }
-  // Assign vs co-share marks: «(Name)» = assigned_by; «(עם Name)» = shared_with.
-  // Prefer assignedBy when both are set (matches block-placement rule).
-  // Skip «(עם …)» when the title already lists those partners (meetings).
-  if (opts?.assignedBy) {
-    body += ` (${opts.assignedBy})`;
+  // Shopping/tasks Stage 2: responsibilityMark = «(מיכל)» / «(מיכל, טל)» (no עם).
+  // Filings/contacts stay «(עם …)» via sharedWithLabel.
+  if (opts?.responsibilityMark?.trim()) {
+    const mark = opts.responsibilityMark.trim();
+    if (!titleAlreadyListsPartners(body, mark)) {
+      body += ` (${mark})`;
+    }
+  } else if (opts?.assignedBy?.trim()) {
+    body += ` (${opts.assignedBy.trim()})`;
   } else if (
-    opts?.sharedWithLabel &&
-    !titleAlreadyListsPartners(body, opts.sharedWithLabel)
+    opts?.sharedWithLabel?.trim() &&
+    !titleAlreadyListsPartners(body, opts.sharedWithLabel.trim())
   ) {
-    body += ` (עם ${opts.sharedWithLabel})`;
+    body += ` (עם ${opts.sharedWithLabel.trim()})`;
   }
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));
@@ -857,19 +1504,7 @@ function itemTitle(
       }
     }
     for (const [key, value] of Object.entries(item)) {
-      if (
-        key === "item_id" ||
-        key === "scope" ||
-        key === "owner" ||
-        key === "urgency" ||
-        key === "shared_with" ||
-        key === "assigned_by" ||
-        key === "attachments" ||
-        key === "reminder" ||
-        key === "חוזר" ||
-        key === "תאריך לביצוע" ||
-        key === "שעה לביצוע"
-      ) {
+      if (CUSTOM_META_KEYS.has(key)) {
         continue;
       }
       if (typeof value === "string" && value.trim()) {

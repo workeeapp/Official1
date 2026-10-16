@@ -11,6 +11,7 @@ import {
   parseChatAttachmentRefs,
   parseLlmReply,
   parseReplyMetadata,
+  showDumpNames,
   toReplyButtons,
   type ChatAttachmentRef,
   type ChatHistoryResponse,
@@ -40,6 +41,7 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  loadFilingOwners,
   loadListItemOwners,
   readItemId,
   removeVisibleCustomItems,
@@ -59,7 +61,9 @@ import {
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  filingActionIds,
   listActionItemIds,
+  matchEmployee,
   planPhoneRelays,
   planRelayDeliveries,
   planScheduledJobDeliveries,
@@ -120,15 +124,21 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   setEngineButtons,
+  setEngineNavigateAddress,
   setEngineResponse,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
 import {
-  formatShowButtonDump,
+  filterSnapshotForAboutPerson,
   formatShowDumpFromKind,
-  isExactShowButtonCommand,
+  mapShowButtonCommandToDump,
+  navigateAddressFromFilingsDump,
+  resolveShowDumpKind,
 } from "./show-button-dump.js";
-import { stripShowTurnMutates } from "./show-turn-guard.js";
+import {
+  clearMutatingMetadata,
+  stripShowTurnMutates,
+} from "./show-turn-guard.js";
 import { stripWhatsAppReplyPrefix } from "./whatsapp-outbound-memory.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
@@ -550,7 +560,7 @@ function workerTargetingInstructions(
       ? `ASK A DIGITAL CO-WORKER (${coworkers}): «תשאלי את <worker> …» / «תבדקי עם <worker> …» → metadata.messages to that worker with expects_reply:true, text = the question with the speaker's name. Not a handoff. The server asks them right now and adds their answer under your response — response confirms with EXACT OUTBOUND QUOTE, e.g. «שאלתי את <worker> את ההודעה «…exact messages.text…»». Never write or guess their answer yourself.`
       : "",
     "One sentence can be several actions. Fill every array that applies.",
-    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks — ONLY if that work is not already in THIS turn's EMPLOYEE_SAVED_DATA by meaning (REUSE EXISTING WRAPPER: match found → skip speaker lists.add; still emit your להזכיר + reminders; several matches → ASK; «עוד אחד» → add allowed). (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. REMINDER-ON-ITEM: «הוסף תזכורת ל־X» / על X / על 3 — FORBIDDEN lists.add of any product in every case; exist → להזכיר+reminder only; missing → not found, lists=[].`,
+    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks — ONLY if that work is not already in THIS turn's EMPLOYEE_SAVED_DATA by meaning (REUSE EXISTING WRAPPER: match found → skip speaker lists.add; still emit your להזכיר + reminders; several matches → ASK; «עוד אחד» → add allowed). (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. REMINDER CONTENT DETAIL: reminders[].item + להזכיר suffix (+ speaker tasks row) keep the concrete facts they listed — light paraphrase OK; FORBIDDEN hollow summaries («לטפל בשני הבאגים» when they named the bugs). Shopping row stays product-only; that does not strip the clock label. REMINDER-ON-ITEM: «הוסף תזכורת ל־X» / על X / על 3 — FORBIDDEN lists.add of any product in every case; exist → להזכיר+reminder only; missing → not found, lists=[].`,
     `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: reminders[].recurrence. NEVER ask for WhatsApp if the name is Known.`,
     "REMIND CLOCK vs APPOINTMENT: «בעוד שעתיים» = `in` for the clock. «יש לה תור ב־22:00» = task context (optional שעה on their task) — do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared משימות לעבודה for a remind.",
     "NO META ON LISTS: complaints about your timing/questions → response only, empty lists. Never dump bug/meta text onto משימות לעבודה or any shared list.",
@@ -572,11 +582,11 @@ function workerTargetingInstructions(
     "YEARLY OFFER: when the speaker saves something that repeats by nature every year (יום הולדת, יום נישואין, אזכרה / יום זיכרון, חידוש מנוי שנתי) — you decide by meaning — save what they asked, then OFFER in response: «להוסיף תזכורת כל שנה ב־<day.month>? באיזו שעה? רוצה גם יום לפני?». Nothing yearly is saved before they agree. On כן (+ time) → reminders add {freq:\"yearly\",interval:1,month,month_day,time}, same item and ping. «גם יום לפני» → a second yearly add on the previous calendar day (item e.g. «מחר יום ההולדת של יוסי»). Agreed without a time → ask the time with reminders empty.",
     "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (reminders=[]), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → reminders add same recurrence + your להזכיר task; no second speaker standing row. Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
-    "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תזכורות), spoken indices («3» / «ל3» / «סעיף 3» / «את 1») → title on LAST dump → id from THIS turn's live JSON → emit whatever ACTION they asked for (lists/reminders/messages/filing/directory/…). FORBIDDEN show_dump; AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → lists.remove; תשני את 3 → update; הוסף תזכורת ל3 on timed (קבוע) → reminders+להזכיר same recurrence (REMINDER-ON-ITEM: never invent a new shopping/tasks row); תשלחי את 3 ל… → messages. Linked clock on row remove → lists.remove only (server cancels clock).",
+    "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → LAST dump line only → id from THIS turn's live JSON → ACTION on THAT entity. After תיוקים dump, line N = that filing (detail from live JSON); FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → DELETE CONFIRM ask first; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id. A multi-day row (תאריך לביצוע … תאריך סיום) counts for every day in its span.",
     "RANGES IN ANSWERS: a row with שעת סיום (or a standing occurrence with end_time) shows as «10:00–12:00», never only the start. A multi-day row (תאריך לביצוע … תאריך סיום) matches EVERY day inside its span — «מה יש לי ביום רביעי» lists «בחו\"ל (שלישי–חמישי)». Scan spans before «אין לך…».",
-    "MUTATE BY ID (like OPEN_JOBS job_id): lists.remove/update need item_id; remove_filing/update_filing need filing_id; reminders remove/update need reminder_id; directory.remove needs contact_id — copy from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS. With a matching id the server applies immediately (no delete-confirm). Never invent or speak ids. Server skips mutate without a matching id.",
+    "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE CONFIRM: any delete ask → remove empty + ask «האם ברצונך למחוק את: <title> מתוך רשימת <…>? האם מאשר?»; on כן/מאשר emit remove with id. Update with id applies immediately. Never invent or speak ids.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
     "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): Use SESSION_CLOCK (Asia/Jerusalem). For אני / שלי / מה אני צריך — ONLY the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA (owner = current speaker). List a clock in parentheses next to a task only when that task row has a `reminder` field — never pair a task with an active_reminders row by similar wording. Do NOT use WORKER_SAVED_DATA (that is YOUR jobs — e.g. להזכיר למאיוש… is not the speaker's Tuesday plan). Do NOT use other owners' TEAM_SCHEDULES rows. Do NOT treat custom lists about someone else (e.g. שיעורי הנהיגה של מאיה) as the speaker's to-do for that day. מה את צריכה ביום X / what YOU need that day → ONLY this turn's WORKER_SAVED_DATA rows whose תאריך matches; if none, say you have nothing that day — do not resurrect prior-turn *saved* jobs (answers to a question you just asked still count). TEAM_SCHEDULES only when they ask about another person by name. SINGLE-DAY: DAY AGENDA FORMAT — day header once, then numbered 1. 2. 3. items sorted by time («• <title> — HH:mm», standing (קבוע)); FORBIDDEN packing the whole day into one line with semicolons. MULTI-DAY (השבוע / שבוע הבא): dense daily/interval → ONE numbered rule line per row — never one line per next_occurrences hit (overload). Sparse weekly meeting → one line with weekdays/times in the window. STANDING / recurring (critical): before «אין לך…», scan EVERY tasks row with חוזר / next_occurrences and clocks with next_occurrences. Resolve the day via calendar (בעוד שבועיים). Match next_occurrences first, then תאריך לביצוע — standing rows with no תאריך לביצוע still count if the date is in next_occurrences. FORBIDDEN: empty «אין לך» when that date is in next_occurrences (e.g. פגישה with 2026-10-21 21:00 → «מה יש לי ביום רביעי בעוד שבועיים» must list it). Empty timed window only after that scan → «אין לך מטלות או תזכורות ביום שלישי» — never jargon like מטלות מתוזמנות. Undated open tasks only if they also asked מה יש לי לעשות in general.",
     "LIST ITEM URGENCY: on lists add/update set item urgency = normal | urgent | very_urgent by MEANING (same as messages) — never ask. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when hard (ממש דחוף / דחוף מאוד / מיד). Clean title without urgency words. Shopping/tasks/contacts/custom alike.",
@@ -592,7 +602,7 @@ function workerTargetingInstructions(
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/מטלות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL list_name → mutate NOW, no ask. (2) VERY SIMILAR but not identical (shortened/extra word/close synonym) → lists=[] and ASK once «התכוונת לרשימת «X»?» — never mutate until confirm. (3) Several close candidates or none → lists=[] and ASK which (brief candidates). FORBIDDEN: inventing list_name or picking by topic alone. Server will not fix a wrong list_name.",
     "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» with empty actions; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. Never ignore SPEAKER_ADDRESS.",
-    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה (יש לי שני ילדים → file now, ages may come later via update), כתובת/עיר, מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. Do NOT auto-file soft plans (חושב לנסוע / אולי). item_description usually = item_name. מה התיוקים שלי → explicit saves (codes/docs), not auto-memory unless מה את זוכרת עלי. Later turns: prefer SPEAKER_ADDRESS over buried filings for how to address them.",
+    "Durable personal memory — file with add_filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB: תייקי/תתייקי → add_filing only; תשמרי without list → infer or ASK. Do NOT auto-file soft plans. item_description usually = item_name. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
 
@@ -1452,7 +1462,7 @@ export async function sendChatMessage(input: {
         "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המטלות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המטלות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER — after a numbered dump, spoken indices map dump titles → ids in THIS turn's JSON, then any supported ACTION (תמחק / תשני / הוסף תזכורת / תשלחי את N…); FORBIDDEN show_dump on that turn.",
         guestSpeaker
           ? ""
-          : "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «סעיף 3» → title → id from this turn → any supported ACTION (remove/update/reminder/messages/…). AFTER a dump «ל3» is a line index not 03:00. Numbering restarts per block — ASK if ambiguous. No show_dump.",
+          : "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «הציגי 1» / «מה זה 1» → LAST dump line only → id from this turn → ACTION on that entity (filings dump → filing). AFTER a dump «ל3» is a line index not 03:00. ASK if ambiguous. FORBIDDEN show_dump on line-index turns.",
         guestSpeaker
           ? ""
           : "SPEAKER_ADDRESS is how to address this speaker (male/female/unknown). Always follow it for second-person Hebrew. filing is durable memory + explicit saves — use family/job silently; address gender prefers SPEAKER_ADDRESS. מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
@@ -1472,10 +1482,10 @@ export async function sendChatMessage(input: {
           : "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
         guestSpeaker
           ? ""
-          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / מטלות / הצג רשימת מטלות|קניות): pick ONE category. For shopping|tasks|contacts set metadata.show_dump = shopping|tasks|contacts and lists=[] — the server replaces response with the live dump (times, תזכורת, קבוע, qty). Filings stay model-written (no show_dump): two-section אישיים/משותפים. FORBIDDEN show_dump on ABOUT X or FULL DUMP. Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
+          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / מטלות / תיוקים / הצג רשימת מטלות|קניות|אנשי קשר): pick ONE category. For shopping|tasks|contacts|filings set metadata.show_dump = shopping|tasks|contacts|filings and lists=[] — the server replaces response with the live dump. ABOUT X («מה מיכל צריכה לקנות» / מטלות של טל) → same show_dump + show_dump_about=X. Filings/contacts = two-section share-only (אישיים→משותפים with (עם …); never assign). FORBIDDEN show_dump on bare FULL DUMP. Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
         guestSpeaker
           ? ""
-          : "SHAREABLE STATUS ASK ABOUT X (מה X צריך לקנות / מטלות של X / תיוקים של X / לי ול־X בקניות): same category layout, ONLY co-share rows between speaker and X (not one-way assignments you gave X). FORBIDDEN: X's private rows even if speaker is owner. Empty → nothing shared with X for that category. כל מה ששמור ל־X → FULL DUMP (not this ask).",
+          : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / מטלות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → FULL DUMP (not this ask).",
         guestSpeaker
           ? ""
           : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק».",
@@ -1483,7 +1493,7 @@ export async function sendChatMessage(input: {
           ? ""
           : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY from THIS turn's WORKER_SAVED_DATA (+ OPEN_JOBS if present) only. Dedup: מטלות = WORKER rows that are NOT an OPEN_JOBS shadow (skip title matching OPEN_JOBS.task / «לבדוק עם…»); ממתינים = every OPEN_JOBS row once including scheduled=true — phrase from ask; scheduled → not yet due, do not ask the check now; OPEN_JOBS empty → all WORKER_SAVED_DATA. FORBIDDEN: repeating a consult under מטלות and again under ממתינים לתשובה. Do NOT RAISE. Worker להזכיר-ל / לשלוח-הודעה jobs count only if listed there now — do not invent saved jobs from earlier chat. Numbered 1. 2. 3. per block (never •; restart at 1). A row with a \`reminder\` field keeps «(תזכורת: <היום/מחר/date> HH:mm)» from reminder.fire_at even when you rephrase it for the viewer; no \`reminder\` field → no reminder parentheses. Before that, name the humans the row involves (asked_by + for, de-duplicated, never yourself, viewer included) in parentheses when there are two or more and the item name does not already show them — e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks.`,
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / מטלות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
-        "Status / דוח / show a list / «הצג רשימת X»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts / exact «הצג רשימת …» → metadata.show_dump + empty lists; server replaces response. «הצג רשימת קניות אישית/משותפת» / מטלות אישית (+ בבקשה) → show_dump=shopping|tasks same as bare. Filings / ABOUT X / bare FULL DUMP (מה יש לי / הציגי הכל) stay model-written from EMPLOYEE_SAVED_DATA. Custom titled list → show_dump = that list_name. Empty model-written section → empty sentence — never reuse «מחקתי…». Urgency/📎 rules still apply when you write filings/FULL DUMP yourself. כל מה ששמור / סיכום מלא → FULL DUMP (no show_dump).",
+        "Status / דוח / show a list / «הצג רשימת X» / «הצג תיוקים»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts|filings / ABOUT X / exact «הצג רשימת …» / «הצג תיוקים» → metadata.show_dump (+ show_dump_about for X) + empty lists; server replaces response. SHOW DUMP SECTION: bare → show_dump only; אישית → personal; משותפת → shared; עם X → partner=X; באחריות שלי → assignee=self; באחריות מיכל → assignee=מיכל; date range → show_dump_from + show_dump_to YYYY-MM-DD. OR WITHIN FIELD: X או Y on same dimension → string[] (assignee/partner/about); AND across fields; אישית או משותפת → omit section; FORBIDDEN cross-shape OR — ask or full dump. FORBIDDEN same-as-bare for אישית/משותפת. Bare FULL DUMP stays model-written. SAVE VERB: תייקי/תתייקי → add_filing only; תשמרי without list → infer or ASK; never invent custom list_name from topic. DELETE CONFIRM before every remove. SHARE-ONLY FACTS: filing/contacts/directory co-share; partners may mutate/unshare by id. Contacts list_ops participants OK; shopping/tasks whole-list share refused. כל מה ששמור / סיכום מלא → FULL DUMP (no show_dump).",
         `Ping clocks (${SPEAKER_CLOCK_ASKS}) → metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
         "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים): SESSION_CLOCK for the window. אני/שלי → only the speaker's own personal tasks + active_reminders in EMPLOYEE_SAVED_DATA. Parentheses «(תזכורת: …)» next to a task only when that task row has a `reminder` field — never pair by similar wording. Any listed task/reminder row with non-empty attachments → append 📎 after the title on that numbered line (same as status dumps — including השבוע / שבוע הבא). Never WORKER_SAVED_DATA (your jobs like להזכיר למאיוש… are not theirs). Never other owners' TEAM_SCHEDULES. Never custom lists about someone else (שיעורי הנהיגה של מאיה) as their day plan. מה את צריכה ביום X → only THIS turn's WORKER rows with matching תאריך; missing → nothing that day (ignore older *saved* claims only — a short היי after מה תרצה שאשלח is still the answer to your question). Ask about X by name → that person's visible rows. STANDING / recurring: before «אין לך…», scan חוזר / next_occurrences (and clock next_occurrences); match next_occurrences first then תאריך לביצוע (a multi-day row matches every day from תאריך לביצוע to תאריך סיום; a row with שעת סיום shows «10:00–12:00»); SINGLE-DAY → DAY AGENDA FORMAT (day header + numbered 1. 2. 3. items by time; never one packed line with semicolons); MULTI-DAY (השבוע / שבוע הבא) → dense daily/interval ONE numbered rule line per row — never one line per next_occurrences hit. FORBIDDEN empty answer when the asked date is in next_occurrences. Empty timed window only after that scan → «אין לך מטלות או תזכורות ב…». Never מטלות מתוזמנות. Undated open tasks only for a general מה יש לי לעשות.",
         "SHOW MY LISTS / הציגי את הרשימות שלי: same DETAIL RULE as FULL DUMP — ONLY מטלות enumerate items (1. 2. 3., schedule / תזכורת / partners). קניות + custom רשימות מותאמות + אנשי קשר are COUNTS ONLY («*name* (עם …) — N פריטים» / ריקה; shopping three-way counts ok). FORBIDDEN listing custom/shopping item titles here. Hint once «לפירוט רשימה: הצג רשימת …». Exact «הצג רשימת X» stays full dump.",
@@ -1652,11 +1662,29 @@ export async function sendChatMessage(input: {
         directory: [],
       };
     }
-    // Exact «הצג …» / show_dump: display-only — drop spurious removes the model re-emits.
-    metadata = stripShowTurnMutates(
-      stripWhatsAppReplyPrefix(input.message),
-      metadata,
-    );
+    // Closed UI button command (opaque equality) → synthesize show_dump if model omitted it.
+    // Free-form never maps here — model must emit show_dump. Dump intent is ACTION-only.
+    if (!(metadata.showDump?.trim() ?? "")) {
+      const buttonText = stripWhatsAppReplyPrefix(input.message);
+      let buttonDump = mapShowButtonCommandToDump(buttonText);
+      if (!buttonDump) {
+        const listsForAllowlist = await getEmployeeRecordSnapshot(
+          input.employeeId,
+        );
+        buttonDump = mapShowButtonCommandToDump(
+          buttonText,
+          listsForAllowlist,
+        );
+      }
+      if (buttonDump) {
+        metadata = {
+          ...clearMutatingMetadata(metadata),
+          showDump: buttonDump,
+        };
+      }
+    }
+    // show_dump: display-only — drop spurious removes; mutates win over accidental show_dump.
+    metadata = stripShowTurnMutates(metadata);
     const metadataForApply = {
       ...metadata,
       lists: [
@@ -1683,6 +1711,12 @@ export async function sendChatMessage(input: {
           input.userId,
           listActionItemIds(metadataForApply.lists),
         );
+    const filingOwners = guestSpeaker
+      ? undefined
+      : await loadFilingOwners(
+          input.userId,
+          filingActionIds(metadataForApply.filing ?? []),
+        );
     const plan = planTargetedActions({
       actor: employee,
       employees: humans,
@@ -1690,6 +1724,7 @@ export async function sendChatMessage(input: {
       metadata: metadataForApply,
       sharedLists,
       itemOwners,
+      filingOwners,
     });
     const relays = planRelayDeliveries({
       actor: employee,
@@ -1768,11 +1803,12 @@ export async function sendChatMessage(input: {
       alreadyCancelledReminderIds: cancelledReminderIds,
     });
     const directoryResult = guestSpeaker
-      ? { saved: [], removed: [] }
+      ? { saved: [], removed: [], shareNotices: [] }
       : await applyDirectoryActions({
           userId: input.userId,
           ownerEmployeeId: employee.id,
           actions: metadata.directory ?? [],
+          employees: humans,
         });
     const refreshedContacts =
       directoryResult.saved.length > 0 || directoryResult.removed.length > 0
@@ -1897,6 +1933,30 @@ export async function sendChatMessage(input: {
         savedLabels,
         recipientIsOwner: true,
         partnerNames: notification.partnerNames,
+        assistantSpeaker,
+        digitalEmployeeId: digital.id,
+      });
+      notifications.push(pushed.notification);
+      sharedWhatsAppSkips.push(...pushed.whatsappSkips);
+    }
+
+    for (const notice of directoryResult.shareNotices) {
+      if (notified.has(notice.employeeId) || notice.employeeId === employee.id) {
+        continue;
+      }
+      const target = humans.find((row) => row.id === notice.employeeId);
+      if (!target) {
+        continue;
+      }
+      notified.add(notice.employeeId);
+      const pushed = await pushTargetNotification({
+        userId: input.userId,
+        actor: employee,
+        target,
+        metadata: notice.metadata,
+        savedLabels,
+        recipientIsOwner: true,
+        partnerNames: [],
         assistantSpeaker,
         digitalEmployeeId: digital.id,
       });
@@ -2220,44 +2280,166 @@ export async function sendChatMessage(input: {
         "מתי לשלוח — עכשיו, בעוד X, או בשעה קבועה?",
       );
     }
-    // Exact «הצג» button OR model show_dump → live DB dump (never chat history).
-    const showCommand = stripWhatsAppReplyPrefix(input.message);
+    // Model / allowlist show_dump (+ section/partner/assignee/about) → live DB dump.
+    // Never utterance-parse dump intent — ACTION fields only.
     const showDumpKind = metadata.showDump?.trim() ?? "";
-    if (isExactShowButtonCommand(showCommand) || showDumpKind) {
-      const liveSnapshot = await withAttachmentRefsSafe(
+    if (showDumpKind) {
+      const speakerAliases = [
+        ...new Set(
+          [employee.nickname?.trim() ?? "", employee.name.trim()].filter(
+            Boolean,
+          ),
+        ),
+      ];
+      const aboutNames = showDumpNames(metadata.showDumpAbout);
+      const speakerSnapshot = await withAttachmentRefsSafe(
         await getEmployeeRecordSnapshot(input.employeeId),
       );
-      const dumpOpts = {
-        viewerName: speaker,
-        viewerAliases: [
-          ...new Set(
-            [employee.nickname?.trim() ?? "", employee.name.trim()].filter(
-              Boolean,
-            ),
-          ),
-        ],
+      const baseDumpOpts = {
+        section: metadata.showDumpSection ?? null,
+        partner: metadata.showDumpPartner ?? null,
+        assignee: metadata.showDumpAssignee ?? null,
+        assigneeSelfNames: speakerAliases,
+        dateFrom: metadata.showDumpFrom ?? null,
+        dateTo: metadata.showDumpTo ?? null,
       };
-      let showDump: string | null = null;
-      if (isExactShowButtonCommand(showCommand)) {
-        showDump = formatShowButtonDump(showCommand, liveSnapshot, dumpOpts);
-        // Exact-looking utterance with unrecognized name (e.g. before normalize
-        // edge cases) — still honor model show_dump when present.
-        if (!showDump && showDumpKind) {
-          showDump = formatShowDumpFromKind(
-            showDumpKind,
-            liveSnapshot,
-            dumpOpts,
-          );
-        }
-      } else if (showDumpKind) {
-        showDump = formatShowDumpFromKind(
-          showDumpKind,
-          liveSnapshot,
-          dumpOpts,
+
+      const dumpForSubject = async (
+        viewerName: string,
+        viewerAliases: string[],
+        snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>,
+      ): Promise<{ text: string | null; snapshot: typeof snapshot; opts: typeof baseDumpOpts & { viewerName: string; viewerAliases: string[] } }> => {
+        const dumpOpts = {
+          ...baseDumpOpts,
+          viewerName,
+          viewerAliases,
+        };
+        return {
+          text: formatShowDumpFromKind(showDumpKind, snapshot, dumpOpts),
+          snapshot,
+          opts: dumpOpts,
+        };
+      };
+
+      if (aboutNames.length === 0) {
+        const { text, snapshot, opts } = await dumpForSubject(
+          speaker,
+          speakerAliases,
+          speakerSnapshot,
         );
-      }
-      if (showDump) {
-        workingReply = setEngineResponse(workingReply, showDump);
+        if (text) {
+          workingReply = setEngineResponse(workingReply, text);
+          const resolved = resolveShowDumpKind(showDumpKind);
+          if (resolved?.kind === "filings") {
+            const dumpAddress = navigateAddressFromFilingsDump(
+              snapshot.filing ?? [],
+              opts,
+            );
+            if (dumpAddress && !parseLlmReply(workingReply).navigateAddress) {
+              workingReply = setEngineNavigateAddress(workingReply, dumpAddress);
+            }
+          }
+        }
+      } else {
+        const blocks: string[] = [];
+        const missing: string[] = [];
+        let soleFilingSnapshot: Awaited<
+          ReturnType<typeof withAttachmentRefsSafe>
+        > | null = null;
+        let soleFilingOpts:
+          | (typeof baseDumpOpts & {
+              viewerName: string;
+              viewerAliases: string[];
+            })
+          | null = null;
+        let filingDumpCount = 0;
+
+        for (const aboutRaw of aboutNames) {
+          const aboutPerson = matchEmployee(aboutRaw, humans);
+          if (!aboutPerson) {
+            missing.push(aboutRaw);
+            continue;
+          }
+          const aboutAliases = [
+            ...new Set(
+              [
+                aboutPerson.nickname?.trim() ?? "",
+                aboutPerson.name.trim(),
+                employeeDisplayName(aboutPerson),
+              ].filter(Boolean),
+            ),
+          ];
+          let subjectSnapshot = speakerSnapshot;
+          if (employee.isOwner === true) {
+            subjectSnapshot = await withAttachmentRefsSafe(
+              await getEmployeeRecordSnapshot(aboutPerson.id),
+            );
+          } else {
+            subjectSnapshot = filterSnapshotForAboutPerson(
+              speakerSnapshot,
+              employeeDisplayName(aboutPerson),
+              aboutAliases,
+            );
+          }
+          const { text, snapshot, opts } = await dumpForSubject(
+            employeeDisplayName(aboutPerson),
+            aboutAliases,
+            subjectSnapshot,
+          );
+          if (text) {
+            const header =
+              aboutNames.length > 1
+                ? `*${employeeDisplayName(aboutPerson)}*\n${text}`
+                : text;
+            blocks.push(header);
+            if (resolveShowDumpKind(showDumpKind)?.kind === "filings") {
+              filingDumpCount += 1;
+              soleFilingSnapshot = snapshot;
+              soleFilingOpts = opts;
+            }
+          }
+        }
+
+        if (blocks.length === 0 && missing.length === aboutNames.length) {
+          workingReply = setEngineResponse(
+            workingReply,
+            missing.length === 1
+              ? `לא מצאתי את ${missing[0]}.`
+              : `לא מצאתי את ${missing.join(" או ")}.`,
+          );
+        } else {
+          const parts = [...blocks];
+          if (missing.length > 0) {
+            parts.push(
+              missing.length === 1
+                ? `לא מצאתי את ${missing[0]}.`
+                : `לא מצאתי את ${missing.join(" או ")}.`,
+            );
+          }
+          if (parts.length > 0) {
+            workingReply = setEngineResponse(
+              workingReply,
+              parts.join("\n\n"),
+            );
+            if (
+              filingDumpCount === 1 &&
+              soleFilingSnapshot &&
+              soleFilingOpts &&
+              !parseLlmReply(workingReply).navigateAddress
+            ) {
+              const dumpAddress = navigateAddressFromFilingsDump(
+                soleFilingSnapshot.filing ?? [],
+                soleFilingOpts,
+              );
+              if (dumpAddress) {
+                workingReply = setEngineNavigateAddress(
+                  workingReply,
+                  dumpAddress,
+                );
+              }
+            }
+          }
+        }
       }
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);

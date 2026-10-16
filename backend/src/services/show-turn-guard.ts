@@ -1,19 +1,12 @@
 /**
- * Exact «הצג …» / metadata.show_dump turns are display-only —
+ * metadata.show_dump turns are display-only —
  * unless the model also emitted real mutates (e.g. «תמחק את 3» + accidental show_dump).
- * Exact button commands always strip mutates (stale removes after הצג).
+ * Dump intent comes only from ACTION fields — never from user utterance text.
  */
 import type { LlmMetadata } from "@workee/shared";
-import { isExactShowButtonCommand } from "./show-button-dump.js";
 
-export function isReadOnlyShowTurn(
-  strippedMessage: string,
-  showDump?: string | null,
-): boolean {
-  return (
-    isExactShowButtonCommand(strippedMessage) ||
-    Boolean(typeof showDump === "string" && showDump.trim())
-  );
+export function isReadOnlyShowTurn(showDump?: string | null): boolean {
+  return Boolean(typeof showDump === "string" && showDump.trim());
 }
 
 function hasMutates(metadata: LlmMetadata): boolean {
@@ -26,7 +19,8 @@ function hasMutates(metadata: LlmMetadata): boolean {
   );
 }
 
-function withoutMutates(metadata: LlmMetadata): LlmMetadata {
+/** Clear mutating ACTION arrays (lists / listOps / filing / reminders / directory). */
+export function clearMutatingMetadata(metadata: LlmMetadata): LlmMetadata {
   return {
     ...metadata,
     lists: [],
@@ -37,27 +31,23 @@ function withoutMutates(metadata: LlmMetadata): LlmMetadata {
   };
 }
 
-/** Clear showDump so the engine does not replace the delete reply with a dump. */
+/** Clear showDump (+ section/partner) so the engine does not replace the delete reply with a dump. */
 function withoutShowDump(metadata: LlmMetadata): LlmMetadata {
-  const { showDump: _dropped, ...rest } = metadata;
+  const {
+    showDump: _dropped,
+    showDumpSection: _section,
+    showDumpPartner: _partner,
+    ...rest
+  } = metadata;
   return { ...rest };
 }
 
 /**
- * Exact «הצג …» → always strip mutates (stale re-emits).
  * show_dump + mutates → keep mutates, drop showDump (delete wins).
  * show_dump alone → strip mutates.
  */
-export function stripShowTurnMutates(
-  strippedMessage: string,
-  metadata: LlmMetadata,
-): LlmMetadata {
-  const exactShow = isExactShowButtonCommand(strippedMessage);
+export function stripShowTurnMutates(metadata: LlmMetadata): LlmMetadata {
   const showDump = metadata.showDump?.trim() ?? "";
-
-  if (exactShow) {
-    return withoutMutates(metadata);
-  }
 
   if (!showDump) {
     return metadata;
@@ -67,5 +57,5 @@ export function stripShowTurnMutates(
     return withoutShowDump(metadata);
   }
 
-  return withoutMutates(metadata);
+  return clearMutatingMetadata(metadata);
 }

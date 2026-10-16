@@ -17,7 +17,15 @@ import {
   type Recurrence,
 } from "@workee/shared";
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
+import {
+  builtinListHebrew,
+  isBuiltinListType,
+  SHOW_FILINGS_COMMAND,
+  SHOW_REMINDERS_COMMAND,
+  showListButtonCommand,
+} from "./builtin-lists.js";
 import type {
+  FilingOwnerRef,
   ItemVisibility,
   ListItemOwnerRef,
 } from "./employee-records.service.js";
@@ -612,6 +620,21 @@ export function listActionItemIds(lists: LlmListAction[]): string[] {
   return [...ids];
 }
 
+/** Collect filing_id values on remove/update for owner lookup. */
+export function filingActionIds(filing: LlmFilingAction[]): string[] {
+  const ids = new Set<string>();
+  for (const row of filing) {
+    if (row.action !== "remove_filing" && row.action !== "update_filing") {
+      continue;
+    }
+    const id = row.filingId.trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
 const UNSHARE_KEYS = ["unshare_with", "unshareWith"] as const;
 
 /** Names the model asked to stop sharing this item with (lists.update). */
@@ -643,6 +666,20 @@ function withoutUnshareField(
 
 function isOwnShoppingOrTasks(listType: string): boolean {
   return listType === "shopping" || listType === "tasks";
+}
+
+/** Route item_id mutates to the row owner (shopping/tasks/contacts). */
+function isBuiltinItemIdRoute(listType: string): boolean {
+  return (
+    listType === "shopping" ||
+    listType === "tasks" ||
+    listType === "contacts"
+  );
+}
+
+/** Contacts (and later directory): share-only — never assign onto someone else's book. */
+function isShareOnlyListType(listType: string): boolean {
+  return listType === "contacts";
 }
 
 /**
@@ -694,8 +731,10 @@ export function planTargetedActions(input: {
   metadata: LlmMetadata;
   /** Shared custom lists visible to the actor (owned by anyone on the account). */
   sharedLists?: SharedListRef[];
-  /** Owner of each live shopping/tasks row addressed by item_id this turn. */
+  /** Owner of each live shopping/tasks/contacts row addressed by item_id this turn. */
   itemOwners?: Map<string, ListItemOwnerRef>;
+  /** Owner of each live filing addressed by filing_id this turn. */
+  filingOwners?: Map<string, FilingOwnerRef>;
 }): {
   applications: Array<{
     employeeId: string;
@@ -730,14 +769,18 @@ export function planTargetedActions(input: {
     };
   }
 
-  const partnerLabel = (targets: PublicEmployee[]) =>
+  /** Co-partners for a notify, excluding the actor and the recipient (never «לך ומיכל» to מיכל). */
+  const partnerLabel = (targets: PublicEmployee[], recipientId: string) =>
     targets
-      .filter((target) => target.id !== input.actor.id)
+      .filter(
+        (target) =>
+          target.id !== input.actor.id && target.id !== recipientId,
+      )
       .map(employeeDisplayName);
 
-  const partnerLabelFromIds = (ids: string[]) =>
+  const partnerLabelFromIds = (ids: string[], recipientId: string) =>
     ids
-      .filter((id) => id !== input.actor.id)
+      .filter((id) => id !== input.actor.id && id !== recipientId)
       .map((id) => {
         const employee = input.employees.find((row) => row.id === id);
         return employee ? employeeDisplayName(employee) : "";
@@ -806,7 +849,7 @@ export function planTargetedActions(input: {
           !ref ||
           !humanOwnerIds.has(ref.ownerId) ||
           !(
-            isOwnShoppingOrTasks(ref.listType) ||
+            isBuiltinItemIdRoute(ref.listType) ||
             isCustomItemSharedOnlyWithActor(ref, input.actor.id) ||
             (list.action === "update" &&
               isCustomItemShareChange(ref, raw, named, input.actor.id))
@@ -938,9 +981,12 @@ export function planTargetedActions(input: {
             .filter((row) => listScopeOf(row) === "shared")
             .flatMap((row) => [row.ownerId, ...row.visibleTo]),
         );
-        const partners = partnerLabelFromIds(notifyIds);
         for (const partnerId of notifyIds) {
-          addNotification(partnerId, notifyMetadata, partners);
+          addNotification(
+            partnerId,
+            notifyMetadata,
+            partnerLabelFromIds(notifyIds, partnerId),
+          );
         }
       }
       continue;
@@ -978,9 +1024,8 @@ export function planTargetedActions(input: {
         metadata,
         visibility,
       });
-      const partners = partnerLabel(targets);
       for (const target of others) {
-        addNotification(target.id, metadata, partners);
+        addNotification(target.id, metadata, partnerLabel(targets, target.id));
       }
       continue;
     }
@@ -989,19 +1034,47 @@ export function planTargetedActions(input: {
     const humanTargets = mutateTargets.filter(
       (target) => !isDigitalEmployee(target),
     );
+    const humanPartnerTargets = humanTargets.filter(
+      (target) => target.id !== input.actor.id,
+    );
+    // Shopping/tasks: co-share only when speaker is in targets (else = assign).
+    // Contacts: always speaker-owned co-share when partners present (share-only).
     const sharedSingleRow =
       normalizedList.action === "add" &&
-      isOwnShoppingOrTasks(normalizedList.listType) &&
-      humanTargets.some((target) => target.id === input.actor.id) &&
-      humanTargets.some((target) => target.id !== input.actor.id);
+      ((isOwnShoppingOrTasks(normalizedList.listType) &&
+        humanTargets.some((target) => target.id === input.actor.id) &&
+        humanPartnerTargets.length > 0) ||
+        (isShareOnlyListType(normalizedList.listType) &&
+          (humanPartnerTargets.length > 0 ||
+            isAllTarget(normalizedList.targets))));
     if (sharedSingleRow) {
       // One row on the speaker's list; partners see it through visible_to.
-      applications.push({ employeeId: input.actor.id, metadata, visibility });
+      const shareVisibility = visibilityFor(
+        input.actor.id,
+        targets,
+        true,
+      );
+      applications.push({
+        employeeId: input.actor.id,
+        metadata,
+        visibility: shareVisibility,
+      });
       for (const target of mutateTargets) {
+        if (target.id === input.actor.id) {
+          continue;
+        }
         if (isDigitalEmployee(target)) {
-          applications.push({ employeeId: target.id, metadata, visibility });
+          applications.push({
+            employeeId: target.id,
+            metadata,
+            visibility: shareVisibility,
+          });
         } else {
-          addNotification(target.id, metadata, partnerLabel(targets));
+          addNotification(
+            target.id,
+            metadata,
+            partnerLabel(targets, target.id),
+          );
         }
       }
       continue;
@@ -1009,12 +1082,81 @@ export function planTargetedActions(input: {
     for (const target of mutateTargets) {
       applications.push({ employeeId: target.id, metadata, visibility });
       if (!isDigitalEmployee(target)) {
-        addNotification(target.id, metadata, partnerLabel(targets));
+        addNotification(target.id, metadata, partnerLabel(targets, target.id));
       }
     }
   }
 
   for (const filing of input.metadata.filing) {
+    // Partner/owner mutate by filing_id — apply on the owner's book.
+    if (
+      (filing.action === "remove_filing" || filing.action === "update_filing") &&
+      filing.filingId.trim() &&
+      input.filingOwners &&
+      input.filingOwners.size > 0
+    ) {
+      const ref = input.filingOwners.get(filing.filingId.trim());
+      if (ref && humanOwnerIds.has(ref.ownerId)) {
+        const unshareNames = filing.unshareWith ?? [];
+        const removeIds = resolveNamedRelayTargets(
+          unshareNames,
+          input.employees,
+        )
+          .map((target) => target.id)
+          .filter((id) => id !== ref.ownerId);
+        const named = resolveNamedRelayTargets(
+          filing.targets,
+          input.employees,
+        ).filter(
+          (target) =>
+            !isDigitalEmployee(target) && !isGuestEmployee(target),
+        );
+        const partners = named.filter(
+          (target) =>
+            target.id !== ref.ownerId &&
+            target.id !== input.actor.id &&
+            !removeIds.includes(target.id),
+        );
+        const share = filing.action === "update_filing" && partners.length > 0;
+        const { unshareWith: _drop, ...filingRest } = filing;
+        const metadata = {
+          lists: [],
+          filing: [{ ...filingRest, targets: [] }],
+        };
+        applications.push({
+          employeeId: ref.ownerId,
+          metadata,
+          visibility: {
+            scope: share || ref.scope === "shared" ? "shared" : "personal",
+            addedById: input.actor.id,
+            visibleTo: share
+              ? uniqueIds([
+                  ref.ownerId,
+                  input.actor.id,
+                  ...ref.visibleTo,
+                  ...partners.map((target) => target.id),
+                ])
+              : uniqueIds([ref.ownerId, ...ref.visibleTo]),
+            ...(removeIds.length > 0 ? { removeIds } : {}),
+            itemOnly: true,
+          },
+        });
+        if (share) {
+          for (const partner of partners) {
+            addNotification(
+              partner.id,
+              metadata,
+              partnerLabelFromIds(
+                [ref.ownerId, input.actor.id, ...partners.map((row) => row.id)],
+                partner.id,
+              ),
+            );
+          }
+        }
+        continue;
+      }
+    }
+
     const targets = resolveActionTargets(
       filing.targets,
       input.employees,
@@ -1022,29 +1164,32 @@ export function planTargetedActions(input: {
       input.workers,
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
-    const sharedCollection = isSharedCollectionAction(
-      "filing",
-      null,
-      targets,
-      input.actor.id,
-      filing.targets,
-    );
-    const visibility = visibilityFor(
-      input.actor.id,
-      targets,
-      sharedCollection || others.length > 0 || isAllTarget(filing.targets),
-    );
+    const humanOthers = others.filter((target) => !isDigitalEmployee(target));
+    // Share-only: any human partner → one filing on the speaker (never assignee fan-out).
+    const coshare =
+      humanOthers.length > 0 ||
+      isAllTarget(filing.targets) ||
+      isSharedCollectionAction(
+        "filing",
+        null,
+        targets,
+        input.actor.id,
+        filing.targets,
+      );
+    const visibility = visibilityFor(input.actor.id, targets, coshare);
     const metadata = { lists: [], filing: [{ ...filing, targets: [] }] };
 
-    if (sharedCollection) {
+    if (coshare) {
       applications.push({
         employeeId: input.actor.id,
         metadata,
         visibility,
       });
-      const partners = partnerLabel(targets);
       for (const target of others) {
-        addNotification(target.id, metadata, partners);
+        if (isGuestEmployee(target)) {
+          continue;
+        }
+        addNotification(target.id, metadata, partnerLabel(targets, target.id));
       }
       continue;
     }
@@ -1053,7 +1198,7 @@ export function planTargetedActions(input: {
     for (const target of mutateTargets) {
       applications.push({ employeeId: target.id, metadata, visibility });
       if (!isDigitalEmployee(target)) {
-        addNotification(target.id, metadata, partnerLabel(targets));
+        addNotification(target.id, metadata, partnerLabel(targets, target.id));
       }
     }
   }
@@ -1281,7 +1426,7 @@ function visibilityFor(
 
 const SHOW_REMINDERS_BUTTON: LlmReplyButton = {
   label: "הצג",
-  command: "הצג תזכורות",
+  command: SHOW_REMINDERS_COMMAND,
 };
 
 function reminderMutates(metadata: LlmMetadata): boolean {
@@ -1333,7 +1478,7 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
     if (!name) {
       continue;
     }
-    const command = `הצג רשימת ${name}`;
+    const command = showListButtonCommand(name);
     if (seen.has(command)) {
       continue;
     }
@@ -1344,6 +1489,22 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
     }
   }
 
+  if (
+    buttons.length < REPLY_BUTTON_MAX &&
+    (metadata.filing ?? []).some(
+      (row) =>
+        row.action === "add_filing" ||
+        row.action === "remove_filing" ||
+        row.action === "update_filing",
+    )
+  ) {
+    const command = SHOW_FILINGS_COMMAND;
+    if (!seen.has(command)) {
+      seen.add(command);
+      buttons.push({ label: "הצג", command });
+    }
+  }
+
   if (buttons.length === 0 && reminderMutates(metadata)) {
     buttons.push(SHOW_REMINDERS_BUTTON);
   }
@@ -1351,14 +1512,8 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
 }
 
 function showListCommandName(list: LlmListAction): string {
-  if (list.listType === "shopping") {
-    return "קניות";
-  }
-  if (list.listType === "tasks") {
-    return "מטלות";
-  }
-  if (list.listType === "contacts") {
-    return "אנשי קשר";
+  if (isBuiltinListType(list.listType)) {
+    return builtinListHebrew(list.listType);
   }
   return customListDerivedName(list).trim();
 }
@@ -1468,9 +1623,12 @@ export function fallbackNotificationText(
     return `${actorName} שיתף איתך ${formatQuotedItems(items)} מרשימת «${title}»`;
   }
   const partners = (options?.partnerNames ?? []).filter(Boolean);
+  const sharedWithRecipient =
+    options?.partnerNames !== undefined || partners.length > 0;
+  /** Empty other-partners → «איתך»; never «לך ו<recipient>». */
   const partnerPhrase =
     partners.length === 0
-      ? ""
+      ? "איתך"
       : partners.length === 1
         ? `לך ול${partners[0]}`
         : `לך ל${partners.slice(0, -1).join(", ")} ו${partners[partners.length - 1]}`;
@@ -1487,7 +1645,7 @@ export function fallbackNotificationText(
     const openingSharedList =
       list.listType === "custom" && isOpeningCustomList(list);
     // Opening an empty / title-only shared custom list.
-    if (partners.length > 0 && openingSharedList) {
+    if (sharedWithRecipient && openingSharedList) {
       return `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`;
     }
     if (list.listType === "custom" && derivedName && !openingSharedList) {
@@ -1499,7 +1657,7 @@ export function fallbackNotificationText(
       }
       return `${actorName} הוסיף ${formatNewItemPhrase(items)} לרשימת «${listTitle}»`;
     }
-    if (partners.length > 0 && derivedName) {
+    if (sharedWithRecipient && derivedName) {
       if (list.action === "remove") {
         return `${actorName} מחק ${itemText} מהרשימה המשותפת «${listTitle}»`;
       }
@@ -1540,7 +1698,7 @@ export function fallbackNotificationText(
     const listTitle = derivedName || "רשימה";
     const openingList = isOpeningCustomList(list);
     if (openingList) {
-      return partners.length > 0
+      return sharedWithRecipient
         ? `${actorName} הוסיף רשימה משותפת ${partnerPhrase}: «${listTitle}»`
         : `${actorName} פתח רשימה חדשה «${listTitle}»`;
     }
@@ -1555,7 +1713,7 @@ export function fallbackNotificationText(
 
   if (metadata.filing.length > 0) {
     const filing = metadata.filing[0];
-    if (partners.length > 0) {
+    if (sharedWithRecipient) {
       const verb =
         filing.action === "remove_filing"
           ? "מחק"
@@ -1578,6 +1736,16 @@ export function fallbackNotificationText(
     return yours
       ? `${actorName} ${verb} אצלך: ${filing.itemName}`
       : `${actorName} ${verb} אצל ${options?.ownerName ?? "עובד אחר"}: ${filing.itemName}`;
+  }
+
+  const directory = metadata.directory ?? [];
+  if (directory.length > 0) {
+    const contact = directory[0];
+    const label = contact.name.trim() || "איש קשר";
+    if (sharedWithRecipient) {
+      return `${actorName} שיתף ${partnerPhrase} איש קשר מספר הטלפונים: «${label}»`;
+    }
+    return `${actorName} עדכן איש קשר בספר הטלפונים: «${label}»`;
   }
 
   return `${actorName} עדכן מידע אצלך: ${itemText}`;

@@ -34,7 +34,7 @@ import {
   formatWhatsAppReplyContext,
   lookupWhatsAppOutbound,
 } from "./whatsapp-outbound-memory.js";
-import { isExactShowButtonCommand } from "./show-button-dump.js";
+import { isKnownShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
 
 export { phonesMatch };
@@ -389,7 +389,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       employeeId: speaker.employeeId,
       digitalEmployeeId: digital.id,
       message:
-        replyToText && !isExactShowButtonCommand(spoken)
+        replyToText && !isKnownShowButtonCommand(spoken)
           ? formatWhatsAppReplyContext(replyToText, spoken)
           : spoken,
       ...(attachments ? { attachments } : {}),

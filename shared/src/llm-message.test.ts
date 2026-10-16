@@ -292,6 +292,89 @@ describe("parseLlmReply", () => {
     expect(meta.showDump).toBe("tasks");
   });
 
+  it("reads show_dump_section and show_dump_partner", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "shopping",
+          show_dump_section: "shared",
+          show_dump_partner: " מיכל ",
+        },
+      }),
+    );
+    expect(meta.showDump).toBe("shopping");
+    expect(meta.showDumpSection).toBe("shared");
+    expect(meta.showDumpPartner).toBe("מיכל");
+  });
+
+  it("reads show_dump_assignee and show_dump_about", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_section: "shared",
+          show_dump_partner: "מיכל",
+          show_dump_assignee: "self",
+          show_dump_about: " מיכל ",
+        },
+      }),
+    );
+    expect(meta.showDumpAssignee).toBe("self");
+    expect(meta.showDumpAbout).toBe("מיכל");
+  });
+
+  it("reads partner/assignee/about as string arrays (OR within field)", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_partner: [" מיכל ", "עמית", "מיכל"],
+          show_dump_assignee: ["self", "מיכל"],
+          show_dump_about: ["טל", "מיכל"],
+        },
+      }),
+    );
+    expect(meta.showDumpPartner).toEqual(["מיכל", "עמית"]);
+    expect(meta.showDumpAssignee).toEqual(["self", "מיכל"]);
+    expect(meta.showDumpAbout).toEqual(["טל", "מיכל"]);
+  });
+
+  it("reads show_dump_from and show_dump_to as YYYY-MM-DD", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_from: "2026-10-17",
+          show_dump_to: "2026-10-20",
+        },
+      }),
+    );
+    expect(meta.showDumpFrom).toBe("2026-10-17");
+    expect(meta.showDumpTo).toBe("2026-10-20");
+
+    const bad = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_from: "17/10/2026",
+          show_dump_to: "not-a-date",
+        },
+      }),
+    );
+    expect(bad.showDumpFrom).toBeUndefined();
+    expect(bad.showDumpTo).toBeUndefined();
+  });
+
   it("omits navigate_address when null, empty, or not a string", () => {
     for (const navigate_address of [null, "", "   ", 12]) {
       const parsed = parseLlmReply(

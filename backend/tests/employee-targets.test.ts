@@ -862,6 +862,24 @@ describe("employee targets", () => {
         { partnerNames: ["עמית"] },
       ),
     ).toBe("טל הוסיף רשימה משותפת לך ולעמית: «באגים לתיקון»");
+    expect(
+      fallbackNotificationText(
+        tal,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "",
+              items: [{ "שם פריט": "באגים לתיקון" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { partnerNames: [] },
+      ),
+    ).toBe("טל הוסיף רשימה משותפת איתך: «באגים לתיקון»");
   });
 
   it("opens a shared custom list when the model stuffed the title as the only item", () => {
@@ -887,11 +905,13 @@ describe("employee targets", () => {
       items: [],
     });
     expect(plan.notifications).toHaveLength(1);
+    expect(plan.notifications[0]!.partnerNames).toEqual([]);
+    expect(plan.notifications[0]!.partnerNames).not.toContain("עמית");
     expect(
       fallbackNotificationText(tal, plan.notifications[0]!.metadata, {
         partnerNames: plan.notifications[0]!.partnerNames,
       }),
-    ).toBe("טל הוסיף רשימה משותפת לך ולעמית: «באגים לתיקון»");
+    ).toBe("טל הוסיף רשימה משותפת איתך: «באגים לתיקון»");
   });
 
   it("keeps a real custom row when list_name is missing but columns are not a title", () => {
@@ -1670,7 +1690,76 @@ describe("employee targets", () => {
       [amit.id, tal.id].sort(),
     );
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
-    expect(plan.notifications[0]?.partnerNames).toContain("טל");
+    expect(plan.notifications[0]?.partnerNames).not.toContain("טל");
+    expect(plan.notifications[0]?.partnerNames).toEqual([]);
+  });
+
+  it("notifies a shared filing partner with איתך, never לך ו<recipient>", () => {
+    const michal: PublicEmployee = {
+      id: "michal-1",
+      name: "מיכל",
+      surname: "",
+      nickname: "מיכל",
+      email: null,
+      phone: null,
+    };
+    const plan = planTargetedActions({
+      actor: tal,
+      employees: [...employees, michal],
+      metadata: {
+        ...emptyLlmMetadata(),
+        filing: [
+          {
+            action: "add_filing",
+            itemName: "קוד שער",
+            itemInfo: "1234",
+            targets: ["טל", "מיכל"],
+          },
+        ],
+      },
+    });
+    expect(plan.notifications).toHaveLength(1);
+    expect(plan.notifications[0]?.employee.id).toBe(michal.id);
+    expect(plan.notifications[0]?.partnerNames).toEqual([]);
+    expect(plan.notifications[0]?.partnerNames).not.toContain("מיכל");
+    expect(
+      fallbackNotificationText(tal, plan.notifications[0]!.metadata, {
+        partnerNames: plan.notifications[0]!.partnerNames,
+      }),
+    ).toBe("טל הוסיף תיוק משותף איתך: «קוד שער»");
+  });
+
+  it("names other co-partners on a three-way shared filing notify", () => {
+    const michal: PublicEmployee = {
+      id: "michal-1",
+      name: "מיכל",
+      surname: "",
+      nickname: "מיכל",
+      email: null,
+      phone: null,
+    };
+    const plan = planTargetedActions({
+      actor: tal,
+      employees: [...employees, michal],
+      metadata: {
+        ...emptyLlmMetadata(),
+        filing: [
+          {
+            action: "add_filing",
+            itemName: "קוד שער",
+            itemInfo: "1234",
+            targets: ["טל", "מיכל", "שני"],
+          },
+        ],
+      },
+    });
+    const toMichal = plan.notifications.find((row) => row.employee.id === michal.id);
+    expect(toMichal?.partnerNames).toEqual(["שני"]);
+    expect(
+      fallbackNotificationText(tal, toMichal!.metadata, {
+        partnerNames: toMichal!.partnerNames,
+      }),
+    ).toBe("טל הוסיף תיוק משותף לך ולשני: «קוד שער»");
   });
 
   it("opens an empty shared custom list without inventing a speaker task", () => {
@@ -2158,6 +2247,90 @@ describe("employee targets", () => {
       visibility: { scope: "personal" },
     });
     expect(plan.applications[0]?.metadata.lists[0]?.listType).toBe("shopping");
+  });
+
+  it("forces filing co-share on the speaker when targets omit the speaker", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        filing: [
+          {
+            action: "add_filing",
+            itemName: "קוד שער",
+            itemInfo: "1234",
+            targets: ["עמית"],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.visibility).toMatchObject({
+      scope: "shared",
+      visibleTo: expect.arrayContaining([tal.id, amit.id]),
+    });
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
+  });
+
+  it("forces contacts co-share on the speaker (share-only, no assign fan-out)", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "contacts",
+            listName: "",
+            targets: ["עמית"],
+            items: [{ "שם פרטי": "דני", "טלפון": "0501111111" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.visibility?.scope).toBe("shared");
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
+  });
+
+  it("keeps shopping assign when targets are the other person only", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            targets: ["עמית"],
+            items: [{ "שם פריט": "חלב" }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(amit.id);
+  });
+
+  it("adds הצג תיוקים on filing partner notify buttons", () => {
+    const buttons = showButtonsForNotify({
+      ...emptyLlmMetadata(),
+      filing: [
+        {
+          action: "add_filing",
+          itemName: "קוד",
+          itemInfo: "",
+          targets: ["טל", "עמית"],
+        },
+      ],
+    });
+    expect(buttons.some((row) => row.command === "הצג תיוקים")).toBe(true);
   });
 
   it("blocks list and filing mutations from guest speakers", () => {

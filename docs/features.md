@@ -27,6 +27,8 @@ Architecture rules: `.cursor/rules/architecture.mdc`, `.cursor/rules/model-under
 
 **Self-nudge reuses existing wrappers:** if «תזכירי לי לקנות/לעשות X» and X is already on the speaker’s shopping/tasks in this turn’s `EMPLOYEE_SAVED_DATA` (same work by meaning), Lucy must **not** `lists.add` a second copy — only her `להזכיר` task + `reminders.add` (engine soft-links the clock to the existing row). Several matches → ask which; «עוד אחד» / «תוסיפי שוב» → add allowed. Same grain as snooze «not already in saved data».
 
+**Reminder content keeps details:** `reminders[].item` and the `להזכיר` / speaker-task wording must keep the speaker’s concrete facts (light paraphrase OK). Hollow summaries that drop what they listed (e.g. «לטפל בשני הבאגים» when they named the bugs) are forbidden. Shopping rows stay product-only; that does not strip the clock label.
+
 **Reminder-on-item never creates a product:** «הוסף תזכורת ל־X» / «תזכורת ל־X» / «תזכירי לי על X» / «על 3» after a dump — **forbidden** to `lists.add` a shopping/tasks row in every case. Existing X → clock + `להזכיר` only; missing X → not found (no invent). Contrast: «תזכירי לי לקנות X» may still create the wrapper when missing.
 
 **Clock vs standing time edits:** updating only the WhatsApp clock (`reminders.update`) must not change the speaker standing `חוזר` — the engine syncs Lucy’s `להזכיר` worker task to the new fire time, not the soft-linked standing row. Moving a standing series that already has a linked clock → model asks «לעדכן גם את תזכורת הוואטסאפ בהתאם?» before cascading. After any reminder mutate, the engine ensures an `הצג תזכורות` reply button even if the model omitted `metadata.buttons`.
@@ -104,36 +106,37 @@ Same enum as jobs (`normal` / `urgent` / `very_urgent`) on shopping/tasks/contac
 - Stored on `EmployeeListItems.urgency`; `EMPLOYEE_SAVED_DATA` shows `urgency` only when not `normal`.
 - Listing in `response`: wrap the whole numbered line in «…» so it is bold (`urgent`). `very_urgent` adds ‼️ after the closing guillemet. Do not write דחוף / דחוף מאוד on the line. «מה יש לי דחוף» → only those rows.
 - Status / free-form «מה יש לי לקנות» answers are **LIVE DATA ONLY** from this turn’s injected blocks (`EMPLOYEE_SAVED_DATA`, …); chat history must not resurrect soft-deleted rows.
-- **Show / status dump (engine):** exact commands `הצג רשימת קניות|מטלות|אנשי קשר|<custom>` and `הצג תזכורות` get a **server dump from live DB** (replaces the model `response`). Trailing `אישית` / `אישיות` / `משותפת` / `משותפות` / `בבקשה` on builtin `קניות`|`מטלות` (and `בבקשה` on custom names) normalize to the same dump as the bare name — full three-way for shopping|tasks (not a personal-only filter). Free-form SHAREABLE STATUS ASK for shopping/tasks/contacts/reminders: the model sets `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`reminders`|custom name); the engine prints the **same** rich dump — shopping|tasks use the **three-way** layout below, plus schedule `— … (קבוע)` or `— … (קבוע + תזכורת)` / `(קבוע + תזכורת ב־20:45)` when standing + linked clock and ping ≠ chore time (live `exceptions` append ` · 18.10 ב־21:30` / ` · 23.10 בוטל`; same on reminder dump lines); else `(תזכורת: …)`, qty, partners without the viewer. **Custom lists:** numbered `1. 2. 3.` lines; every non-empty column labeled (`1. שם: טל · תיאור: נשוי למיכל`) — not a WhatsApp table. Near calendar days use relative labels (`היום` / `מחר` / `מחרתיים` / weekday for +3–6, else `D.M.YYYY`). Exact «הצג …» turns are **read-only** (stale mutates cleared). A free-form turn with both `show_dump` and mutates (e.g. «תמחק את 3,4» after a numbered dump) **keeps the mutates** and drops `show_dump`. If an exact-looking show command yields no dump but `show_dump` is set, the engine falls back to that kind. **BY LINE NUMBER:** after a numbered dump, spoken indices («3» / «ל3» / «סעיף 3») map dump titles → live ids; the model then emits **any** supported ACTION on that row (remove, update, add/cancel reminder, send «תשלחי את 3…», …) — not delete-only; bare «ל3» after a dump is a line index, not 03:00. ABOUT X and FULL DUMP stay model-written. WhatsApp does not attach reply-context to exact button commands.
+- **Show / status dump (engine):** dump intent is **ACTION-only** — `metadata.show_dump` (`shopping`|`tasks`|`contacts`|`filings`|`reminders`|custom name), optional `show_dump_section` (`personal`|`shared`), `show_dump_partner`, `show_dump_assignee` (`self`|name), `show_dump_about` (other person), `show_dump_from` / `show_dump_to` (inclusive `YYYY-MM-DD`, Asia/Jerusalem). **OR within a field:** `partner` / `assignee` / `about` accept `string | string[]` (multiple = OR); **AND across fields** (incl. dates). Multi-`about` → union of dumps. «אישית או משותפת» → omit `section`. Cross-shape OR («אישיות שלי או משותפות עם מיכל») is out of scope — model asks or full dump. The engine never regexes free-form user text for dump intent. Known UI button payloads may synthesize bare `show_dump` by **string equality** only when the model omitted it. Filters always come from the model. `section=personal` → אישיות only; `shared` → משותפות עם … only; `partner` filters that bucket; `assignee` filters sole-responsibility marks (shopping/tasks); `about=X` dumps X under visibility (owners: X’s lists; non-owners: rows already visible involving X); `from`/`to` keep task rows whose date span or `next_occurrences` intersect the range (reminders by `fire_at` day; ignored for shopping/contacts/filings). Empty → one engine sentence. Dump layout: schedule / qty / marks. **Filings dump:** numbered `שם:` / `מידע:` / `תיאור:` lines; when exactly one address-bearing filing is shown, engine sets `navigate_address` for Waze if the model left it empty. **Custom lists:** numbered labeled columns. `show_dump` alone → read-only; + mutates → mutates win. **BY LINE NUMBER** after a numbered dump (`הציגי N` = that last-dump line only — never a new `show_dump`). Bare FULL DUMP stays model-written.
 - **Shopping quantity:** every shopping row stores `כמות` (default `1` on apply if missing) and optional `יחידת מידה`. Dumps show `שם - כמות` or `שם - כמות יחידה` (e.g. `אורז - 2`, `עגבניות - 1 ק"ג`).
-- **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים): one category. Shopping|tasks use **three** blocks — see **Item share vs list share vs assign** below. Filings keep אישיים→משותפים. Items numbered `1. 2. 3.` restarting per block.
-- **Item share vs list share vs assign (do not collapse these again):**
+- **SHAREABLE STATUS ASK** («מה אני צריך לקנות» / «מה המטלות שלי» / תיוקים / **ABOUT X** «מה מיכל צריכה לקנות»): one category via `show_dump` (+ `show_dump_about` for X). Shopping|tasks: **אישיות** (private only) + **משותפות עם X** (co-share and assign involving X; empty buckets hidden). Filings / אנשי קשר: two-section share-only. Engine `show_dump=filings` + button `הצג תיוקים`.
+- **Share-only facts:** filings, contacts, directory are **co-share only**. Partners may mutate/unshare by id (`filing_id` / `contact_id` / `unshare_with`). Contacts may use `list_ops` **participants** for whole-list share; shopping/tasks builtins stay item-level only. Assign remains **shopping/tasks only**.
+- **Item share vs list share vs assign (Stage 2 dump):**
 
   | Case | Data | Dump |
   |------|------|------|
-  | One-way assign («עמית צריך לקנות חלב») | `assigned_by`, no co-share `shared_with` | **אישיות** — `חלב (טל)` / `חלב (עמית)` — name **without** «עם» |
-  | Item share on personal list («שתפי» / «אני ועמית») | personal list + item `shared_with` | **אישיות** — `קפה (עם עמית)` — **with** «עם» on the line |
-  | Meeting with participants in the title | personal list + `shared_with` + `פגישה (טל, מיכל)` | **אישיות** — title only; **no** extra `(עם מיכל)` (partners already in the name) |
-  | Whole shared list | list `scope=shared` + list `shared_with` | **משותפות** — partner header `(עם מיכל)`, then items |
-  | Assigner outbound | `scope=shared_items` | **קניות/מטלות של X** (never «משותפת עם») |
+  | Private row | no `shared_with`, no `assigned_by` | **אישיות** |
+  | One-way assign («מיכל צריכה לקנות חלב») | `assigned_by` / `shared_items` | **משותפות עם \<partner\>** — mark `(assignee)` only (both parties see the same mark) |
+  | Item co-share («שתפי עם מיכל») | personal list + item `shared_with` | **משותפות עם מיכל** — mark `(מיכל, טל)` all involved (no «עם» in the mark) |
+  | Meeting with participants in the title | `shared_with` + `פגישה (טל, מיכל)` | **משותפות עם מיכל** — title only; no extra partner mark |
+  | Whole shared list (custom, or contacts via `list_ops`) | list `scope=shared` | **משותפות עם X** (shopping/tasks) or contacts משותפים |
+  | Filing / contacts / directory share | row `scope=shared` + `shared_with` | two-section אישיים / משותפים with `(עם …)` |
 
   Example:
 
   ```text
   קניות אישיות:
   1. לחם - 1
-  2. חלב - 1 (עמית)           ← assigned_by
-  3. מלפפונים - 1 (עם עמית)   ← personal item shared_with
 
-  קניות משותפות:
-  (עם מיכל)
-  1. קמח מלא - 1              ← scope=shared list only
+  קניות משותפות עם עמית:
+  1. חלב - 1 (טל)             ← assign; mark = assignee
 
-  קניות של מיכל:
-  1. שמן - 1
+  קניות משותפות עם מיכל:
+  1. קפה - 1 (מיכל, טל)       ← co-share
+  2. קמח מלא - 1              ← scope=shared list
+  3. שמן - 1 (מיכל)           ← shared_items folded in
   ```
 
-  Snapshot omits `shared_with` on pure one-way assign (audience = owner+assigner only) so Lucy/engine place it under אישיות as `(Name)`. Item share does **not** promote built-in קניות/מטלות to `scope=shared` (`list_ops add_participants` refused on builtins). **Regression note:** briefly after `67ae2e0` personal `shared_with` was dumped under משותפות (looked identical to a shared list); engine + prompts restored the table above — keep `formatThreeWayDump` and SHAREABLE STATUS ASK wording in sync.
+  Builtin קניות/מטלות: `list_ops add_participants` **refused**. Contacts: participants allowed.
 - **FULL DUMP** (bare «מה יש לי» / «הציגי הכל» / `כל מה ששמור` / `סיכום מלא`): all sections; **מטלות** fully enumerated with the same three-way split; **קניות** and **רשימות אחרות** show **counts only**; hint «לפירוט רשימה: הצג רשימת …». **תזכורות פעילות** only for clocks not already on a task line — numbered `1. 2. 3.` (same as «הצג תזכורות»). **אנשי קשר** = built-in contacts list from `EMPLOYEE_SAVED_DATA`; **ספר הטלפונים** = `SPEAKER_CONTACTS` (directory) — separate section, never skip when the phone book has rows. Explicit «הצג רשימת X» / SHAREABLE STATUS ASK stay full item dumps.
 - **SHOW MY LISTS** («הציגי את הרשימות שלי»): model-written; **same grain as FULL DUMP list sections** — **מטלות** fully enumerated; **קניות** + **custom lists** + אנשי קשר = **counts only** (`*name* — N פריטים` / ריקה). Hint «לפירוט רשימה: הצג רשימת …». Exact «הצג רשימת X» stays a full item dump.
 - **Shared-with-X overview** («מה יש לי עם X» / «מה משותף עם X» / «מה משותף לי ול־X» / «מה יש לנו עם X» / «מה אנחנו חולקים עם X»): model-written from this turn’s `EMPLOYEE_SAVED_DATA` only for person X. **Shared lists** (`scope=shared`, X in `shared_with`) use the same **counts-only** grain as FULL DUMP רשימות אחרות (`*name* (עם X) — N פריטים` / ריקה) — never enumerate list rows here. **Enumerate** only atomic co-shares: item-level `shared_with`, meetings/tasks naming X, filings with X. Hint once «לפירוט רשימה: הצג רשימת …». Not category ABOUT X / exact הצג dumps.
@@ -172,7 +175,8 @@ Multi-turn drafts live **only** in the model conversation.
 - Incomplete turn → leave that ACTION empty and ask in `response`.
 - Short follow-up (time, weekday, phone, כן, מחר) → emit the **complete** ACTION this turn.
 - Bare date/day/time after the model asked for a slot fills the draft — not a new WHEN/TODAY query.
-- Server delete-confirm removed for id-based mutates; only model-side confirm before `list_ops.delete_list`.
+- **Delete confirm (model-turn):** before any lists/filing/reminders/directory remove, the model asks with that remove empty; on כן it emits remove with id. The server still applies immediately once ACTION has a valid id — no server draft. Same pattern for `list_ops.delete_list`.
+- **Save verb routing:** תייקי / תתייקי → always `add_filing`. תשמרי without a list name → infer (durable fact → filing; buying → shopping; chore → tasks) or ASK once; never invent a custom `list_name` from topic.
 
 Speaker-only meetings with an outside party («פגישה עם אלסטיק») save on the speaker alone — do not ask «עם מי עוד?».
 
@@ -206,7 +210,7 @@ Lucy (and engine notifies) can attach tap buttons: show list / show reminders / 
 - Web chat renders them; WhatsApp sends interactive buttons when available.
 - Server-sent thread messages stay in the worker’s model memory.
 
-**Waze navigate button:** when the reply mentions exactly one physical address, the model sets `metadata.navigate_address` (the engine never looks for addresses in the text). Web chat shows a Waze icon link under the first bubble (`https://waze.com/ul?q=…&navigate=yes`, opens the Waze app on a phone; stays tappable while sending). The address is saved in `ChatMessages.navigate_address` so history keeps the button. WhatsApp sends a `cta_url` button («פתח ב-Waze») right after the first reply, falling back to a text link.
+**Waze navigate button:** when the reply mentions exactly one physical address (street+city counts even without the word כתובת), the model sets `metadata.navigate_address` (the engine never looks for addresses in the utterance). On an engine **filings** dump, if the shown set has exactly one address-bearing row (`item_info` preferred, else place-encoded `item_name`), the engine sets `navigate_address` when the model left it empty. Web chat shows a Waze icon link under the first bubble (`https://waze.com/ul?q=…&navigate=yes`, opens the Waze app on a phone; stays tappable while sending). The address is saved in `ChatMessages.navigate_address` so history keeps the button. WhatsApp sends a `cta_url` button («פתח ב-Waze») right after the first reply, falling back to a text link.
 
 **Tests:** `shared/src/llm-message.test.ts`, `frontend/src/hooks/useChat.test.ts`, `frontend/src/pages/Chat/ChatPage.test.tsx`, `backend/tests/whatsapp.test.ts`.
 
@@ -226,6 +230,7 @@ Outbound WhatsApp converts guillemet-quoted spans («…») to bold. Web chat an
 - Shared shopping **delete** notifies partners as «X מחק «item» מרשימת «קניות»» (not a purchase guess).
 - Custom-list remove/update notices use the list’s **title column**, never a raw item id.
 - Share via `list_ops.alter_list` notifies every partner.
+- Partner WhatsApp copy for a new shared list/filing uses «איתך» when the recipient is the only other party — never «לך ו<recipient>» (e.g. not «תיוק משותף לך ומיכל» to מיכל). With additional co-partners: «לך ולערן».
 
 ---
 

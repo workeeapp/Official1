@@ -134,15 +134,16 @@ describe("WhatsApp webhook", () => {
     ).toBe('[בתשובה להודעה: "מה יש בקניות?"] תוריד את החלב');
   });
 
-  it("does not wrap exact הצג button commands in reply context", async () => {
-    const { isExactShowButtonCommand } = await import(
+  it("does not wrap known הצג button commands in reply context", async () => {
+    const { isKnownShowButtonCommand } = await import(
       "../src/services/show-button-dump.js"
     );
-    expect(isExactShowButtonCommand("הצג רשימת קניות")).toBe(true);
+    expect(isKnownShowButtonCommand("הצג רשימת קניות")).toBe(true);
+    expect(isKnownShowButtonCommand("הצג רשימת קניות אישית")).toBe(false);
     // Inbound path: spoken button command skips formatWhatsAppReplyContext.
     const spoken = "הצג רשימת קניות";
     const replyToText = "מחקתי את האורז מרשימת הקניות.";
-    const message = isExactShowButtonCommand(spoken)
+    const message = isKnownShowButtonCommand(spoken)
       ? spoken
       : formatWhatsAppReplyContext(replyToText, spoken);
     expect(message).toBe("הצג רשימת קניות");

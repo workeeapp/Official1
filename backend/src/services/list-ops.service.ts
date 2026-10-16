@@ -16,6 +16,7 @@ import {
   cancelActiveRemindersMatchingWork,
   cancelReminderLinkedToWorkerItem,
 } from "./reminder.service.js";
+import { builtinListHebrew, isBuiltinListType } from "./builtin-lists.js";
 
 export type ListOpRefusalReason =
   | "not_found"
@@ -42,12 +43,6 @@ export interface ListOpResult {
   cancelledReminders: string[];
   cancelledReminderIds: string[];
 }
-
-const BUILTIN_LABELS: Record<string, string> = {
-  shopping: "קניות",
-  tasks: "מטלות",
-  contacts: "אנשי קשר",
-};
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -250,8 +245,15 @@ async function alterList(
   const builtin = list.listType !== "custom";
   const participantsOnly =
     op.addParticipants.length > 0 || op.removeParticipants.length > 0;
-  // Builtins (קניות/מטלות/אנשי קשר) stay personal shells — share is item-level via lists, not whole-list scope=shared.
-  if (builtin && (structural || participantsOnly)) {
+  // Shopping/tasks builtins: never whole-list share (item-level only).
+  // Contacts: allow participants-only whole-list share; still refuse structural.
+  if (list.listType === "shopping" || list.listType === "tasks") {
+    if (structural || participantsOnly) {
+      throw new ListOpRefused("builtin");
+    }
+  } else if (builtin && structural) {
+    throw new ListOpRefused("builtin");
+  } else if (builtin && participantsOnly && list.listType !== "contacts") {
     throw new ListOpRefused("builtin");
   }
 
@@ -459,7 +461,10 @@ function listLabel(list: { listType: string; name: string }): string {
   if (list.listType === "custom") {
     return list.name.trim() || "הרשימה";
   }
-  return BUILTIN_LABELS[list.listType] ?? list.name;
+  if (isBuiltinListType(list.listType)) {
+    return builtinListHebrew(list.listType);
+  }
+  return list.name;
 }
 
 const REFUSAL_TEXT: Record<ListOpRefusalReason, (detail: string, label: string) => string> = {

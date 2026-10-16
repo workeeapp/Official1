@@ -59,7 +59,13 @@
     "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
     "    \"send_attachments\": [],",
     "    \"navigate_address\": null,",
-    "    \"show_dump\": null",
+    "    \"show_dump\": null,",
+    "    \"show_dump_section\": null,",
+    "    \"show_dump_partner\": null,",
+    "    \"show_dump_assignee\": null,",
+    "    \"show_dump_about\": null,",
+    "    \"show_dump_from\": null,",
+    "    \"show_dump_to\": null",
     "  }",
     "}",
     "",
@@ -462,6 +468,11 @@
                       "type": "array",
                       "items": { "type": "string" },
                       "description": "update_filing only: attachment_ids to remove from this filing."
+                    },
+                    "unshare_with": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "update_filing: partner display names to drop from this filing's visible_to (same idea as lists items[].unshare_with)."
                     }
                   },
                   "required": [
@@ -590,7 +601,7 @@
                   "properties": {
                     "action": {
                       "type": "string",
-                      "enum": ["add", "remove"]
+                      "enum": ["add", "remove", "update"]
                     },
                     "name": {
                       "type": "string"
@@ -600,7 +611,17 @@
                     },
                     "contact_id": {
                       "type": "string",
-                      "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove — omitting it skips the mutate."
+                      "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove and directory.update."
+                    },
+                    "targets": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Co-share partners on add/update (speaker stays owner)."
+                    },
+                    "unshare_with": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "directory.update: partner names to drop from this contact's visible_to."
                     }
                   },
                   "required": ["action", "name", "phone"]
@@ -731,7 +752,39 @@
               "show_dump": {
                 "type": ["string", "null"],
                 "maxLength": 100,
-                "description": "When the speaker asks to SHOW their shopping/tasks/contacts/reminders/a named custom list (SHAREABLE STATUS ASK / הצג רשימת X / מה יש לי לקנות / מה המטלות שלי / הצג תזכורות free-form): set to shopping | tasks | contacts | reminders | the exact custom list_name. lists/reminders stay empty. The server replaces response with a live DB dump — do not invent item lines. null otherwise. NOT for ABOUT X or bare FULL DUMP (מה יש לי)."
+                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category («מה מיכל צריכה לקנות» / «מה טל צריך לעשות»): set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. lists/reminders stay empty. Server replaces response with a live dump. null otherwise. NOT for bare FULL DUMP (מה יש לי). Pair with show_dump_section / show_dump_partner / show_dump_assignee / show_dump_about / show_dump_from / show_dump_to."
+              },
+              "show_dump_section": {
+                "type": ["string", "null"],
+                "description": "null = full dump; personal = אישיות only; shared = משותפות עם … only. Use for אישית / משותפת. null otherwise."
+              },
+              "show_dump_partner": {
+                "type": ["string", "array", "null"],
+                "items": { "type": "string", "maxLength": 80 },
+                "maxLength": 80,
+                "description": "With show_dump_section=shared: partner display name(s) for משותפות עם X bucket(s). string or string[] — multiple = OR (מיכל או עמית). null when all shared partners or section is not shared. AND with other dump filters."
+              },
+              "show_dump_assignee": {
+                "type": ["string", "array", "null"],
+                "items": { "type": "string", "maxLength": 80 },
+                "maxLength": 80,
+                "description": "shopping/tasks only: responsibility filter — self (speaker) and/or display name(s). string or string[] — multiple = OR (עליי או מיכל). null = no filter. Ignored for contacts/filings. Multi-name co-share marks are excluded when set. AND with other dump filters."
+              },
+              "show_dump_about": {
+                "type": ["string", "array", "null"],
+                "items": { "type": "string", "maxLength": 80 },
+                "maxLength": 80,
+                "description": "OTHER person(s) for ABOUT X («מה מיכל צריכה לקנות» / מטלות של טל או מיכל). string or string[] — multiple = union of dumps. null when dumping the speaker. Pair with show_dump. AND with other dump filters."
+              },
+              "show_dump_from": {
+                "type": ["string", "null"],
+                "maxLength": 10,
+                "description": "Inclusive dump date filter start YYYY-MM-DD (Asia/Jerusalem). From בין X ל־Y / מ־… עד … via SESSION_CLOCK. Tasks: keep rows whose date span or next_occurrences intersect [from,to]. Reminders: filter by fire_at date. Ignored for shopping/contacts/filings. null = no start bound. Compose with section/partner/assignee/about."
+              },
+              "show_dump_to": {
+                "type": ["string", "null"],
+                "maxLength": 10,
+                "description": "Inclusive dump date filter end YYYY-MM-DD (Asia/Jerusalem). Pair with show_dump_from. null = no end bound."
               }
             }
           }

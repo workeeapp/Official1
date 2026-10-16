@@ -96,21 +96,16 @@ describe("LLM action schema", () => {
       "FORBIDDEN enumerating custom rows",
     );
     expect(config.systemMessage).toContain("לפירוט רשימה: הצג רשימת");
-    expect(config.systemMessage).toContain("THREE blocks");
-    expect(config.systemMessage).toContain("קניות של עמית");
     expect(config.systemMessage).toContain("assigned_by");
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN on (3): «משותפת עם …»",
-    );
-    expect(config.systemMessage).toContain("three-way layout");
-    expect(config.systemMessage).toContain("ITEM vs LIST SHARE (critical)");
-    expect(config.systemMessage).toContain(
-      "personal-list shared_with stays under אישיות",
-    );
-    expect(config.systemMessage).toContain("קפה - 1 (עם עמית)");
-    expect(config.systemMessage).toContain(
-      "ASSIGN vs CO-SHARE marks: «(טל)» = assigned_by; «(עם עמית)» = shared_with",
-    );
+    expect(config.systemMessage).toContain("show_dump_about");
+    expect(config.systemMessage).toContain("show_dump_assignee");
+    expect(config.systemMessage).toContain("show_dump_from");
+    expect(config.systemMessage).toContain("OR WITHIN FIELD");
+    expect(config.systemMessage).toContain("SAVE VERB ROUTING");
+    expect(config.systemMessage).toContain("DELETE CONFIRM (critical)");
+    expect(config.systemMessage).toContain("FORBIDDEN metadata.show_dump on ANY line-index");
+    expect(config.systemMessage).toContain("משותפות עם X");
+    expect(config.systemMessage).toContain("SHOW_DUMP (critical)");
     expect(config.systemMessage).toContain("NOT bare «מה יש לי»");
     expect(config.systemMessage).toContain("מה המטלות שלי");
     expect(config.systemMessage).toContain(
@@ -155,23 +150,23 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN second shopping חלב",
     );
+    expect(config.systemMessage).toContain("REMINDER CONTENT DETAIL");
+    expect(config.systemMessage).toContain("לטפל בשני הבאגים");
     expect(config.systemMessage).toContain("REMINDER-ON-ITEM");
     expect(config.systemMessage).toContain("הוסף תזכורת ל־X");
     expect(config.systemMessage).toContain(
       "FORBIDDEN lists.add (or inventing) any shopping/tasks product wrapper",
     );
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN also appending «(עם מיכל)» on the same line",
-    );
+    expect(config.systemMessage).toContain("meetings whose title already lists partners");
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
     expect(config.systemMessage).toContain("מה יש לי משותף עם X");
     expect(config.systemMessage).toContain("מה יש לי עם X");
     expect(config.systemMessage).toContain("מה אנחנו חולקים עם X");
-    expect(config.systemMessage).toContain(
-      "הצג רשימת קניות אישית/משותפת",
-    );
+    expect(config.systemMessage).toContain("SHOW DUMP SECTION");
+    expect(config.systemMessage).toContain("show_dump_section=personal");
+    expect(config.systemMessage).toContain("show_dump_partner=");
     expect(config.systemMessage).toContain(
       "shared LISTS are COUNTS ONLY",
     );
@@ -229,11 +224,11 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("DELETE BY DAY");
     expect(config.systemMessage).toContain("BY LINE NUMBER (critical)");
     expect(config.systemMessage).toContain(
-      "whatever ACTION the speaker asked for",
+      "whatever ACTION they asked for on THAT entity",
     );
     expect(config.systemMessage).toContain("תשלחי את 3 ל…");
     expect(config.systemMessage).toContain(
-      "FORBIDDEN treating it as 03:00 vs 15:00",
+      "FORBIDDEN metadata.show_dump on ANY line-index turn",
     );
     expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
     expect(config.systemMessage).toContain(

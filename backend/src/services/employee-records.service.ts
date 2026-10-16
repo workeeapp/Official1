@@ -65,6 +65,13 @@ export interface ListItemOwnerRef {
   itemVisibleTo: string[];
 }
 
+/** Owner of a live filing addressed by filing_id. */
+export interface FilingOwnerRef {
+  ownerId: string;
+  visibleTo: string[];
+  scope: ItemScope;
+}
+
 export interface EmployeeRecordSnapshot {
   lists: Array<{
     /** Copy into list_ops.list_id for alter_list / delete_list. */
@@ -88,6 +95,8 @@ export interface EmployeeRecordSnapshot {
     item_description: string;
     owner: string;
     scope: ItemScope;
+    /** Partner display names when scope is shared (includes owner). */
+    shared_with?: string[];
   }>;
   reminders?: ReminderSnapshotRow[];
 }
@@ -523,7 +532,7 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
-    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. With a matching id the server applies immediately (no delete-confirm). The server ignores remove/update without a matching id.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask); on כן emit remove with id — then the server applies immediately (confirm is model-turn only). The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name, item_description (תיאור — use this to find the right filing), and optional item_info. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Status dumps → header «קניות של X» / «מטלות של X» only — FORBIDDEN «משותפת עם …» / «(עם …)» on that header. Custom shared_items: mention when asked what was shared. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
@@ -1326,6 +1335,8 @@ export async function getEmployeeRecordSnapshot(
         scope: (filing.scope === "shared" ? "shared" : "personal") as
           | "shared"
           | "personal",
+        // Share-only family: partners via shared_with; never assigned_by.
+        ...itemSharedWithField(filing.employeeId, filing, names),
       })),
     ...partnerFilings
       .filter((filing) => visibleToIncludes(filing.visibleTo, employeeId))
@@ -1336,6 +1347,7 @@ export async function getEmployeeRecordSnapshot(
         item_description: filing.itemDescription ?? "",
         owner: filing.employee.nickname?.trim() || filing.employee.name,
         scope: "shared" as const,
+        ...itemSharedWithField(filing.employeeId, filing, names),
       })),
   ];
 
@@ -1514,6 +1526,7 @@ export async function applyEmployeeRecords(
     where: { id: employeeId },
     select: { userId: true },
   });
+  const filingAccessCache: WorkerAccessCache = {};
   for (const action of metadata.filing) {
     if (action.action === "remove_filing") {
       const filingId = action.filingId.trim();
@@ -1524,6 +1537,16 @@ export async function applyEmployeeRecords(
         where: { id: filingId, employeeId, deletedAt: null },
       });
       if (!existing) {
+        continue;
+      }
+      if (
+        !(await humanItemAccessAllowed(
+          employeeId,
+          actor,
+          existing,
+          filingAccessCache,
+        ))
+      ) {
         continue;
       }
       await prisma.employeeFiling.update({
@@ -1557,10 +1580,23 @@ export async function applyEmployeeRecords(
       if (!existingFiling) {
         continue;
       }
+      if (
+        !(await humanItemAccessAllowed(
+          employeeId,
+          actor,
+          existingFiling,
+          filingAccessCache,
+        ))
+      ) {
+        continue;
+      }
+      const removeIds = resolved.removeIds ?? [];
+      const hasUnshare = removeIds.length > 0;
       const attachOnly =
         !action.itemName.trim() &&
         !action.itemInfo.trim() &&
         !action.itemDescription.trim() &&
+        !hasUnshare &&
         Boolean(action.attachmentIds?.length || action.detachAttachmentIds?.length);
       if (attachOnly) {
         await applyAttachmentLinks({
@@ -1580,26 +1616,53 @@ export async function applyEmployeeRecords(
       const itemDescription = action.itemDescription.trim().slice(0, 4000);
       const nextDescription =
         itemDescription || existingFiling.itemDescription || "";
-      const shareFiling =
-        resolved.scope === "shared" || resolved.visibleTo.length > 1;
+      const existingVisible = idList(existingFiling.visibleTo);
+      let nextVisible = uniqueIds([
+        employeeId,
+        ...existingVisible,
+        ...(resolved.scope === "shared" || resolved.visibleTo.length > 1
+          ? resolved.visibleTo
+          : []),
+      ]);
+      if (hasUnshare) {
+        const drop = new Set(removeIds);
+        nextVisible = nextVisible.filter(
+          (id) => id === employeeId || !drop.has(id),
+        );
+      }
+      const shareFiling = nextVisible.length > 1;
+      const fieldsOnly =
+        !action.itemName.trim() &&
+        !action.itemInfo.trim() &&
+        !action.itemDescription.trim();
       await prisma.employeeFiling.update({
         where: { id: existingFiling.id },
         data: {
           ...(action.itemName.trim()
             ? { itemName: action.itemName.trim().slice(0, 200) }
             : {}),
-          itemInfo: action.itemInfo,
-          itemDescription: nextDescription,
-          ...(shareFiling
+          ...(!fieldsOnly
             ? {
-                scope: "shared",
-                visibleTo: uniqueIds([
-                  employeeId,
-                  ...resolved.visibleTo,
-                  ...idList(existingFiling.visibleTo),
-                ]),
+                itemInfo: action.itemInfo,
+                itemDescription: nextDescription,
               }
-            : {}),
+            : hasUnshare
+              ? {}
+              : {
+                  itemInfo: action.itemInfo,
+                  itemDescription: nextDescription,
+                }),
+          ...(shareFiling || hasUnshare
+            ? {
+                scope: shareFiling ? "shared" : "personal",
+                visibleTo: shareFiling ? nextVisible : [employeeId],
+              }
+            : resolved.scope === "shared" || resolved.visibleTo.length > 1
+              ? {
+                  scope: "shared",
+                  visibleTo: nextVisible,
+                }
+              : {}),
         },
       });
       const nextName = action.itemName.trim()
@@ -1614,15 +1677,19 @@ export async function applyEmployeeRecords(
       filingMutations.push({
         action: "update",
         itemName: nextName,
-        itemInfo: action.itemInfo,
-        itemDescription: nextDescription,
+        itemInfo: fieldsOnly ? existingFiling.itemInfo : action.itemInfo,
+        itemDescription: fieldsOnly
+          ? existingFiling.itemDescription ?? ""
+          : nextDescription,
       });
-      await syncSpeakerAddressGenderFromFiling({
-        employeeId,
-        itemName: nextName,
-        itemInfo: action.itemInfo,
-        itemDescription: nextDescription,
-      });
+      if (!fieldsOnly) {
+        await syncSpeakerAddressGenderFromFiling({
+          employeeId,
+          itemName: nextName,
+          itemInfo: action.itemInfo,
+          itemDescription: nextDescription,
+        });
+      }
       if (filingOwner) {
         await recordAuditEvent({
           userId: filingOwner.userId,
@@ -1630,7 +1697,9 @@ export async function applyEmployeeRecords(
           action: "filing_update",
           entityType: "EmployeeFiling",
           entityId: existingFiling.id,
-          summary: `update filing: ${nextName}`,
+          summary: hasUnshare
+            ? `unshare filing: ${nextName}`
+            : `update filing: ${nextName}`,
         });
       }
     } else {
@@ -2749,6 +2818,39 @@ export async function loadListItemOwners(
       listScope: row.list.scope === "shared" ? "shared" : "personal",
       listVisibleTo: idList(row.list.visibleTo),
       itemVisibleTo: idList(row.visibleTo),
+    });
+  }
+  return owners;
+}
+
+/** Owner of each live filing addressed by filing_id, limited to this account. */
+export async function loadFilingOwners(
+  userId: string,
+  filingIds: string[],
+): Promise<Map<string, FilingOwnerRef>> {
+  const owners = new Map<string, FilingOwnerRef>();
+  const ids = filingIds.filter((id) => UUID_RE.test(id));
+  if (ids.length === 0) {
+    return owners;
+  }
+  const rows = await prisma.employeeFiling.findMany({
+    where: {
+      id: { in: ids },
+      deletedAt: null,
+      employee: { userId },
+    },
+    select: {
+      id: true,
+      employeeId: true,
+      visibleTo: true,
+      scope: true,
+    },
+  });
+  for (const row of rows) {
+    owners.set(row.id, {
+      ownerId: row.employeeId,
+      visibleTo: idList(row.visibleTo),
+      scope: row.scope === "shared" ? "shared" : "personal",
     });
   }
   return owners;

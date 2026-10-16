@@ -81,6 +81,8 @@ export interface LlmFilingAction {
   filingId: string;
   attachmentIds?: string[];
   detachAttachmentIds?: string[];
+  /** update_filing: partner names to drop from visible_to. */
+  unshareWith?: string[];
 }
 
 export interface LlmMessageAction {
@@ -169,14 +171,18 @@ export interface LlmJobAction {
   endTime?: string;
 }
 
-export type LlmDirectoryActionName = "add" | "remove";
+export type LlmDirectoryActionName = "add" | "remove" | "update";
 
 export interface LlmDirectoryAction {
   action: LlmDirectoryActionName;
   name: string;
   phone: string;
-  /** Copy from this turn's SPEAKER_CONTACTS[].contact_id on remove. */
+  /** Copy from this turn's SPEAKER_CONTACTS[].contact_id on remove/update. */
   contactId: string;
+  /** Co-share partners (share-only — speaker stays owner). Empty = personal. */
+  targets: string[];
+  /** update: partner names to drop from visible_to. */
+  unshareWith?: string[];
 }
 
 export type LlmReminderActionName = "add" | "remove" | "update";
@@ -279,10 +285,36 @@ export interface LlmMetadata {
   /**
    * Status dump signal: model understood a show/status ask; engine replaces
    * response with a live DB dump. Values: shopping|tasks|contacts|reminders
-   * or a custom list name (same as «הצג רשימת <name>»).
+   * or a custom list name.
    */
   showDump?: string;
+  /**
+   * shopping/tasks three-way filter. null/omit = full dump.
+   * personal = אישיות only; shared = משותפות only (optional partner below).
+   */
+  showDumpSection?: "personal" | "shared" | null;
+  /**
+   * With showDumpSection=shared: partner משותפות bucket(s).
+   * string | string[] — multiple = OR.
+   */
+  showDumpPartner?: string | string[] | null;
+  /**
+   * Responsibility filter for shopping/tasks dumps: `self` | display name(s).
+   * string | string[] — multiple = OR. Combine with section/partner.
+   */
+  showDumpAssignee?: string | string[] | null;
+  /**
+   * Dump subject(s) other than the speaker («מה מיכל צריכה לקנות»).
+   * string | string[] — multiple = union of dumps.
+   */
+  showDumpAbout?: string | string[] | null;
+  /** Inclusive dump date filter start YYYY-MM-DD (Asia/Jerusalem). */
+  showDumpFrom?: string | null;
+  /** Inclusive dump date filter end YYYY-MM-DD (Asia/Jerusalem). */
+  showDumpTo?: string | null;
 }
+
+export type LlmShowDumpSection = "personal" | "shared";
 
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
 const LIST_TYPES = new Set<LlmListType>(["shopping", "contacts", "tasks", "custom"]);
@@ -372,6 +404,18 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     meta.send_attachments ?? meta.sendAttachments,
   ).slice(0, SEND_ATTACHMENTS_MAX);
   const showDump = parseShowDump(meta);
+  const showDumpSection = parseShowDumpSection(meta);
+  const showDumpPartner = parseShowDumpNameList(
+    meta.show_dump_partner ?? meta.showDumpPartner,
+  );
+  const showDumpAssignee = parseShowDumpNameList(
+    meta.show_dump_assignee ?? meta.showDumpAssignee,
+  );
+  const showDumpAbout = parseShowDumpNameList(
+    meta.show_dump_about ?? meta.showDumpAbout,
+  );
+  const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
+  const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
   return {
     messages,
     reminders,
@@ -387,6 +431,31 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     filing,
     ...(sendAttachments.length > 0 ? { sendAttachments } : {}),
     ...(showDump ? { showDump } : {}),
+    ...(showDumpSection ? { showDumpSection } : {}),
+    ...(showDumpPartner.length > 0
+      ? {
+          showDumpPartner:
+            showDumpPartner.length === 1
+              ? showDumpPartner[0]!
+              : showDumpPartner,
+        }
+      : {}),
+    ...(showDumpAssignee.length > 0
+      ? {
+          showDumpAssignee:
+            showDumpAssignee.length === 1
+              ? showDumpAssignee[0]!
+              : showDumpAssignee,
+        }
+      : {}),
+    ...(showDumpAbout.length > 0
+      ? {
+          showDumpAbout:
+            showDumpAbout.length === 1 ? showDumpAbout[0]! : showDumpAbout,
+        }
+      : {}),
+    ...(showDumpFrom ? { showDumpFrom } : {}),
+    ...(showDumpTo ? { showDumpTo } : {}),
   };
 }
 
@@ -397,6 +466,81 @@ export function parseShowDump(meta: Record<string, unknown>): string {
     return "";
   }
   return raw.trim().slice(0, 100);
+}
+
+/** metadata.show_dump_section — personal | shared. */
+export function parseShowDumpSection(
+  meta: Record<string, unknown>,
+): LlmShowDumpSection | null {
+  const raw = meta.show_dump_section ?? meta.showDumpSection;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === "personal" || value === "shared") {
+    return value;
+  }
+  return null;
+}
+
+/** Normalize dump name filter: string | string[] → deduped trimmed list. */
+export function parseShowDumpNameList(raw: unknown): string[] {
+  const parts: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim().slice(0, 80);
+    if (trimmed && !parts.includes(trimmed)) {
+      parts.push(trimmed);
+    }
+  };
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      push(entry);
+    }
+  } else {
+    push(raw);
+  }
+  return parts;
+}
+
+/** metadata.show_dump_partner — partner display name(s); multiple = OR. */
+export function parseShowDumpPartner(meta: Record<string, unknown>): string[] {
+  return parseShowDumpNameList(meta.show_dump_partner ?? meta.showDumpPartner);
+}
+
+/** metadata.show_dump_assignee — `self` | display name(s); multiple = OR. */
+export function parseShowDumpAssignee(meta: Record<string, unknown>): string[] {
+  return parseShowDumpNameList(
+    meta.show_dump_assignee ?? meta.showDumpAssignee,
+  );
+}
+
+/** metadata.show_dump_about — other person(s); multiple = union dumps. */
+export function parseShowDumpAbout(meta: Record<string, unknown>): string[] {
+  return parseShowDumpNameList(meta.show_dump_about ?? meta.showDumpAbout);
+}
+
+/** Coerce stored metadata string | string[] to a name list. */
+export function showDumpNames(
+  value: string | string[] | null | undefined,
+): string[] {
+  return parseShowDumpNameList(value ?? null);
+}
+
+/** metadata.show_dump_from / show_dump_to — YYYY-MM-DD inclusive. */
+export function parseShowDumpDate(
+  meta: Record<string, unknown>,
+  snake: string,
+  camel: string,
+): string {
+  const raw = meta[snake] ?? meta[camel];
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const value = raw.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
 }
 
 const LIST_OP_ACTIONS = new Set<LlmListOpName>(["alter_list", "delete_list"]);
@@ -902,23 +1046,36 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
       ? "add"
       : actionRaw === "remove" || actionRaw === "delete"
         ? "remove"
-        : null;
+        : actionRaw === "update" || actionRaw === "edit" || actionRaw === "change"
+          ? "update"
+          : null;
   if (!action) {
     return null;
   }
   const contactId = readText(record, ["contact_id", "contactId", "id"]);
   const name = readText(record, ["name", "שם", "contact", "label"]);
   const phone = readText(record, ["phone", "טלפון", "number", "whatsapp"]);
-  if (action === "remove") {
+  const targets = parseTargets(record);
+  const unshareWith = readStringList(
+    record.unshare_with ?? record.unshareWith,
+  );
+  if (action === "remove" || action === "update") {
     if (!contactId) {
       return null;
     }
-    return { action, name, phone, contactId };
+    return {
+      action,
+      name,
+      phone,
+      contactId,
+      targets,
+      ...(unshareWith.length > 0 ? { unshareWith } : {}),
+    };
   }
   if (!name || !phone) {
     return null;
   }
-  return { action, name, phone, contactId: "" };
+  return { action, name, phone, contactId: "", targets };
 }
 
 function reminderActionName(value: unknown): LlmReminderActionName | null {
@@ -1264,6 +1421,9 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
     return null;
   }
 
+  const unshareWith = readStringList(
+    value.unshare_with ?? value.unshareWith,
+  );
   return {
     action,
     itemName,
@@ -1281,6 +1441,7 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
       "detachAttachmentIds",
       value.detach_attachment_ids ?? value.detachAttachmentIds,
     ),
+    ...(unshareWith.length > 0 ? { unshareWith } : {}),
   };
 }
 

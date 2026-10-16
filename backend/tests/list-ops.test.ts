@@ -207,7 +207,7 @@ describe("list ops", () => {
     expect(listUpdate).not.toHaveBeenCalled();
   });
 
-  it("refuses rename and participant changes on a built-in list", async () => {
+  it("refuses rename and participant changes on shopping/tasks builtins", async () => {
     listFindFirst.mockResolvedValue(
       bugsList({ listType: "shopping", name: "", titleField: "", columns: [] }),
     );
@@ -222,6 +222,26 @@ describe("list ops", () => {
 
     const [removed] = await run([op({ removeParticipants: ["טל"] })]);
     expect(removed.refusal?.reason).toBe("builtin");
+  });
+
+  it("allows participants-only on contacts builtin; refuses structural", async () => {
+    listFindFirst.mockResolvedValue(
+      bugsList({
+        listType: "contacts",
+        name: "",
+        titleField: "שם פרטי",
+        columns: ["שם פרטי", "שם משפחה"],
+        items: [],
+      }),
+    );
+
+    const [structural] = await run([op({ newName: "חברים" })]);
+    expect(structural.refusal?.reason).toBe("builtin");
+
+    const [shared] = await run([op({ addParticipants: ["טל"] })]);
+    expect(shared.refusal).toBeUndefined();
+    expect(shared.applied).toBe(true);
+    expect(listUpdate).toHaveBeenCalled();
   });
 
   it("removes a participant from the list and from its rows", async () => {

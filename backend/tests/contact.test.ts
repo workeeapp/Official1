@@ -49,7 +49,13 @@ describe("contact directory POC", () => {
       }),
     );
     expect(meta.directory).toEqual([
-      { action: "add", name: "מיכל", phone: "0541111111", contactId: "" },
+      {
+        action: "add",
+        name: "מיכל",
+        phone: "0541111111",
+        contactId: "",
+        targets: [],
+      },
     ]);
   });
 

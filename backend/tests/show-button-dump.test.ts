@@ -9,11 +9,12 @@ import {
   formatReminderWhen,
   formatScheduleSuffix,
   formatShoppingTitle,
-  formatShowButtonDump,
   formatShowDumpFromKind,
-  isExactShowButtonCommand,
-  normalizeShowListName,
-  parseExactShowButtonCommand,
+  isKnownShowButtonCommand,
+  itemMatchesDateRange,
+  mapShowButtonCommandToDump,
+  navigateAddressFromFilingsDump,
+  partnerBucketMatches,
   partnersKey,
   shortCadenceParen,
   titleAlreadyListsPartners,
@@ -23,32 +24,135 @@ import {
   stripWhatsAppReplyPrefix,
 } from "../src/services/whatsapp-outbound-memory.js";
 
-describe("exact show button commands", () => {
-  it("matches button commands only", () => {
-    expect(isExactShowButtonCommand("הצג רשימת קניות")).toBe(true);
-    expect(isExactShowButtonCommand("הצג תזכורות")).toBe(true);
-    expect(isExactShowButtonCommand("הצג רשימת משימות לעבודה")).toBe(true);
-    expect(isExactShowButtonCommand("מה יש לי לקנות")).toBe(false);
-    expect(isExactShowButtonCommand("הציגי את רשימת הקניות")).toBe(false);
-    expect(parseExactShowButtonCommand("הצג רשימת קניות בבקשה")).toEqual({
-      kind: "list",
-      name: "קניות בבקשה",
-    });
+describe("closed show button allowlist", () => {
+  it("maps exact builtin button strings only — not free-form or suffixes", () => {
+    expect(mapShowButtonCommandToDump("הצג רשימת קניות")).toBe("shopping");
+    expect(mapShowButtonCommandToDump("הצג תזכורות")).toBe("reminders");
+    expect(mapShowButtonCommandToDump("הצג תיוקים")).toBe("filings");
+    expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
+    expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("contacts");
+    expect(mapShowButtonCommandToDump("הצג רשימת קניות בבקשה")).toBeNull();
+    expect(mapShowButtonCommandToDump("הצג רשימת קניות אישית")).toBeNull();
+    expect(mapShowButtonCommandToDump("מה יש לי לקנות")).toBeNull();
+    expect(mapShowButtonCommandToDump("הציגי את רשימת הקניות")).toBeNull();
+    expect(isKnownShowButtonCommand("הצג רשימת קניות")).toBe(true);
+    expect(isKnownShowButtonCommand("הצג רשימת קניות אישית")).toBe(false);
   });
 
-  it("strips WhatsApp reply prefix", () => {
+  it("maps custom list buttons only by exact equality to a live list_name", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "משימות לעבודה",
+          owner: "טל",
+          scope: "personal",
+          items: [],
+        },
+      ],
+      filing: [],
+    };
+    expect(mapShowButtonCommandToDump("הצג רשימת משימות לעבודה", snap)).toBe(
+      "משימות לעבודה",
+    );
+    expect(mapShowButtonCommandToDump("הצג רשימת משימות לעבודה")).toBeNull();
+    expect(
+      mapShowButtonCommandToDump("הצג רשימת משימות לעבודה בבקשה", snap),
+    ).toBeNull();
+  });
+
+  it("strips WhatsApp reply prefix before allowlist equality", () => {
     const wrapped = formatWhatsAppReplyContext(
       "מחקתי את האורז מרשימת הקניות.",
       "הצג רשימת קניות",
     );
     expect(stripWhatsAppReplyPrefix(wrapped)).toBe("הצג רשימת קניות");
-    expect(isExactShowButtonCommand(stripWhatsAppReplyPrefix(wrapped))).toBe(
-      true,
-    );
+    expect(
+      isKnownShowButtonCommand(stripWhatsAppReplyPrefix(wrapped)),
+    ).toBe(true);
   });
 });
 
-describe("formatShowButtonDump", () => {
+describe("filings two-section dump", () => {
+  it("splits personal vs shared with (עם) marks — no של X", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "רישיון",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f2",
+          item_name: "קוד שער",
+          item_info: "1234",
+          item_description: "קוד שער",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל", "מיכל"],
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    });
+    expect(dump).toContain("תיוקים אישיים:");
+    expect(dump).toContain("1. שם: רישיון · מידע: בתוקף · תיאור: רישיון");
+    expect(dump).toContain("תיוקים משותפים:");
+    expect(dump).toContain(
+      "1. שם: קוד שער · מידע: 1234 · תיאור: קוד שער (עם מיכל)",
+    );
+    expect(dump).not.toContain("של ");
+  });
+
+  it("sets navigate address only when exactly one address-bearing filing is shown", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "a1",
+          item_name: "כתובת מרב",
+          item_info: "יערה אבן יהודה",
+          item_description: "כתובת",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "רישיון",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    expect(navigateAddressFromFilingsDump(snap.filing, { viewerName: "טל" })).toBe(
+      "יערה אבן יהודה",
+    );
+
+    const twoAddresses: EmployeeRecordSnapshot["filing"] = [
+      ...snap.filing,
+      {
+        filing_id: "a2",
+        item_name: "כתובת עבודה",
+        item_info: "הרצל 1 תל אביב",
+        item_description: "",
+        owner: "טל",
+        scope: "personal",
+      },
+    ];
+    expect(
+      navigateAddressFromFilingsDump(twoAddresses, { viewerName: "טל" }),
+    ).toBeNull();
+  });
+});
+
+describe("formatShowDumpFromKind", () => {
   const snapshot: EmployeeRecordSnapshot = {
     lists: [
       {
@@ -384,7 +488,19 @@ describe("formatShowButtonDump", () => {
         },
         now,
       ),
-    ).toBe("ראשון ב־20:45 (כל יום ראשון) · 18.10 ב־21:30");
+    ).toBe("ראשון ב־20:45 (כל יום ראשון ב־20:45) · 18.10 ב־21:30");
+    // Next fire already moved to the exception time — no duplicate suffix; series clock stays in cadence.
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2026-10-18 21:30",
+          repeat: "custom",
+          recurrence_text: "כל יום ראשון ב־20:45",
+          exceptions: ["18.10 ב־21:30"],
+        },
+        now,
+      ),
+    ).toBe("ראשון ב־21:30 (כל יום ראשון ב־20:45)");
     expect(
       formatNumberedItem(
         5,
@@ -489,7 +605,7 @@ describe("formatShowButtonDump", () => {
   });
 
   it("dumps shopping without soft-deleted rice (not in snapshot)", () => {
-    const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+    const text = formatShowDumpFromKind("shopping", snapshot, {
       viewerName: "טל",
     });
     expect(text).toContain("ספוג אדום - 1");
@@ -497,12 +613,11 @@ describe("formatShowButtonDump", () => {
     expect(text).toContain('עגבניות - 1 ק"ג');
     expect(text).not.toContain("אורז");
     expect(text).toContain("קניות אישיות:");
-    expect(text).toContain("קניות משותפות:");
-    expect(text).toContain("(עם מיכל)");
-    expect(text).not.toContain("(עם טל, מיכל)");
+    expect(text).toContain("קניות משותפות עם מיכל:");
+    expect(text).not.toContain("קניות של ");
   });
 
-  it("three-way: assign + personal שתפי under אישיות; scope=shared under משותפות; shared_items under של X", () => {
+  it("Stage 2: private under אישיות; share+assign under משותפות עם X; no של X", () => {
     const threeWay: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -570,35 +685,34 @@ describe("formatShowButtonDump", () => {
       filing: [],
     };
 
-    const shopping = formatShowButtonDump("הצג רשימת קניות", threeWay, {
+    const shopping = formatShowDumpFromKind("shopping", threeWay, {
       viewerName: "טל",
     })!;
     expect(shopping).toMatch(/קניות אישיות:[\s\S]*1\. לחם - 1/);
-    expect(shopping).toContain("חלב - 1 (עמית)");
-    expect(shopping).toContain("ביצים - 1 (עמית)");
-    // Personal-list שתפי stays under אישיות as «(עם …)» — not משותפות.
-    expect(shopping).toMatch(/קניות אישיות:[\s\S]*קפה - 1 \(עם מיכל\)/);
-    expect(shopping).not.toMatch(/קניות משותפות:[\s\S]*קפה/);
-    expect(shopping).not.toMatch(/קניות משותפות:[\s\S]*חלב/);
-    expect(shopping).toContain("קניות של מיכל:");
-    expect(shopping).toContain("שמן - 1");
-    expect(shopping).not.toMatch(/קניות של מיכל:[\s\S]*\(עם/);
+    // Assign: partner = assigner; mark = assignee (טל).
+    expect(shopping).toMatch(/קניות משותפות עם עמית:[\s\S]*חלב - 1 \(טל\)/);
+    expect(shopping).toMatch(/קניות משותפות עם עמית:[\s\S]*ביצים - 1 \(טל\)/);
+    // Co-share: משותפות עם מיכל + (מיכל, טל).
+    expect(shopping).toMatch(
+      /קניות משותפות עם מיכל:[\s\S]*קפה - 1 \(מיכל, טל\)/,
+    );
+    // shared_items fold into משותפות עם מיכל + (מיכל).
+    expect(shopping).toMatch(/קניות משותפות עם מיכל:[\s\S]*שמן - 1 \(מיכל\)/);
+    expect(shopping).not.toContain("קניות של ");
+    expect(shopping).not.toContain("(עם ");
 
-    const tasks = formatShowButtonDump("הצג רשימת מטלות", threeWay, {
+    const tasks = formatShowDumpFromKind("tasks", threeWay, {
       viewerName: "טל",
     })!;
     expect(tasks).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
-    expect(tasks).toContain("לבדוק שמן (עמית)");
-    // Meeting title already lists partners — no redundant «(עם עמית)».
-    expect(tasks).toMatch(/מטלות אישיות:[\s\S]*פגישה \(טל, עמית\)/);
-    expect(tasks).not.toMatch(/פגישה \(טל, עמית\) \(עם/);
-    expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*פגישה/);
-    expect(tasks).not.toMatch(/מטלות משותפות:[\s\S]*לבדוק שמן/);
-    expect(tasks).toContain("מטלות של עמית:");
-    expect(tasks).toContain("לעשות טסט לרכב");
+    expect(tasks).toMatch(/מטלות משותפות עם עמית:[\s\S]*לבדוק שמן \(טל\)/);
+    expect(tasks).toMatch(/מטלות משותפות עם עמית:[\s\S]*פגישה \(טל, עמית\)/);
+    expect(tasks).not.toMatch(/פגישה \(טל, עמית\) \(/);
+    expect(tasks).toMatch(/מטלות משותפות עם עמית:[\s\S]*לעשות טסט לרכב \(עמית\)/);
+    expect(tasks).not.toContain("מטלות של ");
   });
 
-  it("distinguishes personal item share from scope=shared list in the same dump", () => {
+  it("item co-share and scope=shared list both land under משותפות עם X", () => {
     const mixed: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -631,25 +745,29 @@ describe("formatShowButtonDump", () => {
       filing: [],
     };
 
-    const text = formatShowButtonDump("הצג רשימת קניות", mixed, {
+    const text = formatShowDumpFromKind("shopping", mixed, {
       viewerName: "טל",
     })!;
-    const personalBlock = text.split("קניות משותפות:")[0] ?? "";
-    const sharedBlock = text.split("קניות משותפות:")[1] ?? "";
-    expect(personalBlock).toContain("לחם - 1");
-    expect(personalBlock).toContain("מלפפונים - 1 (עם עמית)");
-    expect(personalBlock).not.toContain("קמח מלא");
-    expect(sharedBlock).toMatch(/\(עם מיכל\)[\s\S]*קמח מלא - 1[\s\S]*אורז - 2/);
-    expect(sharedBlock).not.toContain("מלפפונים");
+    expect(text).toMatch(/קניות אישיות:\n1\. לחם - 1/);
+    expect(text).toMatch(
+      /קניות משותפות עם עמית:[\s\S]*מלפפונים - 1 \(עמית, טל\)/,
+    );
+    expect(text).toMatch(
+      /קניות משותפות עם מיכל:[\s\S]*קמח מלא - 1[\s\S]*אורז - 2/,
+    );
+    const personalOnly = text.split(/קניות משותפות עם/)[0] ?? "";
+    expect(personalOnly).toContain("לחם - 1");
+    expect(personalOnly).not.toContain("מלפפונים");
+    expect(personalOnly).not.toContain("קמח מלא");
   });
 
-  it("drops viewer from (עם …) via aliases when viewerName mismatches", () => {
-    const text = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+  it("partner headers drop viewer via aliases", () => {
+    const text = formatShowDumpFromKind("shopping", snapshot, {
       viewerName: "טלי",
       viewerAliases: ["טל"],
     });
-    expect(text).toContain("(עם מיכל)");
-    expect(text).not.toContain("(עם טל");
+    expect(text).toContain("קניות משותפות עם מיכל:");
+    expect(text).not.toContain("משותפות עם טל");
   });
 
   it("puts 📎 on list headers only for list-level has_attachments", () => {
@@ -680,13 +798,13 @@ describe("formatShowButtonDump", () => {
       ],
       filing: [],
     };
-    const shopping = formatShowButtonDump("הצג רשימת קניות", withListFiles, {
+    const shopping = formatShowDumpFromKind("shopping", withListFiles, {
       viewerName: "טל",
     });
     expect(shopping).toContain("קניות אישיות 📎:");
     expect(shopping).toContain("חלב - 1 📎");
 
-    const custom = formatShowButtonDump("הצג רשימת בעיות", withListFiles, {
+    const custom = formatShowDumpFromKind("בעיות", withListFiles, {
       viewerName: "טל",
     });
     expect(custom).toContain("רשימת «בעיות» 📎:");
@@ -737,7 +855,7 @@ describe("formatShowButtonDump", () => {
       ],
       filing: [],
     };
-    const text = formatShowButtonDump("הצג רשימת אני ומיכל", snapshot, {
+    const text = formatShowDumpFromKind("אני ומיכל", snapshot, {
       viewerName: "טל",
     });
     expect(text).toContain("רשימת «אני ומיכל»:");
@@ -777,14 +895,14 @@ describe("formatShowButtonDump", () => {
       ],
       filing: [],
     };
-    const shopping = formatShowButtonDump("הצג רשימת קניות", itemOnly, {
+    const shopping = formatShowDumpFromKind("shopping", itemOnly, {
       viewerName: "טל",
     });
     expect(shopping).toContain("קניות אישיות:");
     expect(shopping).not.toContain("קניות אישיות 📎:");
     expect(shopping).toContain("חלב - 1 📎");
 
-    const custom = formatShowButtonDump("הצג רשימת בעיות", itemOnly, {
+    const custom = formatShowDumpFromKind("בעיות", itemOnly, {
       viewerName: "טל",
     });
     expect(custom).toContain("רשימת «בעיות»:");
@@ -793,7 +911,7 @@ describe("formatShowButtonDump", () => {
   });
 
   it("dumps tasks with schedule, reminder, and partners without viewer", () => {
-    const text = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+    const text = formatShowDumpFromKind("tasks", snapshot, {
       viewerName: "טל",
       now,
     });
@@ -803,7 +921,7 @@ describe("formatShowButtonDump", () => {
     expect(text).toContain(
       "לראות מה קורה עם הביט (תזכורת: 15.11.2026 ב־09:00)",
     );
-    expect(text).toContain("(עם עמית)");
+    expect(text).toContain("מטלות משותפות עם עמית:");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
   });
 
@@ -821,29 +939,26 @@ describe("formatShowButtonDump", () => {
       viewerName: "טל",
       now,
     });
-    const fromButton = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+    const fromButton = formatShowDumpFromKind("tasks", snapshot, {
       viewerName: "טל",
       now,
     });
     expect(fromKind).toBe(fromButton);
     expect(formatShowDumpFromKind("shopping", snapshot, { viewerName: "טל" })).toBe(
-      formatShowButtonDump("הצג רשימת קניות", snapshot, { viewerName: "טל" }),
+      formatShowDumpFromKind("shopping", snapshot, { viewerName: "טל" }),
     );
   });
 
   it("dumps only active reminders with relative when", () => {
-    const text = formatShowButtonDump("הצג תזכורות", snapshot, { now });
+    const text = formatShowDumpFromKind("reminders", snapshot, { now });
     expect(text).toContain("1. לקנות חלב — מחר ב־09:00");
     expect(text).not.toContain("ישן");
     expect(text).not.toContain("2026-10-16 09:00");
   });
 
-  it("returns null for free-form asks", () => {
-    expect(formatShowButtonDump("מה יש לי לקנות", snapshot)).toBeNull();
-  });
-
   it("does not override for unknown custom names", () => {
-    expect(formatShowButtonDump("הצג רשימת בעיות", snapshot)).toBeNull();
+    expect(formatShowDumpFromKind("בעיות", snapshot)).toBeNull();
+    expect(formatShowDumpFromKind("קניות אישית", snapshot)).toBeNull();
   });
 
   it("titleAlreadyListsPartners detects meeting-style titles", () => {
@@ -856,45 +971,309 @@ describe("formatShowButtonDump", () => {
     ).toBe(true);
   });
 
-  it("normalizeShowListName strips polite and builtin section suffixes", () => {
-    expect(normalizeShowListName("קניות אישית")).toBe("קניות");
-    expect(normalizeShowListName("קניות אישיות")).toBe("קניות");
-    expect(normalizeShowListName("מטלות משותפת")).toBe("מטלות");
-    expect(normalizeShowListName("מטלות משותפות")).toBe("מטלות");
-    expect(normalizeShowListName("קניות בבקשה")).toBe("קניות");
-    expect(normalizeShowListName("קניות אישית בבקשה")).toBe("קניות");
-    expect(normalizeShowListName("אנשי קשר אישית")).toBe("אנשי קשר");
-    expect(normalizeShowListName("באגים בבקשה")).toBe("באגים");
-    expect(normalizeShowListName("באגים אישית")).toBe("באגים אישית");
+  it("section=personal dumps only אישיות", () => {
+    const personal = formatShowDumpFromKind("shopping", snapshot, {
+      viewerName: "טל",
+      section: "personal",
+    });
+    const full = formatShowDumpFromKind("shopping", snapshot, {
+      viewerName: "טל",
+    });
+    expect(personal).toContain("קניות אישיות:");
+    expect(personal).not.toContain("קניות משותפות עם");
+    expect(full).toContain("קניות משותפות עם מיכל:");
+    expect(personal).not.toBe(full);
   });
 
-  it("dumps shopping/tasks when trailing אישית|משותפת|בבקשה", () => {
-    const bare = formatShowButtonDump("הצג רשימת קניות", snapshot, {
+  it("section=shared dumps only משותפות עם X; partner filters the bucket", () => {
+    const shared = formatShowDumpFromKind("shopping", snapshot, {
       viewerName: "טל",
+      section: "shared",
     });
-    expect(bare).toContain("קניות אישיות:");
-    for (const cmd of [
-      "הצג רשימת קניות אישית",
-      "הצג רשימת קניות אישיות",
-      "הצג רשימת קניות משותפת",
-      "הצג רשימת קניות בבקשה",
-      "הצג רשימת קניות אישית בבקשה",
-    ]) {
-      expect(formatShowButtonDump(cmd, snapshot, { viewerName: "טל" })).toBe(
-        bare,
-      );
-    }
-    const tasksBare = formatShowButtonDump("הצג רשימת מטלות", snapshot, {
+    expect(shared).toContain("קניות משותפות עם מיכל:");
+    expect(shared).not.toContain("קניות אישיות:");
+
+    const onlyMichal = formatShowDumpFromKind("shopping", snapshot, {
       viewerName: "טל",
+      section: "shared",
+      partner: "מיכל",
     });
-    expect(tasksBare).toContain("מטלות אישיות:");
+    expect(onlyMichal).toContain("קניות משותפות עם מיכל:");
+    expect(onlyMichal).not.toContain("קניות אישיות:");
+
+    const missing = formatShowDumpFromKind("shopping", snapshot, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "ערן",
+    });
+    expect(missing).toContain("אין קניות משותפות עם ערן");
+    expect(missing).not.toContain("קניות משותפות עם מיכל");
+  });
+
+  it("assignee filter keeps sole-responsibility marks only", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "a1",
+              "שם מטלה": "חלב עליי",
+              assigned_by: "מיכל",
+            },
+            {
+              item_id: "s1",
+              "שם מטלה": "קפה משותף",
+              shared_with: ["טל", "מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "מיכל",
+          scope: "shared_items",
+          items: [{ item_id: "out1", "שם מטלה": "שמן למיכל" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const mine = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "מיכל",
+      assignee: "self",
+      assigneeSelfNames: ["טל"],
+    })!;
+    expect(mine).toContain("חלב עליי (טל)");
+    expect(mine).not.toContain("קפה משותף");
+    expect(mine).not.toContain("שמן למיכל");
+
+    const hers = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "מיכל",
+      assignee: "מיכל",
+      assigneeSelfNames: ["טל"],
+    })!;
+    expect(hers).toContain("שמן למיכל (מיכל)");
+    expect(hers).not.toContain("חלב עליי");
+    expect(hers).not.toContain("קפה משותף");
+  });
+
+  it("partnerBucketMatches matches exact partner segments", () => {
+    expect(partnerBucketMatches("מיכל", "מיכל")).toBe(true);
+    expect(partnerBucketMatches("מיכל, עמית", "מיכל")).toBe(true);
+    expect(partnerBucketMatches("מיכל, עמית", "ערן")).toBe(false);
+  });
+
+  it("assignee and partner arrays OR within field and AND with dates", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "t1",
+              "שם מטלה": "עליי בטווח",
+              "תאריך לביצוע": "2026-10-18",
+              assigned_by: "מיכל",
+            },
+            {
+              item_id: "t2",
+              "שם מטלה": "על מיכל בטווח",
+              "תאריך לביצוע": "2026-10-19",
+            },
+            {
+              item_id: "t3",
+              "שם מטלה": "עליי מחוץ",
+              "תאריך לביצוע": "2026-10-25",
+              assigned_by: "מיכל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "מיכל",
+          scope: "shared_items",
+          items: [
+            {
+              item_id: "out1",
+              "שם מטלה": "שמן למיכל בטווח",
+              "תאריך לביצוע": "2026-10-18",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל", "עמית"],
+          items: [
+            {
+              item_id: "s1",
+              "שם מטלה": "עם עמית",
+              "תאריך לביצוע": "2026-10-18",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    const withAssignee = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: ["מיכל", "עמית"],
+      assignee: ["self", "מיכל"],
+      assigneeSelfNames: ["טל"],
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-20",
+    })!;
+    // AND across fields: partner OR ∩ assignee OR ∩ dates.
+    expect(withAssignee).toContain("עליי בטווח");
+    expect(withAssignee).toContain("שמן למיכל בטווח");
+    expect(withAssignee).not.toContain("עליי מחוץ");
+    // Whole shared list row has no sole assignee mark → dropped when assignee set.
+    expect(withAssignee).not.toContain("עם עמית");
+    expect(withAssignee).not.toContain("על מיכל בטווח");
+
+    const partnerOnly = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: ["מיכל", "עמית"],
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-20",
+    })!;
+    expect(partnerOnly).toContain("עם עמית");
+    expect(partnerOnly).toContain("עליי בטווח");
+    expect(partnerOnly).toContain("שמן למיכל בטווח");
+  });
+
+  it("date range composes with partner/assignee on tasks; ignored for shopping", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "t1",
+              "שם מטלה": "פגישה בטווח",
+              "תאריך לביצוע": "2026-10-18",
+              assigned_by: "מיכל",
+            },
+            {
+              item_id: "t2",
+              "שם מטלה": "מחוץ לטווח",
+              "תאריך לביצוע": "2026-10-25",
+              assigned_by: "מיכל",
+            },
+            {
+              item_id: "t3",
+              "שם מטלה": "חוזרת",
+              חוזר: "כל יום שני",
+              next_occurrences: ["2026-10-19 09:00", "2026-10-26 09:00"],
+              assigned_by: "מיכל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "s1", "שם פריט": "חלב", "תאריך לביצוע": "2026-10-25" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    const tasks = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "מיכל",
+      assignee: "self",
+      assigneeSelfNames: ["טל"],
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-20",
+    })!;
+    expect(tasks).toContain("פגישה בטווח");
+    expect(tasks).toContain("חוזרת");
+    expect(tasks).not.toContain("מחוץ לטווח");
+
+    const shopping = formatShowDumpFromKind("shopping", snap, {
+      viewerName: "טל",
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-20",
+    })!;
+    expect(shopping).toContain("חלב");
+
     expect(
-      formatShowButtonDump("הצג רשימת מטלות אישית", snapshot, {
-        viewerName: "טל",
-      }),
-    ).toBe(tasksBare);
-    expect(formatShowDumpFromKind("קניות אישית", snapshot, { viewerName: "טל" })).toBe(
-      bare,
-    );
+      itemMatchesDateRange(
+        { "תאריך לביצוע": "2026-10-18", "תאריך סיום": "2026-10-22" },
+        "2026-10-20",
+        "2026-10-21",
+      ),
+    ).toBe(true);
+  });
+
+  it("reminders dump filters by fire_at date range", () => {
+    const baseReminder = {
+      list_type: "tasks",
+      ping: ["טל"],
+      ping_ids: ["e1"],
+      owner: "טל",
+      text: "",
+      last_composed_text: "",
+      sent_text: "",
+      compose_at_fire: false,
+      compose_source: "",
+      compose_lookback_hours: 0,
+      send_status: "pending" as const,
+      sent: false,
+      sent_at: null,
+    };
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [],
+      reminders: [
+        {
+          ...baseReminder,
+          reminder_id: "r1",
+          item: "בטווח",
+          fire_at: "2026-10-18 09:00",
+          status: "active",
+          repeat: "once",
+        },
+        {
+          ...baseReminder,
+          reminder_id: "r2",
+          item: "מחוץ",
+          fire_at: "2026-10-25 09:00",
+          status: "active",
+          repeat: "once",
+        },
+      ],
+    };
+    const text = formatShowDumpFromKind("reminders", snap, {
+      now: new Date("2026-10-16T07:00:00.000Z"),
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-20",
+    })!;
+    expect(text).toContain("בטווח");
+    expect(text).not.toContain("מחוץ");
   });
 });
