@@ -458,30 +458,27 @@ function hebrewItemCount(n: number): string {
 }
 
 /**
- * Partner names for custom full-dump count `(A, B)` — no «עם» prefix.
- * Whole-list shared → list.shared_with; shared_items → owner; else item co-share partners.
+ * Raw share names for custom full-dump count marks / partner filter.
+ * Whole-list shared → list.shared_with; shared_items → item shared_with or owner;
+ * else item co-share partners.
  */
-function customListCountPartners(
+function customListCountShareNames(
   list: EmployeeRecordSnapshot["lists"][number],
-  viewer: string,
-  aliases: string[],
-): string {
+): string[] {
   if (list.scope === "shared") {
-    return partnersKey(list.shared_with ?? [], viewer, aliases);
+    return (list.shared_with ?? [])
+      .map((name) => name.trim())
+      .filter(Boolean);
   }
   if (list.scope === "shared_items") {
     const fromItems = list.items.flatMap((item) => stringArray(item.shared_with));
     if (fromItems.length > 0) {
-      return partnersKey(fromItems, viewer, aliases);
+      return fromItems;
     }
     const owner = (list.owner ?? "").trim();
-    return owner ? partnersKey([owner], viewer, aliases) : "";
+    return owner ? [owner] : [];
   }
-  const fromItems = list.items.flatMap((item) => stringArray(item.shared_with));
-  if (fromItems.length === 0) {
-    return "";
-  }
-  return partnersKey(fromItems, viewer, aliases);
+  return list.items.flatMap((item) => stringArray(item.shared_with));
 }
 
 function customListHasShareSignal(
@@ -512,7 +509,11 @@ function formatCustomListsCountsDump(
     if (section === "shared" && !hasShare) {
       continue;
     }
-    const partners = customListCountPartners(list, viewer, aliases);
+    const shareNames = customListCountShareNames(list);
+    const partners =
+      shareNames.length > 0
+        ? partnersKey(shareNames, viewer, aliases)
+        : "";
     if (
       partnerNeedles.length > 0 &&
       !partnerNeedles.some((needle) =>
@@ -526,8 +527,12 @@ function formatCustomListsCountsDump(
     if (n === 0) {
       continue;
     }
-    const withMark =
-      partners && partners !== "משותף" ? ` (${partners})` : "";
+    // Display = all involved (מיכל, טל); filter key above stays partners-only.
+    const mark =
+      partners && partners !== "משותף"
+        ? allInvolvedNames(shareNames, viewer, aliases)
+        : "";
+    const withMark = mark ? ` (${mark})` : "";
     lines.push(`*${name}*${withMark} — ${hebrewItemCount(n)}`);
   }
   if (lines.length === 0) {
@@ -1801,6 +1806,93 @@ function filterDumpRows(
   return clusterDumpRowsByKind(kept);
 }
 
+/**
+ * FULL DUMP shopping count line label for one bucket (no leading spaces).
+ * Personal → «אישיות»; co-share/assign → «(mark)» all-involved / באחריות.
+ */
+function shoppingCountBucketLabel(
+  row: DumpItem,
+  viewer: string,
+  aliases: string[],
+): { kind: number; label: string } {
+  const kind = dumpItemKindRank(row);
+  const mark = row.responsibilityMark?.trim() ?? "";
+  if (kind === 2) {
+    if (mark) {
+      return { kind, label: `(${mark})` };
+    }
+    const who = row.assigneeName?.trim();
+    return {
+      kind,
+      label: who ? `(באחריות ${who})` : "(באחריות)",
+    };
+  }
+  if (kind === 1) {
+    if (mark) {
+      return { kind, label: `(${mark})` };
+    }
+    const key = (row.partnerFilterKey ?? "").trim();
+    if (!key || key === "משותף") {
+      return { kind, label: "(משותף)" };
+    }
+    const names = key
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const involved = allInvolvedNames(names, viewer, aliases);
+    return {
+      kind,
+      label: involved ? `(${involved})` : "(משותף)",
+    };
+  }
+  return { kind: 0, label: "אישיות" };
+}
+
+/** FULL DUMP קניות: breakdown by personal / co-share / assign (counts only). */
+function formatShoppingCountsBreakdown(
+  label: string,
+  rows: DumpItem[],
+  opts?: ShowDumpOptions,
+): string {
+  if (rows.length === 0) {
+    return "";
+  }
+  const viewer = opts?.viewerName?.trim() ?? "";
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const headerFiles = rows.some((row) => row.listFiles);
+  const groups = new Map<
+    string,
+    { kind: number; label: string; count: number; order: number }
+  >();
+  let order = 0;
+  for (const row of rows) {
+    const bucket = shoppingCountBucketLabel(row, viewer, aliases);
+    const existing = groups.get(bucket.label);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    groups.set(bucket.label, {
+      kind: bucket.kind,
+      label: bucket.label,
+      count: 1,
+      order: order++,
+    });
+  }
+  const sorted = [...groups.values()].sort((a, b) => {
+    if (a.kind !== b.kind) {
+      return a.kind - b.kind;
+    }
+    return a.order - b.order;
+  });
+  return [
+    `${label}${paperclipSuffix(headerFiles)}:`,
+    ...sorted.map(
+      (group) => `${group.label} — ${hebrewItemCount(group.count)}`,
+    ),
+  ].join("\n");
+}
+
 function formatSingleHeaderDump(
   label: string,
   listType: ListDumpType,
@@ -1811,6 +1903,9 @@ function formatSingleHeaderDump(
 ): string {
   const headerFiles = rows.some((row) => row.listFiles);
   if (opts?.countsOnly === true) {
+    if (listType === "shopping") {
+      return formatShoppingCountsBreakdown(label, rows, opts);
+    }
     const n = rows.length;
     return n === 0
       ? ""

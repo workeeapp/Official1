@@ -1148,7 +1148,7 @@ describe("formatShowDumpFromKind", () => {
       filing: [],
     };
     const text = formatShowDumpFromKind("full", snap, { viewerName: "טל" })!;
-    expect(text).toMatch(/\*באגים ופיתוחים\* \(מיכל\) — 2 פריטים/);
+    expect(text).toMatch(/\*באגים ופיתוחים\* \(מיכל, טל\) — 2 פריטים/);
     expect(text).not.toContain("(עם ");
   });
 
@@ -1636,8 +1636,11 @@ describe("formatShowDumpFromKind", () => {
       phoneBook: [{ name: "דני", phone: "0501234567" }],
     })!;
 
-    // Shopping counts only — one flat total (personal + shared rows).
-    expect(text).toMatch(/קניות: 2 פריטים/);
+    // Shopping counts only — breakdown by personal / co-share marks.
+    expect(text).toMatch(
+      /קניות:\nאישיות — 1 פריט\n\(מיכל, טל\) — 1 פריט/,
+    );
+    expect(text).not.toContain("קניות: 2 פריטים");
     expect(text).not.toContain("קניות אישיות");
     expect(text).not.toContain("קניות משותפות עם");
     expect(text).not.toContain("קפה"); // counts only — no item titles
@@ -1694,8 +1697,60 @@ describe("formatShowDumpFromKind", () => {
     expect(sharedOnly).not.toContain("דני");
   });
 
-  it("shopping countsOnly: single flat count; empty shared section sentence", () => {
+  it("shopping countsOnly: breakdown by bucket; empty shared section sentence", () => {
     const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", "שם פריט": "לחם", כמות: 1 },
+            {
+              item_id: "s1",
+              "שם פריט": "קפה",
+              כמות: 1,
+              shared_with: ["טל", "מיכל"],
+            },
+            {
+              item_id: "a1",
+              "שם פריט": "חלב",
+              כמות: 1,
+              assigned_by: "טל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "ערן",
+          scope: "shared_items",
+          items: [
+            {
+              item_id: "a2",
+              "שם פריט": "ביצים",
+              כמות: 1,
+              assigned_by: "טל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const counts = formatShowDumpFromKind("shopping", snap, {
+      viewerName: "טל",
+      countsOnly: true,
+    })!;
+    expect(counts).toMatch(/^קניות:/);
+    expect(counts).toContain("אישיות — 1 פריט");
+    expect(counts).toContain("(מיכל, טל) — 1 פריט");
+    expect(counts).toContain("(באחריות טל · מאת טל) — 1 פריט");
+    expect(counts).toContain("(באחריות ערן · מאת טל) — 1 פריט");
+    expect(counts).not.toContain("לחם");
+    expect(counts).not.toContain("קניות משותפות עם");
+
+    const personalOnly: EmployeeRecordSnapshot = {
       lists: [
         {
           list_type: "shopping",
@@ -1707,15 +1762,7 @@ describe("formatShowDumpFromKind", () => {
       ],
       filing: [],
     };
-    const counts = formatShowDumpFromKind("shopping", snap, {
-      viewerName: "טל",
-      countsOnly: true,
-    })!;
-    expect(counts).toMatch(/קניות: 1 פריט/);
-    expect(counts).not.toContain("אישיות");
-    expect(counts).not.toContain("משותפות");
-
-    const sharedCounts = formatShowDumpFromKind("shopping", snap, {
+    const sharedCounts = formatShowDumpFromKind("shopping", personalOnly, {
       viewerName: "טל",
       countsOnly: true,
       section: "shared",
