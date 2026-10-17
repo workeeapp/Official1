@@ -1625,6 +1625,50 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("1. דני — 050");
   });
 
+  it("flatLayout dumps digital-worker tasks without משותפות/assignee marks", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "לוסי",
+          scope: "personal",
+          items: [
+            {
+              item_id: "1",
+              "שם מטלה": "להזכיר לטל לבדוק את הביט",
+              assigned_by: "טל",
+              reminder: {
+                reminder_id: "r1",
+                fire_at: "2026-11-15T18:00:00.000Z",
+                repeat: "once",
+              },
+            },
+            {
+              item_id: "2",
+              "שם מטלה": "לשלוח למיכל ברכת בוקר",
+              "שעה לביצוע": "09:00",
+              assigned_by: "טל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const text = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "לוסי",
+      flatLayout: true,
+      now: new Date("2026-10-17T10:00:00.000Z"),
+    })!;
+    expect(text).toContain("מטלות:");
+    expect(text).not.toContain("משותפות");
+    expect(text).not.toContain("אישיות");
+    expect(text).not.toContain("(לוסי)");
+    expect(text).toContain("להזכיר לטל לבדוק את הביט");
+    expect(text).toMatch(/תזכורת:/);
+    expect(text).toContain("לשלוח למיכל ברכת בוקר");
+  });
+
   it("full dump with partner skips phone book and filters custom lists", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [

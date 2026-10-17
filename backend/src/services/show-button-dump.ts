@@ -74,6 +74,11 @@ export type ShowDumpOptions = {
    * Used by show_dump=full for קניות.
    */
   countsOnly?: boolean;
+  /**
+   * Digital-worker book: one numbered list — skip Stage-2 אישיות/משותפות
+   * and assigner marks (`assigned_by` means asker, not human co-share).
+   */
+  flatLayout?: boolean;
   /** SPEAKER_CONTACTS rows for show_dump=full / phone_book ספר הטלפונים. */
   phoneBook?: Array<{ name: string; phone?: string }>;
 };
@@ -808,6 +813,53 @@ function formatThreeWayDump(
   let personalListFiles = false;
   const viewer = opts?.viewerName?.trim() ?? "";
   const aliases = opts?.viewerAliases ?? [];
+
+  // Digital-worker inventory: flat numbered list (same line helpers, no Stage-2).
+  if (opts?.flatLayout === true) {
+    const flat: DumpItem[] = [];
+    let anyListFiles = false;
+    for (const list of lists) {
+      const listFiles = listHasListLevelFiles(list);
+      if (listFiles) {
+        anyListFiles = true;
+      }
+      for (const item of list.items) {
+        flat.push({
+          title: itemTitle(listType, item, list.title_field),
+          item,
+          listFiles,
+        });
+      }
+    }
+    const filterDate = (rows: DumpItem[]): DumpItem[] => {
+      if (listType !== "tasks") {
+        return rows;
+      }
+      return rows.filter((row) =>
+        itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo),
+      );
+    };
+    const kept = filterDate(
+      flat.filter((row) => itemMatchesUrgencyFilter(row.item, opts?.urgency)),
+    );
+    if (opts?.countsOnly === true) {
+      const n = kept.length;
+      return n === 0
+        ? `${label}: ריקה`
+        : `${label}${paperclipSuffix(anyListFiles)}: ${hebrewItemCount(n)}`;
+    }
+    if (kept.length === 0) {
+      return `אין ${label} שמורות.`;
+    }
+    return [
+      `${label}${paperclipSuffix(anyListFiles)}:`,
+      ...kept.map((row, i) =>
+        formatNumberedItem(i + 1, row.title, row.item, listType, {
+          now: opts?.now,
+        }),
+      ),
+    ].join("\n");
+  }
 
   for (const list of lists) {
     const listFiles = listHasListLevelFiles(list);

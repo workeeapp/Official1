@@ -2329,12 +2329,14 @@ export async function sendChatMessage(input: {
         viewerAliases: string[],
         snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>,
         phoneBook?: Array<{ name: string; phone?: string }>,
-      ): Promise<{ text: string | null; snapshot: typeof snapshot; opts: typeof baseDumpOpts & { viewerName: string; viewerAliases: string[]; phoneBook?: Array<{ name: string; phone?: string }> } }> => {
+        extraOpts?: { flatLayout?: boolean },
+      ): Promise<{ text: string | null; snapshot: typeof snapshot; opts: typeof baseDumpOpts & { viewerName: string; viewerAliases: string[]; phoneBook?: Array<{ name: string; phone?: string }>; flatLayout?: boolean } }> => {
         const dumpOpts = {
           ...baseDumpOpts,
           viewerName,
           viewerAliases,
           ...(phoneBook ? { phoneBook } : {}),
+          ...(extraOpts?.flatLayout ? { flatLayout: true } : {}),
         };
         return {
           text: formatShowDumpFromKind(showDumpKind, snapshot, dumpOpts),
@@ -2428,6 +2430,10 @@ export async function sendChatMessage(input: {
             employeeDisplayName(aboutPerson),
             aboutAliases,
             subjectSnapshot,
+            undefined,
+            aboutIsDigital && isTasksShowDumpKind(showDumpKind)
+              ? { flatLayout: true }
+              : undefined,
           );
           let text = rawText;
           if (aboutIsCurrentWorker && isTasksShowDumpKind(showDumpKind)) {
