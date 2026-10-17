@@ -860,6 +860,60 @@ describe("employee records", () => {
     });
   });
 
+  it("persists שעה לביצוע on a timed worker להזכיר task at create", async () => {
+    const list = {
+      id: "lucy-tasks",
+      employeeId,
+      listType: "tasks",
+      name: "",
+      titleField: "",
+      scope: "personal",
+      visibleTo: [],
+    };
+    listFindFirst.mockResolvedValue(list);
+    itemCreate.mockResolvedValue({ id: "lehazkir-maya" });
+
+    const result = await applyEmployeeRecords(
+      employeeId,
+      {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [
+              {
+                "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+                "תאריך לביצוע": "היום",
+                "שעה לביצוע": "14:20",
+              },
+            ],
+            targets: [],
+          },
+        ],
+        filing: [],
+      },
+      {
+        scope: "personal",
+        addedById: employeeId,
+        visibleTo: [employeeId],
+      },
+      employeeId,
+    );
+
+    expect(itemCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        listId: list.id,
+        data: expect.objectContaining({
+          "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+          "שעה לביצוע": "14:20",
+          "תאריך לביצוע": expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      }),
+    });
+    expect(result.mutations.some((row) => row.action === "add")).toBe(true);
+  });
+
   it("adds a custom row even when an existing item shares overlapping field values", async () => {
     const list = {
       id: "maya-lessons",

@@ -119,6 +119,7 @@ import {
 import {
   applyDirectoryActions,
   formatSpeakerContacts,
+  getContactBookShare,
   listContactsForEmployee,
 } from "./contact.service.js";
 import {
@@ -524,7 +525,7 @@ function workerTargetingInstructions(
     'Example: "תגידי לטל לקנות מגבונים וגבינה לבנה" → messages to טל NOW; lists=[]. Offer shared shopping with lists=[]. On כן emit lists add with targets [speaker,\"טל\"] — never private speaker shopping.',
     'Example: "תגידי לטל ולעמית לקנות ביצים" → messages to both; offer a shared list; on כן targets speaker+טל+עמית.',
     'Example: "תגידי לטל להכין מצגת" / "תגידי למיכל שיש פגישה ב־10" / "תגידי לעמית שהקוד 1234" → messages NOW; lists/filing=[] until they accept an offer to save.',
-    'Example: "אני צריך ללכת לרופא מחר ב־08:00" → tasks add for the speaker with that clock fields; reminders=[]. In response offer a reminder (when?); only then self-nudge reminders. APPOINTMENT VS PING: chore/event time ≠ WhatsApp ping time — after a reminder offer, כן / ping time → reminders + להזכיר only; FORBIDDEN lists.update that sets speaker שעה/תאריך לביצוע to the ping. Example: task at T1, ping at T2 → dump «— … ב־T1 (תזכורת: … ב־T2)».',
+    'Example: "אני צריך ללכת לרופא מחר ב־08:00" / «לאסוף את מאיה ב־14:20» → tasks add for the speaker WITH שעה לביצוע that turn; reminders=[]. This is a timed TASK, not a נדנוד. In response offer a WhatsApp reminder (when?); on כן → reminders + your להזכיר job (TASK + REMINDER — not Self-nudge / not נדנד). APPOINTMENT VS PING: chore time ≠ ping time — copy speaker תאריך/שעה onto the להזכיר (chore T1, not the ping); FORBIDDEN lists.update that sets speaker שעה/תאריך לביצוע to the ping. Example: task at T1, ping at T2 → dump «— … ב־T1 (תזכורת: … ב־T2)»; worker להזכיר also has שעה לביצוע T1.',
     'Example: "טל צריך לקחת את הילדים לגינה" → tasks add, targets: ["טל"].',
     'Example: "כולם צריכים לקנות חלב" → targets: ["all"].',
     `Example: "שמור פגישה עם טל ביום ראשון בשעה 10" → tasks add, targets: ["${speaker}", "טל"], שם מטלה includes (${speaker}, טל) in parentheses.`,
@@ -567,9 +568,10 @@ function workerTargetingInstructions(
       ? `ASK A DIGITAL CO-WORKER (${coworkers}): «תשאלי את <worker> …» / «תבדקי עם <worker> …» → metadata.messages to that worker with expects_reply:true, text = the question with the speaker's name. Not a handoff. The server asks them right now and adds their answer under your response — response confirms with EXACT OUTBOUND QUOTE, e.g. «שאלתי את <worker> את ההודעה «…exact messages.text…»». Never write or guess their answer yourself.`
       : "",
     "One sentence can be several actions. Fill every array that applies.",
-    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock): (1) lists add for the speaker — shopping if buying, else tasks — ONLY if that work is not already in THIS turn's EMPLOYEE_SAVED_DATA by meaning (REUSE EXISTING WRAPPER: match found → skip speaker lists.add; still emit your להזכיר + reminders; several matches → ASK; «עוד אחד» → add allowed). (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item> at the clock. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. REMINDER CONTENT DETAIL: reminders[].item + להזכיר suffix (+ speaker tasks row) keep the concrete facts they listed — light paraphrase OK; FORBIDDEN hollow summaries («לטפל בשני הבאגים» when they named the bugs). Shopping row stays product-only; that does not strip the clock label. REMINDER-ON-ITEM: «הוסף תזכורת ל־X» / על X / על 3 — FORBIDDEN lists.add of any product in every case; exist → להזכיר+reminder only; missing → not found, lists=[].`,
-    `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item>. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: reminders[].recurrence. NEVER ask for WhatsApp if the name is Known.`,
-    "REMIND CLOCK vs APPOINTMENT: «בעוד שעתיים» = `in` for the clock. «יש לה תור ב־22:00» = task context (optional שעה on their task) — do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared משימות לעבודה for a remind.",
+    "TASK + REMINDER ≠ נדנוד (critical): a timed chore («לאסוף את מאיה ב־14:20», «ללכת לרופא מחר ב־08:00») is an ordinary tasks row with שעה לביצוע. Accepting a WhatsApp reminder on it is reminders + your להזכיר job — NOT Self-nudge and NOT the נדנד/snooze button. Always save the speaker task with its chore hour; on the להזכיר copy that same תאריך/שעה (chore time, not the ping).",
+    `Self-nudge (תזכיר/י לי לקנות / לבדוק at a clock — they asked to be reminded, not «I have a timed chore»): (1) lists add for the speaker — shopping if buying, else tasks — ONLY if that work is not already in THIS turn's EMPLOYEE_SAVED_DATA by meaning (REUSE EXISTING WRAPPER: match found → skip speaker lists.add; still emit your להזכיר + reminders; several matches → ASK; «עוד אחד» → add allowed). (2) lists tasks add targeting yourself (${workerName}) — להזכיר ל<speaker> <item>. WORKER TASK TIME: when they named HH:mm, that להזכיר item MUST include תאריך לביצוע + שעה לביצוע (= that remind-at clock). Pure \`in\` delay with no HH:mm → date/time optional. (3) metadata.reminders add with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. REMINDER CONTENT DETAIL: reminders[].item + להזכיר suffix (+ speaker tasks row) keep the concrete facts they listed — light paraphrase OK; FORBIDDEN hollow summaries («לטפל בשני הבאגים» when they named the bugs). Shopping row stays product-only; that does not strip the clock label. REMINDER-ON-ITEM: «הוסף תזכורת ל־X» / על X / על 3 — FORBIDDEN lists.add of any product in every case; exist → להזכיר+reminder only (copy date/time onto להזכיר when the saved row is timed); missing → not found, lists=[].`,
+    `Remind someone ELSE in Known employees (תזכיר/י לעמית…): (1) lists add on that person. (2) lists tasks add on yourself — להזכיר ל<name> <item> with תאריך/שעה when a clock/appointment time applies. (3) reminders add, ping/targets = that person's name from Known employees (not digits). Recurring: reminders[].recurrence. NEVER ask for WhatsApp if the name is Known.`,
+    "REMIND CLOCK vs APPOINTMENT: «בעוד שעתיים» = `in` for the clock. «יש לה תור ב־22:00» = task context — put שעה לביצוע 22:00 on their task AND on your להזכיר when saving that turn — do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared משימות לעבודה for a remind.",
     "NO META ON LISTS: complaints about your timing/questions → response only, empty lists. Never dump bug/meta text onto משימות לעבודה or any shared list.",
     "Cancel a nudge / stop the jokes / בטלי את התזכורת: when they clearly mean only the WhatsApp clock («בטלי את התזכורת», «תפסיקי להזכיר») → reminders remove with reminder_id; leave standing chores. Also lists.remove the speaker item when it is only the nudge wrapper (same work by meaning). Standing row with חוזר / (קבוע + תזכורת) / `reminder` → independent work: do NOT auto-remove it; use STANDING + LINKED CLOCK DELETE ASK when «בטל את המטלה» is ambiguous after a ping. Server clears the linked worker להזכיר with the clock. FORBIDDEN: lists.remove of your להזכיר / נדנוד worker alone while the speaker standing row for that work still exists.",
     "Change a clock / תעדכן תזכורת → reminders update with reminder_id from this turn's active_reminders. Put a new time only if they changed the clock. Changed the repeat itself («תשני את התזכורת לכל יום שני», «שתהיה כל יום», «עד סוף החודש») → the same update with the FULL new recurrence (every field of the new rule, time included — copy the time from the clock's recurrence_text / fire_at when they did not change it). «שלא תחזור יותר» / רק פעם אחת → recurrence {freq:\"none\"} (null means unchanged). CLOCK-ONLY: lists=[] — FORBIDDEN lists.update on the speaker standing chore or your להזכיר for a time/cadence change. The server syncs the linked worker להזכיר to the new clock time; do not also mutate it. Do not add a second clock. Example: standing + linked clock at 15:00 → «תעדכני את התזכורת ל־14:50» → reminders update only; standing חוזר stays 15:00.",
@@ -587,7 +589,7 @@ function workerTargetingInstructions(
     "RECURRING CLOCK → reminders[].recurrence {freq, interval, unit, weekdays, month_day, month, time, until, count}; leave every_count/every_unit/weekdays empty. freq: interval (every N hours, unit:\"hours\") | daily | weekly (weekdays 0=Sun … 6=Sat) | monthly (month_day) | yearly (month + month_day). Minimum repeat is every hour: every N minutes/seconds («כל 10 דקות») → no actions at all this turn, answer «אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.» (a one-time «בעוד 10 דקות» is fine). daily/weekly/monthly/yearly need time HH:mm — missing → ask באיזו שעה? with reminders empty. until = inclusive last day YYYY-MM-DD from SESSION_CLOCK calendar (עד סוף החודש → last day of this month; עד דצמבר → Dec 31). count = total sends including the first. A stated start (החל מעוד 10 ימים / החל מ־23.10 / מהשבוע הבא) → YYYY-MM-DD from calendar in reminders[].date (standing task: lists item recurrence.start) — never drop it. Every-N rule (interval > 1) with no start → ask which occurrence is first.",
     "Examples: «כל ראשון, שלישי וחמישי ב־8:00 תזכירי לי לקחת כדור» → {freq:\"weekly\",interval:1,weekdays:[0,2,4],time:\"08:00\"}. «כל 1 לחודש ב־9 לשלם ארנונה» → {freq:\"monthly\",interval:1,month_day:1,time:\"09:00\"}. «כל יום ב־20:00 עד סוף החודש» → {freq:\"daily\",interval:1,time:\"20:00\",until:\"<last day of this month>\"}. «כל יום ב־8 תשלחי לי את המטלות שלי» → compose:true, compose_source:\"saved_data\", ping=speaker, text=«מה המטלות שלי היום», recurrence {freq:\"daily\",interval:1,time:\"08:00\"}.",
     "YEARLY OFFER: when the speaker saves something that repeats by nature every year (יום הולדת, יום נישואין, אזכרה / יום זיכרון, חידוש מנוי שנתי) — you decide by meaning — save what they asked, then OFFER in response: «להוסיף תזכורת כל שנה ב־<day.month>? באיזו שעה? רוצה גם יום לפני?». Nothing yearly is saved before they agree. On כן (+ time) → reminders add {freq:\"yearly\",interval:1,month,month_day,time}, same item and ping. «גם יום לפני» → a second yearly add on the previous calendar day (item e.g. «מחר יום ההולדת של יוסי»). Agreed without a time → ask the time with reminders empty.",
-    "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (reminders=[]), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → reminders add same recurrence (or a different ping time they named) + your להזכיר task; no second speaker standing row; FORBIDDEN lists.update standing time to the ping (APPOINTMENT VS PING). Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
+    "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (reminders=[]), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → reminders add same recurrence (or a different ping time they named) + your להזכיר task with שעה לביצוע = standing chore time (not the ping if different); no second speaker standing row; FORBIDDEN lists.update standing time to the ping (APPOINTMENT VS PING). Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
     "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → LAST dump line only → id from THIS turn's live JSON → ACTION on THAT entity. After תיוקים dump, line N = that filing (detail from live JSON); FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → DELETE CONFIRM ask first; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
@@ -1386,6 +1388,9 @@ export async function sendChatMessage(input: {
   const speakerContacts = guestSpeaker
     ? []
     : await listContactsForEmployee(input.employeeId);
+  const contactBookShare = guestSpeaker
+    ? null
+    : await getContactBookShare(input.employeeId);
   const recentOutbound = guestSpeaker
     ? []
     : await listRecentReminderOutbounds({
@@ -1416,7 +1421,9 @@ export async function sendChatMessage(input: {
           ),
           "WORKER_SAVED_DATA",
         ),
-    guestSpeaker ? "" : formatSpeakerContacts(speakerContacts),
+    guestSpeaker
+      ? ""
+      : formatSpeakerContacts(speakerContacts, contactBookShare),
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
     guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
@@ -1521,7 +1528,7 @@ export async function sendChatMessage(input: {
           : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
         guestSpeaker
           ? ""
-          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ להזכיר) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
+          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ your להזכיר with that speaker row's תאריך/שעה לביצוע copied onto the worker item) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. Id-based list/reminder/filing deletes apply immediately — emit removes with ids and report past tense.",
         guestSpeaker
           ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
           : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
@@ -2320,7 +2327,11 @@ export async function sendChatMessage(input: {
       const speakerPhoneBook = needsPhoneBook
         ? speakerContacts.map((row) => ({
             name: row.name,
-            phone: row.phone,
+            phone: row.phone ?? "",
+            scope: (row.scope ?? "personal") as "personal" | "shared",
+            ...(row.sharedWith && row.sharedWith.length > 1
+              ? { shared_with: row.sharedWith }
+              : {}),
           }))
         : undefined;
 
@@ -2328,9 +2339,23 @@ export async function sendChatMessage(input: {
         viewerName: string,
         viewerAliases: string[],
         snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>,
-        phoneBook?: Array<{ name: string; phone?: string }>,
+        phoneBook?: Array<{
+          name: string;
+          phone: string;
+          scope: "personal" | "shared";
+          shared_with?: string[];
+        }>,
         extraOpts?: { flatLayout?: boolean },
-      ): Promise<{ text: string | null; snapshot: typeof snapshot; opts: typeof baseDumpOpts & { viewerName: string; viewerAliases: string[]; phoneBook?: Array<{ name: string; phone?: string }>; flatLayout?: boolean } }> => {
+      ): Promise<{
+        text: string | null;
+        snapshot: typeof snapshot;
+        opts: typeof baseDumpOpts & {
+          viewerName: string;
+          viewerAliases: string[];
+          phoneBook?: typeof speakerPhoneBook;
+          flatLayout?: boolean;
+        };
+      }> => {
         const dumpOpts = {
           ...baseDumpOpts,
           viewerName,

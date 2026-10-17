@@ -201,6 +201,16 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("תגידי לטל לקנות");
     expect(config.systemMessage).toContain("TIMED TASK WITHOUT CLOCK");
     expect(config.systemMessage).toContain("APPOINTMENT VS PING");
+    expect(config.systemMessage).toContain("TASK + REMINDER ≠ נדנוד (critical)");
+    expect(config.systemMessage).toContain("WORKER TASK TIME (critical)");
+    expect(config.systemMessage).toContain(
+      "שעה לביצוע (= that remind-at clock) — never leave time only on reminders",
+    );
+    expect(config.systemMessage).toContain("SHARE WHOLE PHONE BOOK");
+    expect(config.systemMessage).toContain('action:"share_book"');
+    expect(config.systemMessage).toContain(
+      "ASK «לשמור את «name» (phone) בספר הטלפונים שלך?»",
+    );
     expect(config.systemMessage).toContain(
       "FORBIDDEN: lists.add / lists.update that changes the speaker row's date/time/recurrence to the ping time",
     );

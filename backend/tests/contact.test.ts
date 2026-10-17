@@ -22,7 +22,36 @@ describe("contact directory POC", () => {
 
   it("formats empty and filled speaker contacts", () => {
     expect(formatSpeakerContacts([])).toContain("No personal contacts");
+    expect(formatSpeakerContacts([])).toContain("ASK «לשמור את");
+    expect(formatSpeakerContacts([])).toContain("share_book");
     expect(formatSpeakerContacts(contacts)).toContain("מיכל");
+  });
+
+  it("parses directory share_book actions", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        response: "שיתפתי",
+        metadata: {
+          directory: [
+            {
+              action: "share_book",
+              name: "",
+              phone: "",
+              targets: ["עמית"],
+            },
+          ],
+        },
+      }),
+    );
+    expect(meta.directory).toEqual([
+      {
+        action: "share_book",
+        name: "",
+        phone: "",
+        contactId: "",
+        targets: ["עמית"],
+      },
+    ]);
   });
 
   it("plans WhatsApp phone relays from a saved contact name", () => {

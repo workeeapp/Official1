@@ -80,7 +80,16 @@ export type ShowDumpOptions = {
    */
   flatLayout?: boolean;
   /** SPEAKER_CONTACTS rows for show_dump=full / phone_book ספר הטלפונים. */
-  phoneBook?: Array<{ name: string; phone?: string }>;
+  phoneBook?: PhoneBookDumpRow[];
+};
+
+/** Phone-book dump row (directory / SPEAKER_CONTACTS). */
+export type PhoneBookDumpRow = {
+  name: string;
+  phone?: string;
+  scope?: "personal" | "shared";
+  /** Partner display names when shared (may include owner). */
+  shared_with?: string[];
 };
 
 /** Normalize dump filter name(s) to a trimmed list. */
@@ -244,7 +253,7 @@ function formatResolvedShowDump(
     return formatFilingsDump(snapshot.filing ?? [], opts);
   }
   if (parsed.kind === "phone_book") {
-    return formatPhoneBookDump(opts?.phoneBook);
+    return formatPhoneBookDump(opts?.phoneBook, opts);
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
@@ -269,11 +278,21 @@ export function formatFullDump(
   sections.push(formatThreeWayDump("tasks", "מטלות", snapshot, opts));
   sections.push(formatCustomListsCountsDump(snapshot, opts));
 
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const partnerOnly =
+    Boolean(opts?.section === "shared") || partnerNeedles.length > 0;
+
   const linkedIds = linkedReminderIdsFromTasks(snapshot);
-  const standaloneReminders = (snapshot.reminders ?? []).filter(
-    (row) => !linkedIds.has(row.reminder_id),
-  );
-  const remBody = formatRemindersDump(standaloneReminders, opts);
+  const partnerLinkedIds = partnerOnly
+    ? linkedReminderIdsFromPartnerTasks(snapshot, opts)
+    : new Set<string>();
+  const reminderRows = (snapshot.reminders ?? []).filter((row) => {
+    if (partnerOnly) {
+      return reminderInvolvesPartner(row, partnerNeedles, partnerLinkedIds);
+    }
+    return !linkedIds.has(row.reminder_id);
+  });
+  const remBody = formatRemindersDump(reminderRows, opts);
   sections.push(
     remBody.startsWith("אין לך")
       ? "תזכורות פעילות:\nריק"
@@ -282,28 +301,27 @@ export function formatFullDump(
 
   sections.push(formatFilingsDump(snapshot.filing ?? [], opts));
 
-  const partnerOnly =
-    Boolean(opts?.section === "shared") ||
-    dumpFilterNames(opts?.partner).length > 0;
-
-  if (!partnerOnly) {
-    const hasContacts = snapshot.lists.some(
-      (list) => list.list_type === "contacts",
-    );
-    sections.push(
-      hasContacts
-        ? (formatContactsOrCustomDump(
-            "contacts",
-            "",
-            snapshot,
-            builtinListHebrew("contacts"),
-            opts,
-          ) ?? "אנשי קשר אישיים:\nריקה")
+  const hasContacts = snapshot.lists.some(
+    (list) => list.list_type === "contacts",
+  );
+  sections.push(
+    hasContacts
+      ? (formatContactsOrCustomDump(
+          "contacts",
+          "",
+          snapshot,
+          builtinListHebrew("contacts"),
+          opts,
+        ) ??
+        (partnerOnly
+          ? "אנשי קשר משותפים:\nריקה"
+          : "אנשי קשר אישיים:\nריקה"))
+      : partnerOnly
+        ? "אנשי קשר משותפים:\nריקה"
         : "אנשי קשר אישיים:\nריקה",
-    );
+  );
 
-    sections.push(formatPhoneBookDump(opts?.phoneBook));
-  }
+  sections.push(formatPhoneBookDump(opts?.phoneBook, opts));
 
   sections.push("לפירוט רשימה: הצג רשימת …");
 
@@ -360,19 +378,87 @@ function formatCustomListsCountsDump(
   return ["רשימות אחרות:", ...lines].join("\n");
 }
 
+/**
+ * Phone book dump — two-section share-only like תיוקים / אנשי קשר.
+ * Bare dump: אישיים + משותפים; section/partner filters apply.
+ */
 export function formatPhoneBookDump(
-  phoneBook: Array<{ name: string; phone?: string }> | undefined,
+  phoneBook: PhoneBookDumpRow[] | undefined,
+  opts?: ShowDumpOptions,
 ): string {
   const rows = phoneBook ?? [];
-  if (rows.length === 0) {
-    return "ספר הטלפונים:\nריק";
-  }
-  const lines = rows.map((row, i) => {
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const viewerNames = new Set(
+    [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
+  );
+  const personal: string[] = [];
+  const shared: Array<{ line: string; partnersLabel: string }> = [];
+  for (const row of rows) {
     const name = row.name.trim() || "איש קשר";
     const phone = (row.phone ?? "").trim();
-    return phone ? `${i + 1}. ${name} — ${phone}` : `${i + 1}. ${name}`;
-  });
-  return ["ספר הטלפונים:", ...lines].join("\n");
+    const body = phone ? `${name} — ${phone}` : name;
+    const partners = (row.shared_with ?? [])
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .filter((value) => !viewerNames.has(value));
+    const isShared =
+      row.scope === "shared" && partners.length > 0;
+    if (isShared) {
+      const partnersLabel = partners.join(", ");
+      shared.push({
+        line: `${body} (עם ${partnersLabel})`,
+        partnersLabel,
+      });
+    } else {
+      personal.push(body);
+    }
+  }
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const blocks: string[] = [];
+  if (section !== "shared") {
+    blocks.push("ספר הטלפונים אישי:");
+    if (personal.length === 0) {
+      blocks.push("ריק");
+    } else {
+      personal.forEach((line, i) => {
+        blocks.push(`${i + 1}. ${line}`);
+      });
+    }
+  }
+  if (section !== "personal") {
+    let sharedRows = shared;
+    if (partnerNeedles.length > 0) {
+      sharedRows = shared.filter((row) =>
+        partnerNeedles.some((needle) =>
+          partnerBucketMatches(row.partnersLabel, needle),
+        ),
+      );
+    }
+    if (section === "shared" || sharedRows.length > 0) {
+      if (blocks.length > 0) {
+        blocks.push("");
+      }
+      blocks.push("ספר הטלפונים משותף:");
+      if (sharedRows.length === 0) {
+        blocks.push("ריק");
+      } else {
+        sharedRows.forEach((row, i) => {
+          blocks.push(`${i + 1}. ${row.line}`);
+        });
+      }
+    }
+  }
+  if (rows.length === 0 && !section && partnerNeedles.length === 0) {
+    return "ספר הטלפונים אישי:\nריק";
+  }
+  if (blocks.length === 0) {
+    return section === "shared" || partnerNeedles.length > 0
+      ? "ספר הטלפונים משותף:\nריק"
+      : "ספר הטלפונים אישי:\nריק";
+  }
+  return blocks.join("\n");
 }
 
 /** reminder_id values already shown via LINKED REMINDER on a task line. */
@@ -385,17 +471,109 @@ function linkedReminderIdsFromTasks(
       continue;
     }
     for (const item of list.items) {
-      const raw = item.reminder;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        continue;
-      }
-      const id = (raw as { reminder_id?: unknown }).reminder_id;
-      if (typeof id === "string" && id.trim()) {
-        ids.add(id.trim());
+      const id = reminderIdFromTaskItem(item);
+      if (id) {
+        ids.add(id);
       }
     }
   }
   return ids;
+}
+
+function reminderIdFromTaskItem(
+  item: Record<string, unknown>,
+): string | null {
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const id = (raw as { reminder_id?: unknown }).reminder_id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+/**
+ * Partner bucket key for a tasks item (same rules as formatThreeWayDump),
+ * or null when the row is personal / unshared.
+ */
+export function taskItemPartnerBucketKey(
+  list: EmployeeRecordSnapshot["lists"][number],
+  item: Record<string, unknown>,
+  viewer: string,
+  aliases: string[],
+): string | null {
+  if (list.scope === "shared_items") {
+    return (list.owner ?? "").trim() || "משותף";
+  }
+  if (list.scope === "shared") {
+    return partnersKey(list.shared_with ?? [], viewer, aliases);
+  }
+  const assignedBy =
+    typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
+  if (assignedBy) {
+    return assignedBy;
+  }
+  const sharedWith = stringArray(item.shared_with);
+  if (sharedWith.length > 0) {
+    return partnersKey(sharedWith, viewer, aliases);
+  }
+  return null;
+}
+
+/** Linked reminder ids on tasks that partner-bucket with the dump partner(s). */
+export function linkedReminderIdsFromPartnerTasks(
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): Set<string> {
+  const needles = dumpFilterNames(opts?.partner);
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const ids = new Set<string>();
+  if (needles.length === 0 && opts?.section !== "shared") {
+    return ids;
+  }
+  for (const list of snapshot.lists) {
+    if (list.list_type !== "tasks") {
+      continue;
+    }
+    for (const item of list.items) {
+      const bucket = taskItemPartnerBucketKey(list, item, viewer, aliases);
+      if (!bucket) {
+        continue;
+      }
+      if (
+        needles.length > 0 &&
+        !needles.some((needle) => partnerBucketMatches(bucket, needle))
+      ) {
+        continue;
+      }
+      const id = reminderIdFromTaskItem(item);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Partner dump: clock involves partner via ping name or linked shared task. */
+export function reminderInvolvesPartner(
+  row: ReminderSnapshotRow,
+  partnerNeedles: string[],
+  partnerLinkedIds: Set<string>,
+): boolean {
+  if (partnerLinkedIds.has(row.reminder_id)) {
+    return true;
+  }
+  if (partnerNeedles.length === 0) {
+    // section=shared with no named partner — keep clocks linked to any shared task.
+    return false;
+  }
+  const pings = (row.ping ?? []).map((name) => name.trim()).filter(Boolean);
+  return partnerNeedles.some((needle) =>
+    pings.some(
+      (ping) => ping === needle || partnerBucketMatches(ping, needle),
+    ),
+  );
 }
 
 /** Labeled filing line: «שם: … · תיאור: …» (תיאור = item_info; omit empty). */

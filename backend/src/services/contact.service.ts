@@ -19,6 +19,12 @@ export interface SpeakerContact {
   sharedFromOwner?: string;
 }
 
+/** Whole-book partners for this owner (includes owner when shared). */
+export type ContactBookShare = {
+  scope: "personal" | "shared";
+  sharedWith: string[];
+};
+
 export async function listContactsForEmployee(
   ownerEmployeeId: string,
 ): Promise<SpeakerContact[]> {
@@ -41,29 +47,112 @@ export async function listContactsForEmployee(
     people.map((person) => [person.id, person.nickname?.trim() || person.name]),
   );
 
-  const [owned, sharedCandidates] = await Promise.all([
-    prisma.contact.findMany({
-      where: { ownerEmployeeId },
-      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
-    }),
-    prisma.contact.findMany({
-      where: {
-        userId: owner.userId,
-        ownerEmployeeId: { not: ownerEmployeeId },
-        scope: "shared",
-      },
-      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
-    }),
-  ]);
+  const [owned, sharedCandidates, myBook, booksSharedWithMe] =
+    await Promise.all([
+      prisma.contact.findMany({
+        where: { ownerEmployeeId },
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      }),
+      prisma.contact.findMany({
+        where: {
+          userId: owner.userId,
+          ownerEmployeeId: { not: ownerEmployeeId },
+          scope: "shared",
+        },
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+      }),
+      prisma.contactBook.findUnique({
+        where: { ownerEmployeeId },
+      }),
+      prisma.contactBook.findMany({
+        where: {
+          userId: owner.userId,
+          ownerEmployeeId: { not: ownerEmployeeId },
+          scope: "shared",
+        },
+      }),
+    ]);
+
+  const myBookPartners =
+    myBook?.scope === "shared"
+      ? sharedWithNames(ownerEmployeeId, myBook.visibleTo, names)
+      : [];
 
   const sharedIn = sharedCandidates.filter((row) =>
     visibleToIncludes(row.visibleTo, ownerEmployeeId),
   );
 
-  return [
-    ...owned.map((row) => toSpeakerContact(row, ownerEmployeeId, names)),
-    ...sharedIn.map((row) => toSpeakerContact(row, ownerEmployeeId, names)),
-  ];
+  const seen = new Set<string>();
+  const out: SpeakerContact[] = [];
+
+  for (const row of owned) {
+    seen.add(row.id);
+    out.push(
+      toSpeakerContact(row, ownerEmployeeId, names, myBookPartners),
+    );
+  }
+  for (const row of sharedIn) {
+    if (seen.has(row.id)) {
+      continue;
+    }
+    seen.add(row.id);
+    out.push(toSpeakerContact(row, ownerEmployeeId, names));
+  }
+
+  const bookOwners = (booksSharedWithMe ?? []).filter((book) =>
+    visibleToIncludes(book.visibleTo, ownerEmployeeId),
+  );
+  for (const book of bookOwners) {
+    const bookPartners = sharedWithNames(
+      book.ownerEmployeeId,
+      book.visibleTo,
+      names,
+    );
+    const bookRows = await prisma.contact.findMany({
+      where: { ownerEmployeeId: book.ownerEmployeeId },
+      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+    });
+    for (const row of bookRows) {
+      if (seen.has(row.id)) {
+        continue;
+      }
+      seen.add(row.id);
+      out.push(
+        toSpeakerContact(row, ownerEmployeeId, names, bookPartners),
+      );
+    }
+  }
+
+  return out;
+}
+
+export async function getContactBookShare(
+  ownerEmployeeId: string,
+): Promise<ContactBookShare | null> {
+  const owner = await prisma.employee.findUnique({
+    where: { id: ownerEmployeeId },
+    select: { userId: true },
+  });
+  if (!owner) {
+    return null;
+  }
+  const people = await prisma.employee.findMany({
+    where: { userId: owner.userId },
+    select: { id: true, name: true, nickname: true },
+  });
+  const names = new Map(
+    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
+  );
+  const book = await prisma.contactBook.findUnique({
+    where: { ownerEmployeeId },
+  });
+  if (!book || book.scope !== "shared") {
+    return { scope: "personal", sharedWith: [] };
+  }
+  return {
+    scope: "shared",
+    sharedWith: sharedWithNames(ownerEmployeeId, book.visibleTo, names),
+  };
 }
 
 function toSpeakerContact(
@@ -78,12 +167,21 @@ function toSpeakerContact(
   },
   viewerId: string,
   names: Map<string, string>,
+  /** Whole-book partners to fold in when the row itself is personal. */
+  bookPartners: string[] = [],
 ): SpeakerContact {
-  const scope = row.scope === "shared" ? "shared" : "personal";
+  const rowShared = row.scope === "shared";
+  const rowPartners = rowShared
+    ? sharedWithNames(row.ownerEmployeeId, row.visibleTo, names)
+    : [];
   const sharedWith =
-    scope === "shared"
-      ? sharedWithNames(row.ownerEmployeeId, row.visibleTo, names)
-      : [];
+    rowPartners.length > 1
+      ? rowPartners
+      : bookPartners.length > 1
+        ? bookPartners
+        : [];
+  const scope: "personal" | "shared" =
+    sharedWith.length > 1 ? "shared" : "personal";
   return {
     id: row.id,
     name: row.name,
@@ -129,18 +227,27 @@ function uniqueIds(values: Array<string | null | undefined>): string[] {
 }
 
 const SHARED_CONTACT_RULES = [
-  "SHARED CONTACT CARD: a speaker message starting with [כרטיס איש קשר שותף בוואטסאפ] followed by {\"shared_contacts\":[{name, phones}]} is a contact the speaker shared with WhatsApp's contact-share. It means: save it to their phone book.",
-  "→ Same turn, without asking: metadata.directory add per card with its name and the first phone. If one card has several clearly different numbers, ask which to save (directory []).",
-  "If SPEAKER_CONTACTS already has that phone, add it again — it updates the saved name. If the same name exists with a different phone, update it: directory remove with the old contact_id + add with the new phone, and say you updated it.",
+  "SHARED CONTACT CARD: a speaker message starting with [כרטיס איש קשר שותף בוואטסאפ] followed by {\"shared_contacts\":[{name, phones}]} is a WhatsApp contact-share card — NOT a silent save.",
+  "→ Same turn: directory=[] and ASK «לשמור את «name» (phone) בספר הטלפונים שלך?». כן → directory add (name + first phone). לא → directory=[]; acknowledge. Several clearly different phones on one card → ask which to save first (directory []).",
+  "Already in SPEAKER_CONTACTS with the same phone → say it is already saved; do not re-add silently. Same name with a different phone → ASK whether to update; on כן → directory remove (old contact_id) + add (new phone).",
   "A card without any phone cannot be saved — say so. A card without a name → ask what name to save it under (directory []).",
-  "SHARE: directory add/update MAY include targets (partner names). Speaker stays owner; partners see the row via shared_with. Never assign a contact onto someone else's book.",
+  "SHARE ONE CONTACT: directory add/update MAY include targets (partner names). Speaker stays owner; partners see the row via shared_with.",
+  "SHARE WHOLE PHONE BOOK: «שתף את ספר הטלפונים עם עמית» → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners. Never assign a contact onto someone else's book.",
 ];
 
-export function formatSpeakerContacts(contacts: SpeakerContact[]): string {
+export function formatSpeakerContacts(
+  contacts: SpeakerContact[],
+  bookShare?: ContactBookShare | null,
+): string {
+  const bookLine =
+    bookShare?.scope === "shared" && bookShare.sharedWith.length > 1
+      ? `PHONE_BOOK_SHARE: scope=shared, shared_with=${JSON.stringify(bookShare.sharedWith)} (whole book co-shared).`
+      : "PHONE_BOOK_SHARE: scope=personal (not co-shared as a whole book).";
   if (contacts.length === 0) {
     return [
       "SPEAKER_CONTACTS:",
       "No personal contacts saved yet.",
+      bookLine,
       "Unknown names need a WhatsApp number. After the speaker gives digits, ask to save.",
       ...SHARED_CONTACT_RULES,
     ].join("\n");
@@ -148,7 +255,8 @@ export function formatSpeakerContacts(contacts: SpeakerContact[]): string {
 
   return [
     "SPEAKER_CONTACTS:",
-    "Phone book for this speaker (owned + rows shared with them). Resolve these names without asking for a number.",
+    "Phone book for this speaker (owned + rows shared with them + whole books shared with them). Resolve these names without asking for a number.",
+    bookLine,
     "MUTATE BY ID: directory.remove MUST copy contact_id from this turn — never omit it, never invent it, never speak ids aloud. A partner may remove a shared contact_id they can see.",
     ...SHARED_CONTACT_RULES,
     JSON.stringify(
@@ -220,17 +328,73 @@ export async function applyDirectoryActions(input: {
   saved: SpeakerContact[];
   removed: string[];
   shareNotices: DirectoryShareNotice[];
+  bookShared?: boolean;
 }> {
   const saved: SpeakerContact[] = [];
   const removed: string[] = [];
   const shareNotices: DirectoryShareNotice[] = [];
+  let bookShared = false;
   if (!prisma.contact?.upsert || input.actions.length === 0) {
-    return { saved, removed, shareNotices };
+    return { saved, removed, shareNotices, bookShared };
   }
 
   const employees = input.employees ?? [];
+  const bookPartnerIds = await loadBookPartnerIds(input.ownerEmployeeId);
 
   for (const action of input.actions) {
+    if (action.action === "share_book") {
+      const partnerIds = resolveDirectoryPartnerIds(
+        action.targets ?? [],
+        employees,
+        input.ownerEmployeeId,
+      );
+      const unshareIds = resolveDirectoryPartnerIds(
+        action.unshareWith ?? [],
+        employees,
+        input.ownerEmployeeId,
+      );
+      const existing = await prisma.contactBook.findUnique({
+        where: { ownerEmployeeId: input.ownerEmployeeId },
+      });
+      const drop = new Set(unshareIds);
+      let nextVisible = uniqueIds([
+        input.ownerEmployeeId,
+        ...idList(existing?.visibleTo),
+        ...partnerIds,
+      ]).filter((id) => id === input.ownerEmployeeId || !drop.has(id));
+      const shared = nextVisible.length > 1;
+      await prisma.contactBook.upsert({
+        where: { ownerEmployeeId: input.ownerEmployeeId },
+        create: {
+          userId: input.userId,
+          ownerEmployeeId: input.ownerEmployeeId,
+          scope: shared ? "shared" : "personal",
+          visibleTo: shared ? nextVisible : [input.ownerEmployeeId],
+        },
+        update: {
+          scope: shared ? "shared" : "personal",
+          visibleTo: shared ? nextVisible : [input.ownerEmployeeId],
+        },
+      });
+      bookShared = shared;
+      if (shared) {
+        const directoryMeta: LlmMetadata = {
+          ...emptyLlmMetadata(),
+          directory: [{ ...action, targets: action.targets ?? [] }],
+        };
+        for (const partnerId of nextVisible) {
+          if (partnerId === input.ownerEmployeeId) {
+            continue;
+          }
+          shareNotices.push({
+            employeeId: partnerId,
+            metadata: directoryMeta,
+          });
+        }
+      }
+      continue;
+    }
+
     if (action.action === "remove") {
       const contactId = action.contactId.trim();
       if (!contactId) {
@@ -339,9 +503,13 @@ export async function applyDirectoryActions(input: {
       employees,
       input.ownerEmployeeId,
     );
-    const shared = partnerIds.length > 0;
+    const inherited = bookPartnerIds.filter(
+      (id) => id !== input.ownerEmployeeId,
+    );
+    const allPartners = uniqueIds([...partnerIds, ...inherited]);
+    const shared = allPartners.length > 0;
     const visibleTo = shared
-      ? uniqueIds([input.ownerEmployeeId, ...partnerIds])
+      ? uniqueIds([input.ownerEmployeeId, ...allPartners])
       : [input.ownerEmployeeId];
 
     const row = await prisma.contact.upsert({
@@ -381,7 +549,7 @@ export async function applyDirectoryActions(input: {
       scope: shared ? "shared" : "personal",
     });
 
-    if (shared) {
+    if (partnerIds.length > 0) {
       const directoryMeta: LlmMetadata = {
         ...emptyLlmMetadata(),
         directory: [{ ...action, targets: action.targets ?? [] }],
@@ -395,7 +563,17 @@ export async function applyDirectoryActions(input: {
     }
   }
 
-  return { saved, removed, shareNotices };
+  return { saved, removed, shareNotices, bookShared };
+}
+
+async function loadBookPartnerIds(ownerEmployeeId: string): Promise<string[]> {
+  const book = await prisma.contactBook.findUnique({
+    where: { ownerEmployeeId },
+  });
+  if (!book || book.scope !== "shared") {
+    return [];
+  }
+  return idList(book.visibleTo);
 }
 
 function resolveDirectoryPartnerIds(
@@ -448,8 +626,12 @@ function matchDirectoryTarget(
 export function formatDirectoryApplyNotice(result: {
   saved: SpeakerContact[];
   removed: string[];
+  bookShared?: boolean;
 }): string {
   const parts: string[] = [];
+  if (result.bookShared) {
+    parts.push("שיתפתי את ספר הטלפונים.");
+  }
   for (const row of result.saved) {
     parts.push(`שמרתי את «${row.name}» בספר הטלפונים שלך.`);
   }

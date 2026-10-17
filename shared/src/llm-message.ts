@@ -174,7 +174,11 @@ export interface LlmJobAction {
   urgency?: JobUrgency;
 }
 
-export type LlmDirectoryActionName = "add" | "remove" | "update";
+export type LlmDirectoryActionName =
+  | "add"
+  | "remove"
+  | "update"
+  | "share_book";
 
 export interface LlmDirectoryAction {
   action: LlmDirectoryActionName;
@@ -184,7 +188,7 @@ export interface LlmDirectoryAction {
   contactId: string;
   /** Co-share partners (share-only — speaker stays owner). Empty = personal. */
   targets: string[];
-  /** update: partner names to drop from visible_to. */
+  /** update / share_book: partner names to drop from visible_to. */
   unshareWith?: string[];
 }
 
@@ -1074,7 +1078,11 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
         ? "remove"
         : actionRaw === "update" || actionRaw === "edit" || actionRaw === "change"
           ? "update"
-          : null;
+          : actionRaw === "share_book" ||
+              actionRaw === "share-book" ||
+              actionRaw === "set_book_participants"
+            ? "share_book"
+            : null;
   if (!action) {
     return null;
   }
@@ -1085,6 +1093,16 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
   const unshareWith = readStringList(
     record.unshare_with ?? record.unshareWith,
   );
+  if (action === "share_book") {
+    return {
+      action,
+      name: "",
+      phone: "",
+      contactId: "",
+      targets,
+      ...(unshareWith.length > 0 ? { unshareWith } : {}),
+    };
+  }
   if (action === "remove" || action === "update") {
     if (!contactId) {
       return null;

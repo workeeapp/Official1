@@ -1467,7 +1467,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("אנשי קשר אישיים:");
     expect(text).not.toContain("אנשי קשר משותפים:");
     expect(text).not.toMatch(/מטלות משותפות:\s*ריקה/);
-    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("ספר הטלפונים אישי:");
     expect(text).toContain("דני — 0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
   });
@@ -1621,7 +1621,7 @@ describe("worker inventory tasks dump helpers", () => {
     const text = formatShowDumpFromKind("phone_book", { lists: [], filing: [] }, {
       phoneBook: [{ name: "דני", phone: "050" }],
     })!;
-    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("ספר הטלפונים אישי:");
     expect(text).toContain("1. דני — 050");
   });
 
@@ -1669,7 +1669,7 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("לשלוח למיכל ברכת בוקר");
   });
 
-  it("full dump with partner skips phone book and filters custom lists", () => {
+  it("full dump with partner filters reminders, contacts, phone book like filings", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -1677,7 +1677,20 @@ describe("worker inventory tasks dump helpers", () => {
           list_name: "",
           owner: "טל",
           scope: "personal",
-          items: [{ item_id: "p", "שם מטלה": "פרטי" }],
+          items: [
+            { item_id: "p", "שם מטלה": "פרטי" },
+            {
+              item_id: "meet",
+              "שם מטלה": "פגישה (טל, עמית)",
+              shared_with: ["טל", "עמית"],
+              scope: "shared",
+              reminder: {
+                reminder_id: "rem-meet",
+                fire_at: "2026-10-20T18:30:00.000Z",
+                repeat: "once",
+              },
+            },
+          ],
         } as EmployeeRecordSnapshot["lists"][number],
         {
           list_type: "custom",
@@ -1694,17 +1707,112 @@ describe("worker inventory tasks dump helpers", () => {
           scope: "personal",
           items: [{ item_id: "c2", שם: "b" }],
         } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "contacts",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "ct-personal",
+              "שם פרטי": "דני",
+            },
+            {
+              item_id: "ct-shared",
+              "שם פרטי": "נועה",
+              scope: "shared",
+              shared_with: ["טל", "עמית"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [],
+      reminders: [
+        {
+          reminder_id: "rem-michal",
+          item: "לשלוח למיכל ברכת בוקר",
+          list_type: "tasks",
+          fire_at: "2026-10-17T06:00:00.000Z",
+          repeat: "daily",
+          ping: ["מיכל"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "rem-meet",
+          item: "פגישה עם עמית",
+          list_type: "tasks",
+          fire_at: "2026-10-20T18:30:00.000Z",
+          repeat: "once",
+          ping: ["טל"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "rem-ping-amit",
+          item: "לשאול את עמית",
+          list_type: "tasks",
+          fire_at: "2026-10-18T10:00:00.000Z",
+          repeat: "once",
+          ping: ["עמית"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
     };
     const text = formatShowDumpFromKind("full", snap, {
       viewerName: "טל",
       section: "shared",
       partner: "עמית",
-      phoneBook: [{ name: "דני", phone: "050" }],
+      phoneBook: [
+        { name: "דני", phone: "050", scope: "personal" },
+        {
+          name: "שרה",
+          phone: "052",
+          scope: "shared",
+          shared_with: ["טל", "עמית"],
+        },
+      ],
     })!;
     expect(text).toContain("*באגים*");
     expect(text).not.toContain("*פרטי* —");
-    expect(text).not.toContain("ספר הטלפונים");
+    expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
+    expect(text).toContain("לשאול את עמית");
+    expect(text).toContain("פגישה עם עמית");
+    expect(text).toContain("נועה");
+    expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
+    expect(text).toContain("שרה");
+    expect(text).toContain("ספר הטלפונים משותף");
+    expect(text).not.toMatch(/ספר הטלפונים אישי:[\s\S]*דני/);
   });
 });

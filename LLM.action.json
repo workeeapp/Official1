@@ -747,32 +747,35 @@
                       "enum": [
                         "add",
                         "remove",
-                        "update"
+                        "update",
+                        "share_book"
                       ]
                     },
                     "name": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Contact display name. Empty for share_book."
                     },
                     "phone": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Phone digits. Empty for share_book."
                     },
                     "contact_id": {
                       "type": "string",
-                      "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove and directory.update."
+                      "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove and directory.update. Empty for share_book."
                     },
                     "targets": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Co-share partners on add/update (speaker stays owner)."
+                      "description": "Co-share partners on add/update/share_book (speaker stays owner). share_book = whole phone book."
                     },
                     "unshare_with": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "directory.update: partner names to drop from this contact's visible_to."
+                      "description": "directory.update / share_book: partner names to drop from visible_to."
                     }
                   },
                   "required": [
