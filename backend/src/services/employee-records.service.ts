@@ -502,10 +502,16 @@ export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
 export const EMPTY_REPLY_RETRY =
   "לא הצלחתי לבצע את זה — נסי שוב.";
 
+/** Model past-tense delete claim in the spoken reply (not user utterance). */
+export function looksLikeListDeleteClaim(spoken: string): boolean {
+  return /מחקתי|הסרתי/.test(spoken);
+}
+
 /**
  * When metadata requested a list mutate kind that did not apply, replace the
  * spoken reply so it does not keep a false past-tense claim. Partial success
  * (e.g. remove applied, add did not) keeps an applied fallback + add miss.
+ * Also corrects «מחקתי…» when no remove was requested/applied (bad ACTION shape).
  */
 export function correctListMutationClaimReply(input: {
   reply: string;
@@ -517,6 +523,8 @@ export function correctListMutationClaimReply(input: {
   appliedAdd: boolean;
   appliedFallback: string;
   setResponse: (reply: string, response: string) => string;
+  /** Spoken text already parsed from the reply (optional). */
+  spoken?: string;
 }): string {
   const {
     requestedRemove,
@@ -540,6 +548,13 @@ export function correctListMutationClaimReply(input: {
       return setResponse(input.reply, parts.join("\n"));
     }
     return setResponse(input.reply, LIST_ADD_MISS);
+  }
+  if (
+    !appliedRemove &&
+    !requestedRemove &&
+    looksLikeListDeleteClaim(input.spoken ?? "")
+  ) {
+    return setResponse(input.reply, LIST_FIND_MISS);
   }
   return input.reply;
 }

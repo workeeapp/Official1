@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   coerceMetadataFromPayload,
+  normalizeListsField,
   parseLlmReply,
   parseReplyMetadata,
   wazeNavigateUrl,
@@ -228,6 +229,24 @@ describe("parseLlmReply", () => {
     );
     expect(meta.lists).toHaveLength(1);
     expect(meta.lists[0]?.action).toBe("add");
+  });
+
+  it("normalizes lists object buckets { remove: [...] } into actions", () => {
+    const itemId = "f143906b-89e1-4749-b894-93ec2ebe7f21";
+    expect(
+      normalizeListsField({
+        remove: [{ item_id: itemId }],
+      }),
+    ).toEqual([{ item_id: itemId, action: "remove" }]);
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        lists: { remove: [{ item_id: itemId }] },
+        responses: [{ text: "מחקתי את גרביים מרשימת הקניות." }],
+      }),
+    );
+    expect(meta.lists).toHaveLength(1);
+    expect(meta.lists[0]?.action).toBe("remove");
+    expect(meta.lists[0]?.items[0]).toMatchObject({ item_id: itemId });
   });
 
   it("unwraps top-level text instead of leaking raw JSON", () => {

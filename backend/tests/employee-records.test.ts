@@ -545,6 +545,26 @@ describe("employee records", () => {
     expect(EMPTY_REPLY_RETRY).toContain("נסי שוב");
   });
 
+  it("corrects false מחקתי claim when no remove was requested or applied", () => {
+    expect(
+      correctListMutationClaimReply({
+        reply: JSON.stringify({
+          responses: ["מחקתי את גרביים מרשימת הקניות."],
+          lists: { remove: [{ item_id: "x" }] },
+        }),
+        requestedRemove: false,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: "",
+        setResponse: (_r, response) => response,
+        spoken: "מחקתי את גרביים מרשימת הקניות.",
+      }),
+    ).toBe(LIST_FIND_MISS);
+  });
+
   it("removes a custom row found on another list name for the same owner", async () => {
     const bugs = {
       id: "bugs-list",

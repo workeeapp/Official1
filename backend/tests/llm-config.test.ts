@@ -110,7 +110,10 @@ describe("LLM action schema", () => {
       "FORBIDDEN list_ops for a single item",
     );
     expect(config.systemMessage).toContain(
-      "metadata.lists remove with that item_id",
+      "metadata.lists as an ARRAY of actions",
+    );
+    expect(config.systemMessage).toContain(
+      'FORBIDDEN lists as object buckets',
     );
     expect(config.systemMessage).toContain("FORBIDDEN metadata.show_dump on ANY line-index");
     expect(config.systemMessage).toContain("משותפות עם X");

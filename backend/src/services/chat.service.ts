@@ -2275,6 +2275,7 @@ export async function sendChatMessage(input: {
       appliedAdd: appliedListAdd,
       appliedFallback,
       setResponse: setEngineResponse,
+      spoken: parseLlmReply(workingReply).response,
     });
     if (
       requestedListRemove &&

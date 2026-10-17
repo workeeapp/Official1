@@ -386,20 +386,19 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const meta = metadata as Record<string, unknown>;
   const defaultTargets = parseTargets(meta);
   const reportSections = parseReportSections(meta);
-  const lists = Array.isArray(meta.lists)
-    ? meta.lists.flatMap((entry) => {
-        const action = toListAction(entry);
-        if (!action) {
-          return [];
-        }
-        return [
-          {
-            ...action,
-            targets: action.targets.length > 0 ? action.targets : defaultTargets,
-          },
-        ];
-      })
-    : [];
+  const listEntries = normalizeListsField(meta.lists) ?? [];
+  const lists = listEntries.flatMap((entry) => {
+    const action = toListAction(entry);
+    if (!action) {
+      return [];
+    }
+    return [
+      {
+        ...action,
+        targets: action.targets.length > 0 ? action.targets : defaultTargets,
+      },
+    ];
+  });
   const filing = Array.isArray(meta.filing)
     ? meta.filing.flatMap((entry) => {
         const action = toFilingAction(entry);
@@ -1568,7 +1567,8 @@ function looksLikeLlmReplyPayload(parsed: Record<string, unknown>): boolean {
     "responses" in parsed ||
     "response" in parsed ||
     "text" in parsed ||
-    "metadata" in parsed
+    "metadata" in parsed ||
+    "lists" in parsed
   );
 }
 
@@ -1598,9 +1598,41 @@ export function joinSpokenResponses(responses: string[]): string {
   return responses.join("\n\n");
 }
 
+const LIST_BUCKET_ACTIONS = new Set(["add", "remove", "update"]);
+
+/**
+ * Shape drift: `lists` as `{ remove: [{ item_id }], add: [...] }` instead of
+ * `[{ action: "remove", items: [...] }, …]`.
+ */
+export function normalizeListsField(lists: unknown): unknown[] | null {
+  if (Array.isArray(lists)) {
+    return lists;
+  }
+  if (!lists || typeof lists !== "object") {
+    return null;
+  }
+  const record = lists as Record<string, unknown>;
+  const out: unknown[] = [];
+  for (const action of LIST_BUCKET_ACTIONS) {
+    const entries = record[action];
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        out.push({ ...(entry as Record<string, unknown>), action });
+      } else if (typeof entry === "string" && entry.trim()) {
+        out.push({ action, item_id: entry.trim() });
+      }
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
 /**
  * Shape drift: model sometimes puts `lists` on the payload root instead of
- * `metadata.lists`. Prefer non-empty metadata.lists; else rescue top-level.
+ * `metadata.lists`, or uses `{ remove: […] }` object buckets.
+ * Prefer non-empty metadata.lists; else rescue top-level.
  */
 export function coerceMetadataFromPayload(
   parsed: Record<string, unknown>,
@@ -1611,14 +1643,12 @@ export function coerceMetadataFromPayload(
     !Array.isArray(parsed.metadata)
       ? { ...(parsed.metadata as Record<string, unknown>) }
       : {};
-  const metaLists = base.lists;
-  const hasMetaLists = Array.isArray(metaLists) && metaLists.length > 0;
-  if (
-    !hasMetaLists &&
-    Array.isArray(parsed.lists) &&
-    parsed.lists.length > 0
-  ) {
-    base.lists = parsed.lists;
+  const fromMeta = normalizeListsField(base.lists);
+  const fromTop = normalizeListsField(parsed.lists);
+  if (fromMeta && fromMeta.length > 0) {
+    base.lists = fromMeta;
+  } else if (fromTop && fromTop.length > 0) {
+    base.lists = fromTop;
   }
   if (Object.keys(base).length > 0) {
     return base;
