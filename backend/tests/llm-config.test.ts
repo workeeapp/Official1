@@ -103,6 +103,15 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("OR WITHIN FIELD");
     expect(config.systemMessage).toContain("SAVE VERB ROUTING");
     expect(config.systemMessage).toContain("DELETE CONFIRM (critical)");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN empty responses",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN list_ops for a single item",
+    );
+    expect(config.systemMessage).toContain(
+      "metadata.lists remove with that item_id",
+    );
     expect(config.systemMessage).toContain("FORBIDDEN metadata.show_dump on ANY line-index");
     expect(config.systemMessage).toContain("משותפות עם X");
     expect(config.systemMessage).toContain("SHOW_DUMP (critical)");

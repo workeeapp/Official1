@@ -707,12 +707,22 @@ function toListAction(value: unknown): LlmListAction | null {
   const listType = LIST_TYPES.has(value.list_type as LlmListType)
     ? (value.list_type as LlmListType)
     : "custom";
-  const items = Array.isArray(value.items)
+  let items = Array.isArray(value.items)
     ? value.items.filter(
         (item): item is Record<string, unknown> =>
           Boolean(item && typeof item === "object" && !Array.isArray(item)),
       )
     : [];
+  // Shape drift: remove/update with item_id on the action (not inside items[]).
+  if (
+    items.length === 0 &&
+    (value.action === "remove" || value.action === "update")
+  ) {
+    const loneId = readText(value, ["item_id", "itemId", "id"]);
+    if (loneId) {
+      items = [{ item_id: loneId }];
+    }
+  }
 
   let listName =
     listType === "custom" ? readText(value, ["list_name", "רשימה"]) : "";
@@ -738,7 +748,19 @@ function toListAction(value: unknown): LlmListAction | null {
   }
 
   // Named custom lists may open/share with columns only (no rows yet).
-  if (items.length === 0 && !(listType === "custom" && listName)) {
+  // remove/update with only item_id is also valid (jobs-style id mutate).
+  if (
+    items.length === 0 &&
+    !(listType === "custom" && listName) &&
+    value.action !== "remove" &&
+    value.action !== "update"
+  ) {
+    return null;
+  }
+  if (
+    items.length === 0 &&
+    (value.action === "remove" || value.action === "update")
+  ) {
     return null;
   }
 
@@ -1576,6 +1598,34 @@ export function joinSpokenResponses(responses: string[]): string {
   return responses.join("\n\n");
 }
 
+/**
+ * Shape drift: model sometimes puts `lists` on the payload root instead of
+ * `metadata.lists`. Prefer non-empty metadata.lists; else rescue top-level.
+ */
+export function coerceMetadataFromPayload(
+  parsed: Record<string, unknown>,
+): unknown {
+  const base =
+    parsed.metadata &&
+    typeof parsed.metadata === "object" &&
+    !Array.isArray(parsed.metadata)
+      ? { ...(parsed.metadata as Record<string, unknown>) }
+      : {};
+  const metaLists = base.lists;
+  const hasMetaLists = Array.isArray(metaLists) && metaLists.length > 0;
+  if (
+    !hasMetaLists &&
+    Array.isArray(parsed.lists) &&
+    parsed.lists.length > 0
+  ) {
+    base.lists = parsed.lists;
+  }
+  if (Object.keys(base).length > 0) {
+    return base;
+  }
+  return parsed.metadata;
+}
+
 function extractLlmPayload(text: string): {
   responses: string[];
   rawMetadata: unknown;
@@ -1591,10 +1641,11 @@ function extractLlmPayload(text: string): {
   const responses =
     spoken ?? (looksLikeLlmReplyPayload(parsed) ? [] : [text]);
 
+  const rawMetadata = coerceMetadataFromPayload(parsed);
   return {
     responses,
-    rawMetadata: parsed.metadata,
-    metadata: parseLlmMetadata(parsed.metadata),
+    rawMetadata,
+    metadata: parseLlmMetadata(rawMetadata),
   };
 }
 

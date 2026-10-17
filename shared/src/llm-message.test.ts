@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseLlmReply, parseReplyMetadata, wazeNavigateUrl } from "./llm-message.js";
+import {
+  coerceMetadataFromPayload,
+  parseLlmReply,
+  parseReplyMetadata,
+  wazeNavigateUrl,
+} from "./llm-message.js";
 
 describe("custom list title_field", () => {
   it("reads title_field for custom lists only", () => {
@@ -175,6 +180,54 @@ describe("parseLlmReply", () => {
     expect(parsed.response).toBe("");
     expect(parsed.response).not.toContain("metadata");
     expect(parsed.response).not.toContain("confirm");
+  });
+
+  it("rescues top-level lists into metadata when metadata.lists is empty", () => {
+    const itemId = "f143906b-89e1-4749-b894-93ec2ebe7f21";
+    const coerced = coerceMetadataFromPayload({
+      responses: [],
+      lists: [{ action: "remove", item_id: itemId }],
+      metadata: { lists: [], filing: [] },
+    });
+    expect(coerced).toMatchObject({
+      lists: [{ action: "remove", item_id: itemId }],
+    });
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        lists: [
+          {
+            action: "remove",
+            item_id: itemId,
+          },
+        ],
+        metadata: { lists: [] },
+      }),
+    );
+    expect(meta.lists).toHaveLength(1);
+    expect(meta.lists[0]?.action).toBe("remove");
+    expect(meta.lists[0]?.items[0]).toMatchObject({ item_id: itemId });
+  });
+
+  it("does not override non-empty metadata.lists with top-level lists", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        lists: [{ action: "remove", item_id: "top-level" }],
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "shopping",
+              targets: [],
+              items: [{ "שם פריט": "חלב" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(meta.lists).toHaveLength(1);
+    expect(meta.lists[0]?.action).toBe("add");
   });
 
   it("unwraps top-level text instead of leaking raw JSON", () => {

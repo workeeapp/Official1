@@ -115,6 +115,8 @@ import {
   deleteEmployeeRecord,
   deriveCustomListName,
   correctListMutationClaimReply,
+  EMPTY_REPLY_RETRY,
+  LIST_FIND_MISS,
   formatAppliedMutationFallback,
   clusterSnapshotShoppingTasksItems,
   formatEmployeeContext,
@@ -508,6 +510,39 @@ describe("employee records", () => {
         setResponse: (_r, response) => response,
       }),
     ).toBe(reply);
+  });
+
+  it("empty-reply fallbacks cover remove miss and last-resort retry", () => {
+    expect(
+      correctListMutationClaimReply({
+        reply: JSON.stringify({ responses: [], metadata: { lists: [] } }),
+        requestedRemove: true,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: "",
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(LIST_FIND_MISS);
+    expect(
+      formatAppliedMutationFallback(
+        [
+          {
+            action: "remove",
+            itemId: "item-1",
+            employeeId: "emp-1",
+            listType: "shopping",
+            itemKey: "גרביים",
+            itemLabel: "גרביים",
+            listName: "קניות",
+          },
+        ],
+        [],
+      ),
+    ).toBe('הסרתי את «גרביים» מרשימת «קניות».');
+    expect(EMPTY_REPLY_RETRY).toContain("נסי שוב");
   });
 
   it("removes a custom row found on another list name for the same owner", async () => {

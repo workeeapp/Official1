@@ -496,7 +496,11 @@ export function formatAppliedMutationFallback(
 }
 
 const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
-const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
+export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
+
+/** Last-resort spoken line when the model left responses empty. */
+export const EMPTY_REPLY_RETRY =
+  "לא הצלחתי לבצע את זה — נסי שוב.";
 
 /**
  * When metadata requested a list mutate kind that did not apply, replace the
@@ -632,7 +636,7 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
-    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask «האם מאשר?»); ONE responses entry that turn — FORBIDDEN raise/«אגב»; on כן emit ONLY that remove with id — then the server applies immediately (confirm is model-turn only). On לא / בטל / אל תמחקי while that «האם מאשר?» is open → remove empty; short ack you cancelled deleting that title; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask «האם מאשר?»); ONE responses entry that turn — FORBIDDEN raise/«אגב»; on כן → metadata.lists remove with item_id + non-empty past-tense responses; FORBIDDEN empty responses; FORBIDDEN list_ops for a single item — then the server applies immediately (confirm is model-turn only). On לא / בטל / אל תמחקי while that «האם מאשר?» is open → remove empty; short ack you cancelled deleting that title; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value; use name + info to find the right filing), and item_description (usually empty — ignore for lookup). Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Flat dumps show those rows under one «קניות/מטלות:» header with mark «(באחריות X · מאת <assigner>)». Custom shared_items: ONE «רשימת «name»:» with co-share mark «(A, B)» all involved (no assign). «איזה רשימות משותפות יש לי» → only scope=shared entries.",

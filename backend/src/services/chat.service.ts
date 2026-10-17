@@ -37,6 +37,8 @@ import {
   alignListTypeInReply,
   applyEmployeeRecords,
   correctListMutationClaimReply,
+  EMPTY_REPLY_RETRY,
+  LIST_FIND_MISS,
   formatAppliedMutationFallback,
   formatEmployeeContext,
   formatTeamSchedules,
@@ -596,7 +598,7 @@ function workerTargetingInstructions(
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id. A multi-day row (תאריך לביצוע … תאריך סיום) counts for every day in its span.",
     "RANGES IN ANSWERS: a row with שעת סיום (or a standing occurrence with end_time) shows as «10:00–12:00», never only the start. A multi-day row (תאריך לביצוע … תאריך סיום) matches EVERY day inside its span — «מה יש לי ביום רביעי» lists «בחו\"ל (שלישי–חמישי)». Scan spans before «אין לך…».",
-    "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE CONFIRM: any delete ask → remove empty + ask «האם ברצונך למחוק את: <title> מתוך רשימת <…>? האם מאשר?»; ONE responses entry only that turn — FORBIDDEN raise / «אגב» / another yes/no. On כן/מאשר → emit ONLY that remove with id (FORBIDDEN same-turn jobs.answer or treating a co-raised nudge as confirmed). On לא / בטל / אל תמחקי while «האם מאשר?» is open → remove empty; ack cancelled that title; FORBIDDEN answering AFTER ASSIGN / date+reminder / older drafts. Update with id applies immediately. Never invent or speak ids.",
+    "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE CONFIRM: any delete ask → remove empty + ask «האם ברצונך למחוק את: <title> מתוך רשימת <…>? האם מאשר?»; ONE responses entry only that turn — FORBIDDEN raise / «אגב» / another yes/no. On כן/מאשר → metadata.lists remove with item_id; responses MUST be non-empty past-tense («מחקתי את «title»…»); FORBIDDEN empty responses; FORBIDDEN list_ops for a single item (list_ops = alter_list / delete_list only); FORBIDDEN same-turn jobs.answer. On לא / בטל / אל תמחקי while «האם מאשר?» is open → remove empty; ack cancelled that title; FORBIDDEN answering AFTER ASSIGN / date+reminder / older drafts. Update with id applies immediately. Never invent or speak ids.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
     "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD for that window; lists=[]; server replaces. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Do NOT use TEAM_SCHEDULES as the speaker's day plan. Multi-day (השבוע) → from=first to=last day of the window.",
     "LIST ITEM URGENCY: on lists add/update set item urgency = normal | urgent | very_urgent by MEANING (same as messages) — never ask. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when hard (ממש דחוף / דחוף מאוד / מיד). Clean title without urgency words. Shopping/tasks/contacts/custom alike.",
@@ -2221,21 +2223,6 @@ export async function sendChatMessage(input: {
         `על איזו משימה?\n${jobResult.askWhich.map((ask) => `• ${ask}`).join("\n")}`,
       );
     }
-    // Empty LLM response must not leak raw JSON / blank bubble to the user.
-    if (!parseLlmReply(workingReply).response.trim()) {
-      const fallback =
-        guestMutationNotice ||
-        (metadata.confirm === false
-          ? "ביטלתי את המחיקה."
-          : metadata.confirm === true
-            ? "בוצע."
-            : "") ||
-        formatListOpFallback(listOpResults) ||
-        formatAppliedMutationFallback(listMutations, filingMutations);
-      if (fallback) {
-        workingReply = setEngineResponse(workingReply, fallback);
-      }
-    }
     // Model often claims mutate success when that kind did not apply — correct.
     const requestedListRemove = (metadata.lists ?? []).some(
       (row) => row.action === "remove",
@@ -2259,6 +2246,25 @@ export async function sendChatMessage(input: {
       listMutations,
       filingMutations,
     );
+    // Empty LLM response must not leak raw JSON / blank bubble to the user.
+    if (!parseLlmReply(workingReply).response.trim()) {
+      const fallback =
+        guestMutationNotice ||
+        (metadata.confirm === false
+          ? "ביטלתי את המחיקה."
+          : metadata.confirm === true
+            ? "בוצע."
+            : "") ||
+        formatListOpFallback(listOpResults) ||
+        (appliedListRemove || appliedListUpdate || appliedListAdd
+          ? appliedFallback
+          : "") ||
+        (requestedListRemove && !appliedListRemove ? LIST_FIND_MISS : "") ||
+        (requestedListUpdate && !appliedListUpdate ? LIST_FIND_MISS : "");
+      if (fallback) {
+        workingReply = setEngineResponse(workingReply, fallback);
+      }
+    }
     workingReply = correctListMutationClaimReply({
       reply: workingReply,
       requestedRemove: requestedListRemove,
@@ -2276,6 +2282,10 @@ export async function sendChatMessage(input: {
       !parseLlmReply(workingReply).response.trim()
     ) {
       workingReply = setEngineResponse(workingReply, appliedFallback);
+    }
+    // Never send an empty WhatsApp/web bubble (e.g. responses:[] + bad list_ops).
+    if (!parseLlmReply(workingReply).response.trim()) {
+      workingReply = setEngineResponse(workingReply, EMPTY_REPLY_RETRY);
     }
     // The model already said «שיניתי/מחקתי» — correct it when the engine refused the list op.
     const listOpRefusal = formatListOpRefusals(listOpResults);
