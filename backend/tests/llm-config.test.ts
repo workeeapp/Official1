@@ -77,6 +77,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "show_dump=tasks + show_dump_about=YOUR display name",
     );
+    expect(config.systemMessage).toContain(
+      "show_dump=tasks WITHOUT show_dump_about",
+    );
+    expect(config.systemMessage).toContain("אין לי מטלות");
+    expect(config.systemMessage).toContain(
+      "NEVER show_dump=tasks without about",
+    );
     expect(config.systemMessage).toContain("Set metadata.show_dump to that category");
     expect(config.systemMessage).toContain(
       "FULL DUMP / מה יש לי / הציגי הכל",

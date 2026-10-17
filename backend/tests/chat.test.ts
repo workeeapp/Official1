@@ -682,6 +682,9 @@ describe("chat API", () => {
     expect(instructions).toContain("WHO A STATUS QUESTION IS ABOUT");
     expect(instructions).toContain("show_dump=tasks");
     expect(instructions).toContain("show_dump_about=YOUR display name");
+    expect(instructions).toContain("BOTH REQUIRED");
+    expect(instructions).toContain("אין לי מטלות");
+    expect(instructions).toMatch(/show_dump=tasks WITHOUT about|SPEAKER's tasks/);
   });
 
   it("wires SEND BY MEANING and SEND-ME FREE TEXT into Lucy runtime instructions", async () => {
