@@ -2158,13 +2158,37 @@ describe("partner dump about_ids (birthday event)", () => {
       partner: "עמית",
       now,
     })!;
+    expect(text).toContain("מטלות אישיות:");
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("כל שנה ב־13.10");
     expect(text).toMatch(/קבוע \+ תזכורת/);
+    expect(text).not.toMatch(/מטלות משותפות עם עמית:[\s\S]*יום ההולדת/);
     expect(text).not.toContain("מטלה פרטית");
     expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
-    // Linked birthday clock folded into the task — not a second תזכורות row.
+    // Linked clock folded into the task — not a second תזכורות row.
     expect(text).not.toMatch(/תזכורות פעילות:[\s\S]*יום ההולדת של עמית/);
+  });
+
+  it("standing mark shows ping day when linked fire day ≠ task event day", () => {
+    const line = formatNumberedItem(
+      1,
+      "יום ההולדת של עמית",
+      {
+        "שם מטלה": "יום ההולדת של עמית",
+        "יום שלם": true,
+        "תאריך לביצוע": "2027-05-09",
+        חוזר: "כל שנה ב־9 במאי",
+        reminder: {
+          reminder_id: "r1",
+          fire_at: "2027-05-08 13:00",
+          recurrence_text: "כל שנה ב־8 במאי ב־13:00",
+        },
+      },
+      "tasks",
+      { now },
+    );
+    expect(line).toContain("כל שנה ב־9 במאי");
+    expect(line).toMatch(/קבוע \+ תזכורת ב־8\.5\.2027 ב־13:00/);
   });
 
   it("unlinked about clock alone appears under תזכורות for partner dump", () => {

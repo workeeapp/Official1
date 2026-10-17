@@ -183,6 +183,11 @@ export async function settleFiredReminder(
       where: { reminderId: reminder.id },
       data: { reminderId: null },
     });
+    // Soft-links must not keep pointing at a done one-shot (same as cancel).
+    await prisma.employeeListItem.updateMany({
+      where: { linkedReminderId: reminder.id, deletedAt: null },
+      data: { linkedReminderId: null },
+    });
   }
 
   let firedTaskData: unknown = null;

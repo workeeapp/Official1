@@ -115,6 +115,10 @@ describe("settleFiredReminder", () => {
       where: { reminderId: "clock-1" },
       data: { reminderId: null },
     });
+    expect(itemUpdateMany).toHaveBeenCalledWith({
+      where: { linkedReminderId: "clock-1", deletedAt: null },
+      data: { linkedReminderId: null },
+    });
     expect(itemUpdate).toHaveBeenCalledWith({
       where: { id: "task-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },

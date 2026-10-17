@@ -1650,7 +1650,7 @@ function formatThreeWayDump(
   const applyItemFilters = (rows: DumpItem[]): DumpItem[] =>
     filterUrgency(filterDate(filterAssignee(rows)));
 
-  const filteredPersonal = showPersonal ? applyItemFilters(personal) : [];
+  let filteredPersonal = showPersonal ? applyItemFilters(personal) : [];
 
   const filteredShared = new Map<string, DumpItem[]>();
   if (showShared) {
@@ -1671,7 +1671,8 @@ function formatThreeWayDump(
     }
   }
 
-  // Personal tasks about the partner (birthday of X) — linked reminder.about.
+  // Personal about-X tasks stay under אישיות (never משותפות). In «עם X»
+  // (section=shared) still surface them under the personal header.
   if (
     listType === "tasks" &&
     section === "shared" &&
@@ -1683,9 +1684,19 @@ function formatThreeWayDump(
       ),
     );
     if (aboutRows.length > 0) {
-      const key = partnerFilterLabel(partnerFilters);
-      const merged = [...(filteredShared.get(key) ?? []), ...aboutRows];
-      filteredShared.set(key, merged);
+      const seen = new Set(
+        filteredPersonal.map((row) => String(row.item.item_id ?? "")),
+      );
+      for (const row of aboutRows) {
+        const id = String(row.item.item_id ?? "");
+        if (id && seen.has(id)) {
+          continue;
+        }
+        if (id) {
+          seen.add(id);
+        }
+        filteredPersonal = [...filteredPersonal, row];
+      }
     }
   }
 
@@ -1693,7 +1704,8 @@ function formatThreeWayDump(
   const countsOnly = opts?.countsOnly === true;
 
   if (countsOnly) {
-    if (showPersonal && filteredPersonal.length > 0) {
+    // filteredPersonal may hold about-X rows even when section=shared.
+    if (filteredPersonal.length > 0) {
       blocks.push(
         `${label} אישיות${paperclipSuffix(personalListFiles)}: ${hebrewItemCount(filteredPersonal.length)}`,
       );
@@ -1714,7 +1726,7 @@ function formatThreeWayDump(
   // WHEN / date window: day-header layout only — same line formatter inside.
   if (listType === "tasks" && hasDumpDateRange(opts)) {
     const agendaRows: DumpItem[] = [
-      ...(showPersonal ? filteredPersonal : []),
+      ...filteredPersonal,
       ...[...filteredShared.values()].flat(),
     ];
     return formatTasksDayAgendaDump(
@@ -1725,7 +1737,7 @@ function formatThreeWayDump(
     );
   }
 
-  if (showPersonal && filteredPersonal.length > 0) {
+  if (filteredPersonal.length > 0) {
     blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
     blocks.push(
       ...filteredPersonal.map((row, i) =>
@@ -2193,8 +2205,9 @@ export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
 }
 
 /**
- * Standing + linked clock mark. Same ping time as the chore → «(קבוע + תזכורת)»;
- * different (e.g. chore 21:00, ping 20:45) → «(קבוע + תזכורת ב־20:45)».
+ * Standing + linked clock mark. Same when as the chore → «(קבוע + תזכורת)»;
+ * different time → «(קבוע + תזכורת ב־20:45)»; different calendar day →
+ * «(קבוע + תזכורת ב־8.5.2027 ב־13:00)». Same rule for any task (not birthday-only).
  */
 export function standingLinkedReminderMark(
   item: Record<string, unknown>,
@@ -2203,8 +2216,16 @@ export function standingLinkedReminderMark(
   if (!itemHasLinkedReminder(item)) {
     return "(קבוע)";
   }
+  const taskYmd = taskEventYmd(item);
+  const remYmd = linkedReminderYmd(item);
   const taskHm = extractHmFromText(standingRuleText);
   const reminderHm = linkedReminderSeriesHm(item);
+  if (taskYmd && remYmd && taskYmd !== remYmd) {
+    const day = formatDisplayDate(remYmd);
+    return reminderHm
+      ? `(קבוע + תזכורת ב־${day} ב־${reminderHm})`
+      : `(קבוע + תזכורת ב־${day})`;
+  }
   if (reminderHm && reminderHm !== taskHm) {
     return `(קבוע + תזכורת ב־${reminderHm})`;
   }
@@ -2215,6 +2236,43 @@ export function standingLinkedReminderMark(
 function extractHmFromText(text: string): string | null {
   const match = text.match(/ב־(\d{1,2}:\d{2})/);
   return match ? normalizeHm(match[1]) : null;
+}
+
+/** Task event day YYYY-MM-DD from תאריך לביצוע or first next_occurrence. */
+function taskEventYmd(item: Record<string, unknown>): string | null {
+  const date = readText(item, ["תאריך לביצוע", "date"]).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date;
+  }
+  const next = item.next_occurrences;
+  if (Array.isArray(next) && typeof next[0] === "string") {
+    const ymd = next[0].trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+      return ymd;
+    }
+  }
+  return null;
+}
+
+/** Linked reminder fire day YYYY-MM-DD (Jerusalem wall from fire_at). */
+function linkedReminderYmd(item: Record<string, unknown>): string | null {
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const fireAt = String((raw as Record<string, unknown>).fire_at ?? "").trim();
+  if (!fireAt) {
+    return null;
+  }
+  const space = fireAt.match(/^(\d{4}-\d{2}-\d{2})(?:\s|$)/);
+  if (space) {
+    return space[1]!;
+  }
+  const iso = Date.parse(fireAt);
+  if (!Number.isNaN(iso)) {
+    return jerusalemYmd(new Date(iso));
+  }
+  return null;
 }
 
 /** Series ping HH:mm from linked `reminder` (recurrence_text first, else fire_at). */
@@ -2254,8 +2312,8 @@ export function formatScheduleSuffix(
   if (recurring) {
     const mark = standingLinkedReminderMark(item, recurring);
     let base: string;
-    if (/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־\d{1,2}:\d{2})?)?\)/.test(recurring)) {
-      base = `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־\d{1,2}:\d{2})?)?\)/g, mark)}`;
+    if (/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־[^)]+)?)?\)/.test(recurring)) {
+      base = `— ${recurring.replace(/\(קבוע(?:\s*\+\s*תזכורת(?:\s+ב־[^)]+)?)?\)/g, mark)}`;
     } else if (/קבוע/.test(recurring)) {
       base = `— ${recurring}`;
     } else {
