@@ -16,7 +16,6 @@ import {
   formatScheduleSuffix,
   formatShoppingTitle,
   formatShowDumpFromKind,
-  isEmptyListDump,
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
   itemMatchesDateRange,
@@ -1788,6 +1787,51 @@ describe("formatShowDumpFromKind", () => {
     expect(partnerEmpty).not.toContain("קניות");
     expect(partnerEmpty).not.toContain("תזכורות");
   });
+
+  it("full+partner omits empty contacts section without Hebrew empty sentence", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "t1",
+              "שם מטלה": "פגישה (טל, עמית)",
+              shared_with: ["טל", "עמית"],
+              scope: "shared",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "contacts",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "c1",
+              "שם פרטי": "דני",
+              scope: "personal",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const text = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "עמית",
+    })!;
+    expect(text).toContain("פגישה (טל, עמית)");
+    expect(text).not.toContain("אין אנשי קשר");
+    expect(text).not.toContain("דני");
+    expect(text).toContain("לפירוט רשימה: הצג רשימת …");
+  });
 });
 
 describe("worker inventory tasks dump helpers", () => {
@@ -1822,10 +1866,12 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).not.toContain("לבדוק עם ערן");
   });
 
-  it("stitches ממתינים after tasks and omits empty tasks sentence when waiting", () => {
-    expect(isEmptyListDump("אין מטלות שמורות.")).toBe(true);
+  it("stitches ממתינים after tasks; empty tasks string skips tasks block", () => {
     expect(
-      composeTasksDumpWithWaiting("אין מטלות שמורות.", "ממתינים לתשובה:\n1. א"),
+      composeTasksDumpWithWaiting("", "ממתינים לתשובה:\n1. א"),
+    ).toBe("ממתינים לתשובה:\n1. א");
+    expect(
+      composeTasksDumpWithWaiting(null, "ממתינים לתשובה:\n1. א"),
     ).toBe("ממתינים לתשובה:\n1. א");
     expect(
       composeTasksDumpWithWaiting(

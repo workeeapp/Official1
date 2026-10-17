@@ -135,6 +135,7 @@ import {
 } from "./whatsapp-send.js";
 import {
   composeTasksDumpWithWaiting,
+  emptyListDumpSentence,
   excludeItemIdsFromSnapshot,
   filterSnapshotForAboutPerson,
   formatShowDumpFromKind,
@@ -2345,7 +2346,7 @@ export async function sendChatMessage(input: {
           scope: "personal" | "shared";
           shared_with?: string[];
         }>,
-        extraOpts?: { flatLayout?: boolean },
+        extraOpts?: { flatLayout?: boolean; omitEmptySentence?: boolean },
       ): Promise<{
         text: string | null;
         snapshot: typeof snapshot;
@@ -2354,6 +2355,7 @@ export async function sendChatMessage(input: {
           viewerAliases: string[];
           phoneBook?: typeof speakerPhoneBook;
           flatLayout?: boolean;
+          omitEmptySentence?: boolean;
         };
       }> => {
         const dumpOpts = {
@@ -2362,6 +2364,9 @@ export async function sendChatMessage(input: {
           viewerAliases,
           ...(phoneBook ? { phoneBook } : {}),
           ...(extraOpts?.flatLayout ? { flatLayout: true } : {}),
+          ...(extraOpts?.omitEmptySentence
+            ? { omitEmptySentence: true }
+            : {}),
         };
         return {
           text: formatShowDumpFromKind(showDumpKind, snapshot, dumpOpts),
@@ -2451,21 +2456,29 @@ export async function sendChatMessage(input: {
               new Set(openJobs.map((job) => job.id)),
             );
           }
+          const inventoryTasks =
+            aboutIsCurrentWorker && isTasksShowDumpKind(showDumpKind);
           const { text: rawText, snapshot, opts } = await dumpForSubject(
             employeeDisplayName(aboutPerson),
             aboutAliases,
             subjectSnapshot,
             undefined,
-            aboutIsDigital && isTasksShowDumpKind(showDumpKind)
-              ? { flatLayout: true }
-              : undefined,
+            {
+              ...(aboutIsDigital && isTasksShowDumpKind(showDumpKind)
+                ? { flatLayout: true }
+                : {}),
+              ...(inventoryTasks ? { omitEmptySentence: true } : {}),
+            },
           );
           let text = rawText;
-          if (aboutIsCurrentWorker && isTasksShowDumpKind(showDumpKind)) {
+          if (inventoryTasks) {
             text = composeTasksDumpWithWaiting(
               rawText,
               formatOpenJobsWaitingDump(openJobs, input.employeeId),
             );
+            if (!text?.trim()) {
+              text = emptyListDumpSentence("מטלות", opts);
+            }
           }
           if (text) {
             const header =

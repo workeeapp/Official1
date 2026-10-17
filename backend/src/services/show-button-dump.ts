@@ -81,6 +81,11 @@ export type ShowDumpOptions = {
   flatLayout?: boolean;
   /** SPEAKER_CONTACTS rows for show_dump=full / phone_book ספר הטלפונים. */
   phoneBook?: PhoneBookDumpRow[];
+  /**
+   * When true, empty dumps stay "" (no Hebrew empty sentence).
+   * Used before composeTasksDumpWithWaiting so emptiness is structural.
+   */
+  omitEmptySentence?: boolean;
 };
 
 /** Phone-book dump row (directory / SPEAKER_CONTACTS). */
@@ -247,24 +252,33 @@ function formatResolvedShowDump(
     return formatFullDump(snapshot, opts);
   }
   if (parsed.kind === "reminders") {
-    return (
-      formatRemindersDump(snapshot.reminders ?? [], opts) ||
-      "אין לך תזכורות פעילות כרגע."
-    );
+    const body = formatRemindersDump(snapshot.reminders ?? [], opts);
+    if (body) {
+      return body;
+    }
+    return opts?.omitEmptySentence
+      ? ""
+      : "אין לך תזכורות פעילות כרגע.";
   }
   if (parsed.kind === "filings") {
-    return formatFilingsDump(snapshot.filing ?? [], opts) || emptyFilingsSentence(opts);
+    const body = formatFilingsDump(snapshot.filing ?? [], opts);
+    if (body) {
+      return body;
+    }
+    return opts?.omitEmptySentence ? "" : emptyFilingsSentence(opts);
   }
   if (parsed.kind === "phone_book") {
-    return (
-      formatPhoneBookDump(opts?.phoneBook, opts) || emptyPhoneBookSentence(opts)
-    );
+    const body = formatPhoneBookDump(opts?.phoneBook, opts);
+    if (body) {
+      return body;
+    }
+    return opts?.omitEmptySentence ? "" : emptyPhoneBookSentence(opts);
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
 
 /** One-line empty when a focused shopping/tasks dump has nothing. */
-function emptyListDumpSentence(
+export function emptyListDumpSentence(
   label: string,
   opts?: ShowDumpOptions,
 ): string {
@@ -430,17 +444,15 @@ export function formatFullDump(
     (list) => list.list_type === "contacts",
   );
   if (hasContacts) {
-    const contactsBody = formatContactsOrCustomDump(
-      "contacts",
-      "",
-      snapshot,
-      builtinListHebrew("contacts"),
-      opts,
+    pushIfContent(
+      formatContactsOrCustomDump(
+        "contacts",
+        "",
+        snapshot,
+        builtinListHebrew("contacts"),
+        opts,
+      ) ?? "",
     );
-    // Focused empty sentences must not appear as a full-dump section.
-    if (contactsBody && !isEmptyListDump(contactsBody)) {
-      sections.push(contactsBody);
-    }
   }
 
   pushIfContent(formatPhoneBookDump(opts?.phoneBook, opts));
@@ -1440,11 +1452,15 @@ function formatListDump(
 ): string | null {
   const name = rawName.trim();
   const builtin = builtinListTypeFromHebrew(name);
+  const omitEmpty = opts?.omitEmptySentence === true;
   if (builtin === "shopping" || builtin === "tasks") {
     const label = builtinListHebrew(builtin);
     const body = formatThreeWayDump(builtin, label, snapshot, opts);
     if (body) {
       return body;
+    }
+    if (omitEmpty) {
+      return "";
     }
     if (builtin === "tasks" && hasDumpDateRange(opts)) {
       return "אין מטלות בטווח התאריכים.";
@@ -1462,9 +1478,28 @@ function formatListDump(
     if (body === null) {
       return null;
     }
-    return body || emptyContactsSentence(opts);
+    if (body) {
+      return body;
+    }
+    return omitEmpty ? "" : emptyContactsSentence(opts);
   }
-  return formatContactsOrCustomDump("custom", name, snapshot, name, opts);
+  const customBody = formatContactsOrCustomDump(
+    "custom",
+    name,
+    snapshot,
+    name,
+    opts,
+  );
+  if (customBody === null) {
+    return null;
+  }
+  if (customBody) {
+    return customBody;
+  }
+  if (omitEmpty) {
+    return "";
+  }
+  return emptyCustomListSentence(name, snapshot, opts);
 }
 
 type DumpItem = {
@@ -2043,25 +2078,9 @@ export function excludeItemIdsFromSnapshot(
   };
 }
 
-/** True when a list dump is the engine empty sentence (no item lines). */
-export function isEmptyListDump(text: string | null | undefined): boolean {
-  const trimmed = (text ?? "").trim();
-  if (!trimmed) {
-    return true;
-  }
-  return (
-    /^אין .+ שמורות\.$/.test(trimmed) ||
-    /^אין .+ משותפ[ותים] עם .+\.$/.test(trimmed) ||
-    /^אין מטלות בטווח התאריכים\.$/.test(trimmed) ||
-    /^אין לך (מידע|תזכורות) .+\.$/.test(trimmed) ||
-    / ריק[ה]?\.?$/.test(trimmed) ||
-    / ריקה\.$/.test(trimmed)
-  );
-}
-
 /**
  * Stitch a tasks dump with an optional ממתינים (OPEN_JOBS) block.
- * Empty tasks + waiting → waiting only; both empty → tasks empty sentence.
+ * Empty tasks ("" / null) + waiting → waiting only. No Hebrew parsing.
  */
 export function composeTasksDumpWithWaiting(
   tasksDump: string | null,
@@ -2072,7 +2091,7 @@ export function composeTasksDumpWithWaiting(
   if (!waiting) {
     return tasks || null;
   }
-  if (isEmptyListDump(tasks)) {
+  if (!tasks) {
     return waiting;
   }
   return `${tasks}\n\n${waiting}`;
@@ -2236,24 +2255,35 @@ function formatContactsOrCustomDump(
   }
   const collected = collectListDumpRows(listType, lists, opts);
   const kept = filterDumpRows(collected, listType, opts);
+  if (kept.length === 0) {
+    return "";
+  }
   const header =
     listType === "contacts" ? emptyLabel : `רשימת «${emptyLabel}»`;
-  if (kept.length === 0) {
-    const section = opts?.section ?? null;
-    const partnerNeedles = dumpFilterNames(opts?.partner);
-    const listFiles = lists.some((list) => listHasListLevelFiles(list));
-    if (listType === "contacts") {
-      return emptyContactsSentence(opts);
-    }
-    if (section === "shared" || partnerNeedles.length > 0) {
-      return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
-    }
-    if (section === "personal") {
-      return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} — אין פריטים אישיים.`;
-    }
-    return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} ריקה.`;
-  }
   return formatSingleHeaderDump(header, listType, kept, opts);
+}
+
+/** Focused custom-list empty sentence (not used in FULL DUMP sections). */
+function emptyCustomListSentence(
+  listName: string,
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string {
+  const name = listName.trim() || "ללא שם";
+  const lists = snapshot.lists.filter(
+    (list) =>
+      list.list_type === "custom" && (list.list_name ?? "").trim() === name,
+  );
+  const listFiles = lists.some((list) => listHasListLevelFiles(list));
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  if (section === "shared" || partnerNeedles.length > 0) {
+    return `רשימת «${name}»${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
+  }
+  if (section === "personal") {
+    return `רשימת «${name}»${paperclipSuffix(listFiles)} — אין פריטים אישיים.`;
+  }
+  return `רשימת «${name}»${paperclipSuffix(listFiles)} ריקה.`;
 }
 
 /** Exported for unit tests. */
