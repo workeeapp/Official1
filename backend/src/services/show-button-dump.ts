@@ -39,16 +39,16 @@ const TITLE_KEYS: Record<string, string[]> = {
 export type ShowDumpOptions = {
   /**
    * Subject of the dump (speaker, or about-person when show_dump_about).
-   * Omitted from `משותפות עם …` partner headers.
+   * Omitted from co-share / partner filter keys.
    */
   viewerName?: string;
-  /** Extra viewer labels (nickname + legal name) so partner headers never keep the viewer. */
+  /** Extra viewer labels (nickname + legal name) so partner keys never keep the viewer. */
   viewerAliases?: string[];
   now?: Date;
-  /** shopping/tasks: personal | shared | omit for full dump. */
+  /** shopping/tasks: personal | shared | omit for full dump (filters rows). */
   section?: LlmShowDumpSection | null;
   /**
-   * With section=shared: partner משותפות bucket(s).
+   * With section=shared: keep rows whose partnerFilterKey matches.
    * string | string[] — multiple = OR.
    */
   partner?: string | string[] | null;
@@ -70,13 +70,13 @@ export type ShowDumpOptions = {
    */
   urgency?: "urgent" | "very_urgent" | null;
   /**
-   * shopping/tasks three-way: bucket headers with counts only (no item lines).
+   * shopping/tasks: one header with counts only (no item lines).
    * Used by show_dump=full for קניות.
    */
   countsOnly?: boolean;
   /**
-   * Digital-worker book: one numbered list — skip Stage-2 אישיות/משותפות
-   * and assigner marks (`assigned_by` means asker, not human co-share).
+   * Digital-worker book: one numbered list without assign/co-share marks
+   * (`assigned_by` means asker, not human co-share).
    */
   flatLayout?: boolean;
   /** SPEAKER_CONTACTS rows for show_dump=full / phone_book ספר הטלפונים. */
@@ -271,15 +271,48 @@ function emptyListDumpSentence(
   const section = opts?.section ?? null;
   const partnerFilters = dumpFilterNames(opts?.partner);
   if (section === "personal") {
-    return `${label} אישיות ריקה.`;
+    return `אין ${label} אישיות.`;
   }
   if (section === "shared" && partnerFilters.length > 0) {
     return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
   }
   if (section === "shared") {
-    return `${label} משותפות ריקה.`;
+    return `אין ${label} משותפות.`;
   }
   return `אין ${label} שמורות.`;
+}
+
+/** Assign mark shown to both parties — no arrows, no bare name. */
+export function formatAssignResponsibilityMark(
+  assignee: string,
+  assigner: string,
+): string {
+  const who = assignee.trim();
+  const from = assigner.trim();
+  if (who && from) {
+    return `באחריות ${who} · מאת ${from}`;
+  }
+  if (who) {
+    return `באחריות ${who}`;
+  }
+  if (from) {
+    return `מאת ${from}`;
+  }
+  return "";
+}
+
+/** Parse assignee from «באחריות X · מאת Y». */
+export function extractAssigneeFromMark(mark: string): string | undefined {
+  const trimmed = mark.trim();
+  const full = trimmed.match(/^באחריות\s+(.+?)\s+·\s+מאת\s+/);
+  if (full?.[1]?.trim()) {
+    return full[1].trim();
+  }
+  const only = trimmed.match(/^באחריות\s+(.+)$/);
+  if (only?.[1]?.trim() && !only[1].includes("·")) {
+    return only[1].trim();
+  }
+  return undefined;
 }
 
 function emptyFilingsSentence(opts?: ShowDumpOptions): string {
@@ -319,10 +352,10 @@ function emptyContactsSentence(opts?: ShowDumpOptions): string {
     return `אין אנשי קשר משותפים עם ${partnerFilterLabel(partners)}.`;
   }
   if (section === "shared") {
-    return "אנשי קשר משותפים ריקה.";
+    return "אין אנשי קשר משותפים.";
   }
   if (section === "personal") {
-    return "אנשי קשר אישיים ריקה.";
+    return "אין אנשי קשר אישיים.";
   }
   return "אין אנשי קשר שמורים.";
 }
@@ -1481,22 +1514,339 @@ type DumpItem = {
   title: string;
   item: Record<string, unknown>;
   /**
-   * Responsibility / co-share mark body (no parens).
-   * Assign → assignee only («מיכל»); co-share → all involved («מיכל, טל»).
+   * Mark body (no parens): co-share «מיכל, טל»; assign «באחריות מיכל · מאת טל».
    */
   responsibilityMark?: string;
   /** List-level 📎 for this row's source list. */
   listFiles?: boolean;
+  /** True when row is assign / co-share / shared list / shared_items. */
+  isShared?: boolean;
+  /** Partner filter key (assigner, co-share partners, list owner, …). */
+  partnerFilterKey?: string;
+  /** Sole assignee when this is an assign row (for באחריות filter). */
+  assigneeName?: string;
 };
 
-function pushPartnerBucket(
-  map: Map<string, DumpItem[]>,
-  partnerKey: string,
-  row: DumpItem,
-): void {
-  const bucket = map.get(partnerKey) ?? [];
-  bucket.push(row);
-  map.set(partnerKey, bucket);
+type ListDumpType = "shopping" | "tasks" | "contacts" | "custom";
+
+/**
+ * Row mark for shopping/tasks (assign vs co-share). Worker flatLayout skips marks.
+ */
+function resolveShoppingTasksRowMeta(
+  list: EmployeeRecordSnapshot["lists"][number],
+  item: Record<string, unknown>,
+  title: string,
+  viewer: string,
+  aliases: string[],
+  skipMarks: boolean,
+): Pick<
+  DumpItem,
+  "responsibilityMark" | "isShared" | "partnerFilterKey" | "assigneeName"
+> {
+  if (skipMarks) {
+    return { isShared: false };
+  }
+  if (list.scope === "shared") {
+    return {
+      isShared: true,
+      partnerFilterKey: partnersKey(list.shared_with ?? [], viewer, aliases),
+    };
+  }
+  if (list.scope === "shared_items") {
+    const owner = (list.owner ?? "").trim() || "משותף";
+    const sharedWith = stringArray(item.shared_with);
+    if (sharedWith.length > 0) {
+      const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
+      const showMark =
+        Boolean(allInvolved) && !titleAlreadyListsPartners(title, allInvolved);
+      return {
+        isShared: true,
+        partnerFilterKey: partnersKey(sharedWith, viewer, aliases),
+        ...(showMark ? { responsibilityMark: allInvolved } : {}),
+      };
+    }
+    const assignedBy =
+      typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
+    const assigner = assignedBy || viewer;
+    const mark = formatAssignResponsibilityMark(owner, assigner);
+    return {
+      isShared: true,
+      partnerFilterKey: owner,
+      assigneeName: owner,
+      ...(mark ? { responsibilityMark: mark } : {}),
+    };
+  }
+  const assignedBy =
+    typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
+  if (assignedBy) {
+    const assignee =
+      (list.owner ?? "").trim() ||
+      viewer ||
+      (aliases.map((name) => name.trim()).find(Boolean) ?? "");
+    const mark = formatAssignResponsibilityMark(assignee, assignedBy);
+    return {
+      isShared: true,
+      partnerFilterKey: assignedBy,
+      assigneeName: assignee || undefined,
+      ...(mark ? { responsibilityMark: mark } : {}),
+    };
+  }
+  const sharedWith = stringArray(item.shared_with);
+  if (sharedWith.length > 0) {
+    const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
+    const showMark =
+      Boolean(allInvolved) && !titleAlreadyListsPartners(title, allInvolved);
+    return {
+      isShared: true,
+      partnerFilterKey: partnersKey(sharedWith, viewer, aliases),
+      ...(showMark ? { responsibilityMark: allInvolved } : {}),
+    };
+  }
+  return { isShared: false };
+}
+
+function collectListDumpRows(
+  listType: ListDumpType,
+  lists: EmployeeRecordSnapshot["lists"],
+  opts?: ShowDumpOptions,
+): DumpItem[] {
+  const viewer = opts?.viewerName?.trim() ?? "";
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const skipMarks = opts?.flatLayout === true && (listType === "shopping" || listType === "tasks");
+  const rows: DumpItem[] = [];
+
+  for (const list of lists) {
+    const listFiles = listHasListLevelFiles(list);
+    for (const item of list.items) {
+      const title =
+        listType === "custom"
+          ? formatCustomItemBody(item, list.title_field, list.columns)
+          : itemTitle(listType, item, list.title_field);
+
+      if (listType === "custom") {
+        const mark = customItemCoShareMark(list, item, viewer, aliases);
+        const isShared =
+          list.scope === "shared" ||
+          list.scope === "shared_items" ||
+          Boolean(mark);
+        const partnerFilterKey = mark
+          ? partnersKey(
+              stringArray(item.shared_with).length > 0
+                ? stringArray(item.shared_with)
+                : [(list.owner ?? "").trim()].filter(Boolean),
+              viewer,
+              aliases,
+            )
+          : list.scope === "shared"
+            ? partnersKey(list.shared_with ?? [], viewer, aliases)
+            : "";
+        rows.push({
+          title,
+          item,
+          listFiles,
+          isShared,
+          ...(partnerFilterKey ? { partnerFilterKey } : {}),
+          ...(mark ? { responsibilityMark: mark } : {}),
+        });
+        continue;
+      }
+
+      if (listType === "contacts") {
+        let mark: string | undefined;
+        let isShared = false;
+        let partnerFilterKey = "";
+        if (list.scope === "shared") {
+          isShared = true;
+          const itemPartners = stringArray(item.shared_with);
+          const names =
+            itemPartners.length > 0
+              ? itemPartners
+              : (list.shared_with ?? []);
+          partnerFilterKey = partnersKey(names, viewer, aliases);
+          const allInvolved = allInvolvedNames(names, viewer, aliases);
+          if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
+            mark = allInvolved;
+          }
+        } else if (list.scope === "shared_items") {
+          isShared = true;
+          const owner = (list.owner ?? "").trim();
+          const itemPartners = stringArray(item.shared_with);
+          const names =
+            itemPartners.length > 0
+              ? itemPartners
+              : owner
+                ? [owner]
+                : [];
+          partnerFilterKey = partnersKey(names, viewer, aliases);
+          const allInvolved = allInvolvedNames(
+            names.length > 0 ? names : [owner].filter(Boolean),
+            viewer,
+            aliases,
+          );
+          if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
+            mark = allInvolved;
+          }
+        } else {
+          const sharedWith = stringArray(item.shared_with);
+          const itemScoped =
+            item.scope === "shared" && sharedWith.length > 0;
+          if (itemScoped) {
+            isShared = true;
+            partnerFilterKey = partnersKey(sharedWith, viewer, aliases);
+            const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
+            if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
+              mark = allInvolved;
+            }
+          }
+        }
+        rows.push({
+          title,
+          item,
+          listFiles,
+          isShared,
+          ...(partnerFilterKey ? { partnerFilterKey } : {}),
+          ...(mark ? { responsibilityMark: mark } : {}),
+        });
+        continue;
+      }
+
+      const meta = resolveShoppingTasksRowMeta(
+        list,
+        item,
+        title,
+        viewer,
+        aliases,
+        skipMarks,
+      );
+      rows.push({
+        title,
+        item,
+        listFiles,
+        ...meta,
+      });
+    }
+  }
+  return rows;
+}
+
+function filterDumpRows(
+  rows: DumpItem[],
+  listType: ListDumpType,
+  opts?: ShowDumpOptions,
+): DumpItem[] {
+  const section = opts?.section ?? null;
+  const partnerFilters = dumpFilterNames(opts?.partner);
+
+  let kept = rows.filter((row) => {
+    const shared = row.isShared === true;
+    if (section === "personal" && shared) {
+      return false;
+    }
+    if (section === "shared" && !shared) {
+      return false;
+    }
+    if (partnerFilters.length > 0) {
+      const key = row.partnerFilterKey ?? "";
+      if (
+        !partnerFilters.some((needle) =>
+          partnerBucketMatches(key || "משותף", needle),
+        )
+      ) {
+        return false;
+      }
+    }
+    if (
+      !itemMatchesAssigneeFilter(
+        row.responsibilityMark,
+        opts,
+        row.assigneeName,
+      )
+    ) {
+      return false;
+    }
+    if (!itemMatchesUrgencyFilter(row.item, opts?.urgency)) {
+      return false;
+    }
+    if (
+      listType === "tasks" &&
+      !itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo)
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  // Partner-filtered tasks: also keep personal about-X rows.
+  if (
+    listType === "tasks" &&
+    section === "shared" &&
+    partnerFilters.length > 0
+  ) {
+    const seen = new Set(
+      kept.map((row) => String(row.item.item_id ?? "")).filter(Boolean),
+    );
+    for (const row of rows) {
+      if (row.isShared) {
+        continue;
+      }
+      if (!itemReminderAboutMatchesPartner(row.item, partnerFilters)) {
+        continue;
+      }
+      if (
+        !itemMatchesAssigneeFilter(
+          row.responsibilityMark,
+          opts,
+          row.assigneeName,
+        ) ||
+        !itemMatchesUrgencyFilter(row.item, opts?.urgency) ||
+        !itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo)
+      ) {
+        continue;
+      }
+      const id = String(row.item.item_id ?? "");
+      if (id && seen.has(id)) {
+        continue;
+      }
+      if (id) {
+        seen.add(id);
+      }
+      kept = [...kept, row];
+    }
+  }
+
+  return kept;
+}
+
+function formatSingleHeaderDump(
+  label: string,
+  listType: ListDumpType,
+  rows: DumpItem[],
+  opts?: ShowDumpOptions,
+  reminders: ReminderSnapshotRow[] = [],
+  linkedReminderIds: Set<string> = new Set(),
+): string {
+  const headerFiles = rows.some((row) => row.listFiles);
+  if (opts?.countsOnly === true) {
+    const n = rows.length;
+    return n === 0
+      ? ""
+      : `${label}${paperclipSuffix(headerFiles)}: ${hebrewItemCount(n)}`;
+  }
+  if (listType === "tasks" && hasDumpDateRange(opts)) {
+    return formatTasksDayAgendaDump(rows, reminders, opts, linkedReminderIds);
+  }
+  if (rows.length === 0) {
+    return "";
+  }
+  return [
+    `${label}${paperclipSuffix(headerFiles)}:`,
+    ...rows.map((row, i) =>
+      formatNumberedItem(i + 1, row.title, row.item, listType, {
+        responsibilityMark: row.responsibilityMark,
+        now: opts?.now,
+      }),
+    ),
+  ].join("\n");
 }
 
 function formatThreeWayDump(
@@ -1506,307 +1856,16 @@ function formatThreeWayDump(
   opts?: ShowDumpOptions,
 ): string {
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
-  const personal: DumpItem[] = [];
-  const sharedByPartner = new Map<string, DumpItem[]>();
-  const partnerListFiles = new Map<string, boolean>();
-  let personalListFiles = false;
-  const viewer = opts?.viewerName?.trim() ?? "";
-  const aliases = opts?.viewerAliases ?? [];
-
-  // Digital-worker inventory: flat numbered list (same line helpers, no Stage-2).
-  if (opts?.flatLayout === true) {
-    const flat: DumpItem[] = [];
-    let anyListFiles = false;
-    for (const list of lists) {
-      const listFiles = listHasListLevelFiles(list);
-      if (listFiles) {
-        anyListFiles = true;
-      }
-      for (const item of list.items) {
-        flat.push({
-          title: itemTitle(listType, item, list.title_field),
-          item,
-          listFiles,
-        });
-      }
-    }
-    const filterDate = (rows: DumpItem[]): DumpItem[] => {
-      if (listType !== "tasks") {
-        return rows;
-      }
-      return rows.filter((row) =>
-        itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo),
-      );
-    };
-    const kept = filterDate(
-      flat.filter((row) => itemMatchesUrgencyFilter(row.item, opts?.urgency)),
-    );
-    if (opts?.countsOnly === true) {
-      const n = kept.length;
-      return n === 0
-        ? ""
-        : `${label}${paperclipSuffix(anyListFiles)}: ${hebrewItemCount(n)}`;
-    }
-    if (
-      listType === "tasks" &&
-      hasDumpDateRange(opts) &&
-      opts?.countsOnly !== true
-    ) {
-      return formatTasksDayAgendaDump(
-        kept,
-        snapshot.reminders ?? [],
-        opts,
-        linkedReminderIdsFromTasks(snapshot),
-      );
-    }
-    if (kept.length === 0) {
-      return "";
-    }
-    return [
-      `${label}${paperclipSuffix(anyListFiles)}:`,
-      ...kept.map((row, i) =>
-        formatNumberedItem(i + 1, row.title, row.item, listType, {
-          now: opts?.now,
-        }),
-      ),
-    ].join("\n");
-  }
-
-  for (const list of lists) {
-    const listFiles = listHasListLevelFiles(list);
-
-    // Assigner view: work on someone else's book → משותפות עם <owner> + (assignee).
-    if (list.scope === "shared_items") {
-      const owner = (list.owner ?? "").trim() || "משותף";
-      for (const item of list.items) {
-        const title = itemTitle(listType, item, list.title_field);
-        pushPartnerBucket(sharedByPartner, owner, {
-          title,
-          item,
-          responsibilityMark: owner,
-          listFiles,
-        });
-      }
-      if (listFiles) {
-        partnerListFiles.set(owner, true);
-      }
-      continue;
-    }
-
-    // Whole scope=shared list → one משותפות עם <partners> bucket (no per-line mark).
-    if (list.scope === "shared") {
-      const partnerKey = partnersKey(list.shared_with ?? [], viewer, aliases);
-      for (const item of list.items) {
-        pushPartnerBucket(sharedByPartner, partnerKey, {
-          title: itemTitle(listType, item, list.title_field),
-          item,
-          listFiles,
-        });
-      }
-      if (listFiles) {
-        partnerListFiles.set(partnerKey, true);
-      }
-      continue;
-    }
-
-    // Personal list: private → אישיות; share/assign → משותפות עם X.
-    for (const item of list.items) {
-      const assignedBy =
-        typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
-      const sharedWith = stringArray(item.shared_with);
-      const title = itemTitle(listType, item, list.title_field);
-
-      if (assignedBy) {
-        // Assignee is the list owner (viewer). Partner header = assigner.
-        // Mark = assignee only (same text both parties see).
-        const assigneeMark =
-          viewer ||
-          (aliases.map((name) => name.trim()).find(Boolean) ?? "");
-        pushPartnerBucket(sharedByPartner, assignedBy, {
-          title,
-          item,
-          responsibilityMark: assigneeMark || undefined,
-          listFiles,
-        });
-        if (listFiles) {
-          partnerListFiles.set(assignedBy, true);
-        }
-        continue;
-      }
-
-      if (sharedWith.length > 0) {
-        const partnerKey = partnersKey(sharedWith, viewer, aliases);
-        const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
-        const showMark =
-          Boolean(allInvolved) &&
-          !titleAlreadyListsPartners(title, allInvolved);
-        pushPartnerBucket(sharedByPartner, partnerKey, {
-          title,
-          item,
-          ...(showMark ? { responsibilityMark: allInvolved } : {}),
-          listFiles,
-        });
-        if (listFiles) {
-          partnerListFiles.set(partnerKey, true);
-        }
-        continue;
-      }
-
-      if (listFiles) {
-        personalListFiles = true;
-      }
-      personal.push({ title, item, listFiles });
-    }
-  }
-
-  const section = opts?.section ?? null;
-  const partnerFilters = dumpFilterNames(opts?.partner);
-  const showPersonal = section === null || section === "personal";
-  const showShared = section === null || section === "shared";
-
-  const filterAssignee = (rows: DumpItem[]): DumpItem[] =>
-    rows.filter((row) =>
-      itemMatchesAssigneeFilter(row.responsibilityMark, opts),
-    );
-
-  const filterDate = (rows: DumpItem[]): DumpItem[] => {
-    if (listType !== "tasks") {
-      return rows;
-    }
-    return rows.filter((row) =>
-      itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo),
-    );
-  };
-
-  const filterUrgency = (rows: DumpItem[]): DumpItem[] =>
-    rows.filter((row) => itemMatchesUrgencyFilter(row.item, opts?.urgency));
-
-  const applyItemFilters = (rows: DumpItem[]): DumpItem[] =>
-    filterUrgency(filterDate(filterAssignee(rows)));
-
-  let filteredPersonal = showPersonal ? applyItemFilters(personal) : [];
-
-  const filteredShared = new Map<string, DumpItem[]>();
-  if (showShared) {
-    for (const [partners, items] of sharedByPartner) {
-      if (
-        partnerFilters.length > 0 &&
-        !partnerFilters.some((needle) =>
-          partnerBucketMatches(partners, needle),
-        )
-      ) {
-        continue;
-      }
-      const kept = applyItemFilters(items);
-      if (kept.length === 0) {
-        continue;
-      }
-      filteredShared.set(partners, kept);
-    }
-  }
-
-  // Personal about-X tasks stay under אישיות (never משותפות). In «עם X»
-  // (section=shared) still surface them under the personal header.
-  if (
-    listType === "tasks" &&
-    section === "shared" &&
-    partnerFilters.length > 0
-  ) {
-    const aboutRows = applyItemFilters(
-      personal.filter((row) =>
-        itemReminderAboutMatchesPartner(row.item, partnerFilters),
-      ),
-    );
-    if (aboutRows.length > 0) {
-      const seen = new Set(
-        filteredPersonal.map((row) => String(row.item.item_id ?? "")),
-      );
-      for (const row of aboutRows) {
-        const id = String(row.item.item_id ?? "");
-        if (id && seen.has(id)) {
-          continue;
-        }
-        if (id) {
-          seen.add(id);
-        }
-        filteredPersonal = [...filteredPersonal, row];
-      }
-    }
-  }
-
-  const blocks: string[] = [];
-  const countsOnly = opts?.countsOnly === true;
-
-  if (countsOnly) {
-    // filteredPersonal may hold about-X rows even when section=shared.
-    if (filteredPersonal.length > 0) {
-      blocks.push(
-        `${label} אישיות${paperclipSuffix(personalListFiles)}: ${hebrewItemCount(filteredPersonal.length)}`,
-      );
-    }
-    if (showShared) {
-      for (const [partners, items] of filteredShared) {
-        if (items.length === 0) {
-          continue;
-        }
-        blocks.push(
-          `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}: ${hebrewItemCount(items.length)}`,
-        );
-      }
-    }
-    return blocks.join("\n").trim();
-  }
-
-  // WHEN / date window: day-header layout only — same line formatter inside.
-  if (listType === "tasks" && hasDumpDateRange(opts)) {
-    const agendaRows: DumpItem[] = [
-      ...filteredPersonal,
-      ...[...filteredShared.values()].flat(),
-    ];
-    return formatTasksDayAgendaDump(
-      agendaRows,
-      snapshot.reminders ?? [],
-      opts,
-      linkedReminderIdsFromTasks(snapshot),
-    );
-  }
-
-  if (filteredPersonal.length > 0) {
-    blocks.push(`${label} אישיות${paperclipSuffix(personalListFiles)}:`);
-    blocks.push(
-      ...filteredPersonal.map((row, i) =>
-        formatNumberedItem(i + 1, row.title, row.item, listType, {
-          responsibilityMark: row.responsibilityMark,
-          now: opts?.now,
-        }),
-      ),
-    );
-  }
-
-  if (showShared) {
-    for (const [partners, items] of filteredShared) {
-      if (blocks.length > 0) {
-        blocks.push("");
-      }
-      blocks.push(
-        `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}:`,
-      );
-      blocks.push(
-        ...items.map((row, i) =>
-          formatNumberedItem(i + 1, row.title, row.item, listType, {
-            responsibilityMark: row.responsibilityMark,
-            now: opts?.now,
-          }),
-        ),
-      );
-    }
-  }
-
-  if (blocks.length === 0) {
-    return "";
-  }
-
-  return blocks.join("\n").trim();
+  const collected = collectListDumpRows(listType, lists, opts);
+  const kept = filterDumpRows(collected, listType, opts);
+  return formatSingleHeaderDump(
+    label,
+    listType,
+    kept,
+    opts,
+    snapshot.reminders ?? [],
+    linkedReminderIdsFromTasks(snapshot),
+  );
 }
 
 /** Co-share mark: partners then viewer — e.g. «מיכל, טל». */
@@ -1841,21 +1900,27 @@ export function itemMatchesUrgencyFilter(
   return value === "urgent" || value === "very_urgent";
 }
 
-/** Assignee filter against responsibility mark (sole name only when filter set). */
+/** Assignee filter against assign row / mark (sole assignee only when filter set). */
 export function itemMatchesAssigneeFilter(
   responsibilityMark: string | undefined,
   opts?: Pick<ShowDumpOptions, "assignee" | "assigneeSelfNames" | "viewerName" | "viewerAliases">,
+  assigneeName?: string,
 ): boolean {
   const assignees = dumpFilterNames(opts?.assignee);
   if (assignees.length === 0) {
     return true;
   }
   const mark = (responsibilityMark ?? "").trim();
-  if (!mark) {
+  const sole =
+    (assigneeName ?? "").trim() ||
+    extractAssigneeFromMark(mark) ||
+    "";
+  // Multi-party co-share has no single owner — drop when filtering by assignee.
+  if (!sole && (mark.includes(",") || mark.includes("·"))) {
     return false;
   }
-  // Multi-party co-share has no single owner — drop when filtering by assignee.
-  if (mark.includes(",")) {
+  const matchAgainst = sole || mark;
+  if (!matchAgainst) {
     return false;
   }
   // Each assignee is OR'd; `self` = speaking human only (assigneeSelfNames).
@@ -1865,7 +1930,7 @@ export function itemMatchesAssigneeFilter(
   return assignees.some((raw) => {
     const needles =
       raw.toLowerCase() === "self" ? selfNames : [raw];
-    return needles.some((name) => name === mark);
+    return needles.some((name) => name === matchAgainst);
   });
 }
 
@@ -2090,75 +2155,17 @@ function formatContactsOrCustomDump(
   if (lists.length === 0) {
     return listType === "custom" ? null : `לא מצאתי רשימה בשם «${emptyLabel}».`;
   }
-  const listFiles = lists.some((list) => listHasListLevelFiles(list));
-  if (listType === "contacts") {
-    return formatContactsTwoSectionDump(lists, opts);
-  }
-  const viewer = (opts?.viewerName ?? "").trim();
-  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
-  const section = opts?.section ?? null;
-  const partnerNeedles = dumpFilterNames(opts?.partner);
-
-  type CustomDumpRow = {
-    title: string;
-    item: Record<string, unknown>;
-    responsibilityMark?: string;
-    listFiles: boolean;
-  };
-  const rows: CustomDumpRow[] = [];
-  for (const list of lists) {
-    const thisListFiles = listHasListLevelFiles(list);
-    for (const item of list.items) {
-      const title = formatCustomItemBody(
-        item,
-        list.title_field,
-        list.columns,
-      );
-      const responsibilityMark = customItemCoShareMark(
-        list,
-        item,
-        viewer,
-        aliases,
-      );
-      const isSharedRow =
-        list.scope === "shared" ||
-        list.scope === "shared_items" ||
-        Boolean(responsibilityMark);
-      if (section === "personal" && isSharedRow) {
-        continue;
-      }
-      if (section === "shared" && !isSharedRow) {
-        continue;
-      }
-      if (partnerNeedles.length > 0) {
-        const partnerKey = responsibilityMark
-          ? partnersKey(
-              stringArray(item.shared_with).length > 0
-                ? stringArray(item.shared_with)
-                : [(list.owner ?? "").trim()].filter(Boolean),
-              viewer,
-              aliases,
-            )
-          : list.scope === "shared"
-            ? partnersKey(list.shared_with ?? [], viewer, aliases)
-            : "";
-        if (
-          !partnerNeedles.some((needle) =>
-            partnerBucketMatches(partnerKey || "משותף", needle),
-          )
-        ) {
-          continue;
-        }
-      }
-      rows.push({
-        title,
-        item,
-        ...(responsibilityMark ? { responsibilityMark } : {}),
-        listFiles: thisListFiles,
-      });
+  const collected = collectListDumpRows(listType, lists, opts);
+  const kept = filterDumpRows(collected, listType, opts);
+  const header =
+    listType === "contacts" ? emptyLabel : `רשימת «${emptyLabel}»`;
+  if (kept.length === 0) {
+    const section = opts?.section ?? null;
+    const partnerNeedles = dumpFilterNames(opts?.partner);
+    const listFiles = lists.some((list) => listHasListLevelFiles(list));
+    if (listType === "contacts") {
+      return emptyContactsSentence(opts);
     }
-  }
-  if (rows.length === 0) {
     if (section === "shared" || partnerNeedles.length > 0) {
       return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
     }
@@ -2167,122 +2174,7 @@ function formatContactsOrCustomDump(
     }
     return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} ריקה.`;
   }
-  const headerFiles = rows.some((row) => row.listFiles);
-  const lines = rows.map((row, i) =>
-    formatNumberedItem(i + 1, row.title, row.item, listType, {
-      responsibilityMark: row.responsibilityMark,
-      now: opts?.now,
-    }),
-  );
-  return [
-    `רשימת «${emptyLabel}»${paperclipSuffix(headerFiles)}:`,
-    ...lines,
-  ].join("\n");
-}
-
-/** Contacts: personal vs shared with (עם …) — share-only, no assign bucket. */
-function formatContactsTwoSectionDump(
-  lists: EmployeeRecordSnapshot["lists"],
-  opts?: ShowDumpOptions,
-): string {
-  const viewer = (opts?.viewerName ?? "").trim();
-  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
-  const personal: Array<{ title: string; item: Record<string, unknown> }> = [];
-  const shared: Array<{
-    title: string;
-    item: Record<string, unknown>;
-    sharedWithLabel: string;
-  }> = [];
-  for (const list of lists) {
-    // Whole-list contacts share (list_ops participants) → all rows under משותפים.
-    if (list.scope === "shared") {
-      const listPartners = partnersKey(list.shared_with ?? [], viewer, aliases);
-      for (const item of list.items) {
-        const title = itemTitle("contacts", item, list.title_field);
-        const itemPartners = stringArray(item.shared_with).filter(
-          (name) => name !== viewer && !aliases.includes(name),
-        );
-        shared.push({
-          title,
-          item,
-          sharedWithLabel:
-            itemPartners.length > 0 ? itemPartners.join(", ") : listPartners,
-        });
-      }
-      continue;
-    }
-    if (list.scope === "shared_items") {
-      const owner = (list.owner ?? "").trim();
-      for (const item of list.items) {
-        const title = itemTitle("contacts", item, list.title_field);
-        const itemPartners = stringArray(item.shared_with).filter(
-          (name) => name !== viewer && !aliases.includes(name),
-        );
-        shared.push({
-          title,
-          item,
-          sharedWithLabel:
-            itemPartners.length > 0
-              ? itemPartners.join(", ")
-              : owner || "משותף",
-        });
-      }
-      continue;
-    }
-    for (const item of list.items) {
-      const title = itemTitle("contacts", item, list.title_field);
-      const sharedWith = stringArray(item.shared_with);
-      const partners = sharedWith
-        .filter((name) => name !== viewer && !aliases.includes(name));
-      if (item.scope === "shared" && partners.length > 0) {
-        shared.push({
-          title,
-          item,
-          sharedWithLabel: partners.join(", "),
-        });
-      } else {
-        personal.push({ title, item });
-      }
-    }
-  }
-  const section = opts?.section ?? null;
-  const blocks: string[] = [];
-  if (section !== "shared" && personal.length > 0) {
-    blocks.push("אנשי קשר אישיים:");
-    personal.forEach((row, i) => {
-      blocks.push(
-        formatNumberedItem(i + 1, row.title, row.item, "contacts", {
-          now: opts?.now,
-        }),
-      );
-    });
-  }
-  if (section !== "personal") {
-    let sharedRows = shared;
-    const partnerNeedles = dumpFilterNames(opts?.partner);
-    if (partnerNeedles.length > 0) {
-      sharedRows = shared.filter((row) =>
-        partnerNeedles.some((needle) =>
-          row.sharedWithLabel.includes(needle),
-        ),
-      );
-    }
-    if (sharedRows.length > 0) {
-      if (blocks.length > 0) {
-        blocks.push("");
-      }
-      blocks.push("אנשי קשר משותפים:");
-      sharedRows.forEach((row, i) => {
-        blocks.push(
-          formatNumberedItem(i + 1, row.title, row.item, "contacts", {
-            sharedWithLabel: row.sharedWithLabel,
-            now: opts?.now,
-          }),
-        );
-      });
-    }
-  }
-  return blocks.join("\n");
+  return formatSingleHeaderDump(header, listType, kept, opts);
 }
 
 /** Exported for unit tests. */
@@ -2305,8 +2197,8 @@ export function formatNumberedItem(
   if (hasAttachments(item)) {
     body += " 📎";
   }
-  // Shopping/tasks Stage 2: responsibilityMark = «(מיכל)» / «(מיכל, טל)» (no עם).
-  // Filings/contacts stay «(עם …)» via sharedWithLabel.
+  // List dumps: responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
+  // Filings / phone book may still use sharedWithLabel «(עם …)».
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {

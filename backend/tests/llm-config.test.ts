@@ -57,15 +57,15 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("SHAREABLE STATUS ASK");
     expect(config.systemMessage).toContain("SHAREABLE STATUS ASK ABOUT X");
-    expect(config.systemMessage).toContain("קניות אישיות");
-    expect(config.systemMessage).toContain("מטלות אישיות");
-    expect(config.systemMessage).toContain("Stage 2 live dump");
-    expect(config.systemMessage).toContain("משותפות עם X for co-share");
+    expect(config.systemMessage).toContain("one flat list dump");
+    expect(config.systemMessage).toContain("באחריות X · מאת Y");
+    expect(config.systemMessage).toContain("ONE header per list");
+    expect(config.systemMessage).toContain("No אישיות/משותפות list headers");
     expect(config.systemMessage).toContain("NUMBERED 1. 2. 3.");
     expect(config.systemMessage).toContain(
       "Numbering restarts at 1 for EVERY distinct list block",
     );
-    expect(config.systemMessage).toContain("Stage 2 three-way");
+    expect(config.systemMessage).toContain("one flat dump + row marks");
     expect(config.systemMessage).toContain(
       "ONLY active_reminders NOT already shown via LINKED REMINDER",
     );
@@ -121,10 +121,8 @@ describe("LLM action schema", () => {
       "FORBIDDEN inventing numbers that were not candidates",
     );
     expect(config.systemMessage).toContain("NUMBERED which-list ask");
-    expect(config.systemMessage).toContain(
-      "Custom named-list dump: ONE «רשימת «name»:» block",
-    );
-    expect(config.systemMessage).toContain("no assign/הטלה on custom");
+    expect(config.systemMessage).toContain("רשימת «name»:");
+    expect(config.systemMessage).toContain("אנשי קשר:");
     expect(config.systemMessage).toContain("YEARLY OFFER");
     expect(config.systemMessage).toContain("FORBIDDEN reminders-only yearly birthday");
     expect(config.systemMessage).toContain("about=[that person]");
@@ -168,7 +166,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN lists.add (or inventing) any shopping/tasks product wrapper",
     );
-    expect(config.systemMessage).toContain("meetings whose title already lists partners");
+    expect(config.systemMessage).toContain(
+      "meetings with partners in title → no extra mark",
+    );
     expect(config.systemMessage).toContain("FULL DUMP");
     expect(config.systemMessage).toContain("כל מה ששמור");
     expect(config.systemMessage).toContain("רשימת קניות משותפת");
