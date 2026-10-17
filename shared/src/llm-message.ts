@@ -208,6 +208,11 @@ export interface LlmReminderAction {
   time: string;
   repeat: LlmReminderRepeat;
   ping: string[];
+  /**
+   * Who the clock is about (Known employee names) — e.g. birthday of עמית.
+   * Distinct from ping (who gets WhatsApp). Empty / omitted = omit / keep on update.
+   */
+  about?: string[];
   targets: string[];
   text: string;
   inSeconds: number | null;
@@ -1227,6 +1232,9 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     time,
     repeat,
     ping: parseTargets({ targets: record.ping ?? record.notify ?? record.ping_targets }),
+    about: parseTargets({
+      targets: record.about ?? record.about_names ?? record.aboutNames,
+    }),
     targets: parseTargets(record),
     text: readText(record, ["text", "message", "body", "תוכן", "sentence"]),
     inSeconds,

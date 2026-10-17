@@ -41,6 +41,7 @@ const removeAction: LlmReminderAction = {
   time: "",
   repeat: "once",
   ping: [],
+  about: [],
   targets: [],
   text: "",
   inSeconds: null,

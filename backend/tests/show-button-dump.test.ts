@@ -1276,13 +1276,14 @@ describe("formatShowDumpFromKind", () => {
       dateFrom: "2026-10-17",
       dateTo: "2026-10-20",
     })!;
-    // AND across fields: partner OR ∩ assignee OR ∩ dates.
+    // AND across fields: partner OR ∩ assignee OR ∩ dates — day-agenda layout.
     expect(withAssignee).toContain("עליי בטווח");
     expect(withAssignee).toContain("שמן למיכל בטווח");
     expect(withAssignee).not.toContain("עליי מחוץ");
     // Whole shared list row has no sole assignee mark → dropped when assignee set.
     expect(withAssignee).not.toContain("עם עמית");
     expect(withAssignee).not.toContain("על מיכל בטווח");
+    expect(withAssignee).toMatch(/\d+\.\d+:/);
 
     const partnerOnly = formatShowDumpFromKind("tasks", snap, {
       viewerName: "טל",
@@ -1351,6 +1352,9 @@ describe("formatShowDumpFromKind", () => {
     expect(tasks).toContain("פגישה בטווח");
     expect(tasks).toContain("חוזרת");
     expect(tasks).not.toContain("מחוץ לטווח");
+    // Standing occurrence under day header — chore HM + (קבוע), not full series alone.
+    expect(tasks).toContain("— 09:00 (קבוע)");
+    expect(tasks).toContain("מה־17 עד 20.10:");
 
     const shopping = formatShowDumpFromKind("shopping", snap, {
       viewerName: "טל",
@@ -1808,11 +1812,376 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).not.toContain("*פרטי* —");
     expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
     expect(text).toContain("לשאול את עמית");
-    expect(text).toContain("פגישה עם עמית");
+    // Linked rem-meet is folded into the task line — not a second תזכורות row.
+    expect(text).toContain("פגישה (טל, עמית)");
+    expect(text).toMatch(/תזכורת:/);
+    expect(text).not.toContain("פגישה עם עמית");
     expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
     expect(text).toContain("שרה");
     expect(text).toContain("ספר הטלפונים משותף");
     expect(text).not.toMatch(/ספר הטלפונים אישי:[\s\S]*דני/);
+  });
+});
+
+describe("uniform standing + ping dump lines", () => {
+  const now = new Date("2026-10-17T07:00:00.000Z");
+
+  const standingSkazi = {
+    item_id: "skazi-am",
+    "שם מטלה": "להוריד את סקאזי לטיול",
+    חוזר: "כל יום ב־08:45",
+    next_occurrences: [
+      "2026-10-18 08:45",
+      "2026-10-19 08:45",
+      "2026-10-20 08:45",
+    ],
+    reminder: {
+      reminder_id: "r-skazi-am",
+      fire_at: "2026-10-18 08:30",
+      repeat: "custom",
+      recurrence_text: "כל יום ב־08:30",
+    },
+  };
+
+  it("list dump folds chore≠ping into one line via shared mark", () => {
+    expect(
+      formatNumberedItem(1, "להוריד את סקאזי לטיול", standingSkazi, "tasks", {
+        now,
+      }),
+    ).toBe(
+      "1. להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
+    );
+    expect(
+      formatScheduleSuffix(
+        {
+          חוזר: "כל יום ב־18:15",
+          reminder: {
+            fire_at: "2026-10-18 18:15",
+            repeat: "custom",
+            recurrence_text: "כל יום ב־18:15",
+          },
+        },
+        "tasks",
+        now,
+      ),
+    ).toBe("— כל יום ב־18:15 (קבוע + תזכורת)");
+  });
+
+  it("day-agenda uses same fold mark; excludes linked clock as its own line", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            standingSkazi,
+            {
+              item_id: "meet",
+              "שם מטלה": "פגישה (טל, עמית)",
+              חוזר: "כל ראשון ורביעי ב־21:30",
+              next_occurrences: ["2026-10-18 21:30", "2026-10-21 21:30"],
+            },
+            {
+              item_id: "doc",
+              "שם מטלה": "ללכת לרופא",
+              "תאריך לביצוע": "2026-10-18",
+              "שעה לביצוע": "08:00",
+              reminder: {
+                reminder_id: "r-doc",
+                fire_at: "2026-10-18 07:30",
+                repeat: "once",
+              },
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-skazi-am",
+          item: "להוריד את סקאזי לטיול",
+          list_type: "tasks",
+          fire_at: "2026-10-18 08:30",
+          repeat: "custom",
+          recurrence_text: "כל יום ב־08:30",
+          next_occurrences: ["2026-10-18 08:30", "2026-10-19 08:30"],
+          ping: ["טל"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "r-michal-morning",
+          item: "לשלוח למיכל ברכת בוקר",
+          list_type: "tasks",
+          fire_at: "2026-10-18 09:00",
+          repeat: "custom",
+          recurrence_text: "כל יום ב־09:00",
+          next_occurrences: ["2026-10-18 09:00", "2026-10-19 09:00"],
+          ping: ["טל"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "r-doc",
+          item: "ללכת לרופא",
+          list_type: "tasks",
+          fire_at: "2026-10-18 07:30",
+          repeat: "once",
+          ping: ["טל"],
+          ping_ids: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+
+    const agenda = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-18",
+      dateTo: "2026-10-18",
+    })!;
+
+    expect(agenda).toContain("ראשון 18.10:");
+    expect(agenda).toContain(
+      "להוריד את סקאזי לטיול — 08:45 (קבוע + תזכורת ב־08:30)",
+    );
+    expect(agenda).toContain("לשלוח למיכל ברכת בוקר — 09:00 (קבוע כל יום)");
+    expect(agenda).toContain("פגישה (טל, עמית) — 21:30 (קבוע)");
+    expect(agenda).toContain("ללכת לרופא — 08:00");
+    expect(agenda).toContain("(תזכורת:");
+    // Linked clocks must not appear as their own numbered rows.
+    expect(agenda).not.toMatch(/\d+\. להוריד את סקאזי לטיול — 08:30/);
+    expect(agenda).not.toMatch(/\d+\. ללכת לרופא — 07:30/);
+
+    const list = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+    })!;
+    expect(list).toContain(
+      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
+    );
+
+    const remOnly = formatShowDumpFromKind("reminders", snap, {
+      now,
+      dateFrom: "2026-10-18",
+      dateTo: "2026-10-18",
+    })!;
+    // Bare reminders dump may still list linked clocks.
+    expect(remOnly).toContain("להוריד את סקאזי לטיול");
+    expect(remOnly).toContain("קבוע כל יום");
+  });
+
+  it("multi-day window header + standing occurrence per day", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [standingSkazi],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const text = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-18",
+      dateTo: "2026-10-20",
+    })!;
+    expect(text).toContain("מה־18 עד 20.10:");
+    expect(text).toContain("ראשון 18.10:");
+    expect(text).toContain("שני 19.10:");
+    expect(text).toContain("שלישי 20.10:");
+    expect(text.match(/להוריד את סקאזי לטיול — 08:45 \(קבוע \+ תזכורת ב־08:30\)/g)?.length).toBe(3);
+  });
+
+  it("reminder cadence paren is always קבוע-family", () => {
+    expect(
+      formatReminderWhen(
+        {
+          fire_at: "2026-10-18 09:00",
+          repeat: "daily",
+          recurrence_text: "כל יום ב־09:00",
+        },
+        now,
+      ),
+    ).toBe("מחר ב־09:00 (קבוע כל יום)");
+    expect(shortCadenceParen("כל יום ב־09:00")).toBe("(כל יום)");
+  });
+});
+
+describe("partner dump about_ids (birthday event)", () => {
+  const now = new Date("2026-10-17T07:00:00.000Z");
+
+  it("עם עמית includes personal all-day birthday task via reminder.about", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "bday",
+              "שם מטלה": "יום ההולדת של עמית",
+              "יום שלם": true,
+              חוזר: "כל שנה ב־13.10",
+              next_occurrences: ["2027-10-13"],
+              reminder: {
+                reminder_id: "r-bday",
+                fire_at: "2027-10-13 09:00",
+                repeat: "custom",
+                recurrence_text: "כל שנה ב־13.10 ב־09:00",
+                about: ["עמית"],
+                about_ids: ["amit-1"],
+              },
+            },
+            {
+              item_id: "private",
+              "שם מטלה": "מטלה פרטית",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-bday",
+          item: "יום ההולדת של עמית",
+          list_type: "tasks",
+          fire_at: "2027-10-13 09:00",
+          repeat: "custom",
+          recurrence_text: "כל שנה ב־13.10 ב־09:00",
+          ping: ["טל"],
+          ping_ids: ["tal-1"],
+          about: ["עמית"],
+          about_ids: ["amit-1"],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "r-michal",
+          item: "לשלוח למיכל ברכת בוקר",
+          list_type: "tasks",
+          fire_at: "2026-10-18 09:00",
+          repeat: "daily",
+          ping: ["טל"],
+          ping_ids: ["tal-1"],
+          about: ["מיכל"],
+          about_ids: ["michal-1"],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+
+    const text = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "עמית",
+      now,
+    })!;
+    expect(text).toContain("יום ההולדת של עמית");
+    expect(text).toContain("כל שנה ב־13.10");
+    expect(text).toMatch(/קבוע \+ תזכורת/);
+    expect(text).not.toContain("מטלה פרטית");
+    expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
+    // Linked birthday clock folded into the task — not a second תזכורות row.
+    expect(text).not.toMatch(/תזכורות פעילות:[\s\S]*יום ההולדת של עמית/);
+  });
+
+  it("unlinked about clock alone appears under תזכורות for partner dump", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-bday-only",
+          item: "יום ההולדת של עמית",
+          list_type: "tasks",
+          fire_at: "2027-10-12 09:00",
+          repeat: "custom",
+          recurrence_text: "כל שנה ב־12.10 ב־09:00",
+          ping: ["טל"],
+          ping_ids: ["tal-1"],
+          about: ["עמית"],
+          about_ids: ["amit-1"],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+    const text = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "עמית",
+      now,
+    })!;
+    expect(text).toContain("יום ההולדת של עמית");
+    expect(text).toContain("תזכורות פעילות:");
   });
 });

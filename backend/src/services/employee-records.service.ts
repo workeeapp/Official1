@@ -1178,7 +1178,12 @@ export async function getEmployeeRecordSnapshot(
       owner,
       item.id,
       {
-        ...linkedReminderField(item, activeReminders, activeByWorkerItemId),
+        ...linkedReminderField(
+          item,
+          activeReminders,
+          activeByWorkerItemId,
+          names,
+        ),
         ...urgencySnapshotField(item.urgency),
         ...itemSharedWithField(item.list.employee.id, item, names),
         ...assignedByField(item.list.employee.id, item.addedById, names),
@@ -1233,7 +1238,12 @@ export async function getEmployeeRecordSnapshot(
           owner,
           item.id,
           {
-            ...linkedReminderField(item, activeReminders, activeByWorkerItemId),
+            ...linkedReminderField(
+              item,
+              activeReminders,
+              activeByWorkerItemId,
+              names,
+            ),
             ...urgencySnapshotField(item.urgency),
             ...assignedByField(list.employee.id, item.addedById, names),
           },
@@ -3159,6 +3169,7 @@ function toListSnapshotEntry(input: {
             item,
             input.activeReminders ?? new Map(),
             input.activeByWorkerItemId,
+            input.names,
           ),
           ...urgencySnapshotField(item.urgency),
           ...(input.scope === "shared"
@@ -3218,6 +3229,7 @@ export type LinkedReminderRow = {
   recurrence?: unknown;
   occurrencesFired?: number;
   workerItemId?: string | null;
+  aboutIds?: unknown;
 };
 
 /**
@@ -3232,6 +3244,7 @@ export function linkedReminderField(
   },
   activeReminders: Map<string, LinkedReminderRow>,
   activeByWorkerItemId?: Map<string, LinkedReminderRow>,
+  names?: Map<string, string>,
 ): Record<string, unknown> {
   const itemId = typeof item.id === "string" ? item.id.trim() : "";
   const reminder =
@@ -3244,11 +3257,20 @@ export function linkedReminderField(
   if (!reminder) {
     return {};
   }
+  const aboutIds = Array.isArray(reminder.aboutIds)
+    ? reminder.aboutIds.map(String).filter(Boolean)
+    : [];
   return {
     reminder: {
       reminder_id: reminder.id,
       fire_at: formatJerusalemDateTime(reminder.fireAt),
       repeat: reminder.repeat,
+      ...(aboutIds.length
+        ? {
+            about_ids: aboutIds,
+            about: aboutIds.map((id) => names?.get(id) ?? id),
+          }
+        : {}),
       ...reminderRuleSnapshot(reminder),
     },
   };

@@ -287,10 +287,14 @@ export function formatFullDump(
     ? linkedReminderIdsFromPartnerTasks(snapshot, opts)
     : new Set<string>();
   const reminderRows = (snapshot.reminders ?? []).filter((row) => {
+    // Never re-list a clock already folded into a task line.
+    if (linkedIds.has(row.reminder_id)) {
+      return false;
+    }
     if (partnerOnly) {
       return reminderInvolvesPartner(row, partnerNeedles, partnerLinkedIds);
     }
-    return !linkedIds.has(row.reminder_id);
+    return true;
   });
   const remBody = formatRemindersDump(reminderRows, opts);
   sections.push(
@@ -555,7 +559,7 @@ export function linkedReminderIdsFromPartnerTasks(
   return ids;
 }
 
-/** Partner dump: clock involves partner via ping name or linked shared task. */
+/** Partner dump: clock involves partner via ping, about_ids, or linked shared task. */
 export function reminderInvolvesPartner(
   row: ReminderSnapshotRow,
   partnerNeedles: string[],
@@ -569,9 +573,42 @@ export function reminderInvolvesPartner(
     return false;
   }
   const pings = (row.ping ?? []).map((name) => name.trim()).filter(Boolean);
+  if (
+    partnerNeedles.some((needle) =>
+      pings.some(
+        (ping) => ping === needle || partnerBucketMatches(ping, needle),
+      ),
+    )
+  ) {
+    return true;
+  }
+  const about = (row.about ?? []).map((name) => name.trim()).filter(Boolean);
   return partnerNeedles.some((needle) =>
-    pings.some(
-      (ping) => ping === needle || partnerBucketMatches(ping, needle),
+    about.some(
+      (name) => name === needle || partnerBucketMatches(name, needle),
+    ),
+  );
+}
+
+/** Linked reminder on a task item is about one of the partner needles. */
+export function itemReminderAboutMatchesPartner(
+  item: Record<string, unknown>,
+  partnerNeedles: string[],
+): boolean {
+  if (partnerNeedles.length === 0) {
+    return false;
+  }
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return false;
+  }
+  const rem = raw as Record<string, unknown>;
+  const aboutNames = Array.isArray(rem.about)
+    ? rem.about.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  return partnerNeedles.some((needle) =>
+    aboutNames.some(
+      (name) => name === needle || partnerBucketMatches(name, needle),
     ),
   );
 }
@@ -819,7 +856,7 @@ export function itemMatchesDateRange(
 
 /** Reminders: filter by fire_at calendar day when a dump date range is set. */
 export function reminderMatchesDateRange(
-  row: Pick<ReminderSnapshotRow, "fire_at">,
+  row: Pick<ReminderSnapshotRow, "fire_at" | "next_occurrences">,
   dateFrom?: string | null,
   dateTo?: string | null,
 ): boolean {
@@ -829,10 +866,389 @@ export function reminderMatchesDateRange(
     return true;
   }
   const ymd = ymdFromDumpValue(row.fire_at);
-  if (!ymd) {
-    return false;
+  if (ymd && ymdInInclusiveRange(ymd, from, to)) {
+    return true;
   }
-  return ymdInInclusiveRange(ymd, from, to);
+  const next = row.next_occurrences;
+  if (Array.isArray(next)) {
+    for (const occ of next) {
+      const occYmd = ymdFromDumpValue(occ);
+      if (occYmd && ymdInInclusiveRange(occYmd, from, to)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasDumpDateRange(opts?: ShowDumpOptions): boolean {
+  return Boolean(opts?.dateFrom?.trim() || opts?.dateTo?.trim());
+}
+
+type AgendaSlot = {
+  ymd: string;
+  /** Sort key HH:mm or empty for all-day. */
+  sortHm: string;
+  /** Fully formatted numbered line (number filled when emitting). */
+  formatLine: (n: number) => string;
+};
+
+/**
+ * Day-agenda layout for tasks dumps with show_dump_from/to.
+ * Expands next_occurrences into day buckets; each row uses the shared standing/ping mark.
+ * Unlinked clocks in range appear as their own lines; linked clocks stay folded into the task.
+ */
+export function formatTasksDayAgendaDump(
+  rows: Array<{
+    title: string;
+    item: Record<string, unknown>;
+    responsibilityMark?: string;
+  }>,
+  reminders: ReminderSnapshotRow[],
+  opts?: ShowDumpOptions,
+  /** reminder_ids already folded into a task line — never list again. */
+  linkedReminderIds: Set<string> = new Set(),
+): string {
+  const from = opts?.dateFrom?.trim().slice(0, 10) || null;
+  const to = opts?.dateTo?.trim().slice(0, 10) || null;
+  const now = opts?.now ?? new Date();
+  const slots: AgendaSlot[] = [];
+
+  for (const row of rows) {
+    slots.push(...expandTaskAgendaSlots(row, from, to, now));
+  }
+
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+  const partnerOnly =
+    Boolean(opts?.section === "shared") || partnerNeedles.length > 0;
+
+  for (const rem of reminders) {
+    if (rem.status !== "active") {
+      continue;
+    }
+    if (linkedReminderIds.has(rem.reminder_id)) {
+      continue;
+    }
+    if (partnerOnly) {
+      // Partner day-agenda: only clocks that ping the partner.
+      if (!reminderInvolvesPartner(rem, partnerNeedles, new Set())) {
+        continue;
+      }
+    }
+    slots.push(...expandReminderAgendaSlots(rem, from, to, now));
+  }
+
+  if (slots.length === 0) {
+    return "אין מטלות בטווח התאריכים.";
+  }
+
+  slots.sort((a, b) => {
+    if (a.ymd !== b.ymd) {
+      return a.ymd.localeCompare(b.ymd);
+    }
+    if (a.sortHm !== b.sortHm) {
+      if (!a.sortHm) {
+        return 1;
+      }
+      if (!b.sortHm) {
+        return -1;
+      }
+      return a.sortHm.localeCompare(b.sortHm);
+    }
+    return 0;
+  });
+
+  const byDay = new Map<string, AgendaSlot[]>();
+  for (const slot of slots) {
+    const bucket = byDay.get(slot.ymd) ?? [];
+    bucket.push(slot);
+    byDay.set(slot.ymd, bucket);
+  }
+
+  const lines: string[] = [];
+  const dayKeys = [...byDay.keys()].sort();
+  if (from && to && from !== to) {
+    lines.push(formatAgendaWindowHeader(from, to));
+    lines.push("");
+  }
+  for (const ymd of dayKeys) {
+    const daySlots = byDay.get(ymd) ?? [];
+    lines.push(formatDayAgendaHeader(ymd));
+    daySlots.forEach((slot, i) => {
+      lines.push(slot.formatLine(i + 1));
+    });
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+function expandTaskAgendaSlots(
+  row: {
+    title: string;
+    item: Record<string, unknown>;
+    responsibilityMark?: string;
+  },
+  from: string | null,
+  to: string | null,
+  now: Date,
+): AgendaSlot[] {
+  const item = row.item;
+  const recurring = readText(item, ["חוזר", "recurrence_text"]);
+  const next = item.next_occurrences;
+  if (recurring && Array.isArray(next) && next.length > 0) {
+    const slots: AgendaSlot[] = [];
+    const seen = new Set<string>();
+    for (const occ of next) {
+      const ymd = ymdFromDumpValue(occ);
+      if (!ymd || !ymdInInclusiveRange(ymd, from, to)) {
+        continue;
+      }
+      const hm = hmFromDumpValue(occ) ?? extractHmFromText(recurring) ?? "";
+      const key = `${ymd}|${hm}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      slots.push({
+        ymd,
+        sortHm: hm,
+        formatLine: (n) =>
+          formatAgendaStandingLine(n, row.title, item, hm, {
+            responsibilityMark: row.responsibilityMark,
+          }),
+      });
+    }
+    return slots;
+  }
+
+  const start = ymdFromDumpValue(item["תאריך לביצוע"] ?? item.date);
+  const end = ymdFromDumpValue(item["תאריך סיום"]) ?? start;
+  if (!start) {
+    return [];
+  }
+  const time = readText(item, ["שעה לביצוע", "time", "שעה"]);
+  const hm = time ? normalizeHm(time) : "";
+  // Multi-day span: one slot on the first day that intersects the window.
+  const ymd =
+    from && start < from && end && end >= from
+      ? from
+      : start;
+  if (!ymdInInclusiveRange(ymd, from, to)) {
+    return [];
+  }
+  return [
+    {
+      ymd,
+      sortHm: hm,
+      formatLine: (n) =>
+        formatAgendaOneOffLine(n, row.title, item, hm, {
+          responsibilityMark: row.responsibilityMark,
+          now,
+        }),
+    },
+  ];
+}
+
+function expandReminderAgendaSlots(
+  row: ReminderSnapshotRow,
+  from: string | null,
+  to: string | null,
+  now: Date,
+): AgendaSlot[] {
+  const next = row.next_occurrences;
+  if (Array.isArray(next) && next.length > 0) {
+    const slots: AgendaSlot[] = [];
+    const seen = new Set<string>();
+    for (const occ of next) {
+      const ymd = ymdFromDumpValue(occ);
+      if (!ymd || !ymdInInclusiveRange(ymd, from, to)) {
+        continue;
+      }
+      const hm = hmFromDumpValue(occ) ?? "";
+      const key = `${ymd}|${hm}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      slots.push({
+        ymd,
+        sortHm: hm,
+        formatLine: (n) => formatAgendaReminderLine(n, row, hm, now),
+      });
+    }
+    if (slots.length > 0) {
+      return slots;
+    }
+  }
+  const ymd = ymdFromDumpValue(row.fire_at);
+  if (!ymd || !ymdInInclusiveRange(ymd, from, to)) {
+    return [];
+  }
+  const hm = hmFromDumpValue(row.fire_at) ?? "";
+  return [
+    {
+      ymd,
+      sortHm: hm,
+      formatLine: (n) => formatAgendaReminderLine(n, row, hm, now),
+    },
+  ];
+}
+
+/** HH:mm from «YYYY-MM-DD HH:mm» / ISO-ish dump values. */
+function hmFromDumpValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(/(?:^|\s)(\d{1,2}:\d{2})(?:\s|$)/);
+  return match ? normalizeHm(match[1]) : null;
+}
+
+/** «ראשון 18.10:» */
+export function formatDayAgendaHeader(ymd: string): string {
+  const weekday = hebrewWeekdayFromYmd(ymd.trim().slice(0, 10));
+  const short = formatShortDayMonth(ymd);
+  return weekday ? `${weekday} ${short}:` : `${short}:`;
+}
+
+/** «מה־18 עד 24.10:» / «מה־28.9 עד 4.10:» */
+export function formatAgendaWindowHeader(from: string, to: string): string {
+  const fromParts = parseYmdParts(from);
+  const toParts = parseYmdParts(to);
+  if (!fromParts || !toParts) {
+    return `מה־${from} עד ${to}:`;
+  }
+  if (fromParts.month === toParts.month && fromParts.year === toParts.year) {
+    return `מה־${fromParts.day} עד ${toParts.day}.${toParts.month}:`;
+  }
+  return `מה־${fromParts.day}.${fromParts.month} עד ${toParts.day}.${toParts.month}:`;
+}
+
+function parseYmdParts(
+  ymd: string,
+): { year: number; month: number; day: number } | null {
+  const match = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) {
+    return null;
+  }
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
+function formatShortDayMonth(ymd: string): string {
+  const parts = parseYmdParts(ymd);
+  if (!parts) {
+    return ymd.trim();
+  }
+  return `${parts.day}.${parts.month}`;
+}
+
+/**
+ * Standing occurrence under a day header:
+ * «1. title — 08:45 (קבוע + תזכורת ב־08:30)»
+ */
+export function formatAgendaStandingLine(
+  n: number,
+  title: string,
+  item: Record<string, unknown>,
+  occurrenceHm: string,
+  opts?: { responsibilityMark?: string },
+): string {
+  let body = title.trim() || "פריט";
+  if (hasAttachments(item)) {
+    body += " 📎";
+  }
+  if (opts?.responsibilityMark?.trim()) {
+    const mark = opts.responsibilityMark.trim();
+    if (!titleAlreadyListsPartners(body, mark)) {
+      body += ` (${mark})`;
+    }
+  }
+  const recurring = readText(item, ["חוזר", "recurrence_text"]);
+  const mark = standingLinkedReminderMark(item, recurring);
+  const hm = occurrenceHm.trim();
+  if (hm) {
+    body += ` — ${hm} ${mark}`;
+  } else {
+    body += ` — ${mark}`;
+  }
+  return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
+}
+
+/** One-off under a day header: chore HM + optional «(תזכורת: …)» via shared paren helper. */
+export function formatAgendaOneOffLine(
+  n: number,
+  title: string,
+  item: Record<string, unknown>,
+  occurrenceHm: string,
+  opts?: { responsibilityMark?: string; now?: Date },
+): string {
+  let body = title.trim() || "פריט";
+  if (hasAttachments(item)) {
+    body += " 📎";
+  }
+  if (opts?.responsibilityMark?.trim()) {
+    const mark = opts.responsibilityMark.trim();
+    if (!titleAlreadyListsPartners(body, mark)) {
+      body += ` (${mark})`;
+    }
+  }
+  const hm = occurrenceHm.trim();
+  if (hm) {
+    body += ` — ${hm}`;
+  }
+  const reminder = formatLinkedReminderParen(item, opts?.now);
+  if (reminder) {
+    body += ` ${reminder}`;
+  }
+  return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
+}
+
+/** Clock-only agenda line: «1. title — 09:00 (קבוע כל יום)». */
+export function formatAgendaReminderLine(
+  n: number,
+  row: ReminderSnapshotRow,
+  occurrenceHm: string,
+  now = new Date(),
+): string {
+  let title = row.item.trim() || "תזכורת";
+  if (hasAttachments(row)) {
+    title += " 📎";
+  }
+  const hm = occurrenceHm.trim() || hmFromDumpValue(row.fire_at) || "";
+  const hasExceptions = exceptionLabels(row.exceptions).length > 0;
+  const cadence = standingCadenceParen(
+    shortCadenceParen(row.recurrence_text, row.repeat, {
+      keepSeriesClock: hasExceptions,
+    }),
+  );
+  let body = title;
+  if (hm) {
+    body += ` — ${hm}`;
+  } else {
+    const relative = formatRelativeFireAt(row.fire_at, now);
+    if (relative) {
+      body += ` — ${relative}`;
+    }
+  }
+  if (cadence) {
+    body += ` ${cadence}`;
+  }
+  const extras = formatExceptionsSuffix(row.exceptions);
+  return `${n}. ${body}${extras}`;
+}
+
+function wrapUrgencyLine(line: string, urgency: unknown): string {
+  if (urgency === "urgent" || urgency === "very_urgent") {
+    let out = `«${line}»`;
+    if (urgency === "very_urgent") {
+      out += " ‼️";
+    }
+    return out;
+  }
+  return line;
 }
 
 /**
@@ -1026,6 +1442,18 @@ function formatThreeWayDump(
         ? `${label}: ריקה`
         : `${label}${paperclipSuffix(anyListFiles)}: ${hebrewItemCount(n)}`;
     }
+    if (
+      listType === "tasks" &&
+      hasDumpDateRange(opts) &&
+      opts?.countsOnly !== true
+    ) {
+      return formatTasksDayAgendaDump(
+        kept,
+        snapshot.reminders ?? [],
+        opts,
+        linkedReminderIdsFromTasks(snapshot),
+      );
+    }
     if (kept.length === 0) {
       return `אין ${label} שמורות.`;
     }
@@ -1172,6 +1600,24 @@ function formatThreeWayDump(
     }
   }
 
+  // Personal tasks about the partner (birthday of X) — linked reminder.about.
+  if (
+    listType === "tasks" &&
+    section === "shared" &&
+    partnerFilters.length > 0
+  ) {
+    const aboutRows = applyItemFilters(
+      personal.filter((row) =>
+        itemReminderAboutMatchesPartner(row.item, partnerFilters),
+      ),
+    );
+    if (aboutRows.length > 0) {
+      const key = partnerFilterLabel(partnerFilters);
+      const merged = [...(filteredShared.get(key) ?? []), ...aboutRows];
+      filteredShared.set(key, merged);
+    }
+  }
+
   const blocks: string[] = [];
   const countsOnly = opts?.countsOnly === true;
 
@@ -1202,6 +1648,20 @@ function formatThreeWayDump(
       }
     }
     return blocks.join("\n").trim();
+  }
+
+  // WHEN / date window: day-header layout only — same line formatter inside.
+  if (listType === "tasks" && hasDumpDateRange(opts)) {
+    const agendaRows: DumpItem[] = [
+      ...(showPersonal ? filteredPersonal : []),
+      ...[...filteredShared.values()].flat(),
+    ];
+    return formatTasksDayAgendaDump(
+      agendaRows,
+      snapshot.reminders ?? [],
+      opts,
+      linkedReminderIdsFromTasks(snapshot),
+    );
   }
 
   if (showPersonal && filteredPersonal.length > 0) {

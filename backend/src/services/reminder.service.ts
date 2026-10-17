@@ -52,6 +52,9 @@ export interface ReminderSnapshotRow {
   repeat: string;
   ping: string[];
   ping_ids: string[];
+  /** Who the clock is about (display names) — e.g. birthday of עמית. */
+  about?: string[];
+  about_ids?: string[];
   owner: string;
   text: string;
   /** Final WhatsApp body from the last compose-at-fire (empty when fixed copy). */
@@ -1110,6 +1113,25 @@ function matchEmployee(
   );
 }
 
+/**
+ * Resolve reminders[].about names → employee ids (Known humans only).
+ * No phone fallback, no default to speaker — empty about stays empty.
+ */
+export function resolveReminderAboutIds(
+  reminder: Pick<LlmReminderAction, "about">,
+  employees: PublicEmployee[],
+): string[] {
+  const about = Array.isArray(reminder.about) ? reminder.about : [];
+  const ids: string[] = [];
+  for (const raw of about) {
+    const employee = matchEmployee(String(raw), employees);
+    if (employee && !ids.includes(employee.id)) {
+      ids.push(employee.id);
+    }
+  }
+  return ids;
+}
+
 export function resolveReminderPingDestinations(
   reminder: Pick<LlmReminderAction, "ping"> & {
     targets?: string[];
@@ -1469,6 +1491,14 @@ export async function applyReminders(input: {
       continue;
     }
 
+    const aboutNamed = (reminder.about ?? []).some((part) => String(part).trim());
+    let aboutIds = resolveReminderAboutIds(reminder, input.employees);
+    if (existing && canReuseClock && !aboutNamed) {
+      aboutIds = Array.isArray(existing.aboutIds)
+        ? existing.aboutIds.map(String)
+        : [];
+    }
+
     try {
       const owned = rows.filter((row) => row.ownerId === ownerId);
       const label = (existing?.itemLabel ?? reminder.item.trim()).slice(0, 255);
@@ -1541,6 +1571,7 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               ...ruleFields,
               pingIds,
+              aboutIds,
               messageText: nextText,
               composeAtFire,
               composeSource: nextSource,
@@ -1559,6 +1590,7 @@ export async function applyReminders(input: {
               repeat: nextRepeat,
               ...ruleFields,
               pingIds,
+              aboutIds,
               messageText: nextText,
               composeAtFire,
               composeSource: nextSource,
@@ -1854,6 +1886,7 @@ export function toReminderSnapshotRow(
     recurrence?: unknown;
     occurrencesFired?: number;
     pingIds: unknown;
+    aboutIds?: unknown;
     ownerId: string;
     messageText: string;
     composeAtFire?: boolean;
@@ -1868,6 +1901,7 @@ export function toReminderSnapshotRow(
   names: Map<string, string>,
 ): ReminderSnapshotRow {
   const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
+  const abouts = Array.isArray(row.aboutIds) ? row.aboutIds.map(String) : [];
   const sendStatus =
     row.sendStatus === "sent" || row.sendStatus === "failed"
       ? row.sendStatus
@@ -1896,6 +1930,8 @@ export function toReminderSnapshotRow(
     repeat: row.repeat,
     ping: pings.map((id) => names.get(id) ?? id),
     ping_ids: pings,
+    about: abouts.map((id) => names.get(id) ?? id),
+    about_ids: abouts,
     owner: names.get(row.ownerId) ?? row.ownerId,
     text,
     last_composed_text: lastComposed,

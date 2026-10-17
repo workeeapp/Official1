@@ -228,6 +228,8 @@ model Reminder {
   /** Occurrences fired so far — enforces recurrence.count. */
   occurrencesFired Int @default(0) @map("occurrences_fired")
   pingIds     Json     @default("[]") @map("ping_ids")
+  /** Employee ids the clock is about (birthday of X) — not who gets WhatsApp (ping_ids). */
+  aboutIds    Json     @default("[]") @map("about_ids")
   messageText String   @default("") @map("message_text") @db.Text
   composeAtFire Boolean @default(false) @map("compose_at_fire")
   /** Empty = normal compose brief; "git_log" = summarize repo commits at fire time. */

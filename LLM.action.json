@@ -921,7 +921,15 @@
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "Who gets the WhatsApp (names / phones). Distinct from about."
+                    },
+                    "about": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Who the clock is about (Known employee names) — e.g. birthday of עמית when ping is the speaker. Empty when the clock is only for the ping recipient's own chore."
                     },
                     "targets": {
                       "type": "array",

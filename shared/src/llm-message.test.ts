@@ -911,6 +911,36 @@ describe("parseLlmReply", () => {
     });
   });
 
+  it("parses reminders.about separately from ping", () => {
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        response: "ok",
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "יום ההולדת של עמית",
+              time: "09:00",
+              ping: ["טל"],
+              about: ["עמית"],
+              recurrence: {
+                freq: "yearly",
+                interval: 1,
+                month: 10,
+                month_day: 13,
+                time: "09:00",
+              },
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.reminders?.[0]).toMatchObject({
+      ping: ["טל"],
+      about: ["עמית"],
+    });
+  });
+
   it("keeps a job action that forgot its id and drops unknown actions", () => {
     const parsed = parseReplyMetadata(
       JSON.stringify({
@@ -1014,6 +1044,7 @@ describe("parseLlmReply", () => {
         time: "",
         repeat: "once",
         ping: [],
+        about: [],
         targets: [],
         text: "",
         inSeconds: 10,

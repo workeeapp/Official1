@@ -12,6 +12,7 @@ import {
   pairWorkerItemsToReminders,
   reminderLabelsMatch,
   resolveReminderFireAt,
+  resolveReminderAboutIds,
   resolveReminderPingDestinations,
   toReminderSnapshotRow,
   unknownDestNames,
@@ -26,6 +27,7 @@ const milkRemove: LlmReminderAction = {
   time: "",
   repeat: "once",
   ping: [],
+  about: [],
   targets: [],
   text: "",
   inSeconds: null,
@@ -315,6 +317,25 @@ describe("unknown dest", () => {
   });
 });
 
+describe("resolveReminderAboutIds", () => {
+  it("resolves Known employee names and ignores unknowns", () => {
+    const amit: PublicEmployee = {
+      id: "amit-1",
+      name: "עמית",
+      surname: "",
+      nickname: "עמית",
+      email: null,
+      phone: null,
+      kind: "human",
+      protected: false,
+    };
+    expect(
+      resolveReminderAboutIds({ about: ["עמית", "זר"] }, [tal, amit]),
+    ).toEqual(["amit-1"]);
+    expect(resolveReminderAboutIds({ about: [] }, [tal, amit])).toEqual([]);
+  });
+});
+
 describe("toReminderSnapshotRow", () => {
   it("does not treat a finished clock as sent when WhatsApp failed", () => {
     expect(
@@ -323,13 +344,17 @@ describe("toReminderSnapshotRow", () => {
           fireAt: new Date("2026-09-24T17:08:00.000Z"),
           repeat: "once",
           pingIds: [],
+          aboutIds: ["amit-1"],
           ownerId: tal.id,
           messageText: "",
           status: "done",
           sendStatus: "failed",
           sentAt: null,
         },
-        new Map([[tal.id, "טל"]]),
+        new Map([
+          [tal.id, "טל"],
+          ["amit-1", "עמית"],
+        ]),
       ),
     ).toMatchObject({
       status: "done",
@@ -338,6 +363,8 @@ describe("toReminderSnapshotRow", () => {
       sent_at: null,
       last_composed_text: "",
       sent_text: "",
+      about: ["עמית"],
+      about_ids: ["amit-1"],
     });
   });
 });

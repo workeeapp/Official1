@@ -110,6 +110,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN: inventing a list_name or picking by topic/meaning alone",
     );
+    expect(config.systemMessage).toContain("TWO OR MORE list_name titles");
+    expect(config.systemMessage).toContain("הוסיפי באג");
+    expect(config.systemMessage).toContain("TOPIC-ONLY / NO LIST NAMED");
+    expect(config.systemMessage).toContain("never pick the first / shared");
+    expect(config.systemMessage).toContain("YEARLY OFFER");
+    expect(config.systemMessage).toContain("FORBIDDEN reminders-only yearly birthday");
+    expect(config.systemMessage).toContain("about=[that person]");
     expect(config.systemMessage).toContain("WORKER_SAVED_DATA");
     expect(config.systemMessage).toContain("USER-FACING LANGUAGE");
     expect(config.systemMessage).toContain("compose_source");
@@ -185,13 +192,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("show_dump_from + show_dump_to");
     expect(config.systemMessage).toContain("FORBIDDEN model-written day agenda");
     expect(config.systemMessage).toContain("RECURRING IN A DATE ANSWER");
-    expect(config.systemMessage).toContain("MULTI-DAY window");
-    expect(config.systemMessage).toContain("NEVER explode dense cadences");
-    expect(config.systemMessage).toContain("כל יום ב־09:00");
-    expect(config.systemMessage).toContain("DAY AGENDA FORMAT");
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN: one packed line for the whole day",
-    );
+    expect(config.systemMessage).toContain("FORBIDDEN model-written DAY AGENDA");
+    expect(config.systemMessage).toContain("קבוע כל יום");
+    expect(config.systemMessage).toContain("קבוע + תזכורת ב־HH:mm");
     expect(config.systemMessage).toContain("RECURRENCE START (critical)");
     expect(config.systemMessage).toContain('start:"2026-10-20"');
     expect(config.systemMessage).not.toContain("confirm_share");

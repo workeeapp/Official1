@@ -53,13 +53,12 @@ describe("relative-date", () => {
     expect(text).toContain(`current_date: ${jerusalemYmd(noonUtc)}`);
     expect(text).toContain(`current_time: ${jerusalemHm(noonUtc)}`);
     expect(text).toContain("Asia/Jerusalem");
-    expect(text).toContain("does not filter the rows for you");
     expect(text).toContain("מטלות מתוזמנות");
     expect(text).toContain("אני/שלי");
-    expect(text).toContain("WORKER_SAVED_DATA");
+    expect(text).toContain("show_dump_from/to");
     expect(text).toContain("מה את");
-    expect(text).toContain("MUST scan next_occurrences");
-    expect(text).toContain("FORBIDDEN: empty day answer when the asked YYYY-MM-DD appears");
+    expect(text).toContain("FORBIDDEN inventing day-agenda");
+    expect(text).toContain("server dump only");
   });
 
   it("bounds השבוע to today→Saturday and השבוע הבא to the next Sunday→Saturday", () => {

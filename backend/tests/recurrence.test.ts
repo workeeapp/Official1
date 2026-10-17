@@ -590,8 +590,7 @@ describe("SESSION_CLOCK calendar", () => {
     const text = formatSessionClockContext(NOW);
     expect(text).toContain("calendar");
     expect(text).toContain("2026-10-20 שלישי");
-    expect(text).toContain("(קבוע)");
-    expect(text).toContain("MUST scan next_occurrences");
-    expect(text).toContain("FORBIDDEN: empty day answer");
+    expect(text).toContain("show_dump=tasks");
+    expect(text).toContain("FORBIDDEN inventing day-agenda");
   });
 });
