@@ -555,6 +555,41 @@ describe("reminder worker link", () => {
     });
   });
 
+  it("keeps appointment chore T1 when the ping clock moves to T2", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "w1",
+      itemKey: "להזכיר לטל לאסוף את מאיה",
+      data: {
+        "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+        "תאריך לביצוע": "2026-10-21",
+        "שעה לביצוע": "15:00",
+      },
+    });
+    itemUpdate.mockResolvedValue({});
+    // 14:20 Asia/Jerusalem
+    await syncLinkedWorkerTaskClock({
+      reminderId: "r1",
+      workerItemId: "w1",
+      fireAt: new Date("2026-10-21T11:20:00.000Z"),
+    });
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "w1" },
+      data: expect.objectContaining({
+        data: expect.objectContaining({
+          "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+          "תאריך לביצוע": "2026-10-21",
+          "שעה לביצוע": "15:00",
+        }),
+      }),
+    });
+    const written = itemUpdate.mock.calls[0][0].data.data as Record<
+      string,
+      unknown
+    >;
+    expect(written["שעה לביצוע"]).toBe("15:00");
+    expect(written["שעה לביצוע"]).not.toBe("14:20");
+  });
+
   it("mirrors an every-2-hours clock onto the worker task, anchored at its fire", async () => {
     itemFindUnique.mockResolvedValue({
       id: "w1",

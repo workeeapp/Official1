@@ -437,6 +437,25 @@ describe("formatShowDumpFromKind", () => {
         now,
       ),
     ).toBe("— שני ושלישי ב־19:00 (קבוע)");
+    // Appointment ≠ ping: chore T1 on the row, ping T2 on the linked clock.
+    expect(
+      formatNumberedItem(
+        1,
+        "להזכיר לטל לאסוף את מאיה",
+        {
+          "תאריך לביצוע": "2026-10-21",
+          "שעה לביצוע": "15:00",
+          reminder: {
+            fire_at: "2026-10-21 14:20",
+            repeat: "none",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe(
+      "1. להזכיר לטל לאסוף את מאיה — רביעי ב־15:00 (תזכורת: רביעי ב־14:20)",
+    );
     expect(
       formatScheduleSuffix(
         { "תאריך לביצוע": "2026-10-15", "שעה לביצוע": "19:30" },

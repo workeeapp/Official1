@@ -336,6 +336,23 @@ export function applyTimeToTaskLabel(label: string, time: string): string {
   return `${trimmed} ב־${time}`;
 }
 
+/** Normalize HH:mm for appointment≠ping compares (pad hour). */
+function normalizeTaskClockHm(raw: unknown): string {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const match = raw.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return raw.trim();
+  }
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+/**
+ * Keep worker להזכיר chore time in sync with the linked clock — except when
+ * the item already has a distinct שעה לביצוע (appointment ≠ ping). Then leave
+ * תאריך/שעה לביצוע and the title clock alone; only mirror recurrence meta.
+ */
 export async function syncLinkedWorkerTaskClock(input: {
   reminderId: string;
   workerItemId?: string | null;
@@ -357,16 +374,21 @@ export async function syncLinkedWorkerTaskClock(input: {
     if (!item || item.deletedAt) {
       return;
     }
-    const time = formatJerusalemClock(input.fireAt);
+    const pingTime = formatJerusalemClock(input.fireAt);
     const data =
       item.data && typeof item.data === "object" && !Array.isArray(item.data)
         ? { ...(item.data as Record<string, unknown>) }
         : {};
+    const existingChore = normalizeTaskClockHm(data["שעה לביצוע"]);
+    const preserveChore =
+      Boolean(existingChore) && existingChore !== normalizeTaskClockHm(pingTime);
     const currentName =
       typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()
         ? data["שם מטלה"].trim()
         : item.itemKey;
-    const nextName = applyTimeToTaskLabel(currentName, time);
+    const nextName = preserveChore
+      ? currentName
+      : applyTimeToTaskLabel(currentName, pingTime);
     const ruled =
       input.rule === undefined
         ? data
@@ -377,7 +399,7 @@ export async function syncLinkedWorkerTaskClock(input: {
         data: {
           ...ruled,
           "שם מטלה": nextName,
-          "שעה לביצוע": time,
+          ...(preserveChore ? {} : { "שעה לביצוע": pingTime }),
         } as Prisma.InputJsonValue,
         ...(itemKey(nextName) !== item.itemKey
           ? { itemKey: itemKey(nextName) }
