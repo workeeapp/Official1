@@ -247,15 +247,98 @@ function formatResolvedShowDump(
     return formatFullDump(snapshot, opts);
   }
   if (parsed.kind === "reminders") {
-    return formatRemindersDump(snapshot.reminders ?? [], opts);
+    return (
+      formatRemindersDump(snapshot.reminders ?? [], opts) ||
+      "אין לך תזכורות פעילות כרגע."
+    );
   }
   if (parsed.kind === "filings") {
-    return formatFilingsDump(snapshot.filing ?? [], opts);
+    return formatFilingsDump(snapshot.filing ?? [], opts) || emptyFilingsSentence(opts);
   }
   if (parsed.kind === "phone_book") {
-    return formatPhoneBookDump(opts?.phoneBook, opts);
+    return (
+      formatPhoneBookDump(opts?.phoneBook, opts) || emptyPhoneBookSentence(opts)
+    );
   }
   return formatListDump(parsed.name, snapshot, opts);
+}
+
+/** One-line empty when a focused shopping/tasks dump has nothing. */
+function emptyListDumpSentence(
+  label: string,
+  opts?: ShowDumpOptions,
+): string {
+  const section = opts?.section ?? null;
+  const partnerFilters = dumpFilterNames(opts?.partner);
+  if (section === "personal") {
+    return `${label} אישיות ריקה.`;
+  }
+  if (section === "shared" && partnerFilters.length > 0) {
+    return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
+  }
+  if (section === "shared") {
+    return `${label} משותפות ריקה.`;
+  }
+  return `אין ${label} שמורות.`;
+}
+
+function emptyFilingsSentence(opts?: ShowDumpOptions): string {
+  const section = opts?.section ?? null;
+  const partners = dumpFilterNames(opts?.partner);
+  if (section === "shared" && partners.length > 0) {
+    return `אין תיוקים משותפים עם ${partnerFilterLabel(partners)}.`;
+  }
+  if (section === "shared") {
+    return "תיוקים משותפים ריקה.";
+  }
+  if (section === "personal") {
+    return "תיוקים אישיים ריקה.";
+  }
+  return "אין תיוקים שמורים.";
+}
+
+function emptyPhoneBookSentence(opts?: ShowDumpOptions): string {
+  const section = opts?.section ?? null;
+  const partners = dumpFilterNames(opts?.partner);
+  if (section === "shared" && partners.length > 0) {
+    return `אין אנשי קשר בספר הטלפונים המשותף עם ${partnerFilterLabel(partners)}.`;
+  }
+  if (section === "shared" || partners.length > 0) {
+    return "ספר הטלפונים משותף ריק.";
+  }
+  if (section === "personal") {
+    return "ספר הטלפונים אישי ריק.";
+  }
+  return "ספר הטלפונים אישי ריק.";
+}
+
+function emptyContactsSentence(opts?: ShowDumpOptions): string {
+  const section = opts?.section ?? null;
+  const partners = dumpFilterNames(opts?.partner);
+  if (section === "shared" && partners.length > 0) {
+    return `אין אנשי קשר משותפים עם ${partnerFilterLabel(partners)}.`;
+  }
+  if (section === "shared") {
+    return "אנשי קשר משותפים ריקה.";
+  }
+  if (section === "personal") {
+    return "אנשי קשר אישיים ריקה.";
+  }
+  return "אין אנשי קשר שמורים.";
+}
+
+function emptyFullDumpSentence(opts?: ShowDumpOptions): string {
+  const partners = dumpFilterNames(opts?.partner);
+  if (partners.length > 0) {
+    return `אין לך מידע משותף עם ${partnerFilterLabel(partners)} כרגע.`;
+  }
+  if (opts?.section === "shared") {
+    return "אין לך מידע משותף כרגע.";
+  }
+  if (opts?.section === "personal") {
+    return "אין לך מידע אישי שמור כרגע.";
+  }
+  return "אין לך מידע שמור כרגע.";
 }
 
 /**
@@ -269,14 +352,21 @@ export function formatFullDump(
 ): string {
   const sections: string[] = [];
 
-  sections.push(
+  const pushIfContent = (block: string) => {
+    const trimmed = block.trim();
+    if (trimmed) {
+      sections.push(trimmed);
+    }
+  };
+
+  pushIfContent(
     formatThreeWayDump("shopping", "קניות", snapshot, {
       ...opts,
       countsOnly: true,
     }),
   );
-  sections.push(formatThreeWayDump("tasks", "מטלות", snapshot, opts));
-  sections.push(formatCustomListsCountsDump(snapshot, opts));
+  pushIfContent(formatThreeWayDump("tasks", "מטלות", snapshot, opts));
+  pushIfContent(formatCustomListsCountsDump(snapshot, opts));
 
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const partnerOnly =
@@ -297,39 +387,37 @@ export function formatFullDump(
     return true;
   });
   const remBody = formatRemindersDump(reminderRows, opts);
-  sections.push(
-    remBody.startsWith("אין לך")
-      ? "תזכורות פעילות:\nריק"
-      : `תזכורות פעילות:\n${remBody}`,
-  );
+  if (remBody) {
+    sections.push(`תזכורות פעילות:\n${remBody}`);
+  }
 
-  sections.push(formatFilingsDump(snapshot.filing ?? [], opts));
+  pushIfContent(formatFilingsDump(snapshot.filing ?? [], opts));
 
   const hasContacts = snapshot.lists.some(
     (list) => list.list_type === "contacts",
   );
-  sections.push(
-    hasContacts
-      ? (formatContactsOrCustomDump(
-          "contacts",
-          "",
-          snapshot,
-          builtinListHebrew("contacts"),
-          opts,
-        ) ??
-        (partnerOnly
-          ? "אנשי קשר משותפים:\nריקה"
-          : "אנשי קשר אישיים:\nריקה"))
-      : partnerOnly
-        ? "אנשי קשר משותפים:\nריקה"
-        : "אנשי קשר אישיים:\nריקה",
-  );
+  if (hasContacts) {
+    const contactsBody = formatContactsOrCustomDump(
+      "contacts",
+      "",
+      snapshot,
+      builtinListHebrew("contacts"),
+      opts,
+    );
+    // Focused empty sentences must not appear as a full-dump section.
+    if (contactsBody && !isEmptyListDump(contactsBody)) {
+      sections.push(contactsBody);
+    }
+  }
 
-  sections.push(formatPhoneBookDump(opts?.phoneBook, opts));
+  pushIfContent(formatPhoneBookDump(opts?.phoneBook, opts));
+
+  if (sections.length === 0) {
+    return emptyFullDumpSentence(opts);
+  }
 
   sections.push("לפירוט רשימה: הצג רשימת …");
-
-  return sections.filter(Boolean).join("\n\n");
+  return sections.join("\n\n");
 }
 
 function hebrewItemCount(n: number): string {
@@ -368,16 +456,15 @@ function formatCustomListsCountsDump(
     }
     const name = (list.list_name ?? "").trim() || "ללא שם";
     const n = list.items.length;
+    if (n === 0) {
+      continue;
+    }
     const withMark =
       partners && partners !== "משותף" ? ` (עם ${partners})` : "";
-    const count = n === 0 ? "ריקה" : hebrewItemCount(n);
-    lines.push(`*${name}*${withMark} — ${count}`);
+    lines.push(`*${name}*${withMark} — ${hebrewItemCount(n)}`);
   }
   if (lines.length === 0) {
-    if (partnerNeedles.length > 0 || section === "shared") {
-      return "";
-    }
-    return "רשימות אחרות:\nריק";
+    return "";
   }
   return ["רשימות אחרות:", ...lines].join("\n");
 }
@@ -421,15 +508,11 @@ export function formatPhoneBookDump(
   const section = opts?.section ?? null;
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const blocks: string[] = [];
-  if (section !== "shared") {
+  if (section !== "shared" && personal.length > 0) {
     blocks.push("ספר הטלפונים אישי:");
-    if (personal.length === 0) {
-      blocks.push("ריק");
-    } else {
-      personal.forEach((line, i) => {
-        blocks.push(`${i + 1}. ${line}`);
-      });
-    }
+    personal.forEach((line, i) => {
+      blocks.push(`${i + 1}. ${line}`);
+    });
   }
   if (section !== "personal") {
     let sharedRows = shared;
@@ -440,27 +523,15 @@ export function formatPhoneBookDump(
         ),
       );
     }
-    if (section === "shared" || sharedRows.length > 0) {
+    if (sharedRows.length > 0) {
       if (blocks.length > 0) {
         blocks.push("");
       }
       blocks.push("ספר הטלפונים משותף:");
-      if (sharedRows.length === 0) {
-        blocks.push("ריק");
-      } else {
-        sharedRows.forEach((row, i) => {
-          blocks.push(`${i + 1}. ${row.line}`);
-        });
-      }
+      sharedRows.forEach((row, i) => {
+        blocks.push(`${i + 1}. ${row.line}`);
+      });
     }
-  }
-  if (rows.length === 0 && !section && partnerNeedles.length === 0) {
-    return "ספר הטלפונים אישי:\nריק";
-  }
-  if (blocks.length === 0) {
-    return section === "shared" || partnerNeedles.length > 0
-      ? "ספר הטלפונים משותף:\nריק"
-      : "ספר הטלפונים אישי:\nריק";
   }
   return blocks.join("\n");
 }
@@ -732,15 +803,11 @@ export function formatFilingsDump(
   const section = opts?.section ?? null;
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const blocks: string[] = [];
-  if (section !== "shared") {
+  if (section !== "shared" && personal.length > 0) {
     blocks.push("תיוקים אישיים:");
-    if (personal.length === 0) {
-      blocks.push("ריקה");
-    } else {
-      personal.forEach((line, i) => {
-        blocks.push(`${i + 1}. ${line}`);
-      });
-    }
+    personal.forEach((line, i) => {
+      blocks.push(`${i + 1}. ${line}`);
+    });
   }
   if (section !== "personal") {
     let sharedLines = shared;
@@ -749,23 +816,15 @@ export function formatFilingsDump(
         partnerNeedles.some((needle) => line.includes(needle)),
       );
     }
-    // Hide empty shared unless the speaker asked for shared only.
-    if (section === "shared" || sharedLines.length > 0) {
+    if (sharedLines.length > 0) {
       if (blocks.length > 0) {
         blocks.push("");
       }
       blocks.push("תיוקים משותפים:");
-      if (sharedLines.length === 0) {
-        blocks.push("ריקה");
-      } else {
-        sharedLines.forEach((line, i) => {
-          blocks.push(`${i + 1}. ${line}`);
-        });
-      }
+      sharedLines.forEach((line, i) => {
+        blocks.push(`${i + 1}. ${line}`);
+      });
     }
-  }
-  if (rows.length === 0 && !section) {
-    return "תיוקים אישיים:\nריקה";
   }
   return blocks.join("\n");
 }
@@ -782,7 +841,7 @@ function formatRemindersDump(
     return reminderMatchesDateRange(row, opts?.dateFrom, opts?.dateTo);
   });
   if (active.length === 0) {
-    return "אין לך תזכורות פעילות כרגע.";
+    return "";
   }
   return active
     .map((row, index) => {
@@ -939,7 +998,7 @@ export function formatTasksDayAgendaDump(
   }
 
   if (slots.length === 0) {
-    return "אין מטלות בטווח התאריכים.";
+    return "";
   }
 
   slots.sort((a, b) => {
@@ -1358,16 +1417,28 @@ function formatListDump(
   const name = rawName.trim();
   const builtin = builtinListTypeFromHebrew(name);
   if (builtin === "shopping" || builtin === "tasks") {
-    return formatThreeWayDump(builtin, builtinListHebrew(builtin), snapshot, opts);
+    const label = builtinListHebrew(builtin);
+    const body = formatThreeWayDump(builtin, label, snapshot, opts);
+    if (body) {
+      return body;
+    }
+    if (builtin === "tasks" && hasDumpDateRange(opts)) {
+      return "אין מטלות בטווח התאריכים.";
+    }
+    return emptyListDumpSentence(label, opts);
   }
   if (builtin === "contacts") {
-    return formatContactsOrCustomDump(
+    const body = formatContactsOrCustomDump(
       "contacts",
       "",
       snapshot,
       builtinListHebrew("contacts"),
       opts,
     );
+    if (body === null) {
+      return null;
+    }
+    return body || emptyContactsSentence(opts);
   }
   return formatContactsOrCustomDump("custom", name, snapshot, name, opts);
 }
@@ -1439,7 +1510,7 @@ function formatThreeWayDump(
     if (opts?.countsOnly === true) {
       const n = kept.length;
       return n === 0
-        ? `${label}: ריקה`
+        ? ""
         : `${label}${paperclipSuffix(anyListFiles)}: ${hebrewItemCount(n)}`;
     }
     if (
@@ -1455,7 +1526,7 @@ function formatThreeWayDump(
       );
     }
     if (kept.length === 0) {
-      return `אין ${label} שמורות.`;
+      return "";
     }
     return [
       `${label}${paperclipSuffix(anyListFiles)}:`,
@@ -1622,29 +1693,19 @@ function formatThreeWayDump(
   const countsOnly = opts?.countsOnly === true;
 
   if (countsOnly) {
-    if (showPersonal) {
-      const n = filteredPersonal.length;
+    if (showPersonal && filteredPersonal.length > 0) {
       blocks.push(
-        n === 0
-          ? `${label} אישיות: ריקה`
-          : `${label} אישיות${paperclipSuffix(personalListFiles)}: ${hebrewItemCount(n)}`,
+        `${label} אישיות${paperclipSuffix(personalListFiles)}: ${hebrewItemCount(filteredPersonal.length)}`,
       );
     }
     if (showShared) {
-      if (filteredShared.size === 0) {
-        if (section === "shared" && partnerFilters.length > 0) {
-          return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
+      for (const [partners, items] of filteredShared) {
+        if (items.length === 0) {
+          continue;
         }
-        // Hide empty shared counts unless they asked for shared only.
-        if (section === "shared") {
-          blocks.push(`${label} משותפות: ריקה`);
-        }
-      } else {
-        for (const [partners, items] of filteredShared) {
-          blocks.push(
-            `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}: ${hebrewItemCount(items.length)}`,
-          );
-        }
+        blocks.push(
+          `${label} משותפות עם ${partners}${paperclipSuffix(partnerListFiles.get(partners) === true)}: ${hebrewItemCount(items.length)}`,
+        );
       }
     }
     return blocks.join("\n").trim();
@@ -1696,16 +1757,7 @@ function formatThreeWayDump(
   }
 
   if (blocks.length === 0) {
-    if (section === "personal") {
-      return `${label} אישיות ריקה.`;
-    }
-    if (section === "shared" && partnerFilters.length > 0) {
-      return `אין ${label} משותפות עם ${partnerFilterLabel(partnerFilters)}.`;
-    }
-    if (section === "shared") {
-      return `${label} משותפות ריקה.`;
-    }
-    return `אין ${label} שמורות.`;
+    return "";
   }
 
   return blocks.join("\n").trim();
@@ -1807,7 +1859,14 @@ export function isEmptyListDump(text: string | null | undefined): boolean {
   if (!trimmed) {
     return true;
   }
-  return /^אין .+ שמורות\.$/.test(trimmed) || / ריקה\.$/.test(trimmed);
+  return (
+    /^אין .+ שמורות\.$/.test(trimmed) ||
+    /^אין .+ משותפ[ותים] עם .+\.$/.test(trimmed) ||
+    /^אין מטלות בטווח התאריכים\.$/.test(trimmed) ||
+    /^אין לך (מידע|תזכורות) .+\.$/.test(trimmed) ||
+    / ריק[ה]?\.?$/.test(trimmed) ||
+    / ריקה\.$/.test(trimmed)
+  );
 }
 
 /**
@@ -2027,19 +2086,15 @@ function formatContactsTwoSectionDump(
   }
   const section = opts?.section ?? null;
   const blocks: string[] = [];
-  if (section !== "shared") {
+  if (section !== "shared" && personal.length > 0) {
     blocks.push("אנשי קשר אישיים:");
-    if (personal.length === 0) {
-      blocks.push("ריקה");
-    } else {
-      personal.forEach((row, i) => {
-        blocks.push(
-          formatNumberedItem(i + 1, row.title, row.item, "contacts", {
-            now: opts?.now,
-          }),
-        );
-      });
-    }
+    personal.forEach((row, i) => {
+      blocks.push(
+        formatNumberedItem(i + 1, row.title, row.item, "contacts", {
+          now: opts?.now,
+        }),
+      );
+    });
   }
   if (section !== "personal") {
     let sharedRows = shared;
@@ -2051,24 +2106,19 @@ function formatContactsTwoSectionDump(
         ),
       );
     }
-    // Hide empty shared unless the speaker asked for shared only.
-    if (section === "shared" || sharedRows.length > 0) {
+    if (sharedRows.length > 0) {
       if (blocks.length > 0) {
         blocks.push("");
       }
       blocks.push("אנשי קשר משותפים:");
-      if (sharedRows.length === 0) {
-        blocks.push("ריקה");
-      } else {
-        sharedRows.forEach((row, i) => {
-          blocks.push(
-            formatNumberedItem(i + 1, row.title, row.item, "contacts", {
-              sharedWithLabel: row.sharedWithLabel,
-              now: opts?.now,
-            }),
-          );
-        });
-      }
+      sharedRows.forEach((row, i) => {
+        blocks.push(
+          formatNumberedItem(i + 1, row.title, row.item, "contacts", {
+            sharedWithLabel: row.sharedWithLabel,
+            now: opts?.now,
+          }),
+        );
+      });
     }
   }
   return blocks.join("\n");

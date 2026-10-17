@@ -197,9 +197,9 @@ describe("filings two-section dump", () => {
       viewerName: "טל",
       section: "shared",
     })!;
-    expect(sharedOnly).toContain("תיוקים משותפים:");
-    expect(sharedOnly).toContain("ריקה");
+    expect(sharedOnly).toBe("תיוקים משותפים ריקה.");
     expect(sharedOnly).not.toContain("תיוקים אישיים:");
+    expect(sharedOnly).not.toMatch(/תיוקים משותפים:\s*\nריקה/);
   });
 
   it("never marks filing partners as the viewer even if shared_with still lists them", () => {
@@ -1464,13 +1464,15 @@ describe("formatShowDumpFromKind", () => {
     // Tasks still enumerate.
     expect(text).toMatch(/מטלות אישיות:[\s\S]*לטפל בעמידר/);
 
-    expect(text).toContain("רשימות אחרות:");
-    expect(text).toContain("תזכורות פעילות:");
-    expect(text).toContain("תיוקים אישיים:");
+    // Empty categories omitted (no ריק/ריקה headers).
+    expect(text).not.toContain("רשימות אחרות:");
+    expect(text).not.toContain("תזכורות פעילות:");
+    expect(text).not.toContain("תיוקים אישיים:");
     expect(text).not.toContain("תיוקים משותפים:");
-    expect(text).toContain("אנשי קשר אישיים:");
+    expect(text).not.toContain("אנשי קשר אישיים:");
     expect(text).not.toContain("אנשי קשר משותפים:");
     expect(text).not.toMatch(/מטלות משותפות:\s*ריקה/);
+    expect(text).not.toMatch(/ריק/);
     expect(text).toContain("ספר הטלפונים אישי:");
     expect(text).toContain("דני — 0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
@@ -1506,9 +1508,9 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       section: "shared",
     })!;
-    expect(sharedOnly).toContain("אנשי קשר משותפים:");
-    expect(sharedOnly).toContain("ריקה");
+    expect(sharedOnly).toBe("אנשי קשר משותפים ריקה.");
     expect(sharedOnly).not.toContain("אנשי קשר אישיים:");
+    expect(sharedOnly).not.toMatch(/אנשי קשר משותפים:\s*\nריקה/);
   });
 
   it("shopping countsOnly: omits empty משותפות unless section=shared", () => {
@@ -1536,7 +1538,27 @@ describe("formatShowDumpFromKind", () => {
       countsOnly: true,
       section: "shared",
     })!;
-    expect(sharedCounts).toContain("קניות משותפות: ריקה");
+    expect(sharedCounts).toBe("קניות משותפות ריקה.");
+    expect(sharedCounts).not.toMatch(/קניות משותפות:\s*ריקה/);
+  });
+
+  it("full dump omits empty sections; all-empty → one sentence", () => {
+    const empty = formatShowDumpFromKind(
+      "full",
+      { lists: [], filing: [], reminders: [] },
+      { viewerName: "טל" },
+    )!;
+    expect(empty).toBe("אין לך מידע שמור כרגע.");
+    expect(empty).not.toMatch(/ריק/);
+
+    const partnerEmpty = formatShowDumpFromKind(
+      "full",
+      { lists: [], filing: [], reminders: [] },
+      { viewerName: "טל", section: "shared", partner: "עמית" },
+    )!;
+    expect(partnerEmpty).toBe("אין לך מידע משותף עם עמית כרגע.");
+    expect(partnerEmpty).not.toContain("קניות");
+    expect(partnerEmpty).not.toContain("תזכורות");
   });
 });
 
