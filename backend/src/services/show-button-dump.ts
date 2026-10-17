@@ -322,10 +322,10 @@ function emptyFilingsSentence(opts?: ShowDumpOptions): string {
     return `אין תיוקים משותפים עם ${partnerFilterLabel(partners)}.`;
   }
   if (section === "shared") {
-    return "תיוקים משותפים ריקה.";
+    return "אין תיוקים משותפים.";
   }
   if (section === "personal") {
-    return "תיוקים אישיים ריקה.";
+    return "אין תיוקים אישיים.";
   }
   return "אין תיוקים שמורים.";
 }
@@ -337,12 +337,12 @@ function emptyPhoneBookSentence(opts?: ShowDumpOptions): string {
     return `אין אנשי קשר בספר הטלפונים המשותף עם ${partnerFilterLabel(partners)}.`;
   }
   if (section === "shared" || partners.length > 0) {
-    return "ספר הטלפונים משותף ריק.";
+    return "אין אנשי קשר משותפים בספר הטלפונים.";
   }
   if (section === "personal") {
-    return "ספר הטלפונים אישי ריק.";
+    return "אין אנשי קשר אישיים בספר הטלפונים.";
   }
-  return "ספר הטלפונים אישי ריק.";
+  return "ספר הטלפונים ריק.";
 }
 
 function emptyContactsSentence(opts?: ShowDumpOptions): string {
@@ -458,7 +458,7 @@ function hebrewItemCount(n: number): string {
 }
 
 /**
- * Partner names for custom full-dump count `(עם …)`.
+ * Partner names for custom full-dump count `(A, B)` — no «עם» prefix.
  * Whole-list shared → list.shared_with; shared_items → owner; else item co-share partners.
  */
 function customListCountPartners(
@@ -527,7 +527,7 @@ function formatCustomListsCountsDump(
       continue;
     }
     const withMark =
-      partners && partners !== "משותף" ? ` (עם ${partners})` : "";
+      partners && partners !== "משותף" ? ` (${partners})` : "";
     lines.push(`*${name}*${withMark} — ${hebrewItemCount(n)}`);
   }
   if (lines.length === 0) {
@@ -537,8 +537,7 @@ function formatCustomListsCountsDump(
 }
 
 /**
- * Phone book dump — two-section share-only like תיוקים / אנשי קשר.
- * Bare dump: אישיים + משותפים; section/partner filters apply.
+ * Phone book dump — one header + co-share marks (same rules as contacts).
  */
 export function formatPhoneBookDump(
   phoneBook: PhoneBookDumpRow[] | undefined,
@@ -550,57 +549,31 @@ export function formatPhoneBookDump(
   const viewerNames = new Set(
     [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
   );
-  const personal: string[] = [];
-  const shared: Array<{ line: string; partnersLabel: string }> = [];
-  for (const row of rows) {
+  const collected: DumpItem[] = rows.map((row) => {
     const name = row.name.trim() || "איש קשר";
     const phone = (row.phone ?? "").trim();
-    const body = phone ? `${name} — ${phone}` : name;
-    const partners = (row.shared_with ?? [])
+    const title = phone ? `${name} — ${phone}` : name;
+    const sharedWith = (row.shared_with ?? [])
       .map((value) => value.trim())
-      .filter(Boolean)
-      .filter((value) => !viewerNames.has(value));
-    const isShared =
-      row.scope === "shared" && partners.length > 0;
-    if (isShared) {
-      const partnersLabel = partners.join(", ");
-      shared.push({
-        line: `${body} (עם ${partnersLabel})`,
-        partnersLabel,
-      });
-    } else {
-      personal.push(body);
-    }
-  }
-  const section = opts?.section ?? null;
-  const partnerNeedles = dumpFilterNames(opts?.partner);
-  const blocks: string[] = [];
-  if (section !== "shared" && personal.length > 0) {
-    blocks.push("ספר הטלפונים אישי:");
-    personal.forEach((line, i) => {
-      blocks.push(`${i + 1}. ${line}`);
-    });
-  }
-  if (section !== "personal") {
-    let sharedRows = shared;
-    if (partnerNeedles.length > 0) {
-      sharedRows = shared.filter((row) =>
-        partnerNeedles.some((needle) =>
-          partnerBucketMatches(row.partnersLabel, needle),
-        ),
-      );
-    }
-    if (sharedRows.length > 0) {
-      if (blocks.length > 0) {
-        blocks.push("");
-      }
-      blocks.push("ספר הטלפונים משותף:");
-      sharedRows.forEach((row, i) => {
-        blocks.push(`${i + 1}. ${row.line}`);
-      });
-    }
-  }
-  return blocks.join("\n");
+      .filter(Boolean);
+    const partners = sharedWith.filter((value) => !viewerNames.has(value));
+    const isShared = row.scope === "shared" && partners.length > 0;
+    const allInvolved = isShared
+      ? allInvolvedNames(sharedWith, viewer, aliases)
+      : "";
+    const partnerFilterKey = isShared
+      ? partnersKey(sharedWith, viewer, aliases)
+      : "";
+    return {
+      title,
+      item: row as unknown as Record<string, unknown>,
+      isShared,
+      ...(partnerFilterKey ? { partnerFilterKey } : {}),
+      ...(allInvolved ? { responsibilityMark: allInvolved } : {}),
+    };
+  });
+  const kept = filterDumpRows(collected, "phone_book", opts);
+  return formatSingleHeaderDump("ספר הטלפונים", "phone_book", kept, opts);
 }
 
 /** reminder_id values already shown via LINKED REMINDER on a task line. */
@@ -838,62 +811,41 @@ export function navigateAddressFromFilingsDump(
 }
 
 /** Two-section share-only dump (no assign / של X). */
+/**
+ * Filings dump — one header + co-share marks (share-only, no assign).
+ */
 export function formatFilingsDump(
   rows: EmployeeRecordSnapshot["filing"],
   opts?: ShowDumpOptions,
 ): string {
   const viewer = (opts?.viewerName ?? "").trim();
   const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
-  const personal: string[] = [];
-  const shared: string[] = [];
   const viewerNames = new Set(
     [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
   );
-  for (const row of rows) {
-    const body = formatFilingDumpBody(row);
-    const clip = hasAttachments(row as Record<string, unknown>) ? " 📎" : "";
-    // Never name the viewer in (עם …) — including when snapshot still lists them.
-    const partners = (row.shared_with ?? [])
+  const collected: DumpItem[] = rows.map((row) => {
+    const title = formatFilingDumpBody(row);
+    const sharedWith = (row.shared_with ?? [])
       .map((name) => name.trim())
-      .filter(Boolean)
-      .filter((name) => !viewerNames.has(name));
-    // Same as contacts: shared section only when a non-viewer partner remains.
+      .filter(Boolean);
+    const partners = sharedWith.filter((name) => !viewerNames.has(name));
     const isShared = row.scope === "shared" && partners.length > 0;
-    const mark = isShared ? ` (עם ${partners.join(", ")})` : "";
-    const line = `${body}${clip}${mark}`;
-    if (isShared) {
-      shared.push(line);
-    } else {
-      personal.push(line);
-    }
-  }
-  const section = opts?.section ?? null;
-  const partnerNeedles = dumpFilterNames(opts?.partner);
-  const blocks: string[] = [];
-  if (section !== "shared" && personal.length > 0) {
-    blocks.push("תיוקים אישיים:");
-    personal.forEach((line, i) => {
-      blocks.push(`${i + 1}. ${line}`);
-    });
-  }
-  if (section !== "personal") {
-    let sharedLines = shared;
-    if (partnerNeedles.length > 0) {
-      sharedLines = shared.filter((line) =>
-        partnerNeedles.some((needle) => line.includes(needle)),
-      );
-    }
-    if (sharedLines.length > 0) {
-      if (blocks.length > 0) {
-        blocks.push("");
-      }
-      blocks.push("תיוקים משותפים:");
-      sharedLines.forEach((line, i) => {
-        blocks.push(`${i + 1}. ${line}`);
-      });
-    }
-  }
-  return blocks.join("\n");
+    const allInvolved = isShared
+      ? allInvolvedNames(sharedWith, viewer, aliases)
+      : "";
+    const partnerFilterKey = isShared
+      ? partnersKey(sharedWith, viewer, aliases)
+      : "";
+    return {
+      title,
+      item: row as unknown as Record<string, unknown>,
+      isShared,
+      ...(partnerFilterKey ? { partnerFilterKey } : {}),
+      ...(allInvolved ? { responsibilityMark: allInvolved } : {}),
+    };
+  });
+  const kept = filterDumpRows(collected, "filings", opts);
+  return formatSingleHeaderDump("תיוקים", "filings", kept, opts);
 }
 
 function formatRemindersDump(
@@ -1527,7 +1479,39 @@ type DumpItem = {
   assigneeName?: string;
 };
 
-type ListDumpType = "shopping" | "tasks" | "contacts" | "custom";
+type ListDumpType =
+  | "shopping"
+  | "tasks"
+  | "contacts"
+  | "custom"
+  | "filings"
+  | "phone_book";
+
+/** 0 = personal, 1 = co-share / whole shared list, 2 = assign. */
+function dumpItemKindRank(row: DumpItem): number {
+  const mark = row.responsibilityMark?.trim() ?? "";
+  if (
+    Boolean(row.assigneeName?.trim()) ||
+    mark.startsWith("באחריות")
+  ) {
+    return 2;
+  }
+  if (row.isShared === true) {
+    return 1;
+  }
+  return 0;
+}
+
+/** Stable cluster: personal → co-share → assign (one header, no sub-blocks). */
+export function clusterDumpRowsByKind<T extends DumpItem>(rows: T[]): T[] {
+  return [...rows]
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const delta = dumpItemKindRank(a.row) - dumpItemKindRank(b.row);
+      return delta !== 0 ? delta : a.index - b.index;
+    })
+    .map(({ row }) => row);
+}
 
 /**
  * Row mark for shopping/tasks (assign vs co-share). Worker flatLayout skips marks.
@@ -1814,7 +1798,7 @@ function filterDumpRows(
     }
   }
 
-  return kept;
+  return clusterDumpRowsByKind(kept);
 }
 
 function formatSingleHeaderDump(
@@ -2197,8 +2181,8 @@ export function formatNumberedItem(
   if (hasAttachments(item)) {
     body += " 📎";
   }
-  // List dumps: responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
-  // Filings / phone book may still use sharedWithLabel «(עם …)».
+  // responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
+  // sharedWithLabel is legacy; prefer responsibilityMark (no «עם»).
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -2210,7 +2194,7 @@ export function formatNumberedItem(
     opts?.sharedWithLabel?.trim() &&
     !titleAlreadyListsPartners(body, opts.sharedWithLabel.trim())
   ) {
-    body += ` (עם ${opts.sharedWithLabel.trim()})`;
+    body += ` (${opts.sharedWithLabel.trim()})`;
   }
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));
@@ -2485,7 +2469,7 @@ export function titleAlreadyListsPartners(
 }
 
 /**
- * Partner header body for `(עם …)` — never includes the viewer (by name or aliases).
+ * Non-viewer partners joined as «A, B» — never includes the viewer (by name or aliases).
  */
 export function partnersKey(
   names: string[],

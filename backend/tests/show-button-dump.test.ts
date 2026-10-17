@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  clusterDumpRowsByKind,
   composeTasksDumpWithWaiting,
   excludeItemIdsFromSnapshot,
   customItemCoShareMark,
@@ -105,8 +106,8 @@ describe("formatFilingDumpBody", () => {
   });
 });
 
-describe("filings two-section dump", () => {
-  it("splits personal vs shared with (עם) marks — no של X", () => {
+describe("filings flat dump", () => {
+  it("one header; personal then co-share (A, B) — no עם / של X", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -131,13 +132,15 @@ describe("filings two-section dump", () => {
     };
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
-    });
-    expect(dump).toContain("תיוקים אישיים:");
-    expect(dump).toContain("1. שם: רישיון · תיאור: בתוקף");
+    })!;
+    expect(dump).toContain("תיוקים:");
+    expect(dump).not.toContain("תיוקים אישיים:");
+    expect(dump).not.toContain("תיוקים משותפים:");
+    expect(dump).toMatch(
+      /תיוקים:\n1\. שם: רישיון · תיאור: בתוקף\n2\. שם: קוד שער · תיאור: 1234 \(מיכל, טל\)/,
+    );
     expect(dump).not.toContain("מידע:");
-    expect(dump).toContain("תיוקים משותפים:");
-    expect(dump).toContain("1. שם: קוד שער · תיאור: 1234 (עם מיכל)");
-    expect(dump).not.toContain("(עם טל)");
+    expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("של ");
   });
 
@@ -167,14 +170,14 @@ describe("filings two-section dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toContain("תיוקים אישיים:");
+    expect(dump).toContain("תיוקים:");
     expect(dump).toContain("שם: לשון פנייה · תיאור: זכר");
     expect(dump).toContain("שם: כתובת · תיאור: רחוב שחם");
     expect(dump).not.toContain("(עם ");
-    expect(dump).not.toContain("תיוקים משותפים:");
+    expect(dump).not.toContain("(טל)");
   });
 
-  it("omits empty shared filings section unless section=shared", () => {
+  it("section=shared empty → אין תיוקים משותפים", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -191,7 +194,7 @@ describe("filings two-section dump", () => {
     const full = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(full).toContain("תיוקים אישיים:");
+    expect(full).toContain("תיוקים:");
     expect(full).toContain("רישיון");
     expect(full).not.toContain("תיוקים משותפים:");
 
@@ -199,12 +202,11 @@ describe("filings two-section dump", () => {
       viewerName: "טל",
       section: "shared",
     })!;
-    expect(sharedOnly).toBe("תיוקים משותפים ריקה.");
-    expect(sharedOnly).not.toContain("תיוקים אישיים:");
-    expect(sharedOnly).not.toMatch(/תיוקים משותפים:\s*\nריקה/);
+    expect(sharedOnly).toBe("אין תיוקים משותפים.");
+    expect(sharedOnly).not.toContain("תיוקים:");
   });
 
-  it("never marks filing partners as the viewer even if shared_with still lists them", () => {
+  it("co-share mark lists all involved; never «עם»", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -223,16 +225,16 @@ describe("filings two-section dump", () => {
       viewerName: "טל",
       viewerAliases: ["טל"],
     })!;
-    expect(asTal).toContain("תיוקים משותפים:");
-    expect(asTal).toContain("(עם מיכל)");
-    expect(asTal).not.toContain("(עם טל)");
+    expect(asTal).toContain("תיוקים:");
+    expect(asTal).toContain("(מיכל, טל)");
+    expect(asTal).not.toContain("(עם ");
 
     const asMichal = formatShowDumpFromKind("filings", snap, {
       viewerName: "מיכל",
       viewerAliases: ["מיכל"],
     })!;
-    expect(asMichal).toContain("(עם טל)");
-    expect(asMichal).not.toMatch(/\(עם מיכל\)/);
+    expect(asMichal).toContain("(טל, מיכל)");
+    expect(asMichal).not.toContain("(עם ");
   });
 
   it("sets navigate address only when exactly one address-bearing filing is shown", () => {
@@ -835,6 +837,10 @@ describe("formatShowDumpFromKind", () => {
     expect(shopping).toContain("ביצים - 1 (באחריות טל · מאת עמית)");
     expect(shopping).toContain("קפה - 1 (מיכל, טל)");
     expect(shopping).toContain("שמן - 1 (באחריות מיכל · מאת טל)");
+    // personal → co-share → assign
+    expect(shopping).toMatch(
+      /1\. לחם - 1\n2\. קפה - 1 \(מיכל, טל\)\n3\. חלב - 1 \(באחריות טל · מאת עמית\)\n4\. ביצים - 1 \(באחריות טל · מאת עמית\)\n5\. שמן - 1 \(באחריות מיכל · מאת טל\)/,
+    );
     expect(shopping).not.toContain("קניות אישיות");
     expect(shopping).not.toContain("קניות משותפות עם");
     expect(shopping).not.toContain("קניות של ");
@@ -849,8 +855,47 @@ describe("formatShowDumpFromKind", () => {
     expect(tasks).toContain("פגישה (טל, עמית)");
     expect(tasks).not.toMatch(/פגישה \(טל, עמית\) \(/);
     expect(tasks).toContain("לעשות טסט לרכב (באחריות עמית · מאת טל)");
+    expect(tasks).toMatch(
+      /1\. לטפל בעמידר\n2\. פגישה \(טל, עמית\)\n3\. לבדוק שמן \(באחריות טל · מאת עמית\)\n4\. לעשות טסט לרכב \(באחריות עמית · מאת טל\)/,
+    );
     expect(tasks).not.toContain("מטלות של ");
     expect(tasks).not.toContain("מטלות אישיות");
+
+    const sharedOnly = formatShowDumpFromKind("shopping", threeWay, {
+      viewerName: "טל",
+      section: "shared",
+    })!;
+    // co-share before assign; no personal לחם
+    expect(sharedOnly).not.toContain("לחם");
+    expect(sharedOnly).toMatch(
+      /1\. קפה - 1 \(מיכל, טל\)\n2\. חלב - 1 \(באחריות טל · מאת עמית\)\n3\. ביצים - 1 \(באחריות טל · מאת עמית\)\n4\. שמן - 1 \(באחריות מיכל · מאת טל\)/,
+    );
+  });
+
+  it("clusterDumpRowsByKind is stable within each kind", () => {
+    const clustered = clusterDumpRowsByKind([
+      {
+        title: "a-assign",
+        item: {},
+        isShared: true,
+        assigneeName: "טל",
+        responsibilityMark: "באחריות טל · מאת מיכל",
+      },
+      { title: "b-personal", item: {}, isShared: false },
+      {
+        title: "c-share",
+        item: {},
+        isShared: true,
+        responsibilityMark: "מיכל, טל",
+      },
+      { title: "d-personal", item: {}, isShared: false },
+    ]);
+    expect(clustered.map((row) => row.title)).toEqual([
+      "b-personal",
+      "d-personal",
+      "c-share",
+      "a-assign",
+    ]);
   });
 
   it("item co-share and scope=shared list share one flat shopping header", () => {
@@ -1103,7 +1148,8 @@ describe("formatShowDumpFromKind", () => {
       filing: [],
     };
     const text = formatShowDumpFromKind("full", snap, { viewerName: "טל" })!;
-    expect(text).toMatch(/\*באגים ופיתוחים\* \(עם מיכל\) — 2 פריטים/);
+    expect(text).toMatch(/\*באגים ופיתוחים\* \(מיכל\) — 2 פריטים/);
+    expect(text).not.toContain("(עם ");
   });
 
   it("about filter keeps custom items by item shared_with", () => {
@@ -1607,7 +1653,8 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toContain("תיוקים משותפים:");
     expect(text).not.toContain("אנשי קשר:");
     expect(text).not.toMatch(/ריק/);
-    expect(text).toContain("ספר הטלפונים אישי:");
+    expect(text).toContain("ספר הטלפונים:");
+    expect(text).not.toContain("ספר הטלפונים אישי:");
     expect(text).toContain("דני — 0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
   });
@@ -1781,8 +1828,33 @@ describe("worker inventory tasks dump helpers", () => {
     const text = formatShowDumpFromKind("phone_book", { lists: [], filing: [] }, {
       phoneBook: [{ name: "דני", phone: "050" }],
     })!;
-    expect(text).toContain("ספר הטלפונים אישי:");
+    expect(text).toContain("ספר הטלפונים:");
+    expect(text).not.toContain("ספר הטלפונים אישי:");
     expect(text).toContain("1. דני — 050");
+  });
+
+  it("phone_book flat: personal then co-share (A, B)", () => {
+    const text = formatShowDumpFromKind(
+      "phone_book",
+      { lists: [], filing: [] },
+      {
+        viewerName: "טל",
+        phoneBook: [
+          { name: "דני", phone: "050", scope: "personal" },
+          {
+            name: "שרה",
+            phone: "052",
+            scope: "shared",
+            shared_with: ["טל", "עמית"],
+          },
+        ],
+      },
+    )!;
+    expect(text).toMatch(
+      /ספר הטלפונים:\n1\. דני — 050\n2\. שרה — 052 \(עמית, טל\)/,
+    );
+    expect(text).not.toContain("(עם ");
+    expect(text).not.toContain("ספר הטלפונים משותף");
   });
 
   it("flatLayout dumps digital-worker tasks without משותפות/assignee marks", () => {
@@ -1975,8 +2047,11 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
     expect(text).toContain("שרה");
-    expect(text).toContain("ספר הטלפונים משותף");
-    expect(text).not.toMatch(/ספר הטלפונים אישי:[\s\S]*דני/);
+    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("(עמית, טל)");
+    expect(text).not.toContain("ספר הטלפונים משותף");
+    expect(text).not.toContain("ספר הטלפונים אישי:");
+    expect(text).not.toMatch(/ספר הטלפונים:[\s\S]*דני/);
   });
 });
 
