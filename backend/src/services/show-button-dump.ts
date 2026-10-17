@@ -1351,6 +1351,7 @@ function wrapUrgencyLine(line: string, urgency: unknown): string {
  * One-off moves/cancels always append ` · 18.10 ב־21:30` from snapshot `exceptions`
  * (even when that day is already the primary `fire_at`) so standing + exception stay visible.
  * Cadence paren is labeled «קבוע …» so the series rule is not read as the next-fire time.
+ * `flatCadence`: linked-task `(תזכורת: …)` uses « · קבוע כל יום» (no nested paren).
  */
 export function formatReminderWhen(
   row: Pick<
@@ -1358,6 +1359,7 @@ export function formatReminderWhen(
     "fire_at" | "repeat" | "recurrence_text" | "exceptions"
   >,
   now = new Date(),
+  opts?: { flatCadence?: boolean },
 ): string {
   const fireAt = row.fire_at?.trim() || "";
   const hasExceptions = exceptionLabels(row.exceptions).length > 0;
@@ -1372,7 +1374,15 @@ export function formatReminderWhen(
     return base ? `${base}${extras}` : extras.replace(/^\s*·\s*/, "");
   }
   const relative = formatRelativeFireAt(fireAt, now);
-  const when = cadence ? `${relative} ${cadence}` : relative;
+  let when = relative;
+  if (cadence) {
+    if (opts?.flatCadence) {
+      const flat = cadence.replace(/^\(|\)$/g, "").trim();
+      when = flat ? `${relative} · ${flat}` : relative;
+    } else {
+      when = `${relative} ${cadence}`;
+    }
+  }
   return `${when}${extras}`;
 }
 
@@ -2286,6 +2296,43 @@ function emptyCustomListSentence(
   return `רשימת «${name}»${paperclipSuffix(listFiles)} ריקה.`;
 }
 
+/**
+ * Drop `ב־HH:mm` from a dump title when it matches chore `שעה לביצוע`
+ * (synced into שם מטלה by applyTimeToTaskLabel) so we do not print
+ * «ב־09:00 — 09:00».
+ */
+export function stripMatchingTitleClock(title: string, hm: string): string {
+  const want = normalizeHm(hm);
+  if (!want) {
+    return title.trim();
+  }
+  return title
+    .replace(/\s*ב־(\d{1,2}:\d{2})\b/g, (full, clock: string) =>
+      normalizeHm(clock) === want ? "" : full,
+    )
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Linked reminder is a series (not a one-shot). */
+export function linkedReminderIsRecurring(item: Record<string, unknown>): boolean {
+  const raw = item.reminder;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return false;
+  }
+  const reminder = raw as Record<string, unknown>;
+  const recurrenceText =
+    typeof reminder.recurrence_text === "string"
+      ? reminder.recurrence_text.trim()
+      : "";
+  if (recurrenceText) {
+    return true;
+  }
+  const repeat =
+    typeof reminder.repeat === "string" ? reminder.repeat.trim() : "";
+  return Boolean(repeat) && repeat !== "none" && repeat !== "once";
+}
+
 /** Exported for unit tests. */
 export function formatNumberedItem(
   n: number,
@@ -2303,6 +2350,14 @@ export function formatNumberedItem(
   },
 ): string {
   let body = title.trim() || "פריט";
+  const choreTimeRaw =
+    listType === "tasks" || listType === "shopping"
+      ? readText(item, ["שעה לביצוע", "time", "שעה"])
+      : "";
+  const choreHm = choreTimeRaw ? normalizeHm(choreTimeRaw) : "";
+  if (choreHm) {
+    body = stripMatchingTitleClock(body, choreHm) || "פריט";
+  }
   if (hasAttachments(item)) {
     body += " 📎";
   }
@@ -2324,14 +2379,26 @@ export function formatNumberedItem(
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));
   const linkedOnStanding = standing && itemHasLinkedReminder(item);
+  const reminderHm = linkedReminderSeriesHm(item);
+  // Worker daily sends often have linked recurring clock + שעה לביצוע but no חוזר.
+  const foldRecurringWithoutStanding =
+    listType === "tasks" &&
+    !standing &&
+    linkedReminderIsRecurring(item) &&
+    Boolean(choreHm) &&
+    Boolean(reminderHm) &&
+    choreHm === reminderHm;
   if (listType === "tasks" || listType === "shopping") {
     const schedule = formatScheduleSuffix(item, listType, opts?.now);
     if (schedule) {
       body += ` ${schedule}`;
     }
   }
-  // Standing + linked clock folds into «(קבוע + תזכורת)» / «… ב־HH:mm» on the schedule.
-  if (!linkedOnStanding) {
+  // Standing + linked clock folds into «(קבוע + תזכורת)» on the schedule suffix.
+  // Matching chore HM + recurring linked (no חוזר) uses the same fold mark.
+  if (foldRecurringWithoutStanding) {
+    body += ` ${standingLinkedReminderMark(item, `ב־${choreHm}`)}`;
+  } else if (!linkedOnStanding) {
     const reminder = formatLinkedReminderParen(item, opts?.now);
     if (reminder) {
       body += ` ${reminder}`;
@@ -2485,7 +2552,7 @@ export function formatScheduleSuffix(
   return "";
 }
 
-/** «(תזכורת: היום ב־20:30)» — same relative when as reminder dump lines. */
+/** «(תזכורת: היום ב־20:30)» — flat cadence « · קבוע כל יום» (no nested paren). */
 export function formatLinkedReminderParen(
   item: Record<string, unknown>,
   now = new Date(),
@@ -2511,8 +2578,10 @@ export function formatLinkedReminderParen(
       fire_at: fireAt,
       repeat,
       recurrence_text: recurrenceText || undefined,
+      exceptions: reminder.exceptions,
     },
     now,
+    { flatCadence: true },
   );
   return when ? `(תזכורת: ${when})` : "";
 }

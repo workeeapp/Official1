@@ -261,6 +261,24 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN metadata.show_dump on ANY line-index turn",
     );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN: treating spoken N as EMPLOYEE_SAVED_DATA array index",
+    );
+    expect(config.systemMessage).toContain(
+      "personal then co-share then assign",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN answering AFTER ASSIGN / «תאריך + תזכורת»",
+    );
+    expect(config.systemMessage).toContain(
+      "cancel ONLY that delete (ack the title you asked about)",
+    );
+    expect(config.systemMessage).toContain(
+      "List/filing/directory/contact deletes use DELETE CONFIRM first",
+    );
+    expect(config.systemMessage).not.toContain(
+      "Id-based deletes (item_id / reminder_id / filing_id) apply immediately — never ask to confirm them",
+    );
     expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
     expect(config.systemMessage).toContain(
       "רוצה שאשלח לך תזכורת בוואטסאפ כל 3 ימים ב־12:00?",

@@ -116,6 +116,7 @@ import {
   deriveCustomListName,
   correctListMutationClaimReply,
   formatAppliedMutationFallback,
+  clusterSnapshotShoppingTasksItems,
   formatEmployeeContext,
   formatTeamSchedules,
   getEmployeeOwnedRecords,
@@ -1136,6 +1137,63 @@ describe("employee records", () => {
     expect(context).toContain("MUTATE BY ID");
     expect(context).toContain("item_id");
     expect(context).toContain("filing_id");
+    expect(context).toContain("personal → co-share → assign");
+    expect(context).toContain("FORBIDDEN answering AFTER ASSIGN");
+  });
+
+  it("orders shopping/tasks in context personal then co-share then assign", () => {
+    const list = {
+      list_type: "shopping" as const,
+      owner: "טל",
+      scope: "personal" as const,
+      items: [
+        {
+          item_id: "shared-flour",
+          "שם פריט": "קמח מלא",
+          shared_with: ["מיכל", "טל"],
+        },
+        {
+          item_id: "assign-soap",
+          "שם פריט": "סבון",
+          assigned_by: "מיכל",
+        },
+        {
+          item_id: "personal-socks",
+          "שם פריט": "גרביים",
+        },
+        {
+          item_id: "shared-rice",
+          "שם פריט": "אורז",
+          shared_with: ["מיכל", "טל"],
+        },
+      ],
+    };
+    expect(
+      clusterSnapshotShoppingTasksItems(list, list.items).map(
+        (item) => item.item_id,
+      ),
+    ).toEqual([
+      "personal-socks",
+      "shared-flour",
+      "shared-rice",
+      "assign-soap",
+    ]);
+
+    const context = formatEmployeeContext({
+      lists: [list],
+      filing: [],
+    });
+    const jsonStart = context.indexOf('{"lists"');
+    expect(jsonStart).toBeGreaterThan(-1);
+    const parsed = JSON.parse(context.slice(jsonStart)) as {
+      lists: Array<{ items: Array<{ item_id: string }> }>;
+    };
+    expect(parsed.lists[0]?.items.map((item) => item.item_id)).toEqual([
+      "personal-socks",
+      "shared-flour",
+      "shared-rice",
+      "assign-soap",
+    ]);
   });
 
   it("keeps optional task address and phone in saved data", () => {

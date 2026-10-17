@@ -560,6 +560,62 @@ export function hasEmployeeRecords(snapshot: EmployeeRecordSnapshot): boolean {
   );
 }
 
+/**
+ * Same personal → co-share → assign order as dump `clusterDumpRowsByKind`
+ * (show-button-dump), so BY LINE NUMBER JSON index matches dump line N.
+ */
+export function clusterSnapshotShoppingTasksItems(
+  list: Pick<EmployeeRecordSnapshot["lists"][number], "scope">,
+  items: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const rank = (item: Record<string, unknown>): number => {
+    if (list.scope === "shared") {
+      return 1;
+    }
+    const assignedBy =
+      typeof item.assigned_by === "string" && item.assigned_by.trim()
+        ? item.assigned_by.trim()
+        : "";
+    const sharedWith = Array.isArray(item.shared_with)
+      ? item.shared_with.filter(
+          (name): name is string =>
+            typeof name === "string" && Boolean(name.trim()),
+        )
+      : [];
+    if (list.scope === "shared_items") {
+      return sharedWith.length > 0 ? 1 : 2;
+    }
+    if (assignedBy) {
+      return 2;
+    }
+    if (sharedWith.length > 0) {
+      return 1;
+    }
+    return 0;
+  };
+  return [...items]
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const delta = rank(a.item) - rank(b.item);
+      return delta !== 0 ? delta : a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
+
+function listsForEmployeeContext(
+  lists: EmployeeRecordSnapshot["lists"],
+): EmployeeRecordSnapshot["lists"] {
+  return lists.map((list) => {
+    if (list.list_type !== "shopping" && list.list_type !== "tasks") {
+      return list;
+    }
+    return {
+      ...list,
+      items: clusterSnapshotShoppingTasksItems(list, list.items),
+    };
+  });
+}
+
 export function formatEmployeeContext(
   snapshot: EmployeeRecordSnapshot,
   label = "EMPLOYEE_SAVED_DATA",
@@ -576,15 +632,15 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
-    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask «האם מאשר?»); ONE responses entry that turn — FORBIDDEN raise/«אגב»; on כן emit ONLY that remove with id — then the server applies immediately (confirm is model-turn only). The server ignores remove/update without a matching id.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask «האם מאשר?»); ONE responses entry that turn — FORBIDDEN raise/«אגב»; on כן emit ONLY that remove with id — then the server applies immediately (confirm is model-turn only). On לא / בטל / אל תמחקי while that «האם מאשר?» is open → remove empty; short ack you cancelled deleting that title; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value; use name + info to find the right filing), and item_description (usually empty — ignore for lookup). Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Flat dumps show those rows under one «קניות/מטלות:» header with mark «(באחריות X · מאת <assigner>)». Custom shared_items: ONE «רשימת «name»:» with co-share mark «(A, B)» all involved (no assign). «איזה רשימות משותפות יש לי» → only scope=shared entries.",
-    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Dump shopping/tasks/contacts/custom: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items.",
+    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Dump shopping/tasks/contacts/custom: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign (same as the numbered dump).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
-      lists: snapshot.lists,
+      lists: listsForEmployeeContext(snapshot.lists),
       filing: snapshot.filing,
       active_reminders: (snapshot.reminders ?? [])
         .filter((row) => row.status === "active")

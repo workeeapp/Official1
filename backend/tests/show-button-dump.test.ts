@@ -14,6 +14,7 @@ import {
   formatRelativeFireAt,
   formatReminderWhen,
   formatScheduleSuffix,
+  stripMatchingTitleClock,
   formatShoppingTitle,
   formatShowDumpFromKind,
   isKnownShowButtonCommand,
@@ -667,7 +668,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 (קבוע כל יום))");
+    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 · קבוע כל יום)");
     // Appointment time ≠ ping time: schedule from שעה לביצוע, paren from fire_at.
     expect(
       formatNumberedItem(
@@ -682,6 +683,43 @@ describe("formatShowDumpFromKind", () => {
         { now },
       ),
     ).toBe("1. לאסוף את מאיה — מחר ב־15:00 (תזכורת: מחר ב־14:20)");
+    // Title already has ב־HH:mm from sync — strip so schedule is not duplicated.
+    expect(stripMatchingTitleClock("לשלוח למיכל ברכת בוקר ב־09:00", "09:00")).toBe(
+      "לשלוח למיכל ברכת בוקר",
+    );
+    expect(
+      formatNumberedItem(
+        1,
+        "לשלוח למיכל ברכת בוקר ב־09:00",
+        {
+          "שעה לביצוע": "09:00",
+          reminder: {
+            fire_at: "2026-10-16 09:00",
+            repeat: "daily",
+            recurrence_text: "כל יום ב־09:00",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. לשלוח למיכל ברכת בוקר — 09:00 (קבוע + תזכורת)");
+    // Recurring linked + chore HM match without חוזר → fold; no nested (תזכורת:).
+    expect(
+      formatNumberedItem(
+        1,
+        "להזכיר לטל לבדוק ביט",
+        {
+          "שעה לביצוע": "20:00",
+          reminder: {
+            fire_at: "2026-11-15 20:00",
+            repeat: "none",
+            recurrence_text: "כל יום ב־20:00",
+          },
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. להזכיר לטל לבדוק ביט — 20:00 (קבוע + תזכורת)");
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {
