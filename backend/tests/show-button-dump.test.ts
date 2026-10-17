@@ -3,6 +3,8 @@ import type { EmployeeRecordSnapshot } from "../src/services/employee-records.se
 import {
   composeTasksDumpWithWaiting,
   excludeItemIdsFromSnapshot,
+  customItemCoShareMark,
+  filterSnapshotForAboutPerson,
   formatCustomItemBody,
   formatFilingDumpBody,
   formatLinkedReminderParen,
@@ -999,6 +1001,134 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("רשימת «אני ומיכל»:");
     expect(text).toContain("1. שם: טל · תיאור: נשוי למיכל");
     expect(text).toContain("2. שם: מיכל · תיאור: נשואה לטל");
+    // Whole-list shared: no per-line co-share marks.
+    expect(text).not.toMatch(/שם: טל · תיאור: נשוי למיכל \(/);
+  });
+
+  it("custom dump: one list + all-involved co-share marks (owner and partner)", () => {
+    const ownerView: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "באגים ופיתוחים",
+          owner: "טל",
+          scope: "personal",
+          columns: ["שם"],
+          title_field: "שם",
+          items: [
+            { item_id: "p1", שם: "תיקון לוגין" },
+            {
+              item_id: "s1",
+              שם: "באג בפרודקשן",
+              shared_with: ["טל", "מיכל"],
+            },
+            { item_id: "p2", שם: "שיפור API" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const tal = formatShowDumpFromKind("באגים ופיתוחים", ownerView, {
+      viewerName: "טל",
+    })!;
+    expect(tal).toContain("רשימת «באגים ופיתוחים»:");
+    expect(tal).not.toContain("אישיות");
+    expect(tal).not.toContain("משותפות עם");
+    expect(tal).toMatch(/1\. שם: תיקון לוגין$/m);
+    expect(tal).toContain("שם: באג בפרודקשן (מיכל, טל)");
+    expect(tal).toContain("שם: שיפור API");
+
+    const partnerView: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "באגים ופיתוחים",
+          owner: "טל",
+          scope: "shared_items",
+          columns: ["שם"],
+          title_field: "שם",
+          items: [
+            {
+              item_id: "s1",
+              שם: "באג בפרודקשן",
+              shared_with: ["טל", "מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const michal = formatShowDumpFromKind("באגים ופיתוחים", partnerView, {
+      viewerName: "מיכל",
+    })!;
+    expect(michal).toContain("רשימת «באגים ופיתוחים»:");
+    expect(michal).toContain("שם: באג בפרודקשן (טל, מיכל)");
+    expect(michal).not.toMatch(/באג בפרודקשן \(טל\)$/m);
+
+    // shared_items without shared_with still synthesizes all-involved, not owner-only.
+    expect(
+      customItemCoShareMark(
+        {
+          list_type: "custom",
+          list_name: "באגים",
+          owner: "טל",
+          scope: "shared_items",
+          items: [],
+        } as EmployeeRecordSnapshot["lists"][number],
+        { item_id: "x", שם: "x" },
+        "מיכל",
+      ),
+    ).toBe("טל, מיכל");
+  });
+
+  it("full dump custom counts mark item-level share partners", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "באגים ופיתוחים",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", שם: "פרטי" },
+            {
+              item_id: "s1",
+              שם: "משותף",
+              shared_with: ["טל", "מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const text = formatShowDumpFromKind("full", snap, { viewerName: "טל" })!;
+    expect(text).toMatch(/\*באגים ופיתוחים\* \(עם מיכל\) — 2 פריטים/);
+  });
+
+  it("about filter keeps custom items by item shared_with", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "באגים ופיתוחים",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", שם: "פרטי" },
+            {
+              item_id: "s1",
+              שם: "משותף",
+              shared_with: ["טל", "מיכל"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const filtered = filterSnapshotForAboutPerson(snap, "מיכל");
+    expect(filtered.lists).toHaveLength(1);
+    expect(filtered.lists[0].items).toHaveLength(1);
+    expect(filtered.lists[0].items[0].item_id).toBe("s1");
   });
 
   it("does not put header 📎 when only items have files", () => {

@@ -424,6 +424,42 @@ function hebrewItemCount(n: number): string {
   return n === 1 ? "1 פריט" : `${n} פריטים`;
 }
 
+/**
+ * Partner names for custom full-dump count `(עם …)`.
+ * Whole-list shared → list.shared_with; shared_items → owner; else item co-share partners.
+ */
+function customListCountPartners(
+  list: EmployeeRecordSnapshot["lists"][number],
+  viewer: string,
+  aliases: string[],
+): string {
+  if (list.scope === "shared") {
+    return partnersKey(list.shared_with ?? [], viewer, aliases);
+  }
+  if (list.scope === "shared_items") {
+    const fromItems = list.items.flatMap((item) => stringArray(item.shared_with));
+    if (fromItems.length > 0) {
+      return partnersKey(fromItems, viewer, aliases);
+    }
+    const owner = (list.owner ?? "").trim();
+    return owner ? partnersKey([owner], viewer, aliases) : "";
+  }
+  const fromItems = list.items.flatMap((item) => stringArray(item.shared_with));
+  if (fromItems.length === 0) {
+    return "";
+  }
+  return partnersKey(fromItems, viewer, aliases);
+}
+
+function customListHasShareSignal(
+  list: EmployeeRecordSnapshot["lists"][number],
+): boolean {
+  if (list.scope === "shared" || list.scope === "shared_items") {
+    return true;
+  }
+  return list.items.some((item) => stringArray(item.shared_with).length > 0);
+}
+
 /** Custom lists: one count line each (FULL DUMP רשימות אחרות). */
 function formatCustomListsCountsDump(
   snapshot: EmployeeRecordSnapshot,
@@ -436,20 +472,18 @@ function formatCustomListsCountsDump(
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const lines: string[] = [];
   for (const list of customs) {
-    const isShared = list.scope === "shared";
-    if (section === "personal" && isShared) {
+    const hasShare = customListHasShareSignal(list);
+    if (section === "personal" && (list.scope === "shared" || list.scope === "shared_items")) {
       continue;
     }
-    if (section === "shared" && !isShared) {
+    if (section === "shared" && !hasShare) {
       continue;
     }
-    const partners = isShared
-      ? partnersKey(list.shared_with ?? [], viewer, aliases)
-      : "";
+    const partners = customListCountPartners(list, viewer, aliases);
     if (
       partnerNeedles.length > 0 &&
       !partnerNeedles.some((needle) =>
-        partnerBucketMatches(partners, needle),
+        partnerBucketMatches(partners || "משותף", needle),
       )
     ) {
       continue;
@@ -1930,8 +1964,26 @@ export function filterSnapshotForAboutPerson(
 
   const lists = snapshot.lists
     .map((list) => {
+      if (list.list_type === "custom") {
+        if (list.scope === "shared_items" && nameHit(list.owner)) {
+          return list;
+        }
+        if (list.scope === "shared" && namesHit(list.shared_with)) {
+          return list;
+        }
+        if (nameHit(list.owner) || namesHit(list.shared_with)) {
+          return list;
+        }
+        const items = list.items.filter((item) =>
+          namesHit(stringArray(item.shared_with)),
+        );
+        if (items.length === 0) {
+          return null;
+        }
+        return { ...list, items };
+      }
       if (list.list_type !== "shopping" && list.list_type !== "tasks" && list.list_type !== "contacts") {
-        // Custom / other: keep if owner is about or shared_with includes them.
+        // Other non-builtin: keep if owner is about or shared_with includes them.
         if (nameHit(list.owner) || namesHit(list.shared_with)) {
           return list;
         }
@@ -1989,6 +2041,36 @@ export function partnerBucketMatches(
   return bucketKey.split(",").some((part) => part.trim() === needle);
 }
 
+/**
+ * Co-share mark for a custom-list row (all involved). No assign/הטלה on custom.
+ * Whole-list scope=shared → no per-line mark. Prefer item.shared_with; on
+ * shared_items without it, synthesize owner+viewer as co-partners.
+ */
+export function customItemCoShareMark(
+  list: EmployeeRecordSnapshot["lists"][number],
+  item: Record<string, unknown>,
+  viewerName: string,
+  viewerAliases: string[] = [],
+): string | undefined {
+  if (list.scope === "shared") {
+    return undefined;
+  }
+  const sharedWith = stringArray(item.shared_with);
+  if (sharedWith.length > 0) {
+    const mark = allInvolvedNames(sharedWith, viewerName, viewerAliases);
+    return mark.trim() ? mark : undefined;
+  }
+  if (list.scope === "shared_items") {
+    const owner = (list.owner ?? "").trim();
+    if (!owner) {
+      return undefined;
+    }
+    const mark = allInvolvedNames([owner], viewerName, viewerAliases);
+    return mark.trim() ? mark : undefined;
+  }
+  return undefined;
+}
+
 function formatContactsOrCustomDump(
   listType: "contacts" | "custom",
   listName: string,
@@ -2012,23 +2094,90 @@ function formatContactsOrCustomDump(
   if (listType === "contacts") {
     return formatContactsTwoSectionDump(lists, opts);
   }
-  const items = lists.flatMap((list) =>
-    list.items.map((item) => ({
-      title: formatCustomItemBody(item, list.title_field, list.columns),
-      item,
-    })),
-  );
-  if (items.length === 0) {
+  const viewer = (opts?.viewerName ?? "").trim();
+  const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
+  const section = opts?.section ?? null;
+  const partnerNeedles = dumpFilterNames(opts?.partner);
+
+  type CustomDumpRow = {
+    title: string;
+    item: Record<string, unknown>;
+    responsibilityMark?: string;
+    listFiles: boolean;
+  };
+  const rows: CustomDumpRow[] = [];
+  for (const list of lists) {
+    const thisListFiles = listHasListLevelFiles(list);
+    for (const item of list.items) {
+      const title = formatCustomItemBody(
+        item,
+        list.title_field,
+        list.columns,
+      );
+      const responsibilityMark = customItemCoShareMark(
+        list,
+        item,
+        viewer,
+        aliases,
+      );
+      const isSharedRow =
+        list.scope === "shared" ||
+        list.scope === "shared_items" ||
+        Boolean(responsibilityMark);
+      if (section === "personal" && isSharedRow) {
+        continue;
+      }
+      if (section === "shared" && !isSharedRow) {
+        continue;
+      }
+      if (partnerNeedles.length > 0) {
+        const partnerKey = responsibilityMark
+          ? partnersKey(
+              stringArray(item.shared_with).length > 0
+                ? stringArray(item.shared_with)
+                : [(list.owner ?? "").trim()].filter(Boolean),
+              viewer,
+              aliases,
+            )
+          : list.scope === "shared"
+            ? partnersKey(list.shared_with ?? [], viewer, aliases)
+            : "";
+        if (
+          !partnerNeedles.some((needle) =>
+            partnerBucketMatches(partnerKey || "משותף", needle),
+          )
+        ) {
+          continue;
+        }
+      }
+      rows.push({
+        title,
+        item,
+        ...(responsibilityMark ? { responsibilityMark } : {}),
+        listFiles: thisListFiles,
+      });
+    }
+  }
+  if (rows.length === 0) {
+    if (section === "shared" || partnerNeedles.length > 0) {
+      return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
+    }
+    if (section === "personal") {
+      return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} — אין פריטים אישיים.`;
+    }
     return `רשימת «${emptyLabel}»${paperclipSuffix(listFiles)} ריקה.`;
   }
-  const lines = items.map((row, i) =>
+  const headerFiles = rows.some((row) => row.listFiles);
+  const lines = rows.map((row, i) =>
     formatNumberedItem(i + 1, row.title, row.item, listType, {
+      responsibilityMark: row.responsibilityMark,
       now: opts?.now,
     }),
   );
-  return [`רשימת «${emptyLabel}»${paperclipSuffix(listFiles)}:`, ...lines].join(
-    "\n",
-  );
+  return [
+    `רשימת «${emptyLabel}»${paperclipSuffix(headerFiles)}:`,
+    ...lines,
+  ].join("\n");
 }
 
 /** Contacts: personal vs shared with (עם …) — share-only, no assign bucket. */

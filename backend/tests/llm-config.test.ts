@@ -114,6 +114,17 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("הוסיפי באג");
     expect(config.systemMessage).toContain("TOPIC-ONLY / NO LIST NAMED");
     expect(config.systemMessage).toContain("never pick the first / shared");
+    expect(config.systemMessage).toContain("NUMBERED block");
+    expect(config.systemMessage).toContain("לאיזו רשימה התכוונת");
+    expect(config.systemMessage).toContain("LAST list-pick ask");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN inventing numbers that were not candidates",
+    );
+    expect(config.systemMessage).toContain("NUMBERED which-list ask");
+    expect(config.systemMessage).toContain(
+      "Custom named-list dump: ONE «רשימת «name»:» block",
+    );
+    expect(config.systemMessage).toContain("no assign/הטלה on custom");
     expect(config.systemMessage).toContain("YEARLY OFFER");
     expect(config.systemMessage).toContain("FORBIDDEN reminders-only yearly birthday");
     expect(config.systemMessage).toContain("about=[that person]");
