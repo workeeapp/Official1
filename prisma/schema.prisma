@@ -153,6 +153,8 @@ model EmployeeList {
   employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   items      EmployeeListItem[]
   attachmentLinks AttachmentLink[]
+  /** Shopping/custom lists linked FROM task items (many-to-many). */
+  linkedFromItems ListItemListLink[]
 
   /// Name uniqueness is a partial index (deleted_at IS NULL) in the migration.
   @@index([employeeId, listType, name])
@@ -183,12 +185,30 @@ model EmployeeListItem {
   linkedReminderId String?   @map("linked_reminder_id") @db.Uuid
   linkedReminder   Reminder? @relation("ClockLinksItem", fields: [linkedReminderId], references: [id], onDelete: SetNull)
   attachmentLinks  AttachmentLink[]
+  /** Task hosts: shopping/custom lists linked to this item. */
+  linkedLists      ListItemListLink[]
 
   @@index([listId, itemKey])
   @@index([linkedReminderId])
   @@index([scope])
   @@index([deletedAt])
   @@map("EmployeeListItems")
+}
+
+/// Many-to-many: a tasks item hosts links to shopping/custom lists.
+model ListItemListLink {
+  id         String           @id @default(uuid()) @db.Uuid
+  listItemId String           @map("list_item_id") @db.Uuid
+  listId     String           @map("list_id") @db.Uuid
+  addedById  String?          @map("added_by_id") @db.Uuid
+  createdAt  DateTime         @default(now()) @map("created_at")
+  listItem   EmployeeListItem @relation(fields: [listItemId], references: [id], onDelete: Cascade)
+  list       EmployeeList     @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listItemId, listId])
+  @@index([listItemId])
+  @@index([listId])
+  @@map("ListItemListLinks")
 }
 
 model EmployeeFiling {

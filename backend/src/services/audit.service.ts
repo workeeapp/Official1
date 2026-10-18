@@ -21,7 +21,9 @@ export type AuditAction =
   | "job_close"
   | "attachment_add"
   | "attachment_link"
-  | "attachment_unlink";
+  | "attachment_unlink"
+  | "list_item_list_link"
+  | "list_item_list_unlink";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;

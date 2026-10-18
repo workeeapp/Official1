@@ -526,6 +526,33 @@ describe("formatShowDumpFromKind", () => {
       ),
     ).toBe("1. ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
     expect(
+      formatNumberedItem(
+        1,
+        "ערב פוקר",
+        {
+          linked_lists: [
+            { list_id: "l1", list_type: "custom", list_name: "מי מגיע" },
+          ],
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ערב פוקר 🗂️");
+    expect(
+      formatNumberedItem(
+        1,
+        "ערב פוקר",
+        {
+          attachments: [{ id: "a" }],
+          linked_lists: [
+            { list_id: "l1", list_type: "custom", list_name: "מי מגיע" },
+          ],
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ערב פוקר 📎 🗂️");
+    expect(
       formatScheduleSuffix(
         {
           חוזר: "כל יומיים ב־15:00",

@@ -163,6 +163,7 @@ import {
   withAttachmentRefs,
   type TurnAttachments,
 } from "./attachment.service.js";
+import { withLinkedListRefs } from "./list-item-list-link.service.js";
 
 function speakerName(employee: {
   name: string;
@@ -350,15 +351,19 @@ export function shouldAttachLucyRuntimeEngine(
  * written and the relay is out. A job problem must never fail the turn.
  */
 const ATTACHMENTS_RULE =
-  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. A caption / voice transcript is the request — handle it like any message and put the files' attachment_id values on the action it creates (lists items[].attachment_ids, filing[].attachment_ids, reminders[].attachment_ids, list_ops add_attachments, lists[].list_attachment_ids). No caption → ask where to file / attach them («איך לתייק את 2 התמונות?») with actions empty, then emit the action with those ids from PENDING_ATTACHMENTS. A reminder with files → same ids on the task and on the reminder (sent at fire). PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title (before linked-reminder parentheses, inside an urgency «…» wrap). Applies equally to shopping / tasks / contacts / custom list items, filings, reminders / active_reminders, and WORKER_SAVED_DATA task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר / custom), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and button «📎 קבצים מצורפים» ONLY when has_attachments is true (list-level files on any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory (no attachment links). LIMITS exception: emoji on saved-data lines are only 📎 (when warranted) and ‼️ (very_urgent closing guillemet) — never invent either. A question about ONE saved item with files → also metadata.send_attachments with its ids. On the list files button → send_attachments = the list's and its items' files (max 10). Never speak ids; never invent video/document content.";
+  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. A caption / voice transcript is the request — handle it like any message and put the files' attachment_id values on the action it creates (lists items[].attachment_ids, filing[].attachment_ids, reminders[].attachment_ids, list_ops add_attachments, lists[].list_attachment_ids). No caption → ask where to file / attach them («איך לתייק את 2 התמונות?») with actions empty, then emit the action with those ids from PENDING_ATTACHMENTS. A reminder with files → same ids on the task and on the reminder (sent at fire). PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title (before linked-reminder parentheses, inside an urgency «…» wrap). Applies equally to shopping / tasks / contacts / custom list items, filings, reminders / active_reminders, and WORKER_SAVED_DATA task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר / custom), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and button «📎 קבצים מצורפים» ONLY when has_attachments is true (list-level files on any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory (no attachment links). LINK ICON: tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). VIEW ONE LINKED TASK: show/view ONE task that has linked_lists → two responses entries (first = item; second = 2+ numbered list names, or exactly 1 = that list name + its items). LIMITS exception: emoji on saved-data lines are only 📎 / 🗂️ (when warranted) and ‼️ (very_urgent closing guillemet) — never invent them. A question about ONE saved item with files → also metadata.send_attachments with its ids. On the list files button → send_attachments = the list's and its items' files (max 10). Never speak ids; never invent video/document content.";
 
 async function withAttachmentRefsSafe(
   snapshot: EmployeeRecordSnapshot,
 ): Promise<EmployeeRecordSnapshot> {
-  return (
+  const withAtt =
     (await withoutFailingTurn("attachments_refs_failed", () =>
       withAttachmentRefs(snapshot),
-    )) ?? snapshot
+    )) ?? snapshot;
+  return (
+    (await withoutFailingTurn("linked_list_refs_failed", () =>
+      withLinkedListRefs(withAtt),
+    )) ?? withAtt
   );
 }
 

@@ -1255,6 +1255,9 @@ export function formatAgendaStandingLine(
   if (hasAttachments(item)) {
     body += " 📎";
   }
+  if (hasLinkedLists(item)) {
+    body += " 🗂️";
+  }
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -1283,6 +1286,9 @@ export function formatAgendaOneOffLine(
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
     body += " 📎";
+  }
+  if (hasLinkedLists(item)) {
+    body += " 🗂️";
   }
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
@@ -2361,6 +2367,9 @@ export function formatNumberedItem(
   if (hasAttachments(item)) {
     body += " 📎";
   }
+  if (hasLinkedLists(item)) {
+    body += " 🗂️";
+  }
   // responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
   // sharedWithLabel is legacy; prefer responsibilityMark (no «עם»).
   if (opts?.responsibilityMark?.trim()) {
@@ -2705,6 +2714,8 @@ const CUSTOM_META_KEYS = new Set([
   "shared_with",
   "assigned_by",
   "attachments",
+  "linked_lists",
+  "linked_from_items",
   "reminder",
   "חוזר",
   "recurrence_text",
@@ -2843,4 +2854,10 @@ function stringArray(value: unknown): string[] {
 function hasAttachments(row: Record<string, unknown> | ReminderSnapshotRow): boolean {
   const attachments = (row as { attachments?: unknown }).attachments;
   return Array.isArray(attachments) && attachments.length > 0;
+}
+
+/** Tasks host with one or more linked shopping/custom lists. */
+function hasLinkedLists(row: Record<string, unknown>): boolean {
+  const linked = row.linked_lists;
+  return Array.isArray(linked) && linked.length > 0;
 }

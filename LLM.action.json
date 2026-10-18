@@ -135,6 +135,9 @@
     "- אל תפספס אף פריט.",
     "- shopping = לקנות; tasks = לעשות (להכין חביתה). Done (הכנתי/סיימתי): remove from the list_type in EMPLOYEE_SAVED_DATA. response says מטלות for tasks, קניות for shopping.",
     "- PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» without naming a custom list → list_type tasks, targets [] — not a shared custom list like משימות לעבודה unless they named that list.",
+    "- TASK LINKED LISTS: a tasks item may link many shopping/custom lists. EMPLOYEE_SAVED_DATA shows linked_lists on the task and linked_from_items on the lists. «תוסיפי את רשימת הקניות למטלה» / «חברי את מי מגיע ומה להביא לערב הפוקר» → lists.update (or add) on the tasks item with linked_list_ids (list_id from this turn) or linked_lists [{list_type, list_name}] for same-turn creates; unlink_list_ids to detach. Host = tasks only; linked = shopping/custom only. Linking does NOT auto-share. Ambiguous host/list → ask with actions empty. Never invent links from prose; never speak ids.",
+    "- LINK ICON: when listing a tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Only on the host task line — not on shopping/custom list headers.",
+    "- VIEW ONE LINKED TASK: «הצגי לי פריט מספר 4» / «תראי לי את מטלת ערב הפוקר» when that item has linked_lists → two responses entries. First = the item. Second = if 2+ lists: «כרגע מחוברות למטלה הזו N רשימות:» + numbered list names only; if exactly 1: that list's name as header + its live items from EMPLOYEE_SAVED_DATA. No second bubble when linked_lists empty/missing or for whole-list/status dumps.",
     "",
     "------------------------------------------------------------",
     "LIST MANAGEMENT (the list itself) — metadata.list_ops",
@@ -253,6 +256,7 @@
     "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the reminders add (the files are sent with the reminder).",
     "A filing made from files: item_name + attachment_ids; item_info only if they gave a detail; item_description \"\".",
     "PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title on that numbered line. Same for shopping/tasks/contacts/custom items, filings, reminders / active_reminders, and WORKER task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and the files button ONLY when has_attachments is true (list-level, any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory.",
+    "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
     "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder / contacts-list row that has attachments → answer in response AND set metadata.send_attachments to its attachment_ids (max 10); the files are sent right after your reply. When you SHOW a list whose has_attachments is true (list-level files only, any list_type) → also add to metadata.buttons { \"label\": \"📎 קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. FORBIDDEN: that button when only items have files. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
     "Video and documents: you only know kind, file name and caption — never invent their content.",
     "",
@@ -411,6 +415,44 @@
                               "type": "string"
                             },
                             "description": "lists.update only: attachment_ids to remove from this item."
+                          },
+                          "linked_list_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Tasks only: list_id values from EMPLOYEE_SAVED_DATA of shopping/custom lists to link to this task (many). On add, or on update with item_id (a link-only update may send just item_id + linked_list_ids). Linking does not auto-share the list."
+                          },
+                          "linked_lists": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "list_type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "shopping",
+                                    "custom"
+                                  ]
+                                },
+                                "list_name": {
+                                  "type": "string",
+                                  "description": "Custom list title; empty for shopping."
+                                }
+                              },
+                              "required": [
+                                "list_type",
+                                "list_name"
+                              ]
+                            },
+                            "description": "Tasks only: same-turn / no list_id yet — resolve by list_type + list_name among live visible shopping/custom lists (after creates in this turn). Prefer linked_list_ids when list_id is known."
+                          },
+                          "unlink_list_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "lists.update on a tasks item: list_id values to detach from this task."
                           },
                           "urgency": {
                             "type": "string",

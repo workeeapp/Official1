@@ -16,6 +16,10 @@ import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { applyAttachmentLinks } from "./attachment.service.js";
+import {
+  applyListItemListLinks,
+  splitItemListLinks,
+} from "./list-item-list-link.service.js";
 import { jobMetaFrom, stripJobMeta } from "./job-meta.js";
 import {
   clearItemRecurrence,
@@ -127,6 +131,12 @@ const CUSTOM_ITEM_META_KEYS = new Set([
   "detach_attachment_ids",
   "detachAttachmentIds",
   "attachments",
+  "linked_list_ids",
+  "linkedListIds",
+  "linked_lists",
+  "linkedLists",
+  "unlink_list_ids",
+  "unlinkListIds",
 ]);
 
 /** Read urgency from an ACTION item; undefined when the model omitted it. */
@@ -657,6 +667,7 @@ export function formatEmployeeContext(
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Flat dumps show those rows under one «קניות/מטלות:» header with mark «(באחריות X · מאת <assigner>)». Custom shared_items: ONE «רשימת «name»:» with co-share mark «(A, B)» all involved (no assign). «איזה רשימות משותפות יש לי» → only scope=shared entries.",
     "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Dump shopping/tasks/contacts/custom: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign (same as the numbered dump).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
+    "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למטלה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
     "Each list has list_id (copy into list_ops for alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
       lists: listsForEmployeeContext(snapshot.lists),
@@ -2176,9 +2187,10 @@ async function applyListAction(
   const cancelledReminderIds: string[] = [];
   const accessCache: WorkerAccessCache = {};
   const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
+  const itemListLinks = itemAttachments.map((entry) => splitItemListLinks(entry.item));
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, {
     ...action,
-    items: itemAttachments.map((entry) => entry.item),
+    items: itemListLinks.map((entry) => entry.item),
   });
   let listName = resolvedAction.listName.slice(0, 100);
   if (!listName && resolvedAction.listType === "custom") {
@@ -2296,6 +2308,8 @@ async function applyListAction(
   for (const [itemIndex, rawItem] of itemsForApply.entries()) {
     const attachments =
       itemsForApply === resolvedAction.items ? itemAttachments[itemIndex] : undefined;
+    const listLinks =
+      itemsForApply === resolvedAction.items ? itemListLinks[itemIndex] : undefined;
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
     if (
       resolvedAction.listType === "custom" &&
@@ -2547,6 +2561,15 @@ async function applyListAction(
         attachmentIds: attachments?.attach,
         detachIds: attachments?.detach,
       });
+      await applyListItemListLinks({
+        actorId,
+        listItemId: existing.id,
+        hostListId: existing.listId,
+        hostListType: resolvedAction.listType,
+        linkedListIds: listLinks?.linkedListIds,
+        linkedLists: listLinks?.linkedLists,
+        unlinkListIds: listLinks?.unlinkListIds,
+      });
       if (listOwner) {
         const occurrenceDone = Boolean(done.doneDate) && doneRecord !== ruledRecord;
         const change = occurrenceChanged ? occurrence.change : null;
@@ -2597,6 +2620,15 @@ async function applyListAction(
         actorId,
         target: { listItemId: created.id },
         attachmentIds: attachments?.attach,
+      });
+      await applyListItemListLinks({
+        actorId,
+        listItemId: created.id,
+        hostListId: list.id,
+        hostListType: resolvedAction.listType,
+        linkedListIds: listLinks?.linkedListIds,
+        linkedLists: listLinks?.linkedLists,
+        unlinkListIds: listLinks?.unlinkListIds,
       });
       if (listOwner) {
         await recordAuditEvent({

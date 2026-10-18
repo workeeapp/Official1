@@ -811,6 +811,9 @@ function isTitleOnlyListItem(item: unknown): boolean {
     "targets",
     "attachment_ids",
     "detach_attachment_ids",
+    "linked_list_ids",
+    "linked_lists",
+    "unlink_list_ids",
   ]);
   const titleKeys = new Set([
     "name",
