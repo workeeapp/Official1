@@ -245,6 +245,8 @@ export interface ChatThreadMessage {
   actions?: string[];
   buttons?: LlmReplyButton[];
   navigateAddress?: string;
+  /** Emoji reaction attached to the speaker's message (metadata.show_icon). */
+  showIcon?: string;
   /** Files on this message (view-only in the web chat). */
   attachments?: ChatAttachmentRef[];
   llmMs?: number;

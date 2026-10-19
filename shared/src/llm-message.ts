@@ -23,12 +23,15 @@ export interface ParsedLlmMessage {
   buttons?: LlmReplyButton[];
   /** The single address the model put in metadata.navigate_address (Waze button). */
   navigateAddress?: string;
+  /** Emoji from metadata.show_icon — attached to the speaker's message. */
+  showIcon?: string;
 }
 
 export const REPLY_BUTTON_MAX = 3;
 export const REPLY_BUTTON_LABEL_MAX = 20;
 export const REPLY_BUTTON_COMMAND_MAX = 256;
 export const NAVIGATE_ADDRESS_MAX = 300;
+export const SHOW_ICON_MAX = 32;
 
 export type LlmListType = "shopping" | "contacts" | "tasks" | "custom";
 export type LlmListActionName = "add" | "remove" | "update";
@@ -1706,12 +1709,14 @@ export function parseLlmReply(text: string): ParsedLlmMessage {
 
   const buttons = toReplyButtons(payload.rawMetadata);
   const navigateAddress = toNavigateAddress(payload.rawMetadata);
+  const showIcon = toShowIcon(payload.rawMetadata);
   return {
     response: joinSpokenResponses(payload.responses),
     responses: payload.responses,
     actions: collectActionDescriptions(payload.rawMetadata),
     ...(buttons.length > 0 ? { buttons } : {}),
     ...(navigateAddress ? { navigateAddress } : {}),
+    ...(showIcon ? { showIcon } : {}),
   };
 }
 
@@ -1725,6 +1730,18 @@ export function toNavigateAddress(rawMetadata: unknown): string | undefined {
   }
   const address = raw.trim().slice(0, NAVIGATE_ADDRESS_MAX).trim();
   return address || undefined;
+}
+
+export function toShowIcon(rawMetadata: unknown): string | undefined {
+  if (!rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+    return undefined;
+  }
+  const raw = (rawMetadata as { show_icon?: unknown }).show_icon;
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const icon = raw.trim().slice(0, SHOW_ICON_MAX).trim();
+  return icon || undefined;
 }
 
 export function wazeNavigateUrl(address: string): string {

@@ -90,8 +90,10 @@ export {
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_COMMAND_MAX,
   toNavigateAddress,
+  toShowIcon,
   wazeNavigateUrl,
   NAVIGATE_ADDRESS_MAX,
+  SHOW_ICON_MAX,
 } from "./llm-message";
 export {
   addReminderInterval,

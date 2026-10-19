@@ -84,6 +84,8 @@ model ChatMessage {
   actions        Json?
   buttons        Json?
   navigateAddress String?         @map("navigate_address") @db.VarChar(300)
+  /// Emoji reaction on the speaker bubble (metadata.show_icon).
+  showIcon       String?          @map("show_icon") @db.VarChar(32)
   /// Files shown on this bubble: [{ id, kind, file_name }].
   attachments    Json?
   raw            Json?

@@ -60,6 +60,7 @@
     "    \"buttons\": [ { \"label\": \"הצג\", \"command\": \"הצג רשימת קניות\" } ],",
     "    \"send_attachments\": [],",
     "    \"navigate_address\": null,",
+    "    \"show_icon\": null,",
     "    \"show_dump\": null,",
     "    \"show_dump_section\": null,",
     "    \"show_dump_partner\": null,",
@@ -259,6 +260,7 @@
     "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
     "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder / contacts-list row that has attachments → answer in response AND set metadata.send_attachments to its attachment_ids (max 10); the files are sent right after your reply. When you SHOW a list whose has_attachments is true (list-level files only, any list_type) → also add to metadata.buttons { \"label\": \"📎 קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. FORBIDDEN: that button when only items have files. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
     "Video and documents: you only know kind, file name and caption — never invent their content.",
+    "SHOW_ICON: optionally set metadata.show_icon to ONE emoji that the engine attaches to the speaker's message (WhatsApp reaction + web badge) before your spoken replies. Use 👍 when this turn successfully adds/updates/deletes lists, list items, contacts, reminders, filings, or directory rows. Otherwise pick a contextual emoji from the message meaning (☕ coffee, 📚 library, …) when it fits. Often null — not every turn. Never mention the icon in responses.",
     "",
     "------------------------------------------------------------",
     "OUTPUT RULES",
@@ -1084,6 +1086,14 @@
                 ],
                 "maxLength": 300,
                 "description": "Exactly one physical address mentioned in responses (full, with city) — shown as a Waze navigate button. null when responses mention no address or more than one."
+              },
+              "show_icon": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 32,
+                "description": "One emoji attached to the speaker's message before spoken replies (WhatsApp reaction + web). 👍 after successful list/item/contact/reminder/filing/directory mutate this turn; otherwise a contextual emoji when it fits; null most turns."
               },
               "show_dump": {
                 "type": [

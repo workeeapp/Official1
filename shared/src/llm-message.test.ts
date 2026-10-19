@@ -354,6 +354,35 @@ describe("parseLlmReply", () => {
     expect(parsed.navigateAddress).toBe("הרצל 12, תל אביב");
   });
 
+  it("reads show_icon from metadata", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: ["הוספתי חלב לרשימת הקניות"],
+        metadata: { show_icon: " 👍 " },
+      }),
+    );
+    expect(parsed.showIcon).toBe("👍");
+  });
+
+  it("omits show_icon when null or empty", () => {
+    expect(
+      parseLlmReply(
+        JSON.stringify({
+          responses: ["שלום"],
+          metadata: { show_icon: null },
+        }),
+      ).showIcon,
+    ).toBeUndefined();
+    expect(
+      parseLlmReply(
+        JSON.stringify({
+          responses: ["שלום"],
+          metadata: { show_icon: "   " },
+        }),
+      ).showIcon,
+    ).toBeUndefined();
+  });
+
   it("reads show_dump from metadata", () => {
     const meta = parseReplyMetadata(
       JSON.stringify({

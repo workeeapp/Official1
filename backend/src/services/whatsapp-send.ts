@@ -281,6 +281,59 @@ export async function sendWhatsAppText(
   );
 }
 
+/** Meta reaction on an inbound user message (emoji on their bubble). */
+export function whatsappReactionBody(
+  destination: string,
+  messageId: string,
+  emoji: string,
+): Record<string, unknown> {
+  return {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: destination,
+    type: "reaction",
+    reaction: {
+      message_id: messageId,
+      emoji,
+    },
+  };
+}
+
+/**
+ * React to the speaker's inbound WhatsApp message. Soft-fails like typing —
+ * a missed reaction must not block the spoken reply.
+ */
+export async function sendWhatsAppReaction(
+  to: string,
+  messageId: string,
+  emoji: string,
+): Promise<WhatsAppTextResult> {
+  const id = messageId.trim();
+  const icon = emoji.trim();
+  if (!id || !icon) {
+    return "failed";
+  }
+
+  const env = getEnv();
+  if (env.NODE_ENV === "test") {
+    return "sent";
+  }
+
+  try {
+    return await sendWhatsAppPayload(
+      to,
+      (destination) => whatsappReactionBody(destination, id, icon),
+      { ignoreSession: true },
+    );
+  } catch (error) {
+    recordWhatsAppEvent(
+      "reaction_fail",
+      error instanceof Error ? error.message : "unknown",
+    );
+    return "failed";
+  }
+}
+
 async function sendWhatsAppPayload(
   to: string,
   payload: (destination: string) => Record<string, unknown>,

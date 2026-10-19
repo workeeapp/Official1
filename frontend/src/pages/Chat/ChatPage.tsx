@@ -291,6 +291,11 @@ export function ChatPage() {
                   <p className="mb-1 px-1 text-xs font-medium text-text-secondary">
                     {message.author === "assistant" ? chatWithName : message.speaker}
                   </p>
+                  <div
+                    className={`relative ${
+                      message.author === "you" && message.showIcon ? "mb-3" : ""
+                    }`}
+                  >
                   <p
                     className={`rounded-2xl px-3.5 pt-2.5 pb-1.5 text-sm leading-6 ${
                       message.author === "you"
@@ -334,6 +339,16 @@ export function ChatPage() {
                       </span>
                     ) : null}
                   </p>
+                  {message.author === "you" && message.showIcon ? (
+                    <span
+                      data-testid="chat-show-icon"
+                      aria-hidden="true"
+                      className="absolute -bottom-2 end-2 flex h-7 min-w-7 items-center justify-center rounded-full border border-border bg-surface px-1 text-base leading-none shadow-sm"
+                    >
+                      {message.showIcon}
+                    </span>
+                  ) : null}
+                  </div>
                   {message.attachments?.length ? (
                     <ChatAttachments attachments={message.attachments} />
                   ) : null}

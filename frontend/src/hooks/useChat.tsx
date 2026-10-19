@@ -219,6 +219,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           },
           abort.signal,
         );
+        const showIcon = parseLlmReply(reply).showIcon;
+        if (showIcon) {
+          setThreads((current) => ({
+            ...current,
+            [threadId]: (current[threadId] ?? []).map((message) => {
+              const isUser =
+                message.id === userMessage.id ||
+                (messageIds?.user != null && message.id === messageIds.user);
+              return isUser && message.author === "you"
+                ? { ...message, showIcon, ...(messageIds?.user ? { id: messageIds.user } : {}) }
+                : message;
+            }),
+          }));
+        }
         const replies = buildTurnReplies({
           reply,
           messageIds,

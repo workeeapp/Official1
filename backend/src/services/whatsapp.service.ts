@@ -18,6 +18,7 @@ import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
   sendWhatsAppButtons,
   sendWhatsAppNavigate,
+  sendWhatsAppReaction,
   sendWhatsAppText,
   sendWhatsAppTyping,
   startWhatsAppTyping,
@@ -405,8 +406,16 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
     const buttons = parsed.buttons ?? [];
     recordWhatsAppEvent(
       "llm_ok",
-      `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} files_out=${turn.outboundAttachmentIds.length}`,
+      `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
     );
+    if (parsed.showIcon) {
+      const reactionResult = await sendWhatsAppReaction(
+        from,
+        last.messageId,
+        parsed.showIcon,
+      );
+      recordWhatsAppEvent("reaction_send", `result=${reactionResult}`);
+    }
     let delivered = true;
     for (const [index, reply] of replies.entries()) {
       if (index > 0) {

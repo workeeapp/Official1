@@ -12,6 +12,7 @@ import {
   toWhatsAppFormatting,
   whatsappButtonsBody,
   whatsappCtaUrlBody,
+  whatsappReactionBody,
   whatsappTypingBody,
   WHATSAPP_NAVIGATE_LABEL,
 } from "../src/services/whatsapp-send.js";
@@ -292,6 +293,21 @@ describe("WhatsApp webhook", () => {
           name: "cta_url",
           parameters: { display_text: "פתח ב-Waze", url },
         },
+      },
+    });
+  });
+
+  it("builds a reaction message for the inbound wamid", () => {
+    expect(
+      whatsappReactionBody("972501234567", "wamid.HBgLMTIz", "👍"),
+    ).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "972501234567",
+      type: "reaction",
+      reaction: {
+        message_id: "wamid.HBgLMTIz",
+        emoji: "👍",
       },
     });
   });
