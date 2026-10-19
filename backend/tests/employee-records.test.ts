@@ -565,6 +565,25 @@ describe("employee records", () => {
     ).toBe(LIST_FIND_MISS);
   });
 
+  it("does not force LIST_FIND_MISS when list_ops applied despite failed lists.remove", () => {
+    const reply = "מחקתי את שלוש רשימות המשתתפים.";
+    expect(
+      correctListMutationClaimReply({
+        reply,
+        requestedRemove: true,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: 'מחקתי את הרשימה «משתתפים בכדורגל».',
+        setResponse: (_r, response) => response,
+        spoken: reply,
+        appliedListOps: true,
+      }),
+    ).toBe(reply);
+  });
+
   it("removes a custom row found on another list name for the same owner", async () => {
     const bugs = {
       id: "bugs-list",

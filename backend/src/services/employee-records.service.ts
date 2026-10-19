@@ -522,6 +522,8 @@ export function looksLikeListDeleteClaim(spoken: string): boolean {
  * spoken reply so it does not keep a false past-tense claim. Partial success
  * (e.g. remove applied, add did not) keeps an applied fallback + add miss.
  * Also corrects «מחקתי…» when no remove was requested/applied (bad ACTION shape).
+ * Successful list_ops (delete_list / alter_list) skip item-level LIST_FIND_MISS
+ * so a parallel failed lists.remove does not overwrite a real list delete.
  */
 export function correctListMutationClaimReply(input: {
   reply: string;
@@ -535,6 +537,8 @@ export function correctListMutationClaimReply(input: {
   setResponse: (reply: string, response: string) => string;
   /** Spoken text already parsed from the reply (optional). */
   spoken?: string;
+  /** True when any metadata.list_ops row applied this turn. */
+  appliedListOps?: boolean;
 }): string {
   const {
     requestedRemove,
@@ -545,7 +549,18 @@ export function correctListMutationClaimReply(input: {
     appliedAdd,
     appliedFallback,
     setResponse,
+    appliedListOps,
   } = input;
+  if (appliedListOps) {
+    if (requestedAdd && !appliedAdd) {
+      if (appliedRemove || appliedUpdate || appliedFallback.trim()) {
+        const parts = [appliedFallback.trim(), LIST_ADD_MISS].filter(Boolean);
+        return setResponse(input.reply, parts.join("\n"));
+      }
+      return setResponse(input.reply, LIST_ADD_MISS);
+    }
+    return input.reply;
+  }
   if (
     (requestedRemove && !appliedRemove) ||
     (requestedUpdate && !appliedUpdate)
@@ -661,7 +676,7 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
-    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM first (empty remove + ask «האם מאשר?»); ONE responses entry that turn — FORBIDDEN raise/«אגב»; on כן → metadata.lists remove with item_id + non-empty past-tense responses; FORBIDDEN empty responses; FORBIDDEN list_ops for a single item — then the server applies immediately (confirm is model-turn only). On לא / בטל / אל תמחקי while that «האם מאשר?» is open → remove empty; short ack you cancelled deleting that title; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update / remove_filing / update_filing / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE CONFIRM (rows): empty remove + ask «האם מאשר?»; ONE responses entry — FORBIDDEN raise/«אגב»; on כן → metadata.lists remove with item_id + non-empty past-tense responses; FORBIDDEN empty responses; FORBIDDEN list_ops for a single item. WHOLE-LIST confirm (רשימ(ה/ות) / list titles as lists) → on כן only list_ops delete_list with list_id; lists=[]. Server applies immediately (confirm is model-turn only). On לא / בטל / אל תמחקי while that «האם מאשר?» is open → remove empty; short ack you cancelled deleting that title; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value; use name + info to find the right filing), and item_description (usually empty — ignore for lookup). Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
     "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Flat dumps show those rows under one «קניות/מטלות:» header with mark «(באחריות X · מאת <assigner>)». Custom shared_items: ONE «רשימת «name»:» with co-share mark «(A, B)» all involved (no assign). «איזה רשימות משותפות יש לי» → only scope=shared entries.",

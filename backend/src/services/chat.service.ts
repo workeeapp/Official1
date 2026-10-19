@@ -602,9 +602,10 @@ function workerTargetingInstructions(
     "Delete reminder: reminders remove with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
     "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → title on LAST dump line N → id from THIS turn's live JSON by that title → ACTION on THAT entity. Dump shopping/tasks = personal then co-share then assign (same order as JSON items). FORBIDDEN treating N as JSON array index / creation order when that picks a different title than dump line N. After תיוקים dump, line N = that filing (detail from live JSON); FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → DELETE CONFIRM naming dump line 3's title; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: emit lists.remove for each item with that row's item_id. Server applies immediately — no confirm step. In response: past tense naming what was deleted. Never lists=[] when matching rows exist this turn.",
+    "WHOLE-LIST DELETE («מחקי רשימ(ה/ות)…» / «כל רשימות המשתתפים» / naming list titles as lists): list_ops delete_list with each list_id — never lists.remove. Confirm with list_ops=[] lists=[]; on כן → only those delete_list entries, lists=[]. Several lists → every offered delete_list. Contrast: emptying rows («כל המטלות/הפריטים») → lists.remove per item_id.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id. A multi-day row (תאריך לביצוע … תאריך סיום) counts for every day in its span.",
     "RANGES IN ANSWERS: a row with שעת סיום (or a standing occurrence with end_time) shows as «10:00–12:00», never only the start. A multi-day row (תאריך לביצוע … תאריך סיום) matches EVERY day inside its span — «מה יש לי ביום רביעי» lists «בחו\"ל (שלישי–חמישי)». Scan spans before «אין לך…».",
-    "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE CONFIRM: any delete ask → remove empty + ask «האם ברצונך למחוק את: <title> מתוך רשימת <…>? האם מאשר?»; ONE responses entry only that turn — FORBIDDEN raise / «אגב» / another yes/no. On כן/מאשר → metadata.lists remove with item_id; responses MUST be non-empty past-tense («מחקתי את «title»…»); FORBIDDEN empty responses; FORBIDDEN list_ops for a single item (list_ops = alter_list / delete_list only); FORBIDDEN same-turn jobs.answer. On לא / בטל / אל תמחקי while «האם מאשר?» is open → remove empty; ack cancelled that title; FORBIDDEN answering AFTER ASSIGN / date+reminder / older drafts. Update with id applies immediately. Never invent or speak ids.",
+    "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE CONFIRM (rows): any item delete ask → remove empty + ask «האם ברצונך למחוק את: <title> מתוך רשימת <…>? האם מאשר?»; ONE responses entry only that turn — FORBIDDEN raise / «אגב» / another yes/no. On כן/מאשר → metadata.lists remove with item_id; responses MUST be non-empty past-tense («מחקתי את «title»…»); FORBIDDEN empty responses; FORBIDDEN list_ops for a single item (list_ops = alter_list / delete_list only); FORBIDDEN same-turn jobs.answer. WHOLE-LIST confirm → כן = list_ops delete_list only; lists=[]. On לא / בטל / אל תמחקי while «האם מאשר?» is open → remove empty; ack cancelled that title; FORBIDDEN answering AFTER ASSIGN / date+reminder / older drafts. Update with id applies immediately. Never invent or speak ids.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
     "WHEN / TODAY / SOON (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים / בעוד יומיים): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD for that window; lists=[]; server replaces. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Do NOT use TEAM_SCHEDULES as the speaker's day plan. Multi-day (השבוע) → from=first to=last day of the window.",
     "LIST ITEM URGENCY: on lists add/update set item urgency = normal | urgent | very_urgent by MEANING (same as messages) — never ask. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when hard (ממש דחוף / דחוף מאוד / מיד). Clean title without urgency words. Shopping/tasks/contacts/custom alike.",
@@ -1520,7 +1521,7 @@ export async function sendChatMessage(input: {
           : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / מטלות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → show_dump=full (+ show_dump_about=X).",
         guestSpeaker
           ? ""
-          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק». Claim past-tense success ONLY for actions in THIS turn's metadata. MULTI-INTENT CONFIRM: כן after an offer of several mutations → re-emit EVERY offered ACTION this turn, not a subset. Does NOT apply when the previous turn's open ask was DELETE CONFIRM alone (or a raise illegally co-asked with it) — כן/מאשר then bind ONLY to that remove; FORBIDDEN same-turn jobs.answer.",
+          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק». Claim past-tense success ONLY for actions in THIS turn's metadata. MULTI-INTENT CONFIRM: כן after an offer of several mutations → re-emit EVERY offered ACTION this turn, not a subset (incl. every list_ops delete_list). Item DELETE CONFIRM alone → כן binds ONLY to that lists.remove; whole-list confirm → only delete_list, lists=[]. FORBIDDEN same-turn jobs.answer.",
         guestSpeaker
           ? ""
           : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED); lists=[]; reminders=[]; buttons=[]. Server replaces with your tasks dump + ממתינים from OPEN_JOBS (omit if empty). FORBIDDEN show_dump=tasks alone (speaker book); FORBIDDEN «אין לי מטלות» / «אין לי כלום» when WORKER_SAVED_DATA / OPEN_JOBS has rows; FORBIDDEN writing inventory lines yourself. Do NOT RAISE. Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks (show_dump=reminders).`,
@@ -2257,6 +2258,8 @@ export async function sendChatMessage(input: {
     const appliedListAdd = listMutations.some(
       (row) => row.action === "add" && !row.listShell,
     );
+    const appliedListOps = listOpResults.some((row) => row.applied);
+    const listOpFallback = formatListOpFallback(listOpResults);
     const appliedFallback = formatAppliedMutationFallback(
       listMutations,
       filingMutations,
@@ -2270,12 +2273,16 @@ export async function sendChatMessage(input: {
           : metadata.confirm === true
             ? "בוצע."
             : "") ||
-        formatListOpFallback(listOpResults) ||
+        listOpFallback ||
         (appliedListRemove || appliedListUpdate || appliedListAdd
           ? appliedFallback
           : "") ||
-        (requestedListRemove && !appliedListRemove ? LIST_FIND_MISS : "") ||
-        (requestedListUpdate && !appliedListUpdate ? LIST_FIND_MISS : "");
+        (!appliedListOps && requestedListRemove && !appliedListRemove
+          ? LIST_FIND_MISS
+          : "") ||
+        (!appliedListOps && requestedListUpdate && !appliedListUpdate
+          ? LIST_FIND_MISS
+          : "");
       if (fallback) {
         workingReply = setEngineResponse(workingReply, fallback);
       }
@@ -2288,9 +2295,10 @@ export async function sendChatMessage(input: {
       appliedRemove: appliedListRemove,
       appliedUpdate: appliedListUpdate,
       appliedAdd: appliedListAdd,
-      appliedFallback,
+      appliedFallback: [listOpFallback, appliedFallback].filter(Boolean).join("\n"),
       setResponse: setEngineResponse,
       spoken: parseLlmReply(workingReply).response,
+      appliedListOps,
     });
     if (
       requestedListRemove &&
