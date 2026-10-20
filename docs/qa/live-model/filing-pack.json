@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "kind": "live-model",
+  "domain": "filing",
+  "pack": "live-model-filing-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": false,
+  "evalPath": "model-output-constraints-only",
+  "criticalCaseIds": [],
+  "cases": [
+    {
+      "id": "filing-remove-email-code",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק קוד כניסה לחשבון אימייל",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-email-code"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "filing-update-code",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שנה את הקוד ל־999",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing",
+              "filingId": "eval-filing-email-code",
+              "infoIncludes": "999"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "filing-add-gate",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תייקי קוד לשער 4455",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "filing_has_action",
+                  "action": "add_filing",
+                  "infoIncludes": "4455"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-filing-confirm-delete",
+      "tag": "continuity",
+      "description": "Ask before filing wipe → כן removes filing",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate",
+            "item_name": "קוד לשער",
+            "item_description": "קוד לשער",
+            "item_info": "4455",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הקוד לשער — רק אחרי שאאשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-gate"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,417 @@
+{
+  "version": 1,
+  "kind": "live-full",
+  "domain": "shopping",
+  "pack": "live-full-shopping-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": true,
+  "evalPath": "model-then-production-apply",
+  "status": "scaffold",
+  "criticalCaseIds": [],
+  "cases": [
+    {
+      "id": "list-buy-milk",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "list-clear-personal-shopping",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-shop-bread",
+                "שם פריט": "לחם"
+              },
+              {
+                "item_id": "eval-item-shop-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared-michal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-cheese",
+                "שם פריט": "גבינה סקי"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "נקה את רשימת הקניות האישית שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-milk",
+                "eval-item-shop-bread",
+                "eval-item-shop-eggs"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "למחוק את כל הפריטים"
+              ]
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "shop-move-shared-to-personal",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-personal-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared-michal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "העבירי חלב מהקניות המשותפת עם מיכל לקניות האישיות",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-shared-milk"
+              ],
+              "exclusive": false
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1,
+              "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "lists.update"
+              ]
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "shared-list-found-no-not-found",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "custom",
+            "list_name": "משימות לעבודה",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "עמית"
+            ],
+            "items": [
+              {
+                "תיאור": "דיווח באג לוח שנה"
+              },
+              {
+                "תיאור": "דיווח באג תזכורות"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שתי הבעיות ברשימת משימות לעבודה טופלו",
+          "constraints": [
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לא מצאתי רשימה",
+                "לא מצאתי"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "משימות לעבודה",
+                "משותפת"
+              ]
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "shopping-add-milk",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "mt-clarify-then-delete",
+      "tag": "continuity",
+      "description": "Ambiguous delete → pick milk; bread stays",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את זה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": null
+        },
+        {
+          "utterance": "את החלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "mt-ask-then-add",
+      "tag": "continuity",
+      "description": "Incomplete shopping add → fill bread",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": null
+        },
+        {
+          "utterance": "לחם",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    },
+    {
+      "id": "mt-show-then-bought",
+      "tag": "continuity",
+      "description": "Show shopping → bought milk removes seeded item",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה בקניות שלי?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ],
+          "stateAfter": null
+        },
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    }
+  ]
+}

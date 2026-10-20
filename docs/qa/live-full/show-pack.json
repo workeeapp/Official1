@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "kind": "live-full",
+  "domain": "show",
+  "pack": "live-full-show-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": true,
+  "evalPath": "model-then-production-apply",
+  "status": "scaffold",
+  "criticalCaseIds": [],
+  "cases": [
+    {
+      "id": "dump-what-saved",
+      "tag": "hallucination-boundaries",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate-code",
+            "item_name": "קוד שער",
+            "item_description": "קוד לשער",
+            "item_info": "4455",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה שמור לי",
+          "constraints": [
+            {
+              "type": "show_dump",
+              "value": "full"
+            },
+            {
+              "type": "no_query_report"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ],
+          "stateAfter": null
+        }
+      ],
+      "enabled": false
+    }
+  ]
+}

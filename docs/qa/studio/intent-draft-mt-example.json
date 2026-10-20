@@ -1,0 +1,25 @@
+{
+  "id": "studio-intent-clarify-milk",
+  "track": "model",
+  "description": "Ambiguous delete → ask → remove milk (auto-routes to mt)",
+  "setup": {
+    "shoppingItems": [
+      { "id": "eval-item-milk", "label": "חלב" },
+      { "id": "eval-item-bread", "label": "לחם" }
+    ]
+  },
+  "turns": [
+    {
+      "utterance": "תמחק את זה",
+      "intent": { "type": "ask" }
+    },
+    {
+      "utterance": "את החלב",
+      "intent": {
+        "type": "remove_item",
+        "listType": "shopping",
+        "itemId": "eval-item-milk"
+      }
+    }
+  ]
+}

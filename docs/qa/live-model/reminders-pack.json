@@ -1,0 +1,638 @@
+{
+  "version": 1,
+  "kind": "live-model",
+  "domain": "reminders",
+  "pack": "live-model-reminders-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": false,
+  "evalPath": "model-output-constraints-only",
+  "criticalCaseIds": [
+    "mt-cancel-reminder-resolve"
+  ],
+  "cases": [
+    {
+      "id": "no-invented-clock",
+      "tag": "hallucination-boundaries",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכיר לי משהו",
+          "constraints": [
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "self-nudge-with-volunteered-phone",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי בסביבות 14:00 לדבר עם רב פס הטלפון שלהם לווטסאפ הוא 0508087073",
+          "constraints": [
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "0508087073"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "self-nudge-recurring-until-done",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל שעה לקנות חלב עד שאקנה",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שעה",
+                "עד",
+                "קנ"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "self-nudge-contact-topic-no-whatsapp",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "נדנדי לי כל 10 שניות ליצור קשר עם הופ און",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "ווטסאפ",
+                "whatsapp",
+                "מה מספר"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שעה",
+                "דקות",
+                "שניות"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-cancel-named",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "בטל את התזכורת לחלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-stop-nudge-keep-item",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk-keep",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk-nudge",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "10:seconds",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תפסיקי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk-nudge"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "self-nudge-daily-dog-0800",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל יום ב־08:00 להוריד את הכלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "08",
+                "8:00",
+                "כלב",
+                "יום"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-create-relative",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי בעוד שעה לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-create-no-time",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-update-time",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעדכני את התזכורת לחלב ל־14:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "update"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-subhour-refuse",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל 30 דקות לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שעה",
+                "דקות",
+                "שניות"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-recur-weekday",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל יום שני ב־09:00 לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reminder-cancel-ambiguous",
+      "tag": "action-confusion",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-a",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          },
+          {
+            "reminder_id": "eval-rem-b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T11:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-stop-nudge-keep-item",
+      "tag": "continuity",
+      "description": "Seeded clock + shopping; תפסיקי cancels clock only",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk-keep",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk-nudge",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה התזכורות שלי?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "reminders"
+            }
+          ]
+        },
+        {
+          "utterance": "תפסיקי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk-nudge"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-reminder-ask-then-time",
+      "tag": "continuity",
+      "description": "Reminder without time → ask → complete with 09:00",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "מחר ב־09:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-cancel-reminder-resolve",
+      "tag": "continuity",
+      "description": "Ambiguous cancel → pick milk clock",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-a",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          },
+          {
+            "reminder_id": "eval-rem-b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T11:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "את זו של החלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-a"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

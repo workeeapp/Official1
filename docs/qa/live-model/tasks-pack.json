@@ -1,0 +1,394 @@
+{
+  "version": 1,
+  "kind": "live-model",
+  "domain": "tasks",
+  "pack": "live-model-tasks-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": false,
+  "evalPath": "model-output-constraints-only",
+  "criticalCaseIds": [
+    "list-clear-tasks",
+    "list-filtered-multi-delete"
+  ],
+  "cases": [
+    {
+      "id": "list-clear-tasks",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-task-bill",
+                "שם מטלה": "לשלם חשבון"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק את כל המטלות",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-doctor",
+                "eval-item-task-bill"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "no_silent_multi_domain_wipe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "list-filtered-multi-delete",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-ravpas-1",
+                "שם מטלה": "לדבר עם רב פס",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "14:00"
+              },
+              {
+                "item_id": "eval-item-task-ravpas-2",
+                "שם מטלה": "ליצור קשר עם רב פס שירות לקוחות"
+              },
+              {
+                "item_id": "eval-item-task-meeting",
+                "שם מטלה": "פגישה",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "21:30"
+              },
+              {
+                "item_id": "eval-item-task-milk",
+                "שם מטלה": "לקנות חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקי את שתי המטלות של הרב פס מהמטלות שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-ravpas-1",
+                "eval-item-task-ravpas-2"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לאיזו",
+                "לאיזה",
+                "מצאתי מטלה אחת",
+                "למחוק אותה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "meeting-not-list",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם מטלה": "פגישת עבודה",
+                "תאריך לביצוע": "2099-06-01",
+                "שעה לביצוע": "10:00"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "item": "פגישת עבודה",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T07:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "פגישת עבודה ב־10:00",
+            "last_composed_text": "",
+            "sent_text": "פגישת עבודה ב־10:00",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הפגישה",
+          "constraints": [
+            {
+              "type": "not_lists_remove_shopping"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "remove",
+                  "listType": "tasks"
+                },
+                {
+                  "type": "reminders_has_action",
+                  "action": "remove"
+                },
+                {
+                  "type": "response_looks_like_ask"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-keep-phone-in-title",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי לי מטלה לדבר עם אורי בטלפון 0534455366",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "0534455366"
+            },
+            {
+              "type": "directory_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "occurrence-skip-one-day",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-kids-pickup",
+                "שם מטלה": "לאסוף את הילדים",
+                "חוזר": "כל יום שישי ב־12:00",
+                "שעה לביצוע": "12:00",
+                "next_occurrences": [
+                  "2026-10-23",
+                  "2026-10-30",
+                  "2026-11-06"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "ב־23.10 אני לא צריך לאסוף את הילדים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "23",
+                "23.10",
+                "ילדים"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-add-timed-no-auto-clock",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה מחר ב־09:00 ללכת לבנק",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-meet-create",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תקבעי פגישה עם עמית מחר ב־10:00",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית",
+                "10",
+                "פגיש"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-done-doctor",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-doctor"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-task-ask-then-title",
+      "tag": "continuity",
+      "description": "Empty task add → ask → fill title",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "רופא"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

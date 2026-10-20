@@ -12,7 +12,17 @@
     "delete-everything",
     "delete-two-named-lists",
     "delete-ambiguous-list-title",
-    "delete-unresolved-list"
+    "delete-unresolved-list",
+    "shopping-add-milk",
+    "task-empty-ask",
+    "shopping-empty-ask",
+    "share-shop-with-amit",
+    "share-ask-missing-partner",
+    "event-host-create-poker",
+    "filing-add-simple",
+    "directory-add-michal",
+    "reminder-create-relative",
+    "task-done-doctor"
   ],
   "cases": [
     {
@@ -37,7 +47,13 @@
           "action": "remove_filing",
           "filingId": "eval-filing-email-code"
         },
-        { "type": "lists_empty" }
+        {
+          "type": "lists_empty"
+        }
+      ],
+      "tags": [
+        "filing",
+        "single-turn"
       ]
     },
     {
@@ -63,7 +79,13 @@
           "filingId": "eval-filing-email-code",
           "infoIncludes": "999"
         },
-        { "type": "lists_empty" }
+        {
+          "type": "lists_empty"
+        }
+      ],
+      "tags": [
+        "filing",
+        "single-turn"
       ]
     },
     {
@@ -75,10 +97,20 @@
         {
           "type": "any",
           "constraints": [
-            { "type": "filing_has_action", "action": "add_filing", "infoIncludes": "4455" },
-            { "type": "mutations_empty_or_read_only" }
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "4455"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
           ]
         }
+      ],
+      "tags": [
+        "filing",
+        "single-turn"
       ]
     },
     {
@@ -92,7 +124,12 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }]
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
           }
         ]
       },
@@ -100,10 +137,20 @@
         {
           "type": "lists_remove_item_ids",
           "listType": "shopping",
-          "itemIds": ["eval-item-milk"]
+          "itemIds": [
+            "eval-item-milk"
+          ]
         },
-        { "type": "list_ops_empty" },
-        { "type": "filing_empty" }
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "filing_empty"
+        }
+      ],
+      "tags": [
+        "shopping",
+        "single-turn"
       ]
     },
     {
@@ -118,8 +165,14 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-task-doctor", "שם מטלה": "להתקשר לרופא" },
-              { "item_id": "eval-item-task-bill", "שם מטלה": "לשלם חשבון" }
+              {
+                "item_id": "eval-item-task-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-task-bill",
+                "שם מטלה": "לשלם חשבון"
+              }
             ]
           }
         ]
@@ -128,11 +181,24 @@
         {
           "type": "lists_remove_item_ids",
           "listType": "tasks",
-          "itemIds": ["eval-item-task-doctor", "eval-item-task-bill"]
+          "itemIds": [
+            "eval-item-task-doctor",
+            "eval-item-task-bill"
+          ]
         },
-        { "type": "list_ops_empty" },
-        { "type": "filing_empty" },
-        { "type": "no_silent_multi_domain_wipe" }
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "no_silent_multi_domain_wipe"
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
       ]
     },
     {
@@ -147,9 +213,18 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-shop-milk", "שם פריט": "חלב" },
-              { "item_id": "eval-item-shop-bread", "שם פריט": "לחם" },
-              { "item_id": "eval-item-shop-eggs", "שם פריט": "ביצים" }
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-shop-bread",
+                "שם פריט": "לחם"
+              },
+              {
+                "item_id": "eval-item-shop-eggs",
+                "שם פריט": "ביצים"
+              }
             ]
           },
           {
@@ -157,9 +232,15 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "shared",
-            "shared_with": ["טל", "מיכל"],
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
             "items": [
-              { "item_id": "eval-item-shop-shared-cheese", "שם פריט": "גבינה סקי" }
+              {
+                "item_id": "eval-item-shop-shared-cheese",
+                "שם פריט": "גבינה סקי"
+              }
             ]
           }
         ]
@@ -174,11 +255,19 @@
             "eval-item-shop-eggs"
           ]
         },
-        { "type": "list_ops_empty" },
+        {
+          "type": "list_ops_empty"
+        },
         {
           "type": "response_forbids_any",
-          "needles": ["למחוק את כל הפריטים"]
+          "needles": [
+            "למחוק את כל הפריטים"
+          ]
         }
+      ],
+      "tags": [
+        "shopping",
+        "single-turn"
       ]
     },
     {
@@ -193,7 +282,10 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-shop-personal-bread", "שם פריט": "לחם" }
+              {
+                "item_id": "eval-item-shop-personal-bread",
+                "שם פריט": "לחם"
+              }
             ]
           },
           {
@@ -201,9 +293,15 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "shared",
-            "shared_with": ["טל", "מיכל"],
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
             "items": [
-              { "item_id": "eval-item-shop-shared-milk", "שם פריט": "חלב" }
+              {
+                "item_id": "eval-item-shop-shared-milk",
+                "שם פריט": "חלב"
+              }
             ]
           }
         ]
@@ -212,7 +310,9 @@
         {
           "type": "lists_remove_item_ids",
           "listType": "shopping",
-          "itemIds": ["eval-item-shop-shared-milk"],
+          "itemIds": [
+            "eval-item-shop-shared-milk"
+          ],
           "exclusive": false
         },
         {
@@ -222,11 +322,19 @@
           "minCount": 1,
           "itemTextIncludes": "חלב"
         },
-        { "type": "list_ops_empty" },
+        {
+          "type": "list_ops_empty"
+        },
         {
           "type": "response_forbids_any",
-          "needles": ["lists.update"]
+          "needles": [
+            "lists.update"
+          ]
         }
+      ],
+      "tags": [
+        "shopping",
+        "single-turn"
       ]
     },
     {
@@ -242,7 +350,10 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-problems-check", "תיאור": "לבדוק שוב" }
+              {
+                "item_id": "eval-item-problems-check",
+                "תיאור": "לבדוק שוב"
+              }
             ]
           },
           {
@@ -252,7 +363,10 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-bugs-check", "תיאור": "לבדוק שוב" }
+              {
+                "item_id": "eval-item-bugs-check",
+                "תיאור": "לבדוק שוב"
+              }
             ]
           }
         ]
@@ -261,10 +375,20 @@
         {
           "type": "lists_remove_item_ids",
           "listType": "custom",
-          "itemIds": ["eval-item-problems-check"]
+          "itemIds": [
+            "eval-item-problems-check"
+          ]
         },
-        { "type": "list_ops_empty" },
-        { "type": "filing_empty" }
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "filing_empty"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -278,10 +402,17 @@
             "list_name": "משימות לעבודה",
             "owner": "טל",
             "scope": "shared",
-            "shared_with": ["טל", "עמית"],
+            "shared_with": [
+              "טל",
+              "עמית"
+            ],
             "items": [
-              { "תיאור": "דיווח באג לוח שנה" },
-              { "תיאור": "דיווח באג תזכורות" }
+              {
+                "תיאור": "דיווח באג לוח שנה"
+              },
+              {
+                "תיאור": "דיווח באג תזכורות"
+              }
             ]
           }
         ]
@@ -289,12 +420,22 @@
       "constraints": [
         {
           "type": "response_forbids_any",
-          "needles": ["לא מצאתי רשימה", "לא מצאתי"]
+          "needles": [
+            "לא מצאתי רשימה",
+            "לא מצאתי"
+          ]
         },
         {
           "type": "response_mentions_any",
-          "needles": ["משימות לעבודה", "משותפת"]
+          "needles": [
+            "משימות לעבודה",
+            "משותפת"
+          ]
         }
+      ],
+      "tags": [
+        "shopping",
+        "single-turn"
       ]
     },
     {
@@ -325,7 +466,10 @@
                 "תאריך לביצוע": "2026-10-04",
                 "שעה לביצוע": "21:30"
               },
-              { "item_id": "eval-item-task-milk", "שם מטלה": "לקנות חלב" }
+              {
+                "item_id": "eval-item-task-milk",
+                "שם מטלה": "לקנות חלב"
+              }
             ]
           }
         ]
@@ -334,13 +478,27 @@
         {
           "type": "lists_remove_item_ids",
           "listType": "tasks",
-          "itemIds": ["eval-item-task-ravpas-1", "eval-item-task-ravpas-2"]
+          "itemIds": [
+            "eval-item-task-ravpas-1",
+            "eval-item-task-ravpas-2"
+          ]
         },
-        { "type": "list_ops_empty" },
+        {
+          "type": "list_ops_empty"
+        },
         {
           "type": "response_forbids_any",
-          "needles": ["לאיזו", "לאיזה", "מצאתי מטלה אחת", "למחוק אותה"]
+          "needles": [
+            "לאיזו",
+            "לאיזה",
+            "מצאתי מטלה אחת",
+            "למחוק אותה"
+          ]
         }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
       ]
     },
     {
@@ -354,14 +512,24 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }]
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
           },
           {
             "list_id": "eval-list-tasks-personal",
             "list_type": "tasks",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-task-call", "שם מטלה": "להתקשר" }]
+            "items": [
+              {
+                "item_id": "eval-item-task-call",
+                "שם מטלה": "להתקשר"
+              }
+            ]
           }
         ],
         "filing": [
@@ -381,7 +549,9 @@
             "list_type": "shopping",
             "fire_at": "2099-01-01T08:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "לקנות חלב",
@@ -398,9 +568,19 @@
         ]
       },
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "response_looks_like_ask" },
-        { "type": "no_silent_multi_domain_wipe" }
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        },
+        {
+          "type": "no_silent_multi_domain_wipe"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -413,7 +593,11 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "שם פריט": "חלב" }]
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
           },
           {
             "list_type": "tasks",
@@ -434,7 +618,9 @@
             "list_type": "tasks",
             "fire_at": "2099-06-01T07:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "פגישת עבודה ב־10:00",
@@ -451,15 +637,30 @@
         ]
       },
       "constraints": [
-        { "type": "not_lists_remove_shopping" },
+        {
+          "type": "not_lists_remove_shopping"
+        },
         {
           "type": "any",
           "constraints": [
-            { "type": "lists_has_action", "action": "remove", "listType": "tasks" },
-            { "type": "reminders_has_action", "action": "remove" },
-            { "type": "response_looks_like_ask" }
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "tasks"
+            },
+            {
+              "type": "reminders_has_action",
+              "action": "remove"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
           ]
         }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
       ]
     },
     {
@@ -474,7 +675,12 @@
             "list_name": "שיעורי נהיגה",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-driving-1", "שם": "שיעור 1" }]
+            "items": [
+              {
+                "item_id": "eval-item-driving-1",
+                "שם": "שיעור 1"
+              }
+            ]
           }
         ],
         "filing": [
@@ -491,10 +697,20 @@
       "constraints": [
         {
           "type": "list_ops_delete_list_ids",
-          "listIds": ["eval-list-custom-driving"]
+          "listIds": [
+            "eval-list-custom-driving"
+          ]
         },
-        { "type": "lists_empty" },
-        { "type": "filing_empty" }
+        {
+          "type": "lists_empty"
+        },
+        {
+          "type": "filing_empty"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -507,7 +723,11 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "שם פריט": "חלב" }]
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
           }
         ],
         "filing": [
@@ -522,9 +742,20 @@
         ]
       },
       "constraints": [
-        { "type": "show_dump", "value": "full" },
-        { "type": "no_query_report" },
-        { "type": "mutations_empty_or_read_only" }
+        {
+          "type": "show_dump",
+          "value": "full"
+        },
+        {
+          "type": "no_query_report"
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        }
+      ],
+      "tags": [
+        "show",
+        "single-turn"
       ]
     },
     {
@@ -533,8 +764,16 @@
       "utterance": "תזכיר לי משהו",
       "setup": {},
       "constraints": [
-        { "type": "no_invented_reminder_add" },
-        { "type": "mutations_empty_or_read_only" }
+        {
+          "type": "no_invented_reminder_add"
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -549,6 +788,10 @@
           "nameIncludes": "מיכל",
           "phoneIncludes": "054"
         }
+      ],
+      "tags": [
+        "directory",
+        "single-turn"
       ]
     },
     {
@@ -557,7 +800,9 @@
       "utterance": "תזכירי לי בסביבות 14:00 לדבר עם רב פס הטלפון שלהם לווטסאפ הוא 0508087073",
       "setup": {},
       "constraints": [
-        { "type": "directory_empty" },
+        {
+          "type": "directory_empty"
+        },
         {
           "type": "reminders_has_action",
           "action": "add"
@@ -568,6 +813,10 @@
           "listType": "tasks",
           "itemTextIncludes": "0508087073"
         }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -582,7 +831,13 @@
           "listType": "tasks",
           "itemTextIncludes": "0534455366"
         },
-        { "type": "directory_empty" }
+        {
+          "type": "directory_empty"
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
       ]
     },
     {
@@ -603,8 +858,16 @@
         },
         {
           "type": "response_mentions_any",
-          "needles": ["שעה", "עד", "קנ"]
+          "needles": [
+            "שעה",
+            "עד",
+            "קנ"
+          ]
         }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -613,16 +876,32 @@
       "utterance": "נדנדי לי כל 10 שניות ליצור קשר עם הופ און",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "directory_empty" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "directory_empty"
+        },
         {
           "type": "response_forbids_any",
-          "needles": ["ווטסאפ", "whatsapp", "מה מספר"]
+          "needles": [
+            "ווטסאפ",
+            "whatsapp",
+            "מה מספר"
+          ]
         },
         {
           "type": "response_mentions_any",
-          "needles": ["שעה", "דקות", "שניות"]
+          "needles": [
+            "שעה",
+            "דקות",
+            "שניות"
+          ]
         }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -630,13 +909,24 @@
       "tag": "happy",
       "utterance": "תמחקי את מיכל מספר הטלפונים",
       "setup": {
-        "contacts": [{ "name": "מיכל", "phone": "0541111111" }]
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          }
+        ]
       },
       "constraints": [
         {
           "type": "directory_remove_contact_ids",
-          "contactIds": ["contact-0"]
+          "contactIds": [
+            "contact-0"
+          ]
         }
+      ],
+      "tags": [
+        "directory",
+        "single-turn"
       ]
     },
     {
@@ -645,14 +935,30 @@
       "utterance": "תמחקי את כל אנשי הקשר",
       "setup": {
         "contacts": [
-          { "name": "מיכל", "phone": "0541111111" },
-          { "name": "אורי", "phone": "0534455366" }
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          },
+          {
+            "name": "אורי",
+            "phone": "0534455366"
+          }
         ]
       },
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "directory_empty" },
-        { "type": "response_looks_like_ask" }
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "directory_empty"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ],
+      "tags": [
+        "directory",
+        "single-turn"
       ]
     },
     {
@@ -667,7 +973,9 @@
             "list_type": "shopping",
             "fire_at": "2099-01-01T08:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "לקנות חלב",
@@ -686,8 +994,14 @@
       "constraints": [
         {
           "type": "reminders_remove_ids",
-          "reminderIds": ["eval-reminder-milk"]
+          "reminderIds": [
+            "eval-reminder-milk"
+          ]
         }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -702,7 +1016,10 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-shop-milk-keep", "שם פריט": "חלב" }
+              {
+                "item_id": "eval-item-shop-milk-keep",
+                "שם פריט": "חלב"
+              }
             ]
           }
         ],
@@ -713,7 +1030,9 @@
             "list_type": "shopping",
             "fire_at": "2099-01-01T08:00:00.000Z",
             "repeat": "10:seconds",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "לקנות חלב",
@@ -732,9 +1051,17 @@
       "constraints": [
         {
           "type": "reminders_remove_ids",
-          "reminderIds": ["eval-reminder-milk-nudge"]
+          "reminderIds": [
+            "eval-reminder-milk-nudge"
+          ]
         },
-        { "type": "lists_empty" }
+        {
+          "type": "lists_empty"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -749,7 +1076,12 @@
             "list_name": "באגים",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-bugs-a", "תיאור": "באג א" }]
+            "items": [
+              {
+                "item_id": "eval-item-bugs-a",
+                "תיאור": "באג א"
+              }
+            ]
           },
           {
             "list_id": "eval-list-custom-problems",
@@ -757,7 +1089,12 @@
             "list_name": "בעיות",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-problems-a", "תיאור": "בעיה א" }]
+            "items": [
+              {
+                "item_id": "eval-item-problems-a",
+                "תיאור": "בעיה א"
+              }
+            ]
           },
           {
             "list_id": "eval-list-custom-notes",
@@ -765,17 +1102,33 @@
             "list_name": "הערות",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-notes-a", "תיאור": "הערה" }]
+            "items": [
+              {
+                "item_id": "eval-item-notes-a",
+                "תיאור": "הערה"
+              }
+            ]
           }
         ]
       },
       "constraints": [
         {
           "type": "list_ops_delete_list_ids",
-          "listIds": ["eval-list-custom-bugs", "eval-list-custom-problems"]
+          "listIds": [
+            "eval-list-custom-bugs",
+            "eval-list-custom-problems"
+          ]
         },
-        { "type": "lists_empty" },
-        { "type": "filing_empty" }
+        {
+          "type": "lists_empty"
+        },
+        {
+          "type": "filing_empty"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -790,7 +1143,12 @@
             "list_name": "באגים",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-bugs-p1", "תיאור": "באג אישי" }]
+            "items": [
+              {
+                "item_id": "eval-item-bugs-p1",
+                "תיאור": "באג אישי"
+              }
+            ]
           },
           {
             "list_id": "eval-list-custom-bugs-shared",
@@ -798,15 +1156,33 @@
             "list_name": "באגים",
             "owner": "טל",
             "scope": "shared",
-            "shared_with": ["טל", "עמית"],
-            "items": [{ "item_id": "eval-item-bugs-s1", "תיאור": "באג משותף" }]
+            "shared_with": [
+              "טל",
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-bugs-s1",
+                "תיאור": "באג משותף"
+              }
+            ]
           }
         ]
       },
       "constraints": [
-        { "type": "lists_empty" },
-        { "type": "list_ops_empty" },
-        { "type": "response_looks_like_ask" }
+        {
+          "type": "lists_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -821,14 +1197,29 @@
             "list_name": "באגים",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-bugs-only", "תיאור": "באג" }]
+            "items": [
+              {
+                "item_id": "eval-item-bugs-only",
+                "תיאור": "באג"
+              }
+            ]
           }
         ]
       },
       "constraints": [
-        { "type": "lists_empty" },
-        { "type": "list_ops_empty" },
-        { "type": "response_looks_like_ask" }
+        {
+          "type": "lists_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ],
+      "tags": [
+        "lists-safety",
+        "single-turn"
       ]
     },
     {
@@ -849,8 +1240,17 @@
         },
         {
           "type": "response_mentions_any",
-          "needles": ["08", "8:00", "כלב", "יום"]
+          "needles": [
+            "08",
+            "8:00",
+            "כלב",
+            "יום"
+          ]
         }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
       ]
     },
     {
@@ -870,7 +1270,11 @@
                 "שם מטלה": "לאסוף את הילדים",
                 "חוזר": "כל יום שישי ב־12:00",
                 "שעה לביצוע": "12:00",
-                "next_occurrences": ["2026-10-23", "2026-10-30", "2026-11-06"]
+                "next_occurrences": [
+                  "2026-10-23",
+                  "2026-10-30",
+                  "2026-11-06"
+                ]
               }
             ]
           }
@@ -882,10 +1286,655 @@
           "action": "update",
           "listType": "tasks"
         },
-        { "type": "list_ops_empty" },
+        {
+          "type": "list_ops_empty"
+        },
         {
           "type": "response_mentions_any",
-          "needles": ["23", "23.10", "ילדים"]
+          "needles": [
+            "23",
+            "23.10",
+            "ילדים"
+          ]
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
+      ]
+    },
+    {
+      "id": "reminder-create-relative",
+      "tag": "happy",
+      "utterance": "תזכירי לי בעוד שעה לשתות מים",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "reminders_has_action",
+          "action": "add"
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-create-no-time",
+      "tag": "action-confusion",
+      "utterance": "תזכירי לי לקנות חלב",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-update-time",
+      "tag": "happy",
+      "utterance": "תעדכני את התזכורת לחלב ל־14:00",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "reminders_has_action",
+          "action": "update"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-subhour-refuse",
+      "tag": "action-confusion",
+      "utterance": "תזכירי לי כל 30 דקות לקנות חלב",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": [
+            "שעה",
+            "דקות",
+            "שניות"
+          ]
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-recur-weekday",
+      "tag": "happy",
+      "utterance": "תזכירי לי כל יום שני ב־09:00 לשתות מים",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "reminders_has_action",
+          "action": "add",
+          "recurring": true
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-cancel-ambiguous",
+      "tag": "action-confusion",
+      "utterance": "תבטלי את התזכורת",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-a",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          },
+          {
+            "reminder_id": "eval-rem-b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T11:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ],
+      "tags": [
+        "reminders",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "task-add-timed-no-auto-clock",
+      "tag": "happy",
+      "utterance": "תוסיפי מטלה מחר ב־09:00 ללכת לבנק",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
+      ]
+    },
+    {
+      "id": "task-meet-create",
+      "tag": "happy",
+      "utterance": "תקבעי פגישה עם עמית מחר ב־10:00",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks"
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": [
+            "עמית",
+            "10",
+            "פגיש"
+          ]
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
+      ]
+    },
+    {
+      "id": "task-done-doctor",
+      "tag": "happy",
+      "utterance": "סיימתי להתקשר לרופא",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_remove_item_ids",
+          "listType": "tasks",
+          "itemIds": [
+            "eval-item-doctor"
+          ]
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ],
+      "tags": [
+        "single-turn",
+        "tasks"
+      ]
+    },
+    {
+      "id": "shopping-add-milk",
+      "tag": "happy",
+      "utterance": "תוסיפי חלב לקניות",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping",
+          "itemTextIncludes": "חלב"
+        }
+      ],
+      "tags": [
+        "shopping",
+        "single-turn"
+      ]
+    },
+    {
+      "id": "reminder-create-explicit",
+      "tag": "happy",
+      "tags": [
+        "reminders",
+        "single-turn"
+      ],
+      "utterance": "תזכירי לי מחר ב־09:00 לקנות חלב",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "reminders_has_action",
+          "action": "add"
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping"
+        }
+      ]
+    },
+    {
+      "id": "task-empty-ask",
+      "tag": "action-confusion",
+      "tags": [
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי מטלה",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ]
+    },
+    {
+      "id": "filing-add-simple",
+      "tag": "happy",
+      "tags": [
+        "filing",
+        "single-turn"
+      ],
+      "utterance": "תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "filing_has_action",
+          "action": "add_filing"
+        }
+      ]
+    },
+    {
+      "id": "list-buy-eggs",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn"
+      ],
+      "description": "Bought ביצים → remove by item_id",
+      "utterance": "קניתי ביצים",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_remove_item_ids",
+          "listType": "shopping",
+          "itemIds": [
+            "eval-item-eggs"
+          ]
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "shopping-add-yogurt",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn"
+      ],
+      "description": "Add יוגורט to shopping",
+      "utterance": "תוסיפי יוגורט לקניות",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping",
+          "itemTextIncludes": "יוגורט"
+        }
+      ]
+    },
+    {
+      "id": "shopping-empty-ask",
+      "tag": "action-confusion",
+      "tags": [
+        "shopping",
+        "single-turn",
+        "tasks"
+      ],
+      "utterance": "תוסיפי לקניות",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ]
+    },
+    {
+      "id": "filing-empty-ask",
+      "tag": "action-confusion",
+      "tags": [
+        "filing",
+        "single-turn",
+        "tasks"
+      ],
+      "utterance": "תייקי משהו",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ]
+    },
+    {
+      "id": "share-shop-with-amit",
+      "tag": "happy",
+      "tags": [
+        "share",
+        "shopping",
+        "single-turn"
+      ],
+      "utterance": "תשתפי את הקניות עם עמית",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "update",
+          "listType": "shopping"
+        }
+      ]
+    },
+    {
+      "id": "share-assign-task-amit",
+      "tag": "happy",
+      "tags": [
+        "share",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "תשימי על עמית להתקשר לרופא",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "רופא"
+        }
+      ]
+    },
+    {
+      "id": "share-ask-missing-partner",
+      "tag": "action-confusion",
+      "tags": [
+        "share",
+        "shopping",
+        "single-turn",
+        "tasks"
+      ],
+      "utterance": "תשתפי את הקניות",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        }
+      ]
+    },
+    {
+      "id": "event-host-create-poker",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "צריך לארגן ערב פוקר",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "minCount": 1,
+          "maxCount": 1,
+          "itemTextIncludes": "ערב פוקר"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "custom"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "shopping"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        },
+        {
+          "type": "response_forbids_any",
+          "needles": [
+            "לארגן ערב פוקר"
+          ]
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": [
+            "ערב פוקר"
+          ]
         }
       ]
     }

@@ -1,0 +1,19 @@
+{
+  "id": "studio-intent-buy-milk",
+  "track": "model",
+  "description": "Bought milk → remove (author never wrote constraints)",
+  "tags": ["shopping", "single-turn"],
+  "setup": {
+    "shoppingItems": [{ "id": "eval-item-milk", "label": "חלב" }]
+  },
+  "turns": [
+    {
+      "utterance": "קניתי חלב",
+      "intent": {
+        "type": "remove_item",
+        "listType": "shopping",
+        "itemId": "eval-item-milk"
+      }
+    }
+  ]
+}

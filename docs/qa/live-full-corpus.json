@@ -1,0 +1,1337 @@
+{
+  "version": 1,
+  "kind": "live-full",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "criticalCaseIds": [
+    "full-list-buy-milk",
+    "full-mt-clarify-then-delete",
+    "full-shopping-add-milk",
+    "full-task-done-doctor",
+    "full-list-clear-personal-shopping",
+    "full-reminder-cancel-named",
+    "full-filing-add-simple",
+    "full-directory-add-michal",
+    "full-share-shop-with-amit",
+    "full-event-host-create-poker",
+    "full-mt-event-clarify-then-link",
+    "full-mt-clarify-task-which",
+    "full-mt-multi-add-then-buy",
+    "full-mt-complex-personal-vs-shared",
+    "full-mt-share-ask-then-partner"
+  ],
+  "cases": [
+    {
+      "id": "full-list-buy-milk",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Bought milk → remove persists in DB facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-milk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-shopping-add-milk",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Add milk → appears in reinjected EMPLOYEE_SAVED_DATA",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-clarify-then-delete",
+      "tag": "continuity",
+      "tags": [
+        "shopping",
+        "multi-turn",
+        "full-live"
+      ],
+      "description": "Ask which item → remove milk; bread remains in DB",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את זה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב",
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "את החלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ],
+            "itemIdsAbsent": [
+              "eval-item-milk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-reminder-create-relative",
+      "tag": "happy",
+      "tags": [
+        "reminders",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Relative self-nudge persists clock + task facts",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי בעוד שעה לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מים",
+                "שעה"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-task-done-doctor",
+      "tag": "happy",
+      "tags": [
+        "tasks",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Finish doctor task → removed from live facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-doctor"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "עמית"
+            ],
+            "itemIdsAbsent": [
+              "eval-item-doctor"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-list-buy-eggs",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Bought ביצים → remove persists",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי ביצים",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-eggs"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-eggs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-shopping-add-bread",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Add לחם → appears in facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לחם לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-task-empty-ask",
+      "tag": "action-confusion",
+      "tags": [
+        "tasks",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Incomplete request → ask (no mutations)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-list-clear-personal-shopping",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Clear personal shopping persists",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-shop-bread",
+                "שם פריט": "לחם"
+              },
+              {
+                "item_id": "eval-item-shop-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "נקה את רשימת הקניות האישית שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-milk",
+                "eval-item-shop-bread",
+                "eval-item-shop-eggs"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-shop-milk",
+              "eval-item-shop-bread",
+              "eval-item-shop-eggs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-task-meet-create",
+      "tag": "happy",
+      "tags": [
+        "tasks",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Add meeting task persists in facts",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לפגישה עם עמית",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "עמית"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "עמית"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-reminder-cancel-named",
+      "tag": "happy",
+      "tags": [
+        "reminders",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Cancel named reminder → clock gone from facts",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-01-01T10:00:00.000Z",
+            "repeat": "once",
+            "ping": ["טל"],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "last_composed_text": "",
+            "sent_text": "לשתות מים",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-water"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לשתות מים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-reminder-create-explicit",
+      "tag": "happy",
+      "tags": [
+        "reminders",
+        "shopping",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Explicit tomorrow reminder + shopping task persists",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי מחר ב־09:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-shopping-empty-ask",
+      "tag": "action-confusion",
+      "tags": [
+        "shopping",
+        "full-live",
+        "single-turn",
+        "tasks"
+      ],
+      "description": "Incomplete shopping add → ask; no DB change",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי לקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-filing-add-simple",
+      "tag": "happy",
+      "tags": [
+        "filing",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "File address persists",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "הרצל"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "הרצל"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-filing-remove-email-code",
+      "tag": "happy",
+      "tags": [
+        "filing",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Remove filing by spoken name",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק קוד כניסה לחשבון אימייל",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-email-code"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "8844"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-directory-add-michal",
+      "tag": "happy",
+      "tags": [
+        "directory",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Add Michal to contacts persists",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי את מיכל 0501234567 לאנשי קשר",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "מיכל"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מיכל"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-directory-remove-michal",
+      "tag": "happy",
+      "tags": [
+        "directory",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Remove Michal contact",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0501234567"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקי את מיכל מאנשי הקשר",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "remove"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "מיכל"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-list-named-item-delete",
+      "tag": "happy",
+      "tags": [
+        "lists-safety",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Delete named custom-list item by id",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-problems",
+            "list_type": "custom",
+            "name": "בעיות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-problems-check",
+                "שם פריט": "לבדוק שרת"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקתי לבדוק שרת מרשימת בעיות",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "custom",
+              "itemIds": [
+                "eval-item-problems-check"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-problems-check"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-dump-what-saved",
+      "tag": "happy",
+      "tags": [
+        "show",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Show dump; milk still in facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה שמור לי",
+          "constraints": [
+            {
+              "type": "show_dump",
+              "value": "full"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-share-shop-with-amit",
+      "tag": "happy",
+      "tags": [
+        "share",
+        "shopping",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Share shopping applies; milk still present",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשתפי את הקניות עם עמית",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-share-ask-then-partner",
+      "tag": "continuity",
+      "tags": [
+        "share",
+        "shopping",
+        "mt-clarify",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Share clarify then partner; milk kept",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשתפי את הקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        },
+        {
+          "utterance": "עם עמית",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-event-clarify-then-link",
+      "tag": "continuity",
+      "tags": [
+        "events",
+        "mt-clarify",
+        "mt-complex",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Event clarify→link persists host + כיבוד",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-bday",
+                "שם מטלה": "ערב יום הולדת"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי רשימת כיבוד?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-host-bday"
+            ],
+            "factsInclude": [
+              "ערב יום הולדת"
+            ],
+            "factsExclude": [
+              "כיבוד"
+            ]
+          }
+        },
+        {
+          "utterance": "עוגה ושתיה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "minCount": 1,
+              "itemTextIncludes": "עוגה"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "כיבוד"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-host-bday"
+            ],
+            "factsInclude": [
+              "כיבוד",
+              "עוגה",
+              "ערב יום הולדת"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-event-rename-host",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Rename event host; no second tasks host",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-party",
+                "שם מטלה": "ערב פוקר"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את השם לערב משחקים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "ערב משחקים"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-host-party"
+            ],
+            "factsInclude": [
+              "ערב משחקים"
+            ],
+            "factsExclude": [
+              "ערב פוקר"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-event-host-create-poker",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Create poker host task persists",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "צריך לארגן ערב פוקר",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "ערב פוקר"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "ערב פוקר"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-clarify-task-which",
+      "tag": "continuity",
+      "tags": [
+        "tasks",
+        "mt-clarify",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Clarify task done; meet remains",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי את זה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "רופא",
+              "עמית"
+            ]
+          }
+        },
+        {
+          "utterance": "את הרופא",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-doctor"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-doctor"
+            ],
+            "factsInclude": [
+              "עמית"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-multi-add-then-buy",
+      "tag": "continuity",
+      "tags": [
+        "shopping",
+        "mt-multi-act",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Add then buy yogurt; yogurt absent",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי יוגורט לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "יוגורט"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "יוגורט"
+            ]
+          }
+        },
+        {
+          "utterance": "קניתי יוגורט",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping",
+              "itemTextIncludes": "יוגורט"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "יוגורט"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-complex-personal-vs-shared",
+      "tag": "continuity",
+      "tags": [
+        "shopping",
+        "share",
+        "mt-complex",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Clear personal only; shared bread kept",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "נקה את הקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב",
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "רק את האישית שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-shop-milk"
+            ],
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

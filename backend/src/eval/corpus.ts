@@ -7,6 +7,11 @@ import type { ModelEvalConstraint, ModelEvalTag } from "./constraints.js";
 export interface ModelEvalCorpusCase {
   id: string;
   tag: ModelEvalTag;
+  /**
+   * Topic filters for selective LIVE runs (e.g. reminders, shopping, multi-turn).
+   * Env: MODEL_EVAL_TAGS=reminders,shopping (comma-separated; empty/all = no filter).
+   */
+  tags?: string[];
   utterance: string;
   setup: {
     lists?: EmployeeRecordSnapshot["lists"];
@@ -62,9 +67,44 @@ export interface ModelEvalMultiTurnTurn {
 export interface ModelEvalMultiTurnCase {
   id: string;
   tag: ModelEvalTag;
+  /** Same topic filter array as single-turn LIVE cases. */
+  tags?: string[];
   description?: string;
   setup: ModelEvalCorpusCase["setup"];
   turns: ModelEvalMultiTurnTurn[];
+}
+
+/** Parse MODEL_EVAL_TAGS=a,b — empty / "all" / "*" → null (no filter). */
+export function parseModelEvalTags(
+  raw = process.env.MODEL_EVAL_TAGS,
+): string[] | null {
+  const parts = (raw ?? "")
+    .split(",")
+    .map((row) => row.trim().toLowerCase())
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1 && (parts[0] === "all" || parts[0] === "*")) {
+    return null;
+  }
+  return parts;
+}
+
+/** Keep cases that share at least one requested tag (case-insensitive). */
+export function filterCasesByTags<T extends { id: string; tags?: string[] }>(
+  cases: T[],
+  tags: string[] | null | undefined,
+): T[] {
+  if (!tags?.length) return cases;
+  const want = new Set(tags.map((t) => t.toLowerCase()));
+  const selected = cases.filter((row) =>
+    (row.tags ?? []).some((t) => want.has(t.toLowerCase())),
+  );
+  if (selected.length === 0) {
+    throw new Error(
+      `MODEL_EVAL_TAGS=${[...want].join(",")} matched 0 cases (known tags on corpus may differ)`,
+    );
+  }
+  return selected;
 }
 
 export interface ModelEvalMultiTurnCorpus {
@@ -79,6 +119,59 @@ export function defaultMultiTurnCorpusPath(
   repoRoot = resolve(import.meta.dirname, "../../.."),
 ): string {
   return resolve(repoRoot, "docs/qa/phase-4-multi-turn-corpus.json");
+}
+
+export function defaultLiveFullCorpusPath(
+  repoRoot = resolve(import.meta.dirname, "../../.."),
+): string {
+  return resolve(repoRoot, "docs/qa/live-full-corpus.json");
+}
+
+/** LIVE-full corpus turn (model constraints + optional DB stateAfter). */
+export interface LiveFullCorpusTurn {
+  utterance: string;
+  constraints?: ModelEvalConstraint[];
+  stateAfter?: RegressionStateAssert;
+}
+
+export interface LiveFullCorpusCase {
+  id: string;
+  tag?: ModelEvalTag | string;
+  tags?: string[];
+  description?: string;
+  setup?: ModelEvalCorpusCase["setup"];
+  turns: LiveFullCorpusTurn[];
+}
+
+export interface LiveFullCorpus {
+  version: number;
+  kind?: string;
+  speaker: string;
+  passRate: number;
+  criticalCaseIds?: string[];
+  cases: LiveFullCorpusCase[];
+}
+
+export function loadLiveFullCorpus(
+  path = defaultLiveFullCorpusPath(),
+): LiveFullCorpus {
+  const raw = JSON.parse(readFileSync(path, "utf8")) as LiveFullCorpus;
+  if (!Array.isArray(raw.cases) || raw.cases.length === 0) {
+    throw new Error(`Live-full corpus has no cases: ${path}`);
+  }
+  for (const row of raw.cases) {
+    if (!Array.isArray(row.turns) || row.turns.length === 0) {
+      throw new Error(`Live-full case ${row.id}: turns required`);
+    }
+  }
+  if (raw.criticalCaseIds) {
+    const known = new Set(raw.cases.map((c) => c.id));
+    const missing = raw.criticalCaseIds.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      throw new Error(`Live-full criticalCaseIds unknown: ${missing.join(", ")}`);
+    }
+  }
+  return raw;
 }
 
 export function loadModelEvalMultiTurnCorpus(

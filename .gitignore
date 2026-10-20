@@ -9,4 +9,11 @@ dist/
 frontend/.vite/
 node_modules
 docs/qa/phase-4-last-eval.json
+docs/qa/phase-4-last-report.md
+docs/qa/phase-4-last-report.json
 docs/qa/phase-4-multi-turn-last-eval.json
+docs/qa/phase-4-multi-turn-last-report.md
+docs/qa/phase-4-multi-turn-last-report.json
+docs/qa/live-full-last-eval.json
+docs/qa/live-full-last-report.md
+docs/qa/live-full-last-report.json

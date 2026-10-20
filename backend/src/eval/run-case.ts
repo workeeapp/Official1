@@ -14,8 +14,10 @@ import {
   type ModelEvalCaseResult,
 } from "./constraints.js";
 import {
+  filterCasesByTags,
   loadModelEvalCorpus,
   loadModelEvalMultiTurnCorpus,
+  parseModelEvalTags,
   snapshotFromSetup,
   type ModelEvalCorpus,
   type ModelEvalCorpusCase,
@@ -191,11 +193,15 @@ export async function runModelEvalCase(
 
 export async function runModelEvalCorpus(
   corpus: ModelEvalCorpus = loadModelEvalCorpus(),
-  options?: { caseIds?: string[] },
+  options?: { caseIds?: string[]; tags?: string[] | null },
 ): Promise<ModelEvalSummary> {
-  const selected = options?.caseIds?.length
-    ? corpus.cases.filter((row) => options.caseIds!.includes(row.id))
-    : corpus.cases;
+  let selected = corpus.cases;
+  const tags =
+    options?.tags !== undefined ? options.tags : parseModelEvalTags();
+  selected = filterCasesByTags(selected, tags);
+  if (options?.caseIds?.length) {
+    selected = selected.filter((row) => options.caseIds!.includes(row.id));
+  }
   const results: ModelEvalRunCaseResult[] = [];
   for (const row of selected) {
     results.push(await runModelEvalCase(row, { speaker: corpus.speaker }));
@@ -314,11 +320,15 @@ export async function runModelEvalMultiTurnCase(
 
 export async function runModelEvalMultiTurnCorpus(
   corpus: ModelEvalMultiTurnCorpus = loadModelEvalMultiTurnCorpus(),
-  options?: { caseIds?: string[] },
+  options?: { caseIds?: string[]; tags?: string[] | null },
 ): Promise<ModelEvalSummary & { multiTurnResults: ModelEvalMultiTurnRunResult[] }> {
-  const selected = options?.caseIds?.length
-    ? corpus.cases.filter((row) => options.caseIds!.includes(row.id))
-    : corpus.cases;
+  let selected = corpus.cases;
+  const tags =
+    options?.tags !== undefined ? options.tags : parseModelEvalTags();
+  selected = filterCasesByTags(selected, tags);
+  if (options?.caseIds?.length) {
+    selected = selected.filter((row) => options.caseIds!.includes(row.id));
+  }
   const multiTurnResults: ModelEvalMultiTurnRunResult[] = [];
   for (const row of selected) {
     multiTurnResults.push(

@@ -1,7 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadModelEvalMultiTurnCorpus } from "../src/eval/corpus.js";
+import {
+  loadModelEvalMultiTurnCorpus,
+  parseModelEvalTags,
+} from "../src/eval/corpus.js";
+import {
+  casesFromMultiTurnResults,
+  writeEvalReportArtifacts,
+} from "../src/eval/human-report.js";
 import { runModelEvalMultiTurnCorpus } from "../src/eval/run-case.js";
 
 /**
@@ -10,6 +17,7 @@ import { runModelEvalMultiTurnCorpus } from "../src/eval/run-case.js";
  *
  *   MODEL_EVAL_LIVE=1 npm run test:model-eval-mt -w backend
  * Optional: MODEL_EVAL_CASES=id1,id2
+ * Optional: MODEL_EVAL_TAGS=reminders,multi-turn,shopping,…
  */
 describe("Phase 4 multi-turn model eval (live Lucy)", () => {
   it("meets soft pass-rate on the multi-turn corpus", async () => {
@@ -28,9 +36,17 @@ describe("Phase 4 multi-turn model eval (live Lucy)", () => {
       .map((row) => row.trim())
       .filter(Boolean);
     const corpus = loadModelEvalMultiTurnCorpus();
+    const tagsFilter = parseModelEvalTags();
     const summary = await runModelEvalMultiTurnCorpus(corpus, {
       caseIds: caseFilter?.length ? caseFilter : undefined,
     });
+
+    const generatedAt = new Date().toISOString();
+    const corpusById = new Map(corpus.cases.map((c) => [c.id, c]));
+    const reportCases = casesFromMultiTurnResults(
+      summary.multiTurnResults,
+      corpusById,
+    );
 
     const reportPath = resolve(
       import.meta.dirname,
@@ -40,9 +56,9 @@ describe("Phase 4 multi-turn model eval (live Lucy)", () => {
       reportPath,
       JSON.stringify(
         {
-          generatedAt: new Date().toISOString(),
+          generatedAt,
           suite: "phase-4-multi-turn-corpus",
-          track: "LIVE",
+          track: "LIVE_MODEL_MT",
           promptSource: "LLM.config.json (worktree via loadLlmConfig)",
           evalPath: "model-output-constraints-only-multi-turn",
           productionApply: false,
@@ -76,6 +92,32 @@ describe("Phase 4 multi-turn model eval (live Lucy)", () => {
         2,
       ),
       "utf8",
+    );
+
+    writeEvalReportArtifacts(
+      resolve(
+        import.meta.dirname,
+        "../../docs/qa/phase-4-multi-turn-last-report",
+      ),
+      {
+        track: "LIVE_MODEL_MT",
+        suite: "phase-4-multi-turn-corpus",
+        generatedAt,
+        promptSource: "LLM.config.json (worktree via loadLlmConfig)",
+        productionApply: false,
+        tagsFilter,
+        caseIdsFilter: caseFilter?.length ? caseFilter : null,
+        total: summary.total,
+        passed: summary.passed,
+        failed: summary.failed,
+        passRate: summary.passRate,
+        requiredPassRate: summary.requiredPassRate,
+        softOk: summary.softOk,
+        criticalOk: summary.criticalOk,
+        criticalFailed: summary.criticalFailed,
+        ok: summary.ok,
+        cases: reportCases,
+      },
     );
 
     expect(

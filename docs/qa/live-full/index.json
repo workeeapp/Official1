@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "kind": "live-full",
+  "status": "scaffold",
+  "note": "Same pack domains as live-model. Cases mirrored with enabled:false until full LIVE runner ships.",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "packs": [
+    {
+      "domain": "directory",
+      "file": "directory-pack.json",
+      "pack": "live-full-directory-v1",
+      "caseCount": 4
+    },
+    {
+      "domain": "filing",
+      "file": "filing-pack.json",
+      "pack": "live-full-filing-v1",
+      "caseCount": 4
+    },
+    {
+      "domain": "lists-safety",
+      "file": "lists-safety-pack.json",
+      "pack": "live-full-lists-safety-v1",
+      "caseCount": 7
+    },
+    {
+      "domain": "reminders",
+      "file": "reminders-pack.json",
+      "pack": "live-full-reminders-v1",
+      "caseCount": 16
+    },
+    {
+      "domain": "shopping",
+      "file": "shopping-pack.json",
+      "pack": "live-full-shopping-v1",
+      "caseCount": 8
+    },
+    {
+      "domain": "show",
+      "file": "show-pack.json",
+      "pack": "live-full-show-v1",
+      "caseCount": 1
+    },
+    {
+      "domain": "tasks",
+      "file": "tasks-pack.json",
+      "pack": "live-full-tasks-v1",
+      "caseCount": 9
+    }
+  ]
+}

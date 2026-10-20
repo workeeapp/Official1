@@ -1,0 +1,2 @@
+{"track":"model","template":"ask","id":"studio-example-ask","utterance":"תוסיפי מטלה","tags":["tasks","single-turn"]}
+{"track":"full","template":"add-shopping","id":"studio-example-full-add","itemLabel":"גבינה","utterance":"תוסיפי גבינה לקניות","tags":["shopping","full-live","single-turn"]}

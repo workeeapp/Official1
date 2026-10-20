@@ -11,6 +11,7 @@ export default defineConfig({
     include: [
       "tests/model-eval.live.test.ts",
       "tests/model-eval-multi-turn.live.test.ts",
+      "tests/model-eval-full.live.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 900_000,

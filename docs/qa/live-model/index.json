@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "kind": "live-model",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "packs": [
+    {
+      "domain": "directory",
+      "file": "directory-pack.json",
+      "pack": "live-model-directory-v1",
+      "caseCount": 4,
+      "criticalCaseIds": []
+    },
+    {
+      "domain": "filing",
+      "file": "filing-pack.json",
+      "pack": "live-model-filing-v1",
+      "caseCount": 4,
+      "criticalCaseIds": []
+    },
+    {
+      "domain": "lists-safety",
+      "file": "lists-safety-pack.json",
+      "pack": "live-model-lists-safety-v1",
+      "caseCount": 7,
+      "criticalCaseIds": [
+        "list-named-item-delete",
+        "delete-everything",
+        "list-not-filing",
+        "delete-two-named-lists",
+        "delete-ambiguous-list-title",
+        "delete-unresolved-list",
+        "mt-ambiguous-list-resolve"
+      ]
+    },
+    {
+      "domain": "reminders",
+      "file": "reminders-pack.json",
+      "pack": "live-model-reminders-v1",
+      "caseCount": 16,
+      "criticalCaseIds": [
+        "mt-cancel-reminder-resolve"
+      ]
+    },
+    {
+      "domain": "shopping",
+      "file": "shopping-pack.json",
+      "pack": "live-model-shopping-v1",
+      "caseCount": 8,
+      "criticalCaseIds": [
+        "list-buy-milk",
+        "list-clear-personal-shopping",
+        "mt-clarify-then-delete"
+      ]
+    },
+    {
+      "domain": "show",
+      "file": "show-pack.json",
+      "pack": "live-model-show-v1",
+      "caseCount": 1,
+      "criticalCaseIds": []
+    },
+    {
+      "domain": "tasks",
+      "file": "tasks-pack.json",
+      "pack": "live-model-tasks-v1",
+      "caseCount": 9,
+      "criticalCaseIds": [
+        "list-clear-tasks",
+        "list-filtered-multi-delete"
+      ]
+    }
+  ],
+  "criticalCaseIds": [
+    "list-named-item-delete",
+    "delete-everything",
+    "list-not-filing",
+    "delete-two-named-lists",
+    "delete-ambiguous-list-title",
+    "delete-unresolved-list",
+    "mt-ambiguous-list-resolve",
+    "mt-cancel-reminder-resolve",
+    "list-buy-milk",
+    "list-clear-personal-shopping",
+    "mt-clarify-then-delete",
+    "list-clear-tasks",
+    "list-filtered-multi-delete"
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "kind": "live-model",
+  "domain": "directory",
+  "pack": "live-model-directory-v1",
+  "speaker": "טל",
+  "passRate": 0.7,
+  "productionApply": false,
+  "evalPath": "model-output-constraints-only",
+  "criticalCaseIds": [],
+  "cases": [
+    {
+      "id": "directory-add-michal",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי את מיכל 054-1111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "מיכל",
+              "phoneIncludes": "054"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "directory-remove-michal",
+      "tag": "happy",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את מיכל מספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "contact-0"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "directory-clear-all",
+      "tag": "action-confusion",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          },
+          {
+            "name": "אורי",
+            "phone": "0534455366"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-directory-clear-confirm",
+      "tag": "continuity",
+      "description": "Wipe-all contacts ask → כן removes phone-book rows",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          },
+          {
+            "name": "אורי",
+            "phone": "0534455366"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "כן, את ספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "contact-0",
+                "contact-1"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadModelEvalCorpus } from "../src/eval/corpus.js";
+import {
+  loadModelEvalCorpus,
+  parseModelEvalTags,
+} from "../src/eval/corpus.js";
+import {
+  casesFromModelEvalResults,
+  writeEvalReportArtifacts,
+} from "../src/eval/human-report.js";
 import { runModelEvalCorpus } from "../src/eval/run-case.js";
 
 /**
@@ -10,6 +17,7 @@ import { runModelEvalCorpus } from "../src/eval/run-case.js";
  * CI sets CI=true (workflow_dispatch / nightly). Run:
  *   MODEL_EVAL_LIVE=1 npm run test:model-eval -w backend
  * Optional: MODEL_EVAL_CASES=id1,id2
+ * Optional: MODEL_EVAL_TAGS=reminders,shopping,tasks,filing,directory,lists-safety,show,single-turn
  * Scores model metadata only — no production Prisma apply / no WhatsApp.
  */
 describe("Phase 4 model eval (live Lucy)", () => {
@@ -29,9 +37,14 @@ describe("Phase 4 model eval (live Lucy)", () => {
       .map((row) => row.trim())
       .filter(Boolean);
     const corpus = loadModelEvalCorpus();
+    const tagsFilter = parseModelEvalTags();
     const summary = await runModelEvalCorpus(corpus, {
       caseIds: caseFilter?.length ? caseFilter : undefined,
     });
+
+    const generatedAt = new Date().toISOString();
+    const corpusById = new Map(corpus.cases.map((c) => [c.id, c]));
+    const reportCases = casesFromModelEvalResults(summary.results, corpusById);
 
     const reportPath = resolve(
       import.meta.dirname,
@@ -41,9 +54,9 @@ describe("Phase 4 model eval (live Lucy)", () => {
       reportPath,
       JSON.stringify(
         {
-          generatedAt: new Date().toISOString(),
+          generatedAt,
           suite: "phase-4-corpus",
-          track: "LIVE",
+          track: "LIVE_MODEL",
           promptSource: "LLM.config.json (worktree via loadLlmConfig)",
           evalPath: "model-output-constraints-only",
           productionApply: false,
@@ -73,7 +86,29 @@ describe("Phase 4 model eval (live Lucy)", () => {
       "utf8",
     );
 
-    // Soft pass-rate AND critical deletion-safety gate.
+    writeEvalReportArtifacts(
+      resolve(import.meta.dirname, "../../docs/qa/phase-4-last-report"),
+      {
+        track: "LIVE_MODEL",
+        suite: "phase-4-corpus",
+        generatedAt,
+        promptSource: "LLM.config.json (worktree via loadLlmConfig)",
+        productionApply: false,
+        tagsFilter,
+        caseIdsFilter: caseFilter?.length ? caseFilter : null,
+        total: summary.total,
+        passed: summary.passed,
+        failed: summary.failed,
+        passRate: summary.passRate,
+        requiredPassRate: summary.requiredPassRate,
+        softOk: summary.softOk,
+        criticalOk: summary.criticalOk,
+        criticalFailed: summary.criticalFailed,
+        ok: summary.ok,
+        cases: reportCases,
+      },
+    );
+
     expect(
       summary.ok,
       [
