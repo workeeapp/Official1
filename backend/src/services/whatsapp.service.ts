@@ -6,6 +6,7 @@ import {
   parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
+  REACTION_SETTLE_MS,
   TYPING_PAUSE_MIN_MS,
   typingPauseMs,
 } from "@workee/shared";
@@ -20,11 +21,12 @@ import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
   sendWhatsAppButtons,
+  beginWhatsAppTyping,
+  sendWhatsAppMarkRead,
   sendWhatsAppNavigate,
   sendWhatsAppReaction,
   sendWhatsAppText,
   sendWhatsAppTyping,
-  startWhatsAppTyping,
 } from "./whatsapp-send.js";
 import {
   buildTurnAttachments,
@@ -342,7 +344,9 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
     return;
   }
   const from = last.from;
-  const stopTyping = startWhatsAppTyping(last.messageId);
+  // Read receipt only — typing waits until after show_icon reaction (or LLM if none).
+  await sendWhatsAppMarkRead(last.messageId);
+  let stopTyping: () => void = () => {};
   try {
     await markWhatsAppInbound(from);
     const speaker = await resolveWhatsAppSpeaker(from);
@@ -422,6 +426,8 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       "llm_ok",
       `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
     );
+    // Order: reaction (if any) → settle on device → typing → spoken replies.
+    // Never start typing until after reaction settle — Graph ack ≠ phone delivery.
     if (parsed.showIcon) {
       const reactionResult = await sendWhatsAppReaction(
         from,
@@ -429,12 +435,13 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         parsed.showIcon,
       );
       recordWhatsAppEvent("reaction_send", `result=${reactionResult}`);
-      // Reaction clears Meta's typing indicator, and Graph ack ≠ device delivery —
-      // refresh typing and settle so the emoji lands before the spoken reply.
       if (reactionResult === "sent") {
-        await sendWhatsAppTyping(last.messageId);
-        await sleep(TYPING_PAUSE_MIN_MS);
+        await sleep(REACTION_SETTLE_MS);
       }
+      stopTyping = await beginWhatsAppTyping(last.messageId);
+      await sleep(TYPING_PAUSE_MIN_MS);
+    } else if (replies.length > 0) {
+      stopTyping = await beginWhatsAppTyping(last.messageId);
     }
     let delivered = true;
     for (const [index, reply] of replies.entries()) {

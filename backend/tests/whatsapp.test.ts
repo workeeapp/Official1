@@ -7,11 +7,13 @@ import {
   composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
+  sendWhatsAppMarkRead,
   sendWhatsAppTyping,
   setEngineButtons,
   toWhatsAppFormatting,
   whatsappButtonsBody,
   whatsappCtaUrlBody,
+  whatsappMarkReadBody,
   whatsappReactionBody,
   whatsappTypingBody,
   WHATSAPP_NAVIGATE_LABEL,
@@ -421,6 +423,17 @@ describe("WhatsApp webhook", () => {
     expect(response.status).toBe(503);
   });
 
+  it("marks the inbound message read without typing (pre-LLM)", () => {
+    expect(whatsappMarkReadBody("wamid.1")).toEqual({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: "wamid.1",
+    });
+    expect(whatsappMarkReadBody("wamid.1")).not.toHaveProperty(
+      "typing_indicator",
+    );
+  });
+
   it("marks the inbound message read and shows typing", () => {
     expect(whatsappTypingBody("wamid.1")).toEqual({
       messaging_product: "whatsapp",
@@ -430,11 +443,23 @@ describe("WhatsApp webhook", () => {
     });
   });
 
-  it("does not call Meta for typing in test", async () => {
+  it("does not call Meta for mark-read or typing in test", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await sendWhatsAppMarkRead("wamid.1");
     await sendWhatsAppTyping("wamid.1");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("documents outbound order: mark-read → reaction → settle → typing → reply", () => {
+    // runWhatsAppTurn: mark-read (no typing) → LLM → reaction → REACTION_SETTLE_MS
+    // → beginWhatsAppTyping → TYPING_PAUSE_MIN_MS → spoken replies.
+    const markRead = whatsappMarkReadBody("wamid.1");
+    const typing = whatsappTypingBody("wamid.1");
+    const reaction = whatsappReactionBody("972501234567", "wamid.1", "👍");
+    expect(markRead).not.toHaveProperty("typing_indicator");
+    expect(typing.typing_indicator).toEqual({ type: "text" });
+    expect(reaction.type).toBe("reaction");
   });
 
   it("does not call Meta when delivering relays in test", async () => {

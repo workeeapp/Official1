@@ -25,6 +25,18 @@ export interface WhatsAppDeliverySkip {
 
 const TYPING_REFRESH_MS = 20_000;
 
+export function whatsappMarkReadBody(messageId: string): {
+  messaging_product: "whatsapp";
+  status: "read";
+  message_id: string;
+} {
+  return {
+    messaging_product: "whatsapp",
+    status: "read",
+    message_id: messageId,
+  };
+}
+
 export function whatsappTypingBody(messageId: string): {
   messaging_product: "whatsapp";
   status: "read";
@@ -32,14 +44,17 @@ export function whatsappTypingBody(messageId: string): {
   typing_indicator: { type: "text" };
 } {
   return {
-    messaging_product: "whatsapp",
-    status: "read",
-    message_id: messageId,
+    ...whatsappMarkReadBody(messageId),
     typing_indicator: { type: "text" },
   };
 }
 
-export async function sendWhatsAppTyping(messageId: string): Promise<boolean> {
+async function postWhatsAppStatus(
+  messageId: string,
+  body: Record<string, unknown>,
+  okEvent: "typing_ok" | "mark_read_ok",
+  failEvent: "typing_fail" | "mark_read_fail",
+): Promise<boolean> {
   const id = messageId.trim();
   if (!id) {
     return false;
@@ -65,23 +80,50 @@ export async function sendWhatsAppTyping(messageId: string): Promise<boolean> {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(whatsappTypingBody(id)),
+        body: JSON.stringify(body),
       },
     );
     if (!response.ok) {
       const detail = await graphErrorDetail(response);
-      recordWhatsAppEvent("typing_fail", `status=${response.status} ${detail}`.trim());
+      recordWhatsAppEvent(failEvent, `status=${response.status} ${detail}`.trim());
       return false;
     }
-    recordWhatsAppEvent("typing_ok", `id=${id.slice(0, 20)}`);
+    recordWhatsAppEvent(okEvent, `id=${id.slice(0, 20)}`);
     return true;
   } catch (error) {
     recordWhatsAppEvent(
-      "typing_fail",
+      failEvent,
       error instanceof Error ? error.message : "unknown",
     );
     return false;
   }
+}
+
+/** Mark inbound as read without showing the typing indicator. Soft-fails. */
+export async function sendWhatsAppMarkRead(messageId: string): Promise<boolean> {
+  const id = messageId.trim();
+  if (!id) {
+    return false;
+  }
+  return postWhatsAppStatus(
+    id,
+    whatsappMarkReadBody(id),
+    "mark_read_ok",
+    "mark_read_fail",
+  );
+}
+
+export async function sendWhatsAppTyping(messageId: string): Promise<boolean> {
+  const id = messageId.trim();
+  if (!id) {
+    return false;
+  }
+  return postWhatsAppStatus(
+    id,
+    whatsappTypingBody(id),
+    "typing_ok",
+    "typing_fail",
+  );
 }
 
 export function startWhatsAppTyping(messageId: string): () => void {
@@ -89,6 +131,25 @@ export function startWhatsAppTyping(messageId: string): () => void {
     return () => {};
   }
   void sendWhatsAppTyping(messageId);
+  const timer = setInterval(() => {
+    void sendWhatsAppTyping(messageId);
+  }, TYPING_REFRESH_MS);
+  return () => {
+    clearInterval(timer);
+  };
+}
+
+/**
+ * Await the first typing indicator, then refresh on an interval.
+ * Prefer this when order vs reaction/reply matters (Graph ack ≠ device delivery).
+ */
+export async function beginWhatsAppTyping(
+  messageId: string,
+): Promise<() => void> {
+  if (getEnv().NODE_ENV === "test") {
+    return () => {};
+  }
+  await sendWhatsAppTyping(messageId);
   const timer = setInterval(() => {
     void sendWhatsAppTyping(messageId);
   }, TYPING_REFRESH_MS);
