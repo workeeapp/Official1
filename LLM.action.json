@@ -68,9 +68,12 @@
     "    \"show_dump_about\": null,",
     "    \"show_dump_from\": null,",
     "    \"show_dump_to\": null,",
-    "    \"show_dump_urgency\": null",
+    "    \"show_dump_urgency\": null,",
+    "    \"tips\": null",
     "  }",
     "}",
+    "",
+    "TIPS: when AVAILABLE_TIPS lists a key and the situation matches, set metadata.tips to that key (array). The engine appends the catalog text as its own message — never rewrite tip copy in responses. Action/general tips are automatic (engine-only); do not restate them. If no tip this turn → tips null or [].",
     "",
     "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
     "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close / escalate them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated. Escalate (asker only): jobs.escalate with higher urgency — never a second job for the same check.",
@@ -1202,6 +1205,18 @@
                   "null"
                 ],
                 "description": "Urgency dump filter: urgent = urgent|very_urgent items; very_urgent = only that. Pair with show_dump (tasks/shopping/full). null = no filter. «מה דחוף» → show_dump=tasks (or full) + show_dump_urgency=urgent."
+              },
+              "tips": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "maxItems": 5,
+                "items": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "description": "Catalog tip keys from this turn's AVAILABLE_TIPS when the situation matches (e.g. guest_terms). Engine appends exact catalog text after responses. null/[] when no model tip. Never invent keys; never put tip copy in responses."
               }
             }
           }

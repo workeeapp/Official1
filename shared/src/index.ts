@@ -18,6 +18,14 @@ export type {
   EmployeeUsageSummary,
   TeamUsageSummary,
   TeamUsageMonth,
+  TipAudience,
+  TipTriggerKind,
+  TipTriggerArea,
+  TipTriggerOp,
+  PublicTip,
+  TipsResponse,
+  TipInput,
+  TipUpdateInput,
   EmployeeRecordMutationRequest,
   ChatMessageRequest,
   ChatMessageResponse,
@@ -55,6 +63,20 @@ export {
   parseEmployeeKind,
   validateChatInput,
   hasChatFieldErrors,
+  TIP_KEY_MAX_LENGTH,
+  TIP_TEXT_MAX_LENGTH,
+  TIP_KEY_PATTERN,
+  parseTipAudience,
+  parseTipTriggerKind,
+  parseTipTriggerArea,
+  parseTipTriggerOp,
+  validateTipKey,
+  validateTipText,
+  validateTipInput,
+  validateTipUpdateInput,
+  hasTipFieldErrors,
+  normalizeTipInput,
+  normalizeTipUpdateInput,
 } from "./validation";
 export {
   isDigitalEmployee,
@@ -70,8 +92,17 @@ export {
   chatThreadKey,
   REASONING_EFFORTS,
   parseReasoningEffort,
+  TIP_AUDIENCES,
+  TIP_TRIGGER_KINDS,
+  TIP_TRIGGER_AREAS,
+  TIP_TRIGGER_OPS,
 } from "./types";
-export type { FieldErrors, EmployeeFieldErrors, ChatFieldErrors } from "./validation";
+export type {
+  FieldErrors,
+  EmployeeFieldErrors,
+  ChatFieldErrors,
+  TipFieldErrors,
+} from "./validation";
 export {
   emptyLlmMetadata,
   parseLlmMetadata,
@@ -99,6 +130,7 @@ export {
   SHOW_ICON_MAX,
   redactRegisterSecrets,
   redactMetadataSecrets,
+  parseTipKeys,
 } from "./llm-message";
 export type { LlmRegisterAction } from "./llm-message";
 export {

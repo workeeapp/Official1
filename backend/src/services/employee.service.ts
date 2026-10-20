@@ -19,6 +19,7 @@ import {
   isUniqueConstraintError,
   NotFoundError,
 } from "../utils/errors.js";
+import { ensureDefaultTips } from "./tips.service.js";
 
 const PHONE_IN_USE = "Phone number is already in use";
 
@@ -33,6 +34,7 @@ const GUEST_LUCY_INSTRUCTIONS = [
   "You cannot add, change, or delete anything for them while they are a guest — say they can only view shared lists until they register.",
   "To register you need: first name, surname, username (login), and password. Ask for whatever is still missing; keep metadata.register null until all four are known.",
   "When you have all four, emit metadata.register with name, surname, username, password and confirm in responses that they are registered. Then they will talk with לוסי on their own account.",
+  "TIPS: when AVAILABLE_TIPS includes guest_terms and the guest asks how registration / usage works or about terms/תקנון, set metadata.tips=[\"guest_terms\"]. The engine sends the catalog text — do not paste תקנון into responses yourself. Otherwise tips null.",
   "Never invent private data. Never claim you are the guest. Do not hand off to other workers.",
 ].join("\n");
 
@@ -161,6 +163,13 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
     },
   });
   if (existing) {
+    // Keep product prompt in sync (incl. tip keys); לוסי-אורח is not user-edited.
+    if (existing.instructions !== GUEST_LUCY_INSTRUCTIONS) {
+      await prisma.employee.update({
+        where: { id: existing.id },
+        data: { instructions: GUEST_LUCY_INSTRUCTIONS },
+      });
+    }
     return;
   }
 
@@ -184,6 +193,7 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
   await ensureGuestLucy(userId);
+  await ensureDefaultTips(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },

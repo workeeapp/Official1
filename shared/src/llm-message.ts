@@ -344,6 +344,11 @@ export interface LlmMetadata {
    * Urgency dump filter: urgent = urgent|very_urgent; very_urgent = only that.
    */
   showDumpUrgency?: "urgent" | "very_urgent" | null;
+  /**
+   * Catalog tip keys the engine may append after responses (exact catalog text).
+   * Engine validates audience/digital/quota; model must not rewrite tip copy.
+   */
+  tips?: string[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -451,6 +456,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
   const showDumpUrgency = parseShowDumpUrgency(meta);
+  const tips = parseTipKeys(meta);
   return {
     messages,
     reminders,
@@ -493,7 +499,33 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(showDumpFrom ? { showDumpFrom } : {}),
     ...(showDumpTo ? { showDumpTo } : {}),
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
+    ...(tips.length > 0 ? { tips } : {}),
   };
+}
+
+/** metadata.tips — catalog tip keys (max 5). */
+export function parseTipKeys(meta: Record<string, unknown>): string[] {
+  const raw = meta.tips;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+    const key = entry.trim().slice(0, 64);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    keys.push(key);
+    if (keys.length >= 5) {
+      break;
+    }
+  }
+  return keys;
 }
 
 /** metadata.show_dump — category or custom list name for engine status dump. */

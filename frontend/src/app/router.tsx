@@ -3,6 +3,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { LoginPage } from "@/pages/Login/LoginPage";
 import { DashboardPage } from "@/pages/Dashboard/DashboardPage";
 import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
+import { TipsPage } from "@/pages/Tips/TipsPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
 import { WhatsAppPage } from "@/pages/WhatsApp/WhatsAppPage";
 
@@ -14,6 +15,7 @@ export function AppRoutes() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/employees" element={<EmployeesPage />} />
+        <Route path="/tips" element={<TipsPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/whatsapp" element={<WhatsAppPage />} />
       </Route>

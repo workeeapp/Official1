@@ -129,6 +129,11 @@ import {
 } from "./contact.service.js";
 import { registerGuestMember } from "./guest-register.service.js";
 import {
+  collectAppliedTipOps,
+  formatAvailableTipsContext,
+  resolveAndRecordTipsForTurn,
+} from "./tips.service.js";
+import {
   appendEngineNotice,
   composeAssistantReply,
   deliverWhatsAppPhones,
@@ -1486,6 +1491,13 @@ export async function sendChatMessage(input: {
               ),
           ),
         ),
+    (await withoutFailingTurn("tips_context_failed", () =>
+      formatAvailableTipsContext({
+        userId: input.userId,
+        speaker: employee,
+        digitalEmployeeId: digital.id,
+      }),
+    )) ?? "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -2631,6 +2643,33 @@ export async function sendChatMessage(input: {
       }
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
+    const tipOps = collectAppliedTipOps({
+      listMutations,
+      filingMutations,
+      reminderSavedCount: reminderResult.saved.length,
+      reminderUpdateCount: (reminderResult.changes ?? []).filter(
+        (row) => row.action === "update",
+      ).length,
+      reminderRemovedCount: reminderResult.removed?.length ?? 0,
+      reminderRequestedAdd: (metadata.reminders ?? []).some(
+        (row) => row.action === "add",
+      ),
+      directorySavedCount: directoryResult.saved.length,
+      directoryRemovedCount: directoryResult.removed.length,
+      directoryRequestedUpdate: (metadata.directory ?? []).some(
+        (row) => row.action === "update" || row.action === "share_book",
+      ),
+    });
+    const tipTurn =
+      (await withoutFailingTurn("tips_apply_failed", () =>
+        resolveAndRecordTipsForTurn({
+          userId: input.userId,
+          speaker: employee,
+          digitalEmployeeId: digital.id,
+          appliedOps: tipOps,
+          modelTipKeys: metadata.tips ?? [],
+        }),
+      )) ?? { texts: [], tipIds: [] };
     const notice = [
       guestMutationNotice,
       registerNotice,
@@ -2644,13 +2683,17 @@ export async function sendChatMessage(input: {
     let reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
-          notice: [...consultAnswers, notice].filter(Boolean).join("\n\n"),
+          notice: [...consultAnswers, notice, ...tipTurn.texts]
+            .filter(Boolean)
+            .join("\n\n"),
           replaceResponse: true,
         })
-      : [...consultAnswers, notice].reduce(
-          (current, extra) => appendEngineNotice(current, extra),
-          workingReply,
-        );
+      : [...consultAnswers, notice, ...tipTurn.texts]
+          .filter(Boolean)
+          .reduce(
+            (current, extra) => appendEngineNotice(current, extra),
+            workingReply,
+          );
     const modelButtons = parseLlmReply(reply).buttons ?? [];
     const speakerButtons = guestSpeaker
       ? modelButtons

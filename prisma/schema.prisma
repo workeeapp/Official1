@@ -17,6 +17,7 @@ model User {
   chatConversations ChatConversation[]
   contacts          Contact[]
   contactBooks      ContactBook[]
+  tips              Tip[]
 
   @@map("Users")
 }
@@ -57,10 +58,62 @@ model Employee {
   contacts                 Contact[]
   contactBook              ContactBook?
   attachments              Attachment[]
+  tipsTargeted             Tip[]              @relation("TipDigital")
+  tipProgressAsSpeaker     TipProgress[]      @relation("TipProgressSpeaker")
+  tipProgressAsDigital     TipProgress[]      @relation("TipProgressDigital")
 
   @@index([userId])
   @@index([shareMirrorEmployeeId])
   @@map("Employees")
+}
+
+/// Contextual / general tips the engine may append after a digital-worker reply.
+model Tip {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  /** Stable key for metadata.tips (e.g. guest_terms). Unique per account. */
+  key               String    @db.VarChar(64)
+  /** guest | member | any */
+  audience          String    @db.VarChar(16)
+  /** null = any digital on this account; else only that worker. */
+  digitalEmployeeId String?   @map("digital_employee_id") @db.Uuid
+  /** action | model | general */
+  triggerKind       String    @map("trigger_kind") @db.VarChar(16)
+  /** When triggerKind=action: reminders | filing | lists | directory */
+  triggerArea       String?   @map("trigger_area") @db.VarChar(32)
+  /** When triggerKind=action: add | remove | update */
+  triggerOp         String?   @map("trigger_op") @db.VarChar(16)
+  maxShows          Int       @default(1) @map("max_shows")
+  order             Int       @default(0)
+  text              String    @db.Text
+  enabled           Boolean   @default(true)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  digitalEmployee   Employee? @relation("TipDigital", fields: [digitalEmployeeId], references: [id], onDelete: SetNull)
+  progress          TipProgress[]
+
+  @@unique([userId, key])
+  @@index([userId, enabled])
+  @@index([digitalEmployeeId])
+  @@map("Tips")
+}
+
+/// How many times a tip was shown to a speaker by a given digital worker.
+model TipProgress {
+  id                String   @id @default(uuid()) @db.Uuid
+  tipId             String   @map("tip_id") @db.Uuid
+  employeeId        String   @map("employee_id") @db.Uuid
+  digitalEmployeeId String   @map("digital_employee_id") @db.Uuid
+  showCount         Int      @default(0) @map("show_count")
+  lastShownAt       DateTime @default(now()) @map("last_shown_at")
+  tip               Tip      @relation(fields: [tipId], references: [id], onDelete: Cascade)
+  employee          Employee @relation("TipProgressSpeaker", fields: [employeeId], references: [id], onDelete: Cascade)
+  digitalEmployee   Employee @relation("TipProgressDigital", fields: [digitalEmployeeId], references: [id], onDelete: Cascade)
+
+  @@unique([tipId, employeeId, digitalEmployeeId])
+  @@index([employeeId, digitalEmployeeId])
+  @@map("TipProgress")
 }
 
 model ChatConversation {

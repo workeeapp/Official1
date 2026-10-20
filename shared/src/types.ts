@@ -152,6 +152,74 @@ export interface DigitalEmployeeDefaults {
   instructions: string;
 }
 
+/** Who may receive a tip. */
+export const TIP_AUDIENCES = ["guest", "member", "any"] as const;
+export type TipAudience = (typeof TIP_AUDIENCES)[number];
+
+/** How a tip is triggered. */
+export const TIP_TRIGGER_KINDS = ["action", "model", "general"] as const;
+export type TipTriggerKind = (typeof TIP_TRIGGER_KINDS)[number];
+
+/** ACTION area for action-triggered tips. */
+export const TIP_TRIGGER_AREAS = [
+  "reminders",
+  "filing",
+  "lists",
+  "directory",
+] as const;
+export type TipTriggerArea = (typeof TIP_TRIGGER_AREAS)[number];
+
+export const TIP_TRIGGER_OPS = ["add", "remove", "update"] as const;
+export type TipTriggerOp = (typeof TIP_TRIGGER_OPS)[number];
+
+export interface PublicTip {
+  id: string;
+  key: string;
+  audience: TipAudience;
+  digitalEmployeeId: string | null;
+  /** Display name of the target digital, when set. */
+  digitalName: string | null;
+  triggerKind: TipTriggerKind;
+  triggerArea: TipTriggerArea | null;
+  triggerOp: TipTriggerOp | null;
+  maxShows: number;
+  order: number;
+  text: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TipsResponse {
+  tips: PublicTip[];
+  count: number;
+}
+
+export interface TipInput {
+  key: string;
+  audience: TipAudience;
+  digitalEmployeeId?: string | null;
+  triggerKind: TipTriggerKind;
+  triggerArea?: TipTriggerArea | null;
+  triggerOp?: TipTriggerOp | null;
+  maxShows: number;
+  order: number;
+  text: string;
+  enabled?: boolean;
+}
+
+export interface TipUpdateInput {
+  audience?: TipAudience;
+  digitalEmployeeId?: string | null;
+  triggerKind?: TipTriggerKind;
+  triggerArea?: TipTriggerArea | null;
+  triggerOp?: TipTriggerOp | null;
+  maxShows?: number;
+  order?: number;
+  text?: string;
+  enabled?: boolean;
+}
+
 export function isDigitalEmployee(
   employee: Pick<PublicEmployee, "kind">,
 ): boolean {

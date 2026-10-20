@@ -1,4 +1,34 @@
-import { parseReasoningEffort } from "./types.js";
+import {
+  parseReasoningEffort,
+  TIP_AUDIENCES,
+  TIP_TRIGGER_AREAS,
+  TIP_TRIGGER_KINDS,
+  TIP_TRIGGER_OPS,
+  type TipAudience,
+  type TipInput,
+  type TipTriggerArea,
+  type TipTriggerKind,
+  type TipTriggerOp,
+  type TipUpdateInput,
+} from "./types.js";
+
+export const TIP_KEY_MAX_LENGTH = 64;
+export const TIP_TEXT_MAX_LENGTH = 8000;
+/** tip keys: lowercase letter start, then letters/digits/_/- */
+export const TIP_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
+export interface TipFieldErrors {
+  key?: string;
+  audience?: string;
+  digitalEmployeeId?: string;
+  triggerKind?: string;
+  triggerArea?: string;
+  triggerOp?: string;
+  maxShows?: string;
+  order?: string;
+  text?: string;
+  enabled?: string;
+}
 
 export const USERNAME_MIN_LENGTH = 3;
 export const USERNAME_MAX_LENGTH = 32;
@@ -336,4 +366,281 @@ export function validateChatInput(input: {
 
 export function hasChatFieldErrors(errors: ChatFieldErrors): boolean {
   return Boolean(errors.message || errors.employeeId || errors.digitalEmployeeId);
+}
+
+export function parseTipAudience(value: unknown): TipAudience | null {
+  return typeof value === "string" &&
+    (TIP_AUDIENCES as readonly string[]).includes(value)
+    ? (value as TipAudience)
+    : null;
+}
+
+export function parseTipTriggerKind(value: unknown): TipTriggerKind | null {
+  return typeof value === "string" &&
+    (TIP_TRIGGER_KINDS as readonly string[]).includes(value)
+    ? (value as TipTriggerKind)
+    : null;
+}
+
+export function parseTipTriggerArea(value: unknown): TipTriggerArea | null {
+  return typeof value === "string" &&
+    (TIP_TRIGGER_AREAS as readonly string[]).includes(value)
+    ? (value as TipTriggerArea)
+    : null;
+}
+
+export function parseTipTriggerOp(value: unknown): TipTriggerOp | null {
+  return typeof value === "string" &&
+    (TIP_TRIGGER_OPS as readonly string[]).includes(value)
+    ? (value as TipTriggerOp)
+    : null;
+}
+
+export function validateTipKey(key: unknown): string | undefined {
+  if (typeof key !== "string" || key.trim().length === 0) {
+    return "Key is required";
+  }
+  const value = key.trim();
+  if (value.length > TIP_KEY_MAX_LENGTH) {
+    return `Key must be at most ${TIP_KEY_MAX_LENGTH} characters`;
+  }
+  if (!TIP_KEY_PATTERN.test(value)) {
+    return "Key must start with a letter and use only lowercase letters, digits, _ or -";
+  }
+  return undefined;
+}
+
+export function validateTipText(text: unknown): string | undefined {
+  if (typeof text !== "string" || text.trim().length === 0) {
+    return "Text is required";
+  }
+  if (text.trim().length > TIP_TEXT_MAX_LENGTH) {
+    return `Text must be at most ${TIP_TEXT_MAX_LENGTH} characters`;
+  }
+  return undefined;
+}
+
+export function validateTipInput(input: {
+  key?: unknown;
+  audience?: unknown;
+  digitalEmployeeId?: unknown;
+  triggerKind?: unknown;
+  triggerArea?: unknown;
+  triggerOp?: unknown;
+  maxShows?: unknown;
+  order?: unknown;
+  text?: unknown;
+  enabled?: unknown;
+}): TipFieldErrors {
+  const errors: TipFieldErrors = {};
+  const keyError = validateTipKey(input.key);
+  if (keyError) {
+    errors.key = keyError;
+  }
+  if (!parseTipAudience(input.audience)) {
+    errors.audience = "Audience must be guest, member, or any";
+  }
+  const kind = parseTipTriggerKind(input.triggerKind);
+  if (!kind) {
+    errors.triggerKind = "Trigger must be action, model, or general";
+  } else if (kind === "action") {
+    if (!parseTipTriggerArea(input.triggerArea)) {
+      errors.triggerArea =
+        "Action tips need an area (reminders, filing, lists, or directory)";
+    }
+    const op =
+      input.triggerOp === undefined ||
+      input.triggerOp === null ||
+      input.triggerOp === ""
+        ? "add"
+        : parseTipTriggerOp(input.triggerOp);
+    if (!op) {
+      errors.triggerOp = "Op must be add, remove, or update";
+    }
+  }
+  if (
+    input.digitalEmployeeId !== undefined &&
+    input.digitalEmployeeId !== null &&
+    input.digitalEmployeeId !== ""
+  ) {
+    const idError = validateEmployeeId(input.digitalEmployeeId);
+    if (idError) {
+      errors.digitalEmployeeId = idError;
+    }
+  }
+  if (
+    typeof input.maxShows !== "number" ||
+    !Number.isInteger(input.maxShows) ||
+    input.maxShows < 1
+  ) {
+    errors.maxShows = "Max shows must be an integer of at least 1";
+  }
+  if (
+    typeof input.order !== "number" ||
+    !Number.isInteger(input.order)
+  ) {
+    errors.order = "Order must be an integer";
+  }
+  const textError = validateTipText(input.text);
+  if (textError) {
+    errors.text = textError;
+  }
+  if (
+    input.enabled !== undefined &&
+    typeof input.enabled !== "boolean"
+  ) {
+    errors.enabled = "Enabled must be true or false";
+  }
+  return errors;
+}
+
+export function validateTipUpdateInput(input: {
+  audience?: unknown;
+  digitalEmployeeId?: unknown;
+  triggerKind?: unknown;
+  triggerArea?: unknown;
+  triggerOp?: unknown;
+  maxShows?: unknown;
+  order?: unknown;
+  text?: unknown;
+  enabled?: unknown;
+}): TipFieldErrors {
+  const errors: TipFieldErrors = {};
+  if (input.audience !== undefined && !parseTipAudience(input.audience)) {
+    errors.audience = "Audience must be guest, member, or any";
+  }
+  const kind =
+    input.triggerKind === undefined
+      ? undefined
+      : parseTipTriggerKind(input.triggerKind);
+  if (input.triggerKind !== undefined && !kind) {
+    errors.triggerKind = "Trigger must be action, model, or general";
+  }
+  if (kind === "action" || (input.triggerArea !== undefined && input.triggerArea !== null)) {
+    if (
+      input.triggerArea !== undefined &&
+      input.triggerArea !== null &&
+      !parseTipTriggerArea(input.triggerArea)
+    ) {
+      errors.triggerArea =
+        "Action tips need an area (reminders, filing, lists, or directory)";
+    }
+  }
+  if (
+    input.triggerOp !== undefined &&
+    input.triggerOp !== null &&
+    input.triggerOp !== "" &&
+    !parseTipTriggerOp(input.triggerOp)
+  ) {
+    errors.triggerOp = "Op must be add, remove, or update";
+  }
+  if (
+    input.digitalEmployeeId !== undefined &&
+    input.digitalEmployeeId !== null &&
+    input.digitalEmployeeId !== ""
+  ) {
+    const idError = validateEmployeeId(input.digitalEmployeeId);
+    if (idError) {
+      errors.digitalEmployeeId = idError;
+    }
+  }
+  if (input.maxShows !== undefined) {
+    if (
+      typeof input.maxShows !== "number" ||
+      !Number.isInteger(input.maxShows) ||
+      input.maxShows < 1
+    ) {
+      errors.maxShows = "Max shows must be an integer of at least 1";
+    }
+  }
+  if (input.order !== undefined) {
+    if (typeof input.order !== "number" || !Number.isInteger(input.order)) {
+      errors.order = "Order must be an integer";
+    }
+  }
+  if (input.text !== undefined) {
+    const textError = validateTipText(input.text);
+    if (textError) {
+      errors.text = textError;
+    }
+  }
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    errors.enabled = "Enabled must be true or false";
+  }
+  return errors;
+}
+
+export function hasTipFieldErrors(errors: TipFieldErrors): boolean {
+  return Object.values(errors).some(Boolean);
+}
+
+/** Normalize a create payload after field validation passed. */
+export function normalizeTipInput(input: {
+  key: string;
+  audience: TipAudience;
+  digitalEmployeeId?: string | null;
+  triggerKind: TipTriggerKind;
+  triggerArea?: TipTriggerArea | null;
+  triggerOp?: TipTriggerOp | null;
+  maxShows: number;
+  order: number;
+  text: string;
+  enabled?: boolean;
+}): TipInput {
+  const triggerKind = input.triggerKind;
+  return {
+    key: input.key.trim(),
+    audience: input.audience,
+    digitalEmployeeId: input.digitalEmployeeId?.trim() || null,
+    triggerKind,
+    triggerArea:
+      triggerKind === "action" ? (input.triggerArea ?? null) : null,
+    triggerOp:
+      triggerKind === "action" ? (input.triggerOp ?? "add") : null,
+    maxShows: input.maxShows,
+    order: input.order,
+    text: input.text.trim(),
+    enabled: input.enabled !== false,
+  };
+}
+
+export function normalizeTipUpdateInput(input: TipUpdateInput): TipUpdateInput {
+  const out: TipUpdateInput = {};
+  if (input.audience !== undefined) {
+    out.audience = input.audience;
+  }
+  if (input.digitalEmployeeId !== undefined) {
+    out.digitalEmployeeId =
+      input.digitalEmployeeId === null || input.digitalEmployeeId === ""
+        ? null
+        : String(input.digitalEmployeeId).trim();
+  }
+  if (input.triggerKind !== undefined) {
+    out.triggerKind = input.triggerKind;
+  }
+  if (input.triggerArea !== undefined) {
+    out.triggerArea = input.triggerArea;
+  }
+  if (input.triggerOp !== undefined) {
+    out.triggerOp = input.triggerOp;
+  }
+  if (input.maxShows !== undefined) {
+    out.maxShows = input.maxShows;
+  }
+  if (input.order !== undefined) {
+    out.order = input.order;
+  }
+  if (input.text !== undefined) {
+    out.text = String(input.text).trim();
+  }
+  if (input.enabled !== undefined) {
+    out.enabled = input.enabled;
+  }
+  if (out.triggerKind === "model" || out.triggerKind === "general") {
+    out.triggerArea = null;
+    out.triggerOp = null;
+  } else if (out.triggerKind === "action" && out.triggerOp === undefined) {
+    // keep existing op on patch unless cleared
+  }
+  return out;
 }
