@@ -82,13 +82,13 @@ describe("closed show button allowlist", () => {
 });
 
 describe("formatFilingDumpBody", () => {
-  it("labels item_info as תיאור and omits item_description", () => {
+  it("labels item_info as תיאור and appends מידע לחיפוש when set", () => {
     expect(
       formatFilingDumpBody({
         filing_id: "f1",
         item_name: "כתובת מרב",
         item_info: "יערה אבן יהודה",
-        item_description: "כתובת מרב",
+        item_description: "",
         owner: "טל",
         scope: "personal",
       }),
@@ -96,9 +96,21 @@ describe("formatFilingDumpBody", () => {
     expect(
       formatFilingDumpBody({
         filing_id: "f2",
+        item_name: "מספר רישיון נהיגה",
+        item_info: "423432342",
+        item_description: "רישיון הנהיגה שלי על האופנוע משנת 1998",
+        owner: "טל",
+        scope: "personal",
+      }),
+    ).toBe(
+      "שם: מספר רישיון נהיגה · תיאור: 423432342 · מידע לחיפוש: רישיון הנהיגה שלי על האופנוע משנת 1998",
+    );
+    expect(
+      formatFilingDumpBody({
+        filing_id: "f3",
         item_name: "שרון וטרינרית",
         item_info: "",
-        item_description: "שרון וטרינרית",
+        item_description: "",
         owner: "טל",
         scope: "personal",
       }),
@@ -115,7 +127,7 @@ describe("filings flat dump", () => {
           filing_id: "f1",
           item_name: "רישיון",
           item_info: "בתוקף",
-          item_description: "רישיון",
+          item_description: "",
           owner: "טל",
           scope: "personal",
         },
@@ -123,7 +135,7 @@ describe("filings flat dump", () => {
           filing_id: "f2",
           item_name: "קוד שער",
           item_info: "1234",
-          item_description: "קוד שער",
+          item_description: "",
           owner: "טל",
           scope: "shared",
           shared_with: ["טל", "מיכל"],

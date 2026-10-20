@@ -102,7 +102,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("show_dump_from");
     expect(config.systemMessage).toContain("OR WITHIN FIELD");
     expect(config.systemMessage).toContain("SAVE VERB ROUTING");
-    expect(config.systemMessage).toContain("DELETE CONFIRM (critical)");
+    expect(config.systemMessage).toContain("DELETE CONFIRM (critical —");
     expect(config.systemMessage).toContain(
       "FORBIDDEN empty responses",
     );
@@ -321,7 +321,11 @@ describe("LLM action schema", () => {
       "Product Hebrew תיאור = this field",
     );
     expect(config.systemMessage).toContain(
-      'item_description — leave ""',
+      "item_description (optional) — מידע כללי",
+    );
+    expect(config.systemMessage).toContain("FIND-HELPER");
+    expect(config.systemMessage).toContain(
+      "Find filings by item_name + item_info + item_description",
     );
     expect(config.systemMessage).not.toContain(
       "Prefer item_description = item_name",
