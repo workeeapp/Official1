@@ -71,6 +71,7 @@
     "    \"show_dump_urgency\": null,",
     "    \"weather\": null,",
     "    \"market\": null,",
+    "    \"mashov\": null,",
     "    \"tips\": null",
     "  }",
     "}",
@@ -1037,7 +1038,8 @@
                         "git_log",
                         "saved_data",
                         "weather",
-                        "market"
+                        "market",
+                        "mashov"
                       ]
                     },
                     "compose_lookback_hours": {
@@ -1046,7 +1048,7 @@
                     "compose_place": {
                       "type": "string",
                       "maxLength": 255,
-                      "description": "Required when compose_source is weather (city, e.g. תל אביב) OR market (comma-separated tickers/queries, e.g. AAPL,BTC-USD). Empty otherwise."
+                      "description": "Required when compose_source is weather (city), market (comma-separated tickers), or mashov (child first name, e.g. דניאל; empty = only child). Empty otherwise."
                     },
                     "confirmed": {
                       "type": "boolean"
@@ -1291,6 +1293,33 @@
                 "required": [
                   "queries"
                 ]
+              },
+              "mashov": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / סמל בית ספר למשוב) — the password MUST be stored in a filing item_info, never in this object. Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
+                "properties": {
+                  "child": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "description": "Child first name from speech (דניאל). Empty when only one child or unknown yet."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "grades",
+                        "homework",
+                        "behavior",
+                        "timetable"
+                      ]
+                    },
+                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות → [behavior]; מערכת שעות → [timetable]. Can combine."
+                  }
+                }
               },
               "tips": {
                 "type": [

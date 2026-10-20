@@ -138,8 +138,14 @@ export type {
   LlmWeatherAspect,
   LlmMarketAction,
   LlmMarketAspect,
+  LlmMashovAction,
+  LlmMashovAspect,
 } from "./llm-message";
-export { parseWeatherAction, parseMarketAction } from "./llm-message";
+export {
+  parseWeatherAction,
+  parseMarketAction,
+  parseMashovAction,
+} from "./llm-message";
 export {
   looksLikePhone,
   normalizeEmployeePhone,

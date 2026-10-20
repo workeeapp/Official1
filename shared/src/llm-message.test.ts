@@ -1244,6 +1244,55 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads compose_source mashov and compose_place child", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח ציוני משוב",
+                compose: true,
+                compose_source: "mashov",
+                compose_place: "דניאל",
+                text: "מה הציונים",
+                in: 60,
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "mashov",
+        composePlace: "דניאל",
+      },
+    ]);
+  });
+
+  it("reads metadata.mashov without requiring password", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            mashov: {
+              child: "דניאל",
+              aspects: ["grades", "homework", "bogus"],
+            },
+          },
+        }),
+      ).mashov,
+    ).toEqual({
+      child: "דניאל",
+      aspects: ["grades", "homework"],
+    });
+  });
+
   it("reads compose_source market and compose_place tickers", () => {
     expect(
       parseReplyMetadata(

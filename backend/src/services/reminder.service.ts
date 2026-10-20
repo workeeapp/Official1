@@ -68,7 +68,7 @@ export interface ReminderSnapshotRow {
   compose_source: string;
   /** Git digest content window in hours (0 = since-last-report for recurring). */
   compose_lookback_hours: number;
-  /** Place/symbols for compose_source weather|market (empty otherwise). */
+  /** Place/symbols/child for compose_source weather|market|mashov. */
   compose_place?: string;
   status: string;
   send_status: "pending" | "sent" | "failed";
@@ -1646,7 +1646,10 @@ export async function applyReminders(input: {
               : reminder.composeSource === "market" ||
                   existingSource === "market"
                 ? "market"
-                : "";
+                : reminder.composeSource === "mashov" ||
+                    existingSource === "mashov"
+                  ? "mashov"
+                  : "";
       const existingLookback =
         existing && "composeLookbackHours" in existing
           ? Number(
@@ -1670,7 +1673,9 @@ export async function applyReminders(input: {
           ? String((existing as { composePlace?: string }).composePlace ?? "")
           : "";
       const nextPlace =
-        nextSource === "weather" || nextSource === "market"
+        nextSource === "weather" ||
+        nextSource === "market" ||
+        nextSource === "mashov"
           ? (reminder.composePlace.trim() ||
               (canReuseClock ? existingPlace : "") ||
               "")
@@ -1682,7 +1687,8 @@ export async function applyReminders(input: {
         nextSource === "git_log" ||
         nextSource === "saved_data" ||
         nextSource === "weather" ||
-        nextSource === "market";
+        nextSource === "market" ||
+        nextSource === "mashov";
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -2072,10 +2078,14 @@ export function toReminderSnapshotRow(
             ? "weather"
             : row.composeSource === "market"
               ? "market"
-              : "",
+              : row.composeSource === "mashov"
+                ? "mashov"
+                : "",
     compose_lookback_hours: lookback,
     compose_place:
-      row.composeSource === "weather" || row.composeSource === "market"
+      row.composeSource === "weather" ||
+      row.composeSource === "market" ||
+      row.composeSource === "mashov"
         ? String(row.composePlace ?? "").trim()
         : "",
     status: row.status,

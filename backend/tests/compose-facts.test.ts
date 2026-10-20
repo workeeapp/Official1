@@ -101,8 +101,14 @@ vi.mock("../src/services/git-changelog.js", () => git);
 vi.mock("../src/services/employee-records.service.js", () => records);
 vi.mock("../src/services/contact.service.js", () => contacts);
 vi.mock("../src/utils/relative-date.js", () => clock);
+const mashov = vi.hoisted(() => ({
+  parseMashovAspects: vi.fn(() => ["grades"]),
+  resolveMashovReply: vi.fn(async () => "ציונים של דניאל:\n• מתמטיקה — 90"),
+}));
+
 vi.mock("../src/services/weather.js", () => weather);
 vi.mock("../src/services/market.js", () => market);
+vi.mock("../src/services/mashov.js", () => mashov);
 
 import { loadComposeFacts } from "../src/services/compose-facts.js";
 
@@ -202,5 +208,26 @@ describe("loadComposeFacts", () => {
     expect(bundle.kind).toBe("market");
     expect(bundle.fixedBody).toContain("לאיזה");
     expect(market.fetchMarketFacts).not.toHaveBeenCalled();
+  });
+
+  it("loads mashov with fixedBody from filings snapshot", async () => {
+    records.getEmployeeRecordSnapshot.mockResolvedValueOnce({
+      lists: [],
+      filing: [
+        { item_name: "תעודת זהות למשוב", item_info: "1" },
+      ],
+      reminders: [],
+    });
+    const bundle = await loadComposeFacts({
+      composeSource: "mashov",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "דניאל",
+    });
+    expect(bundle.kind).toBe("mashov");
+    expect(bundle.fixedBody).toContain("דניאל");
+    expect(mashov.resolveMashovReply).toHaveBeenCalledWith(
+      expect.objectContaining({ child: "דניאל" }),
+    );
   });
 });

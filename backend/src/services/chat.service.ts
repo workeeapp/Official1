@@ -157,6 +157,7 @@ import {
 } from "./show-button-dump.js";
 import { resolveWeatherReply } from "./weather.js";
 import { resolveMarketReply } from "./market.js";
+import { resolveMashovReply } from "./mashov.js";
 import {
   clearMutatingMetadata,
   stripShowTurnMutates,
@@ -561,7 +562,7 @@ function workerTargetingInstructions(
     STATUS_ADDRESSEE_RULE,
     `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. On each such numbered line also name the humans the row involves in parentheses: asked_by plus every name in for, de-duplicated, comma-separated, never yourself — keep the viewer in it, e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». These people-parentheses come before the «(תזכורת: …)» parentheses. Skip them when only one person is involved or the item name already shows all of them (פגישה (עמית, ערן)). Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or reminders.remove / reminders.update with its reminder.reminder_id (a new time → reminders.update). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
-    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) weather now or scheduled; (13) stocks, indices & crypto quotes now or scheduled; (14) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
+    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) weather now or scheduled; (13) stocks, indices & crypto quotes now or scheduled; (14) Mashov school feedback (grades/homework) now or scheduled; (15) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
     "SEND BY MEANING (all outbound sends): if the speaker asks you to deliver words to a recipient, treat it as send — judge by MEANING, not a fixed verb. Illustrative only: תשלחי / תגידי / תאמרי / תמסרי / תכתבי / תבקשי / תעדכני (when meaning is notify someone) / tell / say / pass on / update them that…. Then Send NOW or Send LATER below. NOT send: assign without a tell («טל צריך לקנות חלב» → lists); reminder/clock edit («תעדכני את התזכורת» → reminders.update); check-with jobs («תבדקי עם…»).",
     "EXACT OUTBOUND QUOTE (critical): every fixed-text send — messages NOW or reminders with compose false/omit — MUST confirm in response with את ההודעה «…» copying messages[].text or reminders[].text CHARACTER-FOR-CHARACTER. FORBIDDEN: bare «שלחתי לעמית» / «שאלתי את עמית» / «אשלח למיכל בעוד שעה» without the quote; FORBIDDEN summarizing. Speak to the asker in second person — do not make the whole response the recipient line alone. compose:true → no invented final quote; confirm when + wording written at send time.",
     "Send NOW (no delay, recipient is someone else) → metadata.messages; response confirms with את ההודעה «…» = exact messages.text. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []; response confirms when + את ההודעה «…» = exact reminders.text. Do not also emit messages for a delayed send.",
@@ -605,6 +606,9 @@ function workerTargetingInstructions(
     "SCHEDULED WEATHER: «כל בוקר ב־7 שלחי לי מזג אוויר בת״א» / «בעוד שעה הגלים בחיפה» → compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for שלחי לי, text=brief, real clock. No time → ASK מתי; reminders=[].",
     "MARKET (live): «מה מחיר אפל» / NVDA / טבע / ביטקוין / אתריום / S&P → metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|…], aspects:[summary|price|change|range] }; lists/reminders=[]. Prefer Yahoo tickers when known (BTC-USD). Server replaces response — FORBIDDEN inventing prices. Missing what to quote → ask; market=null.",
     "SCHEDULED MARKET: «כל בוקר ב־9 שלחי לי את AAPL וביטקוין» → compose:true, compose_source:\"market\", compose_place:\"AAPL,BTC-USD\" (comma-separated), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; reminders=[].",
+    "MASHOV FILINGS (password included): ALWAYS save Mashov secrets as filings — item_name «תעודת זהות למשוב» / «סיסמת משוב» or «סיסמת משוב של {ילד}» / «סמל בית ספר למשוב» / optional «שנת לימודים למשוב»; the password/ID/semel value goes in item_info. «הסיסמה של דניאל למשוב היא ds73s» → filing add (סיסמת משוב של דניאל / ds73s) THIS turn — MUST persist, not only ack. FORBIDDEN: skipping the password filing; putting password in metadata.mashov; quoting the password in responses.",
+    "MASHOV (live): «מה הציונים של דניאל» / שיעורי בית / התנהגות / מערכת → metadata.mashov { child:\"דניאל\"|\"\", aspects:[grades|homework|behavior|timetable] }; lists/reminders=[]. Server reads filings (incl. סיסמת משוב) + fetches. Missing filings → ask and file; mashov=null. Several children and no child → ask which.",
+    "SCHEDULED MASHOV: «כל יום ב־18 שלחי לי את הציונים של דניאל» → compose:true, compose_source:\"mashov\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; reminders=[].",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל שעה ≠ חביתה כל שעה → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -1518,7 +1522,7 @@ export async function sendChatMessage(input: {
         "Never say אני אורחת / אני רק אורחת / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
         "Your purpose: help them register as a Workee member (their own account + לוסי). Collect first name, surname, username, password; when all four are known emit metadata.register with those fields. Until then register=null and ask for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
-        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market as the main topic.",
+        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov as the main topic.",
         "Off-topic outside shared lists or registration → guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
         "Add/update/delete/buy/remind/send while guest → response: «אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות. אפשר להירשם כדי לקבל חשבון משלך.» Empty mutate arrays.",
         "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
@@ -1902,7 +1906,8 @@ export async function sendChatMessage(input: {
         (row.composeSource === "git_log" ||
           row.composeSource === "saved_data" ||
           row.composeSource === "weather" ||
-          row.composeSource === "market") &&
+          row.composeSource === "market" ||
+          row.composeSource === "mashov") &&
         !row.time.trim() &&
         !(typeof row.inSeconds === "number" && row.inSeconds > 0) &&
         !(row.everyCount && row.everyUnit) &&
@@ -2687,6 +2692,17 @@ export async function sendChatMessage(input: {
         aspects: marketAction.aspects,
       });
       workingReply = setEngineResponse(workingReply, marketText);
+    }
+    // Live Mashov ACTION → login from filings; guests skip.
+    const mashovAction = guestSpeaker ? null : metadata.mashov ?? null;
+    if (mashovAction) {
+      const mashovSnapshot = await getEmployeeRecordSnapshot(input.employeeId);
+      const mashovText = await resolveMashovReply({
+        filings: mashovSnapshot.filing ?? [],
+        child: mashovAction.child,
+        aspects: mashovAction.aspects,
+      });
+      workingReply = setEngineResponse(workingReply, mashovText);
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({

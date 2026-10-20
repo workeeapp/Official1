@@ -243,15 +243,15 @@ export interface LlmReminderAction {
    * "saved_data" = answer the brief from live EMPLOYEE_SAVED_DATA at fire.
    * "weather" / "market" = fixedBody plugins (city or tickers in composePlace).
    */
-  composeSource: "" | "git_log" | "saved_data" | "weather" | "market";
+  composeSource: "" | "git_log" | "saved_data" | "weather" | "market" | "mashov";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
    */
   composeLookbackHours: number;
   /**
-   * Lookup key for compose plugins: weather city, or market comma-separated
-   * tickers/queries (AAPL,BTC-USD). Empty otherwise.
+   * Lookup key for compose plugins: weather city, market tickers, or mashov
+   * child name. Empty otherwise.
    */
   composePlace: string;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
@@ -361,6 +361,11 @@ export interface LlmMetadata {
    */
   market?: LlmMarketAction | null;
   /**
+   * Live Mashov (משוב) ask — engine logs in from filings and replaces response.
+   * Never includes password. Missing filings → model asks; leave unset.
+   */
+  mashov?: LlmMashovAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -387,6 +392,18 @@ export interface LlmMarketAction {
   /** Tickers or names (1–5). */
   queries: string[];
   aspects: LlmMarketAspect[];
+}
+
+export type LlmMashovAspect =
+  | "grades"
+  | "homework"
+  | "behavior"
+  | "timetable";
+
+export interface LlmMashovAction {
+  /** Child first name; empty = only child / ask. */
+  child: string;
+  aspects: LlmMashovAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -496,6 +513,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const showDumpUrgency = parseShowDumpUrgency(meta);
   const weather = parseWeatherAction(meta);
   const market = parseMarketAction(meta);
+  const mashov = parseMashovAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -541,6 +559,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
     ...(weather ? { weather } : {}),
     ...(market ? { market } : {}),
+    ...(mashov ? { mashov } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1405,7 +1424,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     parseComposeSource(record) === "git_log" ||
     parseComposeSource(record) === "saved_data" ||
     parseComposeSource(record) === "weather" ||
-    parseComposeSource(record) === "market";
+    parseComposeSource(record) === "market" ||
+    parseComposeSource(record) === "mashov";
 
   return {
     action,
@@ -1468,7 +1488,7 @@ function parseComposeLookbackHours(record: Record<string, unknown>): number {
 
 function parseComposeSource(
   record: Record<string, unknown>,
-): "" | "git_log" | "saved_data" | "weather" | "market" {
+): "" | "git_log" | "saved_data" | "weather" | "market" | "mashov" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -1513,6 +1533,14 @@ function parseComposeSource(
     raw === "yahoo"
   ) {
     return "market";
+  }
+  if (
+    raw === "mashov" ||
+    raw === "smart_school" ||
+    raw === "smartschool" ||
+    raw === "משוב"
+  ) {
+    return "mashov";
   }
   return "";
 }
@@ -1631,6 +1659,54 @@ export function parseMarketAction(
   return {
     queries,
     aspects: aspects.length > 0 ? aspects : ["summary"],
+  };
+}
+
+const MASHOV_ASPECTS = new Set<LlmMashovAspect>([
+  "grades",
+  "homework",
+  "behavior",
+  "timetable",
+]);
+
+/** metadata.mashov — live Mashov fetch from filings; never includes password. */
+export function parseMashovAction(
+  meta: Record<string, unknown>,
+): LlmMashovAction | null {
+  const raw = meta.mashov ?? meta.smart_school ?? meta.smartSchool;
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (raw === true || raw === "true") {
+    return { child: "", aspects: ["grades"] };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const child = readText(row, ["child", "student", "name", "ילד"]).slice(0, 80);
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmMashovAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      let key = String(entry ?? "")
+        .trim()
+        .toLowerCase();
+      if (key === "behave" || key === "behaviour") {
+        key = "behavior";
+      }
+      if (key === "schedule") {
+        key = "timetable";
+      }
+      const aspect = key as LlmMashovAspect;
+      if (MASHOV_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+        aspects.push(aspect);
+      }
+    }
+  }
+  return {
+    child,
+    aspects: aspects.length > 0 ? aspects : ["grades"],
   };
 }
 

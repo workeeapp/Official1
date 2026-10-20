@@ -117,6 +117,11 @@ function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
       "Market: prefer the fixed FACTS / fixedBody numbers; do not invent prices or percent changes.",
     ];
   }
+  if (kind === "mashov") {
+    return [
+      "Mashov: prefer the fixed FACTS / fixedBody; do not invent grades or homework; never repeat passwords.",
+    ];
+  }
   return [
     "Creative/fixed-brief send: second person when messaging them; for a joke to the speaker, just tell the joke.",
     "Every run must be NEW. Never repeat a previous joke or the same punchline.",

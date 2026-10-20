@@ -299,10 +299,11 @@ The model emits every field; the server never parses «בין 10 ל־12».
 - List/status dumps («תשלחי לי את הרשימה…») stay on `compose_source: saved_data`.
 - **Weather:** live ask → `metadata.weather` { place, date, aspects }; scheduled → `compose_source: weather` + `compose_place`. Engine fetches Open-Meteo (forecast + wind + waves) and replaces the reply / fire body.
 - **Market:** live ask → `metadata.market` { queries, aspects }; scheduled → `compose_source: market` + `compose_place` (comma-separated tickers). Engine fetches Yahoo Finance (stocks / indices / crypto) and replaces the reply / fire body.
+- **Mashov (משוב):** credentials in filings including the password (`תעודת זהות למשוב` / `סיסמת משוב` / `סמל בית ספר למשוב`); live → `metadata.mashov` { child, aspects }; scheduled → `compose_source: mashov` + `compose_place` (child). Engine uses the unofficial parent-portal API (`web.mashov.info`) — may change without notice. Password lives only in filing `item_info`, never in the ACTION or spoken reply.
 - **No engine save ack:** successful reminder/scheduled-send saves never append `נשמרה התזכורת…` — only the model’s confirm (and skip/cancel/missed notices when needed).
 
-**Code:** `chat.service.ts` runtime prompts, `LLM.config.json`, `reminder.service.ts` (`formatReminderApplyNotice`), `weather.ts`, `market.ts`, `compose-facts.ts`.  
-**Tests:** `backend/tests/chat.test.ts`, `backend/tests/reminders.test.ts`, `backend/tests/weather.test.ts`, `backend/tests/market.test.ts`, `backend/tests/compose-facts.test.ts`.
+**Code:** `chat.service.ts` runtime prompts, `LLM.config.json`, `reminder.service.ts` (`formatReminderApplyNotice`), `weather.ts`, `market.ts`, `mashov.ts`, `compose-facts.ts`.  
+**Tests:** `backend/tests/chat.test.ts`, `backend/tests/reminders.test.ts`, `backend/tests/weather.test.ts`, `backend/tests/market.test.ts`, `backend/tests/mashov.test.ts`, `backend/tests/compose-facts.test.ts`.
 
 ---
 

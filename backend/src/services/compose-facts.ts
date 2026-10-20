@@ -25,20 +25,26 @@ import {
   parseMarketQueries,
   type MarketAspect,
 } from "./market.js";
+import {
+  parseMashovAspects,
+  resolveMashovReply,
+  type MashovAspect,
+} from "./mashov.js";
 
 export type ComposeSourceKind =
   | ""
   | "git_log"
   | "saved_data"
   | "weather"
-  | "market";
+  | "market"
+  | "mashov";
 
 /**
  * Fire-time facts for compose clocks. Sources differ only in how facts are
- * loaded; the outbound LLM call is shared (weather/market use fixedBody).
+ * loaded; the outbound LLM call is shared (weather/market/mashov use fixedBody).
  */
 export type ComposeFactsBundle = {
-  kind: "git_log" | "saved_data" | "weather" | "market" | "creative";
+  kind: "git_log" | "saved_data" | "weather" | "market" | "mashov" | "creative";
   /** Internal facts block (git commits, EMPLOYEE_SAVED_DATA, …). */
   facts: string;
   /** Short label shown above facts in the compose message. */
@@ -62,6 +68,8 @@ export async function loadComposeFacts(input: {
   weatherAspects?: WeatherAspect[] | unknown;
   /** Optional market aspects; default summary. */
   marketAspects?: MarketAspect[] | unknown;
+  /** Optional mashov aspects; default grades. */
+  mashovAspects?: MashovAspect[] | unknown;
   now?: Date;
 }): Promise<ComposeFactsBundle> {
   const source = input.composeSource.trim();
@@ -189,6 +197,35 @@ export async function loadComposeFacts(input: {
         factsLabel: "Market",
         fixedBody:
           "לא הצלחתי לשלוף עכשיו נתוני שוק. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "mashov") {
+    const child = String(input.composePlace ?? "").trim();
+    const aspects = parseMashovAspects(input.mashovAspects);
+    try {
+      const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
+      const body = await resolveMashovReply({
+        filings: snapshot.filing ?? [],
+        child,
+        aspects,
+        now: input.now,
+      });
+      return {
+        kind: "mashov",
+        facts: body,
+        factsLabel: "Mashov (משוב)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "mashov",
+        facts: "",
+        factsLabel: "Mashov",
+        fixedBody:
+          "לא הצלחתי לשלוף עכשיו נתונים ממשוב. נסה שוב בעוד רגע.",
       };
     }
   }
