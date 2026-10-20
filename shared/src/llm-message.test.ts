@@ -1244,6 +1244,69 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads compose_source market and compose_place tickers", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח ציטוטי שוק",
+                list_type: "tasks",
+                compose: true,
+                compose_source: "market",
+                compose_place: "AAPL,BTC-USD",
+                text: "מה המחירים",
+                in: 60,
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "market",
+        composePlace: "AAPL,BTC-USD",
+      },
+    ]);
+  });
+
+  it("reads metadata.market for a live ask", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            market: {
+              queries: ["AAPL", "ביטקוין"],
+              aspects: ["price", "bogus"],
+            },
+          },
+        }),
+      ).market,
+    ).toEqual({
+      queries: ["AAPL", "ביטקוין"],
+      aspects: ["price"],
+    });
+  });
+
+  it("ignores market without queries", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            market: { queries: [], aspects: ["summary"] },
+          },
+        }),
+      ).market,
+    ).toBeUndefined();
+  });
+
   it("reads compose_source weather and compose_place", () => {
     expect(
       parseReplyMetadata(

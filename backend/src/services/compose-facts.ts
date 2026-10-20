@@ -18,15 +18,27 @@ import {
   parseWeatherAspects,
   type WeatherAspect,
 } from "./weather.js";
+import {
+  fetchMarketFacts,
+  formatMarketHebrew,
+  parseMarketAspects,
+  parseMarketQueries,
+  type MarketAspect,
+} from "./market.js";
 
-export type ComposeSourceKind = "" | "git_log" | "saved_data" | "weather";
+export type ComposeSourceKind =
+  | ""
+  | "git_log"
+  | "saved_data"
+  | "weather"
+  | "market";
 
 /**
  * Fire-time facts for compose clocks. Sources differ only in how facts are
- * loaded; the outbound LLM call is shared (weather uses fixedBody).
+ * loaded; the outbound LLM call is shared (weather/market use fixedBody).
  */
 export type ComposeFactsBundle = {
-  kind: "git_log" | "saved_data" | "weather" | "creative";
+  kind: "git_log" | "saved_data" | "weather" | "market" | "creative";
   /** Internal facts block (git commits, EMPLOYEE_SAVED_DATA, …). */
   facts: string;
   /** Short label shown above facts in the compose message. */
@@ -48,6 +60,8 @@ export async function loadComposeFacts(input: {
   composePlace?: string | null;
   /** Optional weather aspects from brief context; default summary. */
   weatherAspects?: WeatherAspect[] | unknown;
+  /** Optional market aspects; default summary. */
+  marketAspects?: MarketAspect[] | unknown;
   now?: Date;
 }): Promise<ComposeFactsBundle> {
   const source = input.composeSource.trim();
@@ -143,6 +157,38 @@ export async function loadComposeFacts(input: {
         factsLabel: "Weather",
         fixedBody:
           "לא הצלחתי לשלוף עכשיו את מזג האוויר. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "market") {
+    const queries = parseMarketQueries(input.composePlace);
+    if (queries.length === 0) {
+      return {
+        kind: "market",
+        facts: "",
+        factsLabel: "Market",
+        fixedBody: "לאיזה מניה, מדד או מטבע קריפטו לבדוק?",
+      };
+    }
+    const aspects = parseMarketAspects(input.marketAspects);
+    try {
+      const facts = await fetchMarketFacts({ queries, aspects });
+      const body = formatMarketHebrew(facts);
+      return {
+        kind: "market",
+        facts: body,
+        factsLabel: "Market (Yahoo Finance)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "market",
+        facts: "",
+        factsLabel: "Market",
+        fixedBody:
+          "לא הצלחתי לשלוף עכשיו נתוני שוק. נסה שוב בעוד רגע.",
       };
     }
   }

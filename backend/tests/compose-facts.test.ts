@@ -67,11 +67,42 @@ const weather = vi.hoisted(() => ({
   parseWeatherAspects: vi.fn(() => ["summary"]),
 }));
 
+const market = vi.hoisted(() => ({
+  fetchMarketFacts: vi.fn(async () => ({
+    quotes: [
+      {
+        symbol: "AAPL",
+        name: "Apple",
+        price: 190,
+        changePct: 1,
+        changeAbs: 2,
+        dayHigh: 191,
+        dayLow: 188,
+        currency: "USD",
+        query: "AAPL",
+      },
+    ],
+    aspects: ["summary"],
+    missing: [],
+  })),
+  formatMarketHebrew: vi.fn(
+    () => "Apple (AAPL): 190.00 USD — שינוי +1.00%.\nלא ייעוץ השקעות.",
+  ),
+  parseMarketAspects: vi.fn(() => ["summary"]),
+  parseMarketQueries: vi.fn((raw: unknown) =>
+    String(raw ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ),
+}));
+
 vi.mock("../src/services/git-changelog.js", () => git);
 vi.mock("../src/services/employee-records.service.js", () => records);
 vi.mock("../src/services/contact.service.js", () => contacts);
 vi.mock("../src/utils/relative-date.js", () => clock);
 vi.mock("../src/services/weather.js", () => weather);
+vi.mock("../src/services/market.js", () => market);
 
 import { loadComposeFacts } from "../src/services/compose-facts.js";
 
@@ -142,5 +173,34 @@ describe("loadComposeFacts", () => {
     expect(bundle.kind).toBe("weather");
     expect(bundle.fixedBody).toContain("לאיזה מקום");
     expect(weather.fetchWeatherFacts).not.toHaveBeenCalled();
+  });
+
+  it("loads market with fixedBody for compose_place tickers", async () => {
+    const bundle = await loadComposeFacts({
+      composeSource: "market",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "AAPL,BTC-USD",
+    });
+    expect(bundle.kind).toBe("market");
+    expect(bundle.fixedBody).toContain("AAPL");
+    expect(market.fetchMarketFacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queries: ["AAPL", "BTC-USD"],
+      }),
+    );
+  });
+
+  it("asks when market compose_place is empty", async () => {
+    market.parseMarketQueries.mockReturnValueOnce([]);
+    const bundle = await loadComposeFacts({
+      composeSource: "market",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "",
+    });
+    expect(bundle.kind).toBe("market");
+    expect(bundle.fixedBody).toContain("לאיזה");
+    expect(market.fetchMarketFacts).not.toHaveBeenCalled();
   });
 });

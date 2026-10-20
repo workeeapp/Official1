@@ -68,7 +68,7 @@ export interface ReminderSnapshotRow {
   compose_source: string;
   /** Git digest content window in hours (0 = since-last-report for recurring). */
   compose_lookback_hours: number;
-  /** Place for compose_source=weather (empty otherwise). */
+  /** Place/symbols for compose_source weather|market (empty otherwise). */
   compose_place?: string;
   status: string;
   send_status: "pending" | "sent" | "failed";
@@ -1643,7 +1643,10 @@ export async function applyReminders(input: {
             : reminder.composeSource === "weather" ||
                 existingSource === "weather"
               ? "weather"
-              : "";
+              : reminder.composeSource === "market" ||
+                  existingSource === "market"
+                ? "market"
+                : "";
       const existingLookback =
         existing && "composeLookbackHours" in existing
           ? Number(
@@ -1667,7 +1670,7 @@ export async function applyReminders(input: {
           ? String((existing as { composePlace?: string }).composePlace ?? "")
           : "";
       const nextPlace =
-        nextSource === "weather"
+        nextSource === "weather" || nextSource === "market"
           ? (reminder.composePlace.trim() ||
               (canReuseClock ? existingPlace : "") ||
               "")
@@ -1678,7 +1681,8 @@ export async function applyReminders(input: {
         nextCompose ||
         nextSource === "git_log" ||
         nextSource === "saved_data" ||
-        nextSource === "weather";
+        nextSource === "weather" ||
+        nextSource === "market";
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -2066,10 +2070,12 @@ export function toReminderSnapshotRow(
           ? "saved_data"
           : row.composeSource === "weather"
             ? "weather"
-            : "",
+            : row.composeSource === "market"
+              ? "market"
+              : "",
     compose_lookback_hours: lookback,
     compose_place:
-      row.composeSource === "weather"
+      row.composeSource === "weather" || row.composeSource === "market"
         ? String(row.composePlace ?? "").trim()
         : "",
     status: row.status,

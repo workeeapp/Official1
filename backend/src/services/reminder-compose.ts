@@ -112,6 +112,11 @@ function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
       "Weather: prefer the fixed FACTS / fixedBody numbers; do not invent temperatures, wind, or wave heights.",
     ];
   }
+  if (kind === "market") {
+    return [
+      "Market: prefer the fixed FACTS / fixedBody numbers; do not invent prices or percent changes.",
+    ];
+  }
   return [
     "Creative/fixed-brief send: second person when messaging them; for a joke to the speaker, just tell the joke.",
     "Every run must be NEW. Never repeat a previous joke or the same punchline.",

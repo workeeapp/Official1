@@ -241,16 +241,17 @@ export interface LlmReminderAction {
   /**
    * "git_log" = summarize repo commits at fire.
    * "saved_data" = answer the brief from live EMPLOYEE_SAVED_DATA at fire.
+   * "weather" / "market" = fixedBody plugins (city or tickers in composePlace).
    */
-  composeSource: "" | "git_log" | "saved_data" | "weather";
+  composeSource: "" | "git_log" | "saved_data" | "weather" | "market";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
    */
   composeLookbackHours: number;
   /**
-   * Place for compose_source=weather (city name). Empty otherwise.
-   * Required when scheduling a weather clock — engine geocodes at fire.
+   * Lookup key for compose plugins: weather city, or market comma-separated
+   * tickers/queries (AAPL,BTC-USD). Empty otherwise.
    */
   composePlace: string;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
@@ -355,6 +356,11 @@ export interface LlmMetadata {
    */
   weather?: LlmWeatherAction | null;
   /**
+   * Live market ask (stocks / indices / crypto) — engine fetches Yahoo Finance
+   * and replaces response. Missing queries → model asks; leave unset.
+   */
+  market?: LlmMarketAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -373,6 +379,14 @@ export interface LlmWeatherAction {
   /** YYYY-MM-DD or empty (= now/today). */
   date: string;
   aspects: LlmWeatherAspect[];
+}
+
+export type LlmMarketAspect = "summary" | "price" | "change" | "range";
+
+export interface LlmMarketAction {
+  /** Tickers or names (1–5). */
+  queries: string[];
+  aspects: LlmMarketAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -481,6 +495,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
   const showDumpUrgency = parseShowDumpUrgency(meta);
   const weather = parseWeatherAction(meta);
+  const market = parseMarketAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -525,6 +540,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(showDumpTo ? { showDumpTo } : {}),
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
     ...(weather ? { weather } : {}),
+    ...(market ? { market } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1388,7 +1404,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     record.dynamic === true ||
     parseComposeSource(record) === "git_log" ||
     parseComposeSource(record) === "saved_data" ||
-    parseComposeSource(record) === "weather";
+    parseComposeSource(record) === "weather" ||
+    parseComposeSource(record) === "market";
 
   return {
     action,
@@ -1451,7 +1468,7 @@ function parseComposeLookbackHours(record: Record<string, unknown>): number {
 
 function parseComposeSource(
   record: Record<string, unknown>,
-): "" | "git_log" | "saved_data" | "weather" {
+): "" | "git_log" | "saved_data" | "weather" | "market" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -1487,6 +1504,16 @@ function parseComposeSource(
   ) {
     return "weather";
   }
+  if (
+    raw === "market" ||
+    raw === "stocks" ||
+    raw === "stock" ||
+    raw === "crypto" ||
+    raw === "finance" ||
+    raw === "yahoo"
+  ) {
+    return "market";
+  }
   return "";
 }
 
@@ -1496,6 +1523,9 @@ function parseComposePlace(record: Record<string, unknown>): string {
     "composePlace",
     "weather_place",
     "weatherPlace",
+    "market_symbols",
+    "marketSymbols",
+    "symbols",
   ]).slice(0, 255);
 }
 
@@ -1540,6 +1570,66 @@ export function parseWeatherAction(
   return {
     place,
     date,
+    aspects: aspects.length > 0 ? aspects : ["summary"],
+  };
+}
+
+const MARKET_ASPECTS = new Set<LlmMarketAspect>([
+  "summary",
+  "price",
+  "change",
+  "range",
+]);
+
+/** metadata.market — live Yahoo Finance fetch; engine replaces response. */
+export function parseMarketAction(
+  meta: Record<string, unknown>,
+): LlmMarketAction | null {
+  const raw = meta.market;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const queriesRaw =
+    row.queries ?? row.symbols ?? row.tickers ?? row.query ?? row.symbol;
+  const queries: string[] = [];
+  if (Array.isArray(queriesRaw)) {
+    for (const entry of queriesRaw) {
+      const q = String(entry ?? "")
+        .trim()
+        .slice(0, 80);
+      if (q && !queries.includes(q)) {
+        queries.push(q);
+      }
+      if (queries.length >= 5) {
+        break;
+      }
+    }
+  } else {
+    const single = String(queriesRaw ?? "")
+      .trim()
+      .slice(0, 80);
+    if (single) {
+      queries.push(single);
+    }
+  }
+  if (queries.length === 0) {
+    return null;
+  }
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmMarketAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      const key = String(entry ?? "")
+        .trim()
+        .toLowerCase() as LlmMarketAspect;
+      if (MARKET_ASPECTS.has(key) && !aspects.includes(key)) {
+        aspects.push(key);
+      }
+    }
+  }
+  return {
+    queries,
     aspects: aspects.length > 0 ? aspects : ["summary"],
   };
 }

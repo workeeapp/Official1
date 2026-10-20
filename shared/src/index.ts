@@ -136,8 +136,10 @@ export type {
   LlmRegisterAction,
   LlmWeatherAction,
   LlmWeatherAspect,
+  LlmMarketAction,
+  LlmMarketAspect,
 } from "./llm-message";
-export { parseWeatherAction } from "./llm-message";
+export { parseWeatherAction, parseMarketAction } from "./llm-message";
 export {
   looksLikePhone,
   normalizeEmployeePhone,

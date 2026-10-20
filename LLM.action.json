@@ -70,6 +70,7 @@
     "    \"show_dump_to\": null,",
     "    \"show_dump_urgency\": null,",
     "    \"weather\": null,",
+    "    \"market\": null,",
     "    \"tips\": null",
     "  }",
     "}",
@@ -1035,7 +1036,8 @@
                         "",
                         "git_log",
                         "saved_data",
-                        "weather"
+                        "weather",
+                        "market"
                       ]
                     },
                     "compose_lookback_hours": {
@@ -1044,7 +1046,7 @@
                     "compose_place": {
                       "type": "string",
                       "maxLength": 255,
-                      "description": "Required when compose_source is weather: city/place to fetch at fire (e.g. תל אביב / New York). Empty otherwise."
+                      "description": "Required when compose_source is weather (city, e.g. תל אביב) OR market (comma-separated tickers/queries, e.g. AAPL,BTC-USD). Empty otherwise."
                     },
                     "confirmed": {
                       "type": "boolean"
@@ -1253,6 +1255,41 @@
                 },
                 "required": [
                   "place"
+                ]
+              },
+              "market": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live market ask (stocks / indices / crypto: «מה מחיר אפל» / BTC / טבע / S&P). Server fetches Yahoo Finance and replaces response. null when not a market ask. Missing queries → ask; leave market null.",
+                "properties": {
+                  "queries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "description": "Tickers or names from speech (AAPL, BTC-USD, ביטקוין, טבע). Prefer Yahoo symbols when known."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "summary",
+                        "price",
+                        "change",
+                        "range"
+                      ]
+                    },
+                    "description": "Bare quote → [summary]; מחיר → [price]; כמה עלתה/ירדה → [change]; גבוה/נמוך → [range]. Can combine."
+                  }
+                },
+                "required": [
+                  "queries"
                 ]
               },
               "tips": {
