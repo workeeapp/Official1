@@ -199,6 +199,7 @@ export type TipTier = (typeof TIP_TIERS)[number];
 export const TIP_TOPICS = [
   "shopping",
   "tasks",
+  "meetings",
   "custom",
   "filing",
   "reminders",

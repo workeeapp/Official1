@@ -172,6 +172,7 @@ describe("tips service", () => {
           op: "add",
         }),
         expect.objectContaining({ topic: "tasks", op: "add" }),
+        expect.objectContaining({ topic: "meetings", op: "add", listType: "tasks" }),
         expect.objectContaining({ topic: "filing", op: "add" }),
         expect.objectContaining({ topic: "reminders", op: "add" }),
         expect.objectContaining({ topic: "directory", op: "remove" }),

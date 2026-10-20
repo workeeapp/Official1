@@ -389,6 +389,15 @@ export function collectAppliedTipOps(input: {
       listType,
       topic,
     });
+    // Meetings live on tasks rows — also advance the meetings tip ladder.
+    if (listType === "tasks") {
+      push({
+        area: "lists",
+        op: action,
+        listType: "tasks",
+        topic: "meetings",
+      });
+    }
   }
 
   const filingActions = new Set(
