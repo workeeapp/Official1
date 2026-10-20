@@ -35,12 +35,15 @@
                 "action": "add",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk",
+                    "שם פריט": "חלב"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
@@ -51,8 +54,12 @@
             }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-milk"],
-            "factsInclude": ["eval-item-milk"]
+            "itemIdsPresent": [
+              "eval-item-milk"
+            ],
+            "factsInclude": [
+              "eval-item-milk"
+            ]
           }
         },
         {
@@ -63,24 +70,34 @@
                 "action": "remove",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-milk" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
               "type": "lists_remove_item_ids",
               "listType": "shopping",
-              "itemIds": ["eval-item-milk"]
+              "itemIds": [
+                "eval-item-milk"
+              ]
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsAbsent": ["eval-item-milk"],
-            "factsExclude": ["eval-item-milk"]
+            "itemIdsAbsent": [
+              "eval-item-milk"
+            ],
+            "factsExclude": [
+              "eval-item-milk"
+            ]
           }
         }
       ]
@@ -106,18 +123,26 @@
           "utterance": "תוסיפי משהו לקניות",
           "response": "מה להוסיף?",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [],
-            "filing": []
+            "lists": []
           },
           "constraints": [
-            { "type": "lists_empty" },
-            { "type": "list_ops_empty" },
-            { "type": "filing_empty" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsAbsent": ["eval-item-bread"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsAbsent": [
+              "eval-item-bread"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         },
         {
@@ -128,12 +153,15 @@
                 "action": "add",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-bread", "שם פריט": "לחם" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-bread",
+                    "שם פריט": "לחם"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
@@ -144,8 +172,12 @@
             }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-bread"],
-            "factsInclude": ["eval-item-bread"]
+            "itemIdsPresent": [
+              "eval-item-bread"
+            ],
+            "factsInclude": [
+              "eval-item-bread"
+            ]
           }
         }
       ]
@@ -163,8 +195,14 @@
             "owner": "טל",
             "scope": "personal",
             "items": [
-              { "item_id": "eval-item-task-a", "שם מטלה": "להתקשר לרופא" },
-              { "item_id": "eval-item-task-b", "שם מטלה": "לשלם חשבון" }
+              {
+                "item_id": "eval-item-task-a",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-task-b",
+                "שם מטלה": "לשלם חשבון"
+              }
             ]
           }
         ]
@@ -174,17 +212,24 @@
           "utterance": "תמחק מטלה",
           "response": "איזו מטלה — להתקשר לרופא או לשלם חשבון?",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [],
-            "filing": []
+            "lists": []
           },
           "constraints": [
-            { "type": "lists_empty" },
-            { "type": "list_ops_empty" },
-            { "type": "response_looks_like_ask" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-task-a", "eval-item-task-b"]
+            "itemIdsPresent": [
+              "eval-item-task-a",
+              "eval-item-task-b"
+            ]
           }
         },
         {
@@ -195,23 +240,31 @@
                 "action": "remove",
                 "list_type": "tasks",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-task-a" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-task-a"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
               "type": "lists_remove_item_ids",
               "listType": "tasks",
-              "itemIds": ["eval-item-task-a"]
+              "itemIds": [
+                "eval-item-task-a"
+              ]
             }
           ],
           "stateAfter": {
-            "itemIdsAbsent": ["eval-item-task-a"],
-            "itemIdsPresent": ["eval-item-task-b"]
+            "itemIdsAbsent": [
+              "eval-item-task-a"
+            ],
+            "itemIdsPresent": [
+              "eval-item-task-b"
+            ]
           }
         }
       ]
@@ -228,7 +281,12 @@
             "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }]
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
           }
         ]
       },
@@ -241,23 +299,31 @@
                 "action": "remove",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-milk" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
               "type": "lists_remove_item_ids",
               "listType": "shopping",
-              "itemIds": ["eval-item-milk"]
+              "itemIds": [
+                "eval-item-milk"
+              ]
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsAbsent": ["eval-item-milk"]
+            "itemIdsAbsent": [
+              "eval-item-milk"
+            ]
           }
         }
       ]
@@ -287,9 +353,7 @@
                 ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
@@ -312,28 +376,44 @@
             }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-host-bday"],
-            "listTypeCounts": { "tasks": 1 },
-            "factsInclude": ["ערב יום הולדת"]
+            "itemIdsPresent": [
+              "eval-item-host-bday"
+            ],
+            "listTypeCounts": {
+              "tasks": 1
+            },
+            "factsInclude": [
+              "ערב יום הולדת"
+            ]
           }
         },
         {
           "utterance": "תוסיפי רשימת כיבוד?",
           "response": "מה לשים בכיבוד?",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [],
-            "filing": []
+            "lists": []
           },
           "constraints": [
-            { "type": "lists_empty" },
-            { "type": "list_ops_empty" },
-            { "type": "no_invented_reminder_add" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-host-bday"],
-            "listTypeCounts": { "tasks": 1 },
-            "factsInclude": ["ערב יום הולדת"]
+            "itemIdsPresent": [
+              "eval-item-host-bday"
+            ],
+            "listTypeCounts": {
+              "tasks": 1
+            },
+            "factsInclude": [
+              "ערב יום הולדת"
+            ]
           }
         },
         {
@@ -345,8 +425,14 @@
                 "list_type": "custom",
                 "list_name": "כיבוד",
                 "items": [
-                  { "item_id": "eval-item-cake", "שם": "עוגה" },
-                  { "item_id": "eval-item-drinks", "שם": "שתיה" }
+                  {
+                    "item_id": "eval-item-cake",
+                    "שם": "עוגה"
+                  },
+                  {
+                    "item_id": "eval-item-drinks",
+                    "שם": "שתיה"
+                  }
                 ],
                 "targets": []
               },
@@ -358,14 +444,17 @@
                   {
                     "item_id": "eval-item-host-bday",
                     "שם מטלה": "ערב יום הולדת",
-                    "linked_lists": [{ "list_name": "כיבוד", "list_type": "custom" }]
+                    "linked_lists": [
+                      {
+                        "list_name": "כיבוד",
+                        "list_type": "custom"
+                      }
+                    ]
                   }
                 ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
@@ -404,10 +493,17 @@
               "tasks": 1,
               "custom": 1
             },
-            "factsInclude": ["כיבוד", "עוגה", "שתיה", "ערב יום הולדת"],
+            "factsInclude": [
+              "כיבוד",
+              "עוגה",
+              "שתיה",
+              "ערב יום הולדת"
+            ],
             "linkedListNamesOnItem": {
               "itemId": "eval-item-host-bday",
-              "listNames": ["כיבוד"]
+              "listNames": [
+                "כיבוד"
+              ]
             }
           }
         }
@@ -451,9 +547,7 @@
                 ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": []
+            ]
           },
           "constraints": [
             {
@@ -476,10 +570,18 @@
             }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-host-party"],
-            "factsInclude": ["ערב משחקים"],
-            "factsExclude": ["ערב פוקר"],
-            "listTypeCounts": { "tasks": 1 }
+            "itemIdsPresent": [
+              "eval-item-host-party"
+            ],
+            "factsInclude": [
+              "ערב משחקים"
+            ],
+            "factsExclude": [
+              "ערב פוקר"
+            ],
+            "listTypeCounts": {
+              "tasks": 1
+            }
           }
         }
       ]

@@ -35,13 +35,15 @@
                 "action": "add",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk",
+                    "שם פריט": "חלב"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": [],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -51,30 +53,43 @@
               "minCount": 1,
               "maxCount": 1
             },
-            { "type": "filing_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-milk"],
-            "factsInclude": ["חלב"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsPresent": [
+              "eval-item-milk"
+            ],
+            "factsInclude": [
+              "חלב"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         },
         {
           "utterance": "תתיקי שחלב רק 3%",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [],
-            "filing": [
+            "lists": [
               {
-                "action": "add_filing",
-                "item_name": "חלב",
-                "item_info": "רק 3%",
-                "item_description": "",
-                "targets": []
+                "action": "add",
+                "list_type": "filing",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_name": "חלב",
+                    "item_info": "רק 3%",
+                    "item_description": ""
+                  }
+                ]
               }
-            ],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -82,13 +97,24 @@
               "action": "add_filing",
               "infoIncludes": "3%"
             },
-            { "type": "lists_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-milk"],
-            "factsInclude": ["חלב", "רק 3%"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsPresent": [
+              "eval-item-milk"
+            ],
+            "factsInclude": [
+              "חלב",
+              "רק 3%"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]
@@ -119,13 +145,15 @@
                 "action": "add",
                 "list_type": "custom",
                 "list_name": "קניות לשבת",
-                "items": [{ "item_id": "eval-item-challah", "שם": "חלות" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-challah",
+                    "שם": "חלות"
+                  }
+                ],
                 "targets": []
               }
-            ],
-            "list_ops": [],
-            "filing": [],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -136,20 +164,30 @@
               "minCount": 1,
               "maxCount": 1
             },
-            { "type": "list_ops_empty" },
-            { "type": "filing_empty" }
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-challah"],
-            "factsInclude": ["חלות", "קניות לשבת"],
-            "listTypeCounts": { "custom": 1 }
+            "itemIdsPresent": [
+              "eval-item-challah"
+            ],
+            "factsInclude": [
+              "חלות",
+              "קניות לשבת"
+            ],
+            "listTypeCounts": {
+              "custom": 1
+            }
           }
         },
         {
           "utterance": "תשתפי את קניות לשבת עם עמית",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [
+            "lists": [
               {
                 "action": "alter_list",
                 "list_id": "eval-list-shabbat-shop",
@@ -157,12 +195,14 @@
                 "add_columns": [],
                 "remove_columns": [],
                 "rename_columns": [],
-                "add_participants": ["עמית"],
-                "remove_participants": []
+                "add_participants": [
+                  "עמית"
+                ],
+                "remove_participants": [],
+                "items": [],
+                "targets": []
               }
-            ],
-            "filing": [],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -171,13 +211,25 @@
               "minCount": 1,
               "maxCount": 1
             },
-            { "type": "lists_empty" },
-            { "type": "filing_empty" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-challah"],
-            "factsInclude": ["עמית", "shared", "חלות"],
-            "listTypeCounts": { "custom": 1 }
+            "itemIdsPresent": [
+              "eval-item-challah"
+            ],
+            "factsInclude": [
+              "עמית",
+              "shared",
+              "חלות"
+            ],
+            "listTypeCounts": {
+              "custom": 1
+            }
           }
         },
         {
@@ -195,27 +247,30 @@
                   }
                 ],
                 "targets": []
-              }
-            ],
-            "list_ops": [],
-            "filing": [],
-            "reminders": [
+              },
               {
                 "action": "add",
-                "item": "לקנות לשבת",
-                "list_type": "tasks",
-                "date": "2099-06-15",
-                "time": "09:00",
-                "repeat": "once",
-                "ping": [],
+                "list_type": "reminders",
+                "list_name": "",
                 "targets": [],
-                "text": "לקנות לשבת",
-                "in": null,
-                "every_count": null,
-                "every_unit": null,
-                "weekdays": null,
-                "confirmed": false,
-                "compose": false
+                "items": [
+                  {
+                    "item": "לקנות לשבת",
+                    "list_type": "tasks",
+                    "date": "2099-06-15",
+                    "time": "09:00",
+                    "repeat": "once",
+                    "ping": [],
+                    "targets": [],
+                    "text": "לקנות לשבת",
+                    "in": null,
+                    "every_count": null,
+                    "every_unit": null,
+                    "weekdays": null,
+                    "confirmed": false,
+                    "compose": false
+                  }
+                ]
               }
             ]
           },
@@ -232,13 +287,27 @@
               "minCount": 1,
               "maxCount": 1
             },
-            { "type": "list_ops_empty" },
-            { "type": "filing_empty" }
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-challah", "eval-item-nudge-shabbat"],
-            "factsInclude": ["לקנות לשבת", "חלות", "עמית"],
-            "listTypeCounts": { "custom": 1, "tasks": 1 }
+            "itemIdsPresent": [
+              "eval-item-challah",
+              "eval-item-nudge-shabbat"
+            ],
+            "factsInclude": [
+              "לקנות לשבת",
+              "חלות",
+              "עמית"
+            ],
+            "listTypeCounts": {
+              "custom": 1,
+              "tasks": 1
+            }
           }
         }
       ]
@@ -268,21 +337,28 @@
                 "action": "add",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-wine", "שם פריט": "יין" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-wine",
+                    "שם פריט": "יין"
+                  }
+                ],
                 "targets": []
-              }
-            ],
-            "list_ops": [],
-            "filing": [
+              },
               {
-                "action": "add_filing",
-                "item_name": "יין",
-                "item_info": "רק אדום",
-                "item_description": "",
-                "targets": []
+                "action": "add",
+                "list_type": "filing",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_name": "יין",
+                    "item_info": "רק אדום",
+                    "item_description": ""
+                  }
+                ]
               }
-            ],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -298,12 +374,21 @@
               "action": "add_filing",
               "infoIncludes": "אדום"
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-wine"],
-            "factsInclude": ["יין", "רק אדום"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsPresent": [
+              "eval-item-wine"
+            ],
+            "factsInclude": [
+              "יין",
+              "רק אדום"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]
@@ -329,22 +414,37 @@
           "utterance": "תוסיפי משהו לקניות ותתיקי משהו",
           "response": "מה להוסיף לקניות ומה לתיוק?",
           "fixtureMetadata": {
-            "lists": [],
-            "list_ops": [],
-            "filing": [],
-            "reminders": []
+            "lists": []
           },
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "response_looks_like_ask" },
-            { "type": "lists_empty" },
-            { "type": "filing_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsAbsent": ["eval-item-bread", "eval-item-wine"],
-            "factsExclude": ["לחם", "רק אדום"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsAbsent": [
+              "eval-item-bread",
+              "eval-item-wine"
+            ],
+            "factsExclude": [
+              "לחם",
+              "רק אדום"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         },
         {
@@ -355,21 +455,28 @@
                 "action": "add",
                 "list_type": "shopping",
                 "list_name": "",
-                "items": [{ "item_id": "eval-item-bread", "שם פריט": "לחם" }],
+                "items": [
+                  {
+                    "item_id": "eval-item-bread",
+                    "שם פריט": "לחם"
+                  }
+                ],
                 "targets": []
-              }
-            ],
-            "list_ops": [],
-            "filing": [
+              },
               {
-                "action": "add_filing",
-                "item_name": "לחם",
-                "item_info": "רק מלא",
-                "item_description": "",
-                "targets": []
+                "action": "add",
+                "list_type": "filing",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_name": "לחם",
+                    "item_info": "רק מלא",
+                    "item_description": ""
+                  }
+                ]
               }
-            ],
-            "reminders": []
+            ]
           },
           "constraints": [
             {
@@ -385,13 +492,24 @@
               "action": "add_filing",
               "infoIncludes": "מלא"
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "itemIdsPresent": ["eval-item-bread"],
-            "itemIdsAbsent": ["eval-item-wine"],
-            "factsInclude": ["לחם", "רק מלא"],
-            "listTypeCounts": { "shopping": 1 }
+            "itemIdsPresent": [
+              "eval-item-bread"
+            ],
+            "itemIdsAbsent": [
+              "eval-item-wine"
+            ],
+            "factsInclude": [
+              "לחם",
+              "רק מלא"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]
@@ -424,13 +542,23 @@
               "minCount": 1,
               "maxCount": 1
             },
-            { "type": "filing_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "factsInclude": ["חלב"],
-            "factsExclude": ["רק 3%"],
-            "listTypeCounts": { "shopping": 1 }
+            "factsInclude": [
+              "חלב"
+            ],
+            "factsExclude": [
+              "רק 3%"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         },
         {
@@ -441,12 +569,21 @@
               "action": "add_filing",
               "infoIncludes": "3%"
             },
-            { "type": "lists_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "factsInclude": ["חלב", "רק 3%"],
-            "listTypeCounts": { "shopping": 1 }
+            "factsInclude": [
+              "חלב",
+              "רק 3%"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]
@@ -484,11 +621,18 @@
               "action": "add_filing",
               "infoIncludes": "אדום"
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "factsInclude": ["יין", "רק אדום"],
-            "listTypeCounts": { "shopping": 1 }
+            "factsInclude": [
+              "יין",
+              "רק אדום"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]
@@ -514,15 +658,30 @@
           "utterance": "תוסיפי משהו לקניות ותתיקי משהו",
           "response": "מה להוסיף לקניות ומה לתיוק?",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "response_looks_like_ask" },
-            { "type": "lists_empty" },
-            { "type": "filing_empty" },
-            { "type": "list_ops_empty" }
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "factsExclude": ["לחם", "רק מלא"],
-            "listTypeCounts": { "shopping": 1 }
+            "factsExclude": [
+              "לחם",
+              "רק מלא"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         },
         {
@@ -541,11 +700,18 @@
               "action": "add_filing",
               "infoIncludes": "מלא"
             },
-            { "type": "list_ops_empty" }
+            {
+              "type": "list_ops_empty"
+            }
           ],
           "stateAfter": {
-            "factsInclude": ["לחם", "רק מלא"],
-            "listTypeCounts": { "shopping": 1 }
+            "factsInclude": [
+              "לחם",
+              "רק מלא"
+            ],
+            "listTypeCounts": {
+              "shopping": 1
+            }
           }
         }
       ]

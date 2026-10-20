@@ -85,6 +85,179 @@ describe("list_ops", () => {
     ]);
   });
 
+  it("parses shell ops and filing from unified metadata.lists", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "add",
+            list_type: "shopping",
+            list_name: "",
+            targets: [],
+            items: [{ "שם פריט": "חלב" }],
+          },
+          {
+            action: "alter_list",
+            list_id: "l1",
+            new_name: "באגים",
+            add_participants: ["טל"],
+            items: [],
+          },
+          {
+            action: "add",
+            list_type: "filing",
+            list_name: "",
+            targets: ["עמית"],
+            items: [
+              {
+                item_name: "משפחה",
+                item_info: "שני ילדים",
+                item_description: "",
+              },
+            ],
+          },
+          {
+            action: "remove",
+            list_type: "filing",
+            targets: [],
+            items: [{ filing_id: "f1" }],
+          },
+          { action: "delete_list", list_id: "l2", items: [] },
+        ],
+      }),
+    );
+    expect(meta.lists).toHaveLength(1);
+    expect(meta.lists[0]?.listType).toBe("shopping");
+    expect(meta.listOps).toEqual([
+      {
+        action: "alter_list",
+        listId: "l1",
+        newName: "באגים",
+        addColumns: [],
+        removeColumns: [],
+        renameColumns: [],
+        addParticipants: ["טל"],
+        removeParticipants: [],
+      },
+      {
+        action: "delete_list",
+        listId: "l2",
+        newName: "",
+        addColumns: [],
+        removeColumns: [],
+        renameColumns: [],
+        addParticipants: [],
+        removeParticipants: [],
+      },
+    ]);
+    expect(meta.filing).toEqual([
+      {
+        action: "add_filing",
+        itemName: "משפחה",
+        itemInfo: "שני ילדים",
+        itemDescription: "",
+        targets: ["עמית"],
+        filingId: "",
+      },
+      {
+        action: "remove_filing",
+        itemName: "",
+        itemInfo: "",
+        itemDescription: "",
+        targets: [],
+        filingId: "f1",
+      },
+    ]);
+  });
+
+  it("still accepts legacy metadata.filing alongside unified lists", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "add",
+            list_type: "filing",
+            targets: [],
+            items: [{ item_name: "קוד", item_info: "1", item_description: "" }],
+          },
+        ],
+        filing: [
+          {
+            action: "add_filing",
+            targets: [],
+            item_name: "כתובת",
+            item_info: "ת״א",
+            item_description: "",
+          },
+        ],
+      }),
+    );
+    expect(meta.filing.map((f) => f.itemName)).toEqual(["קוד", "כתובת"]);
+  });
+
+  it("parses list_type reminders into LlmReminderAction and keeps wrapper list_type", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "add",
+            list_type: "reminders",
+            list_name: "",
+            targets: [],
+            items: [
+              {
+                item: "לקנות חלב",
+                list_type: "shopping",
+                in: 3600,
+                ping: ["עמית"],
+              },
+            ],
+          },
+          {
+            action: "remove",
+            list_type: "reminders",
+            targets: [],
+            items: [{ reminder_id: "r1" }],
+          },
+        ],
+      }),
+    );
+    expect(meta.lists).toEqual([]);
+    expect(meta.reminders).toHaveLength(2);
+    expect(meta.reminders[0]?.action).toBe("add");
+    expect(meta.reminders[0]?.item).toBe("לקנות חלב");
+    expect(meta.reminders[0]?.listType).toBe("shopping");
+    expect(meta.reminders[0]?.inSeconds).toBe(3600);
+    expect(meta.reminders[0]?.ping).toEqual(["עמית"]);
+    expect(meta.reminders[1]?.action).toBe("remove");
+    expect(meta.reminders[1]?.reminderId).toBe("r1");
+  });
+
+  it("still accepts legacy metadata.reminders alongside unified lists", () => {
+    const meta = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "add",
+            list_type: "reminders",
+            targets: [],
+            items: [{ item: "לשתות מים", list_type: "tasks", time: "09:00" }],
+          },
+        ],
+        reminders: [
+          {
+            action: "add",
+            item: "לקנות לחם",
+            list_type: "shopping",
+            in: 600,
+            ping: ["טל"],
+          },
+        ],
+      }),
+    );
+    expect(meta.reminders.map((r) => r.item)).toEqual(["לשתות מים", "לקנות לחם"]);
+  });
+
   it("reads declared columns when a custom list is created", () => {
     const meta = parseReplyMetadata(
       reply({

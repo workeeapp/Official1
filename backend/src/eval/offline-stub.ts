@@ -88,37 +88,58 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       return "הנה מה ששמור";
     case "reminders_has_action": {
       if (c.action === "add") {
-        meta.reminders.push({
+        meta.lists.push({
           action: "add",
-          item: "לקנות חלב",
-          list_type: "shopping",
-          time: "09:00",
-          in: null,
-          ping: ["טל"],
+          list_type: "reminders",
+          list_name: "",
           targets: [],
-          ...(c.recurring
-            ? { every_count: 1, every_unit: "days" }
-            : {}),
+          items: [
+            {
+              item: "לקנות חלב",
+              list_type: "shopping",
+              time: "09:00",
+              in: null,
+              ping: ["טל"],
+              ...(c.recurring
+                ? { every_count: 1, every_unit: "days" }
+                : {}),
+            },
+          ],
         });
       } else if (c.action === "update") {
-        meta.reminders.push({
+        meta.lists.push({
           action: "update",
-          reminder_id: "eval-rem-milk",
-          item: "לקנות חלב",
-          time: "14:00",
+          list_type: "reminders",
+          list_name: "",
+          targets: [],
+          items: [
+            {
+              reminder_id: "eval-rem-milk",
+              item: "לקנות חלב",
+              time: "14:00",
+            },
+          ],
         });
       } else if (c.action === "remove") {
-        meta.reminders.push({
+        meta.lists.push({
           action: "remove",
-          reminder_id: "eval-rem-x",
-          item: "",
+          list_type: "reminders",
+          list_name: "",
+          targets: [],
+          items: [{ reminder_id: "eval-rem-x", item: "" }],
         });
       }
       return "עדכנתי";
     }
     case "reminders_remove_ids":
       for (const id of c.reminderIds) {
-        meta.reminders.push({ action: "remove", reminder_id: id, item: "" });
+        meta.lists.push({
+          action: "remove",
+          list_type: "reminders",
+          list_name: "",
+          targets: [],
+          items: [{ reminder_id: id, item: "" }],
+        });
       }
       return "ביטלתי";
     case "lists_has_action":
@@ -158,27 +179,49 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       });
       return "הסרתי";
     case "list_ops_has_action":
-      meta.list_ops.push({
+      meta.lists.push({
         action: c.action,
         list_id: "eval-list-x",
-        ...(c.action === "alter_list" ? { name: "בעיות" } : {}),
+        items: [],
+        targets: [],
+        ...(c.action === "alter_list" ? { new_name: "בעיות" } : {}),
       });
       return "עדכנתי רשימה";
     case "list_ops_delete_list_ids":
       for (const id of c.listIds) {
-        meta.list_ops.push({ action: "delete_list", list_id: id });
+        meta.lists.push({
+          action: "delete_list",
+          list_id: id,
+          items: [],
+          targets: [],
+        });
       }
       return "מחקתי רשימה";
-    case "filing_has_action":
-      meta.filing.push({
-        action: c.action,
-        filing_id: c.filingId ?? "eval-filing-x",
-        item_name: "קוד",
-        item_info: c.infoIncludes ?? "1234",
-        item_description: "",
+    case "filing_has_action": {
+      const rowAction =
+        c.action === "add_filing"
+          ? "add"
+          : c.action === "remove_filing"
+            ? "remove"
+            : "update";
+      meta.lists.push({
+        action: rowAction,
+        list_type: "filing",
+        list_name: "",
         targets: [],
+        items: [
+          {
+            ...(rowAction === "add"
+              ? {}
+              : { filing_id: c.filingId ?? "eval-filing-x" }),
+            item_name: "קוד",
+            item_info: c.infoIncludes ?? "1234",
+            item_description: "",
+          },
+        ],
       });
       return "שמרתי";
+    }
     case "directory_has_action":
       meta.directory.push({
         action: c.action,

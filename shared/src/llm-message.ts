@@ -540,20 +540,14 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const meta = metadata as Record<string, unknown>;
   const defaultTargets = parseTargets(meta);
   const reportSections = parseReportSections(meta);
-  const listEntries = normalizeListsField(meta.lists) ?? [];
-  const lists = listEntries.flatMap((entry) => {
-    const action = toListAction(entry);
-    if (!action) {
-      return [];
-    }
-    return [
-      {
-        ...action,
-        targets: action.targets.length > 0 ? action.targets : defaultTargets,
-      },
-    ];
-  });
-  const filing = Array.isArray(meta.filing)
+  const {
+    lists,
+    listOps: listOpsFromLists,
+    filing: filingFromLists,
+    reminders: remindersFromLists,
+  } = splitUnifiedListEntries(normalizeListsField(meta.lists) ?? [], defaultTargets);
+  // Legacy sibling keys still accepted (old chats / fixtures).
+  const filingLegacy = Array.isArray(meta.filing)
     ? meta.filing.flatMap((entry) => {
         const action = toFilingAction(entry);
         if (!action) {
@@ -567,10 +561,11 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
         ];
       })
     : [];
-  const reminders = parseReminderActions(meta);
+  const filing = [...filingFromLists, ...filingLegacy];
+  const reminders = [...remindersFromLists, ...parseReminderActions(meta)];
   const directory = parseDirectoryActions(meta);
   const messages = parseMessageActions(meta);
-  const listOps = parseListOps(meta);
+  const listOps = [...listOpsFromLists, ...parseListOps(meta)];
   const sendAttachments = parseAttachmentIds(
     meta.send_attachments ?? meta.sendAttachments,
   ).slice(0, SEND_ATTACHMENTS_MAX);
@@ -781,6 +776,198 @@ export function parseListOps(meta: Record<string, unknown>): LlmListOp[] {
   return raw.flatMap((entry) => {
     const op = toListOp(entry);
     return op ? [op] : [];
+  });
+}
+
+const FILING_LIST_TYPE = "filing";
+const REMINDERS_LIST_TYPE = "reminders";
+const FILING_ACTION_BY_ROW: Record<string, LlmFilingActionName> = {
+  add: "add_filing",
+  remove: "remove_filing",
+  update: "update_filing",
+  add_filing: "add_filing",
+  remove_filing: "remove_filing",
+  update_filing: "update_filing",
+};
+
+/**
+ * Split unified metadata.lists into engine-facing lists / listOps / filing /
+ * reminders. Shell ops, list_type filing, and list_type reminders live in the
+ * same model-facing array; row mutates stay as LlmListAction.
+ */
+function splitUnifiedListEntries(
+  entries: unknown[],
+  defaultTargets: string[],
+): {
+  lists: LlmListAction[];
+  listOps: LlmListOp[];
+  filing: LlmFilingAction[];
+  reminders: LlmReminderAction[];
+} {
+  const lists: LlmListAction[] = [];
+  const listOps: LlmListOp[] = [];
+  const filing: LlmFilingAction[] = [];
+  const reminders: LlmReminderAction[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const actionRaw = String(record.action ?? "")
+      .trim()
+      .toLowerCase();
+    if (LIST_OP_ACTIONS.has(actionRaw as LlmListOpName)) {
+      const op = toListOp(record);
+      if (op) {
+        listOps.push(op);
+      }
+      continue;
+    }
+    const listTypeRaw = String(record.list_type ?? record.listType ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      listTypeRaw === FILING_LIST_TYPE ||
+      actionRaw === "add_filing" ||
+      actionRaw === "remove_filing" ||
+      actionRaw === "update_filing"
+    ) {
+      for (const filed of filingActionsFromUnifiedEntry(record, defaultTargets)) {
+        filing.push(filed);
+      }
+      continue;
+    }
+    if (
+      listTypeRaw === REMINDERS_LIST_TYPE ||
+      listTypeRaw === "reminder" ||
+      listTypeRaw === "clocks" ||
+      listTypeRaw === "clock"
+    ) {
+      for (const clock of reminderActionsFromUnifiedEntry(record)) {
+        reminders.push(clock);
+      }
+      continue;
+    }
+    const action = toListAction(record);
+    if (!action) {
+      continue;
+    }
+    lists.push({
+      ...action,
+      targets: action.targets.length > 0 ? action.targets : defaultTargets,
+    });
+  }
+  return { lists, listOps, filing, reminders };
+}
+
+/** One lists[] entry with list_type reminders → one or more LlmReminderAction. */
+function reminderActionsFromUnifiedEntry(
+  record: Record<string, unknown>,
+): LlmReminderAction[] {
+  const actionRaw = String(record.action ?? "")
+    .trim()
+    .toLowerCase();
+  const entryAction = reminderActionName(actionRaw);
+  const items = Array.isArray(record.items)
+    ? record.items.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === "object" && !Array.isArray(item)),
+      )
+    : [];
+  const sources =
+    items.length > 0
+      ? items
+      : // Flat shape: clock fields on the lists entry itself.
+        [record];
+  const entryPing = record.ping ?? record.notify ?? record.ping_targets;
+  const entryTargets = parseTargets(record);
+  return sources.flatMap((source) => {
+    const sourceAction = reminderActionName(source.action) ?? entryAction;
+    if (!sourceAction) {
+      return [];
+    }
+    const merged: Record<string, unknown> = {
+      ...source,
+      action: sourceAction,
+    };
+    // Outer list_type is "reminders"; wrapper shopping|tasks lives on the item.
+    const wrapperType = String(merged.list_type ?? merged.listType ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      wrapperType === REMINDERS_LIST_TYPE ||
+      wrapperType === "reminder" ||
+      wrapperType === "clocks" ||
+      wrapperType === "clock" ||
+      !wrapperType
+    ) {
+      delete merged.list_type;
+      delete merged.listType;
+    }
+    if (
+      !readText(merged, ["reminder_id", "reminderId", "id"]) &&
+      readText(merged, ["item_id", "itemId"])
+    ) {
+      merged.reminder_id = readText(merged, ["item_id", "itemId"]);
+    }
+    if (
+      merged.ping == null &&
+      merged.notify == null &&
+      merged.ping_targets == null &&
+      entryPing != null
+    ) {
+      merged.ping = entryPing;
+    }
+    if (parseTargets(merged).length === 0 && entryTargets.length > 0) {
+      merged.targets = entryTargets;
+    }
+    const action = toReminderAction(merged);
+    return action ? [action] : [];
+  });
+}
+
+/** One lists[] entry with list_type filing → one or more LlmFilingAction. */
+function filingActionsFromUnifiedEntry(
+  record: Record<string, unknown>,
+  defaultTargets: string[],
+): LlmFilingAction[] {
+  const actionRaw = String(record.action ?? "")
+    .trim()
+    .toLowerCase();
+  const filingAction = FILING_ACTION_BY_ROW[actionRaw];
+  if (!filingAction) {
+    return [];
+  }
+  const entryTargets = parseTargets(record);
+  const targets =
+    entryTargets.length > 0 ? entryTargets : defaultTargets;
+  const items = Array.isArray(record.items)
+    ? record.items.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === "object" && !Array.isArray(item)),
+      )
+    : [];
+  const sources =
+    items.length > 0
+      ? items
+      : // Flat shape (legacy-style fields on the lists entry itself).
+        [record];
+  return sources.flatMap((source) => {
+    const merged: Record<string, unknown> = {
+      ...source,
+      action: filingAction,
+      targets:
+        parseTargets(source).length > 0 ? parseTargets(source) : targets,
+    };
+    // Prefer filing_id; allow item_id alias from the unified lists shape.
+    if (
+      !readText(merged, ["filing_id", "filingId"]) &&
+      readText(merged, ["item_id", "itemId"])
+    ) {
+      merged.filing_id = readText(merged, ["item_id", "itemId"]);
+    }
+    const action = toFilingAction(merged);
+    return action ? [action] : [];
   });
 }
 
@@ -2639,24 +2826,47 @@ function collectActionDescriptions(metadata: unknown): string[] {
     }
   }
 
-  if (Array.isArray(meta.lists)) {
-    for (const list of meta.lists) {
-      if (isActionRecord(list)) {
-        descriptions.push(describeListAction(list));
-      }
-    }
+  const unified = splitUnifiedListEntries(
+    normalizeListsField(meta.lists) ?? [],
+    [],
+  );
+  for (const list of unified.lists) {
+    descriptions.push(
+      describeListAction({
+        action: list.action,
+        list_type: list.listType,
+        items: list.items,
+        targets: list.targets,
+      }),
+    );
   }
-
-  for (const op of parseListOps(meta)) {
+  for (const op of [...unified.listOps, ...parseListOps(meta)]) {
     descriptions.push(describeListOp(op));
   }
-
+  for (const filed of unified.filing) {
+    descriptions.push(
+      describeFilingAction({
+        action: filed.action,
+        item_name: filed.itemName,
+        item_info: filed.itemInfo,
+        item_description: filed.itemDescription,
+      }),
+    );
+  }
   if (Array.isArray(meta.filing)) {
     for (const filing of meta.filing) {
       if (isActionRecord(filing)) {
         descriptions.push(describeFilingAction(filing));
       }
     }
+  }
+  for (const clock of unified.reminders) {
+    const when = [clock.date, clock.time].filter(
+      (part): part is string => typeof part === "string" && part.trim().length > 0,
+    );
+    descriptions.push(
+      `${clock.compose ? "Compose" : "Remind"} ${when.join(" ") || "later"}${clock.item ? `: ${clock.item}` : ""}`.trim(),
+    );
   }
 
   if (Array.isArray(meta.messages)) {

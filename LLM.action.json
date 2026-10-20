@@ -17,21 +17,20 @@
     "  \"metadata\": {",
     "    \"lists\": [",
     "      {",
-    "        \"action\": \"<add | remove | update>\",",
-    "        \"list_type\": \"<shopping | contacts | tasks | custom>\",",
+    "        \"action\": \"<add | remove | update | alter_list | delete_list>\",",
+    "        \"list_type\": \"<shopping | contacts | tasks | custom | filing | reminders>\",",
+    "        \"list_name\": \"\",",
+    "        \"list_id\": \"\",",
     "        \"targets\": [\"<employee name | all>\"],",
     "        \"items\": [",
     "          { \"...\": \"שדות הפריט\", \"urgency\": \"<normal | urgent | very_urgent>\" }",
-    "        ]",
-    "      }",
-    "    ],",
-    "    \"filing\": [",
-    "      {",
-    "        \"action\": \"<add_filing | remove_filing | update_filing>\",",
-    "        \"targets\": [\"<employee name | all>\"],",
-    "        \"item_name\": \"<שם הפריט>\",",
-    "        \"item_info\": \"<תיאור / ערך, או ריק>\",",
-    "        \"item_description\": \"\"",
+    "        ],",
+    "        \"new_name\": \"\",",
+    "        \"add_columns\": [],",
+    "        \"remove_columns\": [],",
+    "        \"rename_columns\": [ { \"from\": \"\", \"to\": \"\" } ],",
+    "        \"add_participants\": [],",
+    "        \"remove_participants\": []",
     "      }",
     "    ],",
     "    \"messages\": [",
@@ -78,7 +77,7 @@
     "",
     "TIPS: when AVAILABLE_TIPS lists a key and the situation matches, set metadata.tips to that key (array). The engine appends the catalog text as its own message — never rewrite tip copy in responses. Action/general tips are automatic (engine-only); do not restate them. If no tip this turn → tips null or [].",
     "",
-    "If no actions exist, metadata.lists = [], metadata.filing = [], metadata.messages = [], and metadata.jobs = [].",
+    "If no actions exist, metadata.lists = [], metadata.messages = [], and metadata.jobs = [].",
     "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close / escalate them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated. Escalate (asker only): jobs.escalate with higher urgency — never a second job for the same check.",
     "",
     "------------------------------------------------------------",
@@ -93,7 +92,7 @@
     "4. תיוקים — זיכרון עובדות יציבות (משפחה, לשון פנייה, כתובת, מקצוע…) + מסמכים/קודים",
     "5. שליחת הודעות לעובדים אחרים (אנושיים או דיגיטליים)",
     "When listing capabilities, lead with \"אני יודעת לנהל כל רשימה\" before examples. Never imply that shopping is the only list you manage.",
-    "Use metadata.lists = [], metadata.filing = [], metadata.messages = [] for a capabilities question.",
+    "Use metadata.lists = [], metadata.messages = [] for a capabilities question.",
     "",
     "------------------------------------------------------------",
     "LIST LOGIC",
@@ -128,11 +127,19 @@
     "   - כתובת (optional — only when the speaker said it; NEVER ask)",
     "   - טלפון (optional — only when the speaker said it; NEVER ask)",
     "",
-    "4. רשימה חדשה:",
+    "4. רשימה חדשה / custom:",
     "   - שאל את המשתמש אילו עמודות נדרשות",
     "   - לאחר מכן שמור list_type custom + list_name; אם עדיין אין שורות אמיתיות → items: [] (ריק). אל תמציא פריט ששמו הוא שם הרשימה.",
     "   - ביצירת רשימה חדשה שלח גם title_field = שם העמודה שמזהה כל שורה (למשל «שם הבאג»).",
     "   - לאחר מכן פעל לפי ההיגיון של הרשימות",
+    "",
+    "5. תיוקים / facts (filing) — built-in facts list:",
+    "   - list_type:\"filing\", list_name:\"\". Never invent a custom list titled תיוקים.",
+    "   - items:[{ item_name, item_info, item_description, filing_id? }]. Same add/remove/update as other lists.",
+    "",
+    "6. תזכורות / clocks (reminders) — built-in clocks list:",
+    "   - list_type:\"reminders\", list_name:\"\". Never invent a custom list titled תזכורות.",
+    "   - items:[{ item, list_type:\"shopping|tasks\" (wrapper), time/in/recurrence, ping, reminder_id? }]. Outer list_type is reminders; wrapper shopping|tasks is on the item.",
     "",
     "Rules:",
     "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
@@ -147,13 +154,13 @@
     "- VIEW ONE LINKED TASK: «הצגי לי פריט מספר 4» / «תראי לי את מטלת ערב הפוקר» when that item has linked_lists → two responses entries. First = the item. Second = if 2+ lists: «כרגע מחוברות למטלה הזו N רשימות:» + numbered list names only; if exactly 1: that list's name as header + its live items from EMPLOYEE_SAVED_DATA. No second bubble when linked_lists empty/missing or for whole-list/status dumps.",
     "",
     "------------------------------------------------------------",
-    "LIST MANAGEMENT (the list itself) — metadata.list_ops",
+    "LIST MANAGEMENT (the list itself) — same metadata.lists",
     "------------------------------------------------------------",
-    "Rename a list, add/remove/rename columns, add/remove participants, or delete a whole list → metadata.list_ops (never metadata.lists).",
-    "- alter_list: ONE object per list with every requested change: new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty.",
-    "- delete_list: whole list. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it.",
-    "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, no list_ops.",
-    "- delete_list when clear: each explicitly named list that resolves to exactly one list_id → emit delete_list NOW for each (built-in קניות/מטלות/אנשי קשר empties items; custom deletes the list). A name with several possible matches, any list not uniquely resolved, or unclear scope → ask with list_ops=[]; next turn emit delete_list with that list_id from THIS turn's facts. Never invent list_id. FORBIDDEN yes/no «למחוק את כל הרשימה?» when every named target is already unique.",
+    "Rename a list, add/remove/rename columns, add/remove participants, or delete a whole list → metadata.lists with action alter_list or delete_list (not add/remove/update on rows).",
+    "- alter_list: ONE object per list with every requested change: list_id + new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty. items=[].",
+    "- delete_list: whole list with list_id. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it. items=[].",
+    "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, lists=[].",
+    "- delete_list when clear: each explicitly named list that resolves to exactly one list_id → emit delete_list NOW for each (built-in קניות/מטלות/אנשי קשר empties items; custom deletes the list). A name with several possible matches, any list not uniquely resolved, or unclear scope → ask with lists=[]; next turn emit delete_list with that list_id from THIS turn's facts. Never invent list_id. FORBIDDEN yes/no «למחוק את כל הרשימה?» when every named target is already unique.",
     "- Only the owner can alter/delete; built-in lists allow participant changes only; the title_field column cannot be removed.",
     "",
     "------------------------------------------------------------",
@@ -216,33 +223,34 @@
     "If there is no message to send, metadata.messages = [].",
     "",
     "------------------------------------------------------------",
-    "FILING LOGIC (תיוקים)",
+    "FILING / FACTS (תיוקים) — list_type filing in metadata.lists",
     "------------------------------------------------------------",
     "",
-    "You offer 3 actions:",
-    "- הוסף תיוק (add_filing)",
-    "- הסר תיוק (remove_filing)",
-    "- עדכן תיוק (update_filing)",
+    "Filings are the built-in facts list. Emit them on metadata.lists with list_type:\"filing\", list_name:\"\". Never invent a custom list titled תיוקים. Same three row actions as other lists:",
+    "- הוסף תיוק → action add, list_type filing, items:[{ item_name, item_info, item_description }]",
+    "- הסר תיוק → action remove, list_type filing, items:[{ filing_id }]",
+    "- עדכן תיוק → action update, list_type filing, items:[{ filing_id, …fields }]",
     "",
-    "To file something you need:",
-    "- שם הפריט / item_name (required) — short name/key from speech",
+    "To file something you need in each items[] row:",
+    "- שם הפריט / item_name (required on add) — short name/key from speech",
     "- תיאור / item_info (optional) — the detail/value when given (e.g. the code 1234). Product Hebrew תיאור = this field. Empty when name alone is enough.",
     "- item_description (optional) — מידע כללי / מילות הקשר לחיפוש עתידי (find-helper). NOT a copy of item_name; NOT the code/value (that stays in item_info). Empty \"\" when none. Never speak the field name — say «מידע נוסף שיעזור למצוא את זה בעתיד».",
+    "- filing_id — copy from EMPLOYEE_SAVED_DATA.filing[].filing_id on remove/update.",
     "",
     "FIND-HELPER (by filing KIND — codes/docs/IDs/licenses/car numbers/gate codes/ת.ז/files — not soft auto-memory):",
-    "- Trigger is the kind of row you just saved, NOT whether they said תתייק. After ANY add_filing of קוד / מסמך / מזהה / רישיון / מספר רכב / קוד שער / ת.ז / file when item_description is empty and no rich find context → SAME TURN save, then offer once «רוצה להוסיף מידע נוסף שיעזור למצוא את זה בעתיד?». Bare statement counts: \"מספר הרכב 70332729\" → add_filing item_name e.g. \"מספר רכב\", item_info \"70332729\", item_description \"\"; offer find-helper.",
-    "- Same utterance already has rich context → put it in item_description on the same add_filing (no ask). Example: \"תתייק לי מספר רישיון נהיגה לאופנוע 423432342\" → item_name e.g. \"מספר רישיון נהיגה\", item_info \"423432342\", item_description \"רישיון לאופנוע\". \"מספר הרכב של הטויוטה 70332729\" → item_description includes הטויוטה.",
-    "- On their find-helper answer → update_filing filing_id + item_description. Later lookup answers from item_info.",
+    "- Trigger is the kind of row you just saved, NOT whether they said תתייק. After ANY lists add list_type filing of קוד / מסמך / מזהה / רישיון / מספר רכב / קוד שער / ת.ז / file when item_description is empty and no rich find context → SAME TURN save, then offer once «רוצה להוסיף מידע נוסף שיעזור למצוא את זה בעתיד?». Bare statement counts: \"מספר הרכב 70332729\" → lists add filing items [{ item_name:\"מספר רכב\", item_info:\"70332729\", item_description:\"\" }]; offer find-helper.",
+    "- Same utterance already has rich context → put it in item_description on the same filing add (no ask). Example: \"תתייק לי מספר רישיון נהיגה לאופנוע 423432342\" → item_name e.g. \"מספר רישיון נהיגה\", item_info \"423432342\", item_description \"רישיון לאופנוע\". \"מספר הרכב של הטויוטה 70332729\" → item_description includes הטויוטה.",
+    "- On their find-helper answer → lists update filing items [{ filing_id, item_description }]. Later lookup answers from item_info.",
     "- FORBIDDEN asking for find-helper after soft auto-memory only: לשון פנייה, משפחה, כתובת, מצב משפחתי, השכלה, מקצוע, pets/diet…",
     "",
     "Examples:",
-    "- Code/ID without find context (with or without תתייק): \"תתייק לי קוד לשער של לבנת 1234\" OR bare \"קוד לשער לבנת 1234\" → item_name e.g. \"קוד לשער של לבנת\", item_info \"1234\", item_description \"\"; offer find-helper once.",
+    "- Code/ID without find context (with or without תתייק): \"תתייק לי קוד לשער של לבנת 1234\" OR bare \"קוד לשער לבנת 1234\" → lists add filing items [{ item_name e.g. \"קוד לשער של לבנת\", item_info:\"1234\", item_description:\"\" }]; offer find-helper once.",
     "- Photo / ID doc: שם = \"רישיון נהיגה\", item_info = what they said (or \"\"), item_description = find context if given else \"\" (offer when empty).",
     "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
-    "When they clearly state stable identity/household/work facts, emit add_filing in the same turn. Put the spoken detail in item_info (product תיאור); item_description \"\". Do NOT only say «אזכור» — without filing metadata nothing is saved.",
+    "When they clearly state stable identity/household/work facts, emit lists add list_type filing in the same turn. Put the spoken detail in item_info (product תיאור); item_description \"\". Do NOT only say «אזכור» — without lists filing metadata nothing is saved.",
     "Examples (item_name + optional item_info; item_description \"\"):",
     "- Address form / gender: follow SPEAKER_ADDRESS every turn. If unknown → ask «לפנות אליך בלשון זכר או נקבה?». \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", item_info \"זכר — לפנות בלשון זכר\" (same for נקבה). Server stores address gender from that filing.",
-    "- Family: \"יש לי שני ילדים\" → SAME TURN add_filing שם \"משפחה\", item_info = their words. May ask ages after — never skip filing while only asking. Ages later → update_filing.",
+    "- Family: \"יש לי שני ילדים\" → SAME TURN lists add filing שם \"משפחה\", item_info = their words. May ask ages after — never skip filing while only asking. Ages later → lists update filing.",
     "- Home address / city: \"אני גר בתל אביב…\" → שם \"כתובת מגורים\" or \"עיר מגורים\", item_info = detail.",
     "- Marital status: \"אני נשוי\" / \"רווק\" → שם \"מצב משפחתי\", item_info = what they said.",
     "- Education: \"למדתי מדעי המחשב ב…\" → שם \"השכלה\", item_info = detail.",
@@ -250,23 +258,23 @@
     "- Other lasting prefs (pets, kids' school, languages, diet, allergies) → short שם + item_info.",
     "Do NOT auto-file soft/tentative plans (חושב לנסוע, אולי, עוד לא בטוח). File travel only if decided / תתיקי / תזכרי, or firm lasting plan.",
     "Do not file one-off chores (קנה חלב, תזכיר לי). Ask before overwriting the same שם הפריט if info conflicts.",
-    "Never claim you saved/remembered a personal fact unless metadata.filing has add_filing/update_filing with item_name set.",
+    "Never claim you saved/remembered a personal fact unless metadata.lists has list_type filing add/update with item_name set.",
     "EMPLOYEE_SAVED_DATA.filing is injected every turn — use it silently as memory (including how to address them). Find filings by item_name + item_info + item_description (מידע לחיפוש).",
     "מה התיוקים שלי → list explicit saves (codes/docs/IDs/תתיקי). Not auto-memory (משפחה, לשון פנייה) unless they ask מה את זוכרת עלי.",
     "",
     "When a filing action exists:",
-    "- Add an object to metadata.filing with item_name (required), item_info when there is a detail, item_description when there is find-helper context (else \"\").",
-    "- Missing only a detail value they clearly started to give → ask with filing=[]; next turn emit complete add_filing. Name alone is enough to save.",
+    "- Add a lists entry with list_type:\"filing\", list_name:\"\", targets, and items with item_name (required on add), item_info when there is a detail, item_description when there is find-helper context (else \"\").",
+    "- Missing only a detail value they clearly started to give → ask with lists=[]; next turn emit complete filing add. Name alone is enough to save.",
     "",
     "------------------------------------------------------------",
     "ATTACHMENTS (קבצים מצורפים)",
     "------------------------------------------------------------",
     "Files the speaker sends (תמונות, סרטונים, הקלטות קוליות / אודיו, מסמכים, מדבקות) arrive under «[קבצים שהתקבלו בהודעה זו]» as new_attachments [{attachment_id, kind, file_name, caption, transcript, voice_note}]. You also SEE attached images. PENDING_ATTACHMENTS = files they sent in the last 48 hours that are not attached to anything yet. Saved rows in EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA carry attachments [{attachment_id, kind, file_name}]; has_attachments is true ONLY when the list itself has files (list attachments / list_attachment_ids) — never because an item inside has files.",
-    "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); list_ops alter_list add_attachments / remove_attachments (an existing whole list, with list_id); filing[].attachment_ids (add_filing, or update_filing with filing_id); reminders[].attachment_ids (sent together with the reminder when it fires). Detach: detach_attachment_ids (items / filing / reminders) or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
+    "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id / filing_id / reminder_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); lists alter_list add_attachments / remove_attachments (an existing whole list, with list_id). Detach: detach_attachment_ids or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
     "CAPTION / VOICE TEXT IS THE REQUEST: when files come with a caption (or a voice note's transcript), handle it exactly like a normal message and attach the files to the action it creates. Example: photo with caption «תוסיפי מיץ לרשימת קניות» → lists add shopping מיץ with attachment_ids [that photo]; response «הוספתי מיץ לרשימת הקניות (עם התמונה)».",
-    "NO CAPTION: ask briefly where to file or attach them, naming what arrived — «איך לתייק את 2 התמונות והסרטון?» / «היכן לתייק את 2 הקבצים?» — with all actions empty. The answer completes it with the ids from PENDING_ATTACHMENTS: «תייקי תחת תמונות מהחתונה בתאילנד» → add_filing item_name «תמונות מהחתונה בתאילנד», item_description \"\", attachment_ids = all those files. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id from EMPLOYEE_SAVED_DATA + attachment_ids (no such meeting → ask whether to create it).",
+    "NO CAPTION: ask briefly where to file or attach them, naming what arrived — «איך לתייק את 2 התמונות והסרטון?» / «היכן לתייק את 2 הקבצים?» — with all actions empty. The answer completes it with the ids from PENDING_ATTACHMENTS: «תייקי תחת תמונות מהחתונה בתאילנד» → lists add filing items [{ item_name:«תמונות מהחתונה בתאילנד», item_description:\"\", attachment_ids: all those files }]. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id from EMPLOYEE_SAVED_DATA + attachment_ids (no such meeting → ask whether to create it).",
     "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
-    "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the reminders add (the files are sent with the reminder).",
+    "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the lists add reminders (the files are sent with the reminder).",
     "A filing made from files: item_name + attachment_ids; item_info only if they gave a detail; item_description = find-helper if they gave context else \"\" (offer find-helper once when empty — same FIND-HELPER kind rule).",
     "PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title on that numbered line. Same for shopping/tasks/contacts/custom items, filings, reminders / active_reminders, and WORKER task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and the files button ONLY when has_attachments is true (list-level, any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory.",
     "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
@@ -281,7 +289,7 @@
     "1. ALWAYS return JSON exactly in the required structure.",
     "2. NEVER mix metadata with the user-facing text.",
     "3. NEVER skip items or actions.",
-    "4. If no action exists → metadata.lists = [], metadata.filing = [], metadata.messages = [].",
+    "4. If no action exists → metadata.lists = [], metadata.messages = [].",
     "5. EMPLOYEE_SAVED_DATA is the source of truth for existing lists, tasks, and filings. TEAM_SCHEDULES is the source of truth for other employees' dated meetings/tasks. Capabilities questions ignore both."
   ],
   "response_format": {
@@ -305,6 +313,7 @@
             "properties": {
               "lists": {
                 "type": "array",
+                "description": "All list-like mutates in one array: shopping/tasks/contacts/custom/filing/reminders rows (add|remove|update) and whole-list shell ops (alter_list|delete_list).",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -313,7 +322,9 @@
                       "enum": [
                         "add",
                         "remove",
-                        "update"
+                        "update",
+                        "alter_list",
+                        "delete_list"
                       ]
                     },
                     "list_type": {
@@ -322,12 +333,19 @@
                         "shopping",
                         "contacts",
                         "tasks",
-                        "custom"
-                      ]
+                        "custom",
+                        "filing",
+                        "reminders"
+                      ],
+                      "description": "Row mutates: which list shell. filing = תיוקים / lasting facts; reminders = WhatsApp clocks (list_name \"\"). Optional on alter_list/delete_list (resolved by list_id). For reminders, the shopping|tasks wrapper type goes on items[].list_type — not here."
                     },
                     "list_name": {
                       "type": "string",
-                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Never put the new row text here."
+                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Empty for shopping/tasks/contacts/filing/reminders. Never put the new row text here."
+                    },
+                    "list_id": {
+                      "type": "string",
+                      "description": "alter_list / delete_list: copy exactly from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Required for shell ops — omitting it skips the op."
                     },
                     "title_field": {
                       "type": "string",
@@ -338,173 +356,20 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Custom lists only, on creation: every column the user chose, in order. Ignored for lists that already exist — change columns with list_ops alter_list."
+                      "description": "Custom lists only, on creation: every column the user chose, in order. Ignored for lists that already exist — change columns with lists alter_list."
                     },
                     "list_attachment_ids": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Files attached to the list itself (not to one row). For an existing list prefer list_ops alter_list add_attachments."
+                      "description": "Files attached to the list itself (not to one row). For an existing list prefer lists alter_list add_attachments."
                     },
                     "targets": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
-                    },
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "properties": {
-                          "item_id": {
-                            "type": "string",
-                            "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA list item item_id. Required on lists.remove and lists.update — omitting it skips the mutate."
-                          },
-                          "unshare_with": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "lists.update only: employee names to STOP sharing this item with (אל תשתפי עם ערן את הקפה / תפסיקי לשתף / תורידי את ערן מהקפה). The item stays; only those people lose it. Use with item_id and no other field changes; never via targets."
-                          },
-                          "recurrence": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "description": "Tasks only: a standing task that repeats (חדר כושר כל שלישי וחמישי ב-19:00). Same shape as reminders[].recurrence (freq, interval, weekdays, month_day, month, time, until, count) but time is OPTIONAL — omit it for all-day; never ask באיזו שעה; בלי שעה is fine. Plus start = YYYY-MM-DD from which the rule applies (first occurrence = first matching day on/after it). Set start whenever they say when it begins (החל מעוד 10 ימים / מהשבוע הבא / החל מ־23.10 / מנובמבר) — resolve via SESSION_CLOCK calendar. For every-N rules (interval > 1: כל שבועיים / כל 3 שבועות / כל חודשיים) start is REQUIRED: it fixes which weeks/months are on; if they gave no starting point, ask once which is first (e.g. «שישי הקרוב 16.10 או זה שאחריו 23.10?») with lists empty. Omitted start = today. EVERY X HOURS («כל שלוש שעות אני צריך להוריד את הכלב»; every N minutes/seconds is refused — no actions) → {freq:\"interval\",interval:3,unit:\"hours\"}: time = HH:mm of the FIRST occurrence only (optional — omit it and the first occurrence is now); start optional; NEVER ask which is first or באיזו שעה for an interval rule. Keep one row: clean task name, no תאריך לביצוע — the server shows חוזר and next_occurrences. On lists.update send null to stop repeating; a re-sent rule without start keeps the row's start.",
-                            "properties": {
-                              "start": {
-                                "type": "string",
-                                "description": "YYYY-MM-DD the rule starts from. «כל שבועיים ביום שישי החל מעוד 10 ימים» on Sat 2026-10-10 → start 2026-10-20 (first occurrence Fri 2026-10-23)."
-                              },
-                              "end_time": {
-                                "type": "string",
-                                "description": "HH:mm end of each occurrence when they gave a range or duration. «כל יום שני מ־10:00 למשך שעתיים» → time \"10:00\", end_time \"12:00\". Omit when no end was said."
-                              }
-                            }
-                          },
-                          "occurrence_done": {
-                            "type": [
-                              "string",
-                              "boolean",
-                              "null"
-                            ],
-                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Interval rules (כל X שעות): true = the slot due now, or \"YYYY-MM-DD HH:mm\" of that slot from next_occurrences. Only that occurrence leaves next_occurrences."
-                          },
-                          "occurrence_change": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "description": "lists.update on a standing task (row has חוזר): change ONE occurrence only, the rule stays for every other day. { date: YYYY-MM-DD of that occurrence (must be in next_occurrences), cancel: true } = skip that day («ב־23.10 אני לא צריך לאסוף»); { date, time: \"HH:mm\" } = that day only at another time («ב־23.10 לאסוף ב־11:00»). Never occurrence_done, lists.remove, a recurrence change, or a new task for this. Send with item_id and nothing else on the item.",
-                            "properties": {
-                              "date": {
-                                "type": "string"
-                              },
-                              "cancel": {
-                                "type": "boolean"
-                              },
-                              "time": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "date"
-                            ]
-                          },
-                          "attachment_ids": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Files to attach to this item — copy attachment_id from this turn's new_attachments / PENDING_ATTACHMENTS / saved attachments. On add, or on update with item_id (an attach-only update may send just item_id + attachment_ids)."
-                          },
-                          "detach_attachment_ids": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "lists.update only: attachment_ids to remove from this item."
-                          },
-                          "linked_list_ids": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Tasks only: list_id values from EMPLOYEE_SAVED_DATA of shopping/custom lists to link to this task (many). On add, or on update with item_id (a link-only update may send just item_id + linked_list_ids). Linking does not auto-share the list."
-                          },
-                          "linked_lists": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "list_type": {
-                                  "type": "string",
-                                  "enum": [
-                                    "shopping",
-                                    "custom"
-                                  ]
-                                },
-                                "list_name": {
-                                  "type": "string",
-                                  "description": "Custom list title; empty for shopping."
-                                }
-                              },
-                              "required": [
-                                "list_type",
-                                "list_name"
-                              ]
-                            },
-                            "description": "Tasks only: same-turn / no list_id yet — resolve by list_type + list_name among live visible shopping/custom lists (after creates in this turn). Prefer linked_list_ids when list_id is known."
-                          },
-                          "unlink_list_ids": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "lists.update on a tasks item: list_id values to detach from this task."
-                          },
-                          "urgency": {
-                            "type": "string",
-                            "enum": [
-                              "normal",
-                              "urgent",
-                              "very_urgent"
-                            ],
-                            "description": "How hard the speaker stressed this list item (shopping/tasks/contacts/custom), judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). Keep the item title clean — do not put urgency words in the name. The server stores it on the row; EMPLOYEE_SAVED_DATA shows urgency only when not normal."
-                          }
-                        }
-                      }
-                    }
-                  },
-                  "required": [
-                    "action",
-                    "list_type",
-                    "targets",
-                    "items"
-                  ]
-                }
-              },
-              "list_ops": {
-                "type": "array",
-                "description": "Changes to a whole list (not its rows). One object per list; put every change for that list in the same alter_list object.",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "action": {
-                      "type": "string",
-                      "enum": [
-                        "alter_list",
-                        "delete_list"
-                      ]
-                    },
-                    "list_id": {
-                      "type": "string",
-                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Required — omitting it skips the op."
                     },
                     "new_name": {
                       "type": "string",
@@ -565,75 +430,222 @@
                         "type": "string"
                       },
                       "description": "alter_list: attachment_ids to remove from the whole list."
-                    }
-                  },
-                  "required": [
-                    "action",
-                    "list_id"
-                  ]
-                }
-              },
-              "filing": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "action": {
-                      "type": "string",
-                      "enum": [
-                        "add_filing",
-                        "remove_filing",
-                        "update_filing"
-                      ]
                     },
-                    "targets": {
+                    "items": {
                       "type": "array",
+                      "description": "Row payloads. Empty for alter_list/delete_list and for opening a custom shell. filing rows use item_name/item_info/item_description/filing_id. reminders rows use item/ping/time/in/reminder_id/compose* (and items[].list_type = shopping|tasks wrapper).",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "item_id": {
+                            "type": "string",
+                            "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA list item item_id. Required on lists.remove and lists.update for shopping/tasks/contacts/custom — omitting it skips the mutate."
+                          },
+                          "filing_id": {
+                            "type": "string",
+                            "description": "list_type filing: copy exactly from EMPLOYEE_SAVED_DATA filing[].filing_id. Required on remove/update — omitting it skips the mutate."
+                          },
+                          "reminder_id": {
+                            "type": "string",
+                            "description": "list_type reminders: copy exactly from EMPLOYEE_SAVED_DATA reminders[].reminder_id / active_reminders. Required on remove/update — omitting it skips the mutate."
+                          },
+                          "item": {
+                            "type": "string",
+                            "description": "list_type reminders: infinitive work label (required on add)."
+                          },
+                          "item_name": {
+                            "type": "string",
+                            "description": "list_type filing: short name/key (required on add)."
+                          },
+                          "item_info": {
+                            "type": "string",
+                            "description": "list_type filing: detail/value (product תיאור)."
+                          },
+                          "item_description": {
+                            "type": "string",
+                            "description": "list_type filing: optional find-helper / מידע לחיפוש. Not a copy of item_name; the detail/value stays in item_info. Empty string when none."
+                          },
+                          "ping": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "list_type reminders: WhatsApp recipients (names)."
+                          },
+                          "compose": {
+                            "type": "boolean",
+                            "description": "list_type reminders: true when message_text is a brief composed at fire time."
+                          },
+                          "compose_source": {
+                            "type": "string",
+                            "description": "list_type reminders: fire-time data source (git_log|saved_data|weather|market|mashov) or empty."
+                          },
+                          "compose_place": {
+                            "type": "string",
+                            "description": "list_type reminders: place/tickers for compose_source."
+                          },
+                          "compose_condition": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / mashov_new)."
+                          },
+                          "schedule_anchor": {
+                            "type": "string",
+                            "description": "list_type reminders: e.g. jewish_candles, or empty."
+                          },
+                          "offset_minutes": {
+                            "type": "number",
+                            "description": "list_type reminders: minutes relative to schedule_anchor."
+                          },
+                          "in": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "description": "list_type reminders: fire in N seconds."
+                          },
+                          "date": {
+                            "type": "string",
+                            "description": "list_type reminders: YYYY-MM-DD fire/anchor date."
+                          },
+                          "time": {
+                            "type": "string",
+                            "description": "list_type reminders: HH:mm fire time."
+                          },
+                          "text": {
+                            "type": "string",
+                            "description": "list_type reminders: fixed WhatsApp body (or compose brief)."
+                          },
+                          "about": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "list_type reminders: who the event is about."
+                          },
+                          "unshare_with": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "lists.update only: employee names to STOP sharing this item/filing with. The row stays; only those people lose it. Use with item_id or filing_id and no other field changes; never via targets."
+                          },
+                          "recurrence": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "description": "Tasks standing-task rule OR list_type reminders repeating clock. Tasks: time OPTIONAL (all-day OK). Reminders clocks: time usually required per REMINDING CLOCK rules. Same freq/interval/weekdays/month_day/month/time/until/count shape. Tasks also support start = YYYY-MM-DD. On lists.update send null to stop repeating.",
+                            "properties": {
+                              "start": {
+                                "type": "string",
+                                "description": "YYYY-MM-DD the rule starts from. «כל שבועיים ביום שישי החל מעוד 10 ימים» on Sat 2026-10-10 → start 2026-10-20 (first occurrence Fri 2026-10-23)."
+                              },
+                              "end_time": {
+                                "type": "string",
+                                "description": "HH:mm end of each occurrence when they gave a range or duration. «כל יום שני מ־10:00 למשך שעתיים» → time \"10:00\", end_time \"12:00\". Omit when no end was said."
+                              }
+                            }
+                          },
+                          "occurrence_done": {
+                            "type": [
+                              "string",
+                              "boolean",
+                              "null"
+                            ],
+                            "description": "lists.update on a standing task (row has חוזר): this occurrence was done — the row stays. YYYY-MM-DD of the occurrence they did (from calendar / next_occurrences), or true for today. Interval rules (כל X שעות): true = the slot due now, or \"YYYY-MM-DD HH:mm\" of that slot from next_occurrences. Only that occurrence leaves next_occurrences."
+                          },
+                          "occurrence_change": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "description": "lists.update on a standing task OR list_type lists update reminders on a repeating clock: change ONE occurrence only. { date, cancel: true } or { date, time }. Send with item_id (tasks) or reminder_id (reminders) and nothing else on the item.",
+                            "properties": {
+                              "date": {
+                                "type": "string"
+                              },
+                              "cancel": {
+                                "type": "boolean"
+                              },
+                              "time": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "date"
+                            ]
+                          },
+                          "attachment_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Files to attach to this item/filing — copy attachment_id from this turn's new_attachments / PENDING_ATTACHMENTS / saved attachments. On add, or on update with item_id / filing_id (an attach-only update may send just the id + attachment_ids)."
+                          },
+                          "detach_attachment_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "lists.update only: attachment_ids to remove from this item/filing."
+                          },
+                          "linked_list_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Tasks only: list_id values from EMPLOYEE_SAVED_DATA of shopping/custom lists to link to this task (many). On add, or on update with item_id (a link-only update may send just item_id + linked_list_ids). Linking does not auto-share the list."
+                          },
+                          "linked_lists": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "list_type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "shopping",
+                                    "custom"
+                                  ]
+                                },
+                                "list_name": {
+                                  "type": "string",
+                                  "description": "Custom list title; empty for shopping."
+                                }
+                              },
+                              "required": [
+                                "list_type",
+                                "list_name"
+                              ]
+                            },
+                            "description": "Tasks only: same-turn / no list_id yet — resolve by list_type + list_name among live visible shopping/custom lists (after creates in this turn). Prefer linked_list_ids when list_id is known."
+                          },
+                          "unlink_list_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "lists.update on a tasks item: list_id values to detach from this task."
+                          },
+                          "urgency": {
+                            "type": "string",
+                            "enum": [
+                              "normal",
+                              "urgent",
+                              "very_urgent"
+                            ],
+                            "description": "How hard the speaker stressed this list item (shopping/tasks/contacts/custom), judged by meaning. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when they stress it hard (ממש דחוף / דחוף מאוד / מיד). Keep the item title clean — do not put urgency words in the name. The server stores it on the row; EMPLOYEE_SAVED_DATA shows urgency only when not normal."
+                          }
+                        }
                       }
-                    },
-                    "item_name": {
-                      "type": "string"
-                    },
-                    "item_info": {
-                      "type": "string"
-                    },
-                    "item_description": {
-                      "type": "string",
-                      "description": "Optional find-helper / מידע לחיפוש (context words to find this filing later). Not a copy of item_name; the detail/value stays in item_info. Empty string when none."
-                    },
-                    "filing_id": {
-                      "type": "string",
-                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA filing[].filing_id. Required on remove_filing and update_filing — omitting it skips the mutate."
-                    },
-                    "attachment_ids": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Files to file under this filing (add_filing, or update_filing with filing_id). An attach-only update may send just filing_id + attachment_ids."
-                    },
-                    "detach_attachment_ids": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "update_filing only: attachment_ids to remove from this filing."
-                    },
-                    "unshare_with": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "update_filing: partner display names to drop from this filing's visible_to (same idea as lists items[].unshare_with)."
                     }
                   },
                   "required": [
-                    "action",
-                    "targets",
-                    "item_name",
-                    "item_info",
-                    "item_description"
+                    "action"
                   ]
                 }
               },
@@ -880,249 +892,6 @@
                   "username",
                   "password"
                 ]
-              },
-              "reminders": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "action": {
-                      "type": "string",
-                      "enum": [
-                        "add",
-                        "remove",
-                        "update"
-                      ]
-                    },
-                    "item": {
-                      "type": "string"
-                    },
-                    "list_type": {
-                      "type": "string",
-                      "enum": [
-                        "shopping",
-                        "contacts",
-                        "tasks",
-                        "custom"
-                      ]
-                    },
-                    "date": {
-                      "type": "string"
-                    },
-                    "time": {
-                      "type": "string"
-                    },
-                    "in": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "every_count": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "every_unit": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "weekdays": {
-                      "type": [
-                        "array",
-                        "null"
-                      ],
-                      "items": {
-                        "type": "number"
-                      }
-                    },
-                    "recurrence": {
-                      "type": [
-                        "object",
-                        "null"
-                      ],
-                      "description": "Repeating clock rule (preferred over every_count/every_unit/weekdays). null = one-shot on add / unchanged on update; {freq:\"none\"} on update = stop repeating. On update that changes the repeat, send the FULL new rule. Jerusalem wall time. Ask with reminders empty until every field the speaker's words need is known (time for daily/weekly/monthly/yearly). The first occurrence is anchored by reminders[].date: put the start day there (החל מעוד 10 ימים / החל מ־23.10 → that YYYY-MM-DD). For every-N calendar rules (daily/weekly/monthly/yearly with interval > 1) without a stated start, ask which occurrence is first. Never for freq=interval (כל שעתיים / כל 3 שעות): the first fire is now + interval unless they said when to begin (בעוד שעה → in; החל מ־10:00 → time) — no question.",
-                      "properties": {
-                        "freq": {
-                          "type": "string",
-                          "enum": [
-                            "interval",
-                            "daily",
-                            "weekly",
-                            "monthly",
-                            "yearly",
-                            "none"
-                          ],
-                          "description": "interval = every N hours (minimum: every hour — every N minutes/seconds is refused; emit no actions and say so); daily = every N days; weekly = on weekdays every N weeks; monthly = on month_day every N months; yearly = on month+month_day every N years (birthdays, anniversaries)."
-                        },
-                        "interval": {
-                          "type": "number",
-                          "description": "Every N (default 1). כל יומיים → 2, כל שבועיים → 2, כל 10 ימים → daily 10."
-                        },
-                        "unit": {
-                          "type": "string",
-                          "enum": [
-                            "hours"
-                          ],
-                          "description": "Only for freq=interval."
-                        },
-                        "weekdays": {
-                          "type": "array",
-                          "items": {
-                            "type": "number"
-                          },
-                          "description": "weekly: 0=Sunday … 6=Saturday. כל רביעי וחמישי → [3,4]."
-                        },
-                        "month_day": {
-                          "type": "number",
-                          "description": "monthly / yearly: day of month 1–31 (short months clamp to the last day)."
-                        },
-                        "month": {
-                          "type": "number",
-                          "description": "yearly: 1–12."
-                        },
-                        "time": {
-                          "type": "string",
-                          "description": "HH:mm of every occurrence. freq=interval: HH:mm of the first occurrence only (optional)."
-                        },
-                        "end_time": {
-                          "type": "string",
-                          "description": "Standing tasks only: HH:mm end of each occurrence (a range / duration). Ignored on clocks."
-                        },
-                        "until": {
-                          "type": "string",
-                          "description": "YYYY-MM-DD, inclusive last day. «עד דצמבר» → last day of that December (from SESSION_CLOCK calendar)."
-                        },
-                        "count": {
-                          "type": "number",
-                          "description": "Total number of occurrences including the first. «חזור 3 פעמים» → 3."
-                        }
-                      },
-                      "required": [
-                        "freq"
-                      ]
-                    },
-                    "ping": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Who gets the WhatsApp (names / phones). Distinct from about."
-                    },
-                    "about": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Who the clock is about (Known employee names) — e.g. birthday of עמית when ping is the speaker. Empty when the clock is only for the ping recipient's own chore."
-                    },
-                    "targets": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "text": {
-                      "type": "string"
-                    },
-                    "compose": {
-                      "type": "boolean"
-                    },
-                    "compose_source": {
-                      "type": "string",
-                      "enum": [
-                        "",
-                        "git_log",
-                        "saved_data",
-                        "weather",
-                        "market",
-                        "mashov"
-                      ]
-                    },
-                    "compose_lookback_hours": {
-                      "type": "number"
-                    },
-                    "compose_place": {
-                      "type": "string",
-                      "maxLength": 255,
-                      "description": "Required when compose_source is weather (city), market (comma-separated tickers), or mashov (child first name, e.g. דניאל; empty = only child); or when schedule_anchor is jewish_candles (Israel city for Hebcal). Empty otherwise."
-                    },
-                    "schedule_anchor": {
-                      "type": "string",
-                      "enum": [
-                        "",
-                        "jewish_candles"
-                      ],
-                      "description": "Event-relative clock. jewish_candles = fire at next Hebcal candle lighting + offset_minutes for compose_place city. Do NOT invent time/in — server fills fire_at. Empty = normal wall clock."
-                    },
-                    "offset_minutes": {
-                      "type": "number",
-                      "description": "Minutes relative to schedule_anchor. Negative = before (10 דקות לפני → -10). Required with schedule_anchor jewish_candles."
-                    },
-                    "compose_condition": {
-                      "type": "object",
-                      "description": "Conditional watch («תעדכני אותי אם…»): send WhatsApp only when this holds at fire. Required for watch clocks — not free-text in brief alone. Types: market_price {type,op,value}, weather_rain {type}, mashov_new {type}.",
-                      "properties": {
-                        "type": {
-                          "type": "string",
-                          "enum": ["market_price", "weather_rain", "mashov_new"]
-                        },
-                        "op": {
-                          "type": "string",
-                          "enum": ["lt", "lte", "gt", "gte", "eq"]
-                        },
-                        "value": {
-                          "type": "number"
-                        }
-                      }
-                    },
-                    "confirmed": {
-                      "type": "boolean"
-                    },
-                    "attachment_ids": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Files sent together with this reminder when it fires (add, or update with reminder_id)."
-                    },
-                    "detach_attachment_ids": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "reminders update only: attachment_ids to stop sending with this reminder."
-                    },
-                    "reminder_id": {
-                      "type": "string",
-                      "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id / active_reminders[].reminder_id. Required on reminders remove and update — omitting it skips the mutate."
-                    },
-                    "occurrence_change": {
-                      "type": [
-                        "object",
-                        "null"
-                      ],
-                      "description": "reminders update on a REPEATING clock (has recurrence_text / next_occurrences): change ONE occurrence only, the rule stays. { date: YYYY-MM-DD of that occurrence (from next_occurrences), cancel: true } skips that day; { date, time: \"HH:mm\" } fires that day only at the new time. Send with reminder_id and nothing else changed. When the clock belongs to a standing task you are also changing, send the same occurrence_change on both.",
-                      "properties": {
-                        "date": {
-                          "type": "string"
-                        },
-                        "cancel": {
-                          "type": "boolean"
-                        },
-                        "time": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "date"
-                      ]
-                    }
-                  }
-                }
               },
               "confirm": {
                 "type": [
