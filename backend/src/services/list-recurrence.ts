@@ -30,6 +30,8 @@ export const RECURRENCE_DISPLAY_KEY = "חוזר";
 
 const OCCURRENCE_LIMIT = 6;
 const HORIZON_DAYS = 62;
+/** Cap when expanding for an explicit dump date window (far day / week / month). */
+const RANGE_OCCURRENCE_LIMIT = 400;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -428,6 +430,26 @@ export function stripRecurrenceMeta(data: Record<string, unknown>): Record<strin
   return next;
 }
 
+function formatItemOccurrence(rule: Recurrence, value: Date): string {
+  const moved = (rule.exceptions ?? []).some(
+    (entry) => entry.time && entry.date === ymd(value),
+  );
+  if (!rule.time && !moved) {
+    return ymd(value);
+  }
+  const at = formatJerusalemDateTime(value);
+  // A moved day keeps only its new start; the rule's end belongs to the rule's slot.
+  return rule.endTime && !moved ? `${at}–${rule.endTime}` : at;
+}
+
+function parseYmdDay(value: string): Date | null {
+  const iso = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!iso) {
+    return null;
+  }
+  return jerusalemWallTimeToDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), 0, 0);
+}
+
 /**
  * Upcoming dates of a standing task, from today (inclusive) — "YYYY-MM-DD HH:mm",
  * "YYYY-MM-DD HH:mm–HH:mm" when the rule has an end_time, or "YYYY-MM-DD" when the
@@ -466,18 +488,93 @@ export function itemNextOccurrences(data: unknown, now = new Date()): string[] |
       horizon,
     }).filter(pending);
   }
-  const movedDays = new Set(
-    (rule.exceptions ?? []).filter((entry) => entry.time).map((entry) => entry.date),
+  return occurrences.slice(0, OCCURRENCE_LIMIT).map((value) => formatItemOccurrence(rule, value));
+}
+
+export type OccurrenceRange = {
+  from?: string | null;
+  to?: string | null;
+};
+
+/** Normalize dump date bounds to YYYY-MM-DD; empty → null. */
+export function normalizeOccurrenceRange(
+  range?: OccurrenceRange | null,
+): { from: string; to: string } | null {
+  const from = range?.from?.trim().slice(0, 10) || "";
+  const to = range?.to?.trim().slice(0, 10) || "";
+  if (!from && !to) {
+    return null;
+  }
+  const a = from || to;
+  const b = to || from;
+  return a <= b ? { from: a, to: b } : { from: b, to: a };
+}
+
+/**
+ * Standing-task occurrences whose calendar day lands in [from, to] (inclusive).
+ * Used by day-agenda dumps so a far date (beyond the short next_occurrences horizon)
+ * still matches a weekly/monthly/yearly rule. Does not replace every-turn injection.
+ */
+export function itemOccurrencesInRange(
+  data: unknown,
+  fromYmd: string,
+  toYmd: string,
+  now = new Date(),
+): string[] | null {
+  const stored = itemRecurrence(data);
+  if (!stored) {
+    return null;
+  }
+  const from = fromYmd.trim().slice(0, 10);
+  const to = toYmd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    return [];
+  }
+  const { rule, start } = stored;
+  if (rule.freq === "interval") {
+    return intervalOccurrencesInRange(data, rule, start, from, to, now);
+  }
+  const today = dayStart(now);
+  const startDay = parseYmdDay(start) ?? today;
+  const horizon = jerusalemWallTimeToDate(
+    Number(to.slice(0, 4)),
+    Number(to.slice(5, 7)),
+    Number(to.slice(8, 10)),
+    23,
+    59,
   );
-  return occurrences.slice(0, OCCURRENCE_LIMIT).map((value) => {
-    const moved = movedDays.has(ymd(value));
-    if (!rule.time && !moved) {
-      return ymd(value);
+  const inWindow = (value: Date) => {
+    const day = ymd(value);
+    return day >= from && day <= to && !isOccurrenceDone(data, day);
+  };
+  let occurrences: Date[];
+  if (rule.count) {
+    const first = firstOccurrence(rule, startDay, true);
+    occurrences = listOccurrences(rule, {
+      first,
+      limit: rule.count,
+      horizon,
+    }).filter(inWindow);
+  } else {
+    // Walk from the stored start so every-N cycles keep their parity.
+    let first = firstOccurrence(rule, startDay, true);
+    for (
+      let guard = 0;
+      ymd(first) < from && first.getTime() < horizon.getTime() && guard < 10000;
+      guard += 1
+    ) {
+      first = nextOccurrence(rule, first);
     }
-    const at = formatJerusalemDateTime(value);
-    // A moved day keeps only its new start; the rule's end belongs to the rule's slot.
-    return rule.endTime && !moved ? `${at}–${rule.endTime}` : at;
-  });
+    if (ymd(first) > to || !withinUntil(rule, first)) {
+      return [];
+    }
+    occurrences = listOccurrences(rule, {
+      first,
+      limit: RANGE_OCCURRENCE_LIMIT,
+      horizon,
+    }).filter(inWindow);
+  }
+  return occurrences.map((value) => formatItemOccurrence(rule, value));
 }
 
 /**
@@ -501,6 +598,47 @@ function intervalNextOccurrences(
     const slot = new Date(anchor.getTime() + index * step);
     if (!withinUntil(rule, slot)) {
       break;
+    }
+    const key = formatJerusalemDateTime(slot);
+    if (!isOccurrenceDone(data, key)) {
+      out.push(key);
+    }
+  }
+  return out;
+}
+
+/** Interval slots whose calendar day falls in [from, to]. */
+function intervalOccurrencesInRange(
+  data: unknown,
+  rule: Recurrence,
+  start: string,
+  from: string,
+  to: string,
+  now: Date,
+): string[] {
+  const anchor = intervalAnchor(rule, start) ?? now;
+  const step = intervalStepMs(rule, anchor);
+  const rangeStart = parseYmdDay(from)!;
+  const out: string[] = [];
+  let index = Math.max(0, intervalSlotIndex(anchor, step, rangeStart));
+  for (
+    let guard = 0;
+    guard < 20000 && out.length < RANGE_OCCURRENCE_LIMIT;
+    guard += 1, index += 1
+  ) {
+    if (rule.count && index >= rule.count) {
+      break;
+    }
+    const slot = new Date(anchor.getTime() + index * step);
+    const day = ymd(slot);
+    if (day > to) {
+      break;
+    }
+    if (!withinUntil(rule, slot)) {
+      break;
+    }
+    if (day < from) {
+      continue;
     }
     const key = formatJerusalemDateTime(slot);
     if (!isOccurrenceDone(data, key)) {

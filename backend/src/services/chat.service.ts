@@ -2415,8 +2415,19 @@ export async function sendChatMessage(input: {
         ),
       ];
       const aboutNames = showDumpNames(metadata.showDumpAbout);
+      const dumpOccurrenceRange =
+        metadata.showDumpFrom?.trim() || metadata.showDumpTo?.trim()
+          ? {
+              from: metadata.showDumpFrom ?? null,
+              to: metadata.showDumpTo ?? null,
+            }
+          : null;
       const speakerSnapshot = await withAttachmentRefsSafe(
-        await getEmployeeRecordSnapshot(input.employeeId),
+        await getEmployeeRecordSnapshot(input.employeeId, {
+          ...(dumpOccurrenceRange
+            ? { occurrenceRange: dumpOccurrenceRange }
+            : {}),
+        }),
       );
       const baseDumpOpts = {
         section: metadata.showDumpSection ?? null,
@@ -2537,16 +2548,22 @@ export async function sendChatMessage(input: {
             // Digital worker lists live on that employee — never filter the speaker's book.
             // Current chat worker → same scope as WORKER_SAVED_DATA for this speaker.
             subjectSnapshot = await withAttachmentRefsSafe(
-              await getEmployeeRecordSnapshot(
-                aboutPerson.id,
-                aboutIsCurrentWorker
+              await getEmployeeRecordSnapshot(aboutPerson.id, {
+                ...(aboutIsCurrentWorker
                   ? { scopeItemsToViewerId: input.employeeId }
-                  : undefined,
-              ),
+                  : {}),
+                ...(dumpOccurrenceRange
+                  ? { occurrenceRange: dumpOccurrenceRange }
+                  : {}),
+              }),
             );
           } else if (employee.isOwner === true) {
             subjectSnapshot = await withAttachmentRefsSafe(
-              await getEmployeeRecordSnapshot(aboutPerson.id),
+              await getEmployeeRecordSnapshot(aboutPerson.id, {
+                ...(dumpOccurrenceRange
+                  ? { occurrenceRange: dumpOccurrenceRange }
+                  : {}),
+              }),
             );
           } else {
             subjectSnapshot = filterSnapshotForAboutPerson(

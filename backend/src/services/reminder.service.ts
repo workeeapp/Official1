@@ -251,6 +251,8 @@ export function resolveRecurringFireAt(
 
 const SNAPSHOT_OCCURRENCES = 6;
 const SNAPSHOT_HORIZON_DAYS = 62;
+/** Cap when expanding a repeating clock for an explicit dump date window. */
+const RANGE_OCCURRENCE_LIMIT = 400;
 
 /** The rule a stored clock follows: `recurrence` JSON, else the legacy `repeat` token. */
 export function storedReminderRule(row: {
@@ -268,16 +270,85 @@ export function storedReminderRule(row: {
     : null;
 }
 
+export type ReminderOccurrenceRange = {
+  from?: string | null;
+  to?: string | null;
+};
+
+function reminderDay(value: Date): string {
+  return formatJerusalemDateTime(value).slice(0, 10);
+}
+
+/**
+ * Repeating-clock fires whose calendar day lands in [from, to]. Walks forward from
+ * the clock's next fireAt so every-N parity stays correct beyond the short snapshot horizon.
+ */
+export function reminderOccurrencesInRange(
+  row: {
+    fireAt: Date;
+    repeat: string;
+    recurrence?: unknown;
+    occurrencesFired?: number;
+  },
+  fromYmd: string,
+  toYmd: string,
+): string[] {
+  const rule = storedReminderRule(row);
+  if (!rule) {
+    return [];
+  }
+  const from = fromYmd.trim().slice(0, 10);
+  const to = toYmd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    return [];
+  }
+  const fired = typeof row.occurrencesFired === "number" ? row.occurrencesFired : 0;
+  const horizon = jerusalemWallTimeToDate(
+    Number(to.slice(0, 4)),
+    Number(to.slice(5, 7)),
+    Number(to.slice(8, 10)),
+    23,
+    59,
+  );
+  let first = row.fireAt;
+  for (
+    let guard = 0;
+    reminderDay(first) < from && first.getTime() < horizon.getTime() && guard < 10000;
+    guard += 1
+  ) {
+    first = nextOccurrence(rule, first);
+  }
+  if (reminderDay(first) > to || !withinUntil(rule, first)) {
+    return [];
+  }
+  return listOccurrences(rule, {
+    first,
+    limit: RANGE_OCCURRENCE_LIMIT,
+    horizon,
+    firedCount: fired,
+  })
+    .filter((value) => {
+      const day = reminderDay(value);
+      return day >= from && day <= to;
+    })
+    .map((value) => formatJerusalemDateTime(value));
+}
+
 /**
  * Facts for a repeating clock: product-Hebrew rule text and the next concrete fires
  * (bounded by until/count), so the model answers per date without weekday math.
+ * When `occurrenceRange` is set (day-agenda dump), expand through that window instead
+ * of the short every-turn horizon.
  */
-export function reminderRuleSnapshot(row: {
-  fireAt: Date;
-  repeat: string;
-  recurrence?: unknown;
-  occurrencesFired?: number;
-}): {
+export function reminderRuleSnapshot(
+  row: {
+    fireAt: Date;
+    repeat: string;
+    recurrence?: unknown;
+    occurrencesFired?: number;
+  },
+  occurrenceRange?: ReminderOccurrenceRange | null,
+): {
   recurrence_text?: string;
   next_occurrences?: string[];
   remaining_times?: number;
@@ -287,18 +358,23 @@ export function reminderRuleSnapshot(row: {
     return {};
   }
   const fired = typeof row.occurrencesFired === "number" ? row.occurrencesFired : 0;
-  const occurrences = listOccurrences(rule, {
-    first: row.fireAt,
-    limit: SNAPSHOT_OCCURRENCES,
-    horizon: addJerusalemDays(row.fireAt, SNAPSHOT_HORIZON_DAYS),
-    firedCount: fired,
-  });
+  const from = occurrenceRange?.from?.trim().slice(0, 10) || "";
+  const to = occurrenceRange?.to?.trim().slice(0, 10) || "";
+  const occurrences =
+    from || to
+      ? reminderOccurrencesInRange(row, from || to, to || from)
+      : listOccurrences(rule, {
+          first: row.fireAt,
+          limit: SNAPSHOT_OCCURRENCES,
+          horizon: addJerusalemDays(row.fireAt, SNAPSHOT_HORIZON_DAYS),
+          firedCount: fired,
+        }).map((value) => formatJerusalemDateTime(value));
   const exceptions = formatRecurrenceExceptionsHe(
     pruneRecurrenceExceptions(rule, formatJerusalemDateTime(new Date()).slice(0, 10)),
   );
   return {
     recurrence_text: formatRecurrenceHe(rule),
-    next_occurrences: occurrences.map((value) => formatJerusalemDateTime(value)),
+    next_occurrences: occurrences,
     ...(rule.count ? { remaining_times: Math.max(0, rule.count - fired) } : {}),
     ...(exceptions.length ? { exceptions } : {}),
   };
@@ -1921,6 +1997,7 @@ export function toReminderSnapshotRow(
     updatedAt?: Date | null;
   },
   names: Map<string, string>,
+  occurrenceRange?: ReminderOccurrenceRange | null,
 ): ReminderSnapshotRow {
   const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
   const abouts = Array.isArray(row.aboutIds) ? row.aboutIds.map(String) : [];
@@ -1971,6 +2048,6 @@ export function toReminderSnapshotRow(
     sent: sendStatus === "sent",
     sent_at: row.sentAt ? formatJerusalemDateTime(row.sentAt) : null,
     changed_at: changedAt,
-    ...(row.status === "active" ? reminderRuleSnapshot(row) : {}),
+    ...(row.status === "active" ? reminderRuleSnapshot(row, occurrenceRange) : {}),
   };
 }

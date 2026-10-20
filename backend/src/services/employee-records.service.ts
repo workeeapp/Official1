@@ -29,11 +29,14 @@ import {
   itemDoneDates,
   itemNextOccurrences,
   itemOccurrenceExceptions,
+  itemOccurrencesInRange,
   keepOccurrenceMarks,
   keepRecurrenceStart,
   markOccurrenceDone,
+  normalizeOccurrenceRange,
   shapeItemRecurrence,
   stripRecurrenceMeta,
+  type OccurrenceRange,
 } from "./list-recurrence.js";
 import { toPlainJson } from "./llm-client.js";
 import { syncSpeakerAddressGenderFromFiling } from "./speaker-address.js";
@@ -1162,11 +1165,17 @@ export async function getEmployeeRecordSnapshot(
      * only) even if the mirror row was renamed off אורח after registration.
      */
     sharedOnly?: boolean;
+    /**
+     * Day-agenda dump window: expand standing-task / repeating-clock
+     * next_occurrences through this range (not the short every-turn horizon).
+     */
+    occurrenceRange?: OccurrenceRange | null;
   },
 ): Promise<EmployeeRecordSnapshot> {
   const visibility = await resolveRecordVisibility(employeeId, options);
   const guestMode = options?.sharedOnly === true ? true : visibility.guestMode;
   const { speaker: owner, seeAll, listWhere, filingWhere } = visibility;
+  const occurrenceRange = normalizeOccurrenceRange(options?.occurrenceRange ?? null);
 
   const viewerScope = options?.scopeItemsToViewerId
     ? await resolveRecordVisibility(options.scopeItemsToViewerId)
@@ -1304,11 +1313,13 @@ export async function getEmployeeRecordSnapshot(
           activeReminders,
           activeByWorkerItemId,
           names,
+          occurrenceRange,
         ),
         ...urgencySnapshotField(item.urgency),
         ...itemSharedWithField(item.list.employee.id, item, names),
         ...assignedByField(item.list.employee.id, item.addedById, names),
       },
+      occurrenceRange,
     );
     // Shopping/tasks someone else shared WITH the viewer are the viewer's own work
     // (one row, many partners). Work the viewer assigned to someone else is not.
@@ -1364,10 +1375,12 @@ export async function getEmployeeRecordSnapshot(
               activeReminders,
               activeByWorkerItemId,
               names,
+              occurrenceRange,
             ),
             ...urgencySnapshotField(item.urgency),
             ...assignedByField(list.employee.id, item.addedById, names),
           },
+          occurrenceRange,
         ),
       );
     }
@@ -1412,6 +1425,7 @@ export async function getEmployeeRecordSnapshot(
         names,
         activeReminders,
         activeByWorkerItemId,
+        occurrenceRange,
         ...(workerViewerId
           ? {
               itemExtras: (item: WorkerTaskRow) =>
@@ -1447,6 +1461,7 @@ export async function getEmployeeRecordSnapshot(
         names,
         activeReminders,
         activeByWorkerItemId,
+        occurrenceRange,
       }),
     );
   }
@@ -1531,7 +1546,7 @@ export async function getEmployeeRecordSnapshot(
             return row.ownerId === employeeId || pings.includes(employeeId);
           })
           .filter((row) => row.status === "active")
-          .map((row) => toReminderSnapshotRow(row, names)),
+          .map((row) => toReminderSnapshotRow(row, names, occurrenceRange)),
   };
 
   // Registered member: also inject host shared lists via the share mirror.
@@ -1544,6 +1559,7 @@ export async function getEmployeeRecordSnapshot(
   }
   const mirror = await getEmployeeRecordSnapshot(mirrorId, {
     sharedOnly: true,
+    ...(occurrenceRange ? { occurrenceRange } : {}),
   });
   return mergeShareMirrorSnapshot(base, mirror);
 }
@@ -3338,6 +3354,7 @@ function toListSnapshotEntry(input: {
   names: Map<string, string>;
   activeReminders?: Map<string, LinkedReminderRow>;
   activeByWorkerItemId?: Map<string, LinkedReminderRow>;
+  occurrenceRange?: { from: string; to: string } | null;
   itemExtras?: (item: WorkerTaskRow) => Record<string, unknown>;
 }): EmployeeRecordSnapshot["lists"][number] | null {
   const derivedName =
@@ -3360,6 +3377,7 @@ function toListSnapshotEntry(input: {
             input.activeReminders ?? new Map(),
             input.activeByWorkerItemId,
             input.names,
+            input.occurrenceRange,
           ),
           ...urgencySnapshotField(item.urgency),
           ...(input.scope === "shared"
@@ -3368,6 +3386,7 @@ function toListSnapshotEntry(input: {
           ...assignedByField(input.ownerId, item.addedById, input.names),
           ...(input.itemExtras?.(item) ?? {}),
         },
+        input.occurrenceRange,
       ),
     );
   // Keep empty shells Lucy must still name: shared lists, named custom lists,
@@ -3435,6 +3454,7 @@ export function linkedReminderField(
   activeReminders: Map<string, LinkedReminderRow>,
   activeByWorkerItemId?: Map<string, LinkedReminderRow>,
   names?: Map<string, string>,
+  occurrenceRange?: OccurrenceRange | null,
 ): Record<string, unknown> {
   const itemId = typeof item.id === "string" ? item.id.trim() : "";
   const reminder =
@@ -3461,7 +3481,7 @@ export function linkedReminderField(
             about: aboutIds.map((id) => names?.get(id) ?? id),
           }
         : {}),
-      ...reminderRuleSnapshot(reminder),
+      ...reminderRuleSnapshot(reminder, occurrenceRange),
     },
   };
 }
@@ -3515,6 +3535,7 @@ function withVisibility(
   owner: string,
   itemId?: string,
   linked: Record<string, unknown> = {},
+  occurrenceRange?: { from: string; to: string } | null,
 ): Record<string, unknown> {
   const raw = normalizeListItemData(asRecord(data));
   const normalized = stripRecurrenceMeta(stripJobMeta(raw));
@@ -3524,15 +3545,18 @@ function withVisibility(
   const endDateRaw = normalized["תאריך סיום"];
   const endWeekday =
     typeof endDateRaw === "string" ? hebrewWeekdayFromYmd(endDateRaw) : null;
-  const nextOccurrences = itemNextOccurrences(raw);
-  const doneDates = nextOccurrences ? itemDoneDates(raw) : [];
-  const exceptions = nextOccurrences ? itemOccurrenceExceptions(raw) : [];
+  const nextOccurrences = occurrenceRange
+    ? itemOccurrencesInRange(raw, occurrenceRange.from, occurrenceRange.to)
+    : itemNextOccurrences(raw);
+  const hasRule = nextOccurrences !== null;
+  const doneDates = hasRule ? itemDoneDates(raw) : [];
+  const exceptions = hasRule ? itemOccurrenceExceptions(raw) : [];
   return {
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
     ...(weekday ? { "יום בשבוע": weekday } : {}),
     ...(endWeekday ? { "יום בשבוע סיום": endWeekday } : {}),
-    ...(nextOccurrences ? { next_occurrences: nextOccurrences } : {}),
+    ...(hasRule ? { next_occurrences: nextOccurrences } : {}),
     ...(doneDates.length ? { done_dates: doneDates } : {}),
     ...(exceptions.length ? { exceptions } : {}),
     ...linked,

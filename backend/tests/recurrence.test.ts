@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatJerusalemDateTime } from "@workee/shared";
 import {
   canReuseExistingReminderClock,
+  reminderOccurrencesInRange,
   reminderRuleSnapshot,
   resolveRecurringFireAt,
   toReminderSnapshotRow,
@@ -17,6 +18,7 @@ import {
   itemDoneDates,
   itemNextOccurrences,
   itemOccurrenceExceptions,
+  itemOccurrencesInRange,
   keepOccurrenceMarks,
   keepRecurrenceStart,
   markOccurrenceDone,
@@ -112,6 +114,23 @@ describe("reminder snapshot rule facts", () => {
       "2026-10-14 11:00",
       "2026-10-15 11:00",
     ]);
+  });
+
+  it("occurrenceRange expands a weekly clock past the short snapshot horizon", () => {
+    const row = {
+      fireAt: new Date("2026-10-09T08:45:00.000Z"), // Fri 11:45 Jerusalem
+      repeat: "custom",
+      recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "11:45" },
+    };
+    expect(reminderRuleSnapshot(row).next_occurrences?.some((v) => v.startsWith("2027-04-09"))).toBe(
+      false,
+    );
+    expect(reminderOccurrencesInRange(row, "2027-04-09", "2027-04-09")).toEqual([
+      "2027-04-09 11:45",
+    ]);
+    expect(
+      reminderRuleSnapshot(row, { from: "2027-04-09", to: "2027-04-09" }).next_occurrences,
+    ).toEqual(["2027-04-09 11:45"]);
   });
 
   it("one-shot rows carry no rule facts", () => {
@@ -233,6 +252,48 @@ describe("recurring tasks", () => {
     ]);
     const nextSaturday = new Date("2026-10-24T03:00:00.000Z");
     expect(itemNextOccurrences(kids.item, nextSaturday)?.[0]).toBe("2026-11-06 11:45");
+  });
+
+  it("itemOccurrencesInRange finds a weekly Friday far beyond the short next_occurrences horizon", () => {
+    // 2027-04-09 is a Friday; short horizon (~62d / 6 slots) never reaches it from Oct 2026.
+    const kids = shapeItemRecurrence(
+      {
+        "שם מטלה": "לאסוף את הילדים",
+        recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "11:45" },
+      },
+      NOW,
+    );
+    expect(itemNextOccurrences(kids.item, NOW)?.some((v) => v.startsWith("2027-04-09"))).toBe(
+      false,
+    );
+    expect(itemOccurrencesInRange(kids.item, "2027-04-09", "2027-04-09", NOW)).toEqual([
+      "2027-04-09 11:45",
+    ]);
+    // A Thursday in that week must not match.
+    expect(itemOccurrencesInRange(kids.item, "2027-04-08", "2027-04-08", NOW)).toEqual([]);
+  });
+
+  it("itemOccurrencesInRange keeps every-N parity for a far window", () => {
+    const saturday = new Date("2026-10-10T03:00:00.000Z");
+    const kids = shapeItemRecurrence(
+      {
+        "שם מטלה": "לאסוף את הילדים",
+        recurrence: {
+          freq: "weekly",
+          interval: 2,
+          weekdays: [5],
+          time: "11:45",
+          start: "2026-10-20",
+        },
+      },
+      saturday,
+    );
+    // On-cycle: 2026-10-23, 11-06, 11-20, 12-04, 12-18, 2027-01-01, …
+    expect(itemOccurrencesInRange(kids.item, "2026-12-04", "2026-12-04", saturday)).toEqual([
+      "2026-12-04 11:45",
+    ]);
+    // Off-cycle Friday between 11-20 and 12-04.
+    expect(itemOccurrencesInRange(kids.item, "2026-11-27", "2026-11-27", saturday)).toEqual([]);
   });
 
   it("an update re-sending the rule without start keeps the row's start", () => {

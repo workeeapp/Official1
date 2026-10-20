@@ -2439,6 +2439,39 @@ describe("uniform standing + ping dump lines", () => {
     expect(text.match(/להוריד את סקאזי לטיול — 08:45 \(קבוע \+ תזכורת ב־08:30\)/g)?.length).toBe(3);
   });
 
+  it("far-date day agenda lists a standing Friday when next_occurrences already covers that day", () => {
+    // Snapshot builder expands via occurrenceRange; dump only needs the far slot present.
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "עמית",
+          scope: "personal",
+          items: [
+            {
+              item_id: "kids",
+              "שם מטלה": "לאסוף את הילדים",
+              חוזר: "כל יום שישי ב־11:45",
+              next_occurrences: ["2027-04-09 11:45"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const text = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "עמית",
+      now,
+      dateFrom: "2027-04-09",
+      dateTo: "2027-04-09",
+    })!;
+    expect(text).toContain("לאסוף את הילדים");
+    expect(text).toContain("11:45");
+    expect(text).not.toContain("אין מטלות");
+  });
+
   it("reminder cadence paren is always קבוע-family", () => {
     expect(
       formatReminderWhen(
