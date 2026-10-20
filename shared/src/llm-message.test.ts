@@ -1354,6 +1354,57 @@ describe("parseLlmReply", () => {
     });
   });
 
+  it("reads metadata.jewish for Shabbat / parasha", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            jewish: {
+              place: "פתח תקווה",
+              date: "",
+              aspects: ["candles", "bogus"],
+            },
+          },
+        }),
+      ).jewish,
+    ).toEqual({
+      place: "פתח תקווה",
+      date: "",
+      aspects: ["candles"],
+    });
+  });
+
+  it("allows jewish parasha without place", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            jewish: { place: "", aspects: ["parasha"] },
+          },
+        }),
+      ).jewish,
+    ).toEqual({
+      place: "",
+      date: "",
+      aspects: ["parasha"],
+    });
+  });
+
+  it("ignores jewish summary without place", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            jewish: { place: "", aspects: ["summary"] },
+          },
+        }),
+      ).jewish,
+    ).toBeUndefined();
+  });
+
   it("reads metadata.mashov without requiring password", () => {
     expect(
       parseReplyMetadata(

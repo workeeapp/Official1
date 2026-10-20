@@ -1374,6 +1374,42 @@
                   "place"
                 ]
               },
+              "jewish": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live Jewish calendar / Shabbat ask («מתי מדליקים נרות בפתח תקווה» / «מה פרשת השבוע» / «מתי יוצאת שבת» / «איזה חג הבא»). Server fetches Hebcal and replaces response — FORBIDDEN inventing times. Place required for candles/havdalah/summary (Israel city); optional for parasha/holidays. Missing required place → ask; leave jewish null.",
+                "properties": {
+                  "place": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Israel city for local candle/Havdalah times (פתח תקווה, תל אביב). Empty OK for parasha/holidays alone."
+                  },
+                  "date": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "YYYY-MM-DD for a specific week/day, or empty for this week / now. Resolve מחר via SESSION_CLOCK."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "summary",
+                        "candles",
+                        "havdalah",
+                        "parasha",
+                        "holidays"
+                      ]
+                    },
+                    "description": "Bare שבת/זמני שבת → [summary]; נרות → [candles]; מוצאי/יציאת שבת/הבדלה → [havdalah]; פרשת השבוע → [parasha]; חגים → [holidays]. Can combine."
+                  }
+                },
+                "required": [
+                  "place"
+                ]
+              },
               "tips": {
                 "type": [
                   "array",

@@ -142,12 +142,15 @@ export type {
   LlmMashovAspect,
   LlmPlacesAction,
   LlmPlacesAspect,
+  LlmJewishAction,
+  LlmJewishAspect,
 } from "./llm-message";
 export {
   parseWeatherAction,
   parseMarketAction,
   parseMashovAction,
   parsePlacesAction,
+  parseJewishAction,
   parseComposeCondition,
 } from "./llm-message";
 export {

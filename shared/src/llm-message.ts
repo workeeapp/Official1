@@ -386,6 +386,12 @@ export interface LlmMetadata {
    */
   places?: LlmPlacesAction | null;
   /**
+   * Live Jewish calendar / Shabbat ask — engine fetches Hebcal and replaces
+   * response. Place required for candles/havdalah/summary; optional for
+   * parasha/holidays. Missing required place → model asks; leave unset.
+   */
+  jewish?: LlmJewishAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -434,6 +440,21 @@ export interface LlmPlacesAction {
   /** City / area bias (פתח תקווה, קרית אונו). */
   place: string;
   aspects: LlmPlacesAspect[];
+}
+
+export type LlmJewishAspect =
+  | "summary"
+  | "candles"
+  | "havdalah"
+  | "parasha"
+  | "holidays";
+
+export interface LlmJewishAction {
+  /** Israel city for local times; empty OK for parasha/holidays alone. */
+  place: string;
+  /** YYYY-MM-DD or empty (= this week / now). */
+  date: string;
+  aspects: LlmJewishAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -545,6 +566,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const market = parseMarketAction(meta);
   const mashov = parseMashovAction(meta);
   const places = parsePlacesAction(meta);
+  const jewish = parseJewishAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -592,6 +614,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(market ? { market } : {}),
     ...(mashov ? { mashov } : {}),
     ...(places ? { places } : {}),
+    ...(jewish ? { jewish } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1852,6 +1875,117 @@ export function parsePlacesAction(
     query,
     place,
     aspects: aspects.length > 0 ? aspects : ["summary"],
+  };
+}
+
+const JEWISH_ASPECTS = new Set<LlmJewishAspect>([
+  "summary",
+  "candles",
+  "havdalah",
+  "parasha",
+  "holidays",
+]);
+
+/** Aspects that need a local place (candle / Havdalah times). */
+const JEWISH_PLACE_REQUIRED = new Set<LlmJewishAspect>([
+  "summary",
+  "candles",
+  "havdalah",
+]);
+
+/** metadata.jewish — live Hebcal Shabbat / parasha / holidays. */
+export function parseJewishAction(
+  meta: Record<string, unknown>,
+): LlmJewishAction | null {
+  const raw =
+    meta.jewish ??
+    meta.shabbat ??
+    meta.hebcal ??
+    meta.jewish_calendar ??
+    meta.jewishCalendar;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const place = readText(row, [
+    "place",
+    "location",
+    "city",
+    "מקום",
+    "עיר",
+  ]).slice(0, 255);
+  const date = readText(row, ["date", "day", "תאריך"]).slice(0, 32);
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmJewishAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      let key = String(entry ?? "")
+        .trim()
+        .toLowerCase();
+      if (
+        key === "candle" ||
+        key === "candle_lighting" ||
+        key === "נרות" ||
+        key === "הדלקת נרות"
+      ) {
+        key = "candles";
+      }
+      if (
+        key === "out" ||
+        key === "motzei" ||
+        key === "יציאת שבת" ||
+        key === "מוצאי שבת" ||
+        key === "הבדלה"
+      ) {
+        key = "havdalah";
+      }
+      if (
+        key === "parsha" ||
+        key === "parashat" ||
+        key === "torah" ||
+        key === "פרשה" ||
+        key === "פרשת השבוע"
+      ) {
+        key = "parasha";
+      }
+      if (
+        key === "holiday" ||
+        key === "chag" ||
+        key === "חג" ||
+        key === "חגים"
+      ) {
+        key = "holidays";
+      }
+      if (
+        key === "shabbat" ||
+        key === "שבת" ||
+        key === "זמני שבת" ||
+        key === "times"
+      ) {
+        key = "summary";
+      }
+      const aspect = key as LlmJewishAspect;
+      if (JEWISH_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+        aspects.push(aspect);
+      }
+    }
+  }
+  const resolved = aspects.length > 0 ? aspects : (["summary"] as LlmJewishAspect[]);
+  const needsPlace = resolved.some((a) => JEWISH_PLACE_REQUIRED.has(a));
+  if (needsPlace && !place) {
+    return null;
+  }
+  // Parasha / holidays alone with empty place is OK.
+  if (!needsPlace && resolved.every((a) => a === "parasha" || a === "holidays")) {
+    return { place: place || "", date, aspects: resolved };
+  }
+  if (!place && needsPlace) {
+    return null;
+  }
+  return {
+    place: place || "",
+    date,
+    aspects: resolved,
   };
 }
 
