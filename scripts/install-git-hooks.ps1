@@ -1,4 +1,4 @@
-# Install post-push hook that refreshes the live worktree after a successful push.
+# Install git hooks: pre-push (version bump) + post-push (refresh live worktree).
 # Worktrees share the common .git hooks directory.
 $ErrorActionPreference = "Stop"
 
@@ -12,6 +12,14 @@ if (-not [System.IO.Path]::IsPathRooted($commonDir)) {
 $hooksDir = Join-Path $commonDir "hooks"
 New-Item -ItemType Directory -Force -Path $hooksDir | Out-Null
 
+# --- pre-push: bump VERSION on every branch push ---
+$prePushPath = Join-Path $hooksDir "pre-push"
+$prePushSrc = Join-Path $PSScriptRoot "pre-push-bump-version.sh"
+Copy-Item -Force -Path $prePushSrc -Destination $prePushPath
+Write-Host "Installed pre-push hook: $prePushPath"
+Write-Host "Every git push bumps VERSION (skip with WORKEE_SKIP_VERSION_BUMP=1)."
+
+# --- post-push: refresh live worktree ---
 $hookPath = Join-Path $hooksDir "post-push"
 $refreshAfterPush = Join-Path $PSScriptRoot "refresh-after-push.ps1"
 

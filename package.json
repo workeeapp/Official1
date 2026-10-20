@@ -24,6 +24,8 @@
     "refresh:watch": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch-and-refresh.ps1",
     "live:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-live-worktree.ps1",
     "hooks:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1",
+    "hooks:install:unix": "sh scripts/install-git-hooks.sh",
+    "version:bump": "node scripts/bump-version.mjs",
     "push:live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/push-live.ps1",
     "lucy:sync-prompt": "tsx backend/src/scripts/sync-lucy-prompt.ts"
   },

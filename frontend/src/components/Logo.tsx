@@ -1,3 +1,5 @@
+import { APP_VERSION } from "@/version";
+
 interface LogoProps {
   compact?: boolean;
 }
@@ -30,6 +32,12 @@ export function Logo({ compact = false }: LogoProps) {
         className={`text-lg font-semibold tracking-tight text-text-primary ${compact ? "sr-only sm:not-sr-only" : ""}`}
       >
         Workee
+      </span>
+      <span
+        className={`text-xs font-medium tabular-nums text-text-secondary ${compact ? "sr-only sm:not-sr-only" : ""}`}
+        data-testid="app-version"
+      >
+        version: {APP_VERSION}
       </span>
     </div>
   );
