@@ -1,4 +1,5 @@
 import type { ChatAttachmentRef } from "./attachments.js";
+import type { JobUrgency } from "./job-urgency.js";
 import type { LlmReplyButton } from "./llm-message.js";
 
 export interface PublicUser {
@@ -72,14 +73,25 @@ export interface EmployeeRecordField {
   value: string;
 }
 
+/** Shopping/custom list linked from a tasks item (Employees UI). */
+export interface EmployeeRecordLinkedList {
+  listId: string;
+  listType: string;
+  listName: string;
+}
+
 export interface EmployeeRecordItem {
   id: string;
-  kind: "list" | "filing";
+  kind: "list" | "filing" | "reminder";
   title: string;
   details: EmployeeRecordField[];
   fields: EmployeeRecordField[];
   createdBy: string;
   createdAt: string;
+  /** Non-normal urgency only (urgent / very_urgent). */
+  urgency?: JobUrgency;
+  attachments?: ChatAttachmentRef[];
+  linkedLists?: EmployeeRecordLinkedList[];
 }
 
 export interface EmployeeRecordMutationRequest {
@@ -89,6 +101,8 @@ export interface EmployeeRecordMutationRequest {
 export interface EmployeeRecordGroup {
   type: string;
   title: string;
+  /** Present for list groups so linked-list anchors can scroll here. */
+  listId?: string;
   items: EmployeeRecordItem[];
 }
 

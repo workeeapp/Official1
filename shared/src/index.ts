@@ -12,6 +12,7 @@ export type {
   DigitalEmployeeDefaults,
   EmployeeRecordField,
   EmployeeRecordItem,
+  EmployeeRecordLinkedList,
   EmployeeRecordGroup,
   EmployeeRecordsResponse,
   EmployeeUsageMonth,

@@ -3,7 +3,9 @@ import {
   isGuestEmployee,
   parseAttachmentIds,
   parseJobUrgency,
+  type ChatAttachmentRef,
   type EmployeeRecordField,
+  type EmployeeRecordLinkedList,
   type EmployeeRecordsResponse,
   type JobUrgency,
   type LlmListAction,
@@ -15,7 +17,11 @@ import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
 import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
-import { applyAttachmentLinks } from "./attachment.service.js";
+import {
+  applyAttachmentLinks,
+  loadAttachmentRefs,
+  type AttachmentSavedRef,
+} from "./attachment.service.js";
 import {
   applyListItemListLinks,
   splitItemListLinks,
@@ -1024,7 +1030,7 @@ const TITLE_KEYS: Record<string, string[]> = {
 export async function getEmployeeOwnedRecords(
   employeeId: string,
 ): Promise<EmployeeRecordsResponse> {
-  const [lists, filings] = await Promise.all([
+  const [lists, filings, reminders] = await Promise.all([
     prisma.employeeList.findMany({
       where: { employeeId, deletedAt: null },
       include: {
@@ -1038,11 +1044,29 @@ export async function getEmployeeOwnedRecords(
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
+    prisma.reminder?.findMany
+      ? prisma.reminder.findMany({
+          where: { ownerId: employeeId, status: "active" },
+          orderBy: { fireAt: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
 
-  const names = await loadEmployeeNames([
-    ...lists.flatMap((list) => list.items.map((item) => item.addedById)),
-    ...filings.map((filing) => filing.addedById),
+  const listItemIds = lists.flatMap((list) => list.items.map((item) => item.id));
+  const filingIds = filings.map((filing) => filing.id);
+  const reminderIds = reminders.map((row) => row.id);
+
+  const [names, attachmentRefs, linkedByItem] = await Promise.all([
+    loadEmployeeNames([
+      ...lists.flatMap((list) => list.items.map((item) => item.addedById)),
+      ...filings.map((filing) => filing.addedById),
+      ...reminders.map((row) => row.actorId),
+      ...reminders.flatMap((row) =>
+        Array.isArray(row.pingIds) ? row.pingIds.map(String) : [],
+      ),
+    ]),
+    loadAttachmentRefs({ listItemIds, filingIds, reminderIds }),
+    loadOwnedLinkedLists(listItemIds),
   ]);
 
   const groups = lists
@@ -1057,13 +1081,22 @@ export async function getEmployeeOwnedRecords(
       return {
         type: list.listType,
         title: listTitle(list.listType, titleName),
+        ...(list.id ? { listId: list.id } : {}),
         items: list.items.map((item) =>
           toOwnedListItem(
             list.listType,
-            { ...item, data: withoutHiddenColumns(asRecord(item.data), list.hiddenColumns) },
+            {
+              ...item,
+              data: withoutHiddenColumns(asRecord(item.data), list.hiddenColumns),
+              urgency: item.urgency,
+            },
             names,
             ownerName,
             list.titleField,
+            {
+              attachments: toChatAttachmentRefs(attachmentRefs.listItems.get(item.id)),
+              linkedLists: linkedByItem.get(item.id),
+            },
           ),
         ),
       };
@@ -1096,6 +1129,53 @@ export async function getEmployeeOwnedRecords(
             (filing.addedById ? names.get(filing.addedById) : undefined) ??
             ownerName,
           createdAt: filing.createdAt.toISOString(),
+          ...(attachmentRefs.filings.get(filing.id)?.length
+            ? {
+                attachments: toChatAttachmentRefs(
+                  attachmentRefs.filings.get(filing.id),
+                ),
+              }
+            : {}),
+        };
+      }),
+    });
+  }
+
+  if (reminders.length > 0) {
+    groups.push({
+      type: "reminders",
+      title: "Reminders",
+      items: reminders.map((row) => {
+        const pingNames = (Array.isArray(row.pingIds) ? row.pingIds.map(String) : [])
+          .map((id) => names.get(id) ?? id)
+          .filter(Boolean);
+        const fireAt = formatJerusalemDateTime(row.fireAt);
+        const text = (row.messageText ?? "").trim();
+        const details = [
+          { label: "When", value: fireAt },
+          ...(row.repeat && row.repeat !== "once"
+            ? [{ label: "Repeat", value: row.repeat }]
+            : []),
+          ...(pingNames.length
+            ? [{ label: "To", value: pingNames.join(", ") }]
+            : []),
+          ...(text ? [{ label: "Message", value: text }] : []),
+        ];
+        return {
+          id: row.id,
+          kind: "reminder" as const,
+          title: row.itemLabel || row.itemKey,
+          details,
+          fields: details,
+          createdBy: names.get(row.actorId) ?? names.get(row.ownerId) ?? "",
+          createdAt: row.createdAt.toISOString(),
+          ...(attachmentRefs.reminders.get(row.id)?.length
+            ? {
+                attachments: toChatAttachmentRefs(
+                  attachmentRefs.reminders.get(row.id),
+                ),
+              }
+            : {}),
         };
       }),
     });
@@ -3678,12 +3758,24 @@ function looksLikeListTitleOnlyRecord(item: Record<string, unknown>): boolean {
 
 function toOwnedListItem(
   listType: string,
-  item: { id: string; itemKey?: string; data: unknown; addedById?: string | null; createdAt: Date },
+  item: {
+    id: string;
+    itemKey?: string;
+    data: unknown;
+    addedById?: string | null;
+    createdAt: Date;
+    urgency?: string | null;
+  },
   names: Map<string, string>,
   ownerName: string,
   titleField = "",
+  extras?: {
+    attachments?: ChatAttachmentRef[];
+    linkedLists?: EmployeeRecordLinkedList[];
+  },
 ): EmployeeRecordsResponse["groups"][number]["items"][number] {
   const data = stripRecurrenceMeta(stripJobMeta(normalizeListItemData(asRecord(item.data))));
+  const urgency = parseJobUrgency(item.urgency);
   return {
     id: item.id,
     kind: "list",
@@ -3692,7 +3784,59 @@ function toOwnedListItem(
     fields: ownedItemFields(data),
     createdBy: (item.addedById ? names.get(item.addedById) : undefined) ?? ownerName,
     createdAt: item.createdAt.toISOString(),
+    ...(urgency !== "normal" ? { urgency } : {}),
+    ...(extras?.attachments?.length ? { attachments: extras.attachments } : {}),
+    ...(extras?.linkedLists?.length ? { linkedLists: extras.linkedLists } : {}),
   };
+}
+
+function toChatAttachmentRefs(
+  refs: AttachmentSavedRef[] | undefined,
+): ChatAttachmentRef[] | undefined {
+  if (!refs?.length) {
+    return undefined;
+  }
+  return refs.map((ref) => ({
+    id: ref.attachment_id,
+    kind: ref.kind,
+    file_name: ref.file_name ?? "",
+  }));
+}
+
+async function loadOwnedLinkedLists(
+  listItemIds: string[],
+): Promise<Map<string, EmployeeRecordLinkedList[]>> {
+  const result = new Map<string, EmployeeRecordLinkedList[]>();
+  if (listItemIds.length === 0 || !prisma.listItemListLink?.findMany) {
+    return result;
+  }
+  const links = await prisma.listItemListLink.findMany({
+    where: {
+      listItemId: { in: listItemIds },
+      list: { deletedAt: null, listType: { in: ["shopping", "custom"] } },
+      listItem: { deletedAt: null, list: { listType: "tasks", deletedAt: null } },
+    },
+    include: {
+      list: { select: { id: true, listType: true, name: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const link of links) {
+    const listName =
+      link.list.name.trim() ||
+      (link.list.listType === "shopping" ? "קניות" : link.list.name.trim());
+    const entry: EmployeeRecordLinkedList = {
+      listId: link.list.id,
+      listType: link.list.listType,
+      listName,
+    };
+    const rows = result.get(link.listItemId) ?? [];
+    if (!rows.some((row) => row.listId === entry.listId)) {
+      rows.push(entry);
+      result.set(link.listItemId, rows);
+    }
+  }
+  return result;
 }
 
 function ownedItemTitle(

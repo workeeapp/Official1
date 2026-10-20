@@ -1,18 +1,26 @@
 import { useEffect, useState } from "react";
 import type {
+  ChatAttachmentRef,
   EmployeeInput,
   EmployeeRecordField,
   EmployeeRecordItem,
+  EmployeeRecordLinkedList,
   EmployeeRecordsResponse,
   EmployeeUsageSummary,
+  JobUrgency,
   PublicEmployee,
   TeamUsageSummary,
 } from "@workee/shared";
-import { isDigitalEmployee, isProtectedEmployee } from "@workee/shared";
+import {
+  JOB_URGENCY_POLICY,
+  isDigitalEmployee,
+  isProtectedEmployee,
+} from "@workee/shared";
 import { useEmployees } from "@/hooks/useEmployees";
 import { EmployeeFormDialog } from "@/components/EmployeeFormDialog";
 import { EmployeeRecordDialog } from "@/components/EmployeeRecordDialog";
 import { employeeApi } from "@/services/employee.service";
+import { attachmentApi } from "@/services/attachment.service";
 import {
   IconButton,
   PencilIcon,
@@ -489,48 +497,26 @@ function EmployeeRecordsPanel({
 
       {status === "ready" && groups.length === 0 ? (
         <p className="mt-4 text-sm text-text-secondary">
-          No lists, tasks, contacts, or filings saved for this employee.
+          No lists, tasks, contacts, filings, or reminders saved for this employee.
         </p>
       ) : null}
 
       {status === "ready"
         ? groups.map((group) => (
-            <div key={`${group.type}-${group.title}`} className="mt-6">
+            <div
+              key={`${group.type}-${group.listId ?? group.title}`}
+              id={group.listId ? recordListAnchorId(group.listId) : undefined}
+              className="mt-5 scroll-mt-4"
+            >
               <h3 className="text-sm font-semibold text-text-primary">{group.title}</h3>
-              <ul className="mt-3 space-y-3">
+              <ul className="mt-1.5 divide-y divide-border/70 border-t border-border/70">
                 {group.items.map((item) => (
-                  <li
+                  <EmployeeRecordRow
                     key={item.id}
-                    data-testid="employee-record-item"
-                    className="rounded-xl border border-border bg-background px-4 py-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-sm font-medium text-text-primary" dir="auto">
-                        {item.title}
-                      </p>
-                      <div className="flex shrink-0 items-center rounded-xl border border-border bg-surface p-0.5">
-                        <IconButton label={`Edit ${item.title}`} onClick={() => onEdit(item)}>
-                          <PencilIcon />
-                        </IconButton>
-                        <IconButton label={`Delete ${item.title}`} onClick={() => onDelete(item)}>
-                          <TrashIcon />
-                        </IconButton>
-                      </div>
-                    </div>
-                    {item.details.length > 0 ? (
-                      <dl className="mt-2 space-y-1 text-sm text-text-secondary">
-                        {item.details.map((detail) => (
-                          <div key={`${item.id}-${detail.label}`} className="flex flex-wrap gap-x-2">
-                            <dt className="font-medium">{detail.label}</dt>
-                            <dd dir="auto">{detail.value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    ) : null}
-                    <p className="mt-2 text-xs text-text-secondary">
-                      Created by {item.createdBy} · {formatRecordDate(item.createdAt)}
-                    </p>
-                  </li>
+                    item={item}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                  />
                 ))}
               </ul>
             </div>
@@ -538,6 +524,113 @@ function EmployeeRecordsPanel({
         : null}
     </section>
   );
+}
+
+function EmployeeRecordRow({
+  item,
+  onEdit,
+  onDelete,
+}: {
+  item: EmployeeRecordItem;
+  onEdit: (item: EmployeeRecordItem) => void;
+  onDelete: (item: EmployeeRecordItem) => void;
+}) {
+  const canMutate = item.kind === "list" || item.kind === "filing";
+  const detailText = item.details
+    .map((detail) =>
+      detail.label ? `${detail.label}: ${detail.value}` : detail.value,
+    )
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <li
+      data-testid="employee-record-item"
+      className="flex min-h-11 items-center gap-2 py-1.5 text-sm"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-text-primary" dir="auto">
+          <span className="font-medium">{item.title}</span>
+          {item.urgency ? <UrgencyBadge urgency={item.urgency} /> : null}
+          {detailText ? (
+            <span className="text-text-secondary">· {detailText}</span>
+          ) : null}
+          {item.linkedLists?.map((linked) => (
+            <LinkedListChip key={linked.listId} linked={linked} />
+          ))}
+          {item.attachments?.map((file) => (
+            <AttachmentChip key={file.id} file={file} />
+          ))}
+          <span className="text-xs text-text-secondary">
+            · {item.createdBy}
+            {item.kind !== "reminder" ? ` · ${formatRecordDate(item.createdAt)}` : ""}
+          </span>
+        </p>
+      </div>
+      {canMutate ? (
+        <div className="flex shrink-0 items-center rounded-lg border border-border bg-surface p-0.5">
+          <IconButton label={`Edit ${item.title}`} onClick={() => onEdit(item)}>
+            <PencilIcon />
+          </IconButton>
+          <IconButton label={`Delete ${item.title}`} onClick={() => onDelete(item)}>
+            <TrashIcon />
+          </IconButton>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function UrgencyBadge({ urgency }: { urgency: JobUrgency }) {
+  if (urgency === "normal") {
+    return null;
+  }
+  const label = JOB_URGENCY_POLICY[urgency].label || urgency;
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-xs font-semibold ${
+        urgency === "very_urgent"
+          ? "bg-error/15 text-error"
+          : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function LinkedListChip({ linked }: { linked: EmployeeRecordLinkedList }) {
+  return (
+    <a
+      href={`#${recordListAnchorId(linked.listId)}`}
+      className="inline-flex max-w-[12rem] truncate rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
+      title={linked.listName}
+      dir="auto"
+    >
+      🗂️ {linked.listName}
+    </a>
+  );
+}
+
+function AttachmentChip({ file }: { file: ChatAttachmentRef }) {
+  const url = attachmentApi.contentUrl(file.id);
+  const label = file.file_name || file.kind;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex max-w-[12rem] truncate rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
+      title={label}
+      dir="auto"
+    >
+      📎 {label}
+    </a>
+  );
+}
+
+function recordListAnchorId(listId: string): string {
+  return `employee-list-${listId}`;
 }
 
 function formatRecordDate(value: string): string {

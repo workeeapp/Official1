@@ -196,7 +196,7 @@ describe("Employees page", () => {
     expect(screen.getByRole("button", { name: "Update employee" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Delete employee" })).toBeEnabled();
     expect(await screen.findByTestId("employee-records")).toHaveTextContent(
-      "No lists, tasks, contacts, or filings saved for this employee.",
+      "No lists, tasks, contacts, filings, or reminders saved for this employee.",
     );
   });
 
@@ -247,6 +247,7 @@ describe("Employees page", () => {
         {
           type: "shopping",
           title: "Shopping",
+          listId: "list-shopping",
           items: [
             {
               id: "item-tuna",
@@ -259,12 +260,17 @@ describe("Employees page", () => {
               ],
               createdBy: "טל",
               createdAt: "2026-09-13T07:00:00.000Z",
+              urgency: "urgent" as const,
+              attachments: [
+                { id: "att-1", kind: "image" as const, file_name: "tuna.jpg" },
+              ],
             },
           ],
         },
         {
           type: "tasks",
           title: "Tasks",
+          listId: "list-tasks",
           items: [
             {
               id: "item-book",
@@ -274,6 +280,13 @@ describe("Employees page", () => {
               fields: [{ label: "שם מטלה", value: "לקרוא ספר" }],
               createdBy: "עמית",
               createdAt: "2026-09-13T07:00:00.000Z",
+              linkedLists: [
+                {
+                  listId: "list-shopping",
+                  listType: "shopping",
+                  listName: "קניות",
+                },
+              ],
             },
           ],
         },
@@ -295,6 +308,21 @@ describe("Employees page", () => {
             },
           ],
         },
+        {
+          type: "reminders",
+          title: "Reminders",
+          items: [
+            {
+              id: "rem-1",
+              kind: "reminder" as const,
+              title: "להזכיר לטל",
+              details: [{ label: "When", value: "2026-09-14 09:00" }],
+              fields: [{ label: "When", value: "2026-09-14 09:00" }],
+              createdBy: "עמית",
+              createdAt: "2026-09-13T07:00:00.000Z",
+            },
+          ],
+        },
       ],
     });
     const user = userEvent.setup();
@@ -309,14 +337,24 @@ describe("Employees page", () => {
     const panel = await screen.findByTestId("employee-records");
     expect(panel).toHaveTextContent("Shopping");
     expect(panel).toHaveTextContent("טונה");
-    expect(panel).toHaveTextContent("כמות");
-    expect(panel).toHaveTextContent("Created by טל");
+    expect(panel).toHaveTextContent("כמות: 2");
+    expect(panel).toHaveTextContent("דחוף");
+    expect(panel).toHaveTextContent("tuna.jpg");
+    expect(panel).toHaveTextContent("טל");
     expect(panel).toHaveTextContent("Tasks");
     expect(panel).toHaveTextContent("לקרוא ספר");
-    expect(panel).toHaveTextContent("Created by עמית");
+    expect(panel).toHaveTextContent("קניות");
+    expect(screen.getByRole("link", { name: /קניות/ })).toHaveAttribute(
+      "href",
+      "#employee-list-list-shopping",
+    );
     expect(panel).toHaveTextContent("Filings");
     expect(panel).toHaveTextContent("מספר רכב");
     expect(panel).toHaveTextContent("3434343");
+    expect(panel).toHaveTextContent("Reminders");
+    expect(panel).toHaveTextContent("להזכיר לטל");
+    expect(panel).toHaveTextContent("2026-09-14 09:00");
+    expect(screen.queryByRole("button", { name: "Edit להזכיר לטל" })).not.toBeInTheDocument();
   });
 
   it("shows email and phone fields after choosing a person", async () => {
@@ -545,7 +583,7 @@ describe("Employees page", () => {
         { label: "כמות", value: "4" },
       ],
     );
-    expect(await screen.findByText("4")).toBeInTheDocument();
+    expect(await screen.findByText(/כמות: 4/)).toBeInTheDocument();
   });
 
   it("deletes a saved item after confirmation", async () => {
@@ -588,7 +626,9 @@ describe("Employees page", () => {
       "item-book",
     );
     expect(
-      await screen.findByText("No lists, tasks, contacts, or filings saved for this employee."),
+      await screen.findByText(
+        "No lists, tasks, contacts, filings, or reminders saved for this employee.",
+      ),
     ).toBeInTheDocument();
     confirm.mockRestore();
   });

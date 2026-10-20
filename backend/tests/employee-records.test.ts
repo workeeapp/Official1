@@ -28,6 +28,8 @@ const {
   reminderFindFirst,
   reminderUpdate,
   reminderDelete,
+  attachmentLinkFindMany,
+  listItemListLinkFindMany,
   auditCreate,
 } = vi.hoisted(() => ({
   listFindMany: vi.fn(),
@@ -56,6 +58,8 @@ const {
   reminderFindFirst: vi.fn(),
   reminderUpdate: vi.fn(),
   reminderDelete: vi.fn(),
+  attachmentLinkFindMany: vi.fn(),
+  listItemListLinkFindMany: vi.fn(),
   auditCreate: vi.fn(),
 }));
 
@@ -96,6 +100,12 @@ vi.mock("../src/database/prisma.js", () => ({
       findFirst: reminderFindFirst,
       update: reminderUpdate,
       delete: reminderDelete,
+    },
+    attachmentLink: {
+      findMany: attachmentLinkFindMany,
+    },
+    listItemListLink: {
+      findMany: listItemListLinkFindMany,
     },
     auditEvent: {
       create: auditCreate,
@@ -174,6 +184,8 @@ describe("employee records", () => {
     reminderFindFirst.mockReset().mockResolvedValue(null);
     reminderUpdate.mockReset();
     reminderDelete.mockReset();
+    attachmentLinkFindMany.mockReset().mockResolvedValue([]);
+    listItemListLinkFindMany.mockReset().mockResolvedValue([]);
     auditCreate.mockReset();
   });
 
@@ -2910,6 +2922,7 @@ describe("employee records", () => {
     const createdAt = new Date("2026-09-13T07:00:00.000Z");
     listFindMany.mockResolvedValue([
       {
+        id: "list-shopping",
         listType: "shopping",
         name: "",
         employee: { name: "טל", nickname: "טל" },
@@ -2920,6 +2933,7 @@ describe("employee records", () => {
             data: { "שם פריט": "חלב", כמות: 1 },
             addedById: talId,
             createdAt,
+            urgency: "normal",
           },
           {
             id: "item-tuna",
@@ -2927,10 +2941,12 @@ describe("employee records", () => {
             data: { "שם פריט": "טונה", כמות: 2 },
             addedById: employeeId,
             createdAt,
+            urgency: "urgent",
           },
         ],
       },
       {
+        id: "list-tasks",
         listType: "tasks",
         name: "",
         employee: { name: "טל", nickname: "טל" },
@@ -2941,6 +2957,7 @@ describe("employee records", () => {
             data: { "שם מטלה": "לקרוא ספר" },
             addedById: talId,
             createdAt,
+            urgency: "normal",
           },
         ],
       },
@@ -2960,6 +2977,26 @@ describe("employee records", () => {
       { id: employeeId, name: "עמית", nickname: "עמית" },
       { id: talId, name: "טל", nickname: "טל" },
     ]);
+    listItemListLinkFindMany.mockResolvedValue([
+      {
+        listItemId: "item-book",
+        list: { id: "list-shopping", listType: "shopping", name: "" },
+      },
+    ]);
+    attachmentLinkFindMany.mockResolvedValue([
+      {
+        listItemId: "item-tuna",
+        filingId: null,
+        reminderId: null,
+        listId: null,
+        attachment: {
+          id: "att-1",
+          kind: "image",
+          fileName: "tuna.jpg",
+          deletedAt: null,
+        },
+      },
+    ]);
 
     await expect(getEmployeeOwnedRecords(talId)).resolves.toEqual({
       employeeId: talId,
@@ -2967,6 +3004,7 @@ describe("employee records", () => {
         {
           type: "shopping",
           title: "Shopping",
+          listId: "list-shopping",
           items: [
             {
               id: "item-milk",
@@ -2991,12 +3029,17 @@ describe("employee records", () => {
               ],
               createdBy: "עמית",
               createdAt: createdAt.toISOString(),
+              urgency: "urgent",
+              attachments: [
+                { id: "att-1", kind: "image", file_name: "tuna.jpg" },
+              ],
             },
           ],
         },
         {
           type: "tasks",
           title: "Tasks",
+          listId: "list-tasks",
           items: [
             {
               id: "item-book",
@@ -3006,6 +3049,13 @@ describe("employee records", () => {
               fields: [{ label: "שם מטלה", value: "לקרוא ספר" }],
               createdBy: "טל",
               createdAt: createdAt.toISOString(),
+              linkedLists: [
+                {
+                  listId: "list-shopping",
+                  listType: "shopping",
+                  listName: "קניות",
+                },
+              ],
             },
           ],
         },
