@@ -153,7 +153,7 @@
     "- alter_list: ONE object per list with every requested change: new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty.",
     "- delete_list: whole list. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it.",
     "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, no list_ops.",
-    "- Before delete_list ask «למחוק את כל הרשימה «X»?» with list_ops=[]; emit delete_list (same list_id) only after yes.",
+    "- delete_list when clear: each explicitly named list that resolves to exactly one list_id → emit delete_list NOW for each (built-in קניות/מטלות/אנשי קשר empties items; custom deletes the list). A name with several possible matches, any list not uniquely resolved, or unclear scope → ask with list_ops=[]; next turn emit delete_list with that list_id from THIS turn's facts. Never invent list_id. FORBIDDEN yes/no «למחוק את כל הרשימה?» when every named target is already unique.",
     "- Only the owner can alter/delete; built-in lists allow participant changes only; the title_field column cannot be removed.",
     "",
     "------------------------------------------------------------",
@@ -272,7 +272,7 @@
     "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
     "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder / contacts-list row that has attachments → answer in response AND set metadata.send_attachments to its attachment_ids (max 10); the files are sent right after your reply. When you SHOW a list whose has_attachments is true (list-level files only, any list_type) → also add to metadata.buttons { \"label\": \"📎 קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. FORBIDDEN: that button when only items have files. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
     "Video and documents: you only know kind, file name and caption — never invent their content.",
-    "SHOW_ICON: optionally set metadata.show_icon to ONE emoji that the engine attaches to the speaker's message (WhatsApp reaction + web badge) before your spoken replies. Use 👍 when this turn successfully adds/updates/deletes lists, list items, contacts, reminders, filings, or directory rows. Otherwise pick a contextual emoji from the message meaning (☕ coffee, 📚 library, …) when it fits. Often null — not every turn. Never mention the icon in responses.",
+    "SHOW_ICON: set metadata.show_icon to ONE emoji that the engine attaches to the speaker's message (WhatsApp reaction + web badge) before your spoken replies. Use 👍 when this turn successfully adds/updates/deletes lists, list items, contacts, reminders, filings, or directory rows. When the speaker's message or your question this turn has a clear topic — יום הולדת / birthday → 🎂, פוקר / poker → 🃏, עוגה / cake → 🍰, כדורגל / football → ⚽, קריוקי → 🎤, קפה → ☕, ספרייה → 📚, and similar — emit that contextual emoji often (prefer an icon over null). Same for topical follow-ups and confirm asks about that theme. Leave null only when there is no clear theme and no successful mutate. Never mention the icon in responses.",
     "",
     "------------------------------------------------------------",
     "OUTPUT RULES",
@@ -1174,7 +1174,7 @@
                   "null"
                 ],
                 "maxLength": 32,
-                "description": "One emoji attached to the speaker's message before spoken replies (WhatsApp reaction + web). 👍 after successful list/item/contact/reminder/filing/directory mutate this turn; otherwise a contextual emoji when it fits; null most turns."
+                "description": "One emoji attached to the speaker's message before spoken replies (WhatsApp reaction + web). 👍 after successful list/item/contact/reminder/filing/directory mutate this turn; topical turns (birthday/poker/cake/…) prefer a fitting emoji often; null only when no clear theme and no mutate."
               },
               "show_dump": {
                 "type": [

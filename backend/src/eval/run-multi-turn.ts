@@ -26,6 +26,7 @@ import {
 } from "../services/employee-records.service.js";
 import { withLinkedListRefs } from "../services/list-item-list-link.service.js";
 import { applyListOps } from "../services/list-ops.service.js";
+import { applyReminders } from "../services/reminder.service.js";
 import { evaluateConstraints } from "./constraints.js";
 import {
   type ModelEvalCorpusCase,
@@ -74,6 +75,10 @@ export interface HarnessAccount {
   employeeId: string;
   speaker: string;
   actor: PublicEmployee;
+  /** Optional human partners on the same account (share / targets resolution). */
+  partners: PublicEmployee[];
+  /** actor + partners — passed to applyListOps / applyReminders. */
+  employees: PublicEmployee[];
 }
 
 function readItemId(item: Record<string, unknown>): string {
@@ -236,6 +241,7 @@ function requireFixtureMetadata(
 
 export async function createHarnessAccount(
   speaker: string,
+  options?: { partners?: string[] },
 ): Promise<HarnessAccount> {
   const username = `g1_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const user = await prisma.user.create({
@@ -264,11 +270,42 @@ export async function createHarnessAccount(
     phone: null,
     isOwner: true,
   };
+  const partners: PublicEmployee[] = [];
+  const seen = new Set([speaker.trim()]);
+  for (const raw of options?.partners ?? []) {
+    const name = raw.trim();
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const partnerRow = await prisma.employee.create({
+      data: {
+        userId: user.id,
+        kind: "human",
+        name,
+        surname: "",
+        nickname: name,
+        isOwner: false,
+      },
+    });
+    partners.push({
+      id: partnerRow.id,
+      kind: "human",
+      name,
+      surname: "",
+      nickname: name,
+      email: null,
+      phone: null,
+      isOwner: false,
+    });
+  }
   return {
     userId: user.id,
     employeeId: employee.id,
     speaker,
     actor,
+    partners,
+    employees: [actor, ...partners],
   };
 }
 
@@ -497,7 +534,7 @@ export async function applyFixtureTurn(input: {
     await applyListOps({
       userId: input.account.userId,
       actor: input.account.actor,
-      employees: [input.account.actor],
+      employees: input.account.employees,
       ops: metadata.listOps ?? [],
     });
   }
@@ -513,6 +550,20 @@ export async function applyFixtureTurn(input: {
     input.account.employeeId,
   );
 
+  // Production chat path: clocks go through applyReminders (same as run-model-apply).
+  if ((metadata.reminders?.length ?? 0) > 0) {
+    const reminderWrites = [
+      ...(metadata.reminders ?? []).filter((row) => row.action !== "remove"),
+      ...(metadata.reminders ?? []).filter((row) => row.action === "remove"),
+    ];
+    await applyReminders({
+      userId: input.account.userId,
+      actor: input.account.actor,
+      employees: input.account.employees,
+      reminders: reminderWrites,
+    });
+  }
+
   syncIdMapFromMutations(input.idMap, plannedAdds, applied.mutations);
   return {
     metadata,
@@ -523,7 +574,7 @@ export async function applyFixtureTurn(input: {
 
 export async function runMultiTurnOffline(
   suiteCase: RegressionSuiteCase,
-  options?: { speaker?: string },
+  options?: { speaker?: string; partners?: string[] },
 ): Promise<MultiTurnCaseResult> {
   const speaker = options?.speaker ?? "טל";
   if (suiteCase.track !== "ENGINE") {
@@ -536,7 +587,9 @@ export async function runMultiTurnOffline(
     };
   }
 
-  const account = await createHarnessAccount(speaker);
+  const account = await createHarnessAccount(speaker, {
+    partners: options?.partners,
+  });
   const idMap = new Map<string, string>();
   const turnResults: MultiTurnTurnResult[] = [];
   const failures: string[] = [];

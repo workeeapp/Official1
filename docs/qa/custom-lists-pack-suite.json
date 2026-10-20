@@ -1,0 +1,884 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "custom-lists-pack-v1",
+  "domain": "custom-lists",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "C-ADD-LIST",
+    "C-ADD-ITEM",
+    "C-RM-ITEM",
+    "C-DEL-LIST",
+    "C-DEL-TWO",
+    "C-DEL-AMB",
+    "C-DEL-MISSING",
+    "C-RENAME",
+    "C-SHOW",
+    "C-EMPTY-NAME-ASK",
+    "C-NOT-SHOP",
+    "C-NO-WIPE",
+    "C-NO-CLOCK",
+    "C-ITEM-AMB",
+    "C-UPD-ITEM",
+    "C-NO-EMPTY-NAME",
+    "C-ADD-ITEM-MT",
+    "C-DEL-LIST-MT",
+    "C-RENAME-MT",
+    "C-CRUD-MT"
+  ],
+  "cases": [
+    {
+      "id": "C-ADD-LIST",
+      "track": "MODEL",
+      "contract": "C-ADD-LIST",
+      "description": "יצירת רשימה מותאמת — alter/create path",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תצרי רשימה באגים",
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-ADD-ITEM",
+      "track": "MODEL",
+      "contract": "C-ADD-ITEM",
+      "description": "C-ADD-ITEM",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לבאגים שהכפתור לא עובד",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-RM-ITEM",
+      "track": "MODEL",
+      "contract": "C-RM-ITEM",
+      "description": "C-RM-ITEM",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי מבאגים את כפתור לא עובד",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "custom",
+              "itemIds": [
+                "eval-item-bug1"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-DEL-LIST",
+      "track": "MODEL",
+      "contract": "C-DEL-LIST",
+      "description": "C-DEL-LIST",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את רשימת באגים",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-bugs"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-DEL-TWO",
+      "track": "MODEL",
+      "contract": "C-DEL-TWO",
+      "description": "C-DEL-TWO",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את באגים ואת רעיונות",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-bugs",
+                "eval-list-ideas"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-DEL-AMB",
+      "track": "MODEL",
+      "contract": "C-DEL-AMB",
+      "description": "C-DEL-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי רשימה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-DEL-MISSING",
+      "track": "MODEL",
+      "contract": "C-DEL-MISSING",
+      "description": "C-DEL-MISSING",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את רשימת פיצה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-RENAME",
+      "track": "MODEL",
+      "contract": "C-RENAME",
+      "description": "C-RENAME",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני שם באגים לבעיות",
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-SHOW",
+      "track": "MODEL",
+      "contract": "C-SHOW",
+      "description": "C-SHOW",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש בבאגים?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "full"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-EMPTY-NAME-ASK",
+      "track": "MODEL",
+      "contract": "C-EMPTY-NAME-ASK",
+      "description": "C-EMPTY-NAME-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תצרי רשימה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-NOT-SHOP",
+      "track": "MODEL",
+      "contract": "C-NOT-SHOP",
+      "description": "C-NOT-SHOP",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לבאגים פריט חדש",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom"
+            },
+            {
+              "type": "not_lists_remove_shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-NO-WIPE",
+      "track": "MODEL",
+      "contract": "C-NO-WIPE",
+      "description": "C-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-NO-CLOCK",
+      "track": "MODEL",
+      "contract": "C-NO-CLOCK",
+      "description": "C-NO-CLOCK",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לבאגים תקלה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-ITEM-AMB",
+      "track": "MODEL",
+      "contract": "C-ITEM-AMB",
+      "description": "C-ITEM-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור"
+              },
+              {
+                "item_id": "eval-item-bug2",
+                "תיאור": "מסך"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי פריט מבאגים",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-UPD-ITEM",
+      "track": "MODEL",
+      "contract": "C-UPD-ITEM",
+      "description": "C-UPD-ITEM",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני בבאגים את כפתור לא עובד ל־כפתור שבור",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "custom"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-NO-EMPTY-NAME",
+      "track": "MODEL",
+      "contract": "C-NO-EMPTY-NAME",
+      "description": "C-NO-EMPTY-NAME",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תצרי רשימה בלי שם",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C-ADD-ITEM-MT",
+      "track": "MODEL_APPLY",
+      "contract": "C-ADD-ITEM-MT",
+      "description": "C-ADD-ITEM-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לבאגים שהמסך שחור",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "שחור"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "C-DEL-LIST-MT",
+      "track": "MODEL_APPLY",
+      "contract": "C-DEL-LIST-MT",
+      "description": "C-DEL-LIST-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את רשימת באגים",
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "delete_list"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "\"list_name\": \"באגים\""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "C-RENAME-MT",
+      "track": "MODEL_APPLY",
+      "contract": "C-RENAME-MT",
+      "description": "C-RENAME-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני שם באגים לבעיות",
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "בעיות"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "C-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "C-CRUD-MT",
+      "description": "C-CRUD-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug1",
+                "תיאור": "כפתור לא עובד"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-ideas",
+            "list_type": "custom",
+            "list_name": "רעיונות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לבאגים ניסוי",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "ניסוי"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי את ניסוי מבאגים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "custom"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "ניסוי"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

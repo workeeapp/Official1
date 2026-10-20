@@ -1,0 +1,488 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "criticalCaseIds": [
+    "g1-c1-shop-add-remove",
+    "g1-c2-ask-then-add",
+    "g1-c3-clarify-then-delete",
+    "g1-p1-when-clear-delete",
+    "g1-p2-event-host-link",
+    "g1-p3-host-rename"
+  ],
+  "cases": [
+    {
+      "id": "g1-c1-shop-add-remove",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "G1.C1: shopping add then remove with fact reinjection",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-milk"],
+            "factsInclude": ["eval-item-milk"]
+          }
+        },
+        {
+          "utterance": "קניתי חלב",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-milk" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": ["eval-item-milk"]
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-milk"],
+            "factsExclude": ["eval-item-milk"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-c2-ask-then-add",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "G1.C2: empty ask turn does not poison state; next add applies",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות",
+          "response": "מה להוסיף?",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" },
+            { "type": "filing_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-bread"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        },
+        {
+          "utterance": "לחם",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-bread", "שם פריט": "לחם" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-bread"],
+            "factsInclude": ["eval-item-bread"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-c3-clarify-then-delete",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "G1.C3: ambiguous delete ask then pick resolves item_id",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              { "item_id": "eval-item-task-a", "שם מטלה": "להתקשר לרופא" },
+              { "item_id": "eval-item-task-b", "שם מטלה": "לשלם חשבון" }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק מטלה",
+          "response": "איזו מטלה — להתקשר לרופא או לשלם חשבון?",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" },
+            { "type": "response_looks_like_ask" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-task-a", "eval-item-task-b"]
+          }
+        },
+        {
+          "utterance": "1",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "tasks",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-task-a" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": ["eval-item-task-a"]
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-task-a"],
+            "itemIdsPresent": ["eval-item-task-b"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-p1-when-clear-delete",
+      "track": "ENGINE",
+      "tag": "product",
+      "description": "G1.P1: unique clear item delete applies immediately",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את החלב",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-milk" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": ["eval-item-milk"]
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-milk"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-p2-event-host-link",
+      "track": "ENGINE",
+      "tag": "product",
+      "description": "G1.P2: host task then propose then custom list + linked_lists",
+      "setup": {
+        "lists": []
+      },
+      "turns": [
+        {
+          "utterance": "יש לי ערב יום הולדת",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "tasks",
+                "list_name": "",
+                "items": [
+                  {
+                    "item_id": "eval-item-host-bday",
+                    "שם מטלה": "ערב יום הולדת"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "ערב יום הולדת"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-bday"],
+            "listTypeCounts": { "tasks": 1 },
+            "factsInclude": ["ערב יום הולדת"]
+          }
+        },
+        {
+          "utterance": "תוסיפי רשימת כיבוד?",
+          "response": "מה לשים בכיבוד?",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" },
+            { "type": "no_invented_reminder_add" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-bday"],
+            "listTypeCounts": { "tasks": 1 },
+            "factsInclude": ["ערב יום הולדת"]
+          }
+        },
+        {
+          "utterance": "עוגה ושתיה",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "custom",
+                "list_name": "כיבוד",
+                "items": [
+                  { "item_id": "eval-item-cake", "שם": "עוגה" },
+                  { "item_id": "eval-item-drinks", "שם": "שתיה" }
+                ],
+                "targets": []
+              },
+              {
+                "action": "update",
+                "list_type": "tasks",
+                "list_name": "",
+                "items": [
+                  {
+                    "item_id": "eval-item-host-bday",
+                    "שם מטלה": "ערב יום הולדת",
+                    "linked_lists": [{ "list_name": "כיבוד", "list_type": "custom" }]
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "minCount": 1,
+              "itemTextIncludes": "עוגה"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "כיבוד"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-host-bday",
+              "eval-item-cake",
+              "eval-item-drinks"
+            ],
+            "listTypeCounts": {
+              "tasks": 1,
+              "custom": 1
+            },
+            "factsInclude": ["כיבוד", "עוגה", "שתיה", "ערב יום הולדת"],
+            "linkedListNamesOnItem": {
+              "itemId": "eval-item-host-bday",
+              "listNames": ["כיבוד"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-p3-host-rename",
+      "track": "ENGINE",
+      "tag": "product",
+      "description": "G1.P3: mid-flow host rename keeps one host",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-party",
+                "שם מטלה": "ערב פוקר"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את השם לערב משחקים",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "update",
+                "list_type": "tasks",
+                "list_name": "",
+                "items": [
+                  {
+                    "item_id": "eval-item-host-party",
+                    "שם מטלה": "ערב משחקים"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "ערב משחקים"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-party"],
+            "factsInclude": ["ערב משחקים"],
+            "factsExclude": ["ערב פוקר"],
+            "listTypeCounts": { "tasks": 1 }
+          }
+        }
+      ]
+    }
+  ]
+}

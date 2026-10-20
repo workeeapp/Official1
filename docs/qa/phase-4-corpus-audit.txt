@@ -1,0 +1,301 @@
+# Phase 4 corpus audit (read-only)
+# Written: 2026-10-20
+# Sources: docs/qa/phase-4-corpus.json, backend/src/eval/{constraints,corpus,run-case}.ts,
+#          backend/tests/model-eval-constraints.test.ts, docs/qa/phase-4-model-matrix.md
+# Not done: live OpenAI runs, file edits at audit time, Stage 2, DB/prompt changes.
+
+================================================================================
+HARNESS FACTS (verified in code)
+================================================================================
+
+Fact                                                              Evidence
+----                                                              --------
+Single utterance per case; new OpenAI conversation each case      run-case.ts ~L114-116
+Scores parseReplyMetadata + parseLlmReply().response only         run-case.ts ~L129-135; matrix
+  — no engine apply
+Soft gate: corpus passRate 0.7                                    phase-4-corpus.json; runModelEvalCorpus
+Worker instructions: null → file LLM.config.json, not Lucy DB     run-case.ts fixtures + loadLlmConfig
+Fact inject: SESSION_CLOCK + EMPLOYEE_SAVED_DATA                  run-case.ts message assembly
+  + empty WORKER_SAVED_DATA + SPEAKER_CONTACTS
+Constraint unit tests exercise checkers + corpus load, not live   model-eval-constraints.test.ts
+No list_ops / item_id / show_dump / multi-turn / messages /       constraints.ts DSL
+  handoff checkers in DSL
+
+Assumption (not verified by live eval): current production prompts
+(DELETE CONFIRM, delete_list, empty hold) may diverge from what some
+cases encode (hold_present, lists.remove for whole-list wording).
+
+================================================================================
+PER-CASE AUDIT (24 cases)
+================================================================================
+
+Legend: V = value if green; W = weakness / false pass-fail risk; R = redundancy.
+
+--- Filing / lists core ---
+
+Id: filing-remove-email-code
+  Intent: Delete filing by spoken name
+  Expected: remove_filing, not list remove
+  Evaluator: filing_has_action:remove_filing + lists_empty
+  Weakness: No exact item_name; any remove_filing passes
+  Value: HIGH — domain routing
+
+Id: filing-update-code
+  Intent: Update filing value to 999
+  Expected: update_filing with 999
+  Evaluator: action + infoIncludes:999 + lists empty
+  Weakness: Name match not checked
+  Value: HIGH
+
+Id: filing-add-gate
+  Intent: File gate code 4455
+  Expected: Add now OR hold for detail
+  Evaluator: any(add_filing+4455, hold_present)
+  Weakness: Soft; hold-only OK; if product dropped hold → false fail
+  Value: MEDIUM (schema-drift risk)
+
+Id: list-buy-milk
+  Intent: Bought milk → remove shopping
+  Expected: One shopping remove
+  Evaluator: remove/shopping min1 max1
+  Weakness: No item identity; no confirm path
+  Value: MEDIUM
+
+Id: list-clear-tasks
+  Intent: Clear all tasks
+  Expected: ≥2 removes OR hold/confirm; no filing wipe
+  Evaluator: any(≥2 task removes, hold_or_confirm) + filing_empty + no_silent_multi_domain
+  Weakness: OR allows hold without deletes; product DELETE CONFIRM may disagree
+  Value: MEDIUM-HIGH (safety-ish)
+
+Id: list-clear-personal-shopping
+  Intent: Clear PERSONAL shopping only
+  Expected: ≥3 shopping removes; forbid certain ask phrasing
+  Evaluator: minCount 3 + forbid «למחוק את כל הפריטים»
+  Weakness: Doesn't assert shared item NOT removed; brittle forbid needle
+  Value: MEDIUM
+
+Id: shop-move-shared-to-personal
+  Intent: Move milk shared→personal
+  Expected: remove+add same turn
+  Evaluator: shopping remove≥1 + add≥1; forbid lists.update in response
+  Weakness: Doesn't check which item; forbidding schema string in Hebrew reply is odd
+  Value: MEDIUM
+
+Id: list-ambiguous-name-ask
+  Intent: Ambiguous «בעיות» vs «באגים»
+  Expected: Ask / empty lists
+  Evaluator: any(lists_empty, hold_or_confirm_or_ask) + mentions both names
+  Weakness: looksLikeAsk loose
+  Value: HIGH for routing
+
+Id: shared-list-found-no-not-found
+  Intent: Shared work list tasks done
+  Expected: Don't say not found; name shared list
+  Evaluator: response forbid/mention only — NO ACTION
+  Weakness: Can pass with pure prose and zero removes
+  Value: WEAK
+
+Id: list-filtered-multi-delete
+  Intent: Delete two “רב פס” tasks
+  Expected: ≥2 task removes; no “which one”
+  Evaluator: minCount 2 + forbid clarification needles
+  Weakness: Wrong two tasks still pass; no title/item_id
+  Value: MEDIUM
+
+Id: list-not-filing
+  Intent: Delete list «שיעורי נהיגה»
+  Expected: Custom list remove, not filing
+  Evaluator: lists.remove custom + filing_empty
+  Weakness: Product now prefers delete_list / list_ops for «תמחק את הרשימה»
+            — may false-fail good models or false-pass item removes
+  Value: WEAK (product drift)
+
+--- Safety / confusion / dump ---
+
+Id: delete-everything
+  Intent: Wipe all domains
+  Expected: Ask/hold; no silent multi-domain wipe
+  Evaluator: hold_or_confirm_or_ask + no_silent_multi_domain_wipe
+  Weakness: looksLikeAsk + ask without hold can pass while mutating one domain
+  Value: HIGH
+
+Id: meeting-not-list
+  Intent: Delete meeting not milk
+  Expected: Not shopping remove; tasks/reminder/ask
+  Evaluator: not_shopping_remove + any(tasks remove, reminder remove, ask)
+  Weakness: Cancelling clock only or vague ask passes
+  Value: MEDIUM-HIGH
+
+Id: dump-what-saved
+  Intent: What’s saved
+  Expected: No query:report; read-only; mention facts
+  Evaluator: no_query_report + mutations_empty + mentions any of חלב/קוד/4455
+  Weakness: Doesn't require show_dump; one token “חלב” enough
+  Value: PARTIAL
+
+Id: no-invented-clock
+  Intent: Vague “remind me something”
+  Expected: Don’t invent timed clock
+  Evaluator: no_invented_reminder_add + any(hold, read-only)
+  Weakness: Reminder add without time/date/inSeconds passes no_invented_*
+  Value: MEDIUM
+
+--- Directory / nudge / reminders ---
+
+Id: directory-add-michal
+  Intent: Add contact
+  Expected: directory.add
+  Evaluator: name מיכל + phone 054
+  Weakness: No ask-before-save / hold
+  Value: MEDIUM
+
+Id: self-nudge-with-volunteered-phone
+  Intent: Self-nudge + phone in task; offer save contact
+  Expected: reminders.add + tasks add with phone + hold + directory empty + mention save
+  Evaluator: Multi-constraint
+  Weakness: Heavy; product may use jobs not reminders; brittle response needles
+  Value: HIGH if aligned with prompt
+
+Id: task-keep-phone-in-title
+  Intent: Task with phone; don’t auto-save contact
+  Expected: tasks add w/ digits + directory_empty + hold
+  Weakness: Overlaps prior case (partial redundancy)
+  Value: MEDIUM / redundant with above
+
+Id: self-nudge-recurring-until-done
+  Intent: Hourly until bought
+  Expected: jobs.open+ask + shopping add; not recurring clock
+  Evaluator: jobs open requireAsk + shopping add + response needles שעה/עד/קנ
+  Weakness: «קנ» very loose; no assert reminders empty/non-recurring
+  Value: MEDIUM
+
+Id: self-nudge-contact-topic-no-whatsapp
+  Intent: Nudge re contact Hope On; no WA number ask
+  Expected: jobs.open+ask; no WA phrasing
+  Evaluator: jobs + directory_empty + forbid ווטסאפ/מספר
+  Weakness: Interval “10 seconds” may be refused by product — unclear expected
+  Value: AMBIGUOUS
+
+Id: directory-remove-michal
+  Intent: Remove Michal from book
+  Expected: directory.remove
+  Evaluator: nameIncludes
+  Weakness: No confirm constraint (product DELETE CONFIRM)
+  Value: MEDIUM
+
+Id: directory-clear-all
+  Intent: Clear all contacts
+  Expected: remove Michal + Uri; no refusal phrasing
+  Evaluator: two removes + forbid needles
+  Weakness: Doesn't require exactly two only
+  Value: MEDIUM-HIGH
+
+Id: reminder-cancel-named
+  Intent: Cancel milk reminder
+  Expected: remove OR hold/confirm
+  Evaluator: any(reminders.remove, hold_or_confirm)
+  Weakness: Soft OR; no reminder_id
+  Value: MEDIUM
+
+Id: reminder-stop-nudge-keep-item
+  Intent: Stop ping; keep shopping
+  Expected: remove clock/job; lists empty; forbid «למחוק עכשיו»
+  Evaluator: any(reminder remove, jobs close/clear_clock, hold) + lists_empty
+  Weakness: Utterance «תפסיקי» alone has no chat history of the nudge —
+            single-turn severe context gap; false fail/pass
+  Value: WEAK without multi-turn
+
+================================================================================
+COVERAGE GAPS
+================================================================================
+
+Verified gaps in corpus/DSL:
+- No multi-turn (corpus.ts / run-case.ts).
+- No list_ops (delete_list / alter_list) — conflicts with current whole-list product path.
+- No item_id / filing_id / reminder_id / contact_id assertions.
+- No messages, handoff, show_dump, show_icon, attachments, linked_lists,
+  recurrence/occurrence_*, guest mode.
+- WORKER_SAVED_DATA always empty — inventory / «מה יש לך» not covered.
+- Conversational quality barely scored (needles + looksLikeAsk only).
+
+False-pass risks (verified mechanics):
+- Soft any / hold_or_confirm_or_ask + weak looksLikeAsk.
+- lists_has_action count without identity.
+- Response-only cases (shared-list-found-no-not-found).
+- Soft suite threshold 0.7 ⇒ up to ~7/24 failures still “green”.
+
+False-fail risks:
+- list-not-filing vs delete_list.
+- hold_present if hold deprecated in schema/runtime.
+- reminder-stop-nudge-keep-item without prior turn.
+- Product DELETE CONFIRM (empty mutate + ask) failing cases that require immediate remove.
+
+Does 0.7 measure quality?
+  Fact: it measures “≥70% of constraint bags passed,” not calibrated difficulty,
+  not conversational quality, not engine correctness.
+  Recommendation: treat as smoke/regression gate only; use a stricter core subset
+  (e.g. 100% on 12–15 cases) for prompt A/B.
+
+================================================================================
+PRIORITIZED MODEL-ONLY EVALUATION SET (PROPOSAL)
+================================================================================
+
+Tier A — operational ACTION/schema (must-pass; raise gate to ~1.0 on this subset)
+  1. Filing vs lists routing (keep remove/update; tighten names).
+  2. Shopping done → remove (add item/item_id when setup provides ids).
+  3. Ambiguous list name → ask, lists=[].
+  4. Meeting ≠ shopping.
+  5. Directory add/remove with confirm-aware constraints
+     (empty remove + ask OR remove+id after כן — multi-turn).
+  6. NEW: whole-list delete → list_ops.delete_list (replace/augment list-not-filing).
+  7. Safety: delete-everything (keep).
+  8. No invented clock (keep; tighten).
+  9. Filtered multi-delete with title needles or ids.
+ 10. Clear personal shopping without touching shared
+     (assert no remove of shared item text).
+
+Tier B — conversational quality (new constraint types recommended)
+  - Clarification: ask when missing time/list; forbid inventing fields.
+  - Naturalness: forbid schema jargon in response (extend response_forbids_any).
+  - Avoid unnecessary questions when facts are complete.
+  - Context: use prior assistant ask in multi-turn.
+  - Proactivity/topic emoji: optional, low weight (show_icon) — not blocking.
+
+Tier C — multi-turn (requires Stage 2 harness; not implement in this audit)
+
+  Draft id                  Turns                         Score last turn
+  ------------------------  ----------------------------  ------------------------------
+  mt-filing-confirm         Ask delete → כן               remove_filing + id/name
+  mt-whole-list-delete      Confirm 3 lists → כן          3× delete_list; lists=[]
+  mt-ambiguous-list         Which list? → בעיות           remove on בעיות only
+  mt-stop-nudge             Establish nudge → תפסיקי      clock/job cancel; shopping stays
+  mt-phone-save             Nudge+phone → כן save contact directory.add after confirm
+
+  Per-turn: refresh EMPLOYEE_SAVED_DATA; re-send instructions; same conversationId
+  (per prior Stage 2 plan — not executed).
+
+================================================================================
+RECOMMENDED NEXT STEPS (order; no execution in this audit)
+================================================================================
+
+1. Keep Stage 1 as-is; do not block on the 27 backend unit failures (proven pre-Stage-1).
+2. Before Stage 2: curate Tier A — fix known product-drift cases (list-not-filing,
+   hold vs confirm) in corpus/constraints design only when edits are approved.
+3. Add stricter gate for Tier A (passRate: 1 or separate report).
+4. Then Stage 2 multi-turn + Tier C seeds.
+5. Prompt A/B only against Tier A+C; measure conversational Tier B separately at first.
+
+Out of scope for follow-through from this report alone:
+  fixing chat.test / llm-config.test, live test:model-eval, production Lucy sync,
+  Stage 2 implementation.
+
+================================================================================
+RELATED CONTEXT (session): 27 backend failures on clean HEAD
+================================================================================
+
+Baseline worktree at bbb77343d36371bf5cba1ae5aeaa0f54fa5f1ad0 confirmed the same
+27 failures (chat 500s from missing prisma.contactBook mock; llm-config needle
+DELETE CONFIRM (critical) stale after whole-list prompt rename). Those are
+pre-Stage-1 and should not be fixed as part of the Phase 4 QA port task unless
+separately approved.

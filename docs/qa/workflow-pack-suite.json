@@ -1,0 +1,554 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "workflow-pack-v1",
+  "domain": "workflows",
+  "criticalCaseIds": [
+    "W1-SHOP-THEN-FILING",
+    "W2-LIST-SHARE-REMIND",
+    "W3-MULTI-ACTION-ONE-TURN",
+    "W4-CLARIFY-THEN-MULTI"
+  ],
+  "cases": [
+    {
+      "id": "W1-SHOP-THEN-FILING",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "W1: shopping add then durable filing; reinject facts across turns",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-milk", "שם פריט": "חלב" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": [],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            { "type": "filing_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-milk"],
+            "factsInclude": ["חלב"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        },
+        {
+          "utterance": "תתיקי שחלב רק 3%",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [],
+            "filing": [
+              {
+                "action": "add_filing",
+                "item_name": "חלב",
+                "item_info": "רק 3%",
+                "item_description": "",
+                "targets": []
+              }
+            ],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "3%"
+            },
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-milk"],
+            "factsInclude": ["חלב", "רק 3%"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W2-LIST-SHARE-REMIND",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "W2: custom list item → whole-list share via alter_list add_participants → explicit reminder clock (no invented time)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shabbat-shop",
+            "list_type": "custom",
+            "list_name": "קניות לשבת",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלות לרשימת קניות לשבת",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "custom",
+                "list_name": "קניות לשבת",
+                "items": [{ "item_id": "eval-item-challah", "שם": "חלות" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": [],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "itemTextIncludes": "חלות",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            { "type": "list_ops_empty" },
+            { "type": "filing_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-challah"],
+            "factsInclude": ["חלות", "קניות לשבת"],
+            "listTypeCounts": { "custom": 1 }
+          }
+        },
+        {
+          "utterance": "תשתפי את קניות לשבת עם עמית",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [
+              {
+                "action": "alter_list",
+                "list_id": "eval-list-shabbat-shop",
+                "new_name": "",
+                "add_columns": [],
+                "remove_columns": [],
+                "rename_columns": [],
+                "add_participants": ["עמית"],
+                "remove_participants": []
+              }
+            ],
+            "filing": [],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            { "type": "lists_empty" },
+            { "type": "filing_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-challah"],
+            "factsInclude": ["עמית", "shared", "חלות"],
+            "listTypeCounts": { "custom": 1 }
+          }
+        },
+        {
+          "utterance": "תזכירי לי מחר ב־09:00 לקנות לשבת",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "tasks",
+                "list_name": "",
+                "items": [
+                  {
+                    "item_id": "eval-item-nudge-shabbat",
+                    "שם מטלה": "לקנות לשבת"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": [],
+            "reminders": [
+              {
+                "action": "add",
+                "item": "לקנות לשבת",
+                "list_type": "tasks",
+                "date": "2099-06-15",
+                "time": "09:00",
+                "repeat": "once",
+                "ping": [],
+                "targets": [],
+                "text": "לקנות לשבת",
+                "in": null,
+                "every_count": null,
+                "every_unit": null,
+                "weekdays": null,
+                "confirmed": false,
+                "compose": false
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "לקנות לשבת",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            { "type": "list_ops_empty" },
+            { "type": "filing_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-challah", "eval-item-nudge-shabbat"],
+            "factsInclude": ["לקנות לשבת", "חלות", "עמית"],
+            "listTypeCounts": { "custom": 1, "tasks": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W3-MULTI-ACTION-ONE-TURN",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "W3: shopping add + filing add in one turn; single apply, no duplicate rows",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי יין לקניות ותתיקי שרק יין אדום",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-wine", "שם פריט": "יין" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": [
+              {
+                "action": "add_filing",
+                "item_name": "יין",
+                "item_info": "רק אדום",
+                "item_description": "",
+                "targets": []
+              }
+            ],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "יין",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "אדום"
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-wine"],
+            "factsInclude": ["יין", "רק אדום"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W4-CLARIFY-THEN-MULTI",
+      "track": "ENGINE",
+      "tag": "continuity",
+      "description": "W4: clarification turn mutates nothing; follow-up completes shop+filing once without duplicates",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות ותתיקי משהו",
+          "response": "מה להוסיף לקניות ומה לתיוק?",
+          "fixtureMetadata": {
+            "lists": [],
+            "list_ops": [],
+            "filing": [],
+            "reminders": []
+          },
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "response_looks_like_ask" },
+            { "type": "lists_empty" },
+            { "type": "filing_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-bread", "eval-item-wine"],
+            "factsExclude": ["לחם", "רק אדום"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        },
+        {
+          "utterance": "לחם לקניות ותתיקי שרק מלא",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "items": [{ "item_id": "eval-item-bread", "שם פריט": "לחם" }],
+                "targets": []
+              }
+            ],
+            "list_ops": [],
+            "filing": [
+              {
+                "action": "add_filing",
+                "item_name": "לחם",
+                "item_info": "רק מלא",
+                "item_description": "",
+                "targets": []
+              }
+            ],
+            "reminders": []
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "מלא"
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-bread"],
+            "itemIdsAbsent": ["eval-item-wine"],
+            "factsInclude": ["לחם", "רק מלא"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W1-SHOP-THEN-FILING-MA",
+      "track": "MODEL_APPLY",
+      "tag": "continuity",
+      "description": "W1 MODEL_APPLY: stub shop add then filing; reinject facts; no duplicate milk",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            { "type": "filing_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "factsInclude": ["חלב"],
+            "factsExclude": ["רק 3%"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        },
+        {
+          "utterance": "תתיקי שחלב רק 3%",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "3%"
+            },
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "factsInclude": ["חלב", "רק 3%"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W3-MULTI-ACTION-ONE-TURN-MA",
+      "track": "MODEL_APPLY",
+      "tag": "continuity",
+      "description": "W3 MODEL_APPLY: stub shopping add + filing add in one turn; both applied once; no duplicates",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי יין לקניות ותתיקי שרק יין אדום",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "יין",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "אדום"
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "factsInclude": ["יין", "רק אדום"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "W4-CLARIFY-THEN-MULTI-MA",
+      "track": "MODEL_APPLY",
+      "tag": "continuity",
+      "description": "W4 MODEL_APPLY: stub clarify then shop+filing once; no premature mutate; no duplicates",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות ותתיקי משהו",
+          "response": "מה להוסיף לקניות ומה לתיוק?",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "response_looks_like_ask" },
+            { "type": "lists_empty" },
+            { "type": "filing_empty" },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "factsExclude": ["לחם", "רק מלא"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        },
+        {
+          "utterance": "לחם לקניות ותתיקי שרק מלא",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "מלא"
+            },
+            { "type": "list_ops_empty" }
+          ],
+          "stateAfter": {
+            "factsInclude": ["לחם", "רק מלא"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    }
+  ]
+}

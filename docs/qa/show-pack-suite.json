@@ -1,0 +1,1715 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "show-pack-v1",
+  "domain": "show",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "V-FULL",
+    "V-SHOP",
+    "V-TASKS",
+    "V-REMINDERS",
+    "V-FILING",
+    "V-CONTACTS",
+    "V-NO-MUTATE",
+    "V-NO-REPORT-QUERY",
+    "V-EMPTY-DOMAIN",
+    "V-AMB-ASK",
+    "V-NO-WIPE",
+    "V-LINE-SHOP",
+    "V-LINE-TASK",
+    "V-LINE-REM",
+    "V-CAT-ONLY",
+    "V-INV",
+    "V-LINE-MT",
+    "V-FULL-THEN-SHOP",
+    "V-AFTER-ADD",
+    "V-NO-MUTATE-MT"
+  ],
+  "cases": [
+    {
+      "id": "V-FULL",
+      "track": "MODEL",
+      "contract": "V-FULL",
+      "description": "V-FULL",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי לי הכל",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "full"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-SHOP",
+      "track": "MODEL",
+      "contract": "V-SHOP",
+      "description": "V-SHOP",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש בקניות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-TASKS",
+      "track": "MODEL",
+      "contract": "V-TASKS",
+      "description": "V-TASKS",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה המטלות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-REMINDERS",
+      "track": "MODEL",
+      "contract": "V-REMINDERS",
+      "description": "V-REMINDERS",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה התזכורות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "reminders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-FILING",
+      "track": "MODEL",
+      "contract": "V-FILING",
+      "description": "V-FILING",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה בתיוקים?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "filing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-CONTACTS",
+      "track": "MODEL",
+      "contract": "V-CONTACTS",
+      "description": "V-CONTACTS",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מי באנשי הקשר?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "contacts"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-NO-MUTATE",
+      "track": "MODEL",
+      "contract": "V-NO-MUTATE",
+      "description": "V-NO-MUTATE",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי לי קניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-NO-REPORT-QUERY",
+      "track": "MODEL",
+      "contract": "V-NO-REPORT-QUERY",
+      "description": "V-NO-REPORT-QUERY",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה הסטטוס?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "no_query_report"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-EMPTY-DOMAIN",
+      "track": "MODEL",
+      "contract": "V-EMPTY-DOMAIN",
+      "description": "V-EMPTY-DOMAIN",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש ברעיונות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-AMB-ASK",
+      "track": "MODEL",
+      "contract": "V-AMB-ASK",
+      "description": "V-AMB-ASK",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי לי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-NO-WIPE",
+      "track": "MODEL",
+      "contract": "V-NO-WIPE",
+      "description": "V-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי ותמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-LINE-SHOP",
+      "track": "MODEL",
+      "contract": "V-LINE-SHOP",
+      "description": "V-LINE-SHOP",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "יש לי חלב בקניות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-LINE-TASK",
+      "track": "MODEL",
+      "contract": "V-LINE-TASK",
+      "description": "V-LINE-TASK",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "יש לי מטלה לרופא?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-LINE-REM",
+      "track": "MODEL",
+      "contract": "V-LINE-REM",
+      "description": "V-LINE-REM",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "יש תזכורת לחלב?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-CAT-ONLY",
+      "track": "MODEL",
+      "contract": "V-CAT-ONLY",
+      "description": "V-CAT-ONLY",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי לי רק מטלות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-INV",
+      "track": "MODEL",
+      "contract": "V-INV",
+      "description": "שאלת מלאי — בלי mutate",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש לך?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-LINE-MT",
+      "track": "MODEL_APPLY",
+      "contract": "V-LINE-MT",
+      "description": "V-LINE-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש בקניות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        },
+        {
+          "utterance": "ומה המטלות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "רופא"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "V-FULL-THEN-SHOP",
+      "track": "MODEL_APPLY",
+      "contract": "V-FULL-THEN-SHOP",
+      "description": "V-FULL-THEN-SHOP",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "הכל",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "full"
+            }
+          ]
+        },
+        {
+          "utterance": "רק קניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-AFTER-ADD",
+      "track": "MODEL_APPLY",
+      "contract": "V-AFTER-ADD",
+      "description": "V-AFTER-ADD",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לחם לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "מה יש בקניות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "V-NO-MUTATE-MT",
+      "track": "MODEL_APPLY",
+      "contract": "V-NO-MUTATE-MT",
+      "description": "V-NO-MUTATE-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי תזכורות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "reminders"
+            }
+          ]
+        },
+        {
+          "utterance": "ועוד פעם",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,878 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "reminder-pack-v1",
+  "domain": "reminders",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "R-CREATE-EXPLICIT",
+    "R-CREATE-RELATIVE",
+    "R-CREATE-NO-TIME",
+    "R-UPDATE-TIME",
+    "R-CANCEL",
+    "R-CANCEL-ONE-OF-MANY",
+    "R-CANCEL-MISSING",
+    "R-CANCEL-AMB",
+    "R-NO-INVENT",
+    "R-SUBHOUR-REFUSE",
+    "R-PAST-TIME",
+    "R-CROSS-MIDNIGHT",
+    "R-RECUR-DAILY",
+    "R-RECUR-WEEKDAY",
+    "R-STOP-NUDGE",
+    "R-STOP-KEEP-ITEM",
+    "R-DONE-TASK",
+    "R-CHANGE-MIND-MT",
+    "R-CRUD-MT",
+    "R-IDEMPOTENT"
+  ],
+  "cases": [
+    {
+      "id": "R-CREATE-EXPLICIT",
+      "track": "MODEL",
+      "contract": "R-CREATE-EXPLICIT",
+      "description": "יצירת תזכורת עם שעה מפורשת",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי מחר ב־09:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CREATE-RELATIVE",
+      "track": "MODEL",
+      "contract": "R-CREATE-RELATIVE",
+      "description": "יצירה עם זמן יחסי בעוד שעה",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי בעוד שעה לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CREATE-NO-TIME",
+      "track": "MODEL",
+      "contract": "R-CREATE-NO-TIME",
+      "description": "יצירה ללא שעה — הבהרה",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-UPDATE-TIME",
+      "track": "MODEL",
+      "contract": "R-UPDATE-TIME",
+      "description": "שינוי מועד — update אותו id בלי כפילות add",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעדכני את התזכורת לחלב ל־14:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "update"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_empty"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL",
+      "track": "MODEL",
+      "contract": "R-CANCEL",
+      "description": "ביטול תזכורת ייחודית",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "בטל את התזכורת לחלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL-ONE-OF-MANY",
+      "track": "MODEL_APPLY",
+      "contract": "R-CANCEL-ONE-OF-MANY",
+      "description": "ביטול אחת מתוך כמה — רק המבוקשת",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          },
+          {
+            "reminder_id": "eval-rem-water",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-16T11:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "בטל את התזכורת לחלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-milk"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לשתות מים"
+            ],
+            "factsExclude": [
+              "\"item\": \"לקנות חלב\"",
+              "לקנות חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL-MISSING",
+      "track": "MODEL",
+      "contract": "R-CANCEL-MISSING",
+      "description": "ביטול תזכורת שאינה קיימת — אין mutate שגוי",
+      "tag": "action-confusion",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "בטל את התזכורת לפיצה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL-AMB",
+      "track": "MODEL",
+      "contract": "R-CANCEL-AMB",
+      "description": "תבטלי את התזכורת — עמום כשיש כמה",
+      "tag": "action-confusion",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-a",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          },
+          {
+            "reminder_id": "eval-rem-b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לשתות מים"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-NO-INVENT",
+      "track": "MODEL",
+      "contract": "R-NO-INVENT",
+      "description": "בקשה עמומה — לא ממציאים שעון",
+      "tag": "hallucination-boundaries",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי משהו",
+          "constraints": [
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-SUBHOUR-REFUSE",
+      "track": "MODEL",
+      "contract": "R-SUBHOUR-REFUSE",
+      "description": "מרווח קצר מהמותר — סירוב (מוצר: מינימום שעה)",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל 30 דקות לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שעה",
+                "דקות",
+                "שניות"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-PAST-TIME",
+      "track": "MODEL",
+      "contract": "R-PAST-TIME",
+      "description": "מועד שעבר — אין שמירת שעון לא תקף בשקט (שאל/סרב)",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי אתמול ב־09:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "response_looks_like_ask"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CROSS-MIDNIGHT",
+      "track": "MODEL",
+      "contract": "R-CROSS-MIDNIGHT",
+      "description": "תזכורת שחוצה חצות — add עם שעון",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי היום ב־23:30 להתקשר ואז בעוד שעה לסגור",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "minCount": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-RECUR-DAILY",
+      "track": "MODEL",
+      "contract": "R-RECUR-DAILY",
+      "description": "תזכורת חוזרת כל יום",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל יום ב־08:00 לקחת כדור",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-RECUR-WEEKDAY",
+      "track": "MODEL",
+      "contract": "R-RECUR-WEEKDAY",
+      "description": "תזכורת חוזרת ביום בשבוע",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל יום שני ב־09:00 לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-STOP-NUDGE",
+      "track": "MODEL",
+      "contract": "R-STOP-NUDGE",
+      "description": "תפסיקי לנדנד — ביטול שעון יחיד",
+      "tag": "happy",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-nudge",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תפסיקי לנדנד לי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-nudge"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-STOP-KEEP-ITEM",
+      "track": "MODEL_APPLY",
+      "contract": "R-STOP-KEEP-ITEM",
+      "description": "עצירת נודניק — הפריט נשאר ברשימה",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk-nudge",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תפסיקי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-milk-nudge"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R-DONE-TASK",
+      "track": "MODEL_APPLY",
+      "contract": "R-DONE-TASK",
+      "description": "השלמת משימה — תזכורת נפרדת (ללא reminderId/linkedReminderId/workerItemId) נשארת",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-independent",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T10:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-doctor"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לקנות חלב"
+            ],
+            "factsExclude": [
+              "להתקשר לרופא"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R-CHANGE-MIND-MT",
+      "track": "MODEL_APPLY",
+      "contract": "R-CHANGE-MIND-MT",
+      "description": "יצירה ואז שינוי מועד בשיחה",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי מחר ב־09:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        },
+        {
+          "utterance": "בעצם תשני ל־14:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "update"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "R-CRUD-MT",
+      "description": "יצירה → שינוי → ביטול",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי מחר ב־10:00 לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מים"
+            ]
+          }
+        },
+        {
+          "utterance": "תעדכני את זה ל־11:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "update"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מים"
+            ]
+          }
+        },
+        {
+          "utterance": "בטל את התזכורת למים",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "remove"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לשתות מים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R-IDEMPOTENT",
+      "track": "MODEL_APPLY",
+      "contract": "R-IDEMPOTENT",
+      "description": "אותה בקשת יצירה פעמיים — בלי כפילות פריט קניות",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תזכירי לי מחר ב־08:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        },
+        {
+          "utterance": "תזכירי לי מחר ב־08:00 לקנות חלב",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "reminders_has_action",
+                  "action": "update"
+                },
+                {
+                  "type": "reminders_has_action",
+                  "action": "add"
+                }
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

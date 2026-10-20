@@ -8,3 +8,4 @@ dist/
 .data/
 frontend/.vite/
 node_modules
+docs/qa/phase-4-last-eval.json

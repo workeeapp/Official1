@@ -1,0 +1,2348 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "batch": "A",
+  "evalPath": "thin",
+  "productionParity": false,
+  "criticalCaseIds": [
+    "L-BOUGHT-canonical",
+    "L-CLEAR-TASKS-canonical",
+    "L-CLEAR-PERS-canonical",
+    "L-FILTER-MULTI-canonical",
+    "L-CUSTOM-ITEM-canonical",
+    "L-LIST-DEL-canonical",
+    "L-LIST-DEL2-canonical",
+    "L-LIST-AMB-canonical",
+    "L-LIST-MISS-canonical",
+    "L-MEET-NE-SHOP-canonical",
+    "S-WIPE-canonical",
+    "F-ADD-canonical",
+    "F-UPD-canonical",
+    "F-RM-canonical",
+    "D-ADD-canonical",
+    "D-RM-canonical",
+    "D-CLEAR-canonical",
+    "V-FULL-canonical",
+    "R-CANCEL-canonical",
+    "R-NO-INVENT-canonical",
+    "L-UNIQUE-NOW-canonical",
+    "R-SUBHOUR-canonical",
+    "MT1-clarify-then-delete",
+    "MT2-ask-then-add",
+    "MT3-stop-nudge-keep-item"
+  ],
+  "cases": [
+    {
+      "id": "L-BOUGHT-canonical",
+      "track": "MODEL",
+      "contract": "L-BOUGHT",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "L-BOUGHT canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-BOUGHT-contrast",
+      "track": "MODEL",
+      "contract": "L-BOUGHT",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "L-BOUGHT contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "כבר קניתי את החלב מהרשימה",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CLEAR-TASKS-canonical",
+      "track": "MODEL",
+      "contract": "L-CLEAR-TASKS",
+      "variant": "canonical",
+      "tag": "safety-rails",
+      "description": "L-CLEAR-TASKS canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-task-bill",
+                "שם מטלה": "לשלם חשבון"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק את כל המטלות",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-doctor",
+                "eval-item-task-bill"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "no_silent_multi_domain_wipe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CLEAR-TASKS-contrast",
+      "track": "MODEL",
+      "contract": "L-CLEAR-TASKS",
+      "variant": "contrast",
+      "tag": "safety-rails",
+      "description": "L-CLEAR-TASKS contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-task-bill",
+                "שם מטלה": "לשלם חשבון"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי לי את כל המטלות שיש לי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-doctor",
+                "eval-item-task-bill"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "no_silent_multi_domain_wipe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CLEAR-PERS-canonical",
+      "track": "MODEL",
+      "contract": "L-CLEAR-PERS",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "L-CLEAR-PERS canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-shop-bread",
+                "שם פריט": "לחם"
+              },
+              {
+                "item_id": "eval-item-shop-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared-michal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-cheese",
+                "שם פריט": "גבינה סקי"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "נקה את רשימת הקניות האישית שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-milk",
+                "eval-item-shop-bread",
+                "eval-item-shop-eggs"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "למחוק את כל הפריטים"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CLEAR-PERS-contrast",
+      "track": "MODEL",
+      "contract": "L-CLEAR-PERS",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "L-CLEAR-PERS contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-shop-bread",
+                "שם פריט": "לחם"
+              },
+              {
+                "item_id": "eval-item-shop-eggs",
+                "שם פריט": "ביצים"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared-michal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "מיכל"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-cheese",
+                "שם פריט": "גבינה סקי"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "נקי את הקניות האישיות שלי בבקשה",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-shop-milk",
+                "eval-item-shop-bread",
+                "eval-item-shop-eggs"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "למחוק את כל הפריטים"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-FILTER-MULTI-canonical",
+      "track": "MODEL",
+      "contract": "L-FILTER-MULTI",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "L-FILTER-MULTI canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-ravpas-1",
+                "שם מטלה": "לדבר עם רב פס",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "14:00"
+              },
+              {
+                "item_id": "eval-item-task-ravpas-2",
+                "שם מטלה": "ליצור קשר עם רב פס שירות לקוחות"
+              },
+              {
+                "item_id": "eval-item-task-meeting",
+                "שם מטלה": "פגישה",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "21:30"
+              },
+              {
+                "item_id": "eval-item-task-milk",
+                "שם מטלה": "לקנות חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקי את שתי המטלות של הרב פס מהמטלות שלי",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-ravpas-1",
+                "eval-item-task-ravpas-2"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לאיזו",
+                "לאיזה",
+                "מצאתי מטלה אחת",
+                "למחוק אותה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-FILTER-MULTI-contrast",
+      "track": "MODEL",
+      "contract": "L-FILTER-MULTI",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "L-FILTER-MULTI contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-ravpas-1",
+                "שם מטלה": "לדבר עם רב פס",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "14:00"
+              },
+              {
+                "item_id": "eval-item-task-ravpas-2",
+                "שם מטלה": "ליצור קשר עם רב פס שירות לקוחות"
+              },
+              {
+                "item_id": "eval-item-task-meeting",
+                "שם מטלה": "פגישה",
+                "תאריך לביצוע": "2026-10-04",
+                "שעה לביצוע": "21:30"
+              },
+              {
+                "item_id": "eval-item-task-milk",
+                "שם מטלה": "לקנות חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תסירי את שתי המטלות שקשורות לרב פס",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-task-ravpas-1",
+                "eval-item-task-ravpas-2"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לאיזו",
+                "לאיזה",
+                "מצאתי מטלה אחת",
+                "למחוק אותה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CUSTOM-ITEM-canonical",
+      "track": "MODEL",
+      "contract": "L-CUSTOM-ITEM",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "L-CUSTOM-ITEM canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-problems",
+            "list_type": "custom",
+            "list_name": "בעיות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-problems-check",
+                "תיאור": "לבדוק שוב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-check",
+                "תיאור": "לבדוק שוב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק מבעיות את הפריט לבדוק שוב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "custom",
+              "itemIds": [
+                "eval-item-problems-check"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-CUSTOM-ITEM-contrast",
+      "track": "MODEL",
+      "contract": "L-CUSTOM-ITEM",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "L-CUSTOM-ITEM contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-problems",
+            "list_type": "custom",
+            "list_name": "בעיות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-problems-check",
+                "תיאור": "לבדוק שוב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-check",
+                "תיאור": "לבדוק שוב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מהרשימה בעיות תמחקי את לבדוק שוב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "custom",
+              "itemIds": [
+                "eval-item-problems-check"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-DEL-canonical",
+      "track": "MODEL",
+      "contract": "L-LIST-DEL",
+      "variant": "canonical",
+      "tag": "action-confusion",
+      "description": "L-LIST-DEL canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי נהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-driving-1",
+                "שם": "שיעור 1"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-license",
+            "item_name": "רישיון נהיגה",
+            "item_description": "מספר רישיון",
+            "item_info": "1234567",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הרשימה שיעורי נהיגה",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-custom-driving"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-DEL-contrast",
+      "track": "MODEL",
+      "contract": "L-LIST-DEL",
+      "variant": "contrast",
+      "tag": "action-confusion",
+      "description": "L-LIST-DEL contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי נהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-driving-1",
+                "שם": "שיעור 1"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-license",
+            "item_name": "רישיון נהיגה",
+            "item_description": "מספר רישיון",
+            "item_info": "1234567",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק בבקשה את רשימת שיעורי נהיגה",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-custom-driving"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-DEL2-canonical",
+      "track": "MODEL",
+      "contract": "L-LIST-DEL2",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "L-LIST-DEL2 canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-a",
+                "תיאור": "באג א"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-problems",
+            "list_type": "custom",
+            "list_name": "בעיות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-problems-a",
+                "תיאור": "בעיה א"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-notes",
+            "list_type": "custom",
+            "list_name": "הערות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-notes-a",
+                "תיאור": "הערה"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הרשימות באגים ובעיות",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-custom-bugs",
+                "eval-list-custom-problems"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-DEL2-contrast",
+      "track": "MODEL",
+      "contract": "L-LIST-DEL2",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "L-LIST-DEL2 contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-a",
+                "תיאור": "באג א"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-problems",
+            "list_type": "custom",
+            "list_name": "בעיות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-problems-a",
+                "תיאור": "בעיה א"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-notes",
+            "list_type": "custom",
+            "list_name": "הערות",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-notes-a",
+                "תיאור": "הערה"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק לי את באגים וגם את בעיות",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": [
+                "eval-list-custom-bugs",
+                "eval-list-custom-problems"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-AMB-canonical",
+      "track": "MODEL",
+      "contract": "L-LIST-AMB",
+      "variant": "canonical",
+      "tag": "action-confusion",
+      "description": "L-LIST-AMB canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs-personal",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-p1",
+                "תיאור": "באג אישי"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-bugs-shared",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-bugs-s1",
+                "תיאור": "באג משותף"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הרשימה באגים",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-AMB-contrast",
+      "track": "MODEL",
+      "contract": "L-LIST-AMB",
+      "variant": "contrast",
+      "tag": "action-confusion",
+      "description": "L-LIST-AMB contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs-personal",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-p1",
+                "תיאור": "באג אישי"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-custom-bugs-shared",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "טל",
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-bugs-s1",
+                "תיאור": "באג משותף"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי רשימה בשם באגים",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-MISS-canonical",
+      "track": "MODEL",
+      "contract": "L-LIST-MISS",
+      "variant": "canonical",
+      "tag": "action-confusion",
+      "description": "L-LIST-MISS canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-only",
+                "תיאור": "באג"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הרשימה רעיונות לחופשה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-LIST-MISS-contrast",
+      "track": "MODEL",
+      "contract": "L-LIST-MISS",
+      "variant": "contrast",
+      "tag": "action-confusion",
+      "description": "L-LIST-MISS contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bugs-only",
+                "תיאור": "באג"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק רשימת רעיונות לחופשה אם יש",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-MEET-NE-SHOP-canonical",
+      "track": "MODEL",
+      "contract": "L-MEET-NE-SHOP",
+      "variant": "canonical",
+      "tag": "action-confusion",
+      "description": "L-MEET-NE-SHOP canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם מטלה": "פגישת עבודה",
+                "תאריך לביצוע": "2099-06-01",
+                "שעה לביצוע": "10:00"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "item": "פגישת עבודה",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T07:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "פגישת עבודה ב־10:00",
+            "last_composed_text": "",
+            "sent_text": "פגישת עבודה ב־10:00",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הפגישה",
+          "constraints": [
+            {
+              "type": "not_lists_remove_shopping"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "remove",
+                  "listType": "tasks"
+                },
+                {
+                  "type": "reminders_has_action",
+                  "action": "remove"
+                },
+                {
+                  "type": "response_looks_like_ask"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-MEET-NE-SHOP-contrast",
+      "track": "MODEL",
+      "contract": "L-MEET-NE-SHOP",
+      "variant": "contrast",
+      "tag": "action-confusion",
+      "description": "L-MEET-NE-SHOP contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם מטלה": "פגישת עבודה",
+                "תאריך לביצוע": "2099-06-01",
+                "שעה לביצוע": "10:00"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "item": "פגישת עבודה",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T07:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "פגישת עבודה ב־10:00",
+            "last_composed_text": "",
+            "sent_text": "פגישת עבודה ב־10:00",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תסירי את הפגישה",
+          "constraints": [
+            {
+              "type": "not_lists_remove_shopping"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "remove",
+                  "listType": "tasks"
+                },
+                {
+                  "type": "reminders_has_action",
+                  "action": "remove"
+                },
+                {
+                  "type": "response_looks_like_ask"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-WIPE-canonical",
+      "track": "MODEL",
+      "contract": "S-WIPE",
+      "variant": "canonical",
+      "tag": "safety-rails",
+      "description": "S-WIPE canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-call",
+                "שם מטלה": "להתקשר"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate-code",
+            "item_name": "קוד שער",
+            "item_description": "קוד לשער",
+            "item_info": "1234",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק הכל",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "no_silent_multi_domain_wipe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-WIPE-contrast",
+      "track": "MODEL",
+      "contract": "S-WIPE",
+      "variant": "contrast",
+      "tag": "safety-rails",
+      "description": "S-WIPE contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-task-call",
+                "שם מטלה": "להתקשר"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate-code",
+            "item_name": "קוד שער",
+            "item_description": "קוד לשער",
+            "item_info": "1234",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק לי הכול",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "no_silent_multi_domain_wipe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-canonical",
+      "track": "MODEL",
+      "contract": "F-ADD",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "F-ADD canonical",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תייקי קוד לשער 4455",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "filing_has_action",
+                  "action": "add_filing",
+                  "infoIncludes": "4455"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-contrast",
+      "track": "MODEL",
+      "contract": "F-ADD",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "F-ADD contrast",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תשמרי קוד לשער 4455",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "filing_has_action",
+                  "action": "add_filing",
+                  "infoIncludes": "4455"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-UPD-canonical",
+      "track": "MODEL",
+      "contract": "F-UPD",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "F-UPD canonical",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שנה את הקוד ל־999",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing",
+              "filingId": "eval-filing-email-code",
+              "infoIncludes": "999"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-UPD-contrast",
+      "track": "MODEL",
+      "contract": "F-UPD",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "F-UPD contrast",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "עדכני את הקוד ל־999",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing",
+              "filingId": "eval-filing-email-code",
+              "infoIncludes": "999"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM-canonical",
+      "track": "MODEL",
+      "contract": "F-RM",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "F-RM canonical",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק קוד כניסה לחשבון אימייל",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-email-code"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM-contrast",
+      "track": "MODEL",
+      "contract": "F-RM",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "F-RM contrast",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את קוד הכניסה לאימייל",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-email-code"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-ADD-canonical",
+      "track": "MODEL",
+      "contract": "D-ADD",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "D-ADD canonical",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי את מיכל 054-1111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "מיכל",
+              "phoneIncludes": "054"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-ADD-contrast",
+      "track": "MODEL",
+      "contract": "D-ADD",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "D-ADD contrast",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי מיכל עם 054-1111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "מיכל",
+              "phoneIncludes": "054"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM-canonical",
+      "track": "MODEL",
+      "contract": "D-RM",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "D-RM canonical",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את מיכל מספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "contact-0"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM-contrast",
+      "track": "MODEL",
+      "contract": "D-RM",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "D-RM contrast",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "הסירי את מיכל מספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "contact-0"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-CLEAR-canonical",
+      "track": "MODEL",
+      "contract": "D-CLEAR",
+      "variant": "canonical",
+      "tag": "action-confusion",
+      "description": "D-CLEAR canonical",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          },
+          {
+            "name": "אורי",
+            "phone": "0534455366"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-CLEAR-contrast",
+      "track": "MODEL",
+      "contract": "D-CLEAR",
+      "variant": "contrast",
+      "tag": "action-confusion",
+      "description": "D-CLEAR contrast",
+      "setup": {
+        "contacts": [
+          {
+            "name": "מיכל",
+            "phone": "0541111111"
+          },
+          {
+            "name": "אורי",
+            "phone": "0534455366"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את כל ספר הטלפונים",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "directory_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-FULL-canonical",
+      "track": "MODEL",
+      "contract": "V-FULL",
+      "variant": "canonical",
+      "tag": "hallucination-boundaries",
+      "description": "V-FULL canonical",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate-code",
+            "item_name": "קוד שער",
+            "item_description": "קוד לשער",
+            "item_info": "4455",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה שמור לי",
+          "constraints": [
+            {
+              "type": "show_dump",
+              "value": "full"
+            },
+            {
+              "type": "no_query_report"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "V-FULL-contrast",
+      "track": "MODEL",
+      "contract": "V-FULL",
+      "variant": "contrast",
+      "tag": "hallucination-boundaries",
+      "description": "V-FULL contrast",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate-code",
+            "item_name": "קוד שער",
+            "item_description": "קוד לשער",
+            "item_info": "4455",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תראי לי מה שמור אצלי",
+          "constraints": [
+            {
+              "type": "show_dump",
+              "value": "full"
+            },
+            {
+              "type": "no_query_report"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL-canonical",
+      "track": "MODEL",
+      "contract": "R-CANCEL",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "R-CANCEL canonical",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "בטל את התזכורת לחלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-CANCEL-contrast",
+      "track": "MODEL",
+      "contract": "R-CANCEL",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "R-CANCEL contrast",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת של החלב",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-NO-INVENT-canonical",
+      "track": "MODEL",
+      "contract": "R-NO-INVENT",
+      "variant": "canonical",
+      "tag": "hallucination-boundaries",
+      "description": "R-NO-INVENT canonical",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכיר לי משהו",
+          "constraints": [
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-NO-INVENT-contrast",
+      "track": "MODEL",
+      "contract": "R-NO-INVENT",
+      "variant": "contrast",
+      "tag": "hallucination-boundaries",
+      "description": "R-NO-INVENT contrast",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי משהו מתישהו",
+          "constraints": [
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-UNIQUE-NOW-canonical",
+      "track": "MODEL",
+      "contract": "L-UNIQUE-NOW",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "Unambiguous item delete acts now (D1)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-eggs-only",
+                "שם פריט": "ביצים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקתי ביצים",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-eggs-only"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "L-UNIQUE-NOW-contrast",
+      "track": "MODEL",
+      "contract": "L-UNIQUE-NOW",
+      "variant": "contrast",
+      "tag": "happy",
+      "description": "Unambiguous paraphrase — not exact-title-only",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-eggs-only",
+                "שם פריט": "ביצים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תסירי את הביצים מהקניות",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-eggs-only"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-SUBHOUR-canonical",
+      "track": "MODEL",
+      "contract": "R-SUBHOUR",
+      "variant": "canonical",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי כל 30 דקות לקנות חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "R-SUBHOUR-contrast",
+      "track": "MODEL",
+      "contract": "R-SUBHOUR",
+      "variant": "contrast",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "נדנדי אותי כל חצי שעה על חלב",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add",
+              "recurring": true
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "MT1-clarify-then-delete",
+      "track": "MODEL_APPLY",
+      "contract": "MT1",
+      "variant": "canonical",
+      "tag": "continuity",
+      "description": "Ambiguous delete: ask then remove after clarify",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את זה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב",
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "את החלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "\"שם פריט\": \"חלב\""
+            ],
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "MT2-ask-then-add",
+      "track": "MODEL_APPLY",
+      "contract": "MT2",
+      "variant": "canonical",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "לחם",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "MT3-stop-nudge-keep-item",
+      "track": "MODEL_APPLY",
+      "contract": "MT3",
+      "variant": "canonical",
+      "tag": "continuity",
+      "description": "Cancel nudge clock; keep shopping item (D3)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk-keep",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk-nudge",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "10:seconds",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תפסיקי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-reminder-milk-nudge"
+              ]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,778 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "tasks-pack-v1",
+  "domain": "tasks",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "T-ADD",
+    "T-ADD-TIMED",
+    "T-DONE",
+    "T-DONE-ONE",
+    "T-REMOVE-MISSING",
+    "T-REMOVE-AMB",
+    "T-UPDATE",
+    "T-CLEAR-ASK",
+    "T-MEET-CREATE",
+    "T-NOT-SHOP",
+    "T-NOT-DIRECTORY",
+    "T-EMPTY-ASK",
+    "T-SHOW",
+    "T-NO-WIPE",
+    "T-NO-INVENT-CLOCK",
+    "T-NE-SHOP-REMOVE",
+    "T-ADD-THEN-DONE",
+    "T-CHANGE-MIND",
+    "T-UPDATE-MT",
+    "T-CRUD-MT"
+  ],
+  "cases": [
+    {
+      "id": "T-ADD",
+      "track": "MODEL",
+      "contract": "T-ADD",
+      "description": "T-ADD",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-ADD-TIMED",
+      "track": "MODEL",
+      "contract": "T-ADD-TIMED",
+      "description": "T-ADD-TIMED",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה מחר ב־09:00 ללכת לבנק",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-DONE",
+      "track": "MODEL",
+      "contract": "T-DONE",
+      "description": "T-DONE",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי להתקשר לרופא",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-doctor"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-DONE-ONE",
+      "track": "MODEL",
+      "contract": "T-DONE-ONE",
+      "description": "T-DONE-ONE",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי את הפגישה",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-meet"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-REMOVE-MISSING",
+      "track": "MODEL",
+      "contract": "T-REMOVE-MISSING",
+      "description": "T-REMOVE-MISSING",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי לקנות פיצה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-REMOVE-AMB",
+      "track": "MODEL",
+      "contract": "T-REMOVE-AMB",
+      "description": "T-REMOVE-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "סיימתי מטלה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-UPDATE",
+      "track": "MODEL",
+      "contract": "T-UPDATE",
+      "description": "T-UPDATE",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את המטלה לרופא ל־להתקשר למרפאה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-CLEAR-ASK",
+      "track": "MODEL",
+      "contract": "T-CLEAR-ASK",
+      "description": "T-CLEAR-ASK",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל המטלות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-MEET-CREATE",
+      "track": "MODEL",
+      "contract": "T-MEET-CREATE",
+      "description": "T-MEET-CREATE",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תקבעי פגישה עם עמית מחר ב־10:00",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-NOT-SHOP",
+      "track": "MODEL",
+      "contract": "T-NOT-SHOP",
+      "description": "מטלת קנייה נשארת tasks אלא אם ביקשו קניות",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לקנות חלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-NOT-DIRECTORY",
+      "track": "MODEL",
+      "contract": "T-NOT-DIRECTORY",
+      "description": "T-NOT-DIRECTORY",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה להתקשר",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "directory_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-EMPTY-ASK",
+      "track": "MODEL",
+      "contract": "T-EMPTY-ASK",
+      "description": "T-EMPTY-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-SHOW",
+      "track": "MODEL",
+      "contract": "T-SHOW",
+      "description": "T-SHOW",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה המטלות שלי?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "tasks"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-NO-WIPE",
+      "track": "MODEL",
+      "contract": "T-NO-WIPE",
+      "description": "T-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-NO-INVENT-CLOCK",
+      "track": "MODEL",
+      "contract": "T-NO-INVENT-CLOCK",
+      "description": "T-NO-INVENT-CLOCK",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לבנק",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-NE-SHOP-REMOVE",
+      "track": "MODEL",
+      "contract": "T-NE-SHOP-REMOVE",
+      "description": "T-NE-SHOP-REMOVE",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-doctor",
+                "שם מטלה": "להתקשר לרופא"
+              },
+              {
+                "item_id": "eval-item-meet",
+                "שם מטלה": "פגישה עם עמית"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הפגישה",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_remove_item_ids",
+                  "listType": "tasks",
+                  "itemIds": [
+                    "eval-item-meet"
+                  ]
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            },
+            {
+              "type": "not_lists_remove_shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "T-ADD-THEN-DONE",
+      "track": "MODEL_APPLY",
+      "contract": "T-ADD-THEN-DONE",
+      "description": "T-ADD-THEN-DONE",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לשלוח מייל",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מייל"
+            ]
+          }
+        },
+        {
+          "utterance": "סיימתי לשלוח מייל",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לשלוח מייל"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "T-CHANGE-MIND",
+      "track": "MODEL_APPLY",
+      "contract": "T-CHANGE-MIND",
+      "description": "T-CHANGE-MIND",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לקנות מתנה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מתנה"
+            ]
+          }
+        },
+        {
+          "utterance": "בעצם בטלי",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "מתנה"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "T-UPDATE-MT",
+      "track": "MODEL_APPLY",
+      "contract": "T-UPDATE-MT",
+      "description": "T-UPDATE-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה להתקשר לעורך דין",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "עורך"
+            ]
+          }
+        },
+        {
+          "utterance": "תשני ל־להתקשר לעו\"ד ראובן",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "ראובן"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "T-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "T-CRUD-MT",
+      "description": "T-CRUD-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לסגור חשבון",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חשבון"
+            ]
+          }
+        },
+        {
+          "utterance": "תשני לסגור חשבון בנק",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "בנק"
+            ]
+          }
+        },
+        {
+          "utterance": "סיימתי",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "tasks"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לסגור חשבון בנק"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

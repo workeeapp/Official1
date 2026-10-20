@@ -1,0 +1,691 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "directory-pack-v1",
+  "domain": "directory",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "D-ADD",
+    "D-ADD-NAME-ONLY-ASK",
+    "D-UPD",
+    "D-RM",
+    "D-RM-ONE",
+    "D-RM-MISSING",
+    "D-RM-AMB",
+    "D-CLEAR-ASK",
+    "D-SHOW",
+    "D-NOT-TASK",
+    "D-NOT-FILING",
+    "D-NO-CLOCK",
+    "D-NO-WIPE",
+    "D-PHONE-IN-TASK-ASK",
+    "D-EMPTY-ASK",
+    "D-QUERY",
+    "D-ADD-THEN-RM",
+    "D-DUP-MT",
+    "D-UPD-MT",
+    "D-CRUD-MT"
+  ],
+  "cases": [
+    {
+      "id": "D-ADD",
+      "track": "MODEL",
+      "contract": "D-ADD",
+      "description": "D-ADD",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי מיכל עם 054-1111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "מיכל",
+              "phoneIncludes": "054"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-ADD-NAME-ONLY-ASK",
+      "track": "MODEL",
+      "contract": "D-ADD-NAME-ONLY-ASK",
+      "description": "D-ADD-NAME-ONLY-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי את רון לספר טלפונים",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-UPD",
+      "track": "MODEL",
+      "contract": "D-UPD",
+      "description": "D-UPD",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעדכני את מספר של מיכל ל־0543333333",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "update",
+              "nameIncludes": "מיכל"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM",
+      "track": "MODEL",
+      "contract": "D-RM",
+      "description": "D-RM",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את מיכל מספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "eval-contact-michal"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM-ONE",
+      "track": "MODEL",
+      "contract": "D-RM-ONE",
+      "description": "D-RM-ONE",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את מיכל",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": [
+                "eval-contact-michal"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM-MISSING",
+      "track": "MODEL",
+      "contract": "D-RM-MISSING",
+      "description": "D-RM-MISSING",
+      "tag": "action-confusion",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את פיצה מספר הטלפונים",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-RM-AMB",
+      "track": "MODEL",
+      "contract": "D-RM-AMB",
+      "description": "D-RM-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי איש קשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-CLEAR-ASK",
+      "track": "MODEL",
+      "contract": "D-CLEAR-ASK",
+      "description": "D-CLEAR-ASK",
+      "tag": "safety-rails",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-SHOW",
+      "track": "MODEL",
+      "contract": "D-SHOW",
+      "description": "D-SHOW",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מי באנשי הקשר?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "contacts"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-NOT-TASK",
+      "track": "MODEL",
+      "contract": "D-NOT-TASK",
+      "description": "D-NOT-TASK",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי מיכל עם 0541111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-NOT-FILING",
+      "track": "MODEL",
+      "contract": "D-NOT-FILING",
+      "description": "D-NOT-FILING",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי מיכל עם 0541111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-NO-CLOCK",
+      "track": "MODEL",
+      "contract": "D-NO-CLOCK",
+      "description": "D-NO-CLOCK",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי דן עם 0501111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-NO-WIPE",
+      "track": "MODEL",
+      "contract": "D-NO-WIPE",
+      "description": "D-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-PHONE-IN-TASK-ASK",
+      "track": "MODEL",
+      "contract": "D-PHONE-IN-TASK-ASK",
+      "description": "מספר במטלה ≠ אנשי קשר אוטומטי",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה להתקשר ל־0549999999",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "add",
+                  "listType": "tasks"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                }
+              ]
+            },
+            {
+              "type": "directory_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-EMPTY-ASK",
+      "track": "MODEL",
+      "contract": "D-EMPTY-ASK",
+      "description": "D-EMPTY-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי איש קשר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-QUERY",
+      "track": "MODEL",
+      "contract": "D-QUERY",
+      "description": "D-QUERY",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה הטלפון של מיכל?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D-ADD-THEN-RM",
+      "track": "MODEL_APPLY",
+      "contract": "D-ADD-THEN-RM",
+      "description": "D-ADD-THEN-RM",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי נועה עם 0521111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add",
+              "nameIncludes": "נועה"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "נועה"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי את נועה",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "remove"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "נועה"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "D-DUP-MT",
+      "track": "MODEL_APPLY",
+      "contract": "D-DUP-MT",
+      "description": "D-DUP-MT",
+      "tag": "happy",
+      "setup": {
+        "directory": [
+          {
+            "contact_id": "eval-contact-michal",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "owner": "טל"
+          },
+          {
+            "contact_id": "eval-contact-amit",
+            "name": "עמית",
+            "phone": "0542222222",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "הוסיפי מיכל עם 0541111111",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "directory_has_action",
+                  "action": "update"
+                },
+                {
+                  "type": "directory_has_action",
+                  "action": "add"
+                }
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "מיכל"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "D-UPD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "D-UPD-MT",
+      "description": "D-UPD-MT",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי גיל עם 0531111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "גיל"
+            ]
+          }
+        },
+        {
+          "utterance": "תעדכני את המספר של גיל ל־0532222222",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "update"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "0532222222"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "D-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "D-CRUD-MT",
+      "description": "D-CRUD-MT",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "הוסיפי יעל עם 0511111111",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "add"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "יעל"
+            ]
+          }
+        },
+        {
+          "utterance": "תעדכני ליעל 0512222222",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "update"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "0512222222"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי את יעל",
+          "constraints": [
+            {
+              "type": "directory_has_action",
+              "action": "remove"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "יעל"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

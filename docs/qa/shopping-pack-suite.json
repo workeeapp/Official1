@@ -1,0 +1,765 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "shopping-pack-v1",
+  "domain": "shopping",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "S-ADD",
+    "S-ADD-QTY",
+    "S-BOUGHT",
+    "S-BOUGHT-ONE",
+    "S-REMOVE-MISSING",
+    "S-REMOVE-AMB",
+    "S-UPDATE-QTY",
+    "S-CLEAR-ASK",
+    "S-NO-TIME-NEEDED",
+    "S-NOT-TASK",
+    "S-NOT-DIRECTORY",
+    "S-EMPTY-ASK",
+    "S-DUP-SIGNAL",
+    "S-MULTI",
+    "S-SHOW",
+    "S-NO-WIPE",
+    "S-ADD-THEN-BOUGHT",
+    "S-IDEMPOTENT",
+    "S-CHANGE-MIND",
+    "S-CRUD-MT"
+  ],
+  "cases": [
+    {
+      "id": "S-ADD",
+      "track": "MODEL",
+      "contract": "S-ADD",
+      "description": "S-ADD",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-ADD-QTY",
+      "track": "MODEL",
+      "contract": "S-ADD-QTY",
+      "description": "S-ADD-QTY",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי 2 חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-BOUGHT",
+      "track": "MODEL",
+      "contract": "S-BOUGHT",
+      "description": "S-BOUGHT",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-BOUGHT-ONE",
+      "track": "MODEL",
+      "contract": "S-BOUGHT-ONE",
+      "description": "קניתי אחד מתוך כמה — רק חלב",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "קניתי חלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-milk"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-REMOVE-MISSING",
+      "track": "MODEL",
+      "contract": "S-REMOVE-MISSING",
+      "description": "S-REMOVE-MISSING",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקתי פיצה מהקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-REMOVE-AMB",
+      "track": "MODEL",
+      "contract": "S-REMOVE-AMB",
+      "description": "S-REMOVE-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחקתי מהקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-UPDATE-QTY",
+      "track": "MODEL",
+      "contract": "S-UPDATE-QTY",
+      "description": "S-UPDATE-QTY",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את החלב ל־3",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-CLEAR-ASK",
+      "track": "MODEL",
+      "contract": "S-CLEAR-ASK",
+      "description": "S-CLEAR-ASK",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל הקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-NO-TIME-NEEDED",
+      "track": "MODEL",
+      "contract": "S-NO-TIME-NEEDED",
+      "description": "S-NO-TIME-NEEDED",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי ביצים לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-NOT-TASK",
+      "track": "MODEL",
+      "contract": "S-NOT-TASK",
+      "description": "S-NOT-TASK",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            },
+            {
+              "type": "not_lists_remove_shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-NOT-DIRECTORY",
+      "track": "MODEL",
+      "contract": "S-NOT-DIRECTORY",
+      "description": "S-NOT-DIRECTORY",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            },
+            {
+              "type": "directory_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-EMPTY-ASK",
+      "track": "MODEL",
+      "contract": "S-EMPTY-ASK",
+      "description": "S-EMPTY-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-DUP-SIGNAL",
+      "track": "MODEL",
+      "contract": "S-DUP-SIGNAL",
+      "description": "הוספה כשכבר יש חלב — מודל מחליט",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-MULTI",
+      "track": "MODEL",
+      "contract": "S-MULTI",
+      "description": "S-MULTI",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב ולחם לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-SHOW",
+      "track": "MODEL",
+      "contract": "S-SHOW",
+      "description": "S-SHOW",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש לי בקניות?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "shopping"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-NO-WIPE",
+      "track": "MODEL",
+      "contract": "S-NO-WIPE",
+      "description": "S-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "S-ADD-THEN-BOUGHT",
+      "track": "MODEL_APPLY",
+      "contract": "S-ADD-THEN-BOUGHT",
+      "description": "S-ADD-THEN-BOUGHT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי יוגורט לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "יוגורט"
+            ]
+          }
+        },
+        {
+          "utterance": "קניתי יוגורט",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "יוגורט"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "S-IDEMPOTENT",
+      "track": "MODEL_APPLY",
+      "contract": "S-IDEMPOTENT",
+      "description": "S-IDEMPOTENT",
+      "tag": "happy",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "lists_has_action",
+                  "action": "update",
+                  "listType": "shopping"
+                },
+                {
+                  "type": "lists_has_action",
+                  "action": "add",
+                  "listType": "shopping"
+                }
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "S-CHANGE-MIND",
+      "track": "MODEL_APPLY",
+      "contract": "S-CHANGE-MIND",
+      "description": "S-CHANGE-MIND",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי קוטג לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "קוטג"
+            ]
+          }
+        },
+        {
+          "utterance": "בעצם בטלי את זה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "קוטג"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "S-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "S-CRUD-MT",
+      "description": "S-CRUD-MT",
+      "tag": "continuity",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי בננה לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "בננה"
+            ]
+          }
+        },
+        {
+          "utterance": "תשני לבננות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "בננ"
+            ]
+          }
+        },
+        {
+          "utterance": "מחקתי בננות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "\"שם פריט\": \"בננות\""
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

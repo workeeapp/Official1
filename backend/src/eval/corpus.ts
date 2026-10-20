@@ -483,3 +483,75 @@ export function loadEventPackSuite(
     expectedPack: "event-pack-v1",
   });
 }
+
+/**
+ * Workflow Pack — ENGINE multi-turn cross-domain flows.
+ * Same case shape as Gate 1 regression; not a thin MODEL domain pack.
+ */
+export interface WorkflowPackSuite extends RegressionSuite {
+  pack: "workflow-pack-v1";
+  domain: "workflows";
+}
+
+export function defaultWorkflowPackPath(
+  repoRoot = resolve(import.meta.dirname, "../../.."),
+): string {
+  return resolve(repoRoot, "docs/qa/workflow-pack-suite.json");
+}
+
+export function loadWorkflowPackSuite(
+  path = defaultWorkflowPackPath(),
+): WorkflowPackSuite {
+  const raw = JSON.parse(readFileSync(path, "utf8")) as WorkflowPackSuite;
+  if (raw.pack !== "workflow-pack-v1" || raw.domain !== "workflows") {
+    throw new Error(
+      `Workflow pack must declare pack:"workflow-pack-v1" domain:"workflows": ${path}`,
+    );
+  }
+  if (!Array.isArray(raw.cases) || raw.cases.length === 0) {
+    throw new Error(`Workflow pack has no cases: ${path}`);
+  }
+  if (raw.criticalCaseIds) {
+    if (!Array.isArray(raw.criticalCaseIds)) {
+      throw new Error(`Workflow pack criticalCaseIds must be an array: ${path}`);
+    }
+    const known = new Set(raw.cases.map((row) => row.id));
+    const missing = raw.criticalCaseIds.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        `Workflow pack criticalCaseIds unknown: ${missing.join(", ")}`,
+      );
+    }
+  }
+  for (const row of raw.cases) {
+    if (!row.id?.trim()) {
+      throw new Error(`Workflow pack case missing id: ${path}`);
+    }
+    if (row.track !== "ENGINE" && row.track !== "MODEL_APPLY") {
+      throw new Error(
+        `Workflow pack case ${row.id}: track must be ENGINE or MODEL_APPLY`,
+      );
+    }
+    if (!Array.isArray(row.turns) || row.turns.length === 0) {
+      throw new Error(`Workflow pack case ${row.id}: turns required`);
+    }
+    for (let i = 0; i < row.turns.length; i += 1) {
+      const turn = row.turns[i]!;
+      if (row.track === "ENGINE") {
+        if (turn.fixtureMetadata === undefined || turn.fixtureMetadata === null) {
+          throw new Error(
+            `Workflow pack ${row.id} turn ${i}: fixtureMetadata required for ENGINE`,
+          );
+        }
+      } else if (
+        turn.fixtureMetadata !== undefined &&
+        turn.fixtureMetadata !== null
+      ) {
+        throw new Error(
+          `Workflow pack ${row.id} turn ${i}: fixtureMetadata forbidden on MODEL_APPLY`,
+        );
+      }
+    }
+  }
+  return raw;
+}

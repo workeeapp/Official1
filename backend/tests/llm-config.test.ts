@@ -102,7 +102,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("show_dump_from");
     expect(config.systemMessage).toContain("OR WITHIN FIELD");
     expect(config.systemMessage).toContain("SAVE VERB ROUTING");
-    expect(config.systemMessage).toContain("DELETE CONFIRM (critical —");
+    expect(config.systemMessage).toContain(
+      "DELETE WHEN CLEAR (rows / items / filings / contacts)",
+    );
+    expect(config.systemMessage).toContain("emit remove NOW with that id");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN «האם מאשר?» for a unique clear target",
+    );
+    expect(config.systemMessage).toContain("ASK WHEN UNCLEAR:");
+    expect(config.systemMessage).toContain(
+      "DELETE WHEN CLEAR / ASK WHEN UNCLEAR (lists)",
+    );
+    expect(config.systemMessage).toContain("ASK once naming options");
     expect(config.systemMessage).toContain(
       "FORBIDDEN empty responses",
     );
@@ -280,16 +291,16 @@ describe("LLM action schema", () => {
       "personal then co-share then assign",
     );
     expect(config.systemMessage).toContain(
-      "FORBIDDEN answering AFTER ASSIGN / «תאריך + תזכורת»",
+      "FORBIDDEN binding לא to AFTER ASSIGN / date+reminder / older offers",
     );
     expect(config.systemMessage).toContain(
-      "cancel ONLY that delete (ack the title you asked about)",
+      "cancel ONLY that delete ask (ack the options you named)",
     );
     expect(config.systemMessage).toContain(
-      "List/filing/directory/contact deletes use DELETE CONFIRM first",
+      "Unambiguous deletes never wait for כן",
     );
     expect(config.systemMessage).not.toContain(
-      "Id-based deletes (item_id / reminder_id / filing_id) apply immediately — never ask to confirm them",
+      "DELETE CONFIRM (critical —",
     );
     expect(config.systemMessage).toContain("STANDING TASK WITH TIME — CLOCK OFFER");
     expect(config.systemMessage).toContain(
@@ -311,7 +322,7 @@ describe("LLM action schema", () => {
       "FORBIDDEN: answering «ביטלתי את המטלה לנדנד / להזכיר ל…»",
     );
     expect(config.systemMessage).toContain(
-      "FORBIDDEN: lists.remove of your להזכיר / לשלוח נדנוד worker task alone",
+      "FORBIDDEN: lists.remove of your להזכיר / לשלוח נדנוד worker alone",
     );
     expect(config.systemMessage).toContain("תמחקי את הפגישה / המטלה ביום חמישי");
     expect(config.systemMessage).toContain("MUTATE BY ID");

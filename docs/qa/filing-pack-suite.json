@@ -1,0 +1,679 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "filing-pack-v1",
+  "domain": "filing",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 20,
+  "criticalCaseIds": [
+    "F-ADD",
+    "F-ADD-NAMED",
+    "F-UPD",
+    "F-RM",
+    "F-RM-ONE",
+    "F-RM-MISSING",
+    "F-RM-AMB",
+    "F-SHOW",
+    "F-EMPTY-ASK",
+    "F-NOT-LIST",
+    "F-NOT-DIRECTORY",
+    "F-NO-WIPE",
+    "F-NO-CLOCK",
+    "F-CLEAR-ASK",
+    "F-QUERY-INFO",
+    "F-ADD-DESC",
+    "F-ADD-THEN-UPD",
+    "F-ADD-THEN-RM",
+    "F-CHANGE-MIND",
+    "F-CRUD-MT"
+  ],
+  "cases": [
+    {
+      "id": "F-ADD",
+      "track": "MODEL",
+      "contract": "F-ADD",
+      "description": "F-ADD",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי שהקוד הוא 9999",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing",
+              "infoIncludes": "9999"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-NAMED",
+      "track": "MODEL",
+      "contract": "F-ADD-NAMED",
+      "description": "F-ADD-NAMED",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי בשם סיסמה את הערך abc",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-UPD",
+      "track": "MODEL",
+      "contract": "F-UPD",
+      "description": "F-UPD",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעדכני את הקוד ל־5555",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing",
+              "filingId": "eval-filing-code",
+              "infoIncludes": "5555"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM",
+      "track": "MODEL",
+      "contract": "F-RM",
+      "description": "F-RM",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את התיוק קוד",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM-ONE",
+      "track": "MODEL",
+      "contract": "F-RM-ONE",
+      "description": "מחיקת אחד מתוך כמה",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את התיוק קוד",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM-MISSING",
+      "track": "MODEL",
+      "contract": "F-RM-MISSING",
+      "description": "F-RM-MISSING",
+      "tag": "action-confusion",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את התיוק פיצה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-RM-AMB",
+      "track": "MODEL",
+      "contract": "F-RM-AMB",
+      "description": "F-RM-AMB",
+      "tag": "action-confusion",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי תיוק",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-SHOW",
+      "track": "MODEL",
+      "contract": "F-SHOW",
+      "description": "F-SHOW",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה יש בתיוקים?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "show_dump",
+              "value": "filing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-EMPTY-ASK",
+      "track": "MODEL",
+      "contract": "F-EMPTY-ASK",
+      "description": "F-EMPTY-ASK",
+      "tag": "action-confusion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי משהו",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-NOT-LIST",
+      "track": "MODEL",
+      "contract": "F-NOT-LIST",
+      "description": "F-NOT-LIST",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי שהקוד הוא 1",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-NOT-DIRECTORY",
+      "track": "MODEL",
+      "contract": "F-NOT-DIRECTORY",
+      "description": "F-NOT-DIRECTORY",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי שהקוד הוא 1",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            },
+            {
+              "type": "directory_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-NO-WIPE",
+      "track": "MODEL",
+      "contract": "F-NO-WIPE",
+      "description": "F-NO-WIPE",
+      "tag": "safety-rails",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי הכל",
+          "constraints": [
+            {
+              "type": "no_silent_multi_domain_wipe"
+            },
+            {
+              "type": "hold_or_confirm_or_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-NO-CLOCK",
+      "track": "MODEL",
+      "contract": "F-NO-CLOCK",
+      "description": "F-NO-CLOCK",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי סיסמה 22",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-CLEAR-ASK",
+      "track": "MODEL",
+      "contract": "F-CLEAR-ASK",
+      "description": "F-CLEAR-ASK",
+      "tag": "safety-rails",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל התיוקים",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-QUERY-INFO",
+      "track": "MODEL",
+      "contract": "F-QUERY-INFO",
+      "description": "תשובה מ־EMPLOYEE_SAVED_DATA בלי mutate",
+      "tag": "happy",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-code",
+            "item_name": "קוד",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל"
+          },
+          {
+            "filing_id": "eval-filing-wifi",
+            "item_name": "וויפיי",
+            "item_info": "secret",
+            "item_description": "",
+            "owner": "טל"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה הקוד?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-DESC",
+      "track": "MODEL",
+      "contract": "F-ADD-DESC",
+      "description": "F-ADD-DESC",
+      "tag": "happy",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי הערה שהבנק סוגר ב־16:00",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-THEN-UPD",
+      "track": "MODEL_APPLY",
+      "contract": "F-ADD-THEN-UPD",
+      "description": "F-ADD-THEN-UPD",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי שהקוד הוא 1111",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "1111"
+            ]
+          }
+        },
+        {
+          "utterance": "תעדכני ל־2222",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "2222"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "F-ADD-THEN-RM",
+      "track": "MODEL_APPLY",
+      "contract": "F-ADD-THEN-RM",
+      "description": "F-ADD-THEN-RM",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי פין 4321",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "4321"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי את זה",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "4321"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "F-CHANGE-MIND",
+      "track": "MODEL_APPLY",
+      "contract": "F-CHANGE-MIND",
+      "description": "F-CHANGE-MIND",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי סיסמא זמנית xyz",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "xyz"
+            ]
+          }
+        },
+        {
+          "utterance": "בעצם אל תשמרי",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "xyz"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "F-CRUD-MT",
+      "track": "MODEL_APPLY",
+      "contract": "F-CRUD-MT",
+      "description": "F-CRUD-MT",
+      "tag": "continuity",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תתיקי טוקן aaa",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "add_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "aaa"
+            ]
+          }
+        },
+        {
+          "utterance": "תעדכני ל־bbb",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "bbb"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "bbb"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
