@@ -6,15 +6,35 @@ import type {
   PublicEmployee,
 } from "@workee/shared";
 import {
+  GUEST_LUCY_NAME,
   humanEmployees,
   parseAddressGender,
   parseReasoningEffort,
 } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
-import { ConflictError, NotFoundError } from "../utils/errors.js";
+import { normalizeEmployeePhone } from "../utils/phone.js";
+import {
+  ConflictError,
+  isUniqueConstraintError,
+  NotFoundError,
+} from "../utils/errors.js";
+
+const PHONE_IN_USE = "Phone number is already in use";
 
 const LUCY_NAME = "לוסי";
+
+/** Short custom prompt for WhatsApp guest onboarding (no Lucy capability catalog). */
+const GUEST_LUCY_INSTRUCTIONS = [
+  "SYSTEM:",
+  "You are לוסי-אורח — Workee's guest guide. Your only job is to help this WhatsApp guest become a registered member with their own account.",
+  "Speak Hebrew unless they write in English. Be warm and brief.",
+  "You may answer questions about lists/filings already shared with them in EMPLOYEE_SAVED_DATA (scope=shared).",
+  "You cannot add, change, or delete anything for them while they are a guest — say they can only view shared lists until they register.",
+  "To register you need: first name, surname, username (login), and password. Ask for whatever is still missing; keep metadata.register null until all four are known.",
+  "When you have all four, emit metadata.register with name, surname, username, password and confirm in responses that they are registered. Then they will talk with לוסי on their own account.",
+  "Never invent private data. Never claim you are the guest. Do not hand off to other workers.",
+].join("\n");
 
 function publicAddressGender(
   kind: "human" | "digital",
@@ -43,6 +63,8 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     protected: employee.isProtected,
     isOwner: kind === "human" ? employee.isOwner : false,
     addressGender: publicAddressGender(kind, employee.addressGender),
+    shareMirrorEmployeeId:
+      kind === "human" ? (employee.shareMirrorEmployeeId ?? null) : null,
   };
 }
 
@@ -129,8 +151,39 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
   });
 }
 
+/** WhatsApp guest onboarding worker — not protected; hidden from Chat-with. */
+export async function ensureGuestLucy(userId: string): Promise<void> {
+  const existing = await prisma.employee.findFirst({
+    where: {
+      userId,
+      kind: "digital",
+      OR: [{ name: GUEST_LUCY_NAME }, { nickname: GUEST_LUCY_NAME }],
+    },
+  });
+  if (existing) {
+    return;
+  }
+
+  const defaults = getDigitalEmployeeDefaults();
+  await prisma.employee.create({
+    data: {
+      userId,
+      kind: "digital",
+      isProtected: false,
+      name: GUEST_LUCY_NAME,
+      surname: "",
+      nickname: GUEST_LUCY_NAME,
+      model: defaults.model,
+      temperature: defaults.temperature,
+      reasoningEffort: defaults.reasoningEffort,
+      instructions: GUEST_LUCY_INSTRUCTIONS,
+    },
+  });
+}
+
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
+  await ensureGuestLucy(userId);
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
@@ -212,7 +265,7 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
     surname: input.surname ?? "",
     nickname: input.nickname ?? null,
     email: input.email ?? null,
-    phone: input.phone ?? null,
+    phone: normalizeEmployeePhone(input.phone),
     model: null,
     temperature: null,
     reasoningEffort: null,
@@ -222,21 +275,51 @@ function persistEmployeeData(input: EmployeeInput, kind: "human" | "digital") {
   };
 }
 
+async function assertPhoneAvailable(
+  phone: string | null,
+  exceptEmployeeId?: string,
+): Promise<void> {
+  if (!phone) {
+    return;
+  }
+  const existing = await prisma.employee.findFirst({
+    where: {
+      phone,
+      ...(exceptEmployeeId ? { id: { not: exceptEmployeeId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    throw new ConflictError(PHONE_IN_USE);
+  }
+}
+
+function rethrowPhoneConflict(error: unknown): never {
+  if (isUniqueConstraintError(error)) {
+    throw new ConflictError(PHONE_IN_USE);
+  }
+  throw error;
+}
+
 export async function createEmployeeForUser(
   userId: string,
   input: EmployeeInput,
 ): Promise<PublicEmployee> {
   const kind = input.kind === "digital" ? "digital" : "human";
   const data = persistEmployeeData(input, kind);
-  const employee = await prisma.employee.create({
-    data: {
-      userId,
-      isProtected: false,
-      ...data,
-    },
-  });
-
-  return toPublicEmployee(employee);
+  await assertPhoneAvailable(data.phone);
+  try {
+    const employee = await prisma.employee.create({
+      data: {
+        userId,
+        isProtected: false,
+        ...data,
+      },
+    });
+    return toPublicEmployee(employee);
+  } catch (error) {
+    rethrowPhoneConflict(error);
+  }
 }
 
 export async function updateEmployeeForUser(
@@ -247,13 +330,16 @@ export async function updateEmployeeForUser(
   const existing = await findOwnedEmployee(userId, employeeId);
   const kind = existing.kind === "digital" ? "digital" : "human";
   const data = persistEmployeeData(input, kind);
-
-  const employee = await prisma.employee.update({
-    where: { id: employeeId },
-    data,
-  });
-
-  return toPublicEmployee(employee);
+  await assertPhoneAvailable(data.phone, employeeId);
+  try {
+    const employee = await prisma.employee.update({
+      where: { id: employeeId },
+      data,
+    });
+    return toPublicEmployee(employee);
+  } catch (error) {
+    rethrowPhoneConflict(error);
+  }
 }
 
 export async function deleteEmployeeForUser(

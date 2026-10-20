@@ -6,23 +6,21 @@ Ideas to consider later — not committed work. Captured from product discussion
 
 **Current intent**
 - **Human employees** = workspace team members.
-- **Guests** (`אורח` WhatsApp shells) = outsiders Lucy / other digital workers talk to: clients, suppliers, family, friends. They may **view** lists/filings shared with them; they do not get a full personal workspace.
+- **Guests** (`אורח` WhatsApp shells) = outsiders who talk with **לוסי-אורח** (not Lucy). They may **view** lists/filings shared with them; they do not get a full personal workspace until they register.
+- **Registration (shipped):** לוסי-אורח emits `metadata.register` → new User + own Lucy; host guest row becomes a share mirror (`share_mirror_employee_id`). WhatsApp prefers non-guest on phone match.
 
 **Features to consider**
-1. **Promote guest → employee**  
-   One identity: rename off `אורח`, keep the same employee id, phone, chats, and `visibleTo` on shared lists. No duplicate row.
-2. **Create-employee merges matching guest phone**  
+1. **Create-employee merges matching guest phone**  
    If the UI adds a human with a phone that already belongs to a guest, merge/promote instead of creating a second person.
-3. **WhatsApp resolution preference**  
-   When several humans share a phone match, prefer a non-guest employee over an `אורח` shell (safety net if duplicates ever exist).
-4. **Guest directory / labels**  
+2. **Guest directory / labels**  
    Optional display name for guests (e.g. “מיכל”) without making them employees; clearer than nickname-on-אורח only.
-5. **Invite / share link**  
+3. **Invite / share link**  
    Share a list with a phone number → auto-create or attach guest, send WhatsApp notice.
-6. **Guest chat scope knobs**  
+4. **Guest chat scope knobs**  
    Account setting: shared-list Q&A only (today) vs allow limited chitchat vs block chat entirely (cost control).
-7. **Audit “who is this guest”**  
+5. **Audit “who is this guest”**  
    UI to see guest shells, which shared lists they see, and last WhatsApp activity — without listing them in the main Employees / Chat-as pickers.
+6. **Cross-account mutate** of host shared lists from the new member’s workspace (today: view-only via mirror).
 
 ## Related cleanup (done ad hoc when needed)
 

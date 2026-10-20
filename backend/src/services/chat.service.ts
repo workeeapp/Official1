@@ -6,11 +6,14 @@ import {
   humanEmployees,
   isDigitalEmployee,
   isGuestEmployee,
+  isGuestLucy,
   isSubHourlyRecurrence,
   JOB_URGENCY_POLICY,
   parseChatAttachmentRefs,
   parseLlmReply,
   parseReplyMetadata,
+  redactMetadataSecrets,
+  redactRegisterSecrets,
   showDumpNames,
   toReplyButtons,
   type ChatAttachmentRef,
@@ -124,6 +127,7 @@ import {
   getContactBookShare,
   listContactsForEmployee,
 } from "./contact.service.js";
+import { registerGuestMember } from "./guest-register.service.js";
 import {
   appendEngineNotice,
   composeAssistantReply,
@@ -726,6 +730,24 @@ async function getOrCreateConversation(
   }
 }
 
+function redactStoredJson(
+  value: unknown,
+  register: LlmMetadata["register"],
+): unknown {
+  if (!register?.password || value == null) {
+    return value;
+  }
+  try {
+    const json = JSON.stringify(value);
+    if (!json.includes(register.password)) {
+      return value;
+    }
+    return JSON.parse(redactRegisterSecrets(json, register));
+  } catch {
+    return value;
+  }
+}
+
 async function saveTurn(input: {
   conversationId: string;
   speaker: string;
@@ -737,6 +759,10 @@ async function saveTurn(input: {
   userAttachments?: ChatAttachmentRef[];
 }): Promise<ChatTurnMessageIds & { assistantAt: Date }> {
   const parsed = parseLlmReply(input.reply);
+  const register = parseReplyMetadata(input.reply).register;
+  const safeMessage = redactRegisterSecrets(input.message, register);
+  const safeRaw = redactStoredJson(input.raw, register);
+  const safeRequest = redactStoredJson(input.request, register);
   const userAt = new Date();
   const assistantAt = new Date(userAt.getTime() + 1);
   const ids = { user: randomUUID(), assistant: randomUUID() };
@@ -748,7 +774,7 @@ async function saveTurn(input: {
         conversationId: input.conversationId,
         author: "you",
         speaker: input.speaker,
-        text: input.message,
+        text: safeMessage,
         ...(input.userAttachments?.length
           ? { attachments: toJsonValue(input.userAttachments) }
           : {}),
@@ -765,7 +791,7 @@ async function saveTurn(input: {
         actions: Prisma.JsonNull,
         buttons: parsed.buttons ? toJsonValue(parsed.buttons) : Prisma.JsonNull,
         navigateAddress: parsed.navigateAddress ?? null,
-        raw: toJsonValue(packStoredLlmRaw(input.request, input.raw)),
+        raw: toJsonValue(packStoredLlmRaw(safeRequest, safeRaw)),
         createdAt: assistantAt,
       },
     ],
@@ -1470,13 +1496,14 @@ export async function sendChatMessage(input: {
   );
   const guestModeInstructions = guestSpeaker
     ? [
-        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are still לוסי.",
+        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
         "Never say אני אורחת / אני רק אורחת / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
-        "Allowed ONLY: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
-        "Forbidden: weather, chitchat, advice, jokes, shopping adds, tasks, reminders, messages, directory, filings, anything not about those shared lists.",
-        "Off-topic (הים גלי / מה שלומך / ספרי בדיחה / anything outside shared lists) → response exactly or nearly: «אני יכולה לעזור רק עם הרשימות ששותפו איתך.» Empty lists/filing/reminders/messages/directory.",
-        "Add/update/delete/buy/remind/send while guest → response: «אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות.» Empty metadata arrays.",
-        "lists/filing/reminders/directory/messages must always stay []. Do not invent private data.",
+        "Your purpose: help them register as a Workee member (their own account + לוסי). Collect first name, surname, username, password; when all four are known emit metadata.register with those fields. Until then register=null and ask for what is missing.",
+        "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
+        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather as the main topic.",
+        "Off-topic outside shared lists or registration → guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
+        "Add/update/delete/buy/remind/send while guest → response: «אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות. אפשר להירשם כדי לקבל חשבון משלך.» Empty mutate arrays.",
+        "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
       ].join("\n")
     : "";
   const instructions = attachLucyEngine
@@ -1489,7 +1516,7 @@ export async function sendChatMessage(input: {
         guestSpeaker ? "" : OPEN_JOBS_RULES,
         consultEnvelope,
         guestSpeaker
-          ? "GUEST MODE: shared-list Q&A only. Never claim you (Lucy) are the guest. Off-topic → «אני יכולה לעזור רק עם הרשימות ששותפו איתך.»"
+          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
           : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
         "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
         "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המטלות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המטלות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER — after a numbered dump, spoken indices map dump titles → ids in THIS turn's JSON, then any supported ACTION (תמחק / תשני / הוסף תזכורת / תשלחי את N…); FORBIDDEN show_dump on that turn.",
@@ -1549,7 +1576,7 @@ export async function sendChatMessage(input: {
           ? ""
           : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן), emit the COMPLETE action this turn with every field you already had plus the answer — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ your להזכיר with that speaker row's תאריך/שעה לביצוע copied onto the worker item) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. If the open ask was DELETE CONFIRM («האם מאשר?») → cancel ONLY that delete (ack that title); FORBIDDEN binding לא to AFTER ASSIGN / date+reminder / older offers. List/filing/directory deletes: DELETE CONFIRM first; after כן with id the remove applies immediately. Reminder deletes with reminder_id apply immediately (past tense).",
         guestSpeaker
-          ? "If asked what you can do: «אני יכולה להציג רק רשימות ששותפו איתך.» Nothing else."
+          ? "If asked what you can do: «אני לוסי-אורח — אפשר לראות רשימות ששותפו איתך, ואפשר להירשם לחשבון Workee משלך.»"
           : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
         "LIVE FACTS (this turn only): Saved state — list/filing/reminder/contact rows, field values, urgency, dates, sharing, clocks, open jobs — comes ONLY from this turn's fact blocks in the user message (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, RECENT_OUTBOUND, OPEN_JOBS, SESSION_CLOCK, SPEAKER_ADDRESS). Second-person Hebrew gender comes from SPEAKER_ADDRESS (not chat history). Earlier chat turns and your own prior replies are NOT a source for those values. If chat memory conflicts with this turn's JSON, the JSON wins. A field missing from the JSON (e.g. no urgency) means absent/normal — never resurrect it from an older turn. Chat history is only for the speaker's current intent and unfinished drafts (what they just answered), never for «what is saved». Items can also change outside this chat (a reminder fired, someone bought or removed an item, an edit on the site). Examples: (a) you said «אני צריכה להזכיר לך לקנות חלב», then the task is gone from WORKER_SAVED_DATA → «מה את צריכה לעשות» = nothing open; (b) after lists.update sets urgency to normal, a later «הצג מטלות» must NOT wrap that line or append ‼️ even if an earlier turn did.",
         guestSpeaker
@@ -1813,6 +1840,39 @@ export async function sendChatMessage(input: {
         plan.guestMutationBlocked)
         ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
         : "";
+    let registerNotice = "";
+    if (guestSpeaker && metadata.register) {
+      if (!isGuestLucy(digital)) {
+        registerNotice = "";
+      } else {
+        const registerResult = await registerGuestMember({
+          hostUserId: input.userId,
+          guest: employee,
+          digital,
+          register: metadata.register,
+        });
+        if (registerResult.ok) {
+          registerNotice = `נרשמת בהצלחה כ־${registerResult.displayName}. מעכשיו תדברי עם לוסי בחשבון שלך (שם משתמש: ${registerResult.username}).`;
+          recordWhatsAppEvent(
+            "guest_register",
+            `ok user=${registerResult.newUserId.slice(0, 8)} mirror=${registerResult.mirrorEmployeeId.slice(0, 8)}`,
+          );
+        } else if (registerResult.reason === "username_taken") {
+          registerNotice = "שם המשתמש כבר תפוס — בחרי שם אחר.";
+        } else if (registerResult.reason === "invalid_fields") {
+          registerNotice =
+            "לא הצלחתי לרשום — צריך שם פרטי, שם משפחה, שם משתמש וסיסמה תקינים.";
+        } else {
+          registerNotice = "לא הצלחתי להשלים את הרישום כרגע. נסי שוב בעוד רגע.";
+          recordWhatsAppEvent(
+            "guest_register",
+            `fail reason=${registerResult.reason}`,
+          );
+        }
+      }
+      // Never leave plaintext password in in-memory metadata used later.
+      metadata = redactMetadataSecrets(metadata);
+    }
     const incomingReminders = guestSpeaker ? [] : metadata.reminders ?? [];
     const reminderWrites = [
       ...incomingReminders.filter((row) => row.action !== "remove"),
@@ -2573,6 +2633,7 @@ export async function sendChatMessage(input: {
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const notice = [
       guestMutationNotice,
+      registerNotice,
       missingSend,
       whatsappNotice,
       noTimeSkipped ? "" : reminderApplyNotice,

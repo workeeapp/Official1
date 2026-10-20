@@ -716,6 +716,7 @@ type RecordSpeaker = {
   kind: string;
   name: string;
   nickname: string | null;
+  shareMirrorEmployeeId: string | null;
 };
 
 /** Human list/filing scope: account-owner sees all humans; everyone else sees self only. */
@@ -745,9 +746,17 @@ async function resolveRecordVisibility(
       kind: true,
       name: true,
       nickname: true,
+      shareMirrorEmployeeId: true,
     },
   });
-  const guestMode = Boolean(speaker && isGuestEmployee(speaker));
+  const guestMode = Boolean(
+    speaker &&
+      isGuestEmployee({
+        kind: speaker.kind === "digital" ? "digital" : "human",
+        name: speaker.name,
+        nickname: speaker.nickname,
+      }),
+  );
   const seeAll =
     !guestMode &&
     (options?.accountOwner === true ||
@@ -757,7 +766,12 @@ async function resolveRecordVisibility(
       ? { employee: { userId: speaker.userId, kind: "human" } }
       : { employeeId };
   return {
-    speaker,
+    speaker: speaker
+      ? {
+          ...speaker,
+          shareMirrorEmployeeId: speaker.shareMirrorEmployeeId ?? null,
+        }
+      : null,
     guestMode,
     seeAll,
     listWhere: scope,
@@ -1143,10 +1157,16 @@ export async function getEmployeeRecordSnapshot(
      * tied to this human viewer (unless the viewer is an account owner).
      */
     scopeItemsToViewerId?: string;
+    /**
+     * Host share-mirror load: treat as guest visibility (shared lists/filings
+     * only) even if the mirror row was renamed off אורח after registration.
+     */
+    sharedOnly?: boolean;
   },
 ): Promise<EmployeeRecordSnapshot> {
-  const { speaker: owner, guestMode, seeAll, listWhere, filingWhere } =
-    await resolveRecordVisibility(employeeId, options);
+  const visibility = await resolveRecordVisibility(employeeId, options);
+  const guestMode = options?.sharedOnly === true ? true : visibility.guestMode;
+  const { speaker: owner, seeAll, listWhere, filingWhere } = visibility;
 
   const viewerScope = options?.scopeItemsToViewerId
     ? await resolveRecordVisibility(options.scopeItemsToViewerId)
@@ -1494,7 +1514,7 @@ export async function getEmployeeRecordSnapshot(
       ),
   ];
 
-  return {
+  const base: EmployeeRecordSnapshot = {
     lists,
     filing: filingRows,
     // Guests do not get reminder clocks — shared-list Q&A only.
@@ -1512,6 +1532,54 @@ export async function getEmployeeRecordSnapshot(
           })
           .filter((row) => row.status === "active")
           .map((row) => toReminderSnapshotRow(row, names)),
+  };
+
+  // Registered member: also inject host shared lists via the share mirror.
+  const mirrorId =
+    options?.sharedOnly === true
+      ? null
+      : owner?.shareMirrorEmployeeId?.trim() || null;
+  if (!mirrorId || mirrorId === employeeId) {
+    return base;
+  }
+  const mirror = await getEmployeeRecordSnapshot(mirrorId, {
+    sharedOnly: true,
+  });
+  return mergeShareMirrorSnapshot(base, mirror);
+}
+
+function mergeShareMirrorSnapshot(
+  own: EmployeeRecordSnapshot,
+  mirror: EmployeeRecordSnapshot,
+): EmployeeRecordSnapshot {
+  const lists = [...own.lists];
+  const seen = new Set(
+    own.lists.map(
+      (row) =>
+        `${row.owner}\0${row.list_type}\0${row.list_name ?? ""}\0${row.list_id ?? ""}`,
+    ),
+  );
+  for (const row of mirror.lists) {
+    const key = `${row.owner}\0${row.list_type}\0${row.list_name ?? ""}\0${row.list_id ?? ""}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    lists.push(row);
+  }
+  const filingIds = new Set(own.filing.map((row) => row.filing_id));
+  const filing = [...own.filing];
+  for (const row of mirror.filing) {
+    if (filingIds.has(row.filing_id)) {
+      continue;
+    }
+    filingIds.add(row.filing_id);
+    filing.push(row);
+  }
+  return {
+    lists,
+    filing,
+    reminders: own.reminders,
   };
 }
 

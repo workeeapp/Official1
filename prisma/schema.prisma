@@ -29,7 +29,8 @@ model Employee {
   surname      String   @db.VarChar(100)
   nickname     String?  @db.VarChar(100)
   email        String?  @db.VarChar(254)
-  phone        String?  @db.VarChar(32)
+  /** Canonical digits (IL `0…` stored as `972…`). Globally unique when set. */
+  phone        String?  @unique @db.VarChar(32)
   model        String?  @db.VarChar(100)
   temperature  Float?
   reasoningEffort String? @map("reasoning_effort") @db.VarChar(16)
@@ -38,8 +39,15 @@ model Employee {
   isOwner      Boolean  @default(false) @map("is_owner")
   /** How Lucy addresses this human in Hebrew: male | female | null (ask once). */
   addressGender String?  @map("address_gender") @db.VarChar(16)
+  /**
+   * Registered member → host-account employee kept on shared lists (same id that
+   * was the WhatsApp guest). Null when not linked.
+   */
+  shareMirrorEmployeeId String?  @map("share_mirror_employee_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  shareMirrorEmployee      Employee?          @relation("ShareMirror", fields: [shareMirrorEmployeeId], references: [id], onDelete: SetNull)
+  mirroredBy               Employee[]         @relation("ShareMirror")
   chatConversations        ChatConversation[] @relation("ConversationSpeaker")
   digitalChatConversations ChatConversation[] @relation("ConversationPartner")
   lists                    EmployeeList[]
@@ -51,6 +59,7 @@ model Employee {
   attachments              Attachment[]
 
   @@index([userId])
+  @@index([shareMirrorEmployeeId])
   @@map("Employees")
 }
 

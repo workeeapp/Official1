@@ -55,6 +55,11 @@ export interface PublicEmployee {
   isOwner?: boolean;
   /** Humans only: male | female | null/undefined when unknown. */
   addressGender?: AddressGender | null;
+  /**
+   * After guest registration: this human's host-account employee id that remains
+   * on shared lists (visible_to). Null for guests and host-only humans.
+   */
+  shareMirrorEmployeeId?: string | null;
 }
 
 export interface EmployeesResponse {
@@ -182,6 +187,27 @@ export function workspaceHumans<
   T extends Pick<PublicEmployee, "kind" | "name" | "nickname">,
 >(employees: T[]): T[] {
   return humanEmployees(employees).filter((employee) => !isGuestEmployee(employee));
+}
+
+/** Dedicated WhatsApp onboarding digital — converts guests into members. */
+export const GUEST_LUCY_NAME = "לוסי-אורח";
+
+export function isGuestLucy(
+  employee: Pick<PublicEmployee, "kind" | "name" | "nickname">,
+): boolean {
+  if (employee.kind !== "digital") {
+    return false;
+  }
+  const name = (employee.name ?? "").trim();
+  const nickname = employee.nickname?.trim() ?? "";
+  return name === GUEST_LUCY_NAME || nickname === GUEST_LUCY_NAME;
+}
+
+/** Digitals shown in Chat-with (excludes לוסי-אורח). */
+export function workspaceDigitals<
+  T extends Pick<PublicEmployee, "kind" | "name" | "nickname">,
+>(employees: T[]): T[] {
+  return digitalEmployees(employees).filter((employee) => !isGuestLucy(employee));
 }
 
 export function isProtectedEmployee(

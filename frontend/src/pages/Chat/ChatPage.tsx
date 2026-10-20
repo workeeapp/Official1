@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { chatThreadKey, wazeNavigateUrl } from "@workee/shared";
+import { chatThreadKey, isGuestEmployee, wazeNavigateUrl } from "@workee/shared";
 import { Button } from "@/components/Button";
 import { WazeIcon } from "@/components/WazeIcon";
 import { useChat } from "@/hooks/useChat";
@@ -16,7 +16,7 @@ import {
 import { renderChatText } from "./formatChatText";
 
 export function ChatPage() {
-  const { tableEmployees, digitalEmployees, status } = useEmployees();
+  const { chatAsEmployees, digitalEmployees, status } = useEmployees();
   const {
     chatAsId,
     setChatAsId,
@@ -40,10 +40,10 @@ export function ChatPage() {
   const pinToBottomRef = useRef(true);
 
   useEffect(() => {
-    if (!chatAsId && tableEmployees.length > 0) {
-      setChatAsId(tableEmployees[0].id);
+    if (!chatAsId && chatAsEmployees.length > 0) {
+      setChatAsId(chatAsEmployees[0].id);
     }
-  }, [chatAsId, setChatAsId, tableEmployees]);
+  }, [chatAsId, setChatAsId, chatAsEmployees]);
 
   useEffect(() => {
     if (!chatWithId && digitalEmployees.length > 0) {
@@ -54,8 +54,8 @@ export function ChatPage() {
   }, [chatWithId, digitalEmployees]);
 
   const selectedEmployee =
-    tableEmployees.find((employee) => employee.id === chatAsId) ??
-    tableEmployees[0];
+    chatAsEmployees.find((employee) => employee.id === chatAsId) ??
+    chatAsEmployees[0];
   const selectedDigital =
     digitalEmployees.find((employee) => employee.id === chatWithId) ??
     digitalEmployees[0];
@@ -177,20 +177,30 @@ export function ChatPage() {
               name="chatAs"
               data-testid="chat-as"
               value={chatAsId}
-              disabled={status === "loading" || tableEmployees.length === 0 || sending}
+              disabled={status === "loading" || chatAsEmployees.length === 0 || sending}
               onChange={(event) => setChatAsId(event.target.value)}
               className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-text-primary shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
             >
               {status === "loading" ? (
                 <option value="">Loading employees…</option>
-              ) : tableEmployees.length === 0 ? (
+              ) : chatAsEmployees.length === 0 ? (
                 <option value="">No employees</option>
               ) : (
-                tableEmployees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employeeDisplayName(employee)}
-                  </option>
-                ))
+                chatAsEmployees.map((employee) => {
+                  const guest = isGuestEmployee(employee);
+                  return (
+                    <option
+                      key={employee.id}
+                      value={employee.id}
+                      className={guest ? "font-bold" : undefined}
+                      style={guest ? { fontWeight: 700 } : undefined}
+                    >
+                      {guest
+                        ? `אורח — ${employee.phone?.trim() || employeeDisplayName(employee)}`
+                        : employeeDisplayName(employee)}
+                    </option>
+                  );
+                })
               )}
             </select>
           </div>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   digitalEmployees,
+  humanEmployees,
+  isGuestEmployee,
   workspaceHumans,
   type EmployeeInput,
   type PublicEmployee,
@@ -11,6 +13,8 @@ import { ApiError } from "@/types";
 interface EmployeesState {
   employees: PublicEmployee[];
   tableEmployees: PublicEmployee[];
+  /** Chat-as picker: workspace humans + WhatsApp guest shells (for testing). */
+  chatAsEmployees: PublicEmployee[];
   digitalEmployees: PublicEmployee[];
   count: number;
   status: "loading" | "ready" | "error";
@@ -23,11 +27,15 @@ interface EmployeesState {
 
 function toVisibleState(employees: PublicEmployee[]) {
   const table = workspaceHumans(employees);
+  const guests = humanEmployees(employees).filter((employee) =>
+    isGuestEmployee(employee),
+  );
   const digitals = digitalEmployees(employees);
   const visible = [...table, ...digitals];
   return {
     employees: visible,
     tableEmployees: table,
+    chatAsEmployees: [...table, ...guests],
     digitalEmployees: digitals,
     count: visible.length,
   };
@@ -40,6 +48,7 @@ export function useEmployees(): EmployeesState {
   >>({
     employees: [],
     tableEmployees: [],
+    chatAsEmployees: [],
     digitalEmployees: [],
     count: 0,
     status: "loading",

@@ -274,6 +274,14 @@ export type ReportSection =
 /** Mutation kinds for report section "history" (add / update / remove / fire). */
 export type ReportHistoryKind = "add" | "update" | "remove" | "fire";
 
+/** Guest onboarding: create a User login + own Lucy; keep host share mirror. */
+export interface LlmRegisterAction {
+  name: string;
+  surname: string;
+  username: string;
+  password: string;
+}
+
 export interface LlmMetadata {
   lists: LlmListAction[];
   /** List-level alter/delete (rename, columns, participants, delete whole list). */
@@ -285,6 +293,11 @@ export interface LlmMetadata {
   /** Lifecycle updates for jobs listed in OPEN_JOBS this turn. */
   jobs?: LlmJobAction[];
   handoff?: LlmHandoffAction | null;
+  /**
+   * לוסי-אורח only: promote WhatsApp guest → new User + human with share mirror.
+   * null/omit when not registering this turn.
+   */
+  register?: LlmRegisterAction | null;
   /** Categories for legacy report sections. Empty/omit = full set. */
   reportSections?: ReportSection[];
   /**
@@ -374,6 +387,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     directory: [],
     jobs: [],
     handoff: null,
+    register: null,
     reportSections: [],
     reportHistoryKinds: [],
     confirm: null,
@@ -443,6 +457,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     directory,
     jobs: parseJobActions(meta),
     handoff: parseHandoff(meta),
+    register: parseRegister(meta),
     reportSections,
     reportHistoryKinds: parseReportHistoryKinds(meta, reportSections),
     confirm: parseConfirm(meta),
@@ -1061,6 +1076,71 @@ function parseConfirm(meta: Record<string, unknown>): boolean | null {
     return false;
   }
   return null;
+}
+
+function parseRegister(meta: Record<string, unknown>): LlmRegisterAction | null {
+  const raw = meta.register ?? meta.registration ?? meta.signup;
+  if (raw == null) {
+    return null;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const surname =
+    typeof record.surname === "string"
+      ? record.surname.trim()
+      : typeof record.last_name === "string"
+        ? record.last_name.trim()
+        : typeof record.lastName === "string"
+          ? record.lastName.trim()
+          : "";
+  const username =
+    typeof record.username === "string"
+      ? record.username.trim()
+      : typeof record.user_name === "string"
+        ? record.user_name.trim()
+        : "";
+  const password =
+    typeof record.password === "string"
+      ? record.password
+      : typeof record.pass === "string"
+        ? record.pass
+        : "";
+  if (!name || !surname || !username || !password) {
+    return null;
+  }
+  return { name, surname, username, password };
+}
+
+/** Replace plaintext password in stored chat / audit text. */
+export function redactRegisterSecrets(
+  text: string,
+  register: LlmRegisterAction | null | undefined,
+): string {
+  if (!register?.password || !text) {
+    return text;
+  }
+  const password = register.password;
+  if (!password) {
+    return text;
+  }
+  return text.split(password).join("••••••••");
+}
+
+/** Strip password from metadata before persisting LLM raw / audit. */
+export function redactMetadataSecrets(metadata: LlmMetadata): LlmMetadata {
+  if (!metadata.register?.password) {
+    return metadata;
+  }
+  return {
+    ...metadata,
+    register: {
+      ...metadata.register,
+      password: "••••••••",
+    },
+  };
 }
 
 function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {

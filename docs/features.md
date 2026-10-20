@@ -320,6 +320,22 @@ WhatsApp images, videos, audio/voice notes, documents and stickers are stored on
 
 ---
 
+## 17. Guest mode (לוסי-אורח → own workspace)
+
+Unknown WhatsApp numbers become `אורח` shells on the host account and talk with **לוסי-אורח** (not Lucy). They may **view** shared lists/filings; mutations stay blocked.
+
+| Piece | Behavior |
+|-------|----------|
+| ACTION | `metadata.register` `{ name, surname, username, password }` — לוסי-אורח only; null until all four are known |
+| Engine | `createUser` + protected Lucy + human (`isOwner`) on the new account; host guest renamed, phone cleared, kept as share mirror; new human gets `share_mirror_employee_id` |
+| After | Next WhatsApp turn resolves to the new member (non-guest preferred on phone match) and protected Lucy; host shared data still appears in `EMPLOYEE_SAVED_DATA` via the mirror (view-only) |
+| Safety | Password redacted from stored chat messages / LLM raw; לוסי-אורח hidden from Chat-with |
+
+**Code:** `guest-register.service.ts`, `whatsapp.service.ts`, `employee.service.ts` (`ensureGuestLucy`), `employee-records.service.ts` (mirror merge), `LLM.action.json`, `shared/src/llm-message.ts`.  
+**Tests:** `backend/tests/guest-register.test.ts`, `shared/src/types.test.ts`, `shared/src/llm-message.test.ts`.
+
+---
+
 ## Quick reference — ACTION surface
 
 | Metadata | Role |
@@ -331,6 +347,7 @@ WhatsApp images, videos, audio/voice notes, documents and stickers are stored on
 | `messages` | Send now / open jobs (`expects_reply`, `ask_summary`, `urgency`, `book` with optional `end_time` / `window`) |
 | `reminders` | Clocks (`recurrence`, compose, ping) |
 | `jobs` | answer / decline / progress / counter / snooze / clear_clock / close by `job_id` |
+| `register` | Guest onboarding (לוסי-אורח → new User + Lucy + share mirror) |
 | `query` | `todos` / `self` / `reminders` (read hints only) |
 | `send_attachments` | Saved file ids to send after the reply |
 | `attachment_ids` (on items, filings, reminders; `list_attachment_ids`, `list_ops.add_attachments`) | Link uploaded files |

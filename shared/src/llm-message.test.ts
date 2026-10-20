@@ -4,6 +4,8 @@ import {
   normalizeListsField,
   parseLlmReply,
   parseReplyMetadata,
+  redactMetadataSecrets,
+  redactRegisterSecrets,
   wazeNavigateUrl,
 } from "./llm-message.js";
 
@@ -667,6 +669,7 @@ describe("parseLlmReply", () => {
       directory: [],
       jobs: [],
       handoff: null,
+      register: null,
       reportSections: [],
       reportHistoryKinds: [],
       confirm: null,
@@ -1478,5 +1481,65 @@ describe("parseLlmReply", () => {
         }),
       ).lists[0]?.listName,
     ).toBe("");
+  });
+});
+
+describe("metadata.register", () => {
+  it("parses a complete register action", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["נרשמת"],
+        metadata: {
+          register: {
+            name: "מיכל",
+            surname: "כהן",
+            username: "michal",
+            password: "SecretPass1",
+          },
+        },
+      }),
+    );
+    expect(meta.register).toEqual({
+      name: "מיכל",
+      surname: "כהן",
+      username: "michal",
+      password: "SecretPass1",
+    });
+  });
+
+  it("returns null when register fields are incomplete", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["?"],
+        metadata: {
+          register: {
+            name: "מיכל",
+            surname: "",
+            username: "michal",
+            password: "SecretPass1",
+          },
+        },
+      }),
+    );
+    expect(meta.register).toBeNull();
+  });
+
+  it("redacts passwords from text and metadata", () => {
+    const register = {
+      name: "מיכל",
+      surname: "כהן",
+      username: "michal",
+      password: "SecretPass1",
+    };
+    expect(redactRegisterSecrets("הסיסמה שלי SecretPass1 תודה", register)).toBe(
+      "הסיסמה שלי •••••••• תודה",
+    );
+    expect(
+      redactMetadataSecrets({
+        lists: [],
+        filing: [],
+        register,
+      }).register?.password,
+    ).toBe("••••••••");
   });
 });

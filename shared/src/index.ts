@@ -62,6 +62,9 @@ export {
   digitalEmployees,
   isGuestEmployee,
   workspaceHumans,
+  GUEST_LUCY_NAME,
+  isGuestLucy,
+  workspaceDigitals,
   isProtectedEmployee,
   isAccountOwner,
   chatThreadKey,
@@ -94,7 +97,17 @@ export {
   wazeNavigateUrl,
   NAVIGATE_ADDRESS_MAX,
   SHOW_ICON_MAX,
+  redactRegisterSecrets,
+  redactMetadataSecrets,
 } from "./llm-message";
+export type { LlmRegisterAction } from "./llm-message";
+export {
+  looksLikePhone,
+  normalizeEmployeePhone,
+  normalizePhoneDigits,
+  phonesMatch,
+  toWhatsAppAddress,
+} from "./phone";
 export {
   addReminderInterval,
   formatReminderIntervalHe,

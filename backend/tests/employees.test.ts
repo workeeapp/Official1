@@ -118,14 +118,18 @@ describe("employees API", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+    findFirst.mockResolvedValue(null);
     create.mockResolvedValue({
       id: "55555555-5555-4555-8555-555555555555",
       userId,
+      kind: "human",
       name: "Dana",
       surname: "Levi",
       nickname: "Dana",
       email: "dana@example.com",
-      phone: "050-1111111",
+      phone: "972501111111",
+      isProtected: false,
+      isOwner: false,
       createdAt: new Date(),
     });
 
@@ -147,7 +151,40 @@ describe("employees API", () => {
     expect(response.status).toBe(201);
     expect(response.body.employee.nickname).toBe("Dana");
     expect(response.body.employee.email).toBe("dana@example.com");
-    expect(response.body.employee.phone).toBe("050-1111111");
+    expect(response.body.employee.phone).toBe("972501111111");
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        phone: "972501111111",
+      }),
+    });
+  });
+
+  it("rejects a duplicate phone number", async () => {
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    findFirst.mockResolvedValue({ id: "existing-phone-owner" });
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .post("/api/employees")
+      .set("Cookie", cookieHeader(loginResponse))
+      .send({
+        name: "Dana",
+        surname: "Levi",
+        phone: "0549999999",
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.message).toBe("Phone number is already in use");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("creates a digital employee with the submitted prompt and model", async () => {

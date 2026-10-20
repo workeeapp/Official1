@@ -1,6 +1,8 @@
 import {
   digitalEmployees,
+  GUEST_LUCY_NAME,
   humanEmployees,
+  isGuestEmployee,
   parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
@@ -37,8 +39,13 @@ import {
 } from "./whatsapp-outbound-memory.js";
 import { isKnownShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
+import {
+  applyWhatsAppWorkerSticky,
+  clearWhatsAppWorkerSticky,
+  sessionDigitalFromSticky,
+} from "./whatsapp-worker-sticky.js";
 
-export { phonesMatch };
+export { phonesMatch, clearWhatsAppWorkerSticky };
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -257,8 +264,6 @@ function asTrimmed(value: unknown): string {
 }
 
 const recentInboundIds = new Set<string>();
-const whatsappWorkerByPhone = new Map<string, string>();
-
 export async function handleInboundWhatsAppTexts(
   messages: InboundWhatsAppText[],
 ): Promise<void> {
@@ -341,11 +346,19 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
     await markWhatsAppInbound(from);
     const speaker = await resolveWhatsAppSpeaker(from);
     const employees = await listEmployeesForUser(speaker.userId);
+    const speakerEmployee = employees.find((row) => row.id === speaker.employeeId);
     const digitals = digitalEmployees(employees);
-    const digital =
-      sessionDigital(from, digitals) ??
-      digitals.find((employee) => employee.protected) ??
-      digitals[0];
+    const guestLucy = digitals.find(
+      (employee) =>
+        employee.name === GUEST_LUCY_NAME || employee.nickname === GUEST_LUCY_NAME,
+    );
+    const digital = speakerEmployee && isGuestEmployee(speakerEmployee)
+      ? guestLucy ??
+        digitals.find((employee) => employee.protected) ??
+        digitals[0]
+      : sessionDigitalFromSticky(from, digitals) ??
+        digitals.find((employee) => employee.protected) ??
+        digitals[0];
     if (!digital) {
       throw new ServiceUnavailableError();
     }
@@ -477,16 +490,8 @@ export function applyWhatsAppHandoff(
   if (!matched) {
     return undefined;
   }
-  whatsappWorkerByPhone.set(from, matched.id);
+  applyWhatsAppWorkerSticky(from, matched.id);
   return matched;
-}
-
-function sessionDigital(
-  from: string,
-  digitals: PublicEmployee[],
-): PublicEmployee | undefined {
-  const id = whatsappWorkerByPhone.get(from);
-  return id ? digitals.find((employee) => employee.id === id) : undefined;
 }
 
 function matchDigitalName(
@@ -527,14 +532,20 @@ async function resolveWhatsAppSpeaker(from: string): Promise<{
     orderBy: { createdAt: "asc" },
   });
 
+  const matches: Array<{ userId: string; employee: PublicEmployee }> = [];
   for (const user of users) {
     const humans = humanEmployees(await listEmployeesForUser(user.id));
-    const match = humans.find(
-      (employee) => employee.phone && phonesMatch(employee.phone, from),
-    );
-    if (match) {
-      return { userId: user.id, employeeId: match.id };
+    for (const employee of humans) {
+      if (employee.phone && phonesMatch(employee.phone, from)) {
+        matches.push({ userId: user.id, employee });
+      }
     }
+  }
+  // Prefer a registered member over an אורח shell when duplicates exist.
+  const preferred =
+    matches.find((row) => !isGuestEmployee(row.employee)) ?? matches[0];
+  if (preferred) {
+    return { userId: preferred.userId, employeeId: preferred.employee.id };
   }
 
   const fallbackUser = users[0];

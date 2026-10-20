@@ -837,6 +837,37 @@
                   }
                 }
               },
+              "register": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "לוסי-אורח only: when the WhatsApp guest gave first name, surname, username, and password, emit all four to create their User login + own Lucy. null when not registering this turn or fields are still missing (ask in responses; keep register null).",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Guest first name."
+                  },
+                  "surname": {
+                    "type": "string",
+                    "description": "Guest surname."
+                  },
+                  "username": {
+                    "type": "string",
+                    "description": "Login username for their new Workee account."
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "Login password for their new Workee account."
+                  }
+                },
+                "required": [
+                  "name",
+                  "surname",
+                  "username",
+                  "password"
+                ]
+              },
               "reminders": {
                 "type": "array",
                 "items": {
