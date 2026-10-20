@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   defaultMashovYear,
   formatMashovHebrew,
+  isMashovPasswordTooShortError,
   loadMashovCredsFromFilings,
+  MASHOV_PASSWORD_TOO_SHORT_HE,
   matchMashovSchool,
   mashovSchoolMatchScore,
   normalizeGrades,
@@ -51,7 +53,7 @@ describe("loadMashovCredsFromFilings", () => {
     expect(creds).toBeNull();
     expect(missing).toContain("סיסמת משוב");
     expect(missing).toContain("שם בית ספר למשוב");
-    expect(missing).not.toContain("שנת לימודים למשוב");
+    expect(missing).toContain("שנת לימודים למשוב");
   });
 
   it("pends school-name resolution when name+year are filed without semel", () => {
@@ -70,20 +72,14 @@ describe("loadMashovCredsFromFilings", () => {
     });
   });
 
-  it("defaults year when school name is filed without year", () => {
-    const { missing, pendingSchool } = loadMashovCredsFromFilings(
-      [
-        { item_name: "תעודת זהות למשוב", item_info: "1" },
-        { item_name: "סיסמת משוב", item_info: "x" },
-        { item_name: "שם בית ספר למשוב", item_info: "אחד העם" },
-      ],
-      { now: new Date("2026-10-20T12:00:00+03:00") },
-    );
-    expect(missing).toEqual([]);
-    expect(pendingSchool).toMatchObject({
-      name: "אחד העם",
-      year: 2027,
-    });
+  it("asks for year when school name is filed without year", () => {
+    const { missing, pendingSchool } = loadMashovCredsFromFilings([
+      { item_name: "תעודת זהות למשוב", item_info: "1" },
+      { item_name: "סיסמת משוב", item_info: "x" },
+      { item_name: "שם בית ספר למשוב", item_info: "אחד העם" },
+    ]);
+    expect(pendingSchool).toBeUndefined();
+    expect(missing).toContain("שנת לימודים למשוב");
   });
 });
 
@@ -203,6 +199,20 @@ describe("pickMashovChild / format", () => {
     expect(text).toContain("מתמטיקה");
     expect(text).toContain("90");
   });
+
+  it("asks for year in plain Hebrew when only year is missing", () => {
+    expect(
+      formatMashovHebrew({
+        childName: "יואב",
+        aspects: ["grades"],
+        grades: [],
+        homework: [],
+        behavior: [],
+        timetable: [],
+        missingCreds: ["שנת לימודים למשוב"],
+      }),
+    ).toContain("לאיזו שנת לימודים");
+  });
 });
 
 describe("normalizeGrades", () => {
@@ -259,7 +269,7 @@ describe("resolveMashovReply", () => {
     const reply = await resolveMashovReply({
       filings: [
         { item_name: "תעודת זהות למשוב", item_info: "1" },
-        { item_name: "סיסמת משוב", item_info: "bad" },
+        { item_name: "סיסמת משוב", item_info: "badpass" },
         { item_name: "סמל בית ספר למשוב", item_info: "580001" },
         { item_name: "שנת לימודים למשוב", item_info: "2027" },
       ],
@@ -268,6 +278,53 @@ describe("resolveMashovReply", () => {
       fetchImpl,
     });
     expect(reply).toContain("לא התקבלו");
+  });
+
+  it("asks to update filing when password is shorter than 6 chars (no login call)", async () => {
+    const fetchImpl = vi.fn();
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "032228421" },
+        { item_name: "סיסמת משוב של יואב", item_info: "S007" },
+        { item_name: "סמל בית ספר למשוב", item_info: "580001" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+      ],
+      child: "יואב",
+      aspects: ["grades"],
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(reply).toBe(MASHOV_PASSWORD_TOO_SHORT_HE);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("maps Mashov 400 password min-length to the short-password Hebrew", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      headers: { get: () => null },
+      json: async () => ({
+        errors: {
+          password: [
+            "The field Password must be a string or array type with a minimum length of '6'.",
+          ],
+        },
+        title: "One or more validation errors occurred.",
+      }),
+    })) as unknown as typeof fetch;
+
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "032228421" },
+        // Long enough to pass local pre-check; API still rejects.
+        { item_name: "סיסמת משוב", item_info: "abcdef" },
+        { item_name: "סמל בית ספר למשוב", item_info: "580001" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+      ],
+      child: "יואב",
+      aspects: ["grades"],
+      fetchImpl,
+    });
+    expect(reply).toBe(MASHOV_PASSWORD_TOO_SHORT_HE);
   });
 
   it("resolves school name via /schools then logs in", async () => {
@@ -292,7 +349,7 @@ describe("resolveMashovReply", () => {
           year?: number;
         };
         expect(body.semel).toBe(580001);
-        expect(body.year).toBe(2027);
+        expect(body.year).toBe(2026);
         return {
           ok: true,
           headers: {
@@ -344,10 +401,10 @@ describe("resolveMashovReply", () => {
         { item_name: "סיסמת משוב", item_info: "secret" },
         // Spoken spelling with vav; Mashov list uses תקוה without vav.
         { item_name: "שם בית ספר למשוב", item_info: "שש שנתי רמון פתח תקווה" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
       ],
       child: "דניאל",
       aspects: ["grades"],
-      now: new Date("2026-10-20T12:00:00+03:00"),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(reply).toContain("מתמטיקה");
@@ -418,5 +475,22 @@ describe("resolveMashovReply", () => {
     expect(reply).toContain("היסטוריה");
     expect(reply).toContain("88");
     expect(reply).not.toContain("secret");
+  });
+});
+
+describe("isMashovPasswordTooShortError", () => {
+  it("detects Mashov password min-length validation payload", () => {
+    expect(
+      isMashovPasswordTooShortError({
+        errors: {
+          password: [
+            "The field Password must be a string or array type with a minimum length of '6'.",
+          ],
+        },
+      }),
+    ).toBe(true);
+    expect(isMashovPasswordTooShortError({ errors: { username: ["x"] } })).toBe(
+      false,
+    );
   });
 });

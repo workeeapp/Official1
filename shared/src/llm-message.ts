@@ -381,6 +381,11 @@ export interface LlmMetadata {
    */
   mashov?: LlmMashovAction | null;
   /**
+   * Live local business / places ask — engine fetches Google Places and replaces
+   * response. Missing query or place → model asks; leave unset.
+   */
+  places?: LlmPlacesAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -419,6 +424,16 @@ export interface LlmMashovAction {
   /** Child first name; empty = only child / ask. */
   child: string;
   aspects: LlmMashovAspect[];
+}
+
+export type LlmPlacesAspect = "summary" | "phone" | "address" | "hours";
+
+export interface LlmPlacesAction {
+  /** What to find (business name or category). */
+  query: string;
+  /** City / area bias (פתח תקווה, קרית אונו). */
+  place: string;
+  aspects: LlmPlacesAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -529,6 +544,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const weather = parseWeatherAction(meta);
   const market = parseMarketAction(meta);
   const mashov = parseMashovAction(meta);
+  const places = parsePlacesAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -575,6 +591,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(weather ? { weather } : {}),
     ...(market ? { market } : {}),
     ...(mashov ? { mashov } : {}),
+    ...(places ? { places } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1765,6 +1782,76 @@ export function parseMashovAction(
   return {
     child,
     aspects: aspects.length > 0 ? aspects : ["grades"],
+  };
+}
+
+const PLACES_ASPECTS = new Set<LlmPlacesAspect>([
+  "summary",
+  "phone",
+  "address",
+  "hours",
+]);
+
+/** metadata.places — live Google Places fetch; engine replaces response. */
+export function parsePlacesAction(
+  meta: Record<string, unknown>,
+): LlmPlacesAction | null {
+  const raw = meta.places ?? meta.local_search ?? meta.localSearch;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const query = readText(row, [
+    "query",
+    "q",
+    "what",
+    "business",
+    "category",
+    "חיפוש",
+  ]).slice(0, 255);
+  const place = readText(row, [
+    "place",
+    "location",
+    "city",
+    "area",
+    "near",
+    "מקום",
+    "עיר",
+  ]).slice(0, 255);
+  if (!query || !place) {
+    return null;
+  }
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmPlacesAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      let key = String(entry ?? "")
+        .trim()
+        .toLowerCase();
+      if (key === "tel" || key === "telephone" || key === "טלפון") {
+        key = "phone";
+      }
+      if (
+        key === "addr" ||
+        key === "postal" ||
+        key === "מיקוד" ||
+        key === "כתובת"
+      ) {
+        key = "address";
+      }
+      if (key === "open" || key === "opening_hours" || key === "שעות") {
+        key = "hours";
+      }
+      const aspect = key as LlmPlacesAspect;
+      if (PLACES_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+        aspects.push(aspect);
+      }
+    }
+  }
+  return {
+    query,
+    place,
+    aspects: aspects.length > 0 ? aspects : ["summary"],
   };
 }
 

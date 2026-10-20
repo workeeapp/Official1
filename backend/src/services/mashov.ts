@@ -124,7 +124,7 @@ export function defaultMashovYear(now = new Date()): number {
   const ymd = jerusalemYmd(now);
   const year = Number(ymd.slice(0, 4));
   const month = Number(ymd.slice(5, 7));
-  // School year starts around August/September.
+  // School year starts around August/September → Mashov end-year label.
   return month >= 8 ? year + 1 : year;
 }
 
@@ -148,8 +148,9 @@ function isSchoolNameFiling(name: string): boolean {
  * Read Mashov login fields from speaker filings (model-saved conventions).
  * Does not parse the user utterance — only DB filing rows.
  *
- * School identity: numeric `סמל בית ספר למשוב`, OR `שם בית ספר למשוב` +
- * `שנת לימודים למשוב` (resolved later via GET /api/schools).
+ * School identity: numeric `סמל בית ספר למשוב`, OR `שם בית ספר למשוב`
+ * (resolved later via GET /api/schools). Academic year is always required from
+ * filing `שנת לימודים למשוב` — never invent a default year.
  */
 export function loadMashovCredsFromFilings(
   filings: MashovFilingRow[],
@@ -159,6 +160,7 @@ export function loadMashovCredsFromFilings(
   missing: string[];
   pendingSchool?: MashovPendingSchool;
 } {
+  void opts?.now;
   const childWanted = normHe(opts?.child ?? "");
   let username = "";
   let password = "";
@@ -242,20 +244,18 @@ export function loadMashovCredsFromFilings(
   const hasSchoolName = Boolean(schoolName.trim());
 
   if (!hasSemel && !hasSchoolName) {
-    // Year defaults once a school name is filed — ask only for the name.
     missing.push("שם בית ספר למשוב");
+  }
+  // Always ask — do not default to 2027/current end-year.
+  if (!Number.isFinite(yearFromFiling) || yearFromFiling < 2000) {
+    missing.push("שנת לימודים למשוב");
   }
 
   if (missing.length > 0) {
     return { creds: null, missing };
   }
 
-  const year = Number.isFinite(yearFromFiling)
-    ? yearFromFiling
-    : defaultMashovYear(opts?.now);
-  if (!Number.isFinite(year) || year < 2000) {
-    return { creds: null, missing: ["שנת לימודים למשוב"] };
-  }
+  const year = yearFromFiling;
 
   if (hasSemel) {
     const semel = Number(semelRaw);
@@ -274,7 +274,7 @@ export function loadMashovCredsFromFilings(
     };
   }
 
-  // Resolve semel later via /schools (year defaults when not filed).
+  // Resolve semel later via /schools (year already validated from filing).
   return {
     creds: null,
     missing: [],
@@ -526,26 +526,64 @@ type LoginBody = {
   };
 };
 
+/** Mashov parent-portal login rejects passwords shorter than this. */
+export const MASHOV_PASSWORD_MIN_LENGTH = 6;
+
+export const MASHOV_PASSWORD_TOO_SHORT_HE =
+  "הסיסמה למשוב בתיוק קצרה מדי (משוב דורש לפחות 6 תווים). עדכני את «סיסמת משוב» בתיוק וניסה שוב.";
+
 export class MashovLoginError extends Error {
-  readonly kind: "auth" | "session" | "http";
+  readonly kind: "auth" | "session" | "http" | "validation";
   readonly status?: number;
+  readonly code?: "password_too_short";
 
   constructor(
     message: string,
-    kind: "auth" | "session" | "http",
+    kind: "auth" | "session" | "http" | "validation",
     status?: number,
+    code?: "password_too_short",
   ) {
     super(message);
     this.name = "MashovLoginError";
     this.kind = kind;
     this.status = status;
+    this.code = code;
   }
+}
+
+/** True when Mashov login JSON complains about password min length. */
+export function isMashovPasswordTooShortError(body: unknown): boolean {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+  const errors = (body as { errors?: unknown }).errors;
+  if (!errors || typeof errors !== "object") {
+    return false;
+  }
+  const password = (errors as { password?: unknown }).password;
+  const msgs = Array.isArray(password)
+    ? password.map((m) => String(m ?? ""))
+    : [String(password ?? "")];
+  return msgs.some(
+    (m) =>
+      /minimum length/i.test(m) ||
+      /min(?:imum)?\s*length/i.test(m) ||
+      /at least\s*6/i.test(m),
+  );
 }
 
 export async function mashovLogin(
   creds: MashovCreds,
   fetchImpl: typeof fetch = fetch,
 ): Promise<MashovSession> {
+  if (creds.password.length < MASHOV_PASSWORD_MIN_LENGTH) {
+    throw new MashovLoginError(
+      "mashov password too short",
+      "validation",
+      undefined,
+      "password_too_short",
+    );
+  }
   const body = {
     username: creds.username,
     password: creds.password,
@@ -567,11 +605,25 @@ export async function mashovLogin(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    let errBody: unknown = null;
+    try {
+      errBody = await res.json();
+    } catch {
+      errBody = null;
+    }
     if (res.status === 401 || res.status === 403) {
       throw new MashovLoginError(
         `mashov login HTTP ${res.status}`,
         "auth",
         res.status,
+      );
+    }
+    if (isMashovPasswordTooShortError(errBody)) {
+      throw new MashovLoginError(
+        `mashov login HTTP ${res.status} password too short`,
+        "validation",
+        res.status,
+        "password_too_short",
       );
     }
     throw new MashovLoginError(
@@ -781,7 +833,13 @@ export async function fetchMashovAspects(input: {
 
 export function formatMashovHebrew(facts: MashovFacts): string {
   if (facts.missingCreds.length > 0) {
-    return `כדי לבדוק במשוב חסר לי: ${facts.missingCreds.join(", ")}. שמור אותם בתיוק ואנסה שוב.`;
+    if (
+      facts.missingCreds.length === 1 &&
+      facts.missingCreds[0] === "שנת לימודים למשוב"
+    ) {
+      return "לאיזו שנת לימודים לבדוק במשוב? (למשל 2026)";
+    }
+    return `כדי לבדוק במשוב חסר לי: ${facts.missingCreds.join(", ")}. אחרי שתענה אשמור ואבדוק.`;
   }
   if (facts.error) {
     return facts.error;
@@ -905,11 +963,20 @@ export async function resolveMashovReply(input: {
       ...data,
     });
   } catch (error) {
+    if (
+      error instanceof MashovLoginError &&
+      error.code === "password_too_short"
+    ) {
+      return MASHOV_PASSWORD_TOO_SHORT_HE;
+    }
     if (error instanceof MashovLoginError && error.kind === "auth") {
       return "פרטי ההתחברות למשוב לא התקבלו. בדוק תעודת זהות, סיסמה, שם בית הספר ושנת הלימודים בתיוקים.";
     }
     if (error instanceof MashovLoginError && error.kind === "session") {
       return "ההתחברות למשוב לא הושלמה. נסה שוב בעוד רגע.";
+    }
+    if (error instanceof MashovLoginError && error.kind === "validation") {
+      return "פרטי ההתחברות למשוב לא תקינים. בדוק תעודת זהות, סיסמה, שם בית ספר ושנת לימודים בתיוקים.";
     }
     return "לא הצלחתי להתחבר למשוב עכשיו. בדוק תעודת זהות, סיסמה, שם בית ספר ושנת לימודים בתיוקים, ונסה שוב.";
   }

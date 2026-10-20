@@ -140,11 +140,14 @@ export type {
   LlmMarketAspect,
   LlmMashovAction,
   LlmMashovAspect,
+  LlmPlacesAction,
+  LlmPlacesAspect,
 } from "./llm-message";
 export {
   parseWeatherAction,
   parseMarketAction,
   parseMashovAction,
+  parsePlacesAction,
   parseComposeCondition,
 } from "./llm-message";
 export {

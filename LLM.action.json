@@ -1316,7 +1316,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב with optional שנת לימודים למשוב, or סמל בית ספר למשוב) — the password MUST be stored in a filing item_info, never in this object. With school name the server resolves semel via /schools (year defaults if omitted). Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. With school name the server resolves semel via /schools. Year is never defaulted — ask if missing. Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
                 "properties": {
                   "child": {
                     "type": "string",
@@ -1337,6 +1337,42 @@
                     "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות → [behavior]; מערכת שעות → [timetable]. Can combine."
                   }
                 }
+              },
+              "places": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live local business search («תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו»). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. Missing query or place → ask; leave places null. Postal code (מיקוד) is always included when Google has it.",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "What to find: category or business name (חשמלאי, מקדונלדס)."
+                  },
+                  "place": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "City / area from speech (פתח תקווה, קרית אונו). Required."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "summary",
+                        "phone",
+                        "address",
+                        "hours"
+                      ]
+                    },
+                    "description": "Bare find → [summary]; טלפון → [phone]; כתובת/מיקוד → [address]; שעות → [hours]. Can combine."
+                  }
+                },
+                "required": [
+                  "query",
+                  "place"
+                ]
               },
               "tips": {
                 "type": [

@@ -1333,6 +1333,27 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("reads metadata.places for local business search", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חשמלאי",
+              place: "פתח תקווה",
+              aspects: ["phone", "bogus"],
+            },
+          },
+        }),
+      ).places,
+    ).toEqual({
+      query: "חשמלאי",
+      place: "פתח תקווה",
+      aspects: ["phone"],
+    });
+  });
+
   it("reads metadata.mashov without requiring password", () => {
     expect(
       parseReplyMetadata(

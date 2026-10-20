@@ -24,6 +24,8 @@ const envSchema = z.object({
   UPLOADS_DIR: z.string().default(".data/uploads"),
   /** OpenAI model for voice/audio transcription. */
   TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
+  /** Google Places API key for live local business search (optional). */
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
