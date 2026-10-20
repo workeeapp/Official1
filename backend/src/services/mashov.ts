@@ -242,29 +242,25 @@ export function loadMashovCredsFromFilings(
   const hasSchoolName = Boolean(schoolName.trim());
 
   if (!hasSemel && !hasSchoolName) {
+    // Year defaults once a school name is filed — ask only for the name.
     missing.push("שם בית ספר למשוב");
-    missing.push("שנת לימודים למשוב");
-  } else if (!hasSemel && hasSchoolName) {
-    // Name path always needs an explicit year (no silent default).
-    if (!Number.isFinite(yearFromFiling) || yearFromFiling < 2000) {
-      missing.push("שנת לימודים למשוב");
-    }
   }
 
   if (missing.length > 0) {
     return { creds: null, missing };
   }
 
+  const year = Number.isFinite(yearFromFiling)
+    ? yearFromFiling
+    : defaultMashovYear(opts?.now);
+  if (!Number.isFinite(year) || year < 2000) {
+    return { creds: null, missing: ["שנת לימודים למשוב"] };
+  }
+
   if (hasSemel) {
     const semel = Number(semelRaw);
-    const year = Number.isFinite(yearFromFiling)
-      ? yearFromFiling
-      : defaultMashovYear(opts?.now);
     if (!Number.isFinite(semel) || semel <= 0) {
       return { creds: null, missing: ["סמל בית ספר למשוב (מספר תקין)"] };
-    }
-    if (!Number.isFinite(year) || year < 2000) {
-      return { creds: null, missing: ["שנת לימודים למשוב"] };
     }
     return {
       creds: {
@@ -278,13 +274,13 @@ export function loadMashovCredsFromFilings(
     };
   }
 
-  // Resolve semel later via /schools.
+  // Resolve semel later via /schools (year defaults when not filed).
   return {
     creds: null,
     missing: [],
     pendingSchool: {
       name: schoolName.trim(),
-      year: yearFromFiling,
+      year,
       username,
       password,
       ...(passwordChild ? { passwordChild } : {}),
@@ -292,9 +288,16 @@ export function loadMashovCredsFromFilings(
   };
 }
 
+/**
+ * Fold common Hebrew spelling variants so Mashov names match spoken filings
+ * (e.g. פתח תקווה vs Mashov's פתח תקוה).
+ */
 function normalizeSchoolText(s: string): string {
   return s
     .replace(/["״"']/g, "")
+    .replace(/תקווה/g, "תקוה")
+    .replace(/-/g, " ")
+    .replace(/[()]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -523,6 +526,22 @@ type LoginBody = {
   };
 };
 
+export class MashovLoginError extends Error {
+  readonly kind: "auth" | "session" | "http";
+  readonly status?: number;
+
+  constructor(
+    message: string,
+    kind: "auth" | "session" | "http",
+    status?: number,
+  ) {
+    super(message);
+    this.name = "MashovLoginError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
 export async function mashovLogin(
   creds: MashovCreds,
   fetchImpl: typeof fetch = fetch,
@@ -548,7 +567,18 @@ export async function mashovLogin(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(`mashov login HTTP ${res.status}`);
+    if (res.status === 401 || res.status === 403) {
+      throw new MashovLoginError(
+        `mashov login HTTP ${res.status}`,
+        "auth",
+        res.status,
+      );
+    }
+    throw new MashovLoginError(
+      `mashov login HTTP ${res.status}`,
+      "http",
+      res.status,
+    );
   }
   const csrf =
     res.headers.get("x-csrf-token") ||
@@ -556,7 +586,10 @@ export async function mashovLogin(
     "";
   const cookieHeader = cookieHeaderFromResponse(res);
   if (!csrf || !cookieHeader) {
-    throw new Error("mashov login missing csrf/cookies");
+    throw new MashovLoginError(
+      "mashov login missing csrf/cookies",
+      "session",
+    );
   }
   const json = (await res.json()) as LoginBody;
   const children: MashovChild[] = (json.accessToken?.children ?? [])
@@ -871,7 +904,13 @@ export async function resolveMashovReply(input: {
       missingCreds: [],
       ...data,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof MashovLoginError && error.kind === "auth") {
+      return "פרטי ההתחברות למשוב לא התקבלו. בדוק תעודת זהות, סיסמה, שם בית הספר ושנת הלימודים בתיוקים.";
+    }
+    if (error instanceof MashovLoginError && error.kind === "session") {
+      return "ההתחברות למשוב לא הושלמה. נסה שוב בעוד רגע.";
+    }
     return "לא הצלחתי להתחבר למשוב עכשיו. בדוק תעודת זהות, סיסמה, שם בית ספר ושנת לימודים בתיוקים, ונסה שוב.";
   }
 }

@@ -51,7 +51,7 @@ describe("loadMashovCredsFromFilings", () => {
     expect(creds).toBeNull();
     expect(missing).toContain("סיסמת משוב");
     expect(missing).toContain("שם בית ספר למשוב");
-    expect(missing).toContain("שנת לימודים למשוב");
+    expect(missing).not.toContain("שנת לימודים למשוב");
   });
 
   it("pends school-name resolution when name+year are filed without semel", () => {
@@ -70,14 +70,20 @@ describe("loadMashovCredsFromFilings", () => {
     });
   });
 
-  it("requires year when school name is filed without semel", () => {
-    const { missing, pendingSchool } = loadMashovCredsFromFilings([
-      { item_name: "תעודת זהות למשוב", item_info: "1" },
-      { item_name: "סיסמת משוב", item_info: "x" },
-      { item_name: "שם בית ספר למשוב", item_info: "אחד העם" },
-    ]);
-    expect(pendingSchool).toBeUndefined();
-    expect(missing).toContain("שנת לימודים למשוב");
+  it("defaults year when school name is filed without year", () => {
+    const { missing, pendingSchool } = loadMashovCredsFromFilings(
+      [
+        { item_name: "תעודת זהות למשוב", item_info: "1" },
+        { item_name: "סיסמת משוב", item_info: "x" },
+        { item_name: "שם בית ספר למשוב", item_info: "אחד העם" },
+      ],
+      { now: new Date("2026-10-20T12:00:00+03:00") },
+    );
+    expect(missing).toEqual([]);
+    expect(pendingSchool).toMatchObject({
+      name: "אחד העם",
+      year: 2027,
+    });
   });
 });
 
@@ -85,8 +91,13 @@ describe("matchMashovSchool", () => {
   const schools = [
     {
       semel: 100005,
-      name: 'חט"ב אחד העם החדשה - פתח תקווה',
+      name: 'חט"ב אחד העם החדשה - פתח תקוה',
       years: [2024, 2025],
+    },
+    {
+      semel: 580001,
+      name: "שש שנתי רמון - פתח תקוה (חטב+חטע)",
+      years: [2025, 2026, 2027],
     },
     {
       semel: 112185,
@@ -104,6 +115,25 @@ describe("matchMashovSchool", () => {
     expect(mashovSchoolMatchScore(schools[0]!.name, "אחד העם")).toBeGreaterThanOrEqual(
       50,
     );
+  });
+
+  it("folds תקווה to תקוה so Petah Tikva queries match Mashov spelling", () => {
+    expect(
+      mashovSchoolMatchScore(
+        "שש שנתי רמון - פתח תקוה (חטב+חטע)",
+        "שש שנתי רמון פתח תקווה",
+      ),
+    ).toBeGreaterThanOrEqual(50);
+  });
+
+  it("picks Ramon Petah Tikva from a spoken-style query", () => {
+    const matched = matchMashovSchool({
+      schools,
+      query: "שש שנתי רמון פתח תקווה",
+      year: 2027,
+    });
+    expect(matched.reason).toBe("ok");
+    expect(matched.school?.semel).toBe(580001);
   });
 
   it("picks a unique name+year match", () => {
@@ -214,7 +244,30 @@ describe("resolveMashovReply", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(reply).toContain("חסר");
+    expect(reply).toContain("שם בית ספר למשוב");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("explains auth failure clearly on HTTP 401", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      headers: { get: () => null },
+      json: async () => ({}),
+    })) as unknown as typeof fetch;
+
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "1" },
+        { item_name: "סיסמת משוב", item_info: "bad" },
+        { item_name: "סמל בית ספר למשוב", item_info: "580001" },
+        { item_name: "שנת לימודים למשוב", item_info: "2027" },
+      ],
+      child: "יואב",
+      aspects: ["grades"],
+      fetchImpl,
+    });
+    expect(reply).toContain("לא התקבלו");
   });
 
   it("resolves school name via /schools then logs in", async () => {
@@ -226,9 +279,9 @@ describe("resolveMashovReply", () => {
           headers: { get: () => null },
           json: async () => [
             {
-              semel: 4242,
-              name: "אריאל שרון - פתח תקווה",
-              years: [2025, 2026],
+              semel: 580001,
+              name: "שש שנתי רמון - פתח תקוה (חטב+חטע)",
+              years: [2025, 2026, 2027],
             },
           ],
         } as unknown as Response;
@@ -238,8 +291,8 @@ describe("resolveMashovReply", () => {
           semel?: number;
           year?: number;
         };
-        expect(body.semel).toBe(4242);
-        expect(body.year).toBe(2026);
+        expect(body.semel).toBe(580001);
+        expect(body.year).toBe(2027);
         return {
           ok: true,
           headers: {
@@ -289,11 +342,12 @@ describe("resolveMashovReply", () => {
       filings: [
         { item_name: "תעודת זהות למשוב", item_info: "03222842" },
         { item_name: "סיסמת משוב", item_info: "secret" },
-        { item_name: "שם בית ספר למשוב", item_info: "אריאל שרון פתח תקווה" },
-        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+        // Spoken spelling with vav; Mashov list uses תקוה without vav.
+        { item_name: "שם בית ספר למשוב", item_info: "שש שנתי רמון פתח תקווה" },
       ],
       child: "דניאל",
       aspects: ["grades"],
+      now: new Date("2026-10-20T12:00:00+03:00"),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(reply).toContain("מתמטיקה");
