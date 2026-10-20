@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "event-pack-v1",
+  "domain": "events",
+  "evalPath": "thin",
+  "productionParity": false,
+  "minIndependentContracts": 3,
+  "description": "COMPLEX EVENTS host / link / rename — offline MODEL + MODEL_APPLY. Not Batch A. No LIVE.",
+  "criticalCaseIds": [
+    "E-HOST-CREATE",
+    "E-CLARIFY-THEN-LINK",
+    "E-RENAME-SAME-HOST"
+  ],
+  "cases": [
+    {
+      "id": "E-HOST-CREATE",
+      "track": "MODEL",
+      "contract": "E-HOST-CREATE",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "COMPLEX EVENTS turn 1: host tasks row is the event name (ערב פוקר), not לארגן…; no domain lists or links yet",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "צריך לארגן ערב פוקר",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "ערב פוקר"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "shopping"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": ["לארגן ערב פוקר", "לארגן קריוקי"]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": ["ערב פוקר"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "E-CLARIFY-THEN-LINK",
+      "track": "MODEL_APPLY",
+      "contract": "E-CLARIFY-THEN-LINK",
+      "variant": "canonical",
+      "tag": "continuity",
+      "description": "Preserve seeded host; ask for כיבוד contents; then create domain list + link to same host (no duplicate host)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-bday",
+                "שם מטלה": "ערב יום הולדת"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי רשימת כיבוד?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-bday"],
+            "listTypeCounts": { "tasks": 1 },
+            "factsInclude": ["ערב יום הולדת"],
+            "factsExclude": ["כיבוד"]
+          }
+        },
+        {
+          "utterance": "עוגה ושתיה",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "minCount": 1,
+              "itemTextIncludes": "עוגה"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "כיבוד"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-bday"],
+            "listTypeCounts": {
+              "tasks": 1,
+              "custom": 1
+            },
+            "factsInclude": ["כיבוד", "עוגה", "שתיה", "ערב יום הולדת"],
+            "linkedListNamesOnItem": {
+              "itemId": "eval-item-host-bday",
+              "listNames": ["כיבוד"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "E-RENAME-SAME-HOST",
+      "track": "MODEL_APPLY",
+      "contract": "E-RENAME-SAME-HOST",
+      "variant": "canonical",
+      "tag": "continuity",
+      "description": "Rename existing event host via lists.update same item_id — no second tasks host",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-party",
+                "שם מטלה": "ערב פוקר"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את השם לערב משחקים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "ערב משחקים"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-host-party"],
+            "factsInclude": ["ערב משחקים"],
+            "factsExclude": ["ערב פוקר"],
+            "listTypeCounts": { "tasks": 1 }
+          }
+        }
+      ]
+    }
+  ]
+}
