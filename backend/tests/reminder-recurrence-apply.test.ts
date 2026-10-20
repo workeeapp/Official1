@@ -48,6 +48,7 @@ const base: LlmReminderAction = {
   compose: false,
   composeSource: "",
   composeLookbackHours: 0,
+          composePlace: "",
   reminderId: "rem-1",
 };
 
@@ -67,6 +68,7 @@ const existing = {
   composeAtFire: false,
   composeSource: "",
   composeLookbackHours: 0,
+          composePlace: "",
   status: "active",
   workerItemId: null,
 };

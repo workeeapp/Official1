@@ -68,6 +68,8 @@ export interface ReminderSnapshotRow {
   compose_source: string;
   /** Git digest content window in hours (0 = since-last-report for recurring). */
   compose_lookback_hours: number;
+  /** Place for compose_source=weather (empty otherwise). */
+  compose_place?: string;
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -1638,7 +1640,10 @@ export async function applyReminders(input: {
           : reminder.composeSource === "saved_data" ||
               existingSource === "saved_data"
             ? "saved_data"
-            : "";
+            : reminder.composeSource === "weather" ||
+                existingSource === "weather"
+              ? "weather"
+              : "";
       const existingLookback =
         existing && "composeLookbackHours" in existing
           ? Number(
@@ -1657,8 +1662,23 @@ export async function applyReminders(input: {
                 ? 168
                 : 0
           : 0;
+      const existingPlace =
+        existing && "composePlace" in existing
+          ? String((existing as { composePlace?: string }).composePlace ?? "")
+          : "";
+      const nextPlace =
+        nextSource === "weather"
+          ? (reminder.composePlace.trim() ||
+              (canReuseClock ? existingPlace : "") ||
+              "")
+              .trim()
+              .slice(0, 255)
+          : "";
       const composeAtFire =
-        nextCompose || nextSource === "git_log" || nextSource === "saved_data";
+        nextCompose ||
+        nextSource === "git_log" ||
+        nextSource === "saved_data" ||
+        nextSource === "weather";
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -1674,6 +1694,7 @@ export async function applyReminders(input: {
               composeAtFire,
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
+              composePlace: nextPlace,
             },
           })
         : await prisma.reminder.create({
@@ -1693,6 +1714,7 @@ export async function applyReminders(input: {
               composeAtFire,
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
+              composePlace: nextPlace,
             },
           });
       const linkedWorkerItemId =
@@ -1990,6 +2012,7 @@ export function toReminderSnapshotRow(
     composeAtFire?: boolean;
     composeSource?: string;
     composeLookbackHours?: number;
+    composePlace?: string;
     lastComposedText?: string | null;
     status: string;
     sendStatus?: string;
@@ -2041,8 +2064,14 @@ export function toReminderSnapshotRow(
         ? "git_log"
         : row.composeSource === "saved_data"
           ? "saved_data"
-          : "",
+          : row.composeSource === "weather"
+            ? "weather"
+            : "",
     compose_lookback_hours: lookback,
+    compose_place:
+      row.composeSource === "weather"
+        ? String(row.composePlace ?? "").trim()
+        : "",
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",

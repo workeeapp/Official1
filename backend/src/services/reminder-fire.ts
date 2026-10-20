@@ -329,6 +329,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             typeof reminder.composeLookbackHours === "number"
               ? reminder.composeLookbackHours
               : 0,
+          composePlace:
+            typeof reminder.composePlace === "string"
+              ? reminder.composePlace
+              : "",
           now,
         });
         advanceLastReportSha = Boolean(factsBundle.advanceLastReportSha);

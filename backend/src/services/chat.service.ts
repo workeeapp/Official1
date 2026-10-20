@@ -155,6 +155,7 @@ import {
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
 } from "./show-button-dump.js";
+import { resolveWeatherReply } from "./weather.js";
 import {
   clearMutatingMetadata,
   stripShowTurnMutates,
@@ -559,7 +560,7 @@ function workerTargetingInstructions(
     STATUS_ADDRESSEE_RULE,
     `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. On each such numbered line also name the humans the row involves in parentheses: asked_by plus every name in for, de-duplicated, comma-separated, never yourself — keep the viewer in it, e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». These people-parentheses come before the «(תזכורת: …)» parentheses. Skip them when only one person is involved or the item name already shows all of them (פגישה (עמית, ערן)). Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or reminders.remove / reminders.update with its reminder.reminder_id (a new time → reminders.update). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
-    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
+    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) weather now or scheduled; (13) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
     "SEND BY MEANING (all outbound sends): if the speaker asks you to deliver words to a recipient, treat it as send — judge by MEANING, not a fixed verb. Illustrative only: תשלחי / תגידי / תאמרי / תמסרי / תכתבי / תבקשי / תעדכני (when meaning is notify someone) / tell / say / pass on / update them that…. Then Send NOW or Send LATER below. NOT send: assign without a tell («טל צריך לקנות חלב» → lists); reminder/clock edit («תעדכני את התזכורת» → reminders.update); check-with jobs («תבדקי עם…»).",
     "EXACT OUTBOUND QUOTE (critical): every fixed-text send — messages NOW or reminders with compose false/omit — MUST confirm in response with את ההודעה «…» copying messages[].text or reminders[].text CHARACTER-FOR-CHARACTER. FORBIDDEN: bare «שלחתי לעמית» / «שאלתי את עמית» / «אשלח למיכל בעוד שעה» without the quote; FORBIDDEN summarizing. Speak to the asker in second person — do not make the whole response the recipient line alone. compose:true → no invented final quote; confirm when + wording written at send time.",
     "Send NOW (no delay, recipient is someone else) → metadata.messages; response confirms with את ההודעה «…» = exact messages.text. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → metadata.reminders add with in or time, ping = recipient, text = dictated/formulated words; messages = []; response confirms when + את ההודעה «…» = exact reminders.text. Do not also emit messages for a delayed send.",
@@ -599,6 +600,8 @@ function workerTargetingInstructions(
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily) with reminders=[], then emit the full git_log clock with their answer; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר / תשלחי לי בעוד 10 שניות את רשימת הקניות המשותפת עם מיכל) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said שלחי לי, brief=the question; «עם מיכל» is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
+    "WEATHER (live): «מה מזג האוויר מחר בתל אביב» / גובה גלים / משב רוח / ניו יורק → metadata.weather { place, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity] }; lists/reminders=[]. Server replaces response — FORBIDDEN inventing temps/wind/waves. Missing place → ask; weather=null. מחר/יום X → date via SESSION_CLOCK.",
+    "SCHEDULED WEATHER: «כל בוקר ב־7 שלחי לי מזג אוויר בת״א» / «בעוד שעה הגלים בחיפה» → compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for שלחי לי, text=brief, real clock. No time → ASK מתי; reminders=[].",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before reminders add: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל שעה ≠ חביתה כל שעה → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -1894,11 +1897,13 @@ export async function sendChatMessage(input: {
       (row) =>
         row.action === "add" &&
         (row.composeSource === "git_log" ||
-          row.composeSource === "saved_data") &&
+          row.composeSource === "saved_data" ||
+          row.composeSource === "weather") &&
         !row.time.trim() &&
         !(typeof row.inSeconds === "number" && row.inSeconds > 0) &&
         !(row.everyCount && row.everyUnit) &&
-        !(row.weekdays && row.weekdays.length > 0),
+        !(row.weekdays && row.weekdays.length > 0) &&
+        !row.recurrence?.freq,
     );
     const reminderResult = await applyReminders({
       userId: input.userId,
@@ -2658,6 +2663,17 @@ export async function sendChatMessage(input: {
           }
         }
       }
+    }
+    // Live weather ACTION → Open-Meteo fetch; engine replaces response (like show_dump).
+    // Guests: weather as main topic stays forbidden — skip even if model emitted it.
+    const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
+    if (weatherAction?.place.trim()) {
+      const weatherText = await resolveWeatherReply({
+        place: weatherAction.place,
+        date: weatherAction.date,
+        aspects: weatherAction.aspects,
+      });
+      workingReply = setEngineResponse(workingReply, weatherText);
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({

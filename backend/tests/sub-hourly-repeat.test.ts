@@ -24,6 +24,7 @@ const reminder = {
   compose: false,
   composeSource: "",
   composeLookbackHours: 0,
+          composePlace: "",
   reminderId: "",
 } as NonNullable<LlmMetadata["reminders"]>[number];
 

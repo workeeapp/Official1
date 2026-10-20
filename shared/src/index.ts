@@ -132,7 +132,12 @@ export {
   redactMetadataSecrets,
   parseTipKeys,
 } from "./llm-message";
-export type { LlmRegisterAction } from "./llm-message";
+export type {
+  LlmRegisterAction,
+  LlmWeatherAction,
+  LlmWeatherAspect,
+} from "./llm-message";
+export { parseWeatherAction } from "./llm-message";
 export {
   looksLikePhone,
   normalizeEmployeePhone,

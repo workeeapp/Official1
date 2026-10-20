@@ -1159,6 +1159,7 @@ describe("parseLlmReply", () => {
         compose: false,
         composeSource: "",
         composeLookbackHours: 0,
+        composePlace: "",
         reminderId: "",
       },
     ]);
@@ -1241,6 +1242,71 @@ describe("parseLlmReply", () => {
   reminderId: "",
       },
     ]);
+  });
+
+  it("reads compose_source weather and compose_place", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח מזג אוויר",
+                list_type: "tasks",
+                compose: true,
+                compose_source: "weather",
+                compose_place: "תל אביב",
+                text: "מה מזג האוויר היום",
+                in: 60,
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "weather",
+        composePlace: "תל אביב",
+      },
+    ]);
+  });
+
+  it("reads metadata.weather for a live ask", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            weather: {
+              place: "New York",
+              date: "2026-10-21",
+              aspects: ["wind", "waves", "bogus"],
+            },
+          },
+        }),
+      ).weather,
+    ).toEqual({
+      place: "New York",
+      date: "2026-10-21",
+      aspects: ["wind", "waves"],
+    });
+  });
+
+  it("ignores weather without place", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            weather: { place: "", aspects: ["summary"] },
+          },
+        }),
+      ).weather,
+    ).toBeUndefined();
   });
 
   it("reads compose_source saved_data as a live status clock", () => {

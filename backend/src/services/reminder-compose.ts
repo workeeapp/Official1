@@ -107,6 +107,11 @@ function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
       "No schema jargon (list_name, metadata, …).",
     ];
   }
+  if (kind === "weather") {
+    return [
+      "Weather: prefer the fixed FACTS / fixedBody numbers; do not invent temperatures, wind, or wave heights.",
+    ];
+  }
   return [
     "Creative/fixed-brief send: second person when messaging them; for a joke to the speaker, just tell the joke.",
     "Every run must be NEW. Never repeat a previous joke or the same punchline.",

@@ -38,6 +38,7 @@ const milkRemove: LlmReminderAction = {
   compose: false,
   composeSource: "",
   composeLookbackHours: 0,
+          composePlace: "",
   reminderId: "rem-milk",
 };
 

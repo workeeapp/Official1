@@ -242,12 +242,17 @@ export interface LlmReminderAction {
    * "git_log" = summarize repo commits at fire.
    * "saved_data" = answer the brief from live EMPLOYEE_SAVED_DATA at fire.
    */
-  composeSource: "" | "git_log" | "saved_data";
+  composeSource: "" | "git_log" | "saved_data" | "weather";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
    */
   composeLookbackHours: number;
+  /**
+   * Place for compose_source=weather (city name). Empty otherwise.
+   * Required when scheduling a weather clock — engine geocodes at fire.
+   */
+  composePlace: string;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
   /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
@@ -345,10 +350,29 @@ export interface LlmMetadata {
    */
   showDumpUrgency?: "urgent" | "very_urgent" | null;
   /**
+   * Live weather ask — engine fetches Open-Meteo and replaces response.
+   * null/omit when not a weather turn. Missing place → model asks; leave unset.
+   */
+  weather?: LlmWeatherAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
   tips?: string[];
+}
+
+export type LlmWeatherAspect =
+  | "summary"
+  | "temp"
+  | "wind"
+  | "waves"
+  | "humidity";
+
+export interface LlmWeatherAction {
+  place: string;
+  /** YYYY-MM-DD or empty (= now/today). */
+  date: string;
+  aspects: LlmWeatherAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -456,6 +480,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
   const showDumpUrgency = parseShowDumpUrgency(meta);
+  const weather = parseWeatherAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -499,6 +524,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(showDumpFrom ? { showDumpFrom } : {}),
     ...(showDumpTo ? { showDumpTo } : {}),
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
+    ...(weather ? { weather } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1361,7 +1387,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     record.composeAtFire === true ||
     record.dynamic === true ||
     parseComposeSource(record) === "git_log" ||
-    parseComposeSource(record) === "saved_data";
+    parseComposeSource(record) === "saved_data" ||
+    parseComposeSource(record) === "weather";
 
   return {
     action,
@@ -1385,6 +1412,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     compose,
     composeSource: parseComposeSource(record),
     composeLookbackHours: parseComposeLookbackHours(record),
+    composePlace: parseComposePlace(record),
     reminderId,
     ...(occurrenceChange ? { occurrenceChange } : {}),
     ...optionalIds("attachmentIds", record.attachment_ids ?? record.attachmentIds),
@@ -1423,7 +1451,7 @@ function parseComposeLookbackHours(record: Record<string, unknown>): number {
 
 function parseComposeSource(
   record: Record<string, unknown>,
-): "" | "git_log" | "saved_data" {
+): "" | "git_log" | "saved_data" | "weather" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -1451,7 +1479,69 @@ function parseComposeSource(
   ) {
     return "saved_data";
   }
+  if (
+    raw === "weather" ||
+    raw === "meteo" ||
+    raw === "forecast" ||
+    raw === "open_meteo"
+  ) {
+    return "weather";
+  }
   return "";
+}
+
+function parseComposePlace(record: Record<string, unknown>): string {
+  return readText(record, [
+    "compose_place",
+    "composePlace",
+    "weather_place",
+    "weatherPlace",
+  ]).slice(0, 255);
+}
+
+const WEATHER_ASPECTS = new Set<LlmWeatherAspect>([
+  "summary",
+  "temp",
+  "wind",
+  "waves",
+  "humidity",
+]);
+
+/** metadata.weather — live Open-Meteo fetch; engine replaces response. */
+export function parseWeatherAction(
+  meta: Record<string, unknown>,
+): LlmWeatherAction | null {
+  const raw = meta.weather;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const place = readText(row, ["place", "location", "city", "מקום"]).slice(
+    0,
+    255,
+  );
+  if (!place) {
+    return null;
+  }
+  const dateRaw = readText(row, ["date", "day", "on"]);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : "";
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmWeatherAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      const key = String(entry ?? "")
+        .trim()
+        .toLowerCase() as LlmWeatherAspect;
+      if (WEATHER_ASPECTS.has(key) && !aspects.includes(key)) {
+        aspects.push(key);
+      }
+    }
+  }
+  return {
+    place,
+    date,
+    aspects: aspects.length > 0 ? aspects : ["summary"],
+  };
 }
 
 function parseInSeconds(value: Record<string, unknown>): number | null {

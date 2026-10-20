@@ -44,10 +44,34 @@ const clock = vi.hoisted(() => ({
   formatSessionClockContext: vi.fn(() => "SESSION_CLOCK: test"),
 }));
 
+const weather = vi.hoisted(() => ({
+  fetchWeatherFacts: vi.fn(async () => ({
+    place: { name: "תל אביב", latitude: 32.08, longitude: 34.78 },
+    requestedDate: "2026-10-20",
+    aspects: ["summary"],
+    days: [
+      {
+        date: "2026-10-20",
+        condition: "בהיר",
+        tempMinC: 18,
+        tempMaxC: 28,
+        tempNowC: 24,
+        humidityPct: 50,
+        windKmh: 10,
+        windGustKmh: 15,
+        waveHeightM: 0.5,
+      },
+    ],
+  })),
+  formatWeatherHebrew: vi.fn(() => "מזג האוויר בתל אביב היום: בהיר."),
+  parseWeatherAspects: vi.fn(() => ["summary"]),
+}));
+
 vi.mock("../src/services/git-changelog.js", () => git);
 vi.mock("../src/services/employee-records.service.js", () => records);
 vi.mock("../src/services/contact.service.js", () => contacts);
 vi.mock("../src/utils/relative-date.js", () => clock);
+vi.mock("../src/services/weather.js", () => weather);
 
 import { loadComposeFacts } from "../src/services/compose-facts.js";
 
@@ -92,5 +116,31 @@ describe("loadComposeFacts", () => {
     expect(bundle).toMatchObject({ kind: "creative", facts: "" });
     expect(git.readGitChangelog).not.toHaveBeenCalled();
     expect(records.getEmployeeRecordSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("loads weather with fixedBody for compose_place", async () => {
+    const bundle = await loadComposeFacts({
+      composeSource: "weather",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "תל אביב",
+    });
+    expect(bundle.kind).toBe("weather");
+    expect(bundle.fixedBody).toContain("תל אביב");
+    expect(weather.fetchWeatherFacts).toHaveBeenCalledWith(
+      expect.objectContaining({ place: "תל אביב" }),
+    );
+  });
+
+  it("asks for place when weather compose_place is empty", async () => {
+    const bundle = await loadComposeFacts({
+      composeSource: "weather",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "",
+    });
+    expect(bundle.kind).toBe("weather");
+    expect(bundle.fixedBody).toContain("לאיזה מקום");
+    expect(weather.fetchWeatherFacts).not.toHaveBeenCalled();
   });
 });

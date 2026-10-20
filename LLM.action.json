@@ -69,6 +69,7 @@
     "    \"show_dump_from\": null,",
     "    \"show_dump_to\": null,",
     "    \"show_dump_urgency\": null,",
+    "    \"weather\": null,",
     "    \"tips\": null",
     "  }",
     "}",
@@ -1033,11 +1034,17 @@
                       "enum": [
                         "",
                         "git_log",
-                        "saved_data"
+                        "saved_data",
+                        "weather"
                       ]
                     },
                     "compose_lookback_hours": {
                       "type": "number"
+                    },
+                    "compose_place": {
+                      "type": "string",
+                      "maxLength": 255,
+                      "description": "Required when compose_source is weather: city/place to fetch at fire (e.g. תל אביב / New York). Empty otherwise."
                     },
                     "confirmed": {
                       "type": "boolean"
@@ -1212,6 +1219,41 @@
                   "null"
                 ],
                 "description": "Urgency dump filter: urgent = urgent|very_urgent items; very_urgent = only that. Pair with show_dump (tasks/shopping/full). null = no filter. «מה דחוף» → show_dump=tasks (or full) + show_dump_urgency=urgent."
+              },
+              "weather": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live weather ask («מה מזג האוויר מחר בתל אביב» / גובה גלים / משב רוח / ניו יורק). Server fetches Open-Meteo and replaces response. null when not a weather ask. Missing place → ask; leave weather null.",
+                "properties": {
+                  "place": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "City / place name from speech (Hebrew or English). Required to fetch."
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD for the asked day (מחר / יום שלישי → resolve via SESSION_CLOCK). Empty = now/today."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "summary",
+                        "temp",
+                        "wind",
+                        "waves",
+                        "humidity"
+                      ]
+                    },
+                    "description": "What they asked: bare weather → [summary]; גלים → [waves]; משב רוח / רוח → [wind]; טמפרטורה → [temp]; לחות → [humidity]. Can combine."
+                  }
+                },
+                "required": [
+                  "place"
+                ]
               },
               "tips": {
                 "type": [

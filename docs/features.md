@@ -297,10 +297,11 @@ The model emits every field; the server never parses «בין 10 ל־12».
 - **Exact outbound quote:** after any fixed-text send (NOW or scheduled), `response` confirms with **«את ההודעה «…»»** copying `messages[].text` / `reminders[].text` character-for-character — no bare «שלחתי לעמית» / paraphrase. `compose:true` → no invented final quote (wording at fire).
 - **Send-me free text** («תשלחי לי הודעה מה נשמע»): no clock → ask **«מתי תרצה שאשלח?»** only. With a clock → schedule to the speaker; confirm **«אשלח לך … את ההודעה «…»»**. **«עכשיו»** refused (that is the live chat). Third-party («תמסרי למיכל…») still sends NOW without asking when; same exact-quote confirm.
 - List/status dumps («תשלחי לי את הרשימה…») stay on `compose_source: saved_data`.
+- **Weather:** live ask → `metadata.weather` { place, date, aspects }; scheduled → `compose_source: weather` + `compose_place`. Engine fetches Open-Meteo (forecast + wind + waves) and replaces the reply / fire body.
 - **No engine save ack:** successful reminder/scheduled-send saves never append `נשמרה התזכורת…` — only the model’s confirm (and skip/cancel/missed notices when needed).
 
-**Code:** `chat.service.ts` runtime prompts, `LLM.config.json`, `reminder.service.ts` (`formatReminderApplyNotice`).  
-**Tests:** `backend/tests/chat.test.ts`, `backend/tests/reminders.test.ts`.
+**Code:** `chat.service.ts` runtime prompts, `LLM.config.json`, `reminder.service.ts` (`formatReminderApplyNotice`), `weather.ts`, `compose-facts.ts`.  
+**Tests:** `backend/tests/chat.test.ts`, `backend/tests/reminders.test.ts`, `backend/tests/weather.test.ts`, `backend/tests/compose-facts.test.ts`.
 
 ---
 

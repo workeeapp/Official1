@@ -302,6 +302,7 @@ describe("employee targets", () => {
           compose: true,
           composeSource: "",
           composeLookbackHours: 0,
+          composePlace: "",
           reminderId: "",
         },
       ],
@@ -369,6 +370,7 @@ describe("employee targets", () => {
             compose: true,
             composeSource: "",
             composeLookbackHours: 0,
+          composePlace: "",
           reminderId: "",
           },
         ],
@@ -400,6 +402,7 @@ describe("employee targets", () => {
           compose: false,
           composeSource: "",
           composeLookbackHours: 0,
+          composePlace: "",
           reminderId: "",
         },
       ],
@@ -561,6 +564,7 @@ describe("employee targets", () => {
             compose: false,
             composeSource: "",
             composeLookbackHours: 0,
+          composePlace: "",
             reminderId: "",
           },
         ],
@@ -589,6 +593,7 @@ describe("employee targets", () => {
       compose: false,
       composeSource: "",
       composeLookbackHours: 0,
+          composePlace: "",
       reminderId: "r1",
     };
     expect(
@@ -647,6 +652,7 @@ describe("employee targets", () => {
             compose: false,
             composeSource: "",
             composeLookbackHours: 0,
+          composePlace: "",
           reminderId: "",
           },
         ],
@@ -698,6 +704,7 @@ describe("employee targets", () => {
             compose: false,
             composeSource: "",
             composeLookbackHours: 0,
+          composePlace: "",
           reminderId: "",
           },
         ],
@@ -742,6 +749,7 @@ describe("employee targets", () => {
       compose: false,
       composeSource: "",
       composeLookbackHours: 0,
+          composePlace: "",
       reminderId: "",
     });
     const plan = planTargetedActions({
@@ -799,6 +807,7 @@ describe("employee targets", () => {
       compose: false,
       composeSource: "",
       composeLookbackHours: 0,
+          composePlace: "",
       reminderId: "",
     };
     expect(
