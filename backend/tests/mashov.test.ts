@@ -3,6 +3,8 @@ import {
   defaultMashovYear,
   formatMashovHebrew,
   loadMashovCredsFromFilings,
+  matchMashovSchool,
+  mashovSchoolMatchScore,
   normalizeGrades,
   parseMashovAspects,
   pickMashovChild,
@@ -48,7 +50,90 @@ describe("loadMashovCredsFromFilings", () => {
     ]);
     expect(creds).toBeNull();
     expect(missing).toContain("סיסמת משוב");
-    expect(missing).toContain("סמל בית ספר למשוב");
+    expect(missing).toContain("שם בית ספר למשוב");
+    expect(missing).toContain("שנת לימודים למשוב");
+  });
+
+  it("pends school-name resolution when name+year are filed without semel", () => {
+    const { creds, missing, pendingSchool } = loadMashovCredsFromFilings([
+      { item_name: "תעודת זהות למשוב", item_info: "03222842" },
+      { item_name: "סיסמת משוב", item_info: "secret" },
+      { item_name: "שם בית ספר למשוב", item_info: "אריאל שרון פתח תקווה" },
+      { item_name: "שנת לימודים למשוב", item_info: "2026" },
+    ]);
+    expect(creds).toBeNull();
+    expect(missing).toEqual([]);
+    expect(pendingSchool).toMatchObject({
+      name: "אריאל שרון פתח תקווה",
+      year: 2026,
+      username: "03222842",
+    });
+  });
+
+  it("requires year when school name is filed without semel", () => {
+    const { missing, pendingSchool } = loadMashovCredsFromFilings([
+      { item_name: "תעודת זהות למשוב", item_info: "1" },
+      { item_name: "סיסמת משוב", item_info: "x" },
+      { item_name: "שם בית ספר למשוב", item_info: "אחד העם" },
+    ]);
+    expect(pendingSchool).toBeUndefined();
+    expect(missing).toContain("שנת לימודים למשוב");
+  });
+});
+
+describe("matchMashovSchool", () => {
+  const schools = [
+    {
+      semel: 100005,
+      name: 'חט"ב אחד העם החדשה - פתח תקווה',
+      years: [2024, 2025],
+    },
+    {
+      semel: 112185,
+      name: "אריאל - ירושלים (יסודי)",
+      years: [2025, 2026],
+    },
+    {
+      semel: 114058,
+      name: "אריאל ממד - אפרתה (יסודי)",
+      years: [2025, 2026],
+    },
+  ];
+
+  it("scores exact-ish substring matches", () => {
+    expect(mashovSchoolMatchScore(schools[0]!.name, "אחד העם")).toBeGreaterThanOrEqual(
+      50,
+    );
+  });
+
+  it("picks a unique name+year match", () => {
+    const matched = matchMashovSchool({
+      schools,
+      query: "אחד העם פתח תקווה",
+      year: 2025,
+    });
+    expect(matched.reason).toBe("ok");
+    expect(matched.school?.semel).toBe(100005);
+  });
+
+  it("reports year miss when name hits but year is absent", () => {
+    const matched = matchMashovSchool({
+      schools,
+      query: "אחד העם",
+      year: 2026,
+    });
+    expect(matched.reason).toBe("year");
+    expect(matched.school).toBeNull();
+  });
+
+  it("asks when several schools tie", () => {
+    const matched = matchMashovSchool({
+      schools,
+      query: "אריאל",
+      year: 2026,
+    });
+    expect(matched.reason).toBe("ambiguous");
+    expect(matched.candidates.length).toBeGreaterThan(1);
   });
 });
 
@@ -130,6 +215,90 @@ describe("resolveMashovReply", () => {
     });
     expect(reply).toContain("חסר");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("resolves school name via /schools then logs in", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith("/schools")) {
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => [
+            {
+              semel: 4242,
+              name: "אריאל שרון - פתח תקווה",
+              years: [2025, 2026],
+            },
+          ],
+        } as unknown as Response;
+      }
+      if (href.endsWith("/login") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as {
+          semel?: number;
+          year?: number;
+        };
+        expect(body.semel).toBe(4242);
+        expect(body.year).toBe(2026);
+        return {
+          ok: true,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === "x-csrf-token" ? "csrf" : null,
+            getSetCookie: () => [
+              "MashovAuthToken=abc; Path=/",
+              "Csrf-Token=csrf; Path=/",
+            ],
+          },
+          json: async () => ({
+            accessToken: {
+              displayName: "הורה",
+              children: [
+                {
+                  childGuid: "child-1",
+                  privateName: "דניאל",
+                  familyName: "כהן",
+                },
+              ],
+            },
+          }),
+        } as unknown as Response;
+      }
+      if (href.includes("/grades")) {
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => [
+            {
+              subjectName: "מתמטיקה",
+              grade: "95",
+              eventDate: "2026-10-10",
+              gradingEvent: "מבחן",
+            },
+          ],
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        headers: { get: () => null },
+        json: async () => [],
+      } as unknown as Response;
+    });
+
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "03222842" },
+        { item_name: "סיסמת משוב", item_info: "secret" },
+        { item_name: "שם בית ספר למשוב", item_info: "אריאל שרון פתח תקווה" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+      ],
+      child: "דניאל",
+      aspects: ["grades"],
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(reply).toContain("מתמטיקה");
+    expect(reply).toContain("95");
+    expect(fetchImpl).toHaveBeenCalled();
   });
 
   it("logs in and formats grades", async () => {

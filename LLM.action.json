@@ -1316,7 +1316,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / סמל בית ספר למשוב) — the password MUST be stored in a filing item_info, never in this object. Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + שנת לימודים למשוב, or סמל בית ספר למשוב) — the password MUST be stored in a filing item_info, never in this object. With school name + year the server resolves semel via /schools. Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
                 "properties": {
                   "child": {
                     "type": "string",

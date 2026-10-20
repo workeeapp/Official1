@@ -22,6 +22,22 @@ export type MashovCreds = {
   passwordChild?: string;
 };
 
+/** Row from public GET /api/schools (no auth). */
+export type MashovSchool = {
+  semel: number;
+  name: string;
+  years: number[];
+};
+
+/** When semel is not filed yet — resolve via school name + year. */
+export type MashovPendingSchool = {
+  name: string;
+  year: number;
+  username: string;
+  password: string;
+  passwordChild?: string;
+};
+
 export type MashovChild = {
   guid: string;
   privateName: string;
@@ -112,20 +128,44 @@ export function defaultMashovYear(now = new Date()): number {
   return month >= 8 ? year + 1 : year;
 }
 
+function isSchoolNameFiling(name: string): boolean {
+  if (!name.includes("משוב")) {
+    return false;
+  }
+  if (name.includes("סמל")) {
+    return false;
+  }
+  return (
+    name.includes("שם בית ספר") ||
+    name.includes("שם מוסד") ||
+    name === "בית ספר למשוב" ||
+    (name.includes("שם") &&
+      (name.includes("בית ספר") || name.includes("מוסד")))
+  );
+}
+
 /**
  * Read Mashov login fields from speaker filings (model-saved conventions).
  * Does not parse the user utterance — only DB filing rows.
+ *
+ * School identity: numeric `סמל בית ספר למשוב`, OR `שם בית ספר למשוב` +
+ * `שנת לימודים למשוב` (resolved later via GET /api/schools).
  */
 export function loadMashovCredsFromFilings(
   filings: MashovFilingRow[],
   opts?: { child?: string; now?: Date },
-): { creds: MashovCreds | null; missing: string[] } {
+): {
+  creds: MashovCreds | null;
+  missing: string[];
+  pendingSchool?: MashovPendingSchool;
+} {
   const childWanted = normHe(opts?.child ?? "");
   let username = "";
   let password = "";
   let passwordChild = "";
   let semelRaw = "";
   let yearRaw = "";
+  let schoolName = "";
 
   for (const row of filings) {
     const name = filingName(row);
@@ -147,6 +187,10 @@ export function loadMashovCredsFromFilings(
       name === "סמל בית ספר"
     ) {
       semelRaw = info.replace(/\D/g, "") || info;
+      continue;
+    }
+    if (isSchoolNameFiling(name)) {
+      schoolName = info;
       continue;
     }
     if (name.includes("שנת לימודים") && name.includes("משוב")) {
@@ -192,33 +236,251 @@ export function loadMashovCredsFromFilings(
   if (!password) {
     missing.push("סיסמת משוב");
   }
-  if (!semelRaw) {
-    missing.push("סמל בית ספר למשוב");
+
+  const yearFromFiling = yearRaw ? Number(yearRaw) : NaN;
+  const hasSemel = Boolean(semelRaw);
+  const hasSchoolName = Boolean(schoolName.trim());
+
+  if (!hasSemel && !hasSchoolName) {
+    missing.push("שם בית ספר למשוב");
+    missing.push("שנת לימודים למשוב");
+  } else if (!hasSemel && hasSchoolName) {
+    // Name path always needs an explicit year (no silent default).
+    if (!Number.isFinite(yearFromFiling) || yearFromFiling < 2000) {
+      missing.push("שנת לימודים למשוב");
+    }
   }
+
   if (missing.length > 0) {
     return { creds: null, missing };
   }
 
-  const semel = Number(semelRaw);
-  const year = yearRaw
-    ? Number(yearRaw)
-    : defaultMashovYear(opts?.now);
-  if (!Number.isFinite(semel) || semel <= 0) {
-    return { creds: null, missing: ["סמל בית ספר למשוב (מספר תקין)"] };
-  }
-  if (!Number.isFinite(year) || year < 2000) {
-    return { creds: null, missing: ["שנת לימודים למשוב"] };
+  if (hasSemel) {
+    const semel = Number(semelRaw);
+    const year = Number.isFinite(yearFromFiling)
+      ? yearFromFiling
+      : defaultMashovYear(opts?.now);
+    if (!Number.isFinite(semel) || semel <= 0) {
+      return { creds: null, missing: ["סמל בית ספר למשוב (מספר תקין)"] };
+    }
+    if (!Number.isFinite(year) || year < 2000) {
+      return { creds: null, missing: ["שנת לימודים למשוב"] };
+    }
+    return {
+      creds: {
+        username,
+        password,
+        semel,
+        year,
+        ...(passwordChild ? { passwordChild } : {}),
+      },
+      missing: [],
+    };
   }
 
+  // Resolve semel later via /schools.
   return {
-    creds: {
+    creds: null,
+    missing: [],
+    pendingSchool: {
+      name: schoolName.trim(),
+      year: yearFromFiling,
       username,
       password,
-      semel,
-      year,
       ...(passwordChild ? { passwordChild } : {}),
     },
-    missing: [],
+  };
+}
+
+function normalizeSchoolText(s: string): string {
+  return s
+    .replace(/["״"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Score how well a Mashov school name matches the speaker's query (0 = none). */
+export function mashovSchoolMatchScore(
+  schoolName: string,
+  query: string,
+): number {
+  const n = normalizeSchoolText(schoolName);
+  const q = normalizeSchoolText(query);
+  if (!q || !n) {
+    return 0;
+  }
+  if (n === q) {
+    return 100;
+  }
+  if (n.includes(q)) {
+    return 80;
+  }
+  if (q.includes(n) && n.length >= 4) {
+    return 70;
+  }
+  const tokens = q.split(/\s+/).filter((t) => t.length >= 2);
+  if (tokens.length === 0) {
+    return 0;
+  }
+  const hit = tokens.filter((t) => n.includes(t)).length;
+  if (hit === tokens.length) {
+    return 50 + Math.min(hit, 20);
+  }
+  if (hit >= Math.ceil(tokens.length * 0.6)) {
+    return 30 + hit;
+  }
+  return 0;
+}
+
+/**
+ * Pick a school from the public list by Hebrew name + academic year.
+ */
+export function matchMashovSchool(input: {
+  schools: MashovSchool[];
+  query: string;
+  year: number;
+}): {
+  school: MashovSchool | null;
+  candidates: MashovSchool[];
+  reason: "ok" | "none" | "ambiguous" | "year";
+  nameHits: MashovSchool[];
+} {
+  const scored = input.schools
+    .map((school) => ({
+      school,
+      score: mashovSchoolMatchScore(school.name, input.query),
+    }))
+    .filter((row) => row.score >= 50)
+    .sort((a, b) => b.score - a.score || a.school.name.localeCompare(b.school.name, "he"));
+
+  const nameHits = scored.map((row) => row.school);
+  if (nameHits.length === 0) {
+    return { school: null, candidates: [], reason: "none", nameHits: [] };
+  }
+
+  const withYear = scored.filter((row) =>
+    row.school.years.includes(input.year),
+  );
+  if (withYear.length === 0) {
+    return {
+      school: null,
+      candidates: nameHits.slice(0, 5),
+      reason: "year",
+      nameHits,
+    };
+  }
+
+  const top = withYear[0]!.score;
+  const tied = withYear.filter((row) => row.score === top);
+  if (tied.length === 1) {
+    return {
+      school: tied[0]!.school,
+      candidates: [],
+      reason: "ok",
+      nameHits,
+    };
+  }
+  return {
+    school: null,
+    candidates: tied.map((row) => row.school).slice(0, 5),
+    reason: "ambiguous",
+    nameHits,
+  };
+}
+
+export async function fetchMashovSchools(
+  fetchImpl: typeof fetch = fetch,
+): Promise<MashovSchool[]> {
+  const res = await fetchImpl(`${BASE}/schools`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "User-Agent":
+        "Mozilla/5.0 (compatible; Workee/1.0; +https://web.mashov.info)",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`mashov schools HTTP ${res.status}`);
+  }
+  const json = (await res.json()) as unknown;
+  if (!Array.isArray(json)) {
+    return [];
+  }
+  const out: MashovSchool[] = [];
+  for (const row of json) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const rec = row as Record<string, unknown>;
+    const semel = Number(rec.semel);
+    const name = String(rec.name ?? "").trim();
+    const years = Array.isArray(rec.years)
+      ? rec.years.map((y) => Number(y)).filter((y) => Number.isFinite(y) && y > 0)
+      : [];
+    if (Number.isFinite(semel) && semel > 0 && name) {
+      out.push({ semel, name, years });
+    }
+  }
+  return out;
+}
+
+/** Resolve pending school-name filings into login creds via /schools. */
+export async function resolvePendingMashovSchool(
+  pending: MashovPendingSchool,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ creds: MashovCreds | null; notice: string | null }> {
+  let schools: MashovSchool[];
+  try {
+    schools = await fetchMashovSchools(fetchImpl);
+  } catch {
+    return {
+      creds: null,
+      notice:
+        "לא הצלחתי לשלוף את רשימת בתי הספר ממשוב עכשיו. נסה שוב בעוד רגע, או שמור סמל בית ספר למשוב.",
+    };
+  }
+  const matched = matchMashovSchool({
+    schools,
+    query: pending.name,
+    year: pending.year,
+  });
+  if (matched.reason === "ok" && matched.school) {
+    return {
+      creds: {
+        username: pending.username,
+        password: pending.password,
+        semel: matched.school.semel,
+        year: pending.year,
+        ...(pending.passwordChild
+          ? { passwordChild: pending.passwordChild }
+          : {}),
+      },
+      notice: null,
+    };
+  }
+  if (matched.reason === "year") {
+    const hints = matched.candidates
+      .map((s) => {
+        const ys = s.years.filter((y) => y >= 2020).slice(-4).join(", ");
+        return `«${s.name}» (${ys || "אין שנים זמינות"})`;
+      })
+      .join("; ");
+    return {
+      creds: null,
+      notice: `מצאתי בית ספר לפי השם, אבל שנת ${pending.year} לא זמינה שם. ${hints ? `אפשרויות: ${hints}.` : ""} עדכן שנת לימודים למשוב.`,
+    };
+  }
+  if (matched.reason === "ambiguous") {
+    const names = matched.candidates.map((s) => `«${s.name}»`).join(" או ");
+    return {
+      creds: null,
+      notice: `מצאתי כמה בתי ספר דומים — לאיזה התכוונת: ${names}? שמור את השם המדויק בתיוק שם בית ספר למשוב.`,
+    };
+  }
+  return {
+    creds: null,
+    notice: `לא מצאתי בית ספר בשם «${pending.name}» לשנת ${pending.year}. בדוק את השם או שמור סמל בית ספר למשוב.`,
   };
 }
 
@@ -554,10 +816,24 @@ export async function resolveMashovReply(input: {
   fetchImpl?: typeof fetch;
 }): Promise<string> {
   const aspects = parseMashovAspects(input.aspects);
-  const { creds, missing } = loadMashovCredsFromFilings(input.filings, {
+  const loaded = loadMashovCredsFromFilings(input.filings, {
     child: input.child ?? undefined,
     now: input.now,
   });
+  const fetchImpl = input.fetchImpl ?? fetch;
+
+  let creds = loaded.creds;
+  if (!creds && loaded.pendingSchool) {
+    const resolved = await resolvePendingMashovSchool(
+      loaded.pendingSchool,
+      fetchImpl,
+    );
+    if (resolved.notice) {
+      return resolved.notice;
+    }
+    creds = resolved.creds;
+  }
+
   if (!creds) {
     return formatMashovHebrew({
       childName: input.child?.trim() ?? "",
@@ -566,10 +842,10 @@ export async function resolveMashovReply(input: {
       homework: [],
       behavior: [],
       timetable: [],
-      missingCreds: missing,
+      missingCreds: loaded.missing,
     });
   }
-  const fetchImpl = input.fetchImpl ?? fetch;
+
   try {
     const session = await mashovLogin(creds, fetchImpl);
     const picked = pickMashovChild(session.children, input.child);
@@ -596,6 +872,6 @@ export async function resolveMashovReply(input: {
       ...data,
     });
   } catch {
-    return "לא הצלחתי להתחבר למשוב עכשיו. בדוק תעודת זהות, סיסמה וסמל בית ספר בתיוקים, ונסה שוב.";
+    return "לא הצלחתי להתחבר למשוב עכשיו. בדוק תעודת זהות, סיסמה, שם בית ספר ושנת לימודים בתיוקים, ונסה שוב.";
   }
 }
