@@ -6,8 +6,6 @@ import {
   parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
-  REACTION_SETTLE_MS,
-  TYPING_PAUSE_MIN_MS,
   typingPauseMs,
 } from "@workee/shared";
 import type { AttachmentKind, PublicEmployee } from "@workee/shared";
@@ -426,8 +424,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       "llm_ok",
       `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
     );
-    // Order: reaction (if any) → settle on device → typing → spoken replies.
-    // Never start typing until after reaction settle — Graph ack ≠ phone delivery.
+    // Fast path after LLM: acknowledge already sent → reaction (if any) → typing → reply.
     if (parsed.showIcon) {
       const reactionResult = await sendWhatsAppReaction(
         from,
@@ -435,12 +432,8 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         parsed.showIcon,
       );
       recordWhatsAppEvent("reaction_send", `result=${reactionResult}`);
-      if (reactionResult === "sent") {
-        await sleep(REACTION_SETTLE_MS);
-      }
-      stopTyping = await beginWhatsAppTyping(last.messageId);
-      await sleep(TYPING_PAUSE_MIN_MS);
-    } else if (replies.length > 0) {
+    }
+    if (parsed.showIcon || replies.length > 0) {
       stopTyping = await beginWhatsAppTyping(last.messageId);
     }
     let delivered = true;

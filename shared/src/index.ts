@@ -197,12 +197,7 @@ export {
 } from "./attachments";
 export type { AttachmentKind, ChatAttachmentRef } from "./attachments";
 export { JOB_URGENCIES, JOB_URGENCY_POLICY, parseJobUrgency } from "./job-urgency";
-export {
-  REACTION_SETTLE_MS,
-  TYPING_PAUSE_MAX_MS,
-  TYPING_PAUSE_MIN_MS,
-  typingPauseMs,
-} from "./typing-pause";
+export { TYPING_PAUSE_MAX_MS, TYPING_PAUSE_MIN_MS, typingPauseMs } from "./typing-pause";
 export type { JobUrgency, JobUrgencyPolicy } from "./job-urgency";
 export {
   messageHasSchedule,

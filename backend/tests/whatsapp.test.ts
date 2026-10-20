@@ -451,9 +451,9 @@ describe("WhatsApp webhook", () => {
     fetchSpy.mockRestore();
   });
 
-  it("documents outbound order: mark-read → reaction → settle → typing → reply", () => {
-    // runWhatsAppTurn: mark-read (no typing) → LLM → reaction → REACTION_SETTLE_MS
-    // → beginWhatsAppTyping → TYPING_PAUSE_MIN_MS → spoken replies.
+  it("documents outbound order: mark-read → reaction → typing → reply", () => {
+    // runWhatsAppTurn: mark-read (no typing) → LLM → optional reaction → typing → reply.
+    // No artificial settle sleeps between reaction/typing/first reply.
     const markRead = whatsappMarkReadBody("wamid.1");
     const typing = whatsappTypingBody("wamid.1");
     const reaction = whatsappReactionBody("972501234567", "wamid.1", "👍");
