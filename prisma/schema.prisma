@@ -91,7 +91,7 @@ model Tip {
   listType          String?   @map("list_type") @db.VarChar(32)
   /** Optional: require this tip key shown first (else unlock by prior tier in topic). */
   unlockAfterKey    String?   @map("unlock_after_key") @db.VarChar(64)
-  /** Catalog seed — wiped/reseeded by ensureDefaultTips; UI tips stay false. */
+  /** Catalog seed — upserted in place by ensureDefaultTips; UI edits set false. */
   systemSeed        Boolean   @default(false) @map("system_seed")
   maxShows          Int       @default(1) @map("max_shows")
   order             Int       @default(0)

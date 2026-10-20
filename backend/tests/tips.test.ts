@@ -180,7 +180,7 @@ describe("tips service", () => {
     );
   });
 
-  it("reseeds ladder catalog after wipe", async () => {
+  it("upserts ladder catalog without rotating ids", async () => {
     employeeFindMany.mockResolvedValue([
       {
         id: LUCY,
@@ -195,17 +195,61 @@ describe("tips service", () => {
         isProtected: false,
       },
     ]);
+    tipFindMany.mockResolvedValue([
+      {
+        id: "keep-id",
+        key: "shopping_basic_add",
+        systemSeed: true,
+      },
+    ]);
     tipCreate.mockResolvedValue({});
+    tipUpdate.mockResolvedValue({});
+    tipDeleteMany.mockResolvedValue({ count: 0 });
     await ensureDefaultTips(USER);
     expect(tipDeleteMany).toHaveBeenCalled();
-    expect(tipCreate).toHaveBeenCalled();
-    const keys = tipCreate.mock.calls.map(
+    expect(tipUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "keep-id" },
+        data: expect.objectContaining({
+          text: expect.any(String),
+          systemSeed: true,
+        }),
+      }),
+    );
+    const createdKeys = tipCreate.mock.calls.map(
       (call: unknown[]) => (call[0] as { data: { key: string } }).data.key,
     );
-    expect(keys).toContain("shopping_basic_add");
-    expect(keys).toContain("guest_terms");
-    expect(keys).toContain("reminders_adv_repeat");
-    expect(keys.length).toBe(SYSTEM_TIP_SEEDS.length);
+    expect(createdKeys).toContain("guest_terms");
+    expect(createdKeys).toContain("reminders_adv_repeat");
+    expect(createdKeys).not.toContain("shopping_basic_add");
+    expect(createdKeys.length).toBe(SYSTEM_TIP_SEEDS.length - 1);
+  });
+
+  it("leaves user-edited tips alone when key matches a seed", async () => {
+    employeeFindMany.mockResolvedValue([
+      {
+        id: LUCY,
+        name: "לוסי",
+        nickname: "לוסי",
+        isProtected: true,
+      },
+    ]);
+    tipFindMany.mockResolvedValue([
+      {
+        id: "customized",
+        key: "shopping_basic_add",
+        systemSeed: false,
+      },
+    ]);
+    tipCreate.mockResolvedValue({});
+    tipUpdate.mockResolvedValue({});
+    tipDeleteMany.mockResolvedValue({ count: 0 });
+    await ensureDefaultTips(USER);
+    expect(tipUpdate).not.toHaveBeenCalled();
+    const createdKeys = tipCreate.mock.calls.map(
+      (call: unknown[]) => (call[0] as { data: { key: string } }).data.key,
+    );
+    expect(createdKeys).not.toContain("shopping_basic_add");
   });
 
   it("createTipForUser rejects unknown digital", async () => {

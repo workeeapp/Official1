@@ -116,6 +116,11 @@ function assertActionFields(input: {
  * Wipe system / legacy seeds and insert the ladder catalog.
  * UI-created tips (systemSeed=false, not legacy keys) are kept.
  */
+/**
+ * Sync catalog seeds into the account without rotating tip ids.
+ * Wipe+recreate broke Tips UI saves ("Tip not found") and TipProgress.
+ * User-edited rows (systemSeed=false) are left alone even if the key matches a seed.
+ */
 export async function ensureDefaultTips(userId: string): Promise<void> {
   const digitals = await prisma.employee.findMany({
     where: { userId, kind: "digital" },
@@ -135,16 +140,29 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
     }),
   );
 
+  const catalogKeys = SYSTEM_TIP_SEEDS.map((s) => s.key);
+
   await prisma.tip.deleteMany({
     where: {
       userId,
       OR: [
-        { systemSeed: true },
         { key: { in: [...LEGACY_TIP_KEYS] } },
-        { key: { in: SYSTEM_TIP_SEEDS.map((s) => s.key) } },
+        {
+          systemSeed: true,
+          key: { notIn: catalogKeys },
+        },
       ],
     },
   });
+
+  const existing = await prisma.tip.findMany({
+    where: {
+      userId,
+      key: { in: catalogKeys },
+    },
+    select: { id: true, key: true, systemSeed: true },
+  });
+  const byKey = new Map(existing.map((row) => [row.key, row]));
 
   for (const seed of SYSTEM_TIP_SEEDS) {
     const digitalEmployeeId =
@@ -152,25 +170,39 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
     if (!digitalEmployeeId) {
       continue;
     }
+    const seedData = {
+      audience: seed.audience,
+      digitalEmployeeId,
+      triggerKind: seed.triggerKind,
+      triggerArea: seed.triggerArea,
+      triggerOp: seed.triggerOp,
+      tier: seed.tier,
+      topic: seed.topic,
+      listType: seed.listType,
+      unlockAfterKey: seed.unlockAfterKey,
+      systemSeed: true,
+      maxShows: seed.maxShows,
+      order: seed.order,
+      text: seed.text,
+      enabled: true,
+    };
+    const row = byKey.get(seed.key);
+    if (row) {
+      if (!row.systemSeed) {
+        continue;
+      }
+      await prisma.tip.update({
+        where: { id: row.id },
+        data: seedData,
+      });
+      continue;
+    }
     try {
       await prisma.tip.create({
         data: {
           userId,
           key: seed.key,
-          audience: seed.audience,
-          digitalEmployeeId,
-          triggerKind: seed.triggerKind,
-          triggerArea: seed.triggerArea,
-          triggerOp: seed.triggerOp,
-          tier: seed.tier,
-          topic: seed.topic,
-          listType: seed.listType,
-          unlockAfterKey: seed.unlockAfterKey,
-          systemSeed: true,
-          maxShows: seed.maxShows,
-          order: seed.order,
-          text: seed.text,
-          enabled: true,
+          ...seedData,
         },
       });
     } catch (error) {
@@ -278,6 +310,8 @@ export async function updateTipForUser(
   const row = await prisma.tip.update({
     where: { id: tipId },
     data: {
+      // UI edits leave the catalog; keep id stable and stop reseeds from overwriting.
+      systemSeed: false,
       ...(input.audience !== undefined ? { audience: input.audience } : {}),
       ...(input.digitalEmployeeId !== undefined
         ? { digitalEmployeeId: input.digitalEmployeeId }
