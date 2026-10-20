@@ -53,6 +53,9 @@ const weather = vi.hoisted(() => ({
       {
         date: "2026-10-20",
         condition: "בהיר",
+        weatherCode: 0,
+        isRain: false,
+        precipMm: 0,
         tempMinC: 18,
         tempMaxC: 28,
         tempNowC: 24,

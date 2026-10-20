@@ -21,6 +21,10 @@ import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import { formatAttributedOutbound, reminderSnoozeCommand } from "./outbound-text.js";
 import { composeScheduledOutbound } from "./reminder-compose.js";
 import { loadComposeFacts } from "./compose-facts.js";
+import {
+  conditionFromReminderJson,
+  evaluateComposeCondition,
+} from "./compose-condition.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -302,6 +306,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
 
     let outboundBody = reminder.messageText;
     let skipSend = false;
+    let conditionShaAfterSend: string | undefined;
     if (reminder.composeAtFire) {
       const firstDest = dests[0] ?? "";
       const firstTarget =
@@ -345,6 +350,30 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         skipSend = true;
         await settleFiredReminder(reminder, now, "failed");
         continue;
+      }
+
+      // Conditional watch: skip WhatsApp when the structured condition is false.
+      const condition = conditionFromReminderJson(
+        "composeCondition" in reminder ? reminder.composeCondition : null,
+      );
+      if (condition) {
+        const gate = evaluateComposeCondition({
+          condition,
+          facts: factsBundle.eval ?? {},
+          lastReportSha: reminder.lastReportSha,
+        });
+        if (gate.immediateSha) {
+          await prisma.reminder.update({
+            where: { id: reminder.id },
+            data: { lastReportSha: gate.immediateSha },
+          });
+        }
+        if (gate.skipSend) {
+          // Quiet skip — clock advances; never send «עדיין לא».
+          await settleFiredReminder(reminder, now, "sent");
+          continue;
+        }
+        conditionShaAfterSend = gate.shaAfterSend;
       }
 
       const composed = await composeScheduledOutbound({
@@ -491,6 +520,13 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       sendResults.every(Boolean)
         ? "sent"
         : "failed";
+
+    if (conditionShaAfterSend && sendStatus === "sent") {
+      await prisma.reminder.update({
+        where: { id: reminder.id },
+        data: { lastReportSha: conditionShaAfterSend },
+      });
+    }
 
     await settleFiredReminder(reminder, now, sendStatus);
   }

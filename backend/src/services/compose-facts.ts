@@ -30,6 +30,10 @@ import {
   resolveMashovReply,
   type MashovAspect,
 } from "./mashov.js";
+import {
+  mashovContentFingerprint,
+  type ComposeEvalFacts,
+} from "./compose-condition.js";
 
 export type ComposeSourceKind =
   | ""
@@ -55,6 +59,8 @@ export type ComposeFactsBundle = {
   fixedBody?: string;
   headSha?: string;
   advanceLastReportSha?: boolean;
+  /** Structured signals for compose_condition evaluation. */
+  eval?: ComposeEvalFacts;
 };
 
 export async function loadComposeFacts(input: {
@@ -151,12 +157,16 @@ export async function loadComposeFacts(input: {
         };
       }
       const body = formatWeatherHebrew(weather, input.now);
+      const day = weather.days[0];
       return {
         kind: "weather",
         facts: body,
         factsLabel: "Weather (Open-Meteo)",
         fixedBody: body,
         sessionClock: formatSessionClockContext(input.now),
+        eval: {
+          weatherIsRain: day?.isRain === true,
+        },
       };
     } catch {
       return {
@@ -183,12 +193,18 @@ export async function loadComposeFacts(input: {
     try {
       const facts = await fetchMarketFacts({ queries, aspects });
       const body = formatMarketHebrew(facts);
+      const firstPrice = facts.quotes.find(
+        (q) => q.price != null && Number.isFinite(q.price),
+      )?.price;
       return {
         kind: "market",
         facts: body,
         factsLabel: "Market (Yahoo Finance)",
         fixedBody: body,
         sessionClock: formatSessionClockContext(input.now),
+        eval: {
+          marketPrice: firstPrice ?? null,
+        },
       };
     } catch {
       return {
@@ -218,6 +234,9 @@ export async function loadComposeFacts(input: {
         factsLabel: "Mashov (משוב)",
         fixedBody: body,
         sessionClock: formatSessionClockContext(input.now),
+        eval: {
+          mashovFingerprint: mashovContentFingerprint(body),
+        },
       };
     } catch {
       return {

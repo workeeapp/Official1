@@ -203,6 +203,16 @@ export type LlmReminderRepeat =
   | "weekly"
   | "monthly";
 
+/** Structured gate for conditional watch clocks («תעדכני אותי אם…»). */
+export type LlmComposeCondition =
+  | {
+      type: "market_price";
+      op: "lt" | "lte" | "gt" | "gte" | "eq";
+      value: number;
+    }
+  | { type: "weather_rain" }
+  | { type: "mashov_new" };
+
 export interface LlmReminderAction {
   action: LlmReminderActionName;
   item: string;
@@ -254,6 +264,11 @@ export interface LlmReminderAction {
    * child name. Empty otherwise.
    */
   composePlace: string;
+  /**
+   * Conditional watch: structured gate evaluated at fire (skip WhatsApp when false).
+   * null/omit = always send (normal compose).
+   */
+  composeCondition?: LlmComposeCondition | null;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
   /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
@@ -1450,6 +1465,9 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeSource: parseComposeSource(record),
     composeLookbackHours: parseComposeLookbackHours(record),
     composePlace: parseComposePlace(record),
+    composeCondition: parseComposeCondition(
+      record.compose_condition ?? record.composeCondition,
+    ),
     reminderId,
     ...(occurrenceChange ? { occurrenceChange } : {}),
     ...optionalIds("attachmentIds", record.attachment_ids ?? record.attachmentIds),
@@ -1555,6 +1573,46 @@ function parseComposePlace(record: Record<string, unknown>): string {
     "marketSymbols",
     "symbols",
   ]).slice(0, 255);
+}
+
+const MARKET_PRICE_OPS = new Set(["lt", "lte", "gt", "gte", "eq"]);
+
+/** Parse reminders[].compose_condition — null when absent or invalid. */
+export function parseComposeCondition(raw: unknown): LlmComposeCondition | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const type = String(record.type ?? "")
+    .trim()
+    .toLowerCase();
+  if (type === "weather_rain" || type === "rain") {
+    return { type: "weather_rain" };
+  }
+  if (type === "mashov_new" || type === "mashov") {
+    return { type: "mashov_new" };
+  }
+  if (type === "market_price" || type === "market" || type === "price") {
+    const op = String(record.op ?? record.operator ?? "")
+      .trim()
+      .toLowerCase();
+    const valueRaw = record.value ?? record.threshold ?? record.price;
+    const value =
+      typeof valueRaw === "number"
+        ? valueRaw
+        : typeof valueRaw === "string" && /^-?\d+(\.\d+)?$/.test(valueRaw.trim())
+          ? Number(valueRaw.trim())
+          : NaN;
+    if (!MARKET_PRICE_OPS.has(op) || !Number.isFinite(value)) {
+      return null;
+    }
+    return {
+      type: "market_price",
+      op: op as "lt" | "lte" | "gt" | "gte" | "eq",
+      value,
+    };
+  }
+  return null;
 }
 
 const WEATHER_ASPECTS = new Set<LlmWeatherAspect>([

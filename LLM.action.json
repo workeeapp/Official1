@@ -1050,6 +1050,23 @@
                       "maxLength": 255,
                       "description": "Required when compose_source is weather (city), market (comma-separated tickers), or mashov (child first name, e.g. דניאל; empty = only child). Empty otherwise."
                     },
+                    "compose_condition": {
+                      "type": "object",
+                      "description": "Conditional watch («תעדכני אותי אם…»): send WhatsApp only when this holds at fire. Required for watch clocks — not free-text in brief alone. Types: market_price {type,op,value}, weather_rain {type}, mashov_new {type}.",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["market_price", "weather_rain", "mashov_new"]
+                        },
+                        "op": {
+                          "type": "string",
+                          "enum": ["lt", "lte", "gt", "gte", "eq"]
+                        },
+                        "value": {
+                          "type": "number"
+                        }
+                      }
+                    },
                     "confirmed": {
                       "type": "boolean"
                     },

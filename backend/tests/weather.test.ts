@@ -43,6 +43,9 @@ describe("formatWeatherHebrew", () => {
       {
         date: "2026-10-20",
         condition: "בהיר",
+        weatherCode: 0,
+        isRain: false,
+        precipMm: 0,
         tempMinC: 18,
         tempMaxC: 28,
         tempNowC: 24,
@@ -157,6 +160,8 @@ describe("fetchWeatherFacts / resolveWeatherReply", () => {
     expect(facts!.place.name).toContain("Tel Aviv");
     expect(facts!.days[0]!.tempNowC).toBe(25);
     expect(facts!.days[0]!.waveHeightM).toBe(1.2);
+    expect(facts!.days[0]!.weatherCode).toBe(0);
+    expect(facts!.days[0]!.isRain).toBe(false);
 
     const reply = await resolveWeatherReply({
       place: "תל אביב",

@@ -70,6 +70,8 @@ export interface ReminderSnapshotRow {
   compose_lookback_hours: number;
   /** Place/symbols/child for compose_source weather|market|mashov. */
   compose_place?: string;
+  /** Conditional watch gate (null when unconditional). */
+  compose_condition?: unknown;
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -1682,6 +1684,19 @@ export async function applyReminders(input: {
               .trim()
               .slice(0, 255)
           : "";
+      const existingCondition =
+        existing &&
+        "composeCondition" in existing &&
+        existing.composeCondition != null &&
+        typeof existing.composeCondition === "object"
+          ? (existing.composeCondition as Prisma.InputJsonValue)
+          : null;
+      const nextCondition: Prisma.InputJsonValue | typeof Prisma.DbNull =
+        reminder.composeCondition != null
+          ? (reminder.composeCondition as Prisma.InputJsonValue)
+          : canReuseClock && existingCondition != null
+            ? existingCondition
+            : Prisma.DbNull;
       const composeAtFire =
         nextCompose ||
         nextSource === "git_log" ||
@@ -1705,6 +1720,7 @@ export async function applyReminders(input: {
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
               composePlace: nextPlace,
+              composeCondition: nextCondition,
             },
           })
         : await prisma.reminder.create({
@@ -1725,6 +1741,7 @@ export async function applyReminders(input: {
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
               composePlace: nextPlace,
+              composeCondition: nextCondition,
             },
           });
       const linkedWorkerItemId =
@@ -2023,6 +2040,7 @@ export function toReminderSnapshotRow(
     composeSource?: string;
     composeLookbackHours?: number;
     composePlace?: string;
+    composeCondition?: unknown;
     lastComposedText?: string | null;
     status: string;
     sendStatus?: string;
@@ -2088,6 +2106,12 @@ export function toReminderSnapshotRow(
       row.composeSource === "mashov"
         ? String(row.composePlace ?? "").trim()
         : "",
+    compose_condition:
+      row.composeCondition != null &&
+      typeof row.composeCondition === "object" &&
+      !Array.isArray(row.composeCondition)
+        ? row.composeCondition
+        : null,
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",

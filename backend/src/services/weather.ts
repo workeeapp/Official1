@@ -18,6 +18,11 @@ export type WeatherPlace = {
 export type WeatherDayFacts = {
   date: string;
   condition: string;
+  /** WMO weather interpretation code when available. */
+  weatherCode: number | null;
+  /** True when code/precip indicates rain / drizzle / showers / thunder. */
+  isRain: boolean;
+  precipMm: number | null;
   tempMinC: number | null;
   tempMaxC: number | null;
   tempNowC: number | null;
@@ -45,6 +50,20 @@ const ASPECT_SET = new Set<WeatherAspect>([
   "waves",
   "humidity",
 ]);
+
+/**
+ * WMO codes that mean liquid precipitation (drizzle / rain / showers / thunder).
+ * Snow-only codes are excluded — «גשם» watches should not fire on snow alone.
+ */
+export function isWmoRainCode(code: number | null | undefined): boolean {
+  if (code == null || !Number.isFinite(code)) {
+    return false;
+  }
+  const c = Math.trunc(code);
+  return (
+    (c >= 51 && c <= 67) || (c >= 80 && c <= 82) || (c >= 95 && c <= 99)
+  );
+}
 
 /** WMO weather interpretation codes → short Hebrew. */
 const WMO_HE: Record<number, string> = {
@@ -177,6 +196,7 @@ type ForecastResponse = {
     weather_code?: number;
     wind_speed_10m?: number;
     wind_gusts_10m?: number;
+    precipitation?: number;
   };
   daily?: {
     time?: string[];
@@ -185,6 +205,7 @@ type ForecastResponse = {
     temperature_2m_min?: number[];
     wind_speed_10m_max?: number[];
     wind_gusts_10m_max?: number[];
+    precipitation_sum?: number[];
   };
   hourly?: {
     time?: string[];
@@ -193,6 +214,7 @@ type ForecastResponse = {
     weather_code?: number[];
     wind_speed_10m?: number[];
     wind_gusts_10m?: number[];
+    precipitation?: number[];
   };
 };
 
@@ -218,15 +240,15 @@ async function fetchForecast(
   url.searchParams.set("forecast_days", "7");
   url.searchParams.set(
     "current",
-    "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m",
+    "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m,precipitation",
   );
   url.searchParams.set(
     "daily",
-    "weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max",
+    "weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,wind_gusts_10m_max,precipitation_sum",
   );
   url.searchParams.set(
     "hourly",
-    "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m",
+    "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_gusts_10m,precipitation",
   );
   url.searchParams.set("wind_speed_unit", "kmh");
   const res = await fetchImpl(url.toString());
@@ -299,16 +321,33 @@ function buildDayFacts(
   const isToday = ymd === todayYmd;
   const current = isToday ? forecast.current : undefined;
 
-  const weatherCode =
+  const weatherCodeRaw =
     current?.weather_code ??
     (dailyIdx >= 0 ? forecast.daily?.weather_code?.[dailyIdx] : undefined) ??
     (hourIdx >= 0 ? forecast.hourly?.weather_code?.[hourIdx] : undefined);
+  const weatherCode =
+    typeof weatherCodeRaw === "number" && Number.isFinite(weatherCodeRaw)
+      ? weatherCodeRaw
+      : null;
+  const precipMm = isToday
+    ? round1(current?.precipitation) ??
+      (hourIdx >= 0
+        ? round1(forecast.hourly?.precipitation?.[hourIdx])
+        : null)
+    : dailyIdx >= 0
+      ? round1(forecast.daily?.precipitation_sum?.[dailyIdx])
+      : hourIdx >= 0
+        ? round1(forecast.hourly?.precipitation?.[hourIdx])
+        : null;
 
   return {
     date: ymd,
-    condition: conditionFromWmo(
-      typeof weatherCode === "number" ? weatherCode : null,
-    ),
+    condition: conditionFromWmo(weatherCode),
+    weatherCode,
+    isRain:
+      isWmoRainCode(weatherCode) ||
+      (weatherCode == null && precipMm != null && precipMm > 0),
+    precipMm,
     tempMinC:
       dailyIdx >= 0
         ? round1(forecast.daily?.temperature_2m_min?.[dailyIdx])

@@ -145,6 +145,7 @@ export {
   parseWeatherAction,
   parseMarketAction,
   parseMashovAction,
+  parseComposeCondition,
 } from "./llm-message";
 export {
   looksLikePhone,
@@ -239,6 +240,7 @@ export type {
   LlmReminderAction,
   LlmReminderActionName,
   LlmReminderRepeat,
+  LlmComposeCondition,
   ParsedLlmMessage,
   LlmReplyButton,
 } from "./llm-message";

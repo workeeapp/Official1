@@ -322,8 +322,16 @@ model Reminder {
   composeLookbackHours Float @default(0) @map("compose_lookback_hours")
   /** weather: city; market: tickers; mashov: child name (model-supplied). */
   composePlace String @default("") @map("compose_place") @db.VarChar(255)
+  /**
+   * Conditional watch: only send WhatsApp when the condition holds at fire.
+   * e.g. {type:"market_price",op:"lt",value:80000} | {type:"weather_rain"} | {type:"mashov_new"}.
+   */
+  composeCondition Json? @map("compose_condition")
   lastComposedText String @default("") @map("last_composed_text") @db.Text
-  /** HEAD sha after the last git digest fire (next window starts after this). */
+  /**
+   * HEAD sha after the last git digest fire; also market edge state
+   * (market:below / market:above) or mashov content fingerprint.
+   */
   lastReportSha String @default("") @map("last_report_sha") @db.VarChar(64)
   status      String   @default("active") @db.VarChar(16)
   sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)

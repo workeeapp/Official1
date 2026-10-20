@@ -1160,6 +1160,7 @@ describe("parseLlmReply", () => {
         composeSource: "",
         composeLookbackHours: 0,
         composePlace: "",
+        composeCondition: null,
         reminderId: "",
       },
     ]);
@@ -1271,6 +1272,64 @@ describe("parseLlmReply", () => {
         composeSource: "mashov",
         composePlace: "דניאל",
       },
+    ]);
+  });
+
+  it("reads compose_condition for conditional watches", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אבדוק",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לבדוק שער ביטקוין",
+                compose: true,
+                compose_source: "market",
+                compose_place: "BTC-USD",
+                compose_condition: {
+                  type: "market_price",
+                  op: "lt",
+                  value: 80000,
+                },
+                text: "עדכון ביטקוין",
+                ping: ["עמית"],
+              },
+              {
+                action: "add",
+                item: "לעדכן כשיורד גשם",
+                compose: true,
+                compose_source: "weather",
+                compose_place: "פתח תקווה",
+                compose_condition: { type: "weather_rain" },
+                text: "גשם",
+                ping: ["עמית"],
+              },
+              {
+                action: "add",
+                item: "לבדוק עדכון משוב",
+                compose: true,
+                compose_source: "mashov",
+                compose_place: "דניאל",
+                compose_condition: { type: "mashov_new" },
+                text: "משוב",
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        composeCondition: {
+          type: "market_price",
+          op: "lt",
+          value: 80000,
+        },
+      },
+      { composeCondition: { type: "weather_rain" } },
+      { composeCondition: { type: "mashov_new" } },
     ]);
   });
 
