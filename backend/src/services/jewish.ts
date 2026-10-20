@@ -400,6 +400,55 @@ export function formatJewishHebrew(facts: JewishFacts): string {
   return lines.join("\n");
 }
 
+/**
+ * Next candle-lighting instant for `place`, then apply offsetMinutes
+ * (negative = before). Returns null when place/Hebcal cannot resolve.
+ * If that instant is already past `from`, advances to the following Shabbat.
+ */
+export async function nextCandleLighting(input: {
+  place: string;
+  offsetMinutes?: number;
+  from?: Date;
+  fetchImpl?: typeof fetch;
+}): Promise<Date | null> {
+  const place = String(input.place ?? "").trim();
+  if (!place) {
+    return null;
+  }
+  const offsetMs = (input.offsetMinutes ?? 0) * 60_000;
+  const from = input.from ?? new Date();
+  const fetchImpl = input.fetchImpl ?? fetch;
+  try {
+    const loc = await resolveJewishLocation(place, fetchImpl);
+    if (!loc) {
+      return null;
+    }
+    // Probe this week, then next week if the offset fire already passed.
+    for (const dayOffset of [0, 7]) {
+      const probe = new Date(from.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+      const ymd = probe.toLocaleDateString("en-CA", {
+        timeZone: "Asia/Jerusalem",
+      });
+      const shabbat = await fetchShabbat(loc, ymd, fetchImpl);
+      const candles = pickFromShabbat(shabbat.items).candles;
+      if (!candles?.dateIso) {
+        continue;
+      }
+      const candlesAt = new Date(candles.dateIso);
+      if (!Number.isFinite(candlesAt.getTime())) {
+        continue;
+      }
+      const fireAt = new Date(candlesAt.getTime() + offsetMs);
+      if (fireAt.getTime() > from.getTime()) {
+        return fireAt;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveJewishReply(input: {
   place: string;
   date?: string | null;

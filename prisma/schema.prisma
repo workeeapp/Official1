@@ -320,8 +320,15 @@ model Reminder {
   composeSource String @default("") @map("compose_source") @db.VarChar(32)
   /** Hours of git history for windowed digests (0 = recurring since-last-report mode). Supports fractions (e.g. 0.083 ≈ 5 minutes). */
   composeLookbackHours Float @default(0) @map("compose_lookback_hours")
-  /** weather: city; market: tickers; mashov: child name (model-supplied). */
+  /** weather: city; market: tickers; mashov: child name; jewish_candles: city. */
   composePlace String @default("") @map("compose_place") @db.VarChar(255)
+  /**
+   * Event-relative schedule: empty = wall clock; "jewish_candles" = fire from
+   * next Hebcal candle lighting + schedule_offset_minutes (city in compose_place).
+   */
+  scheduleAnchor String @default("") @map("schedule_anchor") @db.VarChar(32)
+  /** Minutes relative to the schedule anchor (negative = before). */
+  scheduleOffsetMinutes Int @default(0) @map("schedule_offset_minutes")
   /**
    * Conditional watch: only send WhatsApp when the condition holds at fire.
    * e.g. {type:"market_price",op:"lt",value:80000} | {type:"weather_rain"} | {type:"mashov_new"}.

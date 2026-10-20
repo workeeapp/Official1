@@ -260,10 +260,19 @@ export interface LlmReminderAction {
    */
   composeLookbackHours: number;
   /**
-   * Lookup key for compose plugins: weather city, market tickers, or mashov
-   * child name. Empty otherwise.
+   * Lookup key for compose plugins: weather city, market tickers, mashov
+   * child name, or jewish_candles city. Empty otherwise.
    */
   composePlace: string;
+  /**
+   * Event-relative schedule. Empty / omit = wall clock.
+   * jewish_candles = fire from next Hebcal candle lighting + scheduleOffsetMinutes.
+   */
+  scheduleAnchor?: "" | "jewish_candles";
+  /**
+   * Minutes relative to scheduleAnchor (negative = before). 10 דקות לפני → -10.
+   */
+  scheduleOffsetMinutes?: number;
   /**
    * Conditional watch: structured gate evaluated at fire (skip WhatsApp when false).
    * null/omit = always send (normal compose).
@@ -1524,6 +1533,8 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeSource: parseComposeSource(record),
     composeLookbackHours: parseComposeLookbackHours(record),
     composePlace: parseComposePlace(record),
+    scheduleAnchor: parseScheduleAnchor(record),
+    scheduleOffsetMinutes: parseScheduleOffsetMinutes(record),
     composeCondition: parseComposeCondition(
       record.compose_condition ?? record.composeCondition,
     ),
@@ -1631,7 +1642,61 @@ function parseComposePlace(record: Record<string, unknown>): string {
     "market_symbols",
     "marketSymbols",
     "symbols",
+    "place",
+    "city",
+    "עיר",
   ]).slice(0, 255);
+}
+
+function parseScheduleAnchor(
+  record: Record<string, unknown>,
+): "" | "jewish_candles" {
+  const raw = String(
+    record.schedule_anchor ??
+      record.scheduleAnchor ??
+      record.anchor ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    raw === "jewish_candles" ||
+    raw === "candles" ||
+    raw === "candle_lighting" ||
+    raw === "shabbat_candles" ||
+    raw === "נרות" ||
+    raw === "הדלקת נרות"
+  ) {
+    return "jewish_candles";
+  }
+  return "";
+}
+
+function parseScheduleOffsetMinutes(record: Record<string, unknown>): number {
+  const beforeRaw =
+    record.minutes_before ??
+    record.minutesBefore ??
+    record.offset_before_minutes ??
+    record.offsetBeforeMinutes;
+  if (typeof beforeRaw === "number" && Number.isFinite(beforeRaw)) {
+    return -Math.abs(Math.trunc(beforeRaw));
+  }
+  if (typeof beforeRaw === "string" && /^-?\d+$/.test(beforeRaw.trim())) {
+    return -Math.abs(Number(beforeRaw.trim()));
+  }
+
+  const raw =
+    record.offset_minutes ??
+    record.offsetMinutes ??
+    record.schedule_offset_minutes ??
+    record.scheduleOffsetMinutes;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.trunc(raw);
+  }
+  if (typeof raw === "string" && /^-?\d+$/.test(raw.trim())) {
+    return Number(raw.trim());
+  }
+  return 0;
 }
 
 const MARKET_PRICE_OPS = new Set(["lt", "lte", "gt", "gte", "eq"]);

@@ -38,6 +38,7 @@ import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { applyAttachmentLinks } from "./attachment.service.js";
 import { applyClockRuleToTask } from "./list-recurrence.js";
+import { nextCandleLighting } from "./jewish.js";
 import { scheduleSoon } from "./reminder-fire.js";
 
 export function formatJerusalemDateTime(value: Date): string {
@@ -88,7 +89,13 @@ export interface ReminderSnapshotRow {
   exceptions?: string[];
 }
 
-export type ReminderSkipReason = "no_time" | "db" | "no_phone" | "too_frequent";
+export type ReminderSkipReason =
+  | "no_time"
+  | "db"
+  | "no_phone"
+  | "too_frequent"
+  | "no_place"
+  | "anchor_failed";
 
 export const SUB_HOURLY_REFUSAL =
   "אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.";
@@ -1523,26 +1530,6 @@ export async function applyReminders(input: {
       continue;
     }
 
-    const recurring = reminder.recurrence
-      ? resolveRecurringFireAt(
-          reminder.recurrence,
-          reminder.date,
-          reminder.time,
-          new Date(),
-          reminder.inSeconds,
-        )
-      : null;
-    const interval = reminder.recurrence ? null : intervalOf(reminder);
-    let fireAt = reminder.recurrence
-      ? (recurring?.fireAt ?? null)
-      : resolveReminderFireAt(
-          reminder.date,
-          reminder.time,
-          new Date(),
-          reminder.inSeconds,
-          interval,
-        );
-
     const rows = await prisma.reminder.findMany({
       where: { userId: input.userId, status: "active" },
     });
@@ -1555,6 +1542,90 @@ export async function applyReminders(input: {
     const ownerId = existing?.ownerId ?? input.actor.id;
 
     const canReuseClock = canReuseExistingReminderClock(reminder, Boolean(existing));
+
+    const existingAnchor =
+      existing && "scheduleAnchor" in existing
+        ? String((existing as { scheduleAnchor?: string }).scheduleAnchor ?? "")
+        : "";
+    const existingOffset =
+      existing && "scheduleOffsetMinutes" in existing
+        ? Number(
+            (existing as { scheduleOffsetMinutes?: number }).scheduleOffsetMinutes ??
+              0,
+          )
+        : 0;
+    const existingPlaceEarly =
+      existing && "composePlace" in existing
+        ? String((existing as { composePlace?: string }).composePlace ?? "")
+        : "";
+
+    let scheduleAnchor =
+      reminder.scheduleAnchor === "jewish_candles"
+        ? "jewish_candles"
+        : canReuseClock && existingAnchor === "jewish_candles"
+          ? "jewish_candles"
+          : "";
+    const rawOffset = Number(reminder.scheduleOffsetMinutes ?? 0);
+    let scheduleOffsetMinutes =
+      reminder.scheduleAnchor === "jewish_candles" || rawOffset !== 0
+        ? rawOffset
+        : canReuseClock
+          ? existingOffset
+          : 0;
+    let schedulePlace = (
+      reminder.composePlace.trim() ||
+      (canReuseClock && scheduleAnchor ? existingPlaceEarly : "") ||
+      ""
+    )
+      .trim()
+      .slice(0, 255);
+
+    // Candle-offset clocks: engine fills fire_at from Hebcal (no wall time/in).
+    let recurring =
+      reminder.recurrence && scheduleAnchor !== "jewish_candles"
+        ? resolveRecurringFireAt(
+            reminder.recurrence,
+            reminder.date,
+            reminder.time,
+            new Date(),
+            reminder.inSeconds,
+          )
+        : null;
+    const interval =
+      reminder.recurrence || scheduleAnchor === "jewish_candles"
+        ? null
+        : intervalOf(reminder);
+    let fireAt: Date | null = null;
+
+    if (scheduleAnchor === "jewish_candles") {
+      if (!schedulePlace) {
+        skipped.push({ item: reminder.item.trim(), reason: "no_place" });
+        continue;
+      }
+      fireAt = await nextCandleLighting({
+        place: schedulePlace,
+        offsetMinutes: scheduleOffsetMinutes,
+      });
+      if (!fireAt) {
+        skipped.push({ item: reminder.item.trim(), reason: "anchor_failed" });
+        continue;
+      }
+      // One-shot by default. Weekly only when the model sent weekly (כל שישי).
+      recurring =
+        reminder.recurrence && reminder.recurrence.freq === "weekly"
+          ? { fireAt, recurrence: reminder.recurrence }
+          : null;
+    } else {
+      fireAt = reminder.recurrence
+        ? (recurring?.fireAt ?? null)
+        : resolveReminderFireAt(
+            reminder.date,
+            reminder.time,
+            new Date(),
+            reminder.inSeconds,
+            interval,
+          );
+    }
 
     if (!fireAt && canReuseClock && existing) {
       fireAt = existing.fireAt;
@@ -1677,13 +1748,27 @@ export async function applyReminders(input: {
       const nextPlace =
         nextSource === "weather" ||
         nextSource === "market" ||
-        nextSource === "mashov"
-          ? (reminder.composePlace.trim() ||
+        nextSource === "mashov" ||
+        scheduleAnchor === "jewish_candles"
+          ? (schedulePlace ||
+              reminder.composePlace.trim() ||
               (canReuseClock ? existingPlace : "") ||
               "")
               .trim()
               .slice(0, 255)
           : "";
+      const nextScheduleAnchor =
+        scheduleAnchor === "jewish_candles"
+          ? "jewish_candles"
+          : canReuseClock && existingAnchor && !reminder.scheduleAnchor
+            ? existingAnchor
+            : "";
+      const nextScheduleOffset =
+        scheduleAnchor === "jewish_candles" || rawOffset !== 0
+          ? scheduleOffsetMinutes
+          : canReuseClock
+            ? existingOffset
+            : 0;
       const existingCondition =
         existing &&
         "composeCondition" in existing &&
@@ -1720,6 +1805,8 @@ export async function applyReminders(input: {
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
               composePlace: nextPlace,
+              scheduleAnchor: nextScheduleAnchor,
+              scheduleOffsetMinutes: nextScheduleOffset,
               composeCondition: nextCondition,
             },
           })
@@ -1741,6 +1828,8 @@ export async function applyReminders(input: {
               composeSource: nextSource,
               composeLookbackHours: nextLookback,
               composePlace: nextPlace,
+              scheduleAnchor: nextScheduleAnchor,
+              scheduleOffsetMinutes: nextScheduleOffset,
               composeCondition: nextCondition,
             },
           });
@@ -1956,7 +2045,11 @@ export function formatReminderApplyNotice(result: {
                 : `אין לי מספר ליעד. מה המספר?`
               : row.reason === "too_frequent"
                 ? `לא נשמרה «${row.item}» — ${SUB_HOURLY_REFUSAL}`
-                : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
+                : row.reason === "no_place"
+                  ? `לא נשמרה «${row.item}» — באיזה יישוב לחשב את הדלקת הנרות?`
+                  : row.reason === "anchor_failed"
+                    ? `לא נשמרה «${row.item}» — לא הצלחתי לחשב את שעת הדלקת הנרות. נסה שוב בעוד רגע.`
+                    : `לא נשמרה «${row.item}» — מתי לשלוח? עכשיו, בעוד X, או שעה קבועה.`,
         )
         .join(" "),
     );

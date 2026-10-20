@@ -1048,7 +1048,19 @@
                     "compose_place": {
                       "type": "string",
                       "maxLength": 255,
-                      "description": "Required when compose_source is weather (city), market (comma-separated tickers), or mashov (child first name, e.g. דניאל; empty = only child). Empty otherwise."
+                      "description": "Required when compose_source is weather (city), market (comma-separated tickers), or mashov (child first name, e.g. דניאל; empty = only child); or when schedule_anchor is jewish_candles (Israel city for Hebcal). Empty otherwise."
+                    },
+                    "schedule_anchor": {
+                      "type": "string",
+                      "enum": [
+                        "",
+                        "jewish_candles"
+                      ],
+                      "description": "Event-relative clock. jewish_candles = fire at next Hebcal candle lighting + offset_minutes for compose_place city. Do NOT invent time/in — server fills fire_at. Empty = normal wall clock."
+                    },
+                    "offset_minutes": {
+                      "type": "number",
+                      "description": "Minutes relative to schedule_anchor. Negative = before (10 דקות לפני → -10). Required with schedule_anchor jewish_candles."
                     },
                     "compose_condition": {
                       "type": "object",

@@ -8,6 +8,7 @@ import {
   parseStoredRepeat,
   pruneRecurrenceExceptions,
   serializeRecurrence,
+  withinUntil,
   type LlmReplyButton,
 } from "@workee/shared";
 import { Prisma } from "@prisma/client";
@@ -34,6 +35,7 @@ import {
   toChatAttachmentRef,
 } from "./attachment.service.js";
 import { jobMetaFrom } from "./job-meta.js";
+import { nextCandleLighting } from "./jewish.js";
 
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
@@ -78,6 +80,51 @@ export function nextFireAt(
     next = addReminderInterval(next, interval);
   }
   return next;
+}
+
+/**
+ * Like nextFireAt, but jewish_candles anchors re-resolve Hebcal (times move weekly).
+ * Returns null when the series is done or the city/Hebcal lookup fails.
+ */
+export async function resolveNextFireAt(
+  reminder: {
+    fireAt: Date;
+    repeat: string;
+    recurrence?: unknown;
+    scheduleAnchor?: string | null;
+    scheduleOffsetMinutes?: number | null;
+    composePlace?: string | null;
+  },
+  now: Date,
+  firedCount: number,
+): Promise<Date | null> {
+  const rule = parseRecurrence(reminder.recurrence);
+  if (String(reminder.scheduleAnchor ?? "") === "jewish_candles") {
+    // One-shot candle clocks have no recurrence — do not invent the next week.
+    if (!rule || rule.freq !== "weekly") {
+      return null;
+    }
+    if (rule.count != null && firedCount >= rule.count) {
+      return null;
+    }
+    const place = String(reminder.composePlace ?? "").trim();
+    if (!place) {
+      return null;
+    }
+    const next = await nextCandleLighting({
+      place,
+      offsetMinutes: Number(reminder.scheduleOffsetMinutes ?? 0),
+      from: new Date(Math.max(now.getTime(), reminder.fireAt.getTime()) + 60_000),
+    });
+    if (!next) {
+      return null;
+    }
+    if (!withinUntil(rule, next)) {
+      return null;
+    }
+    return next;
+  }
+  return nextFireAt(reminder, now, firedCount);
 }
 
 async function workerItemIdForReminder(reminderId: string): Promise<string | null> {
@@ -125,13 +172,16 @@ export async function settleFiredReminder(
     userId?: string;
     actorId?: string;
     itemLabel?: string;
+    scheduleAnchor?: string | null;
+    scheduleOffsetMinutes?: number | null;
+    composePlace?: string | null;
   },
   now: Date,
   sendStatus: "sent" | "failed",
 ): Promise<void> {
   const sentAt = sendStatus === "sent" ? now : null;
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
-  const nextAt = nextFireAt(reminder, now, firedCount);
+  const nextAt = await resolveNextFireAt(reminder, now, firedCount);
   const rule = parseRecurrence(reminder.recurrence);
   const hasRule = Boolean(rule);
   const workerItemId = await workerItemIdForReminder(reminder.id);

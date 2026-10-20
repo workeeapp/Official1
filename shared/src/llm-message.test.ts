@@ -1160,10 +1160,65 @@ describe("parseLlmReply", () => {
         composeSource: "",
         composeLookbackHours: 0,
         composePlace: "",
+        scheduleAnchor: "",
+        scheduleOffsetMinutes: 0,
         composeCondition: null,
         reminderId: "",
       },
     ]);
+  });
+
+  it("reads schedule_anchor jewish_candles and offset_minutes", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "להדליק נרות",
+                schedule_anchor: "jewish_candles",
+                offset_minutes: -10,
+                compose_place: "פתח תקווה",
+                ping: ["SPEAKER"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        action: "add",
+        item: "להדליק נרות",
+        scheduleAnchor: "jewish_candles",
+        scheduleOffsetMinutes: -10,
+        composePlace: "פתח תקווה",
+      },
+    ]);
+  });
+
+  it("maps minutes_before to negative offset_minutes", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            reminders: {
+              action: "add",
+              item: "להדליק נרות",
+              schedule_anchor: "jewish_candles",
+              minutes_before: 10,
+              place: "תל אביב",
+            },
+          },
+        }),
+      ).reminders?.[0],
+    ).toMatchObject({
+      scheduleAnchor: "jewish_candles",
+      scheduleOffsetMinutes: -10,
+      composePlace: "תל אביב",
+    });
   });
 
   it("accepts create, a single reminder object, and compact delay text", () => {

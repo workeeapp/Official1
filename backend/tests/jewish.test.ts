@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   formatJewishHebrew,
   lookupIlGeonameid,
+  nextCandleLighting,
   parseJewishAspects,
   resolveJewishReply,
   type JewishFacts,
@@ -97,6 +98,38 @@ describe("formatJewishHebrew", () => {
     expect(text).toContain("חגים קרובים");
     expect(text).toContain("חֲנֻכָּה");
     expect(text).toContain("05.12.2026");
+  });
+});
+
+describe("nextCandleLighting", () => {
+  it("returns candles minus offset when still upcoming", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        location: { title: "Petaẖ Tiqva", geonameid: 293918 },
+        items: [
+          {
+            category: "candles",
+            date: "2026-10-23T17:39:00+03:00",
+            hebrew: "הדלקת נרות",
+          },
+        ],
+      }),
+    })) as unknown as typeof fetch;
+
+    const fireAt = await nextCandleLighting({
+      place: "פתח תקווה",
+      offsetMinutes: -10,
+      from: new Date("2026-10-20T12:00:00+03:00"),
+      fetchImpl,
+    });
+    expect(fireAt?.toISOString()).toBe(
+      new Date("2026-10-23T17:29:00+03:00").toISOString(),
+    );
+  });
+
+  it("returns null without place", async () => {
+    expect(await nextCandleLighting({ place: "" })).toBeNull();
   });
 });
 
