@@ -325,6 +325,10 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("FIND-HELPER");
     expect(config.systemMessage).toContain(
+      "by filing KIND",
+    );
+    expect(config.systemMessage).toContain("מספר הרכב 70332729");
+    expect(config.systemMessage).toContain(
       "Find filings by item_name + item_info + item_description",
     );
     expect(config.systemMessage).not.toContain(
