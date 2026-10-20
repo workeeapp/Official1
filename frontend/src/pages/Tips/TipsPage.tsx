@@ -27,7 +27,18 @@ function triggerSummary(tip: PublicTip): string {
   if (tip.triggerKind === "model") {
     return ladder ? `model · ${ladder}` : "model";
   }
-  const action = `action ${tip.triggerArea ?? "?"}/${tip.triggerOp ?? "add"}`;
+  const listBit =
+    tip.triggerArea === "lists" && tip.listType && tip.listType !== tip.topic
+      ? tip.listType
+      : tip.triggerArea === "lists" && tip.listType && !tip.topic
+        ? tip.listType
+        : null;
+  const actionParts = [
+    tip.triggerArea ?? "?",
+    tip.triggerOp ?? "add",
+    listBit,
+  ].filter(Boolean);
+  const action = `action ${actionParts.join("/")}`;
   return ladder ? `${action} · ${ladder}` : action;
 }
 

@@ -1,15 +1,19 @@
 import { FormEvent, useMemo, useState } from "react";
 import {
   TIP_AUDIENCES,
+  TIP_LIST_FORM_TOPICS,
   TIP_TRIGGER_AREAS,
   TIP_TRIGGER_KINDS,
   TIP_TRIGGER_OPS,
   hasTipFieldErrors,
+  tipFieldsFromListFormTopic,
+  tipListFormTopicFromTip,
   validateTipInput,
   type PublicEmployee,
   type PublicTip,
   type TipAudience,
   type TipInput,
+  type TipListFormTopic,
   type TipTriggerArea,
   type TipTriggerKind,
   type TipTriggerOp,
@@ -31,6 +35,14 @@ interface TipFormDialogProps {
 
 const selectClass =
   "min-h-11 w-full rounded-xl border border-border bg-surface px-3.5 text-sm text-text-primary shadow-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20";
+
+const LIST_TOPIC_LABELS: Record<TipListFormTopic, string> = {
+  shopping: "קניות",
+  tasks: "מטלות",
+  meetings: "פגישות",
+  custom: "רשימה מותאמת",
+  contacts: "אנשי קשר",
+};
 
 export function TipFormDialog({
   mode,
@@ -54,6 +66,9 @@ export function TipFormDialog({
   );
   const [triggerOp, setTriggerOp] = useState<TipTriggerOp>(
     tip?.triggerOp ?? "add",
+  );
+  const [listTopic, setListTopic] = useState<TipListFormTopic | "">(
+    tip ? tipListFormTopicFromTip(tip) : "",
   );
   const [maxShows, setMaxShows] = useState(String(tip?.maxShows ?? 1));
   const [order, setOrder] = useState(String(tip?.order ?? 0));
@@ -108,6 +123,15 @@ export function TipFormDialog({
       return;
     }
 
+    const onLists = triggerKind === "action" && triggerArea === "lists";
+    const listsFields = onLists
+      ? tipFieldsFromListFormTopic(listTopic)
+      : null;
+    // Clear list filters only when leaving the lists area; otherwise leave
+    // filing/reminders/directory ladder topic+listType untouched on update.
+    const leftLists =
+      !onLists && Boolean(tip?.triggerArea === "lists");
+
     if (mode === "add") {
       await onSubmit({
         key: key.trim(),
@@ -116,6 +140,9 @@ export function TipFormDialog({
         triggerKind,
         triggerArea: triggerKind === "action" ? (triggerArea as TipTriggerArea) : null,
         triggerOp: triggerKind === "action" ? triggerOp : null,
+        ...(listsFields
+          ? { topic: listsFields.topic, listType: listsFields.listType }
+          : { topic: null, listType: null }),
         maxShows: maxShowsNum,
         order: orderNum,
         text: text.trim(),
@@ -130,6 +157,11 @@ export function TipFormDialog({
       triggerKind,
       triggerArea: triggerKind === "action" ? (triggerArea as TipTriggerArea) : null,
       triggerOp: triggerKind === "action" ? triggerOp : null,
+      ...(listsFields
+        ? { topic: listsFields.topic, listType: listsFields.listType }
+        : leftLists
+          ? { topic: null, listType: null }
+          : {}),
       maxShows: maxShowsNum,
       order: orderNum,
       text: text.trim(),
@@ -228,46 +260,74 @@ export function TipFormDialog({
           </div>
 
           {triggerKind === "action" ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="flex w-full flex-col gap-1.5">
-                <label htmlFor="tip-trigger-area" className="text-sm font-medium text-text-primary">
-                  Area
-                </label>
-                <select
-                  id="tip-trigger-area"
-                  className={selectClass}
-                  value={triggerArea}
-                  onChange={(event) =>
-                    setTriggerArea(event.target.value as TipTriggerArea)
-                  }
-                >
-                  {TIP_TRIGGER_AREAS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="flex w-full flex-col gap-1.5">
+                  <label htmlFor="tip-trigger-area" className="text-sm font-medium text-text-primary">
+                    Area
+                  </label>
+                  <select
+                    id="tip-trigger-area"
+                    className={selectClass}
+                    value={triggerArea}
+                    onChange={(event) => {
+                      const next = event.target.value as TipTriggerArea;
+                      setTriggerArea(next);
+                      if (next !== "lists") {
+                        setListTopic("");
+                      }
+                    }}
+                  >
+                    {TIP_TRIGGER_AREAS.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex w-full flex-col gap-1.5">
+                  <label htmlFor="tip-trigger-op" className="text-sm font-medium text-text-primary">
+                    Op
+                  </label>
+                  <select
+                    id="tip-trigger-op"
+                    className={selectClass}
+                    value={triggerOp}
+                    onChange={(event) =>
+                      setTriggerOp(event.target.value as TipTriggerOp)
+                    }
+                  >
+                    {TIP_TRIGGER_OPS.map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="flex w-full flex-col gap-1.5">
-                <label htmlFor="tip-trigger-op" className="text-sm font-medium text-text-primary">
-                  Op
-                </label>
-                <select
-                  id="tip-trigger-op"
-                  className={selectClass}
-                  value={triggerOp}
-                  onChange={(event) =>
-                    setTriggerOp(event.target.value as TipTriggerOp)
-                  }
-                >
-                  {TIP_TRIGGER_OPS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+              {triggerArea === "lists" ? (
+                <div className="flex w-full flex-col gap-1.5">
+                  <label htmlFor="tip-list-topic" className="text-sm font-medium text-text-primary">
+                    Topic
+                  </label>
+                  <select
+                    id="tip-list-topic"
+                    className={selectClass}
+                    value={listTopic}
+                    onChange={(event) =>
+                      setListTopic(event.target.value as TipListFormTopic | "")
+                    }
+                  >
+                    <option value="">Any</option>
+                    {TIP_LIST_FORM_TOPICS.map((value) => (
+                      <option key={value} value={value}>
+                        {LIST_TOPIC_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </>
           ) : null}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

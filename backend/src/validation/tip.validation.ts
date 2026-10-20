@@ -3,6 +3,7 @@ import {
   normalizeTipInput,
   normalizeTipUpdateInput,
   parseTipAudience,
+  parseTipTopic,
   parseTipTriggerArea,
   parseTipTriggerKind,
   parseTipTriggerOp,
@@ -54,6 +55,28 @@ export function parseTipCreateBody(body: unknown): TipInput {
       : Number(record.maxShows);
   const order =
     typeof record.order === "number" ? record.order : Number(record.order ?? 0);
+  const topic =
+    record.topic === undefined ||
+    record.topic === null ||
+    record.topic === ""
+      ? null
+      : parseTipTopic(record.topic);
+  if (
+    record.topic !== undefined &&
+    record.topic !== null &&
+    record.topic !== "" &&
+    !topic
+  ) {
+    throw new ValidationError("Please correct the highlighted fields", {
+      topic: "Invalid tip topic",
+    });
+  }
+  const listType =
+    record.listType === undefined ||
+    record.listType === null ||
+    record.listType === ""
+      ? null
+      : String(record.listType).trim();
 
   const errors = validateTipInput({
     key: record.key,
@@ -84,6 +107,8 @@ export function parseTipCreateBody(body: unknown): TipInput {
     triggerKind: triggerKind!,
     triggerArea: triggerKind === "action" ? triggerArea : null,
     triggerOp: triggerKind === "action" ? (triggerOp ?? "add") : null,
+    topic,
+    listType,
     maxShows,
     order,
     text: String(record.text),
@@ -141,6 +166,25 @@ export function parseTipUpdateBody(body: unknown): TipUpdateInput {
       }
       patch.triggerOp = op;
     }
+  }
+  if (record.topic !== undefined) {
+    if (record.topic === null || record.topic === "") {
+      patch.topic = null;
+    } else {
+      const topic = parseTipTopic(record.topic);
+      if (!topic) {
+        throw new ValidationError("Please correct the highlighted fields", {
+          topic: "Invalid tip topic",
+        });
+      }
+      patch.topic = topic;
+    }
+  }
+  if (record.listType !== undefined) {
+    patch.listType =
+      record.listType === null || record.listType === ""
+        ? null
+        : String(record.listType).trim();
   }
   if (record.digitalEmployeeId !== undefined) {
     patch.digitalEmployeeId =

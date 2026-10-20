@@ -208,6 +208,63 @@ export const TIP_TOPICS = [
 ] as const;
 export type TipTopic = (typeof TIP_TOPICS)[number];
 
+/**
+ * Topic picker when Area = lists (UI values).
+ * contacts is listType-only (not a TipTopic); meetings uses listType tasks.
+ */
+export const TIP_LIST_FORM_TOPICS = [
+  "shopping",
+  "tasks",
+  "meetings",
+  "custom",
+  "contacts",
+] as const;
+export type TipListFormTopic = (typeof TIP_LIST_FORM_TOPICS)[number];
+
+/** Resolve the lists-area Topic picker value from a saved tip. */
+export function tipListFormTopicFromTip(tip: {
+  topic?: TipTopic | null;
+  listType?: string | null;
+}): TipListFormTopic | "" {
+  if (tip.topic === "meetings") {
+    return "meetings";
+  }
+  if (tip.listType === "contacts") {
+    return "contacts";
+  }
+  if (
+    tip.topic === "shopping" ||
+    tip.topic === "tasks" ||
+    tip.topic === "custom"
+  ) {
+    return tip.topic;
+  }
+  if (
+    tip.listType === "shopping" ||
+    tip.listType === "tasks" ||
+    tip.listType === "custom"
+  ) {
+    return tip.listType;
+  }
+  return "";
+}
+
+/** Map Topic picker → persisted tip.topic + tip.listType. */
+export function tipFieldsFromListFormTopic(
+  selection: TipListFormTopic | "",
+): { topic: TipTopic | null; listType: string | null } {
+  if (!selection) {
+    return { topic: null, listType: null };
+  }
+  if (selection === "contacts") {
+    return { topic: null, listType: "contacts" };
+  }
+  if (selection === "meetings") {
+    return { topic: "meetings", listType: "tasks" };
+  }
+  return { topic: selection, listType: selection };
+}
+
 export interface PublicTip {
   id: string;
   key: string;
