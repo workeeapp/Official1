@@ -20,13 +20,15 @@ import { ApiError } from "@/types";
 type DialogMode = "add" | "update" | null;
 
 function triggerSummary(tip: PublicTip): string {
+  const ladder = [tip.topic, tip.tier].filter(Boolean).join("/");
   if (tip.triggerKind === "general") {
-    return "general";
+    return ladder ? `general · ${ladder}` : "general";
   }
   if (tip.triggerKind === "model") {
-    return "model";
+    return ladder ? `model · ${ladder}` : "model";
   }
-  return `action ${tip.triggerArea ?? "?"}/${tip.triggerOp ?? "add"}`;
+  const action = `action ${tip.triggerArea ?? "?"}/${tip.triggerOp ?? "add"}`;
+  return ladder ? `${action} · ${ladder}` : action;
 }
 
 function truncate(text: string, max = 80): string {

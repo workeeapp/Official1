@@ -4,12 +4,19 @@ import type {
   PublicTip,
   TipAudience,
   TipInput,
+  TipTier,
+  TipTopic,
   TipTriggerArea,
   TipTriggerKind,
   TipTriggerOp,
   TipUpdateInput,
 } from "@workee/shared";
-import { isGuestEmployee, isGuestLucy } from "@workee/shared";
+import {
+  isGuestEmployee,
+  isGuestLucy,
+  parseTipTier,
+  parseTipTopic,
+} from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import {
   ConflictError,
@@ -17,18 +24,26 @@ import {
   NotFoundError,
   ValidationError,
 } from "../utils/errors.js";
+import {
+  LEGACY_TIP_KEYS,
+  SYSTEM_TIP_SEEDS,
+  TIER_RANK,
+  areaFromTopic,
+  topicFromListType,
+} from "./tip-catalog.js";
 
 const LUCY_NAME = "לוסי";
 
 export interface AppliedTipOp {
   area: TipTriggerArea;
   op: TipTriggerOp;
+  /** shopping | tasks | custom | filing | reminders | contacts */
+  listType?: string | null;
+  topic?: TipTopic | null;
 }
 
 export interface TipTurnResult {
-  /** Catalog texts to append (contextual first, then at most one general). */
   texts: string[];
-  /** Tip ids that were recorded this turn. */
   tipIds: string[];
 }
 
@@ -50,6 +65,11 @@ function toPublicTip(row: TipWithDigital): PublicTip {
     triggerKind: row.triggerKind as TipTriggerKind,
     triggerArea: (row.triggerArea as TipTriggerArea | null) ?? null,
     triggerOp: (row.triggerOp as TipTriggerOp | null) ?? null,
+    tier: (parseTipTier(row.tier) ?? "basic") as TipTier,
+    topic: parseTipTopic(row.topic) ?? null,
+    listType: row.listType ?? null,
+    unlockAfterKey: row.unlockAfterKey ?? null,
+    systemSeed: row.systemSeed === true,
     maxShows: row.maxShows,
     order: row.order,
     text: row.text,
@@ -92,20 +112,10 @@ function assertActionFields(input: {
   }
 }
 
-const DEFAULT_TIP_TEXTS = {
-  reminders_intro:
-    "לידיעתך: התזכורות נשמרות אצלי, וכל פעם שתרצה אוכל להציג אותן.",
-  filing_media:
-    "אפשר גם לתייק תמונה, וידאו וקבצים — פשוט שלח/י אותם ואגיד לאן לשמור.",
-  guest_terms:
-    "תקנון שימוש (תמצית): השימוש באורח מוגבל לצפייה ברשימות ששותפו איתך ולהרשמה לחשבון. לאחר ההרשמה תקבל/י חשבון משלך עם לוסי. אל תשתף סיסמאות עם אחרים.",
-  general_lists:
-    "טיפ: אפשר לבקש ממני להציג קניות, מטלות או תיוקים בכל רגע — למשל «הציגי את רשימת הקניות».",
-  general_reminders:
-    "טיפ: אפשר לקבוע תזכורת בשעה מדויקת או בעוד X דקות — למשל «תזכירי לי מחר ב־9»." ,
-} as const;
-
-/** Insert default tips for Lucy / לוסי-אורח when missing (by key). */
+/**
+ * Wipe system / legacy seeds and insert the ladder catalog.
+ * UI-created tips (systemSeed=false, not legacy keys) are kept.
+ */
 export async function ensureDefaultTips(userId: string): Promise<void> {
   const digitals = await prisma.employee.findMany({
     where: { userId, kind: "digital" },
@@ -125,87 +135,21 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
     }),
   );
 
-  const seeds: Array<{
-    key: string;
-    audience: TipAudience;
-    digitalEmployeeId: string | null;
-    triggerKind: TipTriggerKind;
-    triggerArea: TipTriggerArea | null;
-    triggerOp: TipTriggerOp | null;
-    maxShows: number;
-    order: number;
-    text: string;
-  }> = [];
+  await prisma.tip.deleteMany({
+    where: {
+      userId,
+      OR: [
+        { systemSeed: true },
+        { key: { in: [...LEGACY_TIP_KEYS] } },
+        { key: { in: SYSTEM_TIP_SEEDS.map((s) => s.key) } },
+      ],
+    },
+  });
 
-  if (lucy) {
-    seeds.push(
-      {
-        key: "reminders_intro",
-        audience: "member",
-        digitalEmployeeId: lucy.id,
-        triggerKind: "action",
-        triggerArea: "reminders",
-        triggerOp: "add",
-        maxShows: 1,
-        order: 100,
-        text: DEFAULT_TIP_TEXTS.reminders_intro,
-      },
-      {
-        key: "filing_media",
-        audience: "member",
-        digitalEmployeeId: lucy.id,
-        triggerKind: "action",
-        triggerArea: "filing",
-        triggerOp: "add",
-        maxShows: 1,
-        order: 110,
-        text: DEFAULT_TIP_TEXTS.filing_media,
-      },
-      {
-        key: "general_lists",
-        audience: "member",
-        digitalEmployeeId: lucy.id,
-        triggerKind: "general",
-        triggerArea: null,
-        triggerOp: null,
-        maxShows: 3,
-        order: 10,
-        text: DEFAULT_TIP_TEXTS.general_lists,
-      },
-      {
-        key: "general_reminders",
-        audience: "member",
-        digitalEmployeeId: lucy.id,
-        triggerKind: "general",
-        triggerArea: null,
-        triggerOp: null,
-        maxShows: 3,
-        order: 20,
-        text: DEFAULT_TIP_TEXTS.general_reminders,
-      },
-    );
-  }
-
-  if (guestLucy) {
-    seeds.push({
-      key: "guest_terms",
-      audience: "guest",
-      digitalEmployeeId: guestLucy.id,
-      triggerKind: "model",
-      triggerArea: null,
-      triggerOp: null,
-      maxShows: 1,
-      order: 50,
-      text: DEFAULT_TIP_TEXTS.guest_terms,
-    });
-  }
-
-  for (const seed of seeds) {
-    const existing = await prisma.tip.findUnique({
-      where: { userId_key: { userId, key: seed.key } },
-      select: { id: true },
-    });
-    if (existing) {
+  for (const seed of SYSTEM_TIP_SEEDS) {
+    const digitalEmployeeId =
+      seed.for === "guestLucy" ? guestLucy?.id ?? null : lucy?.id ?? null;
+    if (!digitalEmployeeId) {
       continue;
     }
     try {
@@ -214,10 +158,15 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
           userId,
           key: seed.key,
           audience: seed.audience,
-          digitalEmployeeId: seed.digitalEmployeeId,
+          digitalEmployeeId,
           triggerKind: seed.triggerKind,
           triggerArea: seed.triggerArea,
           triggerOp: seed.triggerOp,
+          tier: seed.tier,
+          topic: seed.topic,
+          listType: seed.listType,
+          unlockAfterKey: seed.unlockAfterKey,
+          systemSeed: true,
           maxShows: seed.maxShows,
           order: seed.order,
           text: seed.text,
@@ -264,6 +213,11 @@ export async function createTipForUser(
           input.triggerKind === "action" ? (input.triggerArea ?? null) : null,
         triggerOp:
           input.triggerKind === "action" ? (input.triggerOp ?? "add") : null,
+        tier: input.tier ?? "basic",
+        topic: input.topic ?? null,
+        listType: input.listType ?? null,
+        unlockAfterKey: input.unlockAfterKey ?? null,
+        systemSeed: false,
         maxShows: input.maxShows,
         order: input.order,
         text: input.text,
@@ -333,6 +287,12 @@ export async function updateTipForUser(
         : {}),
       triggerArea: nextArea,
       triggerOp: nextOp,
+      ...(input.tier !== undefined ? { tier: input.tier } : {}),
+      ...(input.topic !== undefined ? { topic: input.topic } : {}),
+      ...(input.listType !== undefined ? { listType: input.listType } : {}),
+      ...(input.unlockAfterKey !== undefined
+        ? { unlockAfterKey: input.unlockAfterKey }
+        : {}),
       ...(input.maxShows !== undefined ? { maxShows: input.maxShows } : {}),
       ...(input.order !== undefined ? { order: input.order } : {}),
       ...(input.text !== undefined ? { text: input.text } : {}),
@@ -385,9 +345,17 @@ function underQuota(showCount: number, maxShows: number): boolean {
   return showCount < maxShows;
 }
 
+function tipTopic(tip: Tip): TipTopic | null {
+  return parseTipTopic(tip.topic) ?? topicFromListType(tip.listType);
+}
+
+function tipTier(tip: Tip): TipTier {
+  return parseTipTier(tip.tier) ?? "basic";
+}
+
 /** Build applied ops from this turn's engine results. */
 export function collectAppliedTipOps(input: {
-  listMutations: Array<{ action: string }>;
+  listMutations: Array<{ action: string; listType?: string }>;
   filingMutations: Array<{ action: string }>;
   reminderSavedCount: number;
   reminderUpdateCount: number;
@@ -398,46 +366,97 @@ export function collectAppliedTipOps(input: {
   directoryRequestedUpdate: boolean;
 }): AppliedTipOp[] {
   const ops: AppliedTipOp[] = [];
-  const listActions = new Set(
-    input.listMutations.map((row) => row.action).filter(Boolean),
-  );
-  for (const op of ["add", "update", "remove"] as TipTriggerOp[]) {
-    if (listActions.has(op)) {
-      ops.push({ area: "lists", op });
+  const seen = new Set<string>();
+  const push = (op: AppliedTipOp) => {
+    const key = `${op.topic ?? op.area}:${op.op}:${op.listType ?? ""}`;
+    if (seen.has(key)) {
+      return;
     }
+    seen.add(key);
+    ops.push(op);
+  };
+
+  for (const row of input.listMutations) {
+    const action = row.action;
+    if (action !== "add" && action !== "update" && action !== "remove") {
+      continue;
+    }
+    const listType = row.listType?.trim() || null;
+    const topic = topicFromListType(listType);
+    push({
+      area: topic ? areaFromTopic(topic) : "lists",
+      op: action,
+      listType,
+      topic,
+    });
   }
+
   const filingActions = new Set(
-    input.filingMutations.map((row) => row.action).filter(Boolean),
+    input.filingMutations.map((row) => {
+      const a = row.action;
+      if (a === "add_filing" || a === "add") return "add";
+      if (a === "remove_filing" || a === "remove") return "remove";
+      if (a === "update_filing" || a === "update") return "update";
+      return "";
+    }).filter(Boolean),
   );
   for (const op of ["add", "update", "remove"] as TipTriggerOp[]) {
     if (filingActions.has(op)) {
-      ops.push({ area: "filing", op });
+      push({
+        area: "filing",
+        op,
+        listType: "filing",
+        topic: "filing",
+      });
     }
   }
-  // New clocks land in saved without an update change row.
+
   const reminderAdds = Math.max(
     0,
     input.reminderSavedCount - input.reminderUpdateCount,
   );
   if (reminderAdds > 0 && input.reminderRequestedAdd) {
-    ops.push({ area: "reminders", op: "add" });
+    push({
+      area: "reminders",
+      op: "add",
+      listType: "reminders",
+      topic: "reminders",
+    });
   }
   if (input.reminderUpdateCount > 0) {
-    ops.push({ area: "reminders", op: "update" });
+    push({
+      area: "reminders",
+      op: "update",
+      listType: "reminders",
+      topic: "reminders",
+    });
   }
   if (input.reminderRemovedCount > 0) {
-    ops.push({ area: "reminders", op: "remove" });
+    push({
+      area: "reminders",
+      op: "remove",
+      listType: "reminders",
+      topic: "reminders",
+    });
   }
+
   if (input.directorySavedCount > 0) {
-    // Directory apply uses saved for add+update; prefer add unless only update requested.
-    ops.push({
+    push({
       area: "directory",
       op: input.directoryRequestedUpdate ? "update" : "add",
+      listType: null,
+      topic: "directory",
     });
   }
   if (input.directoryRemovedCount > 0) {
-    ops.push({ area: "directory", op: "remove" });
+    push({
+      area: "directory",
+      op: "remove",
+      listType: null,
+      topic: "directory",
+    });
   }
+
   return ops;
 }
 
@@ -476,9 +495,77 @@ async function recordTipShown(input: {
   });
 }
 
+function actionTipMatches(tip: Tip, applied: AppliedTipOp): boolean {
+  if (tip.triggerKind !== "action") {
+    return false;
+  }
+  const op = (tip.triggerOp as TipTriggerOp | null) ?? "add";
+  if (op !== applied.op) {
+    return false;
+  }
+  const topic = tipTopic(tip);
+  if (topic && applied.topic) {
+    return topic === applied.topic;
+  }
+  if (tip.listType && applied.listType) {
+    return tip.listType === applied.listType;
+  }
+  // Legacy: area-only match when tip has no topic/listType
+  if (!topic && !tip.listType) {
+    return tip.triggerArea === applied.area;
+  }
+  if (topic === "directory" && applied.area === "directory") {
+    return true;
+  }
+  return tip.triggerArea === applied.area && !applied.listType;
+}
+
+function isUnlocked(
+  tip: Tip,
+  tips: Tip[],
+  showCountByTip: Map<string, number>,
+  keyToTipId: Map<string, string>,
+): boolean {
+  const tier = tipTier(tip);
+  if (tier === "basic" || tier === "personal") {
+    if (tip.unlockAfterKey) {
+      const reqId = keyToTipId.get(tip.unlockAfterKey);
+      if (!reqId) {
+        return true;
+      }
+      return (showCountByTip.get(reqId) ?? 0) >= 1;
+    }
+    return true;
+  }
+
+  if (tip.unlockAfterKey) {
+    const reqId = keyToTipId.get(tip.unlockAfterKey);
+    if (!reqId) {
+      return false;
+    }
+    return (showCountByTip.get(reqId) ?? 0) >= 1;
+  }
+
+  const topic = tipTopic(tip);
+  if (!topic) {
+    return true;
+  }
+  const needTier: TipTier =
+    tier === "intermediate" ? "basic" : "intermediate";
+  return tips.some((other) => {
+    if (tipTopic(other) !== topic) {
+      return false;
+    }
+    if (tipTier(other) !== needTier) {
+      return false;
+    }
+    return (showCountByTip.get(other.id) ?? 0) >= 1;
+  });
+}
+
 /**
  * Resolve which tip texts to append this turn and bump progress.
- * Contextual (action/model) tips first; general only if none contextual fired.
+ * Action/model first (one tip); general only if none contextual.
  */
 export async function resolveAndRecordTipsForTurn(input: {
   userId: string;
@@ -512,36 +599,23 @@ export async function resolveAndRecordTipsForTurn(input: {
   const showCountByTip = new Map(
     progressRows.map((row) => [row.tipId, row.showCount] as const),
   );
+  const keyToTipId = new Map(eligible.map((tip) => [tip.key, tip.id] as const));
 
-  const queued: Tip[] = [];
-  const queuedIds = new Set<string>();
-
-  const queueIfOk = (tip: Tip) => {
-    if (queuedIds.has(tip.id)) {
-      return;
-    }
-    const shown = showCountByTip.get(tip.id) ?? 0;
-    if (!underQuota(shown, tip.maxShows)) {
-      return;
-    }
-    queued.push(tip);
-    queuedIds.add(tip.id);
-  };
-
+  const candidates: Tip[] = [];
   for (const tip of eligible) {
     if (tip.triggerKind !== "action") {
       continue;
     }
-    const area = tip.triggerArea as TipTriggerArea | null;
-    const op = (tip.triggerOp as TipTriggerOp | null) ?? "add";
-    if (!area) {
+    if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
       continue;
     }
-    if (
-      input.appliedOps.some((applied) => applied.area === area && applied.op === op)
-    ) {
-      queueIfOk(tip);
+    if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
+      continue;
     }
+    if (!input.appliedOps.some((applied) => actionTipMatches(tip, applied))) {
+      continue;
+    }
+    candidates.push(tip);
   }
 
   const modelKeys = new Set(
@@ -551,15 +625,29 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (tip.triggerKind !== "model") {
       continue;
     }
-    if (modelKeys.has(tip.key)) {
-      queueIfOk(tip);
+    if (!modelKeys.has(tip.key)) {
+      continue;
     }
+    if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
+      continue;
+    }
+    if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
+      continue;
+    }
+    candidates.push(tip);
   }
 
-  const contextualCount = queued.length;
-
-  if (contextualCount === 0) {
-    // Round-robin among under-quota generals: lowest showCount, then catalog order.
+  let chosen: Tip | null = null;
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => {
+      const tr = TIER_RANK[tipTier(a)] - TIER_RANK[tipTier(b)];
+      if (tr !== 0) {
+        return tr;
+      }
+      return a.order - b.order || a.createdAt.getTime() - b.createdAt.getTime();
+    });
+    chosen = candidates[0] ?? null;
+  } else {
     const generals = eligible.filter((tip) => {
       if (tip.triggerKind !== "general") {
         return false;
@@ -570,33 +658,25 @@ export async function resolveAndRecordTipsForTurn(input: {
       const minShown = Math.min(
         ...generals.map((tip) => showCountByTip.get(tip.id) ?? 0),
       );
-      const next = generals.find(
-        (tip) => (showCountByTip.get(tip.id) ?? 0) === minShown,
-      );
-      if (next) {
-        queueIfOk(next);
-      }
+      chosen =
+        generals.find((tip) => (showCountByTip.get(tip.id) ?? 0) === minShown) ??
+        null;
     }
   }
 
-  const texts: string[] = [];
-  const tipIds: string[] = [];
-  for (const tip of queued) {
-    const body = tip.text.trim();
-    if (!body) {
-      continue;
-    }
-    texts.push(body);
-    tipIds.push(tip.id);
-    await recordTipShown({
-      tipId: tip.id,
-      employeeId: input.speaker.id,
-      digitalEmployeeId: input.digitalEmployeeId,
-    });
-    showCountByTip.set(tip.id, (showCountByTip.get(tip.id) ?? 0) + 1);
+  if (!chosen) {
+    return { texts: [], tipIds: [] };
   }
-
-  return { texts, tipIds };
+  const body = chosen.text.trim();
+  if (!body) {
+    return { texts: [], tipIds: [] };
+  }
+  await recordTipShown({
+    tipId: chosen.id,
+    employeeId: input.speaker.id,
+    digitalEmployeeId: input.digitalEmployeeId,
+  });
+  return { texts: [body], tipIds: [chosen.id] };
 }
 
 /** Remaining model-kind tips the speaker may still receive (for AVAILABLE_TIPS). */

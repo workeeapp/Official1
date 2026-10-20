@@ -83,6 +83,16 @@ model Tip {
   triggerArea       String?   @map("trigger_area") @db.VarChar(32)
   /** When triggerKind=action: add | remove | update */
   triggerOp         String?   @map("trigger_op") @db.VarChar(16)
+  /** basic | intermediate | advanced | personal */
+  tier              String    @default("basic") @db.VarChar(16)
+  /** Product topic: shopping | tasks | custom | filing | reminders | directory | guest */
+  topic             String?   @db.VarChar(32)
+  /** Match applied list_type when set (shopping|tasks|custom|contacts|filing|reminders). */
+  listType          String?   @map("list_type") @db.VarChar(32)
+  /** Optional: require this tip key shown first (else unlock by prior tier in topic). */
+  unlockAfterKey    String?   @map("unlock_after_key") @db.VarChar(64)
+  /** Catalog seed — wiped/reseeded by ensureDefaultTips; UI tips stay false. */
+  systemSeed        Boolean   @default(false) @map("system_seed")
   maxShows          Int       @default(1) @map("max_shows")
   order             Int       @default(0)
   text              String    @db.Text
@@ -96,6 +106,7 @@ model Tip {
   @@unique([userId, key])
   @@index([userId, enabled])
   @@index([digitalEmployeeId])
+  @@index([userId, topic, tier])
   @@map("Tips")
 }
 

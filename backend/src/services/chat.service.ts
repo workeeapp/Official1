@@ -2781,7 +2781,10 @@ export async function sendChatMessage(input: {
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({
-      listMutations,
+      listMutations: listMutations.map((row) => ({
+        action: row.action,
+        listType: row.listType,
+      })),
       filingMutations,
       reminderSavedCount: reminderResult.saved.length,
       reminderUpdateCount: (reminderResult.changes ?? []).filter(

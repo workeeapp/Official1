@@ -186,6 +186,27 @@ export type TipTriggerArea = (typeof TIP_TRIGGER_AREAS)[number];
 export const TIP_TRIGGER_OPS = ["add", "remove", "update"] as const;
 export type TipTriggerOp = (typeof TIP_TRIGGER_OPS)[number];
 
+/** Pedagogy ladder for tips. */
+export const TIP_TIERS = [
+  "basic",
+  "intermediate",
+  "advanced",
+  "personal",
+] as const;
+export type TipTier = (typeof TIP_TIERS)[number];
+
+/** Product topics for tip ladders (copy + unlock), not raw ACTION names. */
+export const TIP_TOPICS = [
+  "shopping",
+  "tasks",
+  "custom",
+  "filing",
+  "reminders",
+  "directory",
+  "guest",
+] as const;
+export type TipTopic = (typeof TIP_TOPICS)[number];
+
 export interface PublicTip {
   id: string;
   key: string;
@@ -196,6 +217,11 @@ export interface PublicTip {
   triggerKind: TipTriggerKind;
   triggerArea: TipTriggerArea | null;
   triggerOp: TipTriggerOp | null;
+  tier: TipTier;
+  topic: TipTopic | null;
+  listType: string | null;
+  unlockAfterKey: string | null;
+  systemSeed: boolean;
   maxShows: number;
   order: number;
   text: string;
@@ -216,6 +242,10 @@ export interface TipInput {
   triggerKind: TipTriggerKind;
   triggerArea?: TipTriggerArea | null;
   triggerOp?: TipTriggerOp | null;
+  tier?: TipTier;
+  topic?: TipTopic | null;
+  listType?: string | null;
+  unlockAfterKey?: string | null;
   maxShows: number;
   order: number;
   text: string;
@@ -228,6 +258,10 @@ export interface TipUpdateInput {
   triggerKind?: TipTriggerKind;
   triggerArea?: TipTriggerArea | null;
   triggerOp?: TipTriggerOp | null;
+  tier?: TipTier;
+  topic?: TipTopic | null;
+  listType?: string | null;
+  unlockAfterKey?: string | null;
   maxShows?: number;
   order?: number;
   text?: string;

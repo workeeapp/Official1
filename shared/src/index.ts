@@ -23,6 +23,8 @@ export type {
   TipTriggerKind,
   TipTriggerArea,
   TipTriggerOp,
+  TipTier,
+  TipTopic,
   PublicTip,
   TipsResponse,
   TipInput,
@@ -71,6 +73,8 @@ export {
   parseTipTriggerKind,
   parseTipTriggerArea,
   parseTipTriggerOp,
+  parseTipTier,
+  parseTipTopic,
   validateTipKey,
   validateTipText,
   validateTipInput,
@@ -97,6 +101,8 @@ export {
   TIP_TRIGGER_KINDS,
   TIP_TRIGGER_AREAS,
   TIP_TRIGGER_OPS,
+  TIP_TIERS,
+  TIP_TOPICS,
 } from "./types";
 export type {
   FieldErrors,

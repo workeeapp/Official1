@@ -1,11 +1,15 @@
 import {
   parseReasoningEffort,
   TIP_AUDIENCES,
+  TIP_TIERS,
+  TIP_TOPICS,
   TIP_TRIGGER_AREAS,
   TIP_TRIGGER_KINDS,
   TIP_TRIGGER_OPS,
   type TipAudience,
   type TipInput,
+  type TipTier,
+  type TipTopic,
   type TipTriggerArea,
   type TipTriggerKind,
   type TipTriggerOp,
@@ -24,6 +28,10 @@ export interface TipFieldErrors {
   triggerKind?: string;
   triggerArea?: string;
   triggerOp?: string;
+  tier?: string;
+  topic?: string;
+  listType?: string;
+  unlockAfterKey?: string;
   maxShows?: string;
   order?: string;
   text?: string;
@@ -396,6 +404,20 @@ export function parseTipTriggerOp(value: unknown): TipTriggerOp | null {
     : null;
 }
 
+export function parseTipTier(value: unknown): TipTier | null {
+  return typeof value === "string" &&
+    (TIP_TIERS as readonly string[]).includes(value)
+    ? (value as TipTier)
+    : null;
+}
+
+export function parseTipTopic(value: unknown): TipTopic | null {
+  return typeof value === "string" &&
+    (TIP_TOPICS as readonly string[]).includes(value)
+    ? (value as TipTopic)
+    : null;
+}
+
 export function validateTipKey(key: unknown): string | undefined {
   if (typeof key !== "string" || key.trim().length === 0) {
     return "Key is required";
@@ -586,6 +608,10 @@ export function normalizeTipInput(input: {
   order: number;
   text: string;
   enabled?: boolean;
+  tier?: TipTier;
+  topic?: TipTopic | null;
+  listType?: string | null;
+  unlockAfterKey?: string | null;
 }): TipInput {
   const triggerKind = input.triggerKind;
   return {
@@ -597,6 +623,10 @@ export function normalizeTipInput(input: {
       triggerKind === "action" ? (input.triggerArea ?? null) : null,
     triggerOp:
       triggerKind === "action" ? (input.triggerOp ?? "add") : null,
+    tier: input.tier ?? "basic",
+    topic: input.topic ?? null,
+    listType: input.listType?.trim() || null,
+    unlockAfterKey: input.unlockAfterKey?.trim() || null,
     maxShows: input.maxShows,
     order: input.order,
     text: input.text.trim(),
@@ -623,6 +653,24 @@ export function normalizeTipUpdateInput(input: TipUpdateInput): TipUpdateInput {
   }
   if (input.triggerOp !== undefined) {
     out.triggerOp = input.triggerOp;
+  }
+  if (input.tier !== undefined) {
+    out.tier = input.tier;
+  }
+  if (input.topic !== undefined) {
+    out.topic = input.topic;
+  }
+  if (input.listType !== undefined) {
+    out.listType =
+      input.listType === null || input.listType === ""
+        ? null
+        : String(input.listType).trim();
+  }
+  if (input.unlockAfterKey !== undefined) {
+    out.unlockAfterKey =
+      input.unlockAfterKey === null || input.unlockAfterKey === ""
+        ? null
+        : String(input.unlockAfterKey).trim();
   }
   if (input.maxShows !== undefined) {
     out.maxShows = input.maxShows;
