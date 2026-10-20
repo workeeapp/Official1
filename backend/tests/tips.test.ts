@@ -55,6 +55,7 @@ import {
   collectAppliedTipOps,
   createTipForUser,
   ensureDefaultTips,
+  formatAvailableTipsContext,
   resolveAndRecordTipsForTurn,
   tipAudienceMatchesForTest,
 } from "../src/services/tips.service.js";
@@ -511,5 +512,52 @@ describe("tips service", () => {
         data: expect.objectContaining({ showCount: 3 }),
       }),
     );
+  });
+
+  it("injects catalog tip text into AVAILABLE_TIPS for model tips", async () => {
+    tipFindUnique.mockResolvedValue({ id: "exists" });
+    tipFindMany.mockResolvedValue([
+      tipRow({
+        id: "tip-terms",
+        key: "guest_terms",
+        audience: "guest",
+        digitalEmployeeId: GUEST_LUCY,
+        triggerKind: "model",
+        text: "תקנון שימוש\n(תמצית)",
+        maxShows: 1,
+        order: 1,
+      }),
+      tipRow({
+        id: "tip-other",
+        key: "custom_help",
+        audience: "any",
+        digitalEmployeeId: GUEST_LUCY,
+        triggerKind: "model",
+        text: "אפשר לבקש עזרה בכל רגע",
+        maxShows: 1,
+        order: 2,
+      }),
+    ]);
+    tipProgressFindMany.mockResolvedValue([]);
+
+    const context = await formatAvailableTipsContext({
+      userId: USER,
+      speaker: {
+        id: SPEAKER,
+        name: "אורח",
+        surname: "",
+        nickname: null,
+        email: null,
+        phone: null,
+        kind: "human",
+      },
+      digitalEmployeeId: GUEST_LUCY,
+    });
+
+    expect(context).toContain("AVAILABLE_TIPS");
+    expect(context).toContain("key=guest_terms text: תקנון שימוש (תמצית)");
+    expect(context).toContain("key=custom_help text: אפשר לבקש עזרה בכל רגע");
+    expect(context).not.toContain("when: guest asks");
+    expect(context).not.toContain("model tip key=");
   });
 });

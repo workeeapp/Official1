@@ -640,13 +640,10 @@ export async function formatAvailableTipsContext(input: {
     return "";
   }
   return [
-    "AVAILABLE_TIPS (engine sends the text — emit metadata.tips with these keys only when the situation matches; never invent keys or rewrite tip copy in responses):",
+    "AVAILABLE_TIPS (match this turn's chat to each tip's catalog text; when it fits, emit that key in metadata.tips — engine appends the text; never invent keys or rewrite tip copy in responses):",
     ...remaining.map((tip) => {
-      const when =
-        tip.key === "guest_terms"
-          ? "guest asks how registration / usage works or about terms"
-          : `model tip key=${tip.key}`;
-      return `- key=${tip.key} when: ${when}`;
+      const body = tip.text.trim().replace(/\s+/g, " ");
+      return `- key=${tip.key} text: ${body}`;
     }),
   ].join("\n");
 }
