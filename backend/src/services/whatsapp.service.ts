@@ -6,6 +6,7 @@ import {
   parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
+  TYPING_PAUSE_MIN_MS,
   typingPauseMs,
 } from "@workee/shared";
 import type { AttachmentKind, PublicEmployee } from "@workee/shared";
@@ -428,6 +429,12 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         parsed.showIcon,
       );
       recordWhatsAppEvent("reaction_send", `result=${reactionResult}`);
+      // Reaction clears Meta's typing indicator, and Graph ack ≠ device delivery —
+      // refresh typing and settle so the emoji lands before the spoken reply.
+      if (reactionResult === "sent") {
+        await sendWhatsAppTyping(last.messageId);
+        await sleep(TYPING_PAUSE_MIN_MS);
+      }
     }
     let delivered = true;
     for (const [index, reply] of replies.entries()) {
