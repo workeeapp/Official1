@@ -53,6 +53,76 @@ export function loadModelEvalCorpus(path = defaultCorpusPath()): ModelEvalCorpus
   return raw;
 }
 
+/** One turn inside a Phase 4 multi-turn LIVE / offline-wire case. */
+export interface ModelEvalMultiTurnTurn {
+  utterance: string;
+  constraints: ModelEvalConstraint[];
+}
+
+export interface ModelEvalMultiTurnCase {
+  id: string;
+  tag: ModelEvalTag;
+  description?: string;
+  setup: ModelEvalCorpusCase["setup"];
+  turns: ModelEvalMultiTurnTurn[];
+}
+
+export interface ModelEvalMultiTurnCorpus {
+  version: number;
+  passRate: number;
+  speaker: string;
+  criticalCaseIds?: string[];
+  cases: ModelEvalMultiTurnCase[];
+}
+
+export function defaultMultiTurnCorpusPath(
+  repoRoot = resolve(import.meta.dirname, "../../.."),
+): string {
+  return resolve(repoRoot, "docs/qa/phase-4-multi-turn-corpus.json");
+}
+
+export function loadModelEvalMultiTurnCorpus(
+  path = defaultMultiTurnCorpusPath(),
+): ModelEvalMultiTurnCorpus {
+  const raw = JSON.parse(readFileSync(path, "utf8")) as ModelEvalMultiTurnCorpus;
+  if (!Array.isArray(raw.cases) || raw.cases.length === 0) {
+    throw new Error(`Model eval multi-turn corpus has no cases: ${path}`);
+  }
+  for (const row of raw.cases) {
+    if (!Array.isArray(row.turns) || row.turns.length < 2) {
+      throw new Error(
+        `Multi-turn case ${row.id}: need ≥2 turns (got ${row.turns?.length ?? 0})`,
+      );
+    }
+    for (let i = 0; i < row.turns.length; i += 1) {
+      const turn = row.turns[i]!;
+      if (!turn.utterance?.trim()) {
+        throw new Error(`Multi-turn case ${row.id} turn ${i}: utterance required`);
+      }
+      if (!Array.isArray(turn.constraints)) {
+        throw new Error(
+          `Multi-turn case ${row.id} turn ${i}: constraints required`,
+        );
+      }
+    }
+  }
+  if (raw.criticalCaseIds) {
+    if (!Array.isArray(raw.criticalCaseIds)) {
+      throw new Error(
+        `Multi-turn corpus criticalCaseIds must be an array: ${path}`,
+      );
+    }
+    const known = new Set(raw.cases.map((row) => row.id));
+    const missing = raw.criticalCaseIds.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        `Multi-turn corpus criticalCaseIds unknown: ${missing.join(", ")}`,
+      );
+    }
+  }
+  return raw;
+}
+
 export function snapshotFromSetup(
   setup: ModelEvalCorpusCase["setup"],
   speaker: string,

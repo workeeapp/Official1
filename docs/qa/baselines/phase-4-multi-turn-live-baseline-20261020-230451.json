@@ -1,0 +1,439 @@
+{
+  "generatedAt": "2026-10-20T20:04:21.354Z",
+  "suite": "phase-4-multi-turn-corpus",
+  "track": "LIVE",
+  "promptSource": "LLM.config.json (worktree via loadLlmConfig)",
+  "evalPath": "model-output-constraints-only-multi-turn",
+  "productionApply": false,
+  "total": 6,
+  "passed": 6,
+  "failed": 0,
+  "passRate": 1,
+  "requiredPassRate": 0.7,
+  "softOk": true,
+  "criticalOk": true,
+  "criticalFailed": [],
+  "ok": true,
+  "results": [
+    {
+      "id": "mt-clarify-then-delete",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 9739,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תמחק את זה",
+          "response": "איזה פריט למחוק — חלב או לחם?",
+          "ok": true,
+          "failures": [],
+          "llmMs": 5544,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "את החלב",
+          "response": "מחקתי את החלב מרשימת הקניות.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4195,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "remove",
+                "listType": "shopping",
+                "listName": "",
+                "items": [
+                  {
+                    "item_id": "eval-item-milk",
+                    "שם פריט": "חלב"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "mt-ask-then-add",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 7093,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תוסיפי משהו לקניות",
+          "response": "מה להוסיף לקניות?",
+          "ok": true,
+          "failures": [],
+          "llmMs": 3115,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "לחם",
+          "response": "הוספתי לחם לקניות.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 3978,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "add",
+                "listType": "shopping",
+                "listName": "",
+                "items": [
+                  {
+                    "שם פריט": "לחם",
+                    "כמות": 1,
+                    "יחידת מידה": "",
+                    "urgency": "normal"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "mt-ambiguous-list-resolve",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 7700,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תמחק את הרשימה באגים",
+          "response": "לאיזו רשימת «באגים» התכוונת?\n1. באגים אישית\n2. באגים משותפת לך ולעמית",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4117,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "את המשותפת עם עמית",
+          "response": "מחקתי את רשימת «באגים» המשותפת לך ולעמית.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 3583,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [
+              {
+                "action": "delete_list",
+                "listId": "eval-list-custom-bugs-shared",
+                "newName": "",
+                "addColumns": [],
+                "removeColumns": [],
+                "renameColumns": [],
+                "addParticipants": [],
+                "removeParticipants": []
+              }
+            ],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "mt-directory-clear-confirm",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 8457,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "response": "יש לך אנשי קשר בספר הטלפונים. התכוונת למחוק את רשימת אנשי הקשר או את ספר הטלפונים? כל אנשי הקשר בספר הטלפונים יימחקו.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4362,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "כן, את ספר הטלפונים",
+          "response": "מחקתי את מיכל ואורי מספר הטלפונים שלך.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4095,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [
+              {
+                "action": "remove",
+                "name": "מיכל",
+                "phone": "0541111111",
+                "contactId": "contact-0",
+                "targets": []
+              },
+              {
+                "action": "remove",
+                "name": "אורי",
+                "phone": "0534455366",
+                "contactId": "contact-1",
+                "targets": []
+              }
+            ],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "mt-stop-nudge-keep-item",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 7523,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "מה התזכורות שלי?",
+          "response": "",
+          "ok": true,
+          "failures": [],
+          "llmMs": 3415,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": [],
+            "showDump": "reminders"
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "תפסיקי",
+          "response": "הפסקתי את התזכורת «לקנות חלב». להשאיר את החלב ברשימת הקניות?",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4108,
+          "metadata": {
+            "messages": [],
+            "reminders": [
+              {
+                "action": "remove",
+                "item": "",
+                "listType": "shopping",
+                "date": "",
+                "time": "",
+                "repeat": "once",
+                "ping": [],
+                "about": [],
+                "targets": [],
+                "text": "",
+                "inSeconds": null,
+                "everyCount": null,
+                "everyUnit": null,
+                "weekdays": null,
+                "confirmed": false,
+                "compose": false,
+                "composeSource": "",
+                "composeLookbackHours": 0,
+                "composePlace": "",
+                "scheduleAnchor": "",
+                "scheduleOffsetMinutes": 0,
+                "composeCondition": null,
+                "reminderId": "eval-reminder-milk-nudge"
+              }
+            ],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "mt-filing-confirm-delete",
+      "tag": "continuity",
+      "ok": true,
+      "failures": [],
+      "llmMs": 8892,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תמחק את הקוד לשער — רק אחרי שאאשר",
+          "response": "למחוק את התיוק «קוד לשער»? מחכה לאישור שלך.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4282,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "כן",
+          "response": "מחקתי את «קוד לשער» מהתיוקים.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4610,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": [
+              {
+                "action": "remove_filing",
+                "itemName": "קוד לשער",
+                "itemInfo": "",
+                "itemDescription": "",
+                "targets": [],
+                "filingId": "eval-filing-gate"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -830,6 +830,64 @@
         { "type": "list_ops_empty" },
         { "type": "response_looks_like_ask" }
       ]
+    },
+    {
+      "id": "self-nudge-daily-dog-0800",
+      "tag": "happy",
+      "utterance": "תזכירי לי כל יום ב־08:00 להוריד את הכלב",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "reminders_has_action",
+          "action": "add",
+          "recurring": true
+        },
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks"
+        },
+        {
+          "type": "response_mentions_any",
+          "needles": ["08", "8:00", "כלב", "יום"]
+        }
+      ]
+    },
+    {
+      "id": "occurrence-skip-one-day",
+      "tag": "happy",
+      "utterance": "ב־23.10 אני לא צריך לאסוף את הילדים",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-kids-pickup",
+                "שם מטלה": "לאסוף את הילדים",
+                "חוזר": "כל יום שישי ב־12:00",
+                "שעה לביצוע": "12:00",
+                "next_occurrences": ["2026-10-23", "2026-10-30", "2026-11-06"]
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "update",
+          "listType": "tasks"
+        },
+        { "type": "list_ops_empty" },
+        {
+          "type": "response_mentions_any",
+          "needles": ["23", "23.10", "ילדים"]
+        }
+      ]
     }
   ]
 }

@@ -388,6 +388,8 @@ describe("Phase 4 constraint checkers", () => {
         "delete-two-named-lists",
         "delete-ambiguous-list-title",
         "delete-unresolved-list",
+        "self-nudge-daily-dog-0800",
+        "occurrence-skip-one-day",
       ]),
     );
   });

@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "passRate": 0.7,
+  "speaker": "טל",
+  "criticalCaseIds": [
+    "mt-clarify-then-delete",
+    "mt-ambiguous-list-resolve"
+  ],
+  "cases": [
+    {
+      "id": "mt-clarify-then-delete",
+      "tag": "continuity",
+      "description": "Ambiguous delete → pick milk; bread stays",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              { "item_id": "eval-item-milk", "שם פריט": "חלב" },
+              { "item_id": "eval-item-bread", "שם פריט": "לחם" }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את זה",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "את החלב",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": ["eval-item-milk"]
+            },
+            { "type": "list_ops_empty" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-ask-then-add",
+      "tag": "continuity",
+      "description": "Incomplete shopping add → fill bread",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי משהו לקניות",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "לחם",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-ambiguous-list-resolve",
+      "tag": "continuity",
+      "description": "Two lists named באגים → ask → delete shared twin",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs-personal",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [{ "item_id": "eval-item-bugs-p1", "תיאור": "באג אישי" }]
+          },
+          {
+            "list_id": "eval-list-custom-bugs-shared",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": ["טל", "עמית"],
+            "items": [{ "item_id": "eval-item-bugs-s1", "תיאור": "באג משותף" }]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הרשימה באגים",
+          "constraints": [
+            { "type": "lists_empty" },
+            { "type": "list_ops_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "את המשותפת עם עמית",
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": ["eval-list-custom-bugs-shared"]
+            },
+            { "type": "lists_empty" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-directory-clear-confirm",
+      "tag": "continuity",
+      "description": "Wipe-all contacts ask → כן removes phone-book rows",
+      "setup": {
+        "contacts": [
+          { "name": "מיכל", "phone": "0541111111" },
+          { "name": "אורי", "phone": "0534455366" }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את כל אנשי הקשר",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "directory_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "כן, את ספר הטלפונים",
+          "constraints": [
+            {
+              "type": "directory_remove_contact_ids",
+              "contactIds": ["contact-0", "contact-1"]
+            },
+            { "type": "lists_empty" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-stop-nudge-keep-item",
+      "tag": "continuity",
+      "description": "Seeded clock + shopping; תפסיקי cancels clock only",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              { "item_id": "eval-item-shop-milk-keep", "שם פריט": "חלב" }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-reminder-milk-nudge",
+            "item": "לקנות חלב",
+            "list_type": "shopping",
+            "fire_at": "2099-01-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": ["טל"],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לקנות חלב",
+            "last_composed_text": "",
+            "sent_text": "לקנות חלב",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה התזכורות שלי?",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "show_dump", "value": "reminders" }
+          ]
+        },
+        {
+          "utterance": "תפסיקי",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": ["eval-reminder-milk-nudge"]
+            },
+            { "type": "lists_empty" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-filing-confirm-delete",
+      "tag": "continuity",
+      "description": "Ask before filing wipe → כן removes filing",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-gate",
+            "item_name": "קוד לשער",
+            "item_description": "קוד לשער",
+            "item_info": "4455",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את הקוד לשער — רק אחרי שאאשר",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "filing_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-gate"
+            },
+            { "type": "lists_empty" }
+          ]
+        }
+      ]
+    }
+  ]
+}

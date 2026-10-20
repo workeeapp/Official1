@@ -4,7 +4,8 @@ export type ModelEvalTag =
   | "happy"
   | "action-confusion"
   | "hallucination-boundaries"
-  | "safety-rails";
+  | "safety-rails"
+  | "continuity";
 
 export type ModelEvalConstraint =
   | {

@@ -15,9 +15,12 @@ import {
 } from "./constraints.js";
 import {
   loadModelEvalCorpus,
+  loadModelEvalMultiTurnCorpus,
   snapshotFromSetup,
   type ModelEvalCorpus,
   type ModelEvalCorpusCase,
+  type ModelEvalMultiTurnCase,
+  type ModelEvalMultiTurnCorpus,
 } from "./corpus.js";
 
 export interface ModelEvalRunCaseResult extends ModelEvalCaseResult {
@@ -201,4 +204,146 @@ export async function runModelEvalCorpus(
     requiredPassRate: corpus.passRate,
     criticalCaseIds: corpus.criticalCaseIds,
   });
+}
+
+export interface ModelEvalMultiTurnRunResult {
+  id: string;
+  tag: string;
+  ok: boolean;
+  failures: string[];
+  turns: Array<{
+    index: number;
+    utterance: string;
+    response: string;
+    ok: boolean;
+    failures: string[];
+    llmMs: number;
+    metadata: ReturnType<typeof parseReplyMetadata>;
+  }>;
+  llmMs: number;
+}
+
+/**
+ * LIVE multi-turn (metadata only, no Prisma apply).
+ * Same conversationId across turns; facts re-injected each turn from setup
+ * (no apply → snapshot does not change between turns).
+ */
+export async function runModelEvalMultiTurnCase(
+  corpusCase: ModelEvalMultiTurnCase,
+  options?: { speaker?: string },
+): Promise<ModelEvalMultiTurnRunResult> {
+  const speaker = options?.speaker ?? "טל";
+  const { employees, worker } = fixtureEmployees(speaker);
+  const config = loadLlmConfig();
+  const instructions = buildLucyModelEvalInstructions({
+    employees,
+    speaker,
+    worker,
+  });
+  const snapshot = snapshotFromSetup(corpusCase.setup, speaker);
+  const contacts = (corpusCase.setup.contacts ?? []).map((row, index) => ({
+    id: `contact-${index}`,
+    name: row.name,
+    phone: row.phone,
+    kind: "person",
+  }));
+  const factsBlock = [
+    formatSessionClockContext(),
+    formatEmployeeContext(snapshot),
+    formatEmployeeContext(
+      { lists: [], filing: [], reminders: [] },
+      "WORKER_SAVED_DATA",
+    ),
+    formatSpeakerContacts(contacts),
+  ].join("\n\n");
+
+  const client = getLlmClient();
+  const conversationId = await client.createConversation();
+  const turnResults: ModelEvalMultiTurnRunResult["turns"] = [];
+  let totalMs = 0;
+
+  for (let i = 0; i < corpusCase.turns.length; i += 1) {
+    const turn = corpusCase.turns[i]!;
+    const message = `${factsBlock}\n\n${speaker}: ${turn.utterance}`;
+    const llmStarted = Date.now();
+    const llmTurn = await client.createResponse({
+      conversationId,
+      message,
+      model: worker.model?.trim() || config.model,
+      temperature:
+        typeof worker.temperature === "number" &&
+        Number.isFinite(worker.temperature)
+          ? worker.temperature
+          : config.temperature,
+      reasoningEffort: config.reasoningEffort,
+      instructions,
+      textFormat: config.responseFormat,
+    });
+    const llmMs = Date.now() - llmStarted;
+    totalMs += llmMs;
+    const parsed = parseLlmReply(llmTurn.reply);
+    const metadata = parseReplyMetadata(llmTurn.reply);
+    const checked = evaluateConstraints(
+      turn.constraints,
+      metadata,
+      parsed.response,
+    );
+    turnResults.push({
+      index: i,
+      utterance: turn.utterance,
+      response: parsed.response,
+      ok: checked.ok,
+      failures: checked.failures,
+      llmMs,
+      metadata,
+    });
+  }
+
+  const failures = turnResults.flatMap((row) =>
+    row.failures.map((f) => `turn ${row.index}: ${f}`),
+  );
+  return {
+    id: corpusCase.id,
+    tag: corpusCase.tag,
+    ok: failures.length === 0,
+    failures,
+    turns: turnResults,
+    llmMs: totalMs,
+  };
+}
+
+export async function runModelEvalMultiTurnCorpus(
+  corpus: ModelEvalMultiTurnCorpus = loadModelEvalMultiTurnCorpus(),
+  options?: { caseIds?: string[] },
+): Promise<ModelEvalSummary & { multiTurnResults: ModelEvalMultiTurnRunResult[] }> {
+  const selected = options?.caseIds?.length
+    ? corpus.cases.filter((row) => options.caseIds!.includes(row.id))
+    : corpus.cases;
+  const multiTurnResults: ModelEvalMultiTurnRunResult[] = [];
+  for (const row of selected) {
+    multiTurnResults.push(
+      await runModelEvalMultiTurnCase(row, { speaker: corpus.speaker }),
+    );
+  }
+  const results: ModelEvalRunCaseResult[] = multiTurnResults.map((row) => {
+    const last = row.turns[row.turns.length - 1]!;
+    return {
+      id: row.id,
+      tag: row.tag as ModelEvalRunCaseResult["tag"],
+      ok: row.ok,
+      failures: row.failures,
+      utterance: row.turns.map((t) => t.utterance).join(" → "),
+      response: last.response,
+      metadata: last.metadata,
+      rawReply: "",
+      llmMs: row.llmMs,
+    };
+  });
+  return {
+    ...summarizeModelEvalResults(results, {
+      requiredPassRate: corpus.passRate,
+      criticalCaseIds: corpus.criticalCaseIds,
+    }),
+    multiTurnResults,
+  };
 }

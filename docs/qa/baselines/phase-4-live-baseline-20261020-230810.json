@@ -1,0 +1,1160 @@
+{
+  "generatedAt": "2026-10-20T20:08:03.756Z",
+  "suite": "phase-4-corpus",
+  "track": "LIVE",
+  "promptSource": "LLM.config.json (worktree via loadLlmConfig)",
+  "evalPath": "model-output-constraints-only",
+  "productionApply": false,
+  "total": 29,
+  "passed": 28,
+  "failed": 1,
+  "passRate": 0.9655172413793104,
+  "requiredPassRate": 0.7,
+  "softOk": true,
+  "criticalOk": true,
+  "criticalFailed": [],
+  "ok": true,
+  "results": [
+    {
+      "id": "filing-remove-email-code",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "מחק קוד כניסה לחשבון אימייל",
+      "response": "מחקתי את קוד הכניסה לחשבון אימייל מהתיוקים.",
+      "llmMs": 3864,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": [
+          {
+            "action": "remove_filing",
+            "itemName": "קוד לכניסה לחשבון אימייל",
+            "itemInfo": "",
+            "itemDescription": "",
+            "targets": [],
+            "filingId": "eval-filing-email-code"
+          }
+        ]
+      }
+    },
+    {
+      "id": "filing-update-code",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "שנה את הקוד ל־999",
+      "response": "עדכנתי את קוד הכניסה לחשבון האימייל.",
+      "llmMs": 4254,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": [
+          {
+            "action": "update_filing",
+            "itemName": "קוד לכניסה לחשבון אימייל",
+            "itemInfo": "999",
+            "itemDescription": "",
+            "targets": [],
+            "filingId": "eval-filing-email-code"
+          }
+        ]
+      }
+    },
+    {
+      "id": "filing-add-gate",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תייקי קוד לשער 4455",
+      "response": "שמרתי בתיוקים. רוצה להוסיף מידע שיעזור למצוא את זה בעתיד?",
+      "llmMs": 5088,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": [
+          {
+            "action": "add_filing",
+            "itemName": "קוד לשער",
+            "itemInfo": "4455",
+            "itemDescription": "",
+            "targets": [],
+            "filingId": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "list-buy-milk",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "קניתי חלב",
+      "response": "מחקתי את החלב מרשימת הקניות.",
+      "llmMs": 4298,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "remove",
+            "listType": "shopping",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-milk"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "list-clear-tasks",
+      "tag": "safety-rails",
+      "ok": true,
+      "failures": [],
+      "utterance": "מחק את כל המטלות",
+      "response": "מחקתי את «להתקשר לרופא» ואת «לשלם חשבון» מרשימת המטלות.",
+      "llmMs": 4097,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "remove",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-task-doctor"
+              },
+              {
+                "item_id": "eval-item-task-bill"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "list-clear-personal-shopping",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "נקה את רשימת הקניות האישית שלי",
+      "response": "מחקתי חלב, לחם וביצים מרשימת הקניות האישית שלך.",
+      "llmMs": 4143,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "remove",
+            "listType": "shopping",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-shop-milk"
+              },
+              {
+                "item_id": "eval-item-shop-bread"
+              },
+              {
+                "item_id": "eval-item-shop-eggs"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "shop-move-shared-to-personal",
+      "tag": "happy",
+      "ok": false,
+      "failures": [
+        "lists_remove_item_ids: id set size 0 != expected 1 (got [] want [eval-item-shop-shared-milk])",
+        "lists.add/shopping count 0 < 1"
+      ],
+      "utterance": "העבירי חלב מהקניות המשותפת עם מיכל לקניות האישיות",
+      "response": "העברתי את החלב מהקניות המשותפות עם מיכל לקניות האישיות שלך.",
+      "llmMs": 5150,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "update",
+            "listType": "shopping",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-shop-shared-milk",
+                "unshare_with": [
+                  "מיכל"
+                ]
+              }
+            ],
+            "targets": [
+              "טל"
+            ]
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "list-named-item-delete",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק מבעיות את הפריט לבדוק שוב",
+      "response": "מחקתי את «לבדוק שוב» מרשימת בעיות.",
+      "llmMs": 8272,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "remove",
+            "listType": "custom",
+            "listName": "בעיות",
+            "items": [
+              {
+                "item_id": "eval-item-problems-check"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "shared-list-found-no-not-found",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "שתי הבעיות ברשימת משימות לעבודה טופלו",
+      "response": "אני רואה ברשימת משימות לעבודה את «דיווח באג לוח שנה» ואת «דיווח באג תזכורות», אבל לא הצלחתי לזהות את השורות כדי להסיר אותן. תוכלי לשלוח את שמותיהן כפי שהם מופיעים ברשימה?",
+      "llmMs": 6049,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "list-filtered-multi-delete",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "מחקי את שתי המטלות של הרב פס מהמטלות שלי",
+      "response": "מחקתי את «לדבר עם רב פס» ואת «ליצור קשר עם רב פס שירות לקוחות» מרשימת המטלות שלך.",
+      "llmMs": 4013,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "remove",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-task-ravpas-1"
+              },
+              {
+                "item_id": "eval-item-task-ravpas-2"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "delete-everything",
+      "tag": "safety-rails",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק הכל",
+      "response": "מה למחוק — את הקניות, המטלות, התיוק «קוד שער», את תזכורת «לקנות חלב», או משהו אחר?",
+      "llmMs": 4385,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "meeting-not-list",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק את הפגישה",
+      "response": "לאיזו פגישה התכוונת — לפגישת העבודה ב־1.6.2099? אין לי כרגע מספיק פרטים כדי להסיר אותה.",
+      "llmMs": 6323,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": false,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "list-not-filing",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק את הרשימה שיעורי נהיגה",
+      "response": "מחקתי את הרשימה «שיעורי נהיגה».",
+      "llmMs": 5259,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [
+          {
+            "action": "delete_list",
+            "listId": "eval-list-custom-driving",
+            "newName": "",
+            "addColumns": [],
+            "removeColumns": [],
+            "renameColumns": [],
+            "addParticipants": [],
+            "removeParticipants": []
+          }
+        ],
+        "filing": []
+      }
+    },
+    {
+      "id": "dump-what-saved",
+      "tag": "hallucination-boundaries",
+      "ok": true,
+      "failures": [],
+      "utterance": "מה שמור לי",
+      "response": "מציגה את כל מה ששמור לך.",
+      "llmMs": 4280,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": [],
+        "showDump": "full"
+      }
+    },
+    {
+      "id": "no-invented-clock",
+      "tag": "hallucination-boundaries",
+      "ok": true,
+      "failures": [],
+      "utterance": "תזכיר לי משהו",
+      "response": "מתי להזכיר לך? באיזו שעה או בעוד כמה זמן?",
+      "llmMs": 6339,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "directory-add-michal",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תוסיפי את מיכל 054-1111111",
+      "response": "הוספתי את מיכל לספר הטלפונים שלך.",
+      "llmMs": 2567,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [
+          {
+            "action": "add",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "contactId": "",
+            "targets": []
+          }
+        ],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "self-nudge-with-volunteered-phone",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תזכירי לי בסביבות 14:00 לדבר עם רב פס הטלפון שלהם לווטסאפ הוא 0508087073",
+      "response": "אזכיר לך מחר בסביבות 14:00 לדבר עם רב פס בטלפון 0508087073.",
+      "llmMs": 11279,
+      "metadata": {
+        "messages": [],
+        "reminders": [
+          {
+            "action": "add",
+            "item": "לדבר עם רב פס בטלפון 0508087073",
+            "listType": "tasks",
+            "date": "2026-10-21",
+            "time": "14:00",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "about": [],
+            "targets": [
+              "טל"
+            ],
+            "text": "",
+            "inSeconds": null,
+            "everyCount": null,
+            "everyUnit": null,
+            "weekdays": null,
+            "confirmed": false,
+            "compose": false,
+            "composeSource": "",
+            "composeLookbackHours": 0,
+            "composePlace": "",
+            "scheduleAnchor": "",
+            "scheduleOffsetMinutes": 0,
+            "composeCondition": null,
+            "reminderId": ""
+          }
+        ],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "לדבר עם רב פס בטלפון 0508087073"
+              }
+            ],
+            "targets": [
+              "טל"
+            ]
+          },
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "להזכיר לטל לדבר עם רב פס בטלפון 0508087073",
+                "תאריך לביצוע": "2026-10-21",
+                "שעה לביצוע": "14:00"
+              }
+            ],
+            "targets": [
+              "לוסי"
+            ]
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "task-keep-phone-in-title",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תוסיפי לי מטלה לדבר עם אורי בטלפון 0534455366",
+      "response": "הוספתי מטלה להתקשר לאורי לרשימת המטלות, עם מספר הטלפון שציינת.",
+      "llmMs": 3270,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "לדבר עם אורי",
+                "טלפון": "0534455366",
+                "urgency": "normal"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "self-nudge-recurring-until-done",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תזכירי לי כל שעה לקנות חלב עד שאקנה",
+      "response": "אזכיר לך לקנות חלב כל שעה עד שתקני.",
+      "llmMs": 8304,
+      "metadata": {
+        "messages": [],
+        "reminders": [
+          {
+            "action": "add",
+            "item": "לקנות חלב",
+            "listType": "shopping",
+            "date": "",
+            "time": "",
+            "repeat": "hourly",
+            "ping": [
+              "טל"
+            ],
+            "about": [],
+            "targets": [
+              "טל"
+            ],
+            "text": "לקנות חלב",
+            "inSeconds": null,
+            "everyCount": null,
+            "everyUnit": null,
+            "weekdays": null,
+            "recurrence": {
+              "freq": "interval",
+              "interval": 1,
+              "unit": "hours"
+            },
+            "confirmed": false,
+            "compose": false,
+            "composeSource": "",
+            "composeLookbackHours": 0,
+            "composePlace": "",
+            "scheduleAnchor": "",
+            "scheduleOffsetMinutes": 0,
+            "composeCondition": null,
+            "reminderId": ""
+          }
+        ],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "add",
+            "listType": "shopping",
+            "listName": "",
+            "items": [
+              {
+                "שם פריט": "חלב",
+                "כמות": 1,
+                "יחידת מידה": ""
+              }
+            ],
+            "targets": [
+              "טל"
+            ]
+          },
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "להזכיר לטל לקנות חלב"
+              }
+            ],
+            "targets": [
+              "לוסי"
+            ]
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "self-nudge-contact-topic-no-whatsapp",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "נדנדי לי כל 10 שניות ליצור קשר עם הופ און",
+      "response": "אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.",
+      "llmMs": 3948,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "directory-remove-michal",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחקי את מיכל מספר הטלפונים",
+      "response": "מחקתי את מיכל מספר הטלפונים.",
+      "llmMs": 3268,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [
+          {
+            "action": "remove",
+            "name": "מיכל",
+            "phone": "0541111111",
+            "contactId": "contact-0",
+            "targets": []
+          }
+        ],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "directory-clear-all",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחקי את כל אנשי הקשר",
+      "response": "יש כאן שני מקומות אפשריים: רשימת אנשי הקשר או ספר הטלפונים. בספר הטלפונים שלך שמורים מיכל ואורי — למה התכוונת, והאם למחוק את כולם?",
+      "llmMs": 3587,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "reminder-cancel-named",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "בטל את התזכורת לחלב",
+      "response": "ביטלתי את התזכורת לקנות חלב.",
+      "llmMs": 7431,
+      "metadata": {
+        "messages": [],
+        "reminders": [
+          {
+            "action": "remove",
+            "item": "לקנות חלב",
+            "listType": "shopping",
+            "date": "",
+            "time": "",
+            "repeat": "once",
+            "ping": [],
+            "about": [],
+            "targets": [],
+            "text": "",
+            "inSeconds": null,
+            "everyCount": null,
+            "everyUnit": null,
+            "weekdays": null,
+            "confirmed": false,
+            "compose": false,
+            "composeSource": "",
+            "composeLookbackHours": 0,
+            "composePlace": "",
+            "scheduleAnchor": "",
+            "scheduleOffsetMinutes": 0,
+            "composeCondition": null,
+            "reminderId": "eval-reminder-milk"
+          }
+        ],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "reminder-stop-nudge-keep-item",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תפסיקי",
+      "response": "מחקתי את התזכורת «לקנות חלב». להשאיר את החלב ברשימת הקניות?",
+      "llmMs": 3948,
+      "metadata": {
+        "messages": [],
+        "reminders": [
+          {
+            "action": "remove",
+            "item": "לקנות חלב",
+            "listType": "shopping",
+            "date": "",
+            "time": "",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "about": [],
+            "targets": [
+              "טל"
+            ],
+            "text": "",
+            "inSeconds": null,
+            "everyCount": null,
+            "everyUnit": null,
+            "weekdays": null,
+            "confirmed": false,
+            "compose": false,
+            "composeSource": "",
+            "composeLookbackHours": 0,
+            "composePlace": "",
+            "scheduleAnchor": "",
+            "scheduleOffsetMinutes": 0,
+            "composeCondition": null,
+            "reminderId": "eval-reminder-milk-nudge"
+          }
+        ],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "delete-two-named-lists",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק את הרשימות באגים ובעיות",
+      "response": "מחקתי את הרשימות «באגים» ו«בעיות».",
+      "llmMs": 3708,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [
+          {
+            "action": "delete_list",
+            "listId": "eval-list-custom-bugs",
+            "newName": "",
+            "addColumns": [],
+            "removeColumns": [],
+            "renameColumns": [],
+            "addParticipants": [],
+            "removeParticipants": []
+          },
+          {
+            "action": "delete_list",
+            "listId": "eval-list-custom-problems",
+            "newName": "",
+            "addColumns": [],
+            "removeColumns": [],
+            "renameColumns": [],
+            "addParticipants": [],
+            "removeParticipants": []
+          }
+        ],
+        "filing": []
+      }
+    },
+    {
+      "id": "delete-ambiguous-list-title",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק את הרשימה באגים",
+      "response": "לאיזו רשימת «באגים» התכוונת למחוק?\n1. באגים (אישית)\n2. באגים (משותפת עם עמית)",
+      "llmMs": 4961,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "delete-unresolved-list",
+      "tag": "action-confusion",
+      "ok": true,
+      "failures": [],
+      "utterance": "תמחק את הרשימה רעיונות לחופשה",
+      "response": "לא מצאתי רשימה בשם «רעיונות לחופשה». התכוונת לרשימה אחרת? אם כן, מה השם שלה?",
+      "llmMs": 5330,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "self-nudge-daily-dog-0800",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "תזכירי לי כל יום ב־08:00 להוריד את הכלב",
+      "response": "הוספתי את «להוריד את הכלב» למטלות שלך, ואזכיר לך כל יום ב־08:00.",
+      "llmMs": 9626,
+      "metadata": {
+        "messages": [],
+        "reminders": [
+          {
+            "action": "add",
+            "item": "להוריד את הכלב",
+            "listType": "tasks",
+            "date": "2026-10-20",
+            "time": "08:00",
+            "repeat": "daily",
+            "ping": [
+              "טל"
+            ],
+            "about": [],
+            "targets": [
+              "טל"
+            ],
+            "text": "",
+            "inSeconds": null,
+            "everyCount": null,
+            "everyUnit": null,
+            "weekdays": null,
+            "recurrence": {
+              "freq": "daily",
+              "interval": 1,
+              "time": "08:00"
+            },
+            "confirmed": false,
+            "compose": false,
+            "composeSource": "",
+            "composeLookbackHours": 0,
+            "composePlace": "",
+            "scheduleAnchor": "",
+            "scheduleOffsetMinutes": 0,
+            "composeCondition": null,
+            "reminderId": ""
+          }
+        ],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "להוריד את הכלב",
+                "recurrence": {
+                  "freq": "daily",
+                  "interval": 1,
+                  "time": "08:00",
+                  "start": "2026-10-20"
+                }
+              }
+            ],
+            "targets": [
+              "טל"
+            ]
+          },
+          {
+            "action": "add",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "שם מטלה": "להזכיר לטל להוריד את הכלב"
+              }
+            ],
+            "targets": [
+              "לוסי"
+            ]
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    },
+    {
+      "id": "occurrence-skip-one-day",
+      "tag": "happy",
+      "ok": true,
+      "failures": [],
+      "utterance": "ב־23.10 אני לא צריך לאסוף את הילדים",
+      "response": "ביטלתי את איסוף הילדים ב־23.10; בשאר ימי שישי המטלה נשארת.",
+      "llmMs": 3777,
+      "metadata": {
+        "messages": [],
+        "reminders": [],
+        "directory": [],
+        "jobs": [],
+        "handoff": null,
+        "register": null,
+        "reportSections": [],
+        "reportHistoryKinds": [],
+        "confirm": null,
+        "targets": [],
+        "lists": [
+          {
+            "action": "update",
+            "listType": "tasks",
+            "listName": "",
+            "items": [
+              {
+                "item_id": "eval-item-kids-pickup",
+                "occurrence_change": {
+                  "date": "2026-10-23",
+                  "cancel": true
+                }
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "listOps": [],
+        "filing": []
+      }
+    }
+  ]
+}

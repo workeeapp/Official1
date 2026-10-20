@@ -8,9 +8,12 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./tests/setup.ts"],
-    include: ["tests/model-eval.live.test.ts"],
+    include: [
+      "tests/model-eval.live.test.ts",
+      "tests/model-eval-multi-turn.live.test.ts",
+    ],
     fileParallelism: false,
-    testTimeout: 600_000,
+    testTimeout: 900_000,
     hookTimeout: 60_000,
     reporters: ["default"],
   },
