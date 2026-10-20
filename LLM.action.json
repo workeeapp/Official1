@@ -1410,6 +1410,46 @@
                   "place"
                 ]
               },
+              "transit": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live Israel public transit schedule («מתי יוצא קו 51 מתחנה מרכזית פתח תקווה»). Server reads MOT GTFS and replaces response — FORBIDDEN inventing departure times. line + place + stop required; missing any → ask; leave transit null.",
+                "properties": {
+                  "line": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Route short name from speech (51, 480, …)."
+                  },
+                  "stop": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Stop hint (תחנה מרכזית, מסוף ארנס)."
+                  },
+                  "place": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "City (פתח תקווה, תל אביב) — disambiguates the line nationwide."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "departures",
+                        "summary"
+                      ]
+                    },
+                    "description": "מתי יוצא / יציאות → [departures]; bare ask → [summary] (same as departures for now)."
+                  }
+                },
+                "required": [
+                  "line",
+                  "stop",
+                  "place"
+                ]
+              },
               "tips": {
                 "type": [
                   "array",

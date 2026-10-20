@@ -1405,6 +1405,42 @@ describe("parseLlmReply", () => {
     ).toBeUndefined();
   });
 
+  it("reads metadata.transit for bus departures", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            transit: {
+              line: "קו 51",
+              stop: "תחנה מרכזית",
+              place: "פתח תקווה",
+              aspects: ["departures", "bogus"],
+            },
+          },
+        }),
+      ).transit,
+    ).toEqual({
+      line: "51",
+      stop: "תחנה מרכזית",
+      place: "פתח תקווה",
+      aspects: ["departures"],
+    });
+  });
+
+  it("ignores transit missing stop", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            transit: { line: "51", stop: "", place: "פתח תקווה" },
+          },
+        }),
+      ).transit,
+    ).toBeUndefined();
+  });
+
   it("reads metadata.mashov without requiring password", () => {
     expect(
       parseReplyMetadata(

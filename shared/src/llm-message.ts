@@ -392,6 +392,11 @@ export interface LlmMetadata {
    */
   jewish?: LlmJewishAction | null;
   /**
+   * Live Israel transit schedule ask — engine reads MOT GTFS and replaces
+   * response. line + stop + place required. Missing → model asks; leave unset.
+   */
+  transit?: LlmTransitAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -455,6 +460,18 @@ export interface LlmJewishAction {
   /** YYYY-MM-DD or empty (= this week / now). */
   date: string;
   aspects: LlmJewishAspect[];
+}
+
+export type LlmTransitAspect = "departures" | "summary";
+
+export interface LlmTransitAction {
+  /** Route short name (51, 480, …). */
+  line: string;
+  /** Stop hint (תחנה מרכזית, מסוף ארנס). */
+  stop: string;
+  /** City (פתח תקווה) — disambiguates the line. */
+  place: string;
+  aspects: LlmTransitAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -567,6 +584,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const mashov = parseMashovAction(meta);
   const places = parsePlacesAction(meta);
   const jewish = parseJewishAction(meta);
+  const transit = parseTransitAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -615,6 +633,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(mashov ? { mashov } : {}),
     ...(places ? { places } : {}),
     ...(jewish ? { jewish } : {}),
+    ...(transit ? { transit } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1986,6 +2005,79 @@ export function parseJewishAction(
     place: place || "",
     date,
     aspects: resolved,
+  };
+}
+
+const TRANSIT_ASPECTS = new Set<LlmTransitAspect>(["departures", "summary"]);
+
+/** metadata.transit — live MOT GTFS schedule departures. */
+export function parseTransitAction(
+  meta: Record<string, unknown>,
+): LlmTransitAction | null {
+  const raw =
+    meta.transit ??
+    meta.bus ??
+    meta.gtfs ??
+    meta.public_transport ??
+    meta.publicTransport;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const line = readText(row, [
+    "line",
+    "route",
+    "route_short_name",
+    "routeShortName",
+    "קו",
+  ])
+    .replace(/^קו\s+/u, "")
+    .trim()
+    .slice(0, 32);
+  const stop = readText(row, [
+    "stop",
+    "station",
+    "stop_name",
+    "stopName",
+    "תחנה",
+  ]).slice(0, 255);
+  const place = readText(row, [
+    "place",
+    "city",
+    "location",
+    "עיר",
+    "מקום",
+  ]).slice(0, 255);
+  if (!line || !stop || !place) {
+    return null;
+  }
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmTransitAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      let key = String(entry ?? "")
+        .trim()
+        .toLowerCase();
+      if (
+        key === "departure" ||
+        key === "times" ||
+        key === "next" ||
+        key === "יציאות" ||
+        key === "לוח זמנים"
+      ) {
+        key = "departures";
+      }
+      const aspect = key as LlmTransitAspect;
+      if (TRANSIT_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+        aspects.push(aspect);
+      }
+    }
+  }
+  return {
+    line,
+    stop,
+    place,
+    aspects: aspects.length > 0 ? aspects : ["departures"],
   };
 }
 
