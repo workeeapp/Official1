@@ -57,9 +57,12 @@ export function parseTransitAspects(raw: unknown): TransitAspect[] {
   return out.length > 0 ? out : ["departures"];
 }
 
+/** Apostrophe / geresh / quote marks MOT and users mix freely (ז'בוטינסקי vs ז׳בוטינסקי). */
+const TRANSIT_QUOTE_RE = /[''`´׳״"«»]/g;
+
 export function normHeTransit(s: string): string {
   return s
-    .replace(/["״"']/g, "")
+    .replace(TRANSIT_QUOTE_RE, "")
     .replace(/תקווה/g, "תקוה")
     .replace(/ת\.?\s*מרכזית/g, "תחנה מרכזית")
     .replace(/־/g, " ")
@@ -67,6 +70,12 @@ export function normHeTransit(s: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/** SQL expr: strip apostrophe/geresh so LIKE '%זבוטינסקי%' matches MOT ז'בוטינסקי. */
+function sqlStripQuotes(columnSql: string): string {
+  // Nested REPLACE — SQLite has no translate(). ASCII ' + Hebrew ׳ cover MOT + typed Hebrew.
+  return `REPLACE(REPLACE(${columnSql}, '''', ''), '׳', '')`;
 }
 
 function tokens(s: string): string[] {
@@ -273,9 +282,12 @@ function likeClause(
   params: string[],
 ): string {
   const parts: string[] = [];
+  const nameBare = sqlStripQuotes("stop_name");
+  const descBare = sqlStripQuotes("IFNULL(stop_desc,'')");
   for (const t of tokensIn) {
     for (const variant of likeVariants(t)) {
-      parts.push("(stop_name LIKE ? OR IFNULL(stop_desc,'') LIKE ?)");
+      // Tokens are already quote-stripped via tokens() → normHeTransit.
+      parts.push(`(${nameBare} LIKE ? OR ${descBare} LIKE ?)`);
       params.push(`%${variant}%`, `%${variant}%`);
     }
   }

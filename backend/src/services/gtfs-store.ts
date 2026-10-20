@@ -547,6 +547,27 @@ export function buildFixtureGtfsDb(dbPath: string): void {
       32.09,
       34.88,
     );
+    // MOT-style geresh in stop_name — search must match without requiring the apostrophe.
+    db.prepare(
+      "INSERT INTO stops(stop_id, stop_code, stop_name, stop_desc, stop_lat, stop_lon) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "s3",
+      "37001",
+      "ז'בוטינסקי/יצחק שדה",
+      "רחוב: ז'בוטינסקי עיר: פתח תקווה רציף:",
+      32.08,
+      34.87,
+    );
+    db.prepare(
+      "INSERT INTO routes(route_id, agency_id, route_short_name, route_long_name, route_desc, route_type) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "r66",
+      "1",
+      "66",
+      "מסוף משה ארנס-פתח תקווה<->מסוף כרמלית-תל אביב",
+      "",
+      3,
+    );
     db.prepare(
       `INSERT INTO calendar(service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date)
        VALUES (?,1,1,1,1,1,1,1,?,?)`,
@@ -566,6 +587,12 @@ export function buildFixtureGtfsDb(dbPath: string): void {
     db.prepare(
       "INSERT INTO stop_times(trip_id, stop_id, arrival_time, departure_time, stop_sequence) VALUES (?, ?, ?, ?, ?)",
     ).run("t2", "s1", "16:05:00", "16:05:00", 1);
+    db.prepare(
+      "INSERT INTO trips(trip_id, route_id, service_id, trip_headsign, direction_id) VALUES (?, ?, ?, ?, ?)",
+    ).run("t66", "r66", "svc", "תל אביב", "0");
+    db.prepare(
+      "INSERT INTO stop_times(trip_id, stop_id, arrival_time, departure_time, stop_sequence) VALUES (?, ?, ?, ?, ?)",
+    ).run("t66", "s3", "15:30:00", "15:30:00", 1);
     createIndexes(db);
     db.prepare(
       "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",

@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { buildFixtureGtfsDb } from "../src/services/gtfs-store.js";
 import {
   formatTransitHebrew,
+  normHeTransit,
   parseTransitAspects,
   queryTransitDepartures,
   resolveTransitReply,
@@ -18,7 +19,29 @@ describe("parseTransitAspects", () => {
   });
 });
 
+describe("normHeTransit", () => {
+  it("strips ASCII apostrophe and Hebrew geresh the same way", () => {
+    expect(normHeTransit("ז'בוטינסקי")).toBe("זבוטינסקי");
+    expect(normHeTransit("ז׳בוטינסקי")).toBe("זבוטינסקי");
+    expect(normHeTransit("פתח תקווה")).toBe("פתח תקוה");
+  });
+});
+
 describe("scoreStopMatch", () => {
+  it("matches Jabotinsky stop when user omits or uses geresh", () => {
+    const motName = "ז'בוטינסקי/יצחק שדה";
+    const motDesc = "רחוב: ז'בוטינסקי עיר: פתח תקווה רציף:";
+    const withGeresh = scoreStopMatch(
+      motName,
+      motDesc,
+      "ז׳בוטינסקי",
+      "פתח תקוה",
+    );
+    const plain = scoreStopMatch(motName, motDesc, "זבוטינסקי", "פתח תקוה");
+    expect(withGeresh).toBeGreaterThan(40);
+    expect(plain).toBeGreaterThan(40);
+  });
+
   it("scores central station in Petah Tikva", () => {
     const score = scoreStopMatch(
       "תחנה מרכזית פתח תקווה",
@@ -165,6 +188,27 @@ describe("queryTransitDepartures fixture", () => {
       });
       expect(text).toContain("קו 51");
       expect(text).toMatch(/15:20|16:05|15:10/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("finds MOT stop with geresh when user types ז׳בוטינסקי without matching apostrophe", async () => {
+    dir = mkdtempSync(join(tmpdir(), "gtfs-test-"));
+    dbPath = join(dir, "test.sqlite");
+    buildFixtureGtfsDb(dbPath);
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const result = queryTransitDepartures(db, {
+        line: "66",
+        stop: "ז׳בוטינסקי",
+        place: "פתח תקוה",
+        now: new Date("2026-10-20T12:00:00+03:00"),
+      });
+      expect(result.departures.length).toBeGreaterThan(0);
+      expect(result.departures[0]!.routeShortName).toBe("66");
+      expect(result.departures[0]!.stopName).toContain("ז'בוטינסקי");
+      expect(result.departures[0]!.departureTime).toBe("15:30:00");
     } finally {
       db.close();
     }
