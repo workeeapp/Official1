@@ -336,24 +336,32 @@ describe("Employees page", () => {
     );
     const panel = await screen.findByTestId("employee-records");
     expect(panel).toHaveTextContent("Shopping");
+    expect(panel).toHaveTextContent("Tasks");
+    expect(panel).toHaveTextContent("Filings");
+    expect(panel).toHaveTextContent("Reminders");
+    expect(screen.queryByTestId("employee-record-item")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Shopping/ }));
     expect(panel).toHaveTextContent("טונה");
-    expect(panel).toHaveTextContent("כמות: 2");
     expect(panel).toHaveTextContent("דחוף");
     expect(panel).toHaveTextContent("tuna.jpg");
-    expect(panel).toHaveTextContent("טל");
-    expect(panel).toHaveTextContent("Tasks");
+    expect(panel).not.toHaveTextContent("כמות: 2");
+
+    await user.click(screen.getByRole("button", { name: /Tasks/ }));
     expect(panel).toHaveTextContent("לקרוא ספר");
     expect(panel).toHaveTextContent("קניות");
     expect(screen.getByRole("link", { name: /קניות/ })).toHaveAttribute(
       "href",
       "#employee-list-list-shopping",
     );
-    expect(panel).toHaveTextContent("Filings");
+
+    await user.click(screen.getByRole("button", { name: /Filings/ }));
     expect(panel).toHaveTextContent("מספר רכב");
-    expect(panel).toHaveTextContent("3434343");
-    expect(panel).toHaveTextContent("Reminders");
+    expect(panel).not.toHaveTextContent("3434343");
+
+    await user.click(screen.getByRole("button", { name: /Reminders/ }));
     expect(panel).toHaveTextContent("להזכיר לטל");
-    expect(panel).toHaveTextContent("2026-09-14 09:00");
+    expect(panel).not.toHaveTextContent("2026-09-14 09:00");
     expect(screen.queryByRole("button", { name: "Edit להזכיר לטל" })).not.toBeInTheDocument();
   });
 
@@ -570,6 +578,7 @@ describe("Employees page", () => {
     renderEmployees();
 
     await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+    await user.click(await screen.findByRole("button", { name: /Shopping/ }));
     await user.click(await screen.findByRole("button", { name: "Edit טונה" }));
     await user.clear(screen.getByLabelText("כמות"));
     await user.type(screen.getByLabelText("כמות"), "4");
@@ -583,7 +592,7 @@ describe("Employees page", () => {
         { label: "כמות", value: "4" },
       ],
     );
-    expect(await screen.findByText(/כמות: 4/)).toBeInTheDocument();
+    expect(await screen.findByText("טונה")).toBeInTheDocument();
   });
 
   it("deletes a saved item after confirmation", async () => {
@@ -618,6 +627,7 @@ describe("Employees page", () => {
     renderEmployees();
 
     await user.click(await screen.findByTitle("עמית חתן · amit@example.com · 050-0000001"));
+    await user.click(await screen.findByRole("button", { name: /Tasks/ }));
     await user.click(await screen.findByRole("button", { name: "Delete לקרוא ספר" }));
 
     expect(confirm).toHaveBeenCalled();

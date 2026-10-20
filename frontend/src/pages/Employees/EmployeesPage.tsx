@@ -410,6 +410,14 @@ export function EmployeesPage() {
   );
 }
 
+function recordGroupKey(group: {
+  type: string;
+  title: string;
+  listId?: string;
+}): string {
+  return `${group.type}-${group.listId ?? group.title}`;
+}
+
 function EmployeeRecordsPanel({
   employee,
   records,
@@ -428,6 +436,39 @@ function EmployeeRecordsPanel({
   onDelete: (item: EmployeeRecordItem) => void;
 }) {
   const groups = records?.groups ?? [];
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setOpenKeys(new Set());
+  }, [employee.id]);
+
+  function toggleGroup(key: string) {
+    setOpenKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function openLinkedList(listId: string) {
+    const target = groups.find((group) => group.listId === listId);
+    if (!target) {
+      return;
+    }
+    const key = recordGroupKey(target);
+    setOpenKeys((current) => {
+      if (current.has(key)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }
 
   return (
     <section
@@ -502,25 +543,58 @@ function EmployeeRecordsPanel({
       ) : null}
 
       {status === "ready"
-        ? groups.map((group) => (
-            <div
-              key={`${group.type}-${group.listId ?? group.title}`}
-              id={group.listId ? recordListAnchorId(group.listId) : undefined}
-              className="mt-5 scroll-mt-4"
-            >
-              <h3 className="text-sm font-semibold text-text-primary">{group.title}</h3>
-              <ul className="mt-1.5 divide-y divide-border/70 border-t border-border/70">
-                {group.items.map((item) => (
-                  <EmployeeRecordRow
-                    key={item.id}
-                    item={item}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                  />
-                ))}
-              </ul>
-            </div>
-          ))
+        ? groups.map((group) => {
+            const key = recordGroupKey(group);
+            const open = openKeys.has(key);
+            const panelId = `employee-record-group-${key}`;
+            return (
+              <div
+                key={key}
+                id={group.listId ? recordListAnchorId(group.listId) : undefined}
+                className="mt-4 scroll-mt-4"
+              >
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={panelId}
+                  onClick={() => toggleGroup(key)}
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-center transition-colors hover:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <span
+                    className="text-lg font-semibold tracking-tight text-text-primary sm:text-xl"
+                    dir="auto"
+                  >
+                    {group.title}
+                  </span>
+                  <span className="text-sm font-medium text-text-secondary">
+                    ({group.items.length})
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`text-text-secondary transition-transform ${open ? "rotate-180" : ""}`}
+                  >
+                    ▾
+                  </span>
+                </button>
+                {open ? (
+                  <ul
+                    id={panelId}
+                    className="mt-1 divide-y divide-border/70 border-t border-border/70"
+                  >
+                    {group.items.map((item) => (
+                      <EmployeeRecordRow
+                        key={item.id}
+                        item={item}
+                        onEdit={onEdit}
+                        onDelete={onDelete}
+                        onOpenLinkedList={openLinkedList}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            );
+          })
         : null}
     </section>
   );
@@ -530,18 +604,14 @@ function EmployeeRecordRow({
   item,
   onEdit,
   onDelete,
+  onOpenLinkedList,
 }: {
   item: EmployeeRecordItem;
   onEdit: (item: EmployeeRecordItem) => void;
   onDelete: (item: EmployeeRecordItem) => void;
+  onOpenLinkedList: (listId: string) => void;
 }) {
   const canMutate = item.kind === "list" || item.kind === "filing";
-  const detailText = item.details
-    .map((detail) =>
-      detail.label ? `${detail.label}: ${detail.value}` : detail.value,
-    )
-    .filter(Boolean)
-    .join(" · ");
 
   return (
     <li
@@ -552,19 +622,16 @@ function EmployeeRecordRow({
         <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-text-primary" dir="auto">
           <span className="font-medium">{item.title}</span>
           {item.urgency ? <UrgencyBadge urgency={item.urgency} /> : null}
-          {detailText ? (
-            <span className="text-text-secondary">· {detailText}</span>
-          ) : null}
           {item.linkedLists?.map((linked) => (
-            <LinkedListChip key={linked.listId} linked={linked} />
+            <LinkedListChip
+              key={linked.listId}
+              linked={linked}
+              onOpen={onOpenLinkedList}
+            />
           ))}
           {item.attachments?.map((file) => (
             <AttachmentChip key={file.id} file={file} />
           ))}
-          <span className="text-xs text-text-secondary">
-            · {item.createdBy}
-            {item.kind !== "reminder" ? ` · ${formatRecordDate(item.createdAt)}` : ""}
-          </span>
         </p>
       </div>
       {canMutate ? (
@@ -599,10 +666,17 @@ function UrgencyBadge({ urgency }: { urgency: JobUrgency }) {
   );
 }
 
-function LinkedListChip({ linked }: { linked: EmployeeRecordLinkedList }) {
+function LinkedListChip({
+  linked,
+  onOpen,
+}: {
+  linked: EmployeeRecordLinkedList;
+  onOpen: (listId: string) => void;
+}) {
   return (
     <a
       href={`#${recordListAnchorId(linked.listId)}`}
+      onClick={() => onOpen(linked.listId)}
       className="inline-flex max-w-[12rem] truncate rounded px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
       title={linked.listName}
       dir="auto"
@@ -631,18 +705,6 @@ function AttachmentChip({ file }: { file: ChatAttachmentRef }) {
 
 function recordListAnchorId(listId: string): string {
   return `employee-list-${listId}`;
-}
-
-function formatRecordDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 function EmployeeChip({
