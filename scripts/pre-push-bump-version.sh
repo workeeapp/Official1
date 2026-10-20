@@ -15,8 +15,9 @@ fi
 
 zero="0000000000000000000000000000000000000000"
 should_bump=0
-while read -r local_ref local_sha remote_ref remote_sha
+while read -r local_ref local_sha remote_ref remote_sha || [ -n "${local_ref:-}" ]
 do
+  [ -z "${local_ref:-}" ] && continue
   case "$local_ref" in
     refs/heads/*)
       if [ "$local_sha" != "$zero" ] && [ "$local_sha" != "$remote_sha" ]; then
@@ -24,7 +25,18 @@ do
       fi
       ;;
   esac
+  local_ref=""
 done
+
+# Some tooling invokes pre-push with an empty stdin — fall back to ahead-of-upstream.
+if [ "$should_bump" != "1" ]; then
+  if git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+    ahead="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    if [ "${ahead:-0}" -gt 0 ]; then
+      should_bump=1
+    fi
+  fi
+fi
 
 if [ "$should_bump" != "1" ]; then
   exit 0
@@ -45,7 +57,9 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-git commit -m "chore: bump version to ${next}"
+# Prefer existing repo identity; fall back so the hook still works in sandboxes.
+git -c user.useConfigOnly=false commit -m "chore: bump version to ${next}" || \
+  git -c user.name='Amit Hatan' -c user.email='amit.hatan@gmail.com' commit -m "chore: bump version to ${next}"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 echo "pre-push: bumped to ${next}; pushing ${branch} (includes version commit)…" >&2
