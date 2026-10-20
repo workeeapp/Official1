@@ -593,6 +593,14 @@ export function formatPhoneBookDump(
   return formatSingleHeaderDump("ספר הטלפונים", "phone_book", kept, opts);
 }
 
+/** Conditional watch clock («תעדכני אותי אם…») — gate is structured compose_condition. */
+function isConditionalWatchReminder(
+  rem: Pick<ReminderSnapshotRow, "compose_condition">,
+): boolean {
+  const gate = rem.compose_condition;
+  return gate != null && typeof gate === "object" && !Array.isArray(gate);
+}
+
 /** reminder_id values already shown via LINKED REMINDER on a task line. */
 function linkedReminderIdsFromTasks(
   snapshot: EmployeeRecordSnapshot,
@@ -1026,6 +1034,12 @@ export function formatTasksDayAgendaDump(
       continue;
     }
     if (linkedReminderIds.has(rem.reminder_id)) {
+      continue;
+    }
+    // Conditional watches (compose_condition) are the digital worker's job —
+    // ping=speaker makes them visible in the snapshot, but they must not flood
+    // the speaker's day agenda (hourly expansion etc.). Inventory / about=worker.
+    if (isConditionalWatchReminder(rem)) {
       continue;
     }
     if (partnerOnly) {

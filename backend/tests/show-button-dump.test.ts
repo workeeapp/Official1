@@ -2288,6 +2288,99 @@ describe("uniform standing + ping dump lines", () => {
     ).toBe("— כל יום ב־18:15 (קבוע + תזכורת)");
   });
 
+  it("day-agenda excludes conditional watch clocks (compose_condition)", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "עמית",
+          scope: "personal",
+          items: [
+            {
+              item_id: "chore",
+              "שם מטלה": "לשתות מים",
+              "תאריך לביצוע": "2026-10-21",
+              "שעה לביצוע": "10:00",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-btc-watch",
+          item: "לעדכן את עמית כששער הביטקוין נמוך מ־81,236.57 דולר",
+          list_type: "tasks",
+          fire_at: "2026-10-21 00:34",
+          repeat: "custom",
+          recurrence_text: "כל שעה",
+          next_occurrences: [
+            "2026-10-21 00:34",
+            "2026-10-21 01:34",
+            "2026-10-21 02:34",
+            "2026-10-21 03:34",
+          ],
+          ping: ["עמית"],
+          ping_ids: [],
+          owner: "לוסי",
+          text: "בדיקת שער ביטקוין",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: true,
+          compose_source: "market",
+          compose_lookback_hours: 0,
+          compose_place: "BTC-USD",
+          compose_condition: {
+            type: "market_price",
+            op: "lt",
+            value: 81236.57,
+          },
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "r-plain-ping",
+          item: "לקחת כדור",
+          list_type: "tasks",
+          fire_at: "2026-10-21 20:00",
+          repeat: "once",
+          ping: ["עמית"],
+          ping_ids: [],
+          owner: "עמית",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+
+    const agenda = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "עמית",
+      now,
+      dateFrom: "2026-10-21",
+      dateTo: "2026-10-21",
+    })!;
+
+    expect(agenda).toContain("לשתות מים — 10:00");
+    expect(agenda).toContain("לקחת כדור — 20:00");
+    expect(agenda).not.toContain("ביטקוין");
+    expect(agenda).not.toContain("00:34");
+
+    // Bare reminders dump still lists the watch (speaker's alert clocks).
+    const remOnly = formatShowDumpFromKind("reminders", snap, { now })!;
+    expect(remOnly).toContain("ביטקוין");
+  });
+
   it("day-agenda uses same fold mark; excludes linked clock as its own line", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
