@@ -88,39 +88,68 @@ describe("resolvePlacesReply", () => {
     expect(text).toContain("לא מוגדר");
   });
 
-  it("searches then formats details including postal", async () => {
-    const fetchImpl = vi.fn(async (url: string) => {
-      const href = String(url);
-      if (href.includes("textsearch")) {
-        return {
-          ok: true,
-          json: async () => ({
-            status: "OK",
-            results: [{ place_id: "pid-1", name: "מקדונלדס" }],
-          }),
-        } as Response;
-      }
-      if (href.includes("details")) {
-        return {
-          ok: true,
-          json: async () => ({
-            status: "OK",
-            result: {
-              name: "מקדונלדס קרית אונו",
-              formatted_phone_number: "03-9998888",
-              formatted_address: "רחוב 1, קרית אונו",
-              address_components: [
-                { long_name: "55400", types: ["postal_code"] },
-                { long_name: "ישראל", types: ["country"] },
+  it("explains permission denied for Places API New", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          code: 403,
+          status: "PERMISSION_DENIED",
+          message: "Places API (New) has not been used in project",
+        },
+      }),
+    })) as unknown as typeof fetch;
+
+    const text = await resolvePlacesReply({
+      query: "קיסו",
+      place: "קרית אונו",
+      aspects: ["address"],
+      apiKey: "test-key",
+      fetchImpl,
+    });
+    expect(text).toContain("Places API New");
+  });
+
+  it("searches Places API New and formats including postal", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toContain("places.googleapis.com/v1/places:searchText");
+      expect(init?.method).toBe("POST");
+      const headers = init?.headers as Record<string, string>;
+      expect(headers["X-Goog-Api-Key"]).toBe("test-key");
+      expect(headers["X-Goog-FieldMask"]).toContain("places.formattedAddress");
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        textQuery?: string;
+        languageCode?: string;
+        regionCode?: string;
+      };
+      expect(body.textQuery).toBe("מקדונלדס קרית אונו");
+      expect(body.languageCode).toBe("he");
+      expect(body.regionCode).toBe("IL");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          places: [
+            {
+              id: "places/abc",
+              displayName: { text: "מקדונלדס קרית אונו", languageCode: "he" },
+              nationalPhoneNumber: "03-9998888",
+              formattedAddress: "רחוב 1, קרית אונו",
+              addressComponents: [
+                { longText: "55400", types: ["postal_code"] },
+                { longText: "ישראל", types: ["country"] },
               ],
               rating: 4.1,
-              opening_hours: { open_now: true },
-              url: "https://maps.google.com/?cid=1",
+              currentOpeningHours: {
+                openNow: true,
+                weekdayDescriptions: ["יום ראשון: 08:00–23:00"],
+              },
+              googleMapsUri: "https://maps.google.com/?cid=1",
             },
-          }),
-        } as Response;
-      }
-      throw new Error(`unexpected url ${href}`);
+          ],
+        }),
+      } as Response;
     });
 
     const text = await resolvePlacesReply({
@@ -133,6 +162,22 @@ describe("resolvePlacesReply", () => {
     expect(text).toContain("מקדונלדס קרית אונו");
     expect(text).toContain("03-9998888");
     expect(text).toContain("מיקוד: 55400");
-    expect(fetchImpl).toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty-results Hebrew when New API returns no places", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ places: [] }),
+    })) as unknown as typeof fetch;
+
+    const text = await resolvePlacesReply({
+      query: "xyzzy",
+      place: "נווה מדבר",
+      apiKey: "test-key",
+      fetchImpl,
+    });
+    expect(text).toContain("לא מצאתי תוצאות");
   });
 });

@@ -28,23 +28,26 @@ const ASPECT_SET = new Set<PlacesAspect>([
   "hours",
 ]);
 
-const TEXT_SEARCH_URL =
-  "https://maps.googleapis.com/maps/api/place/textsearch/json";
-const DETAILS_URL =
-  "https://maps.googleapis.com/maps/api/place/details/json";
+/** Places API (New) — Text Search. */
+const SEARCH_TEXT_URL = "https://places.googleapis.com/v1/places:searchText";
 
-const DETAIL_FIELDS = [
-  "name",
-  "formatted_phone_number",
-  "international_phone_number",
-  "formatted_address",
-  "address_component",
-  "opening_hours",
-  "rating",
-  "url",
+const FIELD_MASK = [
+  "places.displayName",
+  "places.id",
+  "places.nationalPhoneNumber",
+  "places.internationalPhoneNumber",
+  "places.formattedAddress",
+  "places.addressComponents",
+  "places.rating",
+  "places.currentOpeningHours",
+  "places.regularOpeningHours",
+  "places.googleMapsUri",
 ].join(",");
 
 const MAX_RESULTS = 3;
+
+export const PLACES_API_KEY_MISSING = "places_api_key_missing";
+export const PLACES_API_DENIED = "places_api_denied";
 
 export function parsePlacesAspects(raw: unknown): PlacesAspect[] {
   if (!Array.isArray(raw)) {
@@ -66,40 +69,42 @@ function wants(aspects: PlacesAspect[], key: PlacesAspect): boolean {
   return aspects.includes("summary") || aspects.includes(key);
 }
 
-type TextResponse = {
-  status?: string;
-  error_message?: string;
-  results?: Array<{ place_id?: string; name?: string }>;
+type NewAddressComponent = {
+  longText?: string;
+  shortText?: string;
+  types?: string[];
 };
 
-type DetailsResponse = {
-  status?: string;
-  error_message?: string;
-  result?: {
-    name?: string;
-    formatted_phone_number?: string;
-    international_phone_number?: string;
-    formatted_address?: string;
-    address_components?: Array<{
-      long_name?: string;
-      short_name?: string;
-      types?: string[];
-    }>;
-    opening_hours?: {
-      open_now?: boolean;
-      weekday_text?: string[];
-    };
-    rating?: number;
-    url?: string;
+type NewPlace = {
+  id?: string;
+  displayName?: { text?: string; languageCode?: string };
+  nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
+  formattedAddress?: string;
+  addressComponents?: NewAddressComponent[];
+  rating?: number;
+  currentOpeningHours?: {
+    openNow?: boolean;
+    weekdayDescriptions?: string[];
+  };
+  regularOpeningHours?: {
+    openNow?: boolean;
+    weekdayDescriptions?: string[];
+  };
+  googleMapsUri?: string;
+};
+
+type SearchTextResponse = {
+  places?: NewPlace[];
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
   };
 };
 
 function postalFromComponents(
-  components: DetailsResponse["result"] extends infer R
-    ? R extends { address_components?: infer C }
-      ? C
-      : never
-    : never,
+  components: NewAddressComponent[] | undefined,
 ): string {
   if (!Array.isArray(components)) {
     return "";
@@ -107,57 +112,32 @@ function postalFromComponents(
   for (const row of components) {
     const types = Array.isArray(row?.types) ? row.types.map(String) : [];
     if (types.includes("postal_code")) {
-      return String(row.long_name ?? row.short_name ?? "").trim();
+      return String(row.longText ?? row.shortText ?? "").trim();
     }
   }
   return "";
 }
 
-async function fetchPlaceDetails(
-  placeId: string,
-  apiKey: string,
-  fetchImpl: typeof fetch,
-): Promise<PlaceResult | null> {
-  const url = new URL(DETAILS_URL);
-  url.searchParams.set("place_id", placeId);
-  url.searchParams.set("fields", DETAIL_FIELDS);
-  url.searchParams.set("language", "he");
-  url.searchParams.set("key", apiKey);
-  const res = await fetchImpl(url.toString());
-  if (!res.ok) {
-    throw new Error(`places details HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as DetailsResponse;
-  if (json.status && json.status !== "OK" && json.status !== "ZERO_RESULTS") {
-    throw new Error(
-      `places details ${json.status}${json.error_message ? `: ${json.error_message}` : ""}`,
-    );
-  }
-  const row = json.result;
-  if (!row) {
-    return null;
-  }
-  const name = String(row.name ?? "").trim();
+function mapNewPlace(row: NewPlace): PlaceResult | null {
+  const name = String(row.displayName?.text ?? "").trim();
   if (!name) {
     return null;
   }
   const phone =
-    String(row.formatted_phone_number ?? "").trim() ||
-    String(row.international_phone_number ?? "").trim();
-  const address = String(row.formatted_address ?? "").trim();
-  const postalCode = postalFromComponents(row.address_components);
+    String(row.nationalPhoneNumber ?? "").trim() ||
+    String(row.internationalPhoneNumber ?? "").trim();
+  const address = String(row.formattedAddress ?? "").trim();
+  const postalCode = postalFromComponents(row.addressComponents);
   const rating =
     typeof row.rating === "number" && Number.isFinite(row.rating)
       ? row.rating
       : null;
-  const openNow =
-    typeof row.opening_hours?.open_now === "boolean"
-      ? row.opening_hours.open_now
-      : null;
-  const weekdayHours = Array.isArray(row.opening_hours?.weekday_text)
-    ? row.opening_hours!.weekday_text!.map((line) => String(line).trim()).filter(Boolean)
+  const hours = row.currentOpeningHours ?? row.regularOpeningHours;
+  const openNow = typeof hours?.openNow === "boolean" ? hours.openNow : null;
+  const weekdayHours = Array.isArray(hours?.weekdayDescriptions)
+    ? hours!.weekdayDescriptions!.map((line) => String(line).trim()).filter(Boolean)
     : [];
-  const mapsUrl = String(row.url ?? "").trim();
+  const mapsUrl = String(row.googleMapsUri ?? "").trim();
   return {
     name,
     phone,
@@ -168,6 +148,21 @@ async function fetchPlaceDetails(
     weekdayHours,
     mapsUrl,
   };
+}
+
+function isPermissionDenied(status: number, body: SearchTextResponse): boolean {
+  if (status === 403 || status === 401) {
+    return true;
+  }
+  const errStatus = String(body.error?.status ?? "").toUpperCase();
+  const msg = String(body.error?.message ?? "").toLowerCase();
+  return (
+    errStatus === "PERMISSION_DENIED" ||
+    errStatus === "REQUEST_DENIED" ||
+    msg.includes("permission") ||
+    msg.includes("not enabled") ||
+    msg.includes("legacy api")
+  );
 }
 
 export async function fetchPlacesFacts(input: {
@@ -188,40 +183,55 @@ export async function fetchPlacesFacts(input: {
   const apiKey =
     (input.apiKey ?? getEnv().GOOGLE_PLACES_API_KEY ?? "").trim() || null;
   if (!apiKey) {
-    throw new Error("places_api_key_missing");
+    throw new Error(PLACES_API_KEY_MISSING);
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
-  const searchUrl = new URL(TEXT_SEARCH_URL);
-  searchUrl.searchParams.set("query", `${query} ${place}`);
-  searchUrl.searchParams.set("language", "he");
-  searchUrl.searchParams.set("region", "il");
-  searchUrl.searchParams.set("key", apiKey);
+  const searchRes = await fetchImpl(SEARCH_TEXT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": FIELD_MASK,
+    },
+    body: JSON.stringify({
+      textQuery: `${query} ${place}`,
+      languageCode: "he",
+      regionCode: "IL",
+      maxResultCount: MAX_RESULTS,
+    }),
+  });
 
-  const searchRes = await fetchImpl(searchUrl.toString());
+  let searchJson: SearchTextResponse = {};
+  try {
+    searchJson = (await searchRes.json()) as SearchTextResponse;
+  } catch {
+    searchJson = {};
+  }
+
   if (!searchRes.ok) {
+    if (isPermissionDenied(searchRes.status, searchJson)) {
+      throw new Error(PLACES_API_DENIED);
+    }
     throw new Error(`places search HTTP ${searchRes.status}`);
   }
-  const searchJson = (await searchRes.json()) as SearchResponse;
-  if (
-    searchJson.status &&
-    searchJson.status !== "OK" &&
-    searchJson.status !== "ZERO_RESULTS"
-  ) {
+
+  if (searchJson.error) {
+    if (isPermissionDenied(searchRes.status, searchJson)) {
+      throw new Error(PLACES_API_DENIED);
+    }
     throw new Error(
-      `places search ${searchJson.status}${searchJson.error_message ? `: ${searchJson.error_message}` : ""}`,
+      `places search ${searchJson.error.status ?? "ERROR"}${
+        searchJson.error.message ? `: ${searchJson.error.message}` : ""
+      }`,
     );
   }
 
-  const ids = (searchJson.results ?? [])
-    .map((row) => String(row.place_id ?? "").trim())
-    .filter(Boolean)
-    .slice(0, MAX_RESULTS);
-
-  for (const placeId of ids) {
-    const detail = await fetchPlaceDetails(placeId, apiKey, fetchImpl);
-    if (detail) {
-      facts.results.push(detail);
+  const places = Array.isArray(searchJson.places) ? searchJson.places : [];
+  for (const row of places.slice(0, MAX_RESULTS)) {
+    const mapped = mapNewPlace(row);
+    if (mapped) {
+      facts.results.push(mapped);
     }
   }
   return facts;
@@ -338,11 +348,11 @@ export async function resolvePlacesReply(input: {
     const facts = await fetchPlacesFacts(input);
     return formatPlacesHebrew(facts);
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === "places_api_key_missing"
-    ) {
+    if (error instanceof Error && error.message === PLACES_API_KEY_MISSING) {
       return "חיפוש עסקים לא מוגדר כרגע (חסר מפתח Google Places).";
+    }
+    if (error instanceof Error && error.message === PLACES_API_DENIED) {
+      return "חיפוש עסקים בגוגל לא מופעל למפתח הזה (צריך Places API New).";
     }
     return "לא הצלחתי לחפש עכשיו בגוגל. נסה שוב בעוד רגע.";
   }
