@@ -17,6 +17,7 @@ export type PlaceResult = {
 export type PlacesFacts = {
   query: string;
   place: string;
+  nearSpeaker: boolean;
   aspects: PlacesAspect[];
   results: PlaceResult[];
 };
@@ -165,18 +166,35 @@ function isPermissionDenied(status: number, body: SearchTextResponse): boolean {
   );
 }
 
+const NEARBY_RADIUS_METERS = 1500;
+
 export async function fetchPlacesFacts(input: {
   query: string;
   place: string;
   aspects?: PlacesAspect[] | unknown;
+  lat?: number | null;
+  lng?: number | null;
+  nearSpeaker?: boolean;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
 }): Promise<PlacesFacts> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
   const aspects = parsePlacesAspects(input.aspects);
-  const facts: PlacesFacts = { query, place, aspects, results: [] };
-  if (!query || !place) {
+  const lat =
+    input.lat != null && Number.isFinite(input.lat) ? input.lat : null;
+  const lng =
+    input.lng != null && Number.isFinite(input.lng) ? input.lng : null;
+  const nearSpeaker =
+    Boolean(input.nearSpeaker) || (lat != null && lng != null && !place);
+  const facts: PlacesFacts = {
+    query,
+    place: nearSpeaker ? place || "האזור שלך" : place,
+    nearSpeaker,
+    aspects,
+    results: [],
+  };
+  if (!query || (!place && (lat == null || lng == null))) {
     return facts;
   }
 
@@ -187,6 +205,20 @@ export async function fetchPlacesFacts(input: {
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
+  const body: Record<string, unknown> = {
+    textQuery: place && !nearSpeaker ? `${query} ${place}` : query,
+    languageCode: "he",
+    regionCode: "IL",
+    maxResultCount: MAX_RESULTS,
+  };
+  if (lat != null && lng != null) {
+    body.locationBias = {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius: NEARBY_RADIUS_METERS,
+      },
+    };
+  }
   const searchRes = await fetchImpl(SEARCH_TEXT_URL, {
     method: "POST",
     headers: {
@@ -194,12 +226,7 @@ export async function fetchPlacesFacts(input: {
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask": FIELD_MASK,
     },
-    body: JSON.stringify({
-      textQuery: `${query} ${place}`,
-      languageCode: "he",
-      regionCode: "IL",
-      maxResultCount: MAX_RESULTS,
-    }),
+    body: JSON.stringify(body),
   });
 
   let searchJson: SearchTextResponse = {};
@@ -319,30 +346,42 @@ function formatOnePlace(row: PlaceResult, aspects: PlacesAspect[]): string {
 
 /** Deterministic Hebrew reply from Places facts (engine replaces model response). */
 export function formatPlacesHebrew(facts: PlacesFacts): string {
-  if (!facts.query.trim() || !facts.place.trim()) {
-    return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה)";
+  const where = facts.place.trim() || (facts.nearSpeaker ? "האזור שלך" : "");
+  if (!facts.query.trim() || !where) {
+    return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)";
   }
   if (facts.results.length === 0) {
-    return `לא מצאתי תוצאות עבור «${facts.query}» ב«${facts.place}».`;
+    return `לא מצאתי תוצאות עבור «${facts.query}» ב«${where}».`;
   }
   const blocks = facts.results.map((row) => formatOnePlace(row, facts.aspects));
   if (facts.results.length === 1) {
     return blocks[0]!;
   }
-  return `מצאתי ${facts.results.length} תוצאות ל«${facts.query}» ב«${facts.place}»:\n\n${blocks.join("\n\n")}`;
+  return `מצאתי ${facts.results.length} תוצאות ל«${facts.query}» ב«${where}»:\n\n${blocks.join("\n\n")}`;
 }
 
 export async function resolvePlacesReply(input: {
   query: string;
   place: string;
   aspects?: PlacesAspect[] | unknown;
+  lat?: number | null;
+  lng?: number | null;
+  nearSpeaker?: boolean;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
 }): Promise<string> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
-  if (!query || !place) {
-    return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה)";
+  const hasPin =
+    input.lat != null &&
+    input.lng != null &&
+    Number.isFinite(input.lat) &&
+    Number.isFinite(input.lng);
+  if (!query || (!place && !hasPin && !input.nearSpeaker)) {
+    return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)";
+  }
+  if ((input.nearSpeaker || !place) && !hasPin) {
+    return "שלח מיקום בוואטסאפ (סיכת מיקום) ואחפש באזור שלך.";
   }
   try {
     const facts = await fetchPlacesFacts(input);

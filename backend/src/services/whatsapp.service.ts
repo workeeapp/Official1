@@ -45,6 +45,7 @@ import {
   clearWhatsAppWorkerSticky,
   sessionDigitalFromSticky,
 } from "./whatsapp-worker-sticky.js";
+import { setPendingLocation } from "./pending-location.js";
 
 export { phonesMatch, clearWhatsAppWorkerSticky };
 
@@ -58,6 +59,13 @@ export interface WhatsAppVerifyQuery {
   challenge?: string;
 }
 
+export type InboundLocation = {
+  lat: number;
+  lng: number;
+  name: string;
+  address: string;
+};
+
 export interface InboundWhatsAppText {
   from: string;
   /** Message body; for media this is the caption (may be empty). */
@@ -67,6 +75,8 @@ export interface InboundWhatsAppText {
   replyToText?: string;
   /** Image / video / audio / document / sticker sent with this message. */
   media?: InboundMedia;
+  /** WhatsApp location pin. */
+  location?: InboundLocation;
 }
 
 const MEDIA_KINDS: AttachmentKind[] = ["image", "video", "audio", "document", "sticker"];
@@ -169,13 +179,18 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         };
         const buttonCommand = record.interactive?.button_reply?.id;
         const media = readInboundMedia(message as Record<string, unknown>);
+        const location = readInboundLocation(
+          message as Record<string, unknown>,
+        );
         const body = media
           ? media.caption
-          : typeof record.text?.body === "string"
-            ? record.text.body
-            : typeof buttonCommand === "string"
-              ? buttonCommand
-              : formatSharedContactsMessage(record.contacts);
+          : location
+            ? formatSharedLocationMessage(location)
+            : typeof record.text?.body === "string"
+              ? record.text.body
+              : typeof buttonCommand === "string"
+                ? buttonCommand
+                : formatSharedContactsMessage(record.contacts);
         const text = body.trim();
         const from = typeof record.from === "string" ? record.from : "";
         const messageId = typeof record.id === "string" ? record.id : "";
@@ -184,13 +199,14 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const replyToText = replyToId
           ? lookupWhatsAppOutbound(replyToId)
           : undefined;
-        if ((text || media) && from && messageId) {
+        if ((text || media || location) && from && messageId) {
           messages.push({
             from,
             text,
             messageId,
             ...(replyToText ? { replyToText } : {}),
             ...(media ? { media } : {}),
+            ...(location ? { location } : {}),
           });
         }
       }
@@ -198,6 +214,59 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
   }
 
   return messages;
+}
+
+export const SHARED_LOCATION_MARKER = "[מיקום שותף בוואטסאפ]";
+
+/** WhatsApp `location` payload → inbound pin. */
+export function readInboundLocation(
+  record: Record<string, unknown>,
+): InboundLocation | undefined {
+  if (String(record.type ?? "") !== "location") {
+    return undefined;
+  }
+  const payload = record.location;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined;
+  }
+  const loc = payload as {
+    latitude?: unknown;
+    longitude?: unknown;
+    name?: unknown;
+    address?: unknown;
+  };
+  const lat =
+    typeof loc.latitude === "number"
+      ? loc.latitude
+      : typeof loc.latitude === "string"
+        ? Number(loc.latitude)
+        : NaN;
+  const lng =
+    typeof loc.longitude === "number"
+      ? loc.longitude
+      : typeof loc.longitude === "string"
+        ? Number(loc.longitude)
+        : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined;
+  }
+  return {
+    lat,
+    lng,
+    name: asTrimmed(loc.name),
+    address: asTrimmed(loc.address),
+  };
+}
+
+export function formatSharedLocationMessage(loc: InboundLocation): string {
+  return `${SHARED_LOCATION_MARKER}\n${JSON.stringify({
+    location: {
+      lat: loc.lat,
+      lng: loc.lng,
+      name: loc.name,
+      address: loc.address,
+    },
+  })}`;
 }
 
 export const SHARED_CONTACTS_MARKER = "[כרטיס איש קשר שותף בוואטסאפ]";
@@ -383,11 +452,15 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         mediaFailed += 1;
       }
     }
+    const location = batch.find((message) => message.location)?.location;
+    if (location) {
+      setPendingLocation(speaker.employeeId, location);
+    }
     const spoken = batchSpokenText(
       batch,
       stored.map(({ row }) => row.transcript),
     );
-    if (stored.length === 0 && !spoken) {
+    if (stored.length === 0 && !spoken && !location) {
       if (mediaFailed > 0) {
         await sendWhatsAppText(from, MEDIA_FAILED_NOTICE, { ignoreSession: true });
       }

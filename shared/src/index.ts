@@ -155,8 +155,8 @@ export type {
   LlmPlacesAspect,
   LlmJewishAction,
   LlmJewishAspect,
-  LlmTransitAction,
-  LlmTransitAspect,
+  LlmRoutesAction,
+  LlmRoutesAspect,
 } from "./llm-message";
 export {
   parseWeatherAction,
@@ -164,7 +164,7 @@ export {
   parseMashovAction,
   parsePlacesAction,
   parseJewishAction,
-  parseTransitAction,
+  parseRoutesAction,
   parseComposeCondition,
 } from "./llm-message";
 export {

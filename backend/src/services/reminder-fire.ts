@@ -26,6 +26,7 @@ import {
   conditionFromReminderJson,
   evaluateComposeCondition,
 } from "./compose-condition.js";
+import { fetchBusEtaWatch } from "./routes.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -355,6 +356,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const sendResults: boolean[] = [];
 
     let outboundBody = reminder.messageText;
+    let busEtaDefaultBody: string | null = null;
     let skipSend = false;
     let conditionShaAfterSend: string | undefined;
     if (reminder.composeAtFire) {
@@ -407,9 +409,31 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         "composeCondition" in reminder ? reminder.composeCondition : null,
       );
       if (condition) {
+        let evalFacts = { ...(factsBundle.eval ?? {}) };
+        if (condition.type === "bus_eta") {
+          const eta = await fetchBusEtaWatch({
+            origin: condition.origin,
+            destination: condition.destination,
+            line: condition.line,
+            headsign: condition.headsign,
+            now,
+          });
+          evalFacts = {
+            ...evalFacts,
+            busEtaMinutes: eta.minutes,
+            busEtaFingerprint: eta.fingerprint,
+          };
+          if (
+            eta.minutes != null &&
+            eta.minutes <= condition.minutesBefore &&
+            eta.fingerprint
+          ) {
+            busEtaDefaultBody = `קו ${condition.line} מגיע בעוד כ־${eta.minutes} דקות מ«${condition.origin}» לכיוון «${condition.destination}» — זמן לצאת.`;
+          }
+        }
         const gate = evaluateComposeCondition({
           condition,
-          facts: factsBundle.eval ?? {},
+          facts: evalFacts,
           lastReportSha: reminder.lastReportSha,
         });
         if (gate.immediateSha) {
@@ -439,7 +463,12 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         itemLabel: reminder.itemLabel,
         composed,
       });
-      outboundBody = resolved.body;
+      outboundBody =
+        busEtaDefaultBody &&
+        (!resolved.body.trim() ||
+          resolved.body.trim() === String(reminder.messageText ?? "").trim())
+          ? busEtaDefaultBody
+          : resolved.body;
       if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
         await prisma.reminder.update({
           where: { id: reminder.id },

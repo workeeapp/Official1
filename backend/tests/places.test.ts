@@ -36,6 +36,7 @@ describe("formatPlacesHebrew", () => {
     const facts: PlacesFacts = {
       query: "מקדונלדס",
       place: "קרית אונו",
+      nearSpeaker: false,
       aspects: ["summary"],
       results: [base],
     };
@@ -50,6 +51,7 @@ describe("formatPlacesHebrew", () => {
     const text = formatPlacesHebrew({
       query: "חשמלאי",
       place: "פתח תקווה",
+      nearSpeaker: false,
       aspects: ["summary"],
       results: [{ ...base, name: "חשמלאי כהן", postalCode: "" }],
     });
@@ -60,6 +62,7 @@ describe("formatPlacesHebrew", () => {
     const text = formatPlacesHebrew({
       query: "חשמלאי",
       place: "פתח תקווה",
+      nearSpeaker: false,
       aspects: ["summary"],
       results: [
         { ...base, name: "א'", postalCode: "49100" },

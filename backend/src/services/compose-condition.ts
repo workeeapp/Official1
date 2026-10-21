@@ -8,6 +8,10 @@ export type ComposeEvalFacts = {
   weatherIsRain?: boolean;
   /** Stable hash of mashov body content (sha256 hex). */
   mashovFingerprint?: string;
+  /** Minutes until next matching bus departure (Google Routes). */
+  busEtaMinutes?: number | null;
+  /** Fingerprint of the departure being watched (sha / stable id). */
+  busEtaFingerprint?: string;
 };
 
 export type ComposeConditionFireGate = {
@@ -86,6 +90,24 @@ export function evaluateComposeCondition(input: {
   if (input.condition.type === "mashov_new") {
     const fp = String(input.facts.mashovFingerprint ?? "").trim();
     if (!fp) {
+      return { skipSend: true };
+    }
+    if (fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp,
+    };
+  }
+
+  if (input.condition.type === "bus_eta") {
+    const minutes = input.facts.busEtaMinutes;
+    const fp = String(input.facts.busEtaFingerprint ?? "").trim();
+    if (minutes == null || !Number.isFinite(minutes) || !fp) {
+      return { skipSend: true };
+    }
+    if (minutes > input.condition.minutesBefore) {
       return { skipSend: true };
     }
     if (fp === last) {

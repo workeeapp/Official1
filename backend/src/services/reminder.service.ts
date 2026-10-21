@@ -102,9 +102,38 @@ export const SUB_HOURLY_REFUSAL =
 
 /** A new / changed clock that would repeat every N seconds or minutes (refused). */
 export function reminderRepeatsSubHourly(
-  reminder: Pick<LlmReminderAction, "action" | "recurrence" | "everyUnit">,
+  reminder: Pick<
+    LlmReminderAction,
+    "action" | "recurrence" | "everyUnit" | "everyCount" | "composeCondition"
+  >,
 ): boolean {
   if (reminder.action === "remove") {
+    return false;
+  }
+  // Google Routes bus_eta watches may poll every ≥1 minute.
+  const busEta = reminder.composeCondition?.type === "bus_eta";
+  if (busEta) {
+    if (reminder.recurrence) {
+      if (
+        reminder.recurrence.freq === "interval" &&
+        reminder.recurrence.unit === "seconds"
+      ) {
+        return true;
+      }
+      if (
+        reminder.recurrence.freq === "interval" &&
+        reminder.recurrence.unit === "minutes"
+      ) {
+        return (reminder.recurrence.interval ?? 0) < 1;
+      }
+      return isSubHourlyRecurrence(reminder.recurrence);
+    }
+    if (reminder.everyUnit === "seconds") {
+      return true;
+    }
+    if (reminder.everyUnit === "minutes") {
+      return (reminder.everyCount ?? 0) < 1;
+    }
     return false;
   }
   if (reminder.recurrence) {

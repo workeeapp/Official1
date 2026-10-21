@@ -163,7 +163,12 @@ import { resolveMarketReply } from "./market.js";
 import { resolveMashovReply } from "./mashov.js";
 import { resolvePlacesReply } from "./places.js";
 import { resolveJewishReply } from "./jewish.js";
-import { resolveTransitReply } from "./transit.js";
+import { resolveRoutesReply } from "./routes.js";
+import {
+  clearPendingLocation,
+  formatPendingLocationContext,
+  getPendingLocation,
+} from "./pending-location.js";
 import {
   clearMutatingMetadata,
   stripShowTurnMutates,
@@ -667,7 +672,7 @@ function workerTargetingInstructions(
     STATUS_ADDRESSEE_RULE,
     `YOUR JOBS INVOLVING THIS VIEWER: every WORKER_SAVED_DATA row involves the person in front of you — asked_by = who asked, for = who it pings / asks, viewer_is = asker | subject | self | other. Phrase each row from their side: viewer_is=subject → «עמית ביקש שאזכיר לך לבדוק את התזכורת (תזכורת: היום 20:29)»; asker → «אני צריכה להזכיר לטל לבדוק את התזכורת (תזכורת: היום 20:29)». Never read «להזכיר לטל…» as-is to טל. On each such numbered line also name the humans the row involves in parentheses: asked_by plus every name in for, de-duplicated, comma-separated, never yourself — keep the viewer in it, e.g. «1. לשלוח הודעה לערן (עם עמית, ערן) (תזכורת: היום 06:35)». These people-parentheses come before the «(תזכורת: …)» parentheses. Skip them when only one person is involved or the item name already shows all of them (פגישה (עמית, ערן)). Anyone a row involves may change or cancel it: lists.remove / lists.update with that row's item_id and targets: ["${workerName}"], or lists remove reminders / lists update reminders with its reminder.reminder_id (a new time → lists update reminders). Cancelling removes it for everyone it involves, and the server tells them — say so in response in past tense («ביטלתי את התזכורת — עמית יקבל עדכון»). If the viewer also has their own matching task in EMPLOYEE_SAVED_DATA, offer to remove it too — do not remove it unasked.`,
     `Change YOUR task → lists update, targets: ["${workerName}"], keep the current שם מטלה from WORKER_SAVED_DATA and write the new wording. Do not lists.remove your task to replace it. If they refuse an offered add, lists = [].`,
-    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) weather now or scheduled; (13) stocks, indices & crypto quotes now or scheduled; (14) Mashov school feedback (grades/homework) now or scheduled; (15) conditional watches («תעדכני אותי אם…» — alert only when a condition holds); (16) local business search (find electrician / phone of a shop in a city); (17) Shabbat / Jewish calendar (live times + remind N minutes before candle lighting); (18) Israel bus schedule (next departures by line + stop + city); (19) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
+    "If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). Lead «אני יודעת לנהל כל רשימה» then ALL: (1) any list add/remove/update + custom columns; shopping/contacts/tasks are examples; (2) share lists/filings; (3) meetings on tasks calendar + coordinate with participants then save; (4) standing/recurring tasks; (5) day/week agenda; (6) filings; (7) personal phone book; (8) messages now or later (human/digital); (9) checks & nudges (with someone / with me; urgent; deferred); (10) reminders; (11) scheduled sends & live saved-data digests; (12) weather now or scheduled; (13) stocks, indices & crypto quotes now or scheduled; (14) Mashov school feedback (grades/homework) now or scheduled; (15) conditional watches («תעדכני אותי אם…» — alert only when a condition holds); (16) local business search (find electrician / phone of a shop in a city); (17) Shabbat / Jewish calendar (live times + remind N minutes before candle lighting); (18) public-transit routes / leave-by / next bus / lines at a stop via Google; near-me places with a shared pin; (19) handoff to another digital worker. No schema jargon; no git digests. Empty lists/filing/messages/directory/reminders/jobs.",
     "SEND BY MEANING (all outbound sends): if the speaker asks you to deliver words to a recipient, treat it as send — judge by MEANING, not a fixed verb. Illustrative only: תשלחי / תגידי / תאמרי / תמסרי / תכתבי / תבקשי / תעדכני (when meaning is notify someone) / tell / say / pass on / update them that…. Then Send NOW or Send LATER below. NOT send: assign without a tell («טל צריך לקנות חלב» → lists); reminder/clock edit («תעדכני את התזכורת» → lists update reminders); check-with jobs («תבדקי עם…»).",
     "EXACT OUTBOUND QUOTE (critical): every fixed-text send — messages NOW or reminders with compose false/omit — MUST confirm in response with את ההודעה «…» copying messages[].text or reminders[].text CHARACTER-FOR-CHARACTER. FORBIDDEN: bare «שלחתי לעמית» / «שאלתי את עמית» / «אשלח למיכל בעוד שעה» without the quote; FORBIDDEN summarizing. Speak to the asker in second person — do not make the whole response the recipient line alone. compose:true → no invented final quote; confirm when + wording written at send time.",
     "Send NOW (no delay, recipient is someone else) → metadata.messages; response confirms with את ההודעה «…» = exact messages.text. Send LATER (בעוד שעה / מחר ב־08:00 / in N minutes) → lists add list_type reminders with in or time, ping = recipient, text = dictated/formulated words; messages = []; response confirms when + את ההודעה «…» = exact reminders.text. Do not also emit messages for a delayed send.",
@@ -715,11 +720,12 @@ function workerTargetingInstructions(
     "MASHOV YEAR (critical): year is NEVER invented. Missing שנת לימודים למשוב → ask ONLY «לאיזו שנת לימודים?» (one question; mashov=null; FORBIDDEN mixing gender/tips). Example: you asked for year → speaker «זכר / 2026» or just «2026» → SAME TURN lists add filing item_name=שנת לימודים למשוב item_info=2026 AND metadata.mashov with the pending child/aspects. YOU file — never tell them «שמור בתיוק». FORBIDDEN: hearing 2026 and not filing; mashov while year filing is still missing.",
     "MASHOV (live): «מה הציונים של דניאל» / שיעורי בית / התנהגות / מערכת → metadata.mashov { child:\"דניאל\"|\"\", aspects:[grades|homework|behavior|timetable] }; lists/no reminders clock. Server reads filings (incl. סיסמת משוב + שנת לימודים) + fetches. Missing creds → ask (mashov=null) then file on answer; never mashov without complete filings. Several children and no child → ask which.",
     "SCHEDULED MASHOV: «כל יום ב־18 שלחי לי את הציונים של דניאל» → compose:true, compose_source:\"mashov\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH mashov_new exception: no ask-when.",
-    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose with compose_source/place/compose_condition. market_price / weather_rain / mashov_new. No spoken time → hourly interval (FORBIDDEN ask מתי). Server skips WhatsApp when condition false — never «עדיין לא». Condition MUST be compose_condition JSON, not only the brief.",
-    "PLACES (live local business): «תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו» / כתובת/מיקוד → metadata.places { query, place, aspects:[summary|phone|address|hours] }; lists/no reminders clock. Server replaces response — FORBIDDEN inventing phones/addresses. Missing query or place → ask; places=null. Bare find → [summary]; טלפון → [phone]; כתובת/מיקוד → [address]; שעות → [hours].",
+    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose with compose_source/place/compose_condition. market_price / weather_rain / mashov_new / bus_eta. No spoken time → hourly interval (FORBIDDEN ask מתי) except bus_eta every 2 minutes OK. Server skips WhatsApp when condition false — never «עדיין לא». Condition MUST be compose_condition JSON, not only the brief.",
+    "PLACES (live local business): «תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו» → metadata.places { query, place, aspects }. «מה המסעדות באזור שלי» + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\" }. Server replaces — FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): «מתי מדליקים נרות בפתח תקווה» / «מתי יוצאת שבת בתל אביב» / «מה פרשת השבוע» / «איזה חג הבא» → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays] }; lists/no reminders clock. Server fetches Hebcal and replaces response — FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare «מתי שבת» → [summary]; מתי נרות → [candles]; מוצאי/יציאת שבת → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכירי לי להדליק נרות — use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: «תזכירי לי להדליק נרות 10 דקות לפני כניסת שבת בפתח תקווה» → Self-nudge + lists add reminders { item:\"להדליק נרות\", text:\"להדליק נרות\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"פתח תקווה\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal — FORBIDDEN inventing time/in. Missing city → ask; no reminders clock jewish=null. «כל שישי / כל שבוע» → same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot «לשישי הקרוב…»; weekly «בכל שישי…» — not live candle times.",
-    "TRANSIT (live Israel buses): «מתי יוצא קו 51 מתחנה מרכזית פתח תקווה» → metadata.transit { line:\"51\", stop:\"תחנה מרכזית\", place:\"פתח תקווה\", aspects:[departures] }; lists/no reminders clock. Server reads MOT GTFS schedule and replaces response — FORBIDDEN inventing times. Missing line/stop/place → ask; transit=null. Schedule only (not real-time SIRI).",
+    "ROUTES (live Google public transit): «איך מגיעים מ… ל…» → metadata.routes { origin, destination, aspects:[summary] }. Leave-by «מתי לצאת כדי להיות ב־10 ב…» → routes { origin, destination, arrival via SESSION_CLOCK, aspects:[summary] }. Next bus «עוד כמה זמן קו 51 מתחנה X לכיוון Y» → routes { origin:stop, destination:direction, line:\"51\", aspects:[eta] }; missing direction for a known line → ask «לאיזה כיוון?»; routes=null. Frequency → aspects:[frequency]. LINES AT STOP: ambiguous «איזה קווים עוברים בתחנת X» / «מה עובר בתחנה» without destination → ASK first (routes=null): «האם אתה מכוון ליעד מסוים, או פשוט רוצה לדעת אילו קווים עוברים בתחנת «X»?» — do NOT refuse as if destination were mandatory. After «רק קווים / מה עובר בתחנה / בלי יעד» → routes { origin:stop, destination:\"\", aspects:[\"lines\"] }. After they name a destination/direction → trip/ETA as above. origin \"speaker\" with PENDING_LOCATION. Server replaces — FORBIDDEN inventing times or line lists.",
+    "BUS WATCH: «תזכירי לי 10 דקות לפני שקו 51 מגיע לתחנת X לכיוון Y» → Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination → ask; no clock. Server polls Routes; quiet-skip until ETA ≤ N. Sub-hour refuse does NOT apply to bus_eta.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
     "Before lists add reminders: only if this turn's active_reminders already has the SAME work by meaning, ASK מצאתי תזכורת קיימת ל«…». לעדכן אותה או להוסיף עוד אחת? Same time or the same every-N cadence alone is never a match (בדיחה על עדות כל שעה ≠ חביתה כל שעה → just add both). Unrelated clocks never trigger that ask. Do not invent that one exists. Empty reminders while asking.",
@@ -1630,6 +1636,9 @@ export async function sendChatMessage(input: {
               ),
           ),
         ),
+    guestSpeaker
+      ? ""
+      : formatPendingLocationContext(getPendingLocation(input.employeeId)),
     (await withoutFailingTurn("tips_context_failed", () =>
       formatAvailableTipsContext({
         userId: input.userId,
@@ -1651,7 +1660,7 @@ export async function sendChatMessage(input: {
         "Never say אני אורחת / אני רק אורחת / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
         "Your purpose: help them register as a Workee member (their own account + לוסי). Collect first name, surname, username, password; when all four are known emit metadata.register with those fields. Until then register=null and ask for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
-        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/places/jewish/transit as the main topic.",
+        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/places/jewish/routes as the main topic.",
         "Off-topic outside shared lists or registration → guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
         "Add/update/delete/buy/remind/send while guest → response: «אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות. אפשר להירשם כדי לקבל חשבון משלך.» Empty mutate arrays.",
         "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
@@ -2889,13 +2898,27 @@ export async function sendChatMessage(input: {
     }
     // Live places ACTION → Google Places; guests skip.
     const placesAction = guestSpeaker ? null : metadata.places ?? null;
-    if (placesAction?.query.trim() && placesAction.place.trim()) {
+    const pendingLoc = guestSpeaker
+      ? null
+      : getPendingLocation(input.employeeId);
+    if (placesAction?.query.trim()) {
+      const nearSpeaker = placesAction.near === "speaker";
       const placesText = await resolvePlacesReply({
         query: placesAction.query,
         place: placesAction.place,
         aspects: placesAction.aspects,
+        nearSpeaker,
+        lat: placesAction.lat ?? pendingLoc?.lat ?? null,
+        lng: placesAction.lng ?? pendingLoc?.lng ?? null,
       });
       workingReply = setEngineResponse(workingReply, placesText);
+      if (
+        nearSpeaker &&
+        pendingLoc &&
+        !placesText.includes("שלח מיקום")
+      ) {
+        clearPendingLocation(input.employeeId);
+      }
     }
     // Live Jewish / Shabbat ACTION → Hebcal; guests skip.
     // Prefer candle-offset reminder over live jewish times when both appear.
@@ -2914,16 +2937,50 @@ export async function sendChatMessage(input: {
       });
       workingReply = setEngineResponse(workingReply, jewishText);
     }
-    // Live transit ACTION → MOT GTFS schedule; guests skip.
-    const transitAction = guestSpeaker ? null : metadata.transit ?? null;
-    if (transitAction) {
-      const transitText = await resolveTransitReply({
-        line: transitAction.line,
-        stop: transitAction.stop,
-        place: transitAction.place,
-        aspects: transitAction.aspects,
+    // Live routes ACTION → Google Routes TRANSIT / Places stop board; guests skip.
+    const routesAction = guestSpeaker ? null : metadata.routes ?? null;
+    const routesLinesBoard = Boolean(
+      routesAction?.aspects?.includes("lines"),
+    );
+    if (
+      routesAction?.origin.trim() &&
+      (routesAction.destination.trim() || routesLinesBoard)
+    ) {
+      const pin = getPendingLocation(input.employeeId);
+      const routesResult = await resolveRoutesReply({
+        origin: routesAction.origin,
+        destination: routesAction.destination,
+        departure: routesAction.departure,
+        arrival: routesAction.arrival,
+        line: routesAction.line,
+        headsign: routesAction.headsign,
+        aspects: routesAction.aspects,
+        originLat:
+          routesAction.origin.toLowerCase() === "speaker"
+            ? pin?.lat ?? null
+            : null,
+        originLng:
+          routesAction.origin.toLowerCase() === "speaker"
+            ? pin?.lng ?? null
+            : null,
       });
-      workingReply = setEngineResponse(workingReply, transitText);
+      workingReply = setEngineResponse(workingReply, routesResult.text);
+      if (
+        routesResult.navigateAddress &&
+        !parseLlmReply(workingReply).navigateAddress
+      ) {
+        workingReply = setEngineNavigateAddress(
+          workingReply,
+          routesResult.navigateAddress,
+        );
+      }
+      if (
+        routesAction.origin.toLowerCase() === "speaker" &&
+        pin &&
+        !routesResult.text.includes("שלח מיקום")
+      ) {
+        clearPendingLocation(input.employeeId);
+      }
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({

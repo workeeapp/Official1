@@ -410,6 +410,42 @@ describe("WhatsApp webhook", () => {
     ).toEqual([{ from: "972501234567", text: "hi", messageId: "wamid.1" }]);
   });
 
+  it("extracts inbound location pins", () => {
+    const rows = extractInboundTexts({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.loc",
+                    from: "972501234567",
+                    type: "location",
+                    location: {
+                      latitude: 32.087,
+                      longitude: 34.887,
+                      name: "בית",
+                      address: "ז׳בוטינסקי 1",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.location).toEqual({
+      lat: 32.087,
+      lng: 34.887,
+      name: "בית",
+      address: "ז׳בוטינסקי 1",
+    });
+    expect(rows[0]?.text).toContain("מיקום שותף");
+  });
+
   it("returns 503 when the verify token is not configured", async () => {
     delete process.env.WHATSAPP_VERIFY_TOKEN;
     resetEnvCache();

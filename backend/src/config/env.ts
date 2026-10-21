@@ -26,6 +26,11 @@ const envSchema = z.object({
   TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
   /** Google Places API key for live local business search (optional). */
   GOOGLE_PLACES_API_KEY: z.string().optional(),
+  /**
+   * Google Routes API key for live public-transit A→B (optional).
+   * Falls back to GOOGLE_PLACES_API_KEY when unset.
+   */
+  GOOGLE_ROUTES_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -95,6 +95,48 @@ describe("evaluateComposeCondition", () => {
     expect(gate.skipSend).toBe(false);
     expect(gate.shaAfterSend).toBe(fp);
   });
+
+  it("bus_eta: skips when ETA above threshold", () => {
+    expect(
+      evaluateComposeCondition({
+        condition: {
+          type: "bus_eta",
+          origin: "ארנס",
+          destination: "תל אביב",
+          line: "51",
+          headsign: "",
+          minutesBefore: 10,
+        },
+        facts: { busEtaMinutes: 25, busEtaFingerprint: "51|08:40" },
+        lastReportSha: "",
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("bus_eta: sends once then skips same fingerprint", () => {
+    const condition = {
+      type: "bus_eta" as const,
+      origin: "ארנס",
+      destination: "תל אביב",
+      line: "51",
+      headsign: "",
+      minutesBefore: 10,
+    };
+    const first = evaluateComposeCondition({
+      condition,
+      facts: { busEtaMinutes: 8, busEtaFingerprint: "51|08:40" },
+      lastReportSha: "",
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.shaAfterSend).toBe("51|08:40");
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: { busEtaMinutes: 7, busEtaFingerprint: "51|08:40" },
+        lastReportSha: "51|08:40",
+      }).skipSend,
+    ).toBe(true);
+  });
 });
 
 describe("conditional fire outbound", () => {

@@ -1124,17 +1124,39 @@
                   "object",
                   "null"
                 ],
-                "description": "Live local business search («תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו»). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. Missing query or place → ask; leave places null. Postal code (מיקוד) is always included when Google has it.",
+                "description": "Live local business search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it.",
                 "properties": {
                   "query": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "What to find: category or business name (חשמלאי, מקדונלדס)."
+                    "description": "What to find: category or business name (חשמלאי, מסעדות, מקדונלדס)."
                   },
                   "place": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "City / area from speech (פתח תקווה, קרית אונו). Required."
+                    "description": "City / area from speech (פתח תקווה). Empty OK when near=speaker."
+                  },
+                  "near": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 32,
+                    "description": "\"speaker\" = search around PENDING_LOCATION pin. null/empty for city text search."
+                  },
+                  "lat": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Optional lat from PENDING_LOCATION (engine may inject)."
+                  },
+                  "lng": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Optional lng from PENDING_LOCATION (engine may inject)."
                   },
                   "aspects": {
                     "type": "array",
@@ -1151,8 +1173,7 @@
                   }
                 },
                 "required": [
-                  "query",
-                  "place"
+                  "query"
                 ]
               },
               "jewish": {
@@ -1191,44 +1212,62 @@
                   "place"
                 ]
               },
-              "transit": {
+              "routes": {
                 "type": [
                   "object",
                   "null"
                 ],
-                "description": "Live Israel public transit schedule («מתי יוצא קו 51 מתחנה מרכזית פתח תקווה»). Server reads MOT GTFS and replaces response — FORBIDDEN inventing departure times. line + place + stop required; missing any → ask; leave transit null.",
+                "description": "Live public-transit via Google («איך מגיעים מ… ל…» / leave-by / עוד כמה זמן קו X / איזה קווים בתחנה). Trip/ETA: Routes API TRANSIT — origin+destination required. Stop board (which lines at stop, no dest): aspects [lines], origin=stop, destination \"\". Ambiguous «איזה קווים בתחנה X» → ASK clarify first (יעד מסוים או רק קווים בתחנה?); routes=null until answered. FORBIDDEN inventing times or line lists. origin \"speaker\" = PENDING_LOCATION.",
                 "properties": {
+                  "origin": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "From address/place/stop, or \"speaker\" for the shared pin."
+                  },
+                  "destination": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "To address/place/direction city. Empty string when aspects includes lines (stop board only)."
+                  },
+                  "departure": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Leave at YYYY-MM-DDTHH:mm (Jerusalem) or RFC3339; empty = now."
+                  },
+                  "arrival": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Arrive by (same formats); leave-by mode. Do not set both departure and arrival."
+                  },
                   "line": {
                     "type": "string",
                     "maxLength": 32,
-                    "description": "Route short name from speech (51, 480, …)."
+                    "description": "Optional line filter (51) for next-departure / frequency asks."
                   },
-                  "stop": {
+                  "headsign": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Stop hint (תחנה מרכזית, מסוף ארנס)."
-                  },
-                  "place": {
-                    "type": "string",
-                    "maxLength": 255,
-                    "description": "City (פתח תקווה, תל אביב) — disambiguates the line nationwide."
+                    "description": "Optional direction/headsign filter."
                   },
                   "aspects": {
                     "type": "array",
                     "items": {
                       "type": "string",
                       "enum": [
-                        "departures",
-                        "summary"
+                        "summary",
+                        "duration",
+                        "steps",
+                        "fare",
+                        "eta",
+                        "frequency",
+                        "lines"
                       ]
                     },
-                    "description": "מתי יוצא / יציאות → [departures]; bare ask → [summary] (same as departures for now)."
+                    "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות → [frequency]; איזה קווים בתחנה (no dest) → [lines]."
                   }
                 },
                 "required": [
-                  "line",
-                  "stop",
-                  "place"
+                  "origin"
                 ]
               },
               "tips": {

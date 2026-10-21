@@ -211,7 +211,16 @@ export type LlmComposeCondition =
       value: number;
     }
   | { type: "weather_rain" }
-  | { type: "mashov_new" };
+  | { type: "mashov_new" }
+  | {
+      /** Poll Google Routes stop→dest; notify when next matching departure ≤ minutes_before. */
+      type: "bus_eta";
+      origin: string;
+      destination: string;
+      line: string;
+      headsign: string;
+      minutesBefore: number;
+    };
 
 export interface LlmReminderAction {
   action: LlmReminderActionName;
@@ -401,10 +410,11 @@ export interface LlmMetadata {
    */
   jewish?: LlmJewishAction | null;
   /**
-   * Live Israel transit schedule ask — engine reads MOT GTFS and replaces
-   * response. line + stop + place required. Missing → model asks; leave unset.
+   * Live public-transit trip / leave-by / next departure / stop board via Google.
+   * Trip/ETA need origin+destination; stop board (aspects lines) needs origin only.
+   * Ambiguous lines-at-stop → model asks clarify; leave unset until answered.
    */
-  transit?: LlmTransitAction | null;
+  routes?: LlmRoutesAction | null;
   /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
@@ -451,8 +461,12 @@ export type LlmPlacesAspect = "summary" | "phone" | "address" | "hours";
 export interface LlmPlacesAction {
   /** What to find (business name or category). */
   query: string;
-  /** City / area bias (פתח תקווה, קרית אונו). */
+  /** City / area bias (פתח תקווה, קרית אונו). Empty OK when near=speaker. */
   place: string;
+  /** Search around PENDING_LOCATION pin. */
+  near: "speaker" | "";
+  lat: number | null;
+  lng: number | null;
   aspects: LlmPlacesAspect[];
 }
 
@@ -471,16 +485,29 @@ export interface LlmJewishAction {
   aspects: LlmJewishAspect[];
 }
 
-export type LlmTransitAspect = "departures" | "summary";
+export type LlmRoutesAspect =
+  | "summary"
+  | "duration"
+  | "steps"
+  | "fare"
+  | "eta"
+  | "frequency"
+  | "lines";
 
-export interface LlmTransitAction {
-  /** Route short name (51, 480, …). */
+export interface LlmRoutesAction {
+  /** Origin address / place, or "speaker" for PENDING_LOCATION. */
+  origin: string;
+  /** Destination address / place / direction city. Empty when aspects includes lines. */
+  destination: string;
+  /** Leave at (YYYY-MM-DDTHH:mm or RFC3339); empty = now. */
+  departure: string;
+  /** Arrive by (same formats); mutually exclusive with departure when set. */
+  arrival: string;
+  /** Optional line filter (51) for stop→dest next-departure asks. */
   line: string;
-  /** Stop hint (תחנה מרכזית, מסוף ארנס). */
-  stop: string;
-  /** City (פתח תקווה) — disambiguates the line. */
-  place: string;
-  aspects: LlmTransitAspect[];
+  /** Optional headsign / direction filter. */
+  headsign: string;
+  aspects: LlmRoutesAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -588,7 +615,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const mashov = parseMashovAction(meta);
   const places = parsePlacesAction(meta);
   const jewish = parseJewishAction(meta);
-  const transit = parseTransitAction(meta);
+  const routes = parseRoutesAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -637,7 +664,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(mashov ? { mashov } : {}),
     ...(places ? { places } : {}),
     ...(jewish ? { jewish } : {}),
-    ...(transit ? { transit } : {}),
+    ...(routes ? { routes } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -1923,6 +1950,59 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
       value,
     };
   }
+  if (
+    type === "bus_eta" ||
+    type === "bus" ||
+    type === "transit_eta" ||
+    type === "route_eta"
+  ) {
+    const origin = readText(record, [
+      "origin",
+      "from",
+      "stop",
+      "station",
+      "תחנה",
+    ]).slice(0, 255);
+    const destination = readText(record, [
+      "destination",
+      "to",
+      "direction",
+      "יעד",
+      "כיוון",
+    ]).slice(0, 255);
+    const line = readText(record, ["line", "route", "קו"])
+      .replace(/^קו\s+/u, "")
+      .trim()
+      .slice(0, 32);
+    const headsign = readText(record, [
+      "headsign",
+      "direction_label",
+      "toward",
+    ]).slice(0, 255);
+    const minutesRaw =
+      record.minutes_before ??
+      record.minutesBefore ??
+      record.offset_minutes ??
+      record.offsetMinutes ??
+      record.minutes;
+    const minutesBefore =
+      typeof minutesRaw === "number"
+        ? Math.round(minutesRaw)
+        : typeof minutesRaw === "string" && /^-?\d+$/.test(minutesRaw.trim())
+          ? Number(minutesRaw.trim())
+          : NaN;
+    if (!origin || !destination || !line || !Number.isFinite(minutesBefore)) {
+      return null;
+    }
+    return {
+      type: "bus_eta",
+      origin,
+      destination,
+      line,
+      headsign,
+      minutesBefore: Math.abs(minutesBefore) || 10,
+    };
+  }
   return null;
 }
 
@@ -2086,6 +2166,16 @@ const PLACES_ASPECTS = new Set<LlmPlacesAspect>([
   "hours",
 ]);
 
+function parseOptionalCoord(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string" && /^-?\d+(\.\d+)?$/.test(raw.trim())) {
+    return Number(raw.trim());
+  }
+  return null;
+}
+
 /** metadata.places — live Google Places fetch; engine replaces response. */
 export function parsePlacesAction(
   meta: Record<string, unknown>,
@@ -2103,16 +2193,29 @@ export function parsePlacesAction(
     "category",
     "חיפוש",
   ]).slice(0, 255);
+  const nearRaw = readText(row, ["near", "near_me", "nearMe", "around"])
+    .trim()
+    .toLowerCase();
+  const near: "speaker" | "" =
+    nearRaw === "speaker" ||
+    nearRaw === "me" ||
+    nearRaw === "here" ||
+    nearRaw === "כאן" ||
+    nearRaw === "שלי"
+      ? "speaker"
+      : "";
   const place = readText(row, [
     "place",
     "location",
     "city",
     "area",
-    "near",
     "מקום",
     "עיר",
   ]).slice(0, 255);
-  if (!query || !place) {
+  const lat = parseOptionalCoord(row.lat ?? row.latitude);
+  const lng = parseOptionalCoord(row.lng ?? row.lon ?? row.longitude);
+  const hasPin = lat != null && lng != null;
+  if (!query || (!place && near !== "speaker" && !hasPin)) {
     return null;
   }
   const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
@@ -2145,6 +2248,9 @@ export function parsePlacesAction(
   return {
     query,
     place,
+    near,
+    lat,
+    lng,
     aspects: aspects.length > 0 ? aspects : ["summary"],
   };
 }
@@ -2260,76 +2366,128 @@ export function parseJewishAction(
   };
 }
 
-const TRANSIT_ASPECTS = new Set<LlmTransitAspect>(["departures", "summary"]);
+const ROUTES_ASPECTS = new Set<LlmRoutesAspect>([
+  "summary",
+  "duration",
+  "steps",
+  "fare",
+  "eta",
+  "frequency",
+  "lines",
+]);
 
-/** metadata.transit — live MOT GTFS schedule departures. */
-export function parseTransitAction(
+/** metadata.routes — live Google Routes TRANSIT (A→B / leave-by / next departure / stop board). */
+export function parseRoutesAction(
   meta: Record<string, unknown>,
-): LlmTransitAction | null {
+): LlmRoutesAction | null {
   const raw =
-    meta.transit ??
-    meta.bus ??
-    meta.gtfs ??
-    meta.public_transport ??
-    meta.publicTransport;
+    meta.routes ??
+    meta.route ??
+    meta.directions ??
+    meta.trip ??
+    meta.transit_trip ??
+    meta.transitTrip;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
   const row = raw as Record<string, unknown>;
-  const line = readText(row, [
-    "line",
-    "route",
-    "route_short_name",
-    "routeShortName",
-    "קו",
-  ])
+  let origin = readText(row, [
+    "origin",
+    "from",
+    "start",
+    "מוצא",
+    "מ",
+  ]).slice(0, 255);
+  const originLower = origin.toLowerCase();
+  if (
+    originLower === "me" ||
+    originLower === "here" ||
+    originLower === "כאן" ||
+    originLower === "מכאן"
+  ) {
+    origin = "speaker";
+  }
+  const destination = readText(row, [
+    "destination",
+    "to",
+    "end",
+    "יעד",
+    "ל",
+    "אל",
+  ]).slice(0, 255);
+  const departure = readText(row, [
+    "departure",
+    "departure_time",
+    "departureTime",
+    "leave",
+  ]).slice(0, 64);
+  const arrival = readText(row, [
+    "arrival",
+    "arrival_time",
+    "arrivalTime",
+    "arrive",
+    "arrive_by",
+    "arriveBy",
+  ]).slice(0, 64);
+  const line = readText(row, ["line", "route", "קו"])
     .replace(/^קו\s+/u, "")
     .trim()
     .slice(0, 32);
-  const stop = readText(row, [
-    "stop",
-    "station",
-    "stop_name",
-    "stopName",
-    "תחנה",
+  const headsign = readText(row, [
+    "headsign",
+    "direction",
+    "toward",
+    "כיוון",
   ]).slice(0, 255);
-  const place = readText(row, [
-    "place",
-    "city",
-    "location",
-    "עיר",
-    "מקום",
-  ]).slice(0, 255);
-  if (!line || !stop || !place) {
-    return null;
-  }
   const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
-  const aspects: LlmTransitAspect[] = [];
+  const aspects: LlmRoutesAspect[] = [];
   if (Array.isArray(aspectsRaw)) {
     for (const entry of aspectsRaw) {
       let key = String(entry ?? "")
         .trim()
         .toLowerCase();
       if (
-        key === "departure" ||
-        key === "times" ||
+        key === "departures" ||
         key === "next" ||
-        key === "יציאות" ||
-        key === "לוח זמנים"
+        key === "arrival" ||
+        key === "יציאה"
       ) {
-        key = "departures";
+        key = "eta";
       }
-      const aspect = key as LlmTransitAspect;
-      if (TRANSIT_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+      if (key === "freq" || key === "headway" || key === "תדירות") {
+        key = "frequency";
+      }
+      if (
+        key === "board" ||
+        key === "stop_board" ||
+        key === "stopboard" ||
+        key === "קווים"
+      ) {
+        key = "lines";
+      }
+      const aspect = key as LlmRoutesAspect;
+      if (ROUTES_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
         aspects.push(aspect);
       }
     }
   }
+  const resolvedAspects: LlmRoutesAspect[] =
+    aspects.length > 0 ? aspects : ["summary"];
+  const linesOnly = resolvedAspects.includes("lines");
+  if (!origin) {
+    return null;
+  }
+  if (!destination && !linesOnly) {
+    return null;
+  }
   return {
+    origin,
+    destination,
+    departure,
+    arrival,
     line,
-    stop,
-    place,
-    aspects: aspects.length > 0 ? aspects : ["departures"],
+    headsign,
+    aspects: resolvedAspects,
   };
 }
 

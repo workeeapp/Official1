@@ -1578,6 +1578,9 @@ describe("parseLlmReply", () => {
     ).toEqual({
       query: "חשמלאי",
       place: "פתח תקווה",
+      near: "",
+      lat: null,
+      lng: null,
       aspects: ["phone"],
     });
   });
@@ -1633,40 +1636,125 @@ describe("parseLlmReply", () => {
     ).toBeUndefined();
   });
 
-  it("reads metadata.transit for bus departures", () => {
+  it("reads metadata.routes for transit trips", () => {
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "",
           metadata: {
-            transit: {
+            routes: {
+              origin: "ז׳בוטינסקי פתח תקווה",
+              destination: "דיזנגוף סנטר",
               line: "קו 51",
-              stop: "תחנה מרכזית",
-              place: "פתח תקווה",
-              aspects: ["departures", "bogus"],
+              aspects: ["eta", "bogus"],
             },
           },
         }),
-      ).transit,
+      ).routes,
     ).toEqual({
+      origin: "ז׳בוטינסקי פתח תקווה",
+      destination: "דיזנגוף סנטר",
+      departure: "",
+      arrival: "",
       line: "51",
-      stop: "תחנה מרכזית",
-      place: "פתח תקווה",
-      aspects: ["departures"],
+      headsign: "",
+      aspects: ["eta"],
     });
   });
 
-  it("ignores transit missing stop", () => {
+  it("ignores routes missing destination", () => {
     expect(
       parseReplyMetadata(
         JSON.stringify({
           response: "",
           metadata: {
-            transit: { line: "51", stop: "", place: "פתח תקווה" },
+            routes: { origin: "תחנה מרכזית", destination: "" },
           },
         }),
-      ).transit,
+      ).routes,
     ).toBeUndefined();
+  });
+
+  it("reads routes stop-board with lines aspect and empty destination", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              origin: "שלום דורני פתח תקווה",
+              destination: "",
+              aspects: ["lines"],
+            },
+          },
+        }),
+      ).routes,
+    ).toEqual({
+      origin: "שלום דורני פתח תקווה",
+      destination: "",
+      departure: "",
+      arrival: "",
+      line: "",
+      headsign: "",
+      aspects: ["lines"],
+    });
+  });
+
+  it("reads places near speaker", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: { query: "מסעדות", place: "", near: "speaker" },
+          },
+        }),
+      ).places,
+    ).toEqual({
+      query: "מסעדות",
+      place: "",
+      near: "speaker",
+      lat: null,
+      lng: null,
+      aspects: ["summary"],
+    });
+  });
+
+  it("reads bus_eta compose_condition", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "reminders",
+                items: [
+                  {
+                    item: "לצאת לאוטובוס",
+                    compose_condition: {
+                      type: "bus_eta",
+                      origin: "שלום דורני פתח תקווה",
+                      destination: "תל אביב",
+                      line: "51",
+                      minutes_before: 10,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ).reminders?.[0]?.composeCondition,
+    ).toEqual({
+      type: "bus_eta",
+      origin: "שלום דורני פתח תקווה",
+      destination: "תל אביב",
+      line: "51",
+      headsign: "",
+      minutesBefore: 10,
+    });
   });
 
   it("reads metadata.mashov without requiring password", () => {
