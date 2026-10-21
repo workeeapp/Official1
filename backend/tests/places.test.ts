@@ -125,10 +125,12 @@ describe("resolvePlacesReply", () => {
         textQuery?: string;
         languageCode?: string;
         regionCode?: string;
+        maxResultCount?: number;
       };
       expect(body.textQuery).toBe("מקדונלדס קרית אונו");
       expect(body.languageCode).toBe("he");
       expect(body.regionCode).toBe("IL");
+      expect(body.maxResultCount).toBe(10);
       return {
         ok: true,
         status: 200,

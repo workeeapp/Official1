@@ -45,9 +45,12 @@ const FIELD_MASK = [
   "places.googleMapsUri",
 ].join(",");
 
-const MAX_RESULTS = 3;
-
 export const PLACES_API_KEY_MISSING = "places_api_key_missing";
+
+/** Cap for Text Search `maxResultCount` (Places API New hard max is 20). */
+function placesMaxResults(): number {
+  return getEnv().GOOGLE_PLACES_MAX_RESULTS;
+}
 export const PLACES_API_DENIED = "places_api_denied";
 
 export function parsePlacesAspects(raw: unknown): PlacesAspect[] {
@@ -209,7 +212,7 @@ export async function fetchPlacesFacts(input: {
     textQuery: place && !nearSpeaker ? `${query} ${place}` : query,
     languageCode: "he",
     regionCode: "IL",
-    maxResultCount: MAX_RESULTS,
+    maxResultCount: placesMaxResults(),
   };
   if (lat != null && lng != null) {
     body.locationBias = {
@@ -254,8 +257,9 @@ export async function fetchPlacesFacts(input: {
     );
   }
 
+  const maxResults = placesMaxResults();
   const places = Array.isArray(searchJson.places) ? searchJson.places : [];
-  for (const row of places.slice(0, MAX_RESULTS)) {
+  for (const row of places.slice(0, maxResults)) {
     const mapped = mapNewPlace(row);
     if (mapped) {
       facts.results.push(mapped);

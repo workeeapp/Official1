@@ -27,6 +27,11 @@ const envSchema = z.object({
   /** Google Places API key for live local business search (optional). */
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   /**
+   * Max places returned per Text Search (Places API New `maxResultCount`).
+   * Clamped 1–20 (API hard cap).
+   */
+  GOOGLE_PLACES_MAX_RESULTS: z.coerce.number().int().min(1).max(20).default(10),
+  /**
    * Google Routes API key for live public-transit A→B (optional).
    * Falls back to GOOGLE_PLACES_API_KEY when unset.
    */
