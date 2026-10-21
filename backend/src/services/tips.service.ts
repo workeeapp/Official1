@@ -14,6 +14,7 @@ import type {
 import {
   isGuestEmployee,
   isGuestLucy,
+  normalizeEmployeePhone,
   parseTipTier,
   parseTipTopic,
 } from "@workee/shared";
@@ -32,6 +33,7 @@ import {
   areaFromTopic,
   topicFromListType,
 } from "./tip-catalog.js";
+import { sendWhatsAppText } from "./whatsapp-send.js";
 
 const LUCY_NAME = "לוסי";
 
@@ -360,6 +362,29 @@ export async function deleteTipForUser(
     throw new NotFoundError("Tip not found");
   }
   await prisma.tip.delete({ where: { id: tipId } });
+}
+
+/** Send tip text to TIPS_PREVIEW_PHONE (Tips admin preview). */
+export async function sendTipForUser(
+  userId: string,
+  tipId: string,
+): Promise<void> {
+  const tip = await prisma.tip.findFirst({
+    where: { id: tipId, userId },
+    select: { id: true, text: true },
+  });
+  if (!tip) {
+    throw new NotFoundError("Tip not found");
+  }
+  const phone = normalizeEmployeePhone(process.env.TIPS_PREVIEW_PHONE);
+  if (!phone) {
+    throw new ValidationError("Tips preview phone is not configured");
+  }
+  const text = tip.text.trim();
+  if (!text) {
+    throw new ValidationError("Tip text is empty");
+  }
+  await sendWhatsAppText(phone, text, { ignoreSession: true });
 }
 
 function audienceMatches(

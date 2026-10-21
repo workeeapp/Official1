@@ -568,6 +568,19 @@ describe("parseLlmReply", () => {
     expect(meta.showDump).toBe("tasks");
   });
 
+  it("strips wrapping quotes from show_dump custom list names", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: '"בדיקה של שיתוף עם עמית"',
+        },
+      }),
+    );
+    expect(meta.showDump).toBe("בדיקה של שיתוף עם עמית");
+  });
+
   it("reads show_dump_section and show_dump_partner", () => {
     const meta = parseReplyMetadata(
       JSON.stringify({

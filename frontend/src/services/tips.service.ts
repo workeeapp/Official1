@@ -30,4 +30,10 @@ export const tipsApi = {
       method: "DELETE",
     });
   },
+
+  send(id: string): Promise<{ ok: boolean }> {
+    return api<{ ok: boolean }>(`/api/tips/${id}/send`, {
+      method: "POST",
+    });
+  },
 };

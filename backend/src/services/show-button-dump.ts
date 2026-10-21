@@ -4,7 +4,11 @@
  * Dump intent never comes from free-form user text — only ACTION fields, or a
  * closed equality allowlist of known UI button command strings.
  */
-import { addJerusalemDays, type LlmShowDumpSection } from "@workee/shared";
+import {
+  addJerusalemDays,
+  normalizeShowDumpListName,
+  type LlmShowDumpSection,
+} from "@workee/shared";
 import {
   hebrewWeekdayFromYmd,
   jerusalemYmd,
@@ -178,7 +182,7 @@ export function resolveShowDumpKind(
   | { kind: "phone_book" }
   | { kind: "list"; name: string }
   | null {
-  const trimmed = raw.trim();
+  const trimmed = normalizeShowDumpListName(raw);
   if (!trimmed) {
     return null;
   }
@@ -1594,7 +1598,7 @@ function formatListDump(
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): { text: string | null; lines: LastNumberedDumpLine[] } {
-  const name = rawName.trim();
+  const name = normalizeShowDumpListName(rawName);
   const builtin = builtinListTypeFromHebrew(name);
   const omitEmpty = opts?.omitEmptySentence === true;
   if (builtin === "shopping" || builtin === "tasks") {
@@ -2436,6 +2440,7 @@ function formatContactsOrCustomDump(
   emptyLabel: string,
   opts?: ShowDumpOptions,
 ): DumpTextResult | null {
+  const normalizedListName = normalizeShowDumpListName(listName);
   const lists = snapshot.lists.filter((list) => {
     if (list.list_type !== listType) {
       return false;
@@ -2443,12 +2448,13 @@ function formatContactsOrCustomDump(
     if (listType === "contacts") {
       return true;
     }
-    return (list.list_name ?? "").trim() === listName;
+    return (
+      (list.list_name ?? "").trim() === normalizedListName
+    );
   });
   if (lists.length === 0) {
-    return listType === "custom"
-      ? null
-      : emptyDumpResult(`לא מצאתי רשימה בשם «${emptyLabel}».`);
+    const label = normalizeShowDumpListName(emptyLabel) || emptyLabel;
+    return emptyDumpResult(`לא מצאתי רשימה בשם «${label}».`);
   }
   const collected = collectListDumpRows(listType, lists, opts);
   const kept = filterDumpRows(collected, listType, opts);

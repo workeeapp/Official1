@@ -125,6 +125,7 @@ export {
   parseReportSections,
   parseReportHistoryKinds,
   parseShowDump,
+  normalizeShowDumpListName,
   parseShowDumpNameList,
   parseShowDumpUrgency,
   showDumpNames,

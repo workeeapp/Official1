@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   tipFindMany,
@@ -14,6 +14,7 @@ const {
   tipProgressUpdate,
   employeeFindMany,
   employeeFindFirst,
+  sendWhatsAppText,
 } = vi.hoisted(() => ({
   tipFindMany: vi.fn(),
   tipFindUnique: vi.fn(),
@@ -28,6 +29,7 @@ const {
   tipProgressUpdate: vi.fn(),
   employeeFindMany: vi.fn(),
   employeeFindFirst: vi.fn(),
+  sendWhatsAppText: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -54,14 +56,20 @@ vi.mock("../src/database/prisma.js", () => ({
   },
 }));
 
+vi.mock("../src/services/whatsapp-send.js", () => ({
+  sendWhatsAppText,
+}));
+
 import {
   collectAppliedTipOps,
   createTipForUser,
   ensureDefaultTips,
   resolveAndRecordTipsForTurn,
+  sendTipForUser,
   tipAudienceMatchesForTest,
 } from "../src/services/tips.service.js";
 import { SYSTEM_TIP_SEEDS } from "../src/services/tip-catalog.js";
+import { ValidationError } from "../src/utils/errors.js";
 
 const USER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SPEAKER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -412,5 +420,44 @@ describe("tips service", () => {
     });
     expect(turn.texts).toHaveLength(1);
     expect(turn.texts[0]).toBe("shop tip");
+  });
+});
+
+describe("sendTipForUser", () => {
+  const tipId = "tip-send-1";
+  const previousPhone = process.env.TIPS_PREVIEW_PHONE;
+
+  beforeEach(() => {
+    tipFindFirst.mockReset();
+    sendWhatsAppText.mockReset();
+    sendWhatsAppText.mockResolvedValue({ ok: true });
+  });
+
+  afterEach(() => {
+    if (previousPhone === undefined) {
+      delete process.env.TIPS_PREVIEW_PHONE;
+    } else {
+      process.env.TIPS_PREVIEW_PHONE = previousPhone;
+    }
+  });
+
+  it("rejects when TIPS_PREVIEW_PHONE is missing", async () => {
+    delete process.env.TIPS_PREVIEW_PHONE;
+    tipFindFirst.mockResolvedValue({ id: tipId, text: "Hello tip" });
+    await expect(sendTipForUser(USER, tipId)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    expect(sendWhatsAppText).not.toHaveBeenCalled();
+  });
+
+  it("sends tip text to the normalized preview phone", async () => {
+    process.env.TIPS_PREVIEW_PHONE = "0544365812";
+    tipFindFirst.mockResolvedValue({ id: tipId, text: "  Preview tip  " });
+    await sendTipForUser(USER, tipId);
+    expect(sendWhatsAppText).toHaveBeenCalledWith(
+      "972544365812",
+      "Preview tip",
+      { ignoreSession: true },
+    );
   });
 });

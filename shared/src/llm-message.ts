@@ -694,13 +694,38 @@ export function parseTipKeys(meta: Record<string, unknown>): string[] {
   return keys;
 }
 
+/**
+ * Strip one layer of wrapping quotes from a show_dump list name
+ * (`"…"`, `״…״`, `«…»`, `'…'`). Builtin kinds are unchanged after trim.
+ */
+export function normalizeShowDumpListName(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+  const pairs: Array<[string, string]> = [
+    ['"', '"'],
+    ["״", "״"],
+    ["«", "»"],
+    ["'", "'"],
+    ["\u201C", "\u201D"],
+    ["\u2018", "\u2019"],
+  ];
+  for (const [open, close] of pairs) {
+    if (trimmed.startsWith(open) && trimmed.endsWith(close)) {
+      return trimmed.slice(open.length, trimmed.length - close.length).trim();
+    }
+  }
+  return trimmed;
+}
+
 /** metadata.show_dump — category or custom list name for engine status dump. */
 export function parseShowDump(meta: Record<string, unknown>): string {
   const raw = meta.show_dump ?? meta.showDump;
   if (typeof raw !== "string") {
     return "";
   }
-  return raw.trim().slice(0, 100);
+  return normalizeShowDumpListName(raw).slice(0, 100);
 }
 
 /** metadata.show_dump_section — personal | shared. */

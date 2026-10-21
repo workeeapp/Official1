@@ -63,3 +63,22 @@ export function TrashIcon() {
     </svg>
   );
 }
+
+export function SendIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none">
+      <path
+        d="M3.5 10.2 16.2 3.8 12.1 16.2l-2.1-4.4-4.4-2.1Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.9 11.8 16.2 3.8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

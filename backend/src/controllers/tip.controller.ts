@@ -3,6 +3,7 @@ import {
   createTipForUser,
   deleteTipForUser,
   listTipsForUser,
+  sendTipForUser,
   updateTipForUser,
 } from "../services/tips.service.js";
 import { UnauthorizedError } from "../utils/errors.js";
@@ -45,5 +46,14 @@ export async function deleteTip(req: Request, res: Response): Promise<void> {
   }
   const tipId = parseTipIdParam(req.params.id);
   await deleteTipForUser(req.user.id, tipId);
+  res.status(200).json({ ok: true });
+}
+
+export async function sendTip(req: Request, res: Response): Promise<void> {
+  if (!req.user) {
+    throw new UnauthorizedError();
+  }
+  const tipId = parseTipIdParam(req.params.id);
+  await sendTipForUser(req.user.id, tipId);
   res.status(200).json({ ok: true });
 }

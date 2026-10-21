@@ -1148,6 +1148,60 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toMatch(/שם: טל · תיאור: נשוי למיכל \(/);
   });
 
+  it("strips wrapping quotes from custom show_dump names", () => {
+    const snapshot: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "בדיקה של שיתוף עם עמית",
+          owner: "טל",
+          scope: "shared",
+          columns: ["שם"],
+          title_field: "שם",
+          items: [
+            { item_id: "1", שם: "בדיקה 1" },
+            { item_id: "2", שם: "בדיקה 2" },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    for (const kind of [
+      '"בדיקה של שיתוף עם עמית"',
+      "״בדיקה של שיתוף עם עמית״",
+      "«בדיקה של שיתוף עם עמית»",
+    ]) {
+      const text = formatShowDumpFromKind(kind, snapshot, {
+        viewerName: "טל",
+      });
+      expect(text).toContain("רשימת «בדיקה של שיתוף עם עמית»:");
+      expect(text).toContain("1. שם: בדיקה 1");
+      expect(text).toContain("2. שם: בדיקה 2");
+    }
+  });
+
+  it("unknown custom show_dump returns לא מצאתי רשימה (not null)", () => {
+    const snapshot: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "באגים",
+          owner: "טל",
+          scope: "personal",
+          columns: ["שם"],
+          title_field: "שם",
+          items: [{ item_id: "1", שם: "x" }],
+        },
+      ],
+      filing: [],
+    };
+    const text = formatShowDumpFromKind('"אין כזו"', snapshot, {
+      viewerName: "טל",
+    });
+    expect(text).toBeTruthy();
+    expect(text).toContain("לא מצאתי רשימה בשם «אין כזו»");
+  });
+
   it("custom dump: one list + all-involved co-share marks (owner and partner)", () => {
     const ownerView: EmployeeRecordSnapshot = {
       lists: [
@@ -1369,9 +1423,13 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toContain("2026-10-16 09:00");
   });
 
-  it("does not override for unknown custom names", () => {
-    expect(formatShowDumpFromKind("בעיות", snapshot)).toBeNull();
-    expect(formatShowDumpFromKind("קניות אישית", snapshot)).toBeNull();
+  it("unknown custom names return לא מצאתי רשימה (not null)", () => {
+    expect(formatShowDumpFromKind("בעיות", snapshot)).toContain(
+      "לא מצאתי רשימה בשם «בעיות»",
+    );
+    expect(formatShowDumpFromKind("קניות אישית", snapshot)).toContain(
+      "לא מצאתי רשימה בשם «קניות אישית»",
+    );
   });
 
   it("titleAlreadyListsPartners detects meeting-style titles", () => {
