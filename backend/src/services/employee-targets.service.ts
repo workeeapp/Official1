@@ -1442,24 +1442,32 @@ function reminderMutates(metadata: LlmMetadata): boolean {
 }
 
 /**
- * Engine fallback for the speaker: if this turn mutates reminders and the
- * model omitted «הצג תזכורות», append it (keep any existing show buttons).
+ * Engine fallback for the speaker: after list / filing / reminder mutates,
+ * if the model omitted the matching «הצג» button(s), append them (same
+ * product commands as partner notifies). Keeps any existing model buttons.
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
 ): LlmReplyButton[] {
   const buttons = existing.slice(0, REPLY_BUTTON_MAX);
-  if (!reminderMutates(metadata)) {
-    return buttons;
+  const seen = new Set(buttons.map((button) => button.command));
+  const append = (button: LlmReplyButton): void => {
+    if (buttons.length >= REPLY_BUTTON_MAX || seen.has(button.command)) {
+      return;
+    }
+    seen.add(button.command);
+    buttons.push(button);
+  };
+  for (const button of showButtonsForNotify(metadata)) {
+    append(button);
   }
-  if (buttons.some((button) => button.command === SHOW_REMINDERS_BUTTON.command)) {
-    return buttons;
+  // Partner notify skips תזכורות when a list button already exists; speaker
+  // still gets both after a self-nudge (task + clock) if the model omitted them.
+  if (reminderMutates(metadata)) {
+    append(SHOW_REMINDERS_BUTTON);
   }
-  if (buttons.length >= REPLY_BUTTON_MAX) {
-    return buttons;
-  }
-  return [...buttons, SHOW_REMINDERS_BUTTON];
+  return buttons;
 }
 
 /**

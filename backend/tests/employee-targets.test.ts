@@ -620,6 +620,81 @@ describe("employee targets", () => {
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
+  it("ensures speaker הצג רשימת … when lists mutate and model omitted buttons", () => {
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "remove",
+            listType: "tasks",
+            listName: "",
+            items: [{ item_id: "6", "שם מטלה": "לשטוף את הרכב" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "1", "שם פריט": "חלב", כמות: "2" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "6", "שם מטלה": "לשטוף את הרכב" }],
+              targets: [],
+            },
+          ],
+        },
+        [{ label: "הצג", command: "הצג רשימת מטלות" }],
+      ),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "בדיקת שם",
+            items: [{ שם: "פריט" }],
+            targets: [],
+          },
+        ],
+        filing: [
+          {
+            action: "add_filing",
+            itemName: "עובדה",
+            itemInfo: "",
+            itemDescription: "עובדה",
+            targets: [],
+            filingId: "",
+          },
+        ],
+      }),
+    ).toEqual([
+      { label: "הצג", command: "הצג רשימת בדיקת שם" },
+      { label: "הצג", command: "הצג תיוקים" },
+    ]);
+  });
+
   it("appends a linked reminder clock to a task notification", () => {
     expect(
       fallbackNotificationText(tal, {
