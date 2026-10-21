@@ -1257,6 +1257,10 @@ describe("employee records", () => {
     expect(context).toContain("filing");
     expect(context).toContain("LIVE FACTS THIS TURN");
     expect(context).toContain("MUTATE BY ID");
+    expect(context).toContain("DELETE WHEN CLEAR");
+    expect(context).toContain("BY LINE NUMBER");
+    expect(context).toContain("LAST_NUMBERED_DUMP");
+    expect(context).not.toContain("DELETE CONFIRM (rows): empty remove + ask «האם מאשר?»");
     expect(context).toContain("item_id");
     expect(context).toContain("filing_id");
     expect(context).toContain("personal → co-share → assign");

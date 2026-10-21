@@ -16,7 +16,9 @@ import {
   formatScheduleSuffix,
   stripMatchingTitleClock,
   formatShoppingTitle,
+  formatLastNumberedDumpContext,
   formatShowDumpFromKind,
+  formatShowDumpWithLineMap,
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
   itemMatchesDateRange,
@@ -2754,5 +2756,196 @@ describe("partner dump about_ids (birthday event)", () => {
     })!;
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("תזכורות פעילות:");
+  });
+});
+
+describe("LAST_NUMBERED_DUMP line map", () => {
+  it("aligns multi-shell shopping dump lines with item_ids (not per-list JSON index)", () => {
+    const mixed: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "p1", "שם פריט": "לחם", כמות: 1 },
+            {
+              item_id: "s1",
+              "שם פריט": "מלפפונים",
+              כמות: 1,
+              shared_with: ["טל", "עמית"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל", "מיכל"],
+          items: [
+            { item_id: "l1", "שם פריט": "קמח מלא", כמות: 1 },
+            { item_id: "l2", "שם פריט": "אורז", כמות: 2 },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    const { text, lines } = formatShowDumpWithLineMap("shopping", mixed, {
+      viewerName: "טל",
+    });
+    expect(text).toContain("1. לחם");
+    expect(text).toContain("3. קמח מלא");
+    expect(lines.map((row) => row.id)).toEqual(["p1", "s1", "l1", "l2"]);
+    expect(lines[2]).toMatchObject({
+      n: 3,
+      id: "l1",
+      kind: "shopping",
+      title_stem: "קמח מלא",
+    });
+    // JSON array index 2 on either shell would NOT be dump line 3.
+    expect(lines.find((row) => row.n === 3)?.title_stem).toBe("קמח מלא");
+  });
+
+  it("uses title_stem without quantity for shopping", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "rice", "שם פריט": "אורז", כמות: 2 }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const { lines } = formatShowDumpWithLineMap("shopping", snap, {
+      viewerName: "טל",
+    });
+    expect(lines[0]).toMatchObject({
+      n: 1,
+      id: "rice",
+      title_stem: "אורז",
+    });
+  });
+
+  it("scopes full-dump task and reminder lines by section", () => {
+    const now = new Date("2026-10-21T10:00:00+03:00");
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "task-1",
+              "שם מטלה": "לשלם לרופא",
+              "תאריך לביצוע": "2026-10-22",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "rem-1",
+          item: "לקנות חלב",
+          list_type: "shopping",
+          fire_at: "2026-10-22 08:00",
+          repeat: "once",
+          ping: ["טל"],
+          ping_ids: ["tal-1"],
+          about: [],
+          owner: "טל",
+          text: "",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+    const { lines } = formatShowDumpWithLineMap("full", snap, {
+      viewerName: "טל",
+      now,
+    });
+    const taskLine = lines.find((row) => row.id === "task-1");
+    const remLine = lines.find((row) => row.id === "rem-1");
+    expect(taskLine).toMatchObject({
+      n: 1,
+      kind: "tasks",
+      section: "tasks",
+      title_stem: "לשלם לרופא",
+    });
+    expect(remLine).toMatchObject({
+      n: 1,
+      kind: "reminders",
+      section: "reminders",
+      title_stem: "לקנות חלב",
+    });
+  });
+
+  it("formats LAST_NUMBERED_DUMP context for model inject", () => {
+    const ctx = formatLastNumberedDumpContext([
+      { n: 1, id: "a", kind: "tasks", title_stem: "ללכת לים" },
+      { n: 2, id: "b", kind: "tasks", title_stem: "לשלם" },
+    ]);
+    expect(ctx).toContain("LAST_NUMBERED_DUMP:");
+    expect(ctx).toContain('"id":"a"');
+    expect(ctx).toContain("Spoken dump indices");
+    expect(formatLastNumberedDumpContext([])).toBe("");
+  });
+
+  it("day-agenda lines restart n per day with section=ymd", () => {
+    const now = new Date("2026-10-20T10:00:00+03:00");
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "d1",
+              "שם מטלה": "מטלה א",
+              "תאריך לביצוע": "2026-10-21",
+              "שעה לביצוע": "09:00",
+            },
+            {
+              item_id: "d2",
+              "שם מטלה": "מטלה ב",
+              "תאריך לביצוע": "2026-10-22",
+              "שעה לביצוע": "10:00",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const { text, lines } = formatShowDumpWithLineMap("tasks", snap, {
+      viewerName: "טל",
+      dateFrom: "2026-10-21",
+      dateTo: "2026-10-22",
+      now,
+    });
+    expect(text).toMatch(/1\. /);
+    expect(lines.filter((row) => row.n === 1)).toHaveLength(2);
+    expect(lines.map((row) => row.section).sort()).toEqual([
+      "2026-10-21",
+      "2026-10-22",
+    ]);
+    expect(lines.find((row) => row.section === "2026-10-22")?.id).toBe("d2");
   });
 });

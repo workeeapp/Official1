@@ -225,15 +225,53 @@ export function resolveShowDumpKind(
   return { kind: "list", name: trimmed };
 }
 
+/** One numbered dump line for LAST_NUMBERED_DUMP (model copies id on line-index turns). */
+export type LastNumberedDumpLine = {
+  n: number;
+  id: string;
+  kind: string;
+  title_stem: string;
+  /** When numbering restarts (day YMD, full-dump section, ממתינים). */
+  section?: string;
+};
+
+type DumpTextResult = { text: string; lines: LastNumberedDumpLine[] };
+
+function emptyDumpResult(text = ""): DumpTextResult {
+  return { text, lines: [] };
+}
+
+export function formatLastNumberedDumpContext(
+  lines: LastNumberedDumpLine[],
+): string {
+  if (lines.length === 0) {
+    return "";
+  }
+  return [
+    "LAST_NUMBERED_DUMP:",
+    "Spoken dump indices («3» / «ל3» / «תמחק את 3») map to these rows from the last numbered dump. Copy id (+ kind) for that n; if section is set and several sections restart at 1, require a matching section or ASK which. Never invent ids. Never treat n as EMPLOYEE_SAVED_DATA array index.",
+    JSON.stringify(lines),
+  ].join("\n");
+}
+
 /** Dump from model `show_dump` (+ optional section/partner on opts). */
 export function formatShowDumpFromKind(
   kind: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): string | null {
+  return formatShowDumpWithLineMap(kind, snapshot, opts).text;
+}
+
+/** Same dump text as formatShowDumpFromKind, plus LAST_NUMBERED_DUMP lines. */
+export function formatShowDumpWithLineMap(
+  kind: string,
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): { text: string | null; lines: LastNumberedDumpLine[] } {
   const resolved = resolveShowDumpKind(kind);
   if (!resolved) {
-    return null;
+    return { text: null, lines: [] };
   }
   return formatResolvedShowDump(resolved, snapshot, opts);
 }
@@ -247,32 +285,40 @@ function formatResolvedShowDump(
     | { kind: "list"; name: string },
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): string | null {
+): { text: string | null; lines: LastNumberedDumpLine[] } {
   if (parsed.kind === "full") {
-    return formatFullDump(snapshot, opts);
+    const full = formatFullDump(snapshot, opts);
+    return { text: full.text || null, lines: full.lines };
   }
   if (parsed.kind === "reminders") {
     const body = formatRemindersDump(snapshot.reminders ?? [], opts);
-    if (body) {
+    if (body.text) {
       return body;
     }
-    return opts?.omitEmptySentence
-      ? ""
-      : "אין לך תזכורות פעילות כרגע.";
+    return {
+      text: opts?.omitEmptySentence ? "" : "אין לך תזכורות פעילות כרגע.",
+      lines: [],
+    };
   }
   if (parsed.kind === "filings") {
     const body = formatFilingsDump(snapshot.filing ?? [], opts);
-    if (body) {
+    if (body.text) {
       return body;
     }
-    return opts?.omitEmptySentence ? "" : emptyFilingsSentence(opts);
+    return {
+      text: opts?.omitEmptySentence ? "" : emptyFilingsSentence(opts),
+      lines: [],
+    };
   }
   if (parsed.kind === "phone_book") {
     const body = formatPhoneBookDump(opts?.phoneBook, opts);
-    if (body) {
+    if (body.text) {
       return body;
     }
-    return opts?.omitEmptySentence ? "" : emptyPhoneBookSentence(opts);
+    return {
+      text: opts?.omitEmptySentence ? "" : emptyPhoneBookSentence(opts),
+      lines: [],
+    };
   }
   return formatListDump(parsed.name, snapshot, opts);
 }
@@ -396,24 +442,37 @@ function emptyFullDumpSentence(opts?: ShowDumpOptions): string {
 export function formatFullDump(
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): string {
+): DumpTextResult {
   const sections: string[] = [];
+  const lines: LastNumberedDumpLine[] = [];
 
-  const pushIfContent = (block: string) => {
-    const trimmed = block.trim();
+  const pushBlock = (block: DumpTextResult | string, section?: string) => {
+    if (typeof block === "string") {
+      const trimmed = block.trim();
+      if (trimmed) {
+        sections.push(trimmed);
+      }
+      return;
+    }
+    const trimmed = block.text.trim();
     if (trimmed) {
       sections.push(trimmed);
     }
+    for (const line of block.lines) {
+      lines.push(
+        section && !line.section ? { ...line, section } : line,
+      );
+    }
   };
 
-  pushIfContent(
+  pushBlock(
     formatThreeWayDump("shopping", "קניות", snapshot, {
       ...opts,
       countsOnly: true,
     }),
   );
-  pushIfContent(formatThreeWayDump("tasks", "מטלות", snapshot, opts));
-  pushIfContent(formatCustomListsCountsDump(snapshot, opts));
+  pushBlock(formatThreeWayDump("tasks", "מטלות", snapshot, opts), "tasks");
+  pushBlock(formatCustomListsCountsDump(snapshot, opts));
 
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const partnerOnly =
@@ -433,36 +492,38 @@ export function formatFullDump(
     }
     return true;
   });
-  const remBody = formatRemindersDump(reminderRows, opts);
-  if (remBody) {
-    sections.push(`תזכורות פעילות:\n${remBody}`);
+  const remBody = formatRemindersDump(reminderRows, opts, "reminders");
+  if (remBody.text) {
+    sections.push(`תזכורות פעילות:\n${remBody.text}`);
+    lines.push(...remBody.lines);
   }
 
-  pushIfContent(formatFilingsDump(snapshot.filing ?? [], opts));
+  pushBlock(formatFilingsDump(snapshot.filing ?? [], opts), "filings");
 
   const hasContacts = snapshot.lists.some(
     (list) => list.list_type === "contacts",
   );
   if (hasContacts) {
-    pushIfContent(
-      formatContactsOrCustomDump(
-        "contacts",
-        "",
-        snapshot,
-        builtinListHebrew("contacts"),
-        opts,
-      ) ?? "",
+    const contacts = formatContactsOrCustomDump(
+      "contacts",
+      "",
+      snapshot,
+      builtinListHebrew("contacts"),
+      opts,
     );
+    if (contacts) {
+      pushBlock(contacts, "contacts");
+    }
   }
 
-  pushIfContent(formatPhoneBookDump(opts?.phoneBook, opts));
+  pushBlock(formatPhoneBookDump(opts?.phoneBook, opts), "phone_book");
 
   if (sections.length === 0) {
-    return emptyFullDumpSentence(opts);
+    return emptyDumpResult(emptyFullDumpSentence(opts));
   }
 
   sections.push("לפירוט רשימה: הצג רשימת …");
-  return sections.join("\n\n");
+  return { text: sections.join("\n\n"), lines };
 }
 
 function hebrewItemCount(n: number): string {
@@ -559,7 +620,7 @@ function formatCustomListsCountsDump(
 export function formatPhoneBookDump(
   phoneBook: PhoneBookDumpRow[] | undefined,
   opts?: ShowDumpOptions,
-): string {
+): DumpTextResult {
   const rows = phoneBook ?? [];
   const viewer = (opts?.viewerName ?? "").trim();
   const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
@@ -590,7 +651,9 @@ export function formatPhoneBookDump(
     };
   });
   const kept = filterDumpRows(collected, "phone_book", opts);
-  return formatSingleHeaderDump("ספר הטלפונים", "phone_book", kept, opts);
+  // Phone-book rows have no contact_id in the dump payload — omit LAST_NUMBERED_DUMP ids.
+  const { text } = formatSingleHeaderDump("ספר הטלפונים", "phone_book", kept, opts);
+  return { text, lines: [] };
 }
 
 /** Conditional watch clock («תעדכני אותי אם…») — gate is structured compose_condition. */
@@ -846,7 +909,7 @@ export function navigateAddressFromFilingsDump(
 export function formatFilingsDump(
   rows: EmployeeRecordSnapshot["filing"],
   opts?: ShowDumpOptions,
-): string {
+): DumpTextResult {
   const viewer = (opts?.viewerName ?? "").trim();
   const aliases = (opts?.viewerAliases ?? []).map((name) => name.trim());
   const viewerNames = new Set(
@@ -880,7 +943,8 @@ export function formatFilingsDump(
 function formatRemindersDump(
   rows: ReminderSnapshotRow[],
   opts?: ShowDumpOptions,
-): string {
+  section?: string,
+): DumpTextResult {
   const now = opts?.now ?? new Date();
   const active = rows.filter((row) => {
     if (row.status !== "active") {
@@ -889,18 +953,32 @@ function formatRemindersDump(
     return reminderMatchesDateRange(row, opts?.dateFrom, opts?.dateTo);
   });
   if (active.length === 0) {
-    return "";
+    return emptyDumpResult();
   }
-  return active
+  const lines: LastNumberedDumpLine[] = [];
+  const text = active
     .map((row, index) => {
-      let title = row.item.trim() || "תזכורת";
+      const n = index + 1;
+      const stem = row.item.trim() || "תזכורת";
+      let title = stem;
       if (hasAttachments(row)) {
         title += " 📎";
       }
       const when = formatReminderWhen(row, now);
-      return when ? `${index + 1}. ${title} — ${when}` : `${index + 1}. ${title}`;
+      const id = row.reminder_id?.trim() ?? "";
+      if (id) {
+        lines.push({
+          n,
+          id,
+          kind: "reminders",
+          title_stem: stem,
+          ...(section ? { section } : {}),
+        });
+      }
+      return when ? `${n}. ${title} — ${when}` : `${n}. ${title}`;
     })
     .join("\n");
+  return { text, lines };
 }
 
 /** YYYY-MM-DD from a date / datetime string. */
@@ -996,6 +1074,9 @@ type AgendaSlot = {
   ymd: string;
   /** Sort key HH:mm or empty for all-day. */
   sortHm: string;
+  id: string;
+  kind: "tasks" | "reminders";
+  title_stem: string;
   /** Fully formatted numbered line (number filled when emitting). */
   formatLine: (n: number) => string;
 };
@@ -1015,7 +1096,7 @@ export function formatTasksDayAgendaDump(
   opts?: ShowDumpOptions,
   /** reminder_ids already folded into a task line — never list again. */
   linkedReminderIds: Set<string> = new Set(),
-): string {
+): DumpTextResult {
   const from = opts?.dateFrom?.trim().slice(0, 10) || null;
   const to = opts?.dateTo?.trim().slice(0, 10) || null;
   const now = opts?.now ?? new Date();
@@ -1052,7 +1133,7 @@ export function formatTasksDayAgendaDump(
   }
 
   if (slots.length === 0) {
-    return "";
+    return emptyDumpResult();
   }
 
   slots.sort((a, b) => {
@@ -1078,21 +1159,32 @@ export function formatTasksDayAgendaDump(
     byDay.set(slot.ymd, bucket);
   }
 
-  const lines: string[] = [];
+  const textLines: string[] = [];
+  const mapLines: LastNumberedDumpLine[] = [];
   const dayKeys = [...byDay.keys()].sort();
   if (from && to && from !== to) {
-    lines.push(formatAgendaWindowHeader(from, to));
-    lines.push("");
+    textLines.push(formatAgendaWindowHeader(from, to));
+    textLines.push("");
   }
   for (const ymd of dayKeys) {
     const daySlots = byDay.get(ymd) ?? [];
-    lines.push(formatDayAgendaHeader(ymd));
+    textLines.push(formatDayAgendaHeader(ymd));
     daySlots.forEach((slot, i) => {
-      lines.push(slot.formatLine(i + 1));
+      const n = i + 1;
+      textLines.push(slot.formatLine(n));
+      if (slot.id) {
+        mapLines.push({
+          n,
+          id: slot.id,
+          kind: slot.kind,
+          title_stem: slot.title_stem,
+          section: ymd,
+        });
+      }
     });
-    lines.push("");
+    textLines.push("");
   }
-  return lines.join("\n").trim();
+  return { text: textLines.join("\n").trim(), lines: mapLines };
 }
 
 function expandTaskAgendaSlots(
@@ -1122,9 +1214,14 @@ function expandTaskAgendaSlots(
         continue;
       }
       seen.add(key);
+      const stem = row.title.trim() || "מטלה";
+      const id = String(item.item_id ?? "").trim();
       slots.push({
         ymd,
         sortHm: hm,
+        id,
+        kind: "tasks",
+        title_stem: stem,
         formatLine: (n) =>
           formatAgendaStandingLine(n, row.title, item, hm, {
             responsibilityMark: row.responsibilityMark,
@@ -1149,10 +1246,15 @@ function expandTaskAgendaSlots(
   if (!ymdInInclusiveRange(ymd, from, to)) {
     return [];
   }
+  const oneOffStem = row.title.trim() || "מטלה";
+  const oneOffId = String(item.item_id ?? "").trim();
   return [
     {
       ymd,
       sortHm: hm,
+      id: oneOffId,
+      kind: "tasks",
+      title_stem: oneOffStem,
       formatLine: (n) =>
         formatAgendaOneOffLine(n, row.title, item, hm, {
           responsibilityMark: row.responsibilityMark,
@@ -1183,9 +1285,13 @@ function expandReminderAgendaSlots(
         continue;
       }
       seen.add(key);
+      const stem = row.item.trim() || "תזכורת";
       slots.push({
         ymd,
         sortHm: hm,
+        id: row.reminder_id?.trim() ?? "",
+        kind: "reminders",
+        title_stem: stem,
         formatLine: (n) => formatAgendaReminderLine(n, row, hm, now),
       });
     }
@@ -1198,10 +1304,14 @@ function expandReminderAgendaSlots(
     return [];
   }
   const hm = hmFromDumpValue(row.fire_at) ?? "";
+  const stem = row.item.trim() || "תזכורת";
   return [
     {
       ymd,
       sortHm: hm,
+      id: row.reminder_id?.trim() ?? "",
+      kind: "reminders",
+      title_stem: stem,
       formatLine: (n) => formatAgendaReminderLine(n, row, hm, now),
     },
   ];
@@ -1483,23 +1593,23 @@ function formatListDump(
   rawName: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): string | null {
+): { text: string | null; lines: LastNumberedDumpLine[] } {
   const name = rawName.trim();
   const builtin = builtinListTypeFromHebrew(name);
   const omitEmpty = opts?.omitEmptySentence === true;
   if (builtin === "shopping" || builtin === "tasks") {
     const label = builtinListHebrew(builtin);
     const body = formatThreeWayDump(builtin, label, snapshot, opts);
-    if (body) {
+    if (body.text) {
       return body;
     }
     if (omitEmpty) {
-      return "";
+      return emptyDumpResult("");
     }
     if (builtin === "tasks" && hasDumpDateRange(opts)) {
-      return "אין מטלות בטווח התאריכים.";
+      return emptyDumpResult("אין מטלות בטווח התאריכים.");
     }
-    return emptyListDumpSentence(label, opts);
+    return emptyDumpResult(emptyListDumpSentence(label, opts));
   }
   if (builtin === "contacts") {
     const body = formatContactsOrCustomDump(
@@ -1510,12 +1620,12 @@ function formatListDump(
       opts,
     );
     if (body === null) {
-      return null;
+      return { text: null, lines: [] };
     }
-    if (body) {
+    if (body.text) {
       return body;
     }
-    return omitEmpty ? "" : emptyContactsSentence(opts);
+    return emptyDumpResult(omitEmpty ? "" : emptyContactsSentence(opts));
   }
   const customBody = formatContactsOrCustomDump(
     "custom",
@@ -1525,15 +1635,15 @@ function formatListDump(
     opts,
   );
   if (customBody === null) {
-    return null;
+    return { text: null, lines: [] };
   }
-  if (customBody) {
+  if (customBody.text) {
     return customBody;
   }
   if (omitEmpty) {
-    return "";
+    return emptyDumpResult("");
   }
-  return emptyCustomListSentence(name, snapshot, opts);
+  return emptyDumpResult(emptyCustomListSentence(name, snapshot, opts));
 }
 
 type DumpItem = {
@@ -1962,6 +2072,43 @@ function formatShoppingCountsBreakdown(
   ].join("\n");
 }
 
+function dumpItemId(listType: ListDumpType, item: Record<string, unknown>): string {
+  if (listType === "filings") {
+    return String(item.filing_id ?? "").trim();
+  }
+  if (listType === "phone_book") {
+    return "";
+  }
+  return String(item.item_id ?? "").trim();
+}
+
+function dumpItemTitleStem(
+  listType: ListDumpType,
+  row: DumpItem,
+): string {
+  const item = row.item;
+  if (listType === "shopping") {
+    return (
+      readText(item, TITLE_KEYS.shopping) ||
+      row.title.replace(/\s*-\s*\d+\s*$/, "").trim() ||
+      "פריט"
+    );
+  }
+  if (listType === "tasks") {
+    return readText(item, TITLE_KEYS.tasks) || row.title.trim() || "מטלה";
+  }
+  if (listType === "contacts") {
+    return readText(item, TITLE_KEYS.contacts) || row.title.trim() || "איש קשר";
+  }
+  if (listType === "filings") {
+    return String(item.item_name ?? "").trim() || row.title.trim() || "תיוק";
+  }
+  if (listType === "custom") {
+    return row.title.trim() || "פריט";
+  }
+  return row.title.trim() || "פריט";
+}
+
 function formatSingleHeaderDump(
   label: string,
   listType: ListDumpType,
@@ -1969,32 +2116,46 @@ function formatSingleHeaderDump(
   opts?: ShowDumpOptions,
   reminders: ReminderSnapshotRow[] = [],
   linkedReminderIds: Set<string> = new Set(),
-): string {
+): DumpTextResult {
   const headerFiles = rows.some((row) => row.listFiles);
   if (opts?.countsOnly === true) {
     if (listType === "shopping") {
-      return formatShoppingCountsBreakdown(label, rows, opts);
+      return emptyDumpResult(formatShoppingCountsBreakdown(label, rows, opts));
     }
     const n = rows.length;
-    return n === 0
-      ? ""
-      : `${label}${paperclipSuffix(headerFiles)}: ${hebrewItemCount(n)}`;
+    return emptyDumpResult(
+      n === 0
+        ? ""
+        : `${label}${paperclipSuffix(headerFiles)}: ${hebrewItemCount(n)}`,
+    );
   }
   if (listType === "tasks" && hasDumpDateRange(opts)) {
     return formatTasksDayAgendaDump(rows, reminders, opts, linkedReminderIds);
   }
   if (rows.length === 0) {
-    return "";
+    return emptyDumpResult();
   }
-  return [
+  const lines: LastNumberedDumpLine[] = [];
+  const text = [
     `${label}${paperclipSuffix(headerFiles)}:`,
-    ...rows.map((row, i) =>
-      formatNumberedItem(i + 1, row.title, row.item, listType, {
+    ...rows.map((row, i) => {
+      const n = i + 1;
+      const id = dumpItemId(listType, row.item);
+      if (id) {
+        lines.push({
+          n,
+          id,
+          kind: listType,
+          title_stem: dumpItemTitleStem(listType, row),
+        });
+      }
+      return formatNumberedItem(n, row.title, row.item, listType, {
         responsibilityMark: row.responsibilityMark,
         now: opts?.now,
-      }),
-    ),
+      });
+    }),
   ].join("\n");
+  return { text, lines };
 }
 
 function formatThreeWayDump(
@@ -2002,7 +2163,7 @@ function formatThreeWayDump(
   label: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): string {
+): DumpTextResult {
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
   const collected = collectListDumpRows(listType, lists, opts);
   const kept = filterDumpRows(collected, listType, opts);
@@ -2274,7 +2435,7 @@ function formatContactsOrCustomDump(
   snapshot: EmployeeRecordSnapshot,
   emptyLabel: string,
   opts?: ShowDumpOptions,
-): string | null {
+): DumpTextResult | null {
   const lists = snapshot.lists.filter((list) => {
     if (list.list_type !== listType) {
       return false;
@@ -2285,12 +2446,14 @@ function formatContactsOrCustomDump(
     return (list.list_name ?? "").trim() === listName;
   });
   if (lists.length === 0) {
-    return listType === "custom" ? null : `לא מצאתי רשימה בשם «${emptyLabel}».`;
+    return listType === "custom"
+      ? null
+      : emptyDumpResult(`לא מצאתי רשימה בשם «${emptyLabel}».`);
   }
   const collected = collectListDumpRows(listType, lists, opts);
   const kept = filterDumpRows(collected, listType, opts);
   if (kept.length === 0) {
-    return "";
+    return emptyDumpResult();
   }
   const header =
     listType === "contacts" ? emptyLabel : `רשימת «${emptyLabel}»`;
@@ -2600,12 +2763,17 @@ export function formatLinkedReminderParen(
   if (!fireAt && !recurrenceText && (!repeat || repeat === "none" || repeat === "once")) {
     return "";
   }
+  const exceptions = Array.isArray(reminder.exceptions)
+    ? reminder.exceptions.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : undefined;
   const when = formatReminderWhen(
     {
       fire_at: fireAt,
       repeat,
       recurrence_text: recurrenceText || undefined,
-      exceptions: reminder.exceptions,
+      ...(exceptions ? { exceptions } : {}),
     },
     now,
     { flatCadence: true },

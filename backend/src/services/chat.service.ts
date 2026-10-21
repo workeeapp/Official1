@@ -150,11 +150,13 @@ import {
   emptyListDumpSentence,
   excludeItemIdsFromSnapshot,
   filterSnapshotForAboutPerson,
-  formatShowDumpFromKind,
+  formatLastNumberedDumpContext,
+  formatShowDumpWithLineMap,
   isTasksShowDumpKind,
   mapShowButtonCommandToDump,
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
+  type LastNumberedDumpLine,
 } from "./show-button-dump.js";
 import { resolveWeatherReply } from "./weather.js";
 import { resolveMarketReply } from "./market.js";
@@ -243,6 +245,7 @@ function toHistoryResponse(
 
 const STORED_LLM_REQUEST = "workeeOpenAiRequest";
 const STORED_LLM_RESPONSE = "workeeOpenAiResponse";
+const STORED_LAST_NUMBERED_DUMP = "lastNumberedDump";
 
 function buildOpenAiRequest(input: {
   conversationId: string;
@@ -256,14 +259,25 @@ function buildOpenAiRequest(input: {
   return toResponsesCreateBody(input);
 }
 
-function packStoredLlmRaw(request: unknown, response: unknown): unknown {
+function packStoredLlmRaw(
+  request: unknown,
+  response: unknown,
+  lastNumberedDump?: LastNumberedDumpLine[],
+): unknown {
   return {
     [STORED_LLM_REQUEST]: request,
     [STORED_LLM_RESPONSE]: response,
+    ...(lastNumberedDump && lastNumberedDump.length > 0
+      ? { [STORED_LAST_NUMBERED_DUMP]: lastNumberedDump }
+      : {}),
   };
 }
 
-function unpackStoredLlmRaw(raw: unknown): { request: unknown; response: unknown } {
+function unpackStoredLlmRaw(raw: unknown): {
+  request: unknown;
+  response: unknown;
+  lastNumberedDump: LastNumberedDumpLine[];
+} {
   if (
     raw &&
     typeof raw === "object" &&
@@ -274,9 +288,67 @@ function unpackStoredLlmRaw(raw: unknown): { request: unknown; response: unknown
     return {
       request: packed[STORED_LLM_REQUEST] ?? null,
       response: packed[STORED_LLM_RESPONSE] ?? null,
+      lastNumberedDump: parseLastNumberedDump(packed[STORED_LAST_NUMBERED_DUMP]),
     };
   }
-  return { request: null, response: raw ?? null };
+  return {
+    request: null,
+    response: raw ?? null,
+    lastNumberedDump: [],
+  };
+}
+
+function parseLastNumberedDump(value: unknown): LastNumberedDumpLine[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: LastNumberedDumpLine[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      continue;
+    }
+    const rec = row as Record<string, unknown>;
+    const n = typeof rec.n === "number" && Number.isFinite(rec.n) ? rec.n : 0;
+    const id = typeof rec.id === "string" ? rec.id.trim() : "";
+    const kind = typeof rec.kind === "string" ? rec.kind.trim() : "";
+    const title_stem =
+      typeof rec.title_stem === "string" ? rec.title_stem.trim() : "";
+    if (!n || !id || !kind) {
+      continue;
+    }
+    const section =
+      typeof rec.section === "string" && rec.section.trim()
+        ? rec.section.trim()
+        : undefined;
+    out.push({
+      n,
+      id,
+      kind,
+      title_stem: title_stem || id,
+      ...(section ? { section } : {}),
+    });
+  }
+  return out;
+}
+
+async function loadLastNumberedDumpForConversation(
+  conversationId: string,
+): Promise<LastNumberedDumpLine[]> {
+  // Dump map is stored on the first assistant row of a show_dump turn. Later
+  // raise/extra rows in the same turn have no raw map — scan newest-first.
+  const recent = await prisma.chatMessage.findMany({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+    take: 12,
+    select: { raw: true },
+  });
+  for (const row of recent) {
+    const lines = unpackStoredLlmRaw(row.raw).lastNumberedDump;
+    if (lines.length > 0) {
+      return lines;
+    }
+  }
+  return [];
 }
 
 function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
@@ -480,6 +552,7 @@ function thinSessionEnvelope(input: {
     feminine
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
       : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
+    "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «תמחק את 3» → prefer LAST_NUMBERED_DUMP id for that n when present; else match dump line N title stem (שם פריט / שם מטלה / item_name / reminder item; strip quantity/marks) to an id in THIS turn's JSON. FORBIDDEN JSON array index when it disagrees with dump line N. Numbering restarts per header/day/section — ASK which section if several 1. sequences. Unique → ACTION NOW; ≥2 matches → ASK. FORBIDDEN show_dump on line-index turns.",
   ].join("\n");
 }
 
@@ -656,7 +729,7 @@ function workerTargetingInstructions(
     "YEARLY OFFER: yearly facts (יום הולדת / נישואין / אזכרה / מנוי שנתי) — offer first; on כן (+ time) birthday of a Known employee is an all-day yearly tasks event + linked reminder (ping=speaker, about=[that person]); FORBIDDEN reminders-only yearly birthday. «גם יום לפני» → event stays on birthday day; ping fires day before. No person → tasks all-day + reminder, about=[].",
     "STANDING TASK WITH TIME — CLOCK OFFER: «אני צריך לקחת סירופ כל 3 ימים ב־12:00» without תזכירי לי → THIS turn lists standing only (no reminders clock), confirm, then OFFER «רוצה שאשלח לך תזכורת בוואטסאפ …?». On כן → lists add reminders same recurrence (or a different ping time they named) + your להזכיר task with שעה לביצוע = standing chore time (not the ping if different); no second speaker standing row; FORBIDDEN lists.update standing time to the ping (APPOINTMENT VS PING). Skip offer if all-day (no recurrence.time) or they already said תזכירי לי / שתזכירו לי (full self-nudge now). Later move of that standing series → STANDING + LINKED CLOCK MOVE ASK (not auto-cascade). Ambiguous cancel after a ping → STANDING + LINKED CLOCK DELETE ASK.",
     "Delete reminder: lists remove reminders with reminder_id from this turn's active_reminders. Server applies immediately — no confirm step. In response say the reminder(s) were deleted (past tense), naming them.",
-    "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → title on LAST dump line N → id from THIS turn's live JSON by that title → ACTION on THAT entity. Dump shopping/tasks = personal then co-share then assign (same order as JSON items). FORBIDDEN treating N as JSON array index / creation order when that picks a different title than dump line N. After תיוקים dump, line N = that filing (detail from live JSON); FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → when uniquely resolved remove NOW with that id (past tense); ambiguous → ASK, delete mutates empty; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
+    "BY LINE NUMBER: after a numbered dump (הצג / show_dump / תיוקים / תזכורות), indices («3» / «ל3» / «את 1» / «הציגי 1» / «מה זה 1») → prefer LAST_NUMBERED_DUMP for that n (copy id+kind; section when present) → ACTION. Else title stem on LAST dump line N → id from THIS turn's live JSON (שם פריט / שם מטלה / item_name / reminder item; strip quantity/marks). Dump shopping/tasks = personal then co-share then assign across shells. FORBIDDEN treating N as JSON array index / creation order when that picks a different title than dump line N. Numbering restarts per header/day/ממתינים/full-dump section — ASK which section if several 1. sequences. After תיוקים dump, line N = that filing; FORBIDDEN show_dump of another list. FORBIDDEN show_dump on any line-index turn. AFTER a dump bare «ל3» is a line index not 03:00. Examples: תמחק את 3 → when uniquely resolved remove NOW with that id (past tense); ambiguous → ASK, delete mutates empty; תשני את 3 → update; הוסף תזכורת ל3 → reminders; תשלחי את 3 ל… → messages.",
     "Delete many list items / מחק את כל המטלות / כל הקניות: when scope is clearly the built-in tasks or shopping shell → emit lists.remove NOW for each speaker-visible item_id in that list_type only. Past tense naming what was deleted. Never lists=[] when matching rows exist this turn. FORBIDDEN wiping custom lists or other people's lists. Unclear shell/title → ASK; delete mutates empty.",
     "WHOLE-LIST DELETE («מחקי רשימ(ה/ות)…» / «כל רשימות המשתתפים» / naming list titles as lists): each explicitly named list with a unique list_id → one lists delete_list NOW per list — never lists.remove. A name with several possible matches, unresolved list, or unclear scope → ASK; lists=[]. Contrast: emptying built-in rows («כל המטלות/הפריטים») → lists.remove per item_id — never wipe unrelated custom lists.",
     "DELETE BY DAY: תמחקי את הפגישה / המטלה ביום חמישי / מחר / ביום X → from this turn's EMPLOYEE_SAVED_DATA tasks whose תאריך לביצוע is that day (SESSION_CLOCK), lists.remove list_type tasks with that row's item_id (never omit) plus the EXACT שם מטלה. Never lists=[] + «לא מצאתי» when such a row is present. Several that day → ASK which (exact titles). Shared twins → every matching item_id. A multi-day row (תאריך לביצוע … תאריך סיום) counts for every day in its span.",
@@ -867,6 +940,8 @@ async function syncTurnReplies(input: {
   buttons?: LlmReplyButton[];
   /** Emoji reaction on the speaker's message (metadata.show_icon). */
   showIcon?: string;
+  /** Line map from this turn's show_dump REPLACE (for next-turn BY LINE). */
+  lastNumberedDump?: LastNumberedDumpLine[];
 }): Promise<ChatTurnMessageIds> {
   const [first = "", ...rest] = input.responses;
   const buttons = input.buttons?.length
@@ -879,6 +954,16 @@ async function syncTurnReplies(input: {
       data: { showIcon },
     });
   }
+  const existingAssistant = await prisma.chatMessage.findUnique({
+    where: { id: input.saved.assistant },
+    select: { raw: true },
+  });
+  const unpacked = unpackStoredLlmRaw(existingAssistant?.raw);
+  const dumpLines = input.lastNumberedDump ?? [];
+  const nextRaw =
+    dumpLines.length > 0
+      ? packStoredLlmRaw(unpacked.request, unpacked.response, dumpLines)
+      : existingAssistant?.raw;
   await prisma.chatMessage.update({
     where: { id: input.saved.assistant },
     data: {
@@ -888,6 +973,7 @@ async function syncTurnReplies(input: {
       ...(input.attachments?.length
         ? { attachments: toJsonValue(input.attachments) }
         : {}),
+      ...(dumpLines.length > 0 ? { raw: toJsonValue(nextRaw) } : {}),
     },
   });
   const extra = rest.map((text, index) => ({
@@ -1503,6 +1589,9 @@ export async function sendChatMessage(input: {
           viewerId: input.employeeId,
         }),
       )) ?? []);
+  const lastNumberedDump = guestSpeaker
+    ? []
+    : await loadLastNumberedDumpForConversation(conversation.id);
   const context = [
     formatSessionClockContext(),
     guestSpeaker ? "" : formatSpeakerAddressContext(employee.addressGender),
@@ -1525,6 +1614,7 @@ export async function sendChatMessage(input: {
     guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
     guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
     guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
+    guestSpeaker ? "" : formatLastNumberedDumpContext(lastNumberedDump),
     guestSpeaker || consultFrom
       ? ""
       : formatPendingAttachmentsContext(
@@ -1582,7 +1672,7 @@ export async function sendChatMessage(input: {
         "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המטלות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המטלות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER — after a numbered dump, spoken indices map dump titles → ids in THIS turn's JSON, then any supported ACTION (תמחק / תשני / הוסף תזכורת / תשלחי את N…); FORBIDDEN show_dump on that turn.",
         guestSpeaker
           ? ""
-          : "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «הציגי 1» / «מה זה 1» → title on LAST dump line N → id from this turn by that title → ACTION (filings dump → filing). Shopping/tasks dump order = personal then co-share then assign (same as JSON). FORBIDDEN treating N as JSON array index when that picks a different title. AFTER a dump «ל3» is a line index not 03:00. ASK if ambiguous. FORBIDDEN show_dump on line-index turns.",
+          : "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «הציגי 1» / «מה זה 1» → prefer LAST_NUMBERED_DUMP id for that n; else title stem on LAST dump line N → id from this turn → ACTION (filings dump → filing). Shopping/tasks dump order = personal then co-share then assign across shells. FORBIDDEN treating N as JSON array index when that picks a different title. Numbering restarts per section/day — ASK if several 1. sequences. AFTER a dump «ל3» is a line index not 03:00. ASK if ambiguous. FORBIDDEN show_dump on line-index turns.",
         guestSpeaker
           ? ""
           : "SPEAKER_ADDRESS is how to address this speaker (male/female/unknown). Always follow it for second-person Hebrew. filing is durable memory + explicit saves — use family/job silently; address gender prefers SPEAKER_ADDRESS. מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
@@ -2486,6 +2576,7 @@ export async function sendChatMessage(input: {
     }
     // Model / allowlist show_dump (+ section/partner/assignee/about) → live DB dump.
     // Never utterance-parse dump intent — ACTION fields only.
+    let turnLastNumberedDump: LastNumberedDumpLine[] = [];
     const showDumpKind = metadata.showDump?.trim() ?? "";
     if (showDumpKind) {
       const speakerAliases = [
@@ -2547,6 +2638,7 @@ export async function sendChatMessage(input: {
         extraOpts?: { flatLayout?: boolean; omitEmptySentence?: boolean },
       ): Promise<{
         text: string | null;
+        lines: LastNumberedDumpLine[];
         snapshot: typeof snapshot;
         opts: typeof baseDumpOpts & {
           viewerName: string;
@@ -2566,20 +2658,27 @@ export async function sendChatMessage(input: {
             ? { omitEmptySentence: true }
             : {}),
         };
+        const mapped = formatShowDumpWithLineMap(
+          showDumpKind,
+          snapshot,
+          dumpOpts,
+        );
         return {
-          text: formatShowDumpFromKind(showDumpKind, snapshot, dumpOpts),
+          text: mapped.text,
+          lines: mapped.lines,
           snapshot,
           opts: dumpOpts,
         };
       };
 
       if (aboutNames.length === 0) {
-        const { text, snapshot, opts } = await dumpForSubject(
+        const { text, lines, snapshot, opts } = await dumpForSubject(
           speaker,
           speakerAliases,
           speakerSnapshot,
           speakerPhoneBook,
         );
+        turnLastNumberedDump = lines;
         if (text) {
           workingReply = setEngineResponse(workingReply, text);
           const resolved = resolveShowDumpKind(showDumpKind);
@@ -2662,7 +2761,12 @@ export async function sendChatMessage(input: {
           }
           const inventoryTasks =
             aboutIsCurrentWorker && isTasksShowDumpKind(showDumpKind);
-          const { text: rawText, snapshot, opts } = await dumpForSubject(
+          const {
+            text: rawText,
+            lines: subjectLines,
+            snapshot,
+            opts,
+          } = await dumpForSubject(
             employeeDisplayName(aboutPerson),
             aboutAliases,
             subjectSnapshot,
@@ -2673,6 +2777,17 @@ export async function sendChatMessage(input: {
                 : {}),
               ...(inventoryTasks ? { omitEmptySentence: true } : {}),
             },
+          );
+          const sectionPrefix =
+            aboutNames.length > 1
+              ? employeeDisplayName(aboutPerson)
+              : undefined;
+          turnLastNumberedDump.push(
+            ...subjectLines.map((line) =>
+              sectionPrefix && !line.section
+                ? { ...line, section: sectionPrefix }
+                : line,
+            ),
           );
           let text = rawText;
           if (inventoryTasks) {
@@ -2891,6 +3006,9 @@ export async function sendChatMessage(input: {
       attachments: outboundAttachments.map(toChatAttachmentRef),
       buttons: speakerButtons,
       ...(finalParsed.showIcon ? { showIcon: finalParsed.showIcon } : {}),
+      ...(turnLastNumberedDump.length > 0
+        ? { lastNumberedDump: turnLastNumberedDump }
+        : {}),
     });
 
     if (conversation.needsContext) {
