@@ -901,18 +901,18 @@
               },
               "buttons": {
                 "type": "array",
-                "description": "Tap buttons shown under the first entry of responses (web + WhatsApp). Max 3. A tap sends command back as the speaker's next message.",
+                "description": "Tap buttons under the first responses entry (web + WhatsApp). Max 3. ALWAYS when YOUR responses ask a short closed choice (כן/לא, A/B, ≤3 options). label ≤12 Hebrew chars preferred (max 20), parallel pair/trio same style; fixed vocab: כן/לא; ברכב/תחב״צ; המטלה/רק תזכורות; יעד/קווים; 1/2/3; קניות/מטלות/תיוק; הצג after mutates. command = same meaning (may be slightly longer). Positive/primary first. FORBIDDEN mismatched lengths/synonyms in one turn. Empty when not a choice and no post-mutate הצג.",
                 "maxItems": 3,
                 "items": {
                   "type": "object",
                   "properties": {
                     "label": {
                       "type": "string",
-                      "description": "Short button text, max 20 characters (e.g. הצג)."
+                      "description": "Short button text, max 20 characters (e.g. כן, לא, ברכב, הצג)."
                     },
                     "command": {
                       "type": "string",
-                      "description": "Exact text sent as the next message on tap (e.g. הצג רשימת קניות)."
+                      "description": "Exact text sent as the next message on tap (e.g. כן / לא / ברכב / בתחבורה ציבורית / הצג רשימת קניות)."
                     }
                   },
                   "required": [
@@ -935,7 +935,7 @@
                   "null"
                 ],
                 "maxLength": 300,
-                "description": "Exactly one physical address mentioned in responses (full, with city) — shown as a Waze navigate button. null when responses mention no address or more than one."
+                "description": "Exactly one physical address (full, with city) → Waze navigate button. Use when they chose car/Waze navigation to that place, or responses mention exactly one address. null when no address, more than one, or while still asking car vs transit (routes=null)."
               },
               "show_icon": {
                 "type": [
@@ -1217,7 +1217,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live public-transit via Google («איך מגיעים מ… ל…» / leave-by / עוד כמה זמן קו X / איזה קווים בתחנה). Trip/ETA: Routes API TRANSIT — origin+destination required. Stop board (which lines at stop, no dest): aspects [lines], origin=stop, destination \"\". Ambiguous «איזה קווים בתחנה X» → ASK clarify first (יעד מסוים או רק קווים בתחנה?); routes=null until answered. FORBIDDEN inventing times or line lists. origin \"speaker\" = PENDING_LOCATION.",
+                "description": "Live PUBLIC TRANSIT only via Google (leave-by / עוד כמה זמן קו X / איזה קווים בתחנה / explicit bus/train/transit). Trip/ETA: Routes API TRANSIT — origin+destination required. Stop board (aspects [lines], empty destination). Ambiguous «איזה קווים בתחנה X» → ASK (יעד או רק קווים?); routes=null. Bare «איך להגיע / איך מגיעים» with no mode → ASK car vs transit (routes=null, navigate_address=null) + choice buttons; car/Waze → navigate_address only (no routes); transit → set routes. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION.",
                 "properties": {
                   "origin": {
                     "type": "string",
