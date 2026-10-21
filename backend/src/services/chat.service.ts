@@ -107,6 +107,7 @@ import { recordLlmUsage } from "./llm-usage.service.js";
 import {
   applyReminders,
   formatReminderApplyNotice,
+  formatReminderDeleteFallback,
   itemsFromListMutationsForSoftLink,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
@@ -1959,6 +1960,23 @@ export async function sendChatMessage(input: {
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
     });
+    // Clock cancel soft-deletes the linked worker להזכיר — count it as a list
+    // remove so reply correction does not claim «לא מצאתי את הפריט ברשימה».
+    const knownMutationIds = new Set(listMutations.map((row) => row.itemId));
+    for (const task of reminderResult.removedWorkerTasks) {
+      if (knownMutationIds.has(task.id)) {
+        continue;
+      }
+      knownMutationIds.add(task.id);
+      listMutations.push({
+        action: "remove",
+        itemId: task.id,
+        employeeId: task.employeeId,
+        listType: "tasks",
+        itemKey: task.itemKey,
+        itemLabel: task.itemLabel,
+      });
+    }
     const directoryResult = guestSpeaker
       ? { saved: [], removed: [], shareNotices: [] }
       : await applyDirectoryActions({
@@ -2387,6 +2405,10 @@ export async function sendChatMessage(input: {
       listMutations,
       filingMutations,
     );
+    const reminderDeleteFallback =
+      (reminderResult.removed?.length ?? 0) > 0
+        ? formatReminderDeleteFallback(reminderResult.removed)
+        : "";
     // Empty LLM response must not leak raw JSON / blank bubble to the user.
     if (!parseLlmReply(workingReply).response.trim()) {
       const fallback =
@@ -2400,6 +2422,7 @@ export async function sendChatMessage(input: {
         (appliedListRemove || appliedListUpdate || appliedListAdd
           ? appliedFallback
           : "") ||
+        reminderDeleteFallback ||
         (!appliedListOps && requestedListRemove && !appliedListRemove
           ? LIST_FIND_MISS
           : "") ||
@@ -2429,6 +2452,13 @@ export async function sendChatMessage(input: {
       !parseLlmReply(workingReply).response.trim()
     ) {
       workingReply = setEngineResponse(workingReply, appliedFallback);
+    }
+    // Clock-only delete (no linked worker task): do not leave LIST_FIND_MISS.
+    if (reminderDeleteFallback) {
+      const spokenAfter = parseLlmReply(workingReply).response.trim();
+      if (!spokenAfter || spokenAfter === LIST_FIND_MISS) {
+        workingReply = setEngineResponse(workingReply, reminderDeleteFallback);
+      }
     }
     // Never send an empty WhatsApp/web bubble (e.g. responses:[] + bad list shell ops).
     if (!parseLlmReply(workingReply).response.trim()) {

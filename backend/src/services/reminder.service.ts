@@ -1045,10 +1045,22 @@ async function clockInvolvedIds(clock: {
   return [...new Set(ids.filter(Boolean))];
 }
 
+export type CascadedWorkerTask = {
+  id: string;
+  itemKey: string;
+  itemLabel: string;
+  employeeId: string;
+};
+
 async function cancelActiveReminderById(
   userId: string,
   reminderId: string,
-): Promise<{ label: string; fireAt: Date; involvedIds: string[] } | null> {
+): Promise<{
+  label: string;
+  fireAt: Date;
+  involvedIds: string[];
+  removedWorkerTasks: CascadedWorkerTask[];
+} | null> {
   const match = await prisma.reminder.findFirst({
     where: { id: reminderId, userId, status: "active" },
   });
@@ -1064,13 +1076,18 @@ async function cancelActiveReminderById(
     pingIds: match.pingIds,
     workerItemId,
   });
-  await removeReminderAndLinkedWorkerTask({
+  const removedWorkerTasks = await removeReminderAndLinkedWorkerTask({
     id: match.id,
     workerItemId,
     userId,
     label: match.itemLabel,
   });
-  return { label: match.itemLabel, fireAt: match.fireAt, involvedIds };
+  return {
+    label: match.itemLabel,
+    fireAt: match.fireAt,
+    involvedIds,
+    removedWorkerTasks,
+  };
 }
 
 /** True when `day` is one of the rule's own occurrence days, walking from the clock's next fire. */
@@ -1379,6 +1396,8 @@ export async function applyReminders(input: {
 }): Promise<{
   removed: string[];
   missed: string[];
+  /** Worker tasks soft-deleted when a clock cascade ran this turn. */
+  removedWorkerTasks: CascadedWorkerTask[];
   saved: Array<{
     id: string;
     item: string;
@@ -1404,6 +1423,17 @@ export async function applyReminders(input: {
   );
   const removed: string[] = [];
   const missed: string[] = [];
+  const removedWorkerTasks: CascadedWorkerTask[] = [];
+  const seenWorkerTaskIds = new Set<string>();
+  const pushCascadedTasks = (tasks: CascadedWorkerTask[]) => {
+    for (const task of tasks) {
+      if (seenWorkerTaskIds.has(task.id)) {
+        continue;
+      }
+      seenWorkerTaskIds.add(task.id);
+      removedWorkerTasks.push(task);
+    }
+  };
   const changes: ReminderChange[] = [];
   const saved: Array<{
     id: string;
@@ -1424,7 +1454,7 @@ export async function applyReminders(input: {
     for (const reminder of input.reminders.filter((row) => row.action !== "remove")) {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
-    return { removed, missed, saved, skipped, changes };
+    return { removed, missed, removedWorkerTasks, saved, skipped, changes };
   }
   for (const reminder of input.reminders) {
     if (reminder.action === "remove") {
@@ -1442,6 +1472,7 @@ export async function applyReminders(input: {
       if (cancelled) {
         removed.push(cancelled.label);
         alreadyCancelled.add(reminderId);
+        pushCascadedTasks(cancelled.removedWorkerTasks);
         changes.push({
           action: "remove",
           label: cancelled.label,
@@ -1917,7 +1948,18 @@ export async function applyReminders(input: {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
   }
-  return { removed, missed, saved, skipped, changes };
+  return { removed, missed, removedWorkerTasks, saved, skipped, changes };
+}
+
+export function formatReminderDeleteFallback(labels: string[]): string {
+  const unique = uniqueLabels(labels);
+  if (unique.length === 0) {
+    return "מחקתי את התזכורת.";
+  }
+  if (unique.length === 1) {
+    return `מחקתי את התזכורת «${unique[0]}».`;
+  }
+  return `מחקתי ${unique.length} תזכורות.`;
 }
 
 export function formatActiveRemindersReply(

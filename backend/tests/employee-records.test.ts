@@ -596,6 +596,42 @@ describe("employee records", () => {
     ).toBe(reply);
   });
 
+  it("keeps מחקתי when a cascaded worker-task remove applied (reminder delete)", () => {
+    const reply = 'מחקתי את התזכורת «לקנות חלב».';
+    expect(
+      correctListMutationClaimReply({
+        reply,
+        requestedRemove: false,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: true,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: 'הסרתי את «להזכיר לטל לקנות חלב» מרשימת «מטלות».',
+        setResponse: (_r, response) => response,
+        spoken: reply,
+      }),
+    ).toBe(reply);
+  });
+
+  it("formats cascaded worker-task remove as מטלות fallback", () => {
+    expect(
+      formatAppliedMutationFallback(
+        [
+          {
+            action: "remove",
+            itemId: "worker-task-1",
+            employeeId: "lucy-1",
+            listType: "tasks",
+            itemKey: "להזכיר לטל לקנות חלב",
+            itemLabel: "להזכיר לטל לקנות חלב",
+          },
+        ],
+        [],
+      ),
+    ).toBe('הסרתי את «להזכיר לטל לקנות חלב» מרשימת «מטלות».');
+  });
+
   it("removes a custom row found on another list name for the same owner", async () => {
     const bugs = {
       id: "bugs-list",
