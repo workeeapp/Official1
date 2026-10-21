@@ -553,6 +553,7 @@ function thinSessionEnvelope(input: {
       ? "First-person Hebrew is feminine only: מעבירה, מוסיפה, שומרת, שואלת."
       : "First-person Hebrew is masculine: מעביר, מוסיף, שומר, שואל.",
     "BY LINE NUMBER: after a numbered dump, «3» / «ל3» / «תמחק את 3» → prefer LAST_NUMBERED_DUMP id for that n when present; else match dump line N title stem (שם פריט / שם מטלה / item_name / reminder item; strip quantity/marks) to an id in THIS turn's JSON. FORBIDDEN JSON array index when it disagrees with dump line N. Numbering restarts per header/day/section — ASK which section if several 1. sequences. Unique → ACTION NOW; ≥2 matches → ASK. FORBIDDEN show_dump on line-index turns.",
+    `Ping clocks (${SPEAKER_CLOCK_ASKS}) → metadata.show_dump=reminders; lists/reminders/buttons=[]. Server replaces from active_reminders. Product «שלך» here = the speaker's WhatsApp clocks — FORBIDDEN answering from WORKER_SAVED_DATA / OPEN_JOBS or free-writing «אין לי תזכורות ממתינות».`,
   ].join("\n");
 }
 
