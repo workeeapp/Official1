@@ -193,7 +193,12 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
   await ensureProtectedLucy(userId);
   await ensureGuestLucy(userId);
-  await ensureDefaultTips(userId);
+  // Tip catalog sync must not block listing employees (Employees UI / chat-as).
+  try {
+    await ensureDefaultTips(userId);
+  } catch (error) {
+    console.error("ensureDefaultTips failed during listEmployeesForUser", error);
+  }
   const employees = await prisma.employee.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },

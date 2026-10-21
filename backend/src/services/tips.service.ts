@@ -20,6 +20,7 @@ import {
 import { prisma } from "../database/prisma.js";
 import {
   ConflictError,
+  isSkippableTipWriteError,
   isUniqueConstraintError,
   NotFoundError,
   ValidationError,
@@ -191,10 +192,16 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
       if (!row.systemSeed) {
         continue;
       }
-      await prisma.tip.update({
-        where: { id: row.id },
-        data: seedData,
-      });
+      try {
+        await prisma.tip.update({
+          where: { id: row.id },
+          data: seedData,
+        });
+      } catch (error) {
+        if (!isSkippableTipWriteError(error)) {
+          throw error;
+        }
+      }
       continue;
     }
     try {
@@ -206,7 +213,7 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
         },
       });
     } catch (error) {
-      if (!isUniqueConstraintError(error)) {
+      if (!isUniqueConstraintError(error) && !isSkippableTipWriteError(error)) {
         throw error;
       }
     }

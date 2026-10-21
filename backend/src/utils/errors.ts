@@ -80,3 +80,11 @@ export function isUniqueConstraintError(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
   );
 }
+
+/** Record gone (P2025) or FK violation (P2003) — safe to skip a tip upsert. */
+export function isSkippableTipWriteError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === "P2025" || error.code === "P2003")
+  );
+}

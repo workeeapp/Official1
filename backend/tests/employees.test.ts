@@ -11,6 +11,11 @@ const {
   remove,
   listFindMany,
   filingFindMany,
+  tipDeleteMany,
+  tipFindMany,
+  tipCreate,
+  tipUpdate,
+  attachmentLinkFindMany,
 } = vi.hoisted(() => ({
   findUnique: vi.fn(),
   findMany: vi.fn(),
@@ -20,6 +25,11 @@ const {
   remove: vi.fn(),
   listFindMany: vi.fn(),
   filingFindMany: vi.fn(),
+  tipDeleteMany: vi.fn(),
+  tipFindMany: vi.fn(),
+  tipCreate: vi.fn(),
+  tipUpdate: vi.fn(),
+  attachmentLinkFindMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -39,6 +49,15 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     employeeFiling: {
       findMany: filingFindMany,
+    },
+    tip: {
+      deleteMany: tipDeleteMany,
+      findMany: tipFindMany,
+      create: tipCreate,
+      update: tipUpdate,
+    },
+    attachmentLink: {
+      findMany: attachmentLinkFindMany,
     },
   },
 }));
@@ -68,6 +87,11 @@ describe("employees API", () => {
     remove.mockReset();
     listFindMany.mockReset().mockResolvedValue([]);
     filingFindMany.mockReset().mockResolvedValue([]);
+    tipDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+    tipFindMany.mockReset().mockResolvedValue([]);
+    tipCreate.mockReset().mockResolvedValue({});
+    tipUpdate.mockReset().mockResolvedValue({});
+    attachmentLinkFindMany.mockReset().mockResolvedValue([]);
     app = createApp();
   });
 
