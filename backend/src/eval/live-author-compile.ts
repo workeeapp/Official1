@@ -42,6 +42,8 @@ export type LiveAuthorOutcome = {
   itemIdsPresent?: string[];
   factsInclude?: string[];
   factsExclude?: string[];
+  contactNamesInclude?: string[];
+  contactNamesExclude?: string[];
 };
 
 export type LiveAuthorTurn = {
@@ -265,7 +267,7 @@ function synthesizeOutcome(
         : undefined;
     case "directory_add":
       return intent.nameIncludes
-        ? { factsInclude: [intent.nameIncludes] }
+        ? { contactNamesInclude: [intent.nameIncludes] }
         : undefined;
     default:
       return undefined;
@@ -283,6 +285,12 @@ function toStateAfter(
   }
   if (outcome.factsInclude?.length) state.factsInclude = outcome.factsInclude;
   if (outcome.factsExclude?.length) state.factsExclude = outcome.factsExclude;
+  if (outcome.contactNamesInclude?.length) {
+    state.contactNamesInclude = outcome.contactNamesInclude;
+  }
+  if (outcome.contactNamesExclude?.length) {
+    state.contactNamesExclude = outcome.contactNamesExclude;
+  }
   return Object.keys(state).length ? state : undefined;
 }
 

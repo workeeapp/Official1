@@ -245,6 +245,24 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
         answer_text: c.requireAsk ? "שאלה?" : "",
       });
       return "עדכנתי";
+    case "messages_has": {
+      const target = c.targetIncludes ?? "עמית";
+      meta.messages.push({
+        text: c.textIncludes ?? `תיאום עם ${target}`,
+        targets: [target],
+        expects_reply: true,
+        ...(c.requireBook
+          ? {
+              book: {
+                title: "פגישה",
+                date: "2099-01-01",
+                time: "10:00",
+              },
+            }
+          : {}),
+      });
+      return `שלחתי ל${target}`;
+    }
     default:
       return "";
   }

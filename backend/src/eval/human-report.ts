@@ -161,6 +161,11 @@ export function summarizeAction(meta: LlmMetadata): string {
       `directory.${row.action}${row.contactId ? `(${row.contactId})` : ""}${row.name ? `[${row.name}]` : ""}`,
     );
   }
+  for (const row of meta.messages ?? []) {
+    const targets = (row.targets ?? []).join(",") || "—";
+    const book = row.book ? "+book" : "";
+    parts.push(`messages→${targets}${book}`);
+  }
   if (meta.showDump) parts.push(`show_dump=${meta.showDump}`);
   if (meta.confirm) parts.push("confirm");
   if (meta.hold) parts.push("hold");
@@ -229,6 +234,14 @@ export function summarizeConstraints(
       case "response_forbids_any":
         bits.push(`forbid~${c.needles.slice(0, 3).join("|")}`);
         break;
+      case "messages_has": {
+        const bitsMsg = ["messages"];
+        if (c.targetIncludes) bitsMsg.push(`→${c.targetIncludes}`);
+        if (c.requireBook) bitsMsg.push("+book");
+        if (c.textIncludes) bitsMsg.push(`~${c.textIncludes}`);
+        bits.push(bitsMsg.join(""));
+        break;
+      }
       case "any":
         bits.push(`any(${summarizeConstraints(c.constraints)})`);
         break;
@@ -400,8 +413,8 @@ export function formatEvalUiReportMarkdown(report: EvalUiReport): string {
   lines.push("---");
   lines.push("");
 
-  for (const row of report.cases) {
-    lines.push(`## ${row.verdict} \`${row.id}\``);
+  report.cases.forEach((row, index) => {
+    lines.push(`## ${index + 1}. ${row.verdict} \`${row.id}\``);
     if (row.tag) lines.push(`*tag:* ${row.tag}`);
     if (row.tags.length) lines.push(`*tags:* ${row.tags.join(", ")}`);
     lines.push("");
@@ -446,7 +459,7 @@ export function formatEvalUiReportMarkdown(report: EvalUiReport): string {
     lines.push("");
     lines.push("---");
     lines.push("");
-  }
+  });
 
   return lines.join("\n");
 }
@@ -597,6 +610,8 @@ export function casesFromLiveFullResults(
         stateAfter?: {
           factsInclude?: string[];
           itemIdsAbsent?: string[];
+          contactNamesInclude?: string[];
+          contactNamesExclude?: string[];
         };
       }>;
     }
@@ -622,6 +637,16 @@ export function casesFromLiveFullResults(
         }
         if (state?.factsInclude?.length) {
           stateBits.push(`facts~${state.factsInclude.join("|")}`);
+        }
+        if (state?.contactNamesInclude?.length) {
+          stateBits.push(
+            `contacts~${state.contactNamesInclude.join("|")}`,
+          );
+        }
+        if (state?.contactNamesExclude?.length) {
+          stateBits.push(
+            `contacts!~${state.contactNamesExclude.join("|")}`,
+          );
         }
         return {
           index: t.turnIndex,

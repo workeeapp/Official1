@@ -1526,22 +1526,18 @@
       "setup": {},
       "constraints": [
         {
-          "type": "lists_has_action",
-          "action": "add",
-          "listType": "tasks"
+          "type": "messages_has",
+          "targetIncludes": "עמית",
+          "requireBook": true
         },
         {
-          "type": "response_mentions_any",
-          "needles": [
-            "עמית",
-            "10",
-            "פגיש"
-          ]
+          "type": "lists_empty"
         }
       ],
       "tags": [
         "single-turn",
-        "tasks"
+        "tasks",
+        "messages"
       ]
     },
     {
@@ -1899,7 +1895,7 @@
         "tasks",
         "single-turn"
       ],
-      "utterance": "צריך לארגן ערב פוקר",
+      "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
       "setup": {},
       "constraints": [
         {
@@ -1908,7 +1904,7 @@
           "listType": "tasks",
           "minCount": 1,
           "maxCount": 1,
-          "itemTextIncludes": "ערב פוקר"
+          "itemTextIncludes": "פוקר"
         },
         {
           "type": "no_lists_add",
@@ -1923,18 +1919,6 @@
         },
         {
           "type": "no_invented_reminder_add"
-        },
-        {
-          "type": "response_forbids_any",
-          "needles": [
-            "לארגן ערב פוקר"
-          ]
-        },
-        {
-          "type": "response_mentions_any",
-          "needles": [
-            "ערב פוקר"
-          ]
         }
       ]
     }

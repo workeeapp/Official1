@@ -136,6 +136,8 @@ export function mapStateAssert(
     itemIdsAbsent: expect.itemIdsAbsent?.map(mapId),
     factsInclude: expect.factsInclude?.map(mapId),
     factsExclude: expect.factsExclude?.map(mapId),
+    contactNamesInclude: expect.contactNamesInclude,
+    contactNamesExclude: expect.contactNamesExclude,
     linkedListNamesOnItem: expect.linkedListNamesOnItem
       ? {
           itemId: mapId(expect.linkedListNamesOnItem.itemId),
@@ -149,12 +151,14 @@ export function assertRegressionState(
   snapshot: EmployeeRecordSnapshot,
   facts: string,
   expect: RegressionStateAssert | undefined,
+  options?: { contactNames?: string[] },
 ): string[] {
   if (!expect) {
     return [];
   }
   const failures: string[] = [];
   const liveIds = new Set(allLiveItemIds(snapshot));
+  const contactNames = options?.contactNames ?? [];
 
   for (const id of expect.itemIdsPresent ?? []) {
     if (!liveIds.has(id)) {
@@ -174,6 +178,26 @@ export function assertRegressionState(
   for (const needle of expect.factsExclude ?? []) {
     if (facts.includes(needle)) {
       failures.push(`facts: expected to exclude ${JSON.stringify(needle)}`);
+    }
+  }
+  for (const needle of expect.contactNamesInclude ?? []) {
+    const hit = contactNames.some((name) =>
+      name.toLowerCase().includes(needle.toLowerCase()),
+    );
+    if (!hit) {
+      failures.push(
+        `contacts: expected to include ${JSON.stringify(needle)}`,
+      );
+    }
+  }
+  for (const needle of expect.contactNamesExclude ?? []) {
+    const hit = contactNames.some((name) =>
+      name.toLowerCase().includes(needle.toLowerCase()),
+    );
+    if (hit) {
+      failures.push(
+        `contacts: expected to exclude ${JSON.stringify(needle)}`,
+      );
     }
   }
   if (expect.listTypeCounts) {
@@ -312,6 +336,8 @@ export async function createHarnessAccount(
 export async function destroyHarnessAccount(account: HarnessAccount): Promise<void> {
   // EmployeeLists / items cascade from Employee; User is Restrict until employees go.
   await prisma.reminder.deleteMany({ where: { userId: account.userId } }).catch(() => undefined);
+  await prisma.contact.deleteMany({ where: { userId: account.userId } }).catch(() => undefined);
+  await prisma.contactBook.deleteMany({ where: { userId: account.userId } }).catch(() => undefined);
   await prisma.employeeFiling.deleteMany({
     where: { employeeId: account.employeeId },
   });
@@ -322,29 +348,107 @@ export async function destroyHarnessAccount(account: HarnessAccount): Promise<vo
   await prisma.user.delete({ where: { id: account.userId } }).catch(() => undefined);
 }
 
+/** Partner nicknames referenced in setup shared_with (for harness account creation). */
+export function collectPartnerNamesFromSetup(
+  setup: ModelEvalCorpusCase["setup"] | undefined,
+): string[] {
+  const names = new Set<string>();
+  for (const list of setup?.lists ?? []) {
+    const listShared = (list as { shared_with?: unknown }).shared_with;
+    if (Array.isArray(listShared)) {
+      for (const raw of listShared) {
+        if (typeof raw === "string" && raw.trim()) names.add(raw.trim());
+      }
+    }
+    for (const raw of list.items ?? []) {
+      const item = raw as { shared_with?: unknown };
+      if (Array.isArray(item.shared_with)) {
+        for (const name of item.shared_with) {
+          if (typeof name === "string" && name.trim()) names.add(name.trim());
+        }
+      }
+    }
+  }
+  return [...names];
+}
+
 /** Seed corpus setup rows into Prisma; map symbolic ids → real UUIDs. */
 export async function seedSetup(
   employeeId: string,
   speaker: string,
   setup: ModelEvalCorpusCase["setup"] | undefined,
   idMap: Map<string, string>,
-  options?: { userId?: string },
+  options?: {
+    userId?: string;
+    /** Name → employee id for shared_with resolution (speaker + partners). */
+    nameToEmployeeId?: Map<string, string>;
+  },
 ): Promise<void> {
+  const userId = options?.userId?.trim();
+  const nameToId = options?.nameToEmployeeId ?? new Map<string, string>();
+  if (!nameToId.has(speaker.trim())) {
+    nameToId.set(speaker.trim(), employeeId);
+  }
+
+  const resolvePartnerIds = (sharedWith: unknown): string[] => {
+    if (!Array.isArray(sharedWith)) return [];
+    const ids: string[] = [];
+    for (const raw of sharedWith) {
+      if (typeof raw !== "string" || !raw.trim()) continue;
+      const id = nameToId.get(raw.trim());
+      if (id && id !== employeeId) ids.push(id);
+    }
+    return ids;
+  };
+
   for (const list of setup?.lists ?? []) {
     const symbolicListId = String(list.list_id ?? "").trim();
-    const createdList = await prisma.employeeList.create({
-      data: {
+    const listName = String(
+      (list as { list_name?: string; name?: string }).list_name ??
+        (list as { name?: string }).name ??
+        "",
+    );
+    const listPartners = resolvePartnerIds(
+      (list as { shared_with?: unknown }).shared_with,
+    );
+    const listShared =
+      list.scope === "shared" || listPartners.length > 0;
+    const listVisibleTo = listShared
+      ? [employeeId, ...listPartners]
+      : [employeeId];
+
+    // One shopping/tasks shell per (employee, list_type, name) — reuse to avoid unique crashes.
+    let createdList = await prisma.employeeList.findFirst({
+      where: {
         employeeId,
         listType: list.list_type,
-        name: list.list_name ?? "",
-        scope: list.scope === "shared" ? "shared" : "personal",
-        visibleTo: [employeeId],
+        name: listName,
+        deletedAt: null,
       },
     });
+    if (!createdList) {
+      createdList = await prisma.employeeList.create({
+        data: {
+          employeeId,
+          listType: list.list_type,
+          name: listName,
+          scope: listShared ? "shared" : "personal",
+          visibleTo: listVisibleTo,
+        },
+      });
+    } else if (listShared && createdList.scope !== "shared") {
+      createdList = await prisma.employeeList.update({
+        where: { id: createdList.id },
+        data: {
+          scope: "shared",
+          visibleTo: listVisibleTo,
+        },
+      });
+    }
     if (symbolicListId && !UUID_RE.test(symbolicListId)) {
       idMap.set(symbolicListId, createdList.id);
     }
-    idMap.set(`list:${list.list_type}:${list.list_name ?? ""}`, createdList.id);
+    idMap.set(`list:${list.list_type}:${listName}`, createdList.id);
 
     for (const raw of list.items ?? []) {
       const item = { ...raw } as Record<string, unknown>;
@@ -352,6 +456,12 @@ export async function seedSetup(
       delete item.item_id;
       delete item.itemId;
       delete item.id;
+      const itemScopeRaw = item.scope;
+      delete item.scope;
+      const itemSharedWith = item.shared_with;
+      const itemPartners = resolvePartnerIds(itemSharedWith);
+      const itemShared =
+        itemScopeRaw === "shared" || itemPartners.length > 0;
       const titleKeys =
         list.list_type === "shopping"
           ? ["שם פריט", "name"]
@@ -373,10 +483,12 @@ export async function seedSetup(
         data: {
           listId: createdList.id,
           itemKey,
-          data: item,
-          scope: "personal",
+          data: JSON.parse(JSON.stringify(item)) as object,
+          scope: itemShared ? "shared" : "personal",
           addedById: employeeId,
-          visibleTo: [employeeId],
+          visibleTo: itemShared
+            ? [employeeId, ...itemPartners]
+            : [employeeId],
         },
       });
       if (symbolicId && !UUID_RE.test(symbolicId)) {
@@ -402,7 +514,41 @@ export async function seedSetup(
     }
   }
 
-  const userId = options?.userId?.trim();
+  if (userId && (setup?.contacts?.length ?? 0) > 0) {
+    for (const [index, row] of setup!.contacts!.entries()) {
+      const name = String(row.name ?? "").trim();
+      const phone = String(row.phone ?? "").trim();
+      if (!name || !phone) continue;
+      const created = await prisma.contact.upsert({
+        where: {
+          ownerEmployeeId_phone: {
+            ownerEmployeeId: employeeId,
+            phone,
+          },
+        },
+        create: {
+          userId,
+          ownerEmployeeId: employeeId,
+          name,
+          phone,
+          kind: "personal",
+          addedById: employeeId,
+          scope: "personal",
+          visibleTo: [employeeId],
+        },
+        update: { name },
+      });
+      idMap.set(`contact-${index}`, created.id);
+      const symbolic =
+        typeof (row as { contact_id?: string }).contact_id === "string"
+          ? String((row as { contact_id?: string }).contact_id).trim()
+          : "";
+      if (symbolic && !UUID_RE.test(symbolic)) {
+        idMap.set(symbolic, created.id);
+      }
+    }
+  }
+
   if (userId && (setup?.reminders?.length ?? 0) > 0) {
     for (const row of setup!.reminders!) {
       const symbolicId = String(row.reminder_id ?? "").trim();
@@ -587,16 +733,26 @@ export async function runMultiTurnOffline(
     };
   }
 
+  const partnersFromSetup = collectPartnerNamesFromSetup(suiteCase.setup);
   const account = await createHarnessAccount(speaker, {
-    partners: options?.partners,
+    partners: options?.partners?.length
+      ? options.partners
+      : partnersFromSetup,
   });
   const idMap = new Map<string, string>();
   const turnResults: MultiTurnTurnResult[] = [];
   const failures: string[] = [];
 
   try {
+    const nameToEmployeeId = new Map<string, string>([
+      [speaker.trim(), account.employeeId],
+      ...account.partners.map(
+        (p) => [p.nickname?.trim() || p.name, p.id] as const,
+      ),
+    ]);
     await seedSetup(account.employeeId, speaker, suiteCase.setup, idMap, {
       userId: account.userId,
+      nameToEmployeeId,
     });
 
     for (let i = 0; i < suiteCase.turns.length; i += 1) {

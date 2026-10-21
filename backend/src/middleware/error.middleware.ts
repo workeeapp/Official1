@@ -33,7 +33,7 @@ export function errorMiddleware(
     return;
   }
 
-  console.error("Unhandled server error");
+  console.error("Unhandled server error", error);
   res.status(500).json({
     error: {
       code: "INTERNAL_ERROR",

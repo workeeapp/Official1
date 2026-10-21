@@ -20,7 +20,10 @@ import {
   type EmployeeRecordSnapshot,
 } from "../services/employee-records.service.js";
 import { withLinkedListRefs } from "../services/list-item-list-link.service.js";
-import { applyDirectoryActions } from "../services/contact.service.js";
+import {
+  applyDirectoryActions,
+  listContactsForEmployee,
+} from "../services/contact.service.js";
 import { applyListOps } from "../services/list-ops.service.js";
 import { applyReminders } from "../services/reminder.service.js";
 import { evaluateConstraints } from "./constraints.js";
@@ -29,6 +32,7 @@ import type { StudioTurn } from "./corpus.js";
 import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
 import {
   assertRegressionState,
+  collectPartnerNamesFromSetup,
   createHarnessAccount,
   destroyHarnessAccount,
   mapStateAssert,
@@ -215,9 +219,17 @@ export async function runModelApplyCase(
     // DB safety before any Prisma connection/mutation. Never log URLs.
     assertModelApplyDatabaseApproved();
 
-    account = await createHarnessAccount(speaker);
+    const partners = collectPartnerNamesFromSetup(suiteCase.setup);
+    account = await createHarnessAccount(speaker, { partners });
+    const nameToEmployeeId = new Map<string, string>([
+      [speaker.trim(), account.employeeId],
+      ...account.partners.map(
+        (p) => [p.nickname?.trim() || p.name, p.id] as const,
+      ),
+    ]);
     await seedSetup(account.employeeId, speaker, suiteCase.setup, idMap, {
       userId: account.userId,
+      nameToEmployeeId,
     });
     let { snapshot, facts } = await enrichSnapshot(account.employeeId);
 
@@ -232,7 +244,9 @@ export async function runModelApplyCase(
         priorMetadata: [...priorMetadata],
       });
 
-      const metadata = parseLlmMetadata(proposed.metadata);
+      const metadata = parseLlmMetadata(
+        rewriteAliases(proposed.metadata, idMap),
+      );
       const response = proposed.response ?? turn.response ?? "";
       priorMetadata.push(metadata);
 
@@ -252,11 +266,15 @@ export async function runModelApplyCase(
       const enriched = await enrichSnapshot(account.employeeId);
       snapshot = enriched.snapshot;
       facts = enriched.facts;
+      const contactNames = (
+        await listContactsForEmployee(account.employeeId)
+      ).map((row) => row.name);
 
       const stateFailures = assertRegressionState(
         snapshot,
         facts,
         mapStateAssert(turn.stateAfter, idMap),
+        { contactNames },
       );
 
       const turnOk = checked.ok && stateFailures.length === 0;

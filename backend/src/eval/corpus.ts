@@ -17,7 +17,7 @@ export interface ModelEvalCorpusCase {
     lists?: EmployeeRecordSnapshot["lists"];
     filing?: EmployeeRecordSnapshot["filing"];
     reminders?: ReminderSnapshotRow[];
-    contacts?: Array<{ name: string; phone: string }>;
+    contacts?: Array<{ name: string; phone: string; contact_id?: string }>;
   };
   constraints: ModelEvalConstraint[];
 }
@@ -254,6 +254,13 @@ export interface RegressionStateAssert {
   factsInclude?: string[];
   /** Substrings that must not appear in formatEmployeeContext output. */
   factsExclude?: string[];
+  /**
+   * Contact display names that must appear in the phone book
+   * (Contacts table / SPEAKER_CONTACTS — not list facts).
+   */
+  contactNamesInclude?: string[];
+  /** Contact display names that must not appear in the phone book. */
+  contactNamesExclude?: string[];
   /** Exact count of lists with this list_type (after apply / authored facts). */
   listTypeCounts?: Record<string, number>;
   /** Task item must expose these linked list names (via linked_lists[].list_name or list_id). */

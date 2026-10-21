@@ -102,6 +102,20 @@ export type ModelEvalConstraint =
   /** Every needle must appear in the response (AND). */
   | { type: "response_mentions_all"; needles: string[] }
   | { type: "response_forbids_any"; needles: string[] }
+  /**
+   * At least one metadata.messages row. Prefer over response text for
+   * coordination / outbound checks (e.g. meeting book with Amit).
+   */
+  | {
+      type: "messages_has";
+      minCount?: number;
+      /** At least one message target must include this substring (fold). */
+      targetIncludes?: string;
+      /** At least one matching message text must include this substring. */
+      textIncludes?: string;
+      /** When true, at least one matching message must carry a book slot. */
+      requireBook?: boolean;
+    }
   | { type: "any"; constraints: ModelEvalConstraint[] };
 
 export interface ModelEvalCaseResult {
@@ -564,6 +578,41 @@ export function checkConstraint(
         includesFold(response, needle),
       );
       return hit ? `response must not mention: ${hit}` : null;
+    }
+    case "messages_has": {
+      const rows = meta.messages ?? [];
+      const minCount = constraint.minCount ?? 1;
+      if (rows.length < minCount) {
+        return `expected messages count >= ${minCount}, got ${rows.length}`;
+      }
+      let matched = rows;
+      if (constraint.targetIncludes) {
+        matched = matched.filter((row) =>
+          (row.targets ?? []).some((t) =>
+            includesFold(String(t), constraint.targetIncludes!),
+          ),
+        );
+        if (matched.length === 0) {
+          return `expected messages target~${constraint.targetIncludes}`;
+        }
+      }
+      if (constraint.textIncludes) {
+        matched = matched.filter((row) =>
+          includesFold(row.text ?? "", constraint.textIncludes!),
+        );
+        if (matched.length === 0) {
+          return `expected messages text~${constraint.textIncludes}`;
+        }
+      }
+      if (constraint.requireBook) {
+        const withBook = matched.filter(
+          (row) => row.book && typeof row.book === "object",
+        );
+        if (withBook.length === 0) {
+          return "expected messages entry with book";
+        }
+      }
+      return null;
     }
     default: {
       const unknown = constraint as { type: string };

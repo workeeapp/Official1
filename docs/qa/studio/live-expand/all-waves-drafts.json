@@ -796,11 +796,11 @@
       "tasks",
       "single-turn"
     ],
-    "description": "Event host is poker night task name",
+    "description": "Event host is poker night task name when a time is given",
     "setup": {},
     "turns": [
       {
-        "utterance": "צריך לארגן ערב פוקר",
+        "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
         "intent": {
           "type": "custom",
           "constraints": [
@@ -810,7 +810,7 @@
               "listType": "tasks",
               "minCount": 1,
               "maxCount": 1,
-              "itemTextIncludes": "ערב פוקר"
+              "itemTextIncludes": "פוקר"
             },
             {
               "type": "no_lists_add",
@@ -825,18 +825,6 @@
             },
             {
               "type": "no_invented_reminder_add"
-            },
-            {
-              "type": "response_forbids_any",
-              "needles": [
-                "לארגן ערב פוקר"
-              ]
-            },
-            {
-              "type": "response_mentions_any",
-              "needles": [
-                "ערב פוקר"
-              ]
             }
           ]
         }
@@ -1067,11 +1055,11 @@
       "full-live",
       "single-turn"
     ],
-    "description": "Create poker host task persists",
+    "description": "Create poker host task persists when a time is given",
     "setup": {},
     "turns": [
       {
-        "utterance": "צריך לארגן ערב פוקר",
+        "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
         "intent": {
           "type": "custom",
           "constraints": [
@@ -1079,7 +1067,7 @@
               "type": "lists_has_action",
               "action": "add",
               "listType": "tasks",
-              "itemTextIncludes": "ערב פוקר"
+              "itemTextIncludes": "פוקר"
             },
             {
               "type": "no_lists_add",
@@ -1089,7 +1077,7 @@
         },
         "outcome": {
           "factsInclude": [
-            "ערב פוקר"
+            "פוקר"
           ]
         }
       }

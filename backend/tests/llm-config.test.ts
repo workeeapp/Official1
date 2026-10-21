@@ -118,7 +118,7 @@ describe("LLM action schema", () => {
       "FORBIDDEN empty responses",
     );
     expect(config.systemMessage).toContain(
-      "FORBIDDEN list_ops for a single item",
+      "FORBIDDEN alter_list/delete_list for a single item",
     );
     expect(config.systemMessage).toContain(
       "metadata.lists as an ARRAY of actions",

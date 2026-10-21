@@ -102,11 +102,33 @@ describe("human-report", () => {
     expect(ui.cases[0]?.turns[0]?.expectation).toContain("remove shopping");
 
     const md = formatEvalUiReportMarkdown(ui);
+    expect(md).toContain("## 1. PASS");
     expect(md).toContain("### Scenario");
     expect(md).toContain("### Expectation");
     expect(md).toContain("### Observed");
     expect(md).toContain("### Verdict");
     expect(md).not.toContain("תסריט");
     expect(formatEvalHumanReport(input)).toContain("### Scenario");
+  });
+
+  it("summarizes messages in ACTION summary", () => {
+    const meta = {
+      lists: [],
+      listOps: [],
+      filing: [],
+      messages: [
+        {
+          text: "תיאום",
+          targets: ["עמית"],
+          book: { title: "פגישה", date: "2099-01-01", time: "10:00" },
+        },
+      ],
+      reminders: [],
+      directory: [],
+      jobs: [],
+      confirm: null,
+      handoff: null,
+    } as Parameters<typeof summarizeAction>[0];
+    expect(summarizeAction(meta)).toContain("messages→עמית+book");
   });
 });

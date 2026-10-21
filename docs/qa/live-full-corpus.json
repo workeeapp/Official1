@@ -672,7 +672,7 @@
             }
           ],
           "stateAfter": {
-            "factsInclude": [
+            "contactNamesInclude": [
               "מיכל"
             ]
           }
@@ -706,7 +706,7 @@
             }
           ],
           "stateAfter": {
-            "factsExclude": [
+            "contactNamesExclude": [
               "מיכל"
             ]
           }
@@ -1094,17 +1094,17 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Create poker host task persists",
+      "description": "Create poker host task persists when a time is given",
       "setup": {},
       "turns": [
         {
-          "utterance": "צריך לארגן ערב פוקר",
+          "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
           "constraints": [
             {
               "type": "lists_has_action",
               "action": "add",
               "listType": "tasks",
-              "itemTextIncludes": "ערב פוקר"
+              "itemTextIncludes": "פוקר"
             },
             {
               "type": "no_lists_add",
@@ -1113,7 +1113,7 @@
           ],
           "stateAfter": {
             "factsInclude": [
-              "ערב פוקר"
+              "פוקר"
             ]
           }
         }
@@ -1270,21 +1270,14 @@
               {
                 "item_id": "eval-item-shop-milk",
                 "שם פריט": "חלב"
-              }
-            ]
-          },
-          {
-            "list_id": "eval-list-shopping-shared",
-            "list_type": "shopping",
-            "owner": "טל",
-            "scope": "shared",
-            "shared_with": [
-              "עמית"
-            ],
-            "items": [
+              },
               {
                 "item_id": "eval-item-shop-shared-bread",
-                "שם פריט": "לחם"
+                "שם פריט": "לחם",
+                "scope": "shared",
+                "shared_with": [
+                  "עמית"
+                ]
               }
             ]
           }

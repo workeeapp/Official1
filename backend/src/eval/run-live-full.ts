@@ -6,7 +6,10 @@
  */
 import { parseLlmReply, parseReplyMetadata } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
-import { formatSpeakerContacts } from "../services/contact.service.js";
+import {
+  formatSpeakerContacts,
+  listContactsForEmployee,
+} from "../services/contact.service.js";
 import { buildLucyModelEvalInstructions } from "../services/chat.service.js";
 import { getLlmClient } from "../services/llm-client.js";
 import { formatSessionClockContext } from "../utils/relative-date.js";
@@ -101,12 +104,19 @@ export async function runLiveFullCase(
   const result = await runModelApplyCase(
     applyCase,
     async (input: ModelApplyProposeInput) => {
-      const contacts = (suiteCase.setup?.contacts ?? []).map((row, index) => ({
-        id: `contact-${index}`,
-        name: row.name,
-        phone: row.phone,
-        kind: "person" as const,
-      }));
+      // Prefer live Contacts rows (real UUIDs) so directory.remove can apply.
+      const liveContacts = await listContactsForEmployee(
+        input.account.employeeId,
+      );
+      const contacts =
+        liveContacts.length > 0
+          ? liveContacts
+          : (suiteCase.setup?.contacts ?? []).map((row, index) => ({
+              id: `contact-${index}`,
+              name: row.name,
+              phone: row.phone,
+              kind: "person" as const,
+            }));
       const message = [
         formatSessionClockContext(),
         input.facts,

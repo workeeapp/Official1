@@ -106,6 +106,48 @@ describe("Phase 4 constraint checkers", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("passes messages_has for coordination to a named target with book", () => {
+    const constraints: ModelEvalConstraint[] = [
+      {
+        type: "messages_has",
+        targetIncludes: "עמית",
+        requireBook: true,
+      },
+      { type: "lists_empty" },
+    ];
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          messages: [
+            {
+              text: "טל מבקש לתאם פגישה",
+              targets: ["עמית"],
+              expectsReply: true,
+              book: { title: "פגישה", date: "2099-01-02", time: "10:00" },
+            },
+          ],
+        }),
+        "שלחתי לעמית",
+      ).ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          messages: [
+            {
+              text: "שלום",
+              targets: ["עמית"],
+              expectsReply: true,
+            },
+          ],
+        }),
+        "שלחתי",
+      ).ok,
+    ).toBe(false);
+  });
+
   it("requires list item text when itemTextIncludes is set", () => {
     const constraints: ModelEvalConstraint[] = [
       {
