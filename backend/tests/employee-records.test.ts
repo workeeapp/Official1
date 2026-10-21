@@ -3118,6 +3118,55 @@ describe("employee records", () => {
     });
   });
 
+  it("returns owned records when a reminder pings a phone (non-UUID)", async () => {
+    const createdAt = new Date("2026-09-13T07:00:00.000Z");
+    listFindMany.mockResolvedValue([]);
+    filingFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([
+      {
+        id: "rem-phone-ping",
+        ownerId: talId,
+        actorId: talId,
+        itemLabel: "להתקשר",
+        itemKey: "להתקשר",
+        fireAt: createdAt,
+        createdAt,
+        status: "active",
+        repeat: "once",
+        messageText: "",
+        pingIds: ["972523691495"],
+        aboutIds: [],
+      },
+    ]);
+    employeeFindMany.mockResolvedValue([
+      { id: talId, name: "טל", nickname: "טל" },
+    ]);
+
+    await expect(getEmployeeOwnedRecords(talId)).resolves.toMatchObject({
+      employeeId: talId,
+      groups: [
+        {
+          type: "reminders",
+          title: "Reminders",
+          items: [
+            expect.objectContaining({
+              id: "rem-phone-ping",
+              title: "להתקשר",
+              details: expect.arrayContaining([
+                { label: "To", value: "972523691495" },
+              ]),
+            }),
+          ],
+        },
+      ],
+    });
+    expect(employeeFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [talId] } },
+      }),
+    );
+  });
+
   it("keeps a «X צריך לקנות Y» task in the snapshot and never deletes it while reading", async () => {
     listFindMany.mockResolvedValue([
       {

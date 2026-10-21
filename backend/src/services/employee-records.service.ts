@@ -3885,7 +3885,9 @@ function ownedItemDetails(
 async function loadEmployeeNames(
   ids: Array<string | null | undefined>,
 ): Promise<Map<string, string>> {
-  const unique = uniqueIds(ids);
+  // Reminder pingIds / addedById can hold phones or legacy tokens — never pass
+  // non-UUIDs into Prisma's Uuid column filter (throws INTERNAL_ERROR).
+  const unique = uniqueIds(ids).filter((id) => UUID_RE.test(id));
   if (unique.length === 0) {
     return new Map();
   }
