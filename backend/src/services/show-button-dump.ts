@@ -1229,6 +1229,7 @@ function expandTaskAgendaSlots(
         formatLine: (n) =>
           formatAgendaStandingLine(n, row.title, item, hm, {
             responsibilityMark: row.responsibilityMark,
+            now,
           }),
       });
     }
@@ -1373,15 +1374,17 @@ function formatShortDayMonth(ymd: string): string {
 }
 
 /**
- * Standing occurrence under a day header:
- * «1. title — 08:45 (קבוע + תזכורת ב־08:30)»
+ * Standing occurrence under a day header — same schedule suffix as the flat
+ * tasks dump (`formatScheduleSuffix`), so series + exceptions stay consistent
+ * («כל שני ורביעי ב־19:00 (קבוע) · 28.10 ב־18:00»). Day bucketing still uses
+ * occurrence HM only for sort/filter; it is not a second display dialect.
  */
 export function formatAgendaStandingLine(
   n: number,
   title: string,
   item: Record<string, unknown>,
-  occurrenceHm: string,
-  opts?: { responsibilityMark?: string },
+  _occurrenceHm: string,
+  opts?: { responsibilityMark?: string; now?: Date },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
@@ -1396,13 +1399,13 @@ export function formatAgendaStandingLine(
       body += ` (${mark})`;
     }
   }
-  const recurring = readText(item, ["חוזר", "recurrence_text"]);
-  const mark = standingLinkedReminderMark(item, recurring);
-  const hm = occurrenceHm.trim();
-  if (hm) {
-    body += ` — ${hm} ${mark}`;
-  } else {
-    body += ` — ${mark}`;
+  const suffix = formatScheduleSuffix(
+    item,
+    "tasks",
+    opts?.now ?? new Date(),
+  );
+  if (suffix) {
+    body += ` ${suffix}`;
   }
   return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
 }

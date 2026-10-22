@@ -13,6 +13,7 @@ import {
   formatRelativeDayLabel,
   formatRelativeFireAt,
   formatReminderWhen,
+  formatAgendaStandingLine,
   formatScheduleSuffix,
   stripMatchingTitleClock,
   formatShoppingTitle,
@@ -1689,8 +1690,8 @@ describe("formatShowDumpFromKind", () => {
     expect(tasks).toContain("פגישה בטווח");
     expect(tasks).toContain("חוזרת");
     expect(tasks).not.toContain("מחוץ לטווח");
-    // Standing occurrence under day header — chore HM + (קבוע), not full series alone.
-    expect(tasks).toContain("— 09:00 (קבוע)");
+    // Standing under day header uses the same schedule suffix as the flat tasks dump.
+    expect(tasks).toContain("— כל יום שני (קבוע)");
     expect(tasks).toContain("מה־17 עד 20.10:");
 
     const shopping = formatShowDumpFromKind("shopping", snap, {
@@ -2324,6 +2325,22 @@ describe("uniform standing + ping dump lines", () => {
     },
   };
 
+  it("day-agenda standing line matches flat dump schedule suffix (incl. exceptions)", () => {
+    const item = {
+      "שם מטלה": "חוג תיאטרון",
+      חוזר: "כל שני ורביעי ב־19:00",
+      exceptions: ["28.10 ב־18:00"],
+      next_occurrences: ["2026-10-28 18:00"],
+    };
+    const listSuffix = formatScheduleSuffix(item, "tasks", now);
+    expect(listSuffix).toBe(
+      "— כל שני ורביעי ב־19:00 (קבוע) · 28.10 ב־18:00",
+    );
+    expect(formatAgendaStandingLine(3, "חוג תיאטרון", item, "18:00", { now })).toBe(
+      `3. חוג תיאטרון ${listSuffix}`,
+    );
+  });
+
   it("list dump folds chore≠ping into one line via shared mark", () => {
     expect(
       formatNumberedItem(1, "להוריד את סקאזי לטיול", standingSkazi, "tasks", {
@@ -2549,10 +2566,13 @@ describe("uniform standing + ping dump lines", () => {
 
     expect(agenda).toContain("ראשון 18.10:");
     expect(agenda).toContain(
-      "להוריד את סקאזי לטיול — 08:45 (קבוע + תזכורת ב־08:30)",
+      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
     );
+    // Unlinked clock-only row still uses reminder agenda formatting.
     expect(agenda).toContain("לשלוח למיכל ברכת בוקר — 09:00 (קבוע כל יום)");
-    expect(agenda).toContain("פגישה (טל, עמית) — 21:30 (קבוע)");
+    expect(agenda).toContain(
+      "פגישה (טל, עמית) — כל ראשון ורביעי ב־21:30 (קבוע)",
+    );
     expect(agenda).toContain("ללכת לרופא — 08:00");
     expect(agenda).toContain("(תזכורת:");
     // Linked clocks must not appear as their own numbered rows.
@@ -2601,7 +2621,11 @@ describe("uniform standing + ping dump lines", () => {
     expect(text).toContain("ראשון 18.10:");
     expect(text).toContain("שני 19.10:");
     expect(text).toContain("שלישי 20.10:");
-    expect(text.match(/להוריד את סקאזי לטיול — 08:45 \(קבוע \+ תזכורת ב־08:30\)/g)?.length).toBe(3);
+    expect(
+      text.match(
+        /להוריד את סקאזי לטיול — כל יום ב־08:45 \(קבוע \+ תזכורת ב־08:30\)/g,
+      )?.length,
+    ).toBe(3);
   });
 
   it("far-date day agenda lists a standing Friday when next_occurrences already covers that day", () => {
