@@ -64,6 +64,24 @@ export function mashovContentFingerprint(body: string): string {
 
 export const weatherContentFingerprint = mashovContentFingerprint;
 
+/** Edge sha tokens that mean the condition is currently holding (true). */
+export function isHoldingEdgeSha(sha: string | null | undefined): boolean {
+  const token = String(sha ?? "").trim();
+  return token === "market:below" || token === "expr:hold";
+}
+
+/** Idle counterpart so the next fire can edge into a send. */
+export function idleEdgeShaForHolding(sha: string): string {
+  const token = String(sha ?? "").trim();
+  if (token === "expr:hold") {
+    return "expr:idle";
+  }
+  if (token === "market:below") {
+    return "market:above";
+  }
+  return token;
+}
+
 /**
  * Evaluate a structured compose_condition against fire-time facts.
  * Market uses edge trigger (false→true) via lastReportSha market:below/above.

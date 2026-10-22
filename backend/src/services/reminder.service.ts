@@ -1978,7 +1978,7 @@ export async function applyReminders(input: {
           (Array.isArray(pingIds) && typeof pingIds[0] === "string"
             ? pingIds[0]
             : null) || ownerId;
-        await seedWatchBaseline({
+        const seeded = await seedWatchBaseline({
           reminderId: row.id,
           composeSource: nextSource,
           composePlace: nextPlace,
@@ -1987,6 +1987,16 @@ export async function applyReminders(input: {
           subjectEmployeeId: subjectId,
           repeat: nextRepeat,
         }).catch(() => null);
+        // Already holding at create (e.g. BTC already > threshold): idle was
+        // stamped so the next fire edges into a send — bump fireAt to now.
+        if (seeded?.alreadyHolding) {
+          const dueNow = new Date();
+          await prisma.reminder.update({
+            where: { id: row.id },
+            data: { fireAt: dueNow },
+          });
+          scheduleSoon(dueNow);
+        }
       }
       await recordAuditEvent({
         userId: input.userId,

@@ -12,6 +12,7 @@ import {
 import { getEnv } from "../config/env.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
+import { EMPTY_REPLY_RETRY } from "./employee-records.service.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { rememberWhatsAppOutbound } from "./whatsapp-outbound-memory.js";
 import { hasWhatsAppSession } from "./whatsapp-window.js";
@@ -706,17 +707,48 @@ export function setEngineNavigateAddress(
   return JSON.stringify({ ...record, metadata });
 }
 
-/** Adds an engine notice as its own message after the model's messages. */
-export function appendEngineNotice(reply: string, notice: string): string {
-  if (!notice.trim()) {
+/** Adds an engine body as its own message after the model's messages. */
+export function appendEngineResponse(reply: string, text: string): string {
+  if (!text.trim()) {
     return reply;
   }
   const record = parseReplyRecord(reply);
   if (record) {
     const spoken = readSpokenResponses(record);
     if (spoken) {
-      return withResponses(record, [...spoken, notice.trim()]);
+      return withResponses(record, [...spoken, text.trim()]);
     }
   }
-  return `${reply.trim()}\n\n${notice}`;
+  return `${reply.trim()}\n\n${text.trim()}`;
+}
+
+/** @deprecated Prefer {@link appendEngineResponse}. */
+export function appendEngineNotice(reply: string, notice: string): string {
+  return appendEngineResponse(reply, notice);
+}
+
+/**
+ * Live domain reply: keep the model's ack when present, else replace with facts.
+ * Pure live ask (empty spoken) → replace; WATCH/ack + sample → two bubbles.
+ * Engine EMPTY_REPLY_RETRY alone is not an ack — replace so live facts are not
+ * double-bubbled after a premature empty fallback.
+ */
+export function applyLiveDomainReply(reply: string, liveText: string): string {
+  const trimmed = liveText.trim();
+  if (!trimmed) {
+    return reply;
+  }
+  const record = parseReplyRecord(reply);
+  const spoken = record ? readSpokenResponses(record) : null;
+  const nonEmpty = (spoken ?? []).map((entry) => entry.trim()).filter(Boolean);
+  const plain = !record ? reply.trim() : "";
+  const onlyEmptyRetry =
+    (nonEmpty.length === 1 && nonEmpty[0] === EMPTY_REPLY_RETRY) ||
+    plain === EMPTY_REPLY_RETRY;
+  const hasAck = Boolean(
+    !onlyEmptyRetry && (nonEmpty.length > 0 || plain.length > 0),
+  );
+  return hasAck
+    ? appendEngineResponse(reply, trimmed)
+    : setEngineResponse(reply, trimmed);
 }

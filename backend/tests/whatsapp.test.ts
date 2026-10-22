@@ -4,6 +4,8 @@ import { createApp } from "../src/app.js";
 import { resetEnvCache } from "../src/config/env.js";
 import {
   appendEngineNotice,
+  appendEngineResponse,
+  applyLiveDomainReply,
   composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
@@ -18,6 +20,8 @@ import {
   whatsappTypingBody,
   WHATSAPP_NAVIGATE_LABEL,
 } from "../src/services/whatsapp-send.js";
+import { parseLlmReply } from "@workee/shared";
+import { EMPTY_REPLY_RETRY } from "../src/services/employee-records.service.js";
 import { wazeNavigateUrl } from "@workee/shared";
 import { sessionOpenAt } from "../src/services/whatsapp-window.js";
 import {
@@ -547,6 +551,92 @@ describe("WhatsApp webhook", () => {
     });
     expect(spoken).toContain("שלחתי למיכל");
     expect(spoken).toContain("מה לשלוח");
+  });
+
+  it("appendEngineResponse keeps prior responses and adds a bubble", () => {
+    const reply = appendEngineResponse(
+      JSON.stringify({
+        responses: ["אעקוב אחרי הביטקוין ואעדכן מעל 84,000"],
+        metadata: { market: { queries: ["BTC-USD"] } },
+      }),
+      "Bitcoin USD (BTC-USD): 84,180.34 USD.\nלא ייעוץ השקעות.",
+    );
+    expect(parseLlmReply(reply).responses).toEqual([
+      "אעקוב אחרי הביטקוין ואעדכן מעל 84,000",
+      "Bitcoin USD (BTC-USD): 84,180.34 USD.\nלא ייעוץ השקעות.",
+    ]);
+  });
+
+  it("applyLiveDomainReply appends when model ack is present", () => {
+    const quote =
+      "Bitcoin USD (BTC-USD): 84,180.34 USD.\nלא ייעוץ השקעות.";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [
+          "אעקוב אחרי שער הביטקוין ואעדכן אותך כשיהיה מעל 84,000 דולר",
+        ],
+        metadata: { market: { queries: ["BTC-USD"], aspects: ["price"] } },
+      }),
+      quote,
+    );
+    expect(parseLlmReply(reply).responses).toEqual([
+      "אעקוב אחרי שער הביטקוין ואעדכן אותך כשיהיה מעל 84,000 דולר",
+      quote,
+    ]);
+  });
+
+  it("applyLiveDomainReply replaces when spoken is empty (pure live ask)", () => {
+    const weather =
+      "מזג האוויר בפתח תקווה עכשיו: 22° מעונן חלקית.";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [],
+        metadata: { weather: { place: "פתח תקווה", aspects: ["summary"] } },
+      }),
+      weather,
+    );
+    expect(parseLlmReply(reply).responses).toEqual([weather]);
+  });
+
+  it("applyLiveDomainReply appends weather after places-style ack", () => {
+    const facts = "חשמלאי מומלץ, פתח תקווה — 03-1234567";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: ["מצאתי כמה חשמלאים באזור:"],
+        metadata: { places: { query: "חשמלאי", place: "פתח תקווה" } },
+      }),
+      facts,
+    );
+    expect(parseLlmReply(reply).responses).toEqual([
+      "מצאתי כמה חשמלאים באזור:",
+      facts,
+    ]);
+  });
+
+  it("applyLiveDomainReply replaces EMPTY_REPLY_RETRY instead of appending", () => {
+    const quote =
+      "Bitcoin USD (BTC-USD): 84,111.54 USD.\nלא ייעוץ השקעות.";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [EMPTY_REPLY_RETRY],
+        metadata: { market: { queries: ["BTC-USD"] } },
+      }),
+      quote,
+    );
+    expect(parseLlmReply(reply).responses).toEqual([quote]);
+    expect(parseLlmReply(reply).response).not.toContain("לא הצלחתי");
+  });
+
+  it("applyLiveDomainReply fills empty responses with live facts only", () => {
+    const quote = "Bitcoin USD (BTC-USD): 84,111.54 USD.";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [],
+        metadata: { market: { queries: ["BTC-USD"] } },
+      }),
+      quote,
+    );
+    expect(parseLlmReply(reply).responses).toEqual([quote]);
   });
 
   it("replaces a false sent claim when WhatsApp delivery failed", () => {

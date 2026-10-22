@@ -4,13 +4,24 @@ import { loadComposeFacts } from "./compose-facts.js";
 import {
   baselineShaForWatch,
   conditionFromReminderJson,
+  idleEdgeShaForHolding,
+  isHoldingEdgeSha,
 } from "./compose-condition.js";
 import { fetchBusEtaWatch } from "./routes.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
 
+export type WatchBaselineSeedResult = {
+  sha: string | null;
+  /** Condition already true at create — sha stamped as idle so next fire alerts. */
+  alreadyHolding: boolean;
+};
+
 /**
  * After creating/updating a conditional watch clock, sample current facts and
  * stamp last_report_sha so the first fire does not treat "current state" as new.
+ *
+ * Edge watches (market / expr): if already holding at create, stamp the idle
+ * token instead so the next fire can send once (caller may bump fireAt to now).
  */
 export async function seedWatchBaseline(input: {
   reminderId: string;
@@ -21,10 +32,10 @@ export async function seedWatchBaseline(input: {
   subjectEmployeeId: string;
   repeat: string;
   now?: Date;
-}): Promise<string | null> {
+}): Promise<WatchBaselineSeedResult> {
   const condition = conditionFromReminderJson(input.composeCondition);
   if (!condition) {
-    return null;
+    return { sha: null, alreadyHolding: false };
   }
   const now = input.now ?? new Date();
   try {
@@ -64,17 +75,21 @@ export async function seedWatchBaseline(input: {
       evalFacts = enriched.evalFacts;
       factsBundle = enriched.factsBundle;
     }
-    const sha = baselineShaForWatch({ condition, facts: evalFacts });
-    if (!sha) {
-      return null;
+    const rawSha = baselineShaForWatch({ condition, facts: evalFacts });
+    if (!rawSha) {
+      return { sha: null, alreadyHolding: false };
     }
+    const alreadyHolding = isHoldingEdgeSha(rawSha);
+    const sha = (
+      alreadyHolding ? idleEdgeShaForHolding(rawSha) : rawSha
+    ).slice(0, 64);
     await prisma.reminder.update({
       where: { id: input.reminderId },
-      data: { lastReportSha: sha.slice(0, 64) },
+      data: { lastReportSha: sha },
     });
-    return sha.slice(0, 64);
+    return { sha, alreadyHolding };
   } catch {
-    return null;
+    return { sha: null, alreadyHolding: false };
   }
 }
 

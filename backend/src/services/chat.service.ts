@@ -141,6 +141,7 @@ import {
   deliverWhatsAppPhones,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
+  applyLiveDomainReply,
   setEngineButtons,
   setEngineNavigateAddress,
   setEngineResponse,
@@ -713,21 +714,21 @@ function workerTargetingInstructions(
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind — greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy → compose false/omit with full text. Daily «שלחי למיכל ברכת בוקר ב־9» → also lists tasks on yourself לשלוח הודעה למיכל; never a speaker task.",
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git → compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent עמית), compose_lookback_hours from the spoken window (minutes→fractional hours e.g. 5 דקות≈0.083, 24≈day, 168≈week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given → ASK מתי (עכשיו / בעוד X / daily) with no reminders clock, then emit the full git_log clock with their answer; NEVER say אשלח without in/time. «עכשיו» → in≈5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. אפשר להוסיף דוגמאות). NEVER invent עמית or any coworker; NEVER offer «אשלח לו / תבקשי מעמית» unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction — not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (כל יום ב־8 מה יש לי היום / בעוד חצי שעה המטלות שלי / בעוד שעה מה מיכל צריכה מחר / תשלחי לי בעוד 10 שניות את רשימת הקניות המשותפת עם מיכל) → compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said שלחי לי, brief=the question; «עם מיכל» is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later («תוסיפי מטלה בעוד שעה») — refuse; offer save-now or a normal reminder. Never ask מה תרצה שאשלח למיכל for a send-me list dump.",
-    "WEATHER (live): «מה מזג האוויר מחר בתל אביב» / גובה גלים / משב רוח / ניו יורק → metadata.weather { place, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity] }; lists/no reminders clock. Server replaces response — FORBIDDEN inventing temps/wind/waves. Missing place → ask; weather=null. מחר/יום X → date via SESSION_CLOCK.",
+    "WEATHER (live): «מה מזג האוויר מחר בתל אביב» / גובה גלים / משב רוח / ניו יורק → metadata.weather { place, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity] }; lists/no reminders clock. Pure ask → responses may be empty; server fills the facts. WITH an ack (WATCH sample / short confirm) → responses = ack only (no numbers); server appends weather as a 2nd message. FORBIDDEN inventing temps/wind/waves. Missing place → ask; weather=null. מחר/יום X → date via SESSION_CLOCK.",
     "SCHEDULED WEATHER: «כל בוקר ב־7 שלחי לי מזג אוויר בת״א» / «בעוד שעה הגלים בחיפה» → compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for שלחי לי, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH weather_rain exception: no ask-when.",
-    "MARKET (live): «מה מחיר אפל» / NVDA / טבע / ביטקוין / אתריום / S&P → metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|…], aspects:[summary|price|change|range] }; lists/no reminders clock. Prefer Yahoo tickers when known (BTC-USD). Server replaces response — FORBIDDEN inventing prices. Missing what to quote → ask; market=null.",
+    "MARKET (live): «מה מחיר אפל» / NVDA / טבע / ביטקוין / אתריום / S&P → metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|…], aspects:[summary|price|change|range] }; lists/no reminders clock. Prefer Yahoo tickers when known (BTC-USD). Pure ask → responses may be empty; server fills the quote. WITH an ack (WATCH sample) → responses = ack only (no prices); server appends the quote as a 2nd message. FORBIDDEN inventing prices. Missing what to quote → ask; market=null.",
     "SCHEDULED MARKET: «כל בוקר ב־9 שלחי לי את AAPL וביטקוין» → compose:true, compose_source:\"market\", compose_place:\"AAPL,BTC-USD\" (comma-separated), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH market_price exception: no ask-when.",
     "MASHOV FILINGS (password included): ALWAYS save Mashov secrets as filings — item_name «תעודת זהות למשוב» / «סיסמת משוב» or «סיסמת משוב של {ילד}» / prefer «שם בית ספר למשוב» (server resolves semel via /schools) + required «שנת לימודים למשוב» OR «סמל בית ספר למשוב» + year. «הסיסמה של דניאל למשוב היא ds73s» → filing add THIS turn — MUST persist. FORBIDDEN: skipping the password filing; putting password in metadata.mashov; quoting the password in responses.",
     "MASHOV YEAR (critical): year is NEVER invented. Missing שנת לימודים למשוב → ask ONLY «לאיזו שנת לימודים?» (one question; mashov=null; FORBIDDEN mixing gender/tips). Example: you asked for year → speaker «זכר / 2026» or just «2026» → SAME TURN lists add filing item_name=שנת לימודים למשוב item_info=2026 AND metadata.mashov with the pending child/aspects. YOU file — never tell them «שמור בתיוק». FORBIDDEN: hearing 2026 and not filing; mashov while year filing is still missing.",
-    "MASHOV (live): «מה הציונים של דניאל» / שיעורי בית / התנהגות / מערכת / חיסורים / הודעות → metadata.mashov { child:\"דניאל\"|\"\", aspects:[grades|homework|behavior|timetable|absences|messages] }; lists/no reminders clock. הודעות = inbox (parent account; child optional). Server reads filings (incl. סיסמת משוב + שנת לימודים) + fetches. Missing creds → ask (mashov=null) then file on answer; never mashov without complete filings. Several children and no child → ask which.",
+    "MASHOV (live): «מה הציונים של דניאל» / שיעורי בית / התנהגות / מערכת / חיסורים / הודעות → metadata.mashov { child:\"דניאל\"|\"\", aspects:[grades|homework|behavior|timetable|absences|messages] }; lists/no reminders clock. הודעות = inbox (parent account; child optional). Pure ask → responses may be empty; server fills. WITH ack (WATCH sample) → ack only; server appends mashov as 2nd message. Server reads filings (incl. סיסמת משוב + שנת לימודים) + fetches. Missing creds → ask (mashov=null) then file on answer; never mashov without complete filings. Several children and no child → ask which.",
     "SCHEDULED MASHOV: «כל יום ב־18 שלחי לי את הציונים של דניאל» → compose:true, compose_source:\"mashov\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH mashov_new exception: no ask-when.",
-    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov). Types: market_price | weather_rain | weather_changed | mashov_new | market_change_compare | expr | field_changed | bus_eta. SAME TURN: also emit live weather/market/mashov sample so you can confirm the reference point («כרגע מעונן… כשישתנה אעדכן»). Server stamps baseline — never «עדיין לא». No spoken time → hourly interval (FORBIDDEN ask מתי) except bus_eta every 2 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
+    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov). Types: market_price | weather_rain | weather_changed | mashov_new | market_change_compare | expr | field_changed | bus_eta. SAME TURN: emit live weather/market/mashov sample ACTION + responses = short watch ack ONLY (e.g. «אעקוב אחרי שער הביטקוין ואעדכן כשיהיה מעל 84,000») — FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message. Server stamps baseline — never «עדיין לא». No spoken time → hourly interval (FORBIDDEN ask מתי) except bus_eta every 2 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
     "WATCH ONCE vs RECURRING: «תעדכני אותי כש…» / first time the condition holds → watch_once:true (after alert the server deletes YOUR worker task). «בכל פעם…» / keep checking → omit watch_once (or false). weather_changed + watch_once for «כשמזג האוויר משתנה». mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. market_change_compare e.g. {type:\"market_change_compare\",left:\"דולר\",right:\"יורו\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "WATCH EXPR (arithmetic on catalog fields): «טמפרטורה בפתח תקווה כפול 2 = 50» → compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"פתח תקווה\"},{const:2}]},right:{const:50}}; compose_source weather. «יורו + דולר קטן מכ־10» → expr compare approx/lt with market.price fields (symbols יורו/דולר). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (כ־ → approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. «כשהטמפרטורה משתנה» on a number → field_changed {field:\"weather.temp_now\",place:…}. FORBIDDEN putting the math only in the brief.",
-    "PLACES (live local business): «תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו» → metadata.places { query, place, aspects }. «מה המסעדות באזור שלי» + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\" }. Server replaces — FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
-    "JEWISH / SHABBAT (live): «מתי מדליקים נרות בפתח תקווה» / «מתי יוצאת שבת בתל אביב» / «מה פרשת השבוע» / «איזה חג הבא» → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays] }; lists/no reminders clock. Server fetches Hebcal and replaces response — FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare «מתי שבת» → [summary]; מתי נרות → [candles]; מוצאי/יציאת שבת → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכירי לי להדליק נרות — use CANDLE-OFFSET REMINDER.",
+    "PLACES (live local business): «תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו» → metadata.places { query, place, aspects }. «מה המסעדות באזור שלי» + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\" }. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
+    "JEWISH / SHABBAT (live): «מתי מדליקים נרות בפתח תקווה» / «מתי יוצאת שבת בתל אביב» / «מה פרשת השבוע» / «איזה חג הבא» → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays] }; lists/no reminders clock. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare «מתי שבת» → [summary]; מתי נרות → [candles]; מוצאי/יציאת שבת → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכירי לי להדליק נרות — use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: «תזכירי לי להדליק נרות 10 דקות לפני כניסת שבת בפתח תקווה» → Self-nudge + lists add reminders { item:\"להדליק נרות\", text:\"להדליק נרות\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"פתח תקווה\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal — FORBIDDEN inventing time/in. Missing city → ask; no reminders clock jewish=null. «כל שישי / כל שבוע» → same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot «לשישי הקרוב…»; weekly «בכל שישי…» — not live candle times.",
-    "ROUTES (live Google public transit): «איך מגיעים מ… ל…» → metadata.routes { origin, destination, aspects:[summary] }. Leave-by «מתי לצאת כדי להיות ב־10 ב…» → routes { origin, destination, arrival via SESSION_CLOCK, aspects:[summary] }. Next bus «עוד כמה זמן קו 51 מתחנה X לכיוון Y» → routes { origin:stop, destination:direction, line:\"51\", aspects:[eta] }; missing direction for a known line → ask «לאיזה כיוון?»; routes=null. Frequency → aspects:[frequency]. LINES AT STOP: ambiguous «איזה קווים עוברים בתחנת X» / «מה עובר בתחנה» without destination → ASK first (routes=null): «האם אתה מכוון ליעד מסוים, או פשוט רוצה לדעת אילו קווים עוברים בתחנת «X»?» — do NOT refuse as if destination were mandatory. After «רק קווים / מה עובר בתחנה / בלי יעד» → routes { origin:stop, destination:\"\", aspects:[\"lines\"] }. After they name a destination/direction → trip/ETA as above. origin \"speaker\" with PENDING_LOCATION. Server replaces — FORBIDDEN inventing times or line lists.",
+    "ROUTES (live Google public transit): «איך מגיעים מ… ל…» → metadata.routes { origin, destination, aspects:[summary] }. Leave-by «מתי לצאת כדי להיות ב־10 ב…» → routes { origin, destination, arrival via SESSION_CLOCK, aspects:[summary] }. Next bus «עוד כמה זמן קו 51 מתחנה X לכיוון Y» → routes { origin:stop, destination:direction, line:\"51\", aspects:[eta] }; missing direction for a known line → ask «לאיזה כיוון?»; routes=null. Frequency → aspects:[frequency]. LINES AT STOP: ambiguous «איזה קווים עוברים בתחנת X» / «מה עובר בתחנה» without destination → ASK first (routes=null): «האם אתה מכוון ליעד מסוים, או פשוט רוצה לדעת אילו קווים עוברים בתחנת «X»?» — do NOT refuse as if destination were mandatory. After «רק קווים / מה עובר בתחנה / בלי יעד» → routes { origin:stop, destination:\"\", aspects:[\"lines\"] }. After they name a destination/direction → trip/ETA as above. origin \"speaker\" with PENDING_LOCATION. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends routes as 2nd message. FORBIDDEN inventing times or line lists.",
     "BUS WATCH: «תזכירי לי 10 דקות לפני שקו 51 מגיע לתחנת X לכיוון Y» → Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination → ask; no clock. Server polls Routes; quiet-skip until ETA ≤ N. Sub-hour refuse does NOT apply to bus_eta.",
     "Ambiguous words: if a request hinges on a Hebrew word with several common senses (e.g. עדות = ethnic communities / אשכנזי־ספרדי vs courtroom testimony), ASK which meaning before saving. Do not assume בית משפט. For בדיחות על עדות without משפט/בית משפט, prefer ethnic communities or ask.",
     "Reminder item is an infinitive: להתאמן, לקנות חלב. Never claim saved unless reminders has add/update with a clock (new) or update of an existing clock (text/time).",
@@ -2573,10 +2574,6 @@ export async function sendChatMessage(input: {
         workingReply = setEngineResponse(workingReply, reminderDeleteFallback);
       }
     }
-    // Never send an empty WhatsApp/web bubble (e.g. responses:[] + bad list shell ops).
-    if (!parseLlmReply(workingReply).response.trim()) {
-      workingReply = setEngineResponse(workingReply, EMPTY_REPLY_RETRY);
-    }
     // The model already said «שיניתי/מחקתי» — correct it when the engine refused the list op.
     const listOpRefusal = formatListOpRefusals(listOpResults);
     if (listOpRefusal) {
@@ -2878,7 +2875,7 @@ export async function sendChatMessage(input: {
         }
       }
     }
-    // Live weather ACTION → Open-Meteo fetch; engine replaces response (like show_dump).
+    // Live weather ACTION → Open-Meteo; keep model ack when present, else replace.
     // Guests: weather as main topic stays forbidden — skip even if model emitted it.
     const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
     if (weatherAction?.place.trim()) {
@@ -2887,7 +2884,7 @@ export async function sendChatMessage(input: {
         date: weatherAction.date,
         aspects: weatherAction.aspects,
       });
-      workingReply = setEngineResponse(workingReply, weatherText);
+      workingReply = applyLiveDomainReply(workingReply, weatherText);
     }
     // Live market ACTION → Yahoo Finance; guests skip (same as weather).
     const marketAction = guestSpeaker ? null : metadata.market ?? null;
@@ -2896,7 +2893,7 @@ export async function sendChatMessage(input: {
         queries: marketAction.queries,
         aspects: marketAction.aspects,
       });
-      workingReply = setEngineResponse(workingReply, marketText);
+      workingReply = applyLiveDomainReply(workingReply, marketText);
     }
     // Live Mashov ACTION → login from filings; guests skip.
     const mashovAction = guestSpeaker ? null : metadata.mashov ?? null;
@@ -2907,7 +2904,7 @@ export async function sendChatMessage(input: {
         child: mashovAction.child,
         aspects: mashovAction.aspects,
       });
-      workingReply = setEngineResponse(workingReply, mashovText);
+      workingReply = applyLiveDomainReply(workingReply, mashovText);
     }
     // Live places ACTION → Google Places; guests skip.
     const placesAction = guestSpeaker ? null : metadata.places ?? null;
@@ -2924,7 +2921,7 @@ export async function sendChatMessage(input: {
         lat: placesAction.lat ?? pendingLoc?.lat ?? null,
         lng: placesAction.lng ?? pendingLoc?.lng ?? null,
       });
-      workingReply = setEngineResponse(workingReply, placesText);
+      workingReply = applyLiveDomainReply(workingReply, placesText);
       if (
         nearSpeaker &&
         pendingLoc &&
@@ -2948,7 +2945,7 @@ export async function sendChatMessage(input: {
         date: jewishAction.date,
         aspects: jewishAction.aspects,
       });
-      workingReply = setEngineResponse(workingReply, jewishText);
+      workingReply = applyLiveDomainReply(workingReply, jewishText);
     }
     // Live routes ACTION → Google Routes TRANSIT / Places stop board; guests skip.
     const routesAction = guestSpeaker ? null : metadata.routes ?? null;
@@ -2977,7 +2974,7 @@ export async function sendChatMessage(input: {
             ? pin?.lng ?? null
             : null,
       });
-      workingReply = setEngineResponse(workingReply, routesResult.text);
+      workingReply = applyLiveDomainReply(workingReply, routesResult.text);
       if (
         routesResult.navigateAddress &&
         !parseLlmReply(workingReply).navigateAddress
@@ -2994,6 +2991,11 @@ export async function sendChatMessage(input: {
       ) {
         clearPendingLocation(input.employeeId);
       }
+    }
+    // After live domains: empty responses:[] on a pure quote ask is filled above;
+    // only then fall back so we never prepend «לא הצלחתי» before a successful fetch.
+    if (!parseLlmReply(workingReply).response.trim()) {
+      workingReply = setEngineResponse(workingReply, EMPTY_REPLY_RETRY);
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({

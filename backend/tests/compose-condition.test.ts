@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   baselineShaForWatch,
   evaluateComposeCondition,
+  idleEdgeShaForHolding,
+  isHoldingEdgeSha,
   mashovContentFingerprint,
   weatherContentFingerprint,
 } from "../src/services/compose-condition.js";
@@ -64,6 +66,55 @@ describe("evaluateComposeCondition", () => {
       lastReportSha: "market:above",
     });
     expect(gate.skipSend).toBe(false);
+  });
+
+  it("market_price gt: already above at create → idle stamp then next fire sends once", () => {
+    const condition = {
+      type: "market_price" as const,
+      op: "gt" as const,
+      value: 84_000,
+    };
+    const facts = { marketPrice: 84_180 };
+    const raw = baselineShaForWatch({ condition, facts });
+    expect(raw).toBe("market:below"); // holding token (misnamed)
+    expect(isHoldingEdgeSha(raw)).toBe(true);
+    const idle = idleEdgeShaForHolding(raw!);
+    expect(idle).toBe("market:above");
+    // Seed stamps idle → first fire edges into send.
+    const first = evaluateComposeCondition({
+      condition,
+      facts,
+      lastReportSha: idle,
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.immediateSha).toBe("market:below");
+    // Stay above after alert → quiet-skip.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts,
+        lastReportSha: "market:below",
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("market_price gt: still below at create → idle baseline, no immediate send", () => {
+    const condition = {
+      type: "market_price" as const,
+      op: "gt" as const,
+      value: 84_000,
+    };
+    const facts = { marketPrice: 80_000 };
+    const raw = baselineShaForWatch({ condition, facts });
+    expect(raw).toBe("market:above");
+    expect(isHoldingEdgeSha(raw)).toBe(false);
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts,
+        lastReportSha: raw,
+      }).skipSend,
+    ).toBe(true);
   });
 
   it("weather_rain: skips when dry", () => {
