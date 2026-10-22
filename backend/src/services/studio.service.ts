@@ -91,11 +91,44 @@ export type StudioCaseResult = {
   }>;
 };
 
+/**
+ * Fields copied from shared-runner `summary.prompt` (evalPromptProvenance).
+ * Optional on disk for older Studio run JSON.
+ */
+export type StudioEvalPromptProvenanceFields = {
+  promptSource: string;
+  instructionsSha256: string;
+  envelopeMode: string;
+  attachLucyRuntimeEngine: boolean;
+  model: string;
+  temperature: number;
+  reasoningEffort?: string;
+  workerName: string;
+  workerProtected: boolean;
+  employeeId: string | null;
+  instructionsFile: string | null;
+};
+
 /** Run identity / prompt provenance — no secrets or connection strings. */
 export type StudioRunProvenance = {
   productionApply: boolean;
   promptSource: string;
+  /**
+   * Legacy: SHA-16 of LLM.config.json systemMessage at run start.
+   * Does NOT identify the final model instructions string — see instructionsSha256.
+   */
   promptHash: string;
+  /** Final instructions SHA-256 from the shared runner (optional on old records). */
+  instructionsSha256?: string;
+  envelopeMode?: string;
+  attachLucyRuntimeEngine?: boolean;
+  model?: string;
+  temperature?: number;
+  reasoningEffort?: string;
+  workerName?: string;
+  workerProtected?: boolean;
+  employeeId?: string | null;
+  instructionsFile?: string | null;
   speakerIdentity: {
     kind: "fixture" | "harness" | "product";
     employeeId: string | null;
@@ -121,6 +154,41 @@ export type StudioRunProvenance = {
   };
 };
 
+/**
+ * Copy runner `summary.prompt` into Studio provenance.
+ * Preserves legacy `promptHash` (systemMessage SHA-16). Does not invent fields.
+ */
+export function mergeStudioEvalPromptProvenance(
+  base: StudioRunProvenance,
+  prompt: StudioEvalPromptProvenanceFields,
+): StudioRunProvenance {
+  return {
+    ...base,
+    promptSource: prompt.promptSource,
+    // promptHash intentionally unchanged — legacy systemMessage identity only
+    instructionsSha256: prompt.instructionsSha256,
+    envelopeMode: prompt.envelopeMode,
+    attachLucyRuntimeEngine: prompt.attachLucyRuntimeEngine,
+    model: prompt.model,
+    temperature: prompt.temperature,
+    ...(prompt.reasoningEffort !== undefined
+      ? { reasoningEffort: prompt.reasoningEffort }
+      : {}),
+    workerName: prompt.workerName,
+    workerProtected: prompt.workerProtected,
+    employeeId: prompt.employeeId,
+    instructionsFile: prompt.instructionsFile,
+    digitalEmployee: {
+      ...base.digitalEmployee,
+      name: prompt.workerName,
+      instructionsSource: prompt.promptSource,
+      ...(prompt.employeeId
+        ? { kind: "product" as const, id: prompt.employeeId }
+        : {}),
+    },
+  };
+}
+
 export type StudioRunRecord = {
   id: string;
   createdAt: string;
@@ -145,6 +213,8 @@ export type StudioRunRecord = {
 };
 
 function buildLiveModelProvenance(track: StudioTrack): StudioRunProvenance {
+  // Pre-run placeholder: promptSource/promptHash are legacy config labels until
+  // mergeStudioEvalPromptProvenance copies summary.prompt after the runner returns.
   let promptSource = "LLM.config.json (worktree via loadLlmConfig)";
   let promptHash = "unavailable";
   try {
@@ -630,6 +700,12 @@ export async function startStudioRun(input: {
         ok: summary.ok,
       };
       run.status = summary.ok ? "passed" : "failed";
+      if (run.provenance && summary.prompt) {
+        run.provenance = mergeStudioEvalPromptProvenance(
+          run.provenance,
+          summary.prompt,
+        );
+      }
     } else if (input.track === "LIVE_MODEL_MT") {
       const corpus = loadModelEvalMultiTurnCorpus();
       const summary = await runModelEvalMultiTurnCorpus(corpus, {
@@ -680,8 +756,15 @@ export async function startStudioRun(input: {
         ok: summary.ok,
       };
       run.status = summary.ok ? "passed" : "failed";
+      if (run.provenance && summary.prompt) {
+        run.provenance = mergeStudioEvalPromptProvenance(
+          run.provenance,
+          summary.prompt,
+        );
+      }
     } else {
       // LIVE_FULL — real MODEL_APPLY + LLM on approved test DB only
+      // (Phase A still refuses via assertStudioTrackRunnable; no gate bypass.)
       const corpus = loadLiveFullCorpus();
       const summary = await runLiveFullCorpus(corpus, {
         caseIds: preview.caseIds,
@@ -725,6 +808,12 @@ export async function startStudioRun(input: {
         ok: summary.ok,
       };
       run.status = summary.ok ? "passed" : "failed";
+      if (run.provenance && summary.prompt) {
+        run.provenance = mergeStudioEvalPromptProvenance(
+          run.provenance,
+          summary.prompt,
+        );
+      }
     }
   } catch (err) {
     if (err instanceof UnapprovedEvalDatabaseError) {

@@ -278,11 +278,17 @@ export function StudioPage() {
                       </td>
                       <td className="px-3 py-2 text-xs">
                         {r.promptSource ?? "—"}
-                        {r.promptHash ? (
-                          <span className="ml-1 font-mono text-text-secondary">
-                            #{r.promptHash}
-                          </span>
-                        ) : null}
+                        {(() => {
+                          // Prefer final-instructions identity; fall back to legacy systemMessage hash.
+                          const displayHash = r.instructionsSha256
+                            ? r.instructionsSha256.slice(0, 16)
+                            : r.promptHash;
+                          return displayHash ? (
+                            <span className="ml-1 font-mono text-text-secondary">
+                              #{displayHash}
+                            </span>
+                          ) : null;
+                        })()}
                       </td>
                       <td className="px-3 py-2">
                         {r.summary

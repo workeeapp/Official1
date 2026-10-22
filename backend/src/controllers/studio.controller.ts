@@ -68,6 +68,7 @@ export async function getRuns(req: Request, res: Response): Promise<void> {
       productionApply: r.provenance?.productionApply ?? false,
       promptSource: r.provenance?.promptSource,
       promptHash: r.provenance?.promptHash,
+      instructionsSha256: r.provenance?.instructionsSha256,
     })),
     count: runs.length,
   });

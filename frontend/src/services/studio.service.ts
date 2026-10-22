@@ -41,7 +41,10 @@ export type StudioRunSummary = {
   blockers?: string[];
   productionApply?: boolean;
   promptSource?: string;
+  /** Legacy SHA-16 of LLM.config systemMessage — not the final instructions. */
   promptHash?: string;
+  /** Final instructions SHA-256 from the shared eval runner (when present). */
+  instructionsSha256?: string;
 };
 
 export const studioApi = {
