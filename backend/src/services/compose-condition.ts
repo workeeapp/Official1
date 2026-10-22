@@ -23,6 +23,12 @@ export type ComposeEvalFacts = {
   busEtaMinutes?: number | null;
   /** Fingerprint of the departure being watched (sha / stable id). */
   busEtaFingerprint?: string;
+  /** Minutes until flight arrival/departure (AviationStack). */
+  flightEtaMinutes?: number | null;
+  /** Fingerprint of the flight ETA sample (sha). */
+  flightEtaFingerprint?: string;
+  /** Fingerprint of flight status (status/delay/gate/times). */
+  flightChangedFingerprint?: string;
   /** Resolved catalog field values for expr / field_changed. */
   exprFieldValues?: Record<string, number | null>;
 };
@@ -225,6 +231,46 @@ export function evaluateComposeCondition(input: {
     };
   }
 
+  if (input.condition.type === "flight_eta") {
+    const minutes = input.facts.flightEtaMinutes;
+    const fp = String(input.facts.flightEtaFingerprint ?? "").trim();
+    const threshold =
+      Math.abs(Math.round(input.condition.minutesBefore || 0)) +
+      Math.abs(Math.round(input.condition.hoursBefore || 0)) * 60;
+    if (
+      minutes == null ||
+      !Number.isFinite(minutes) ||
+      !fp ||
+      threshold <= 0
+    ) {
+      return { skipSend: true };
+    }
+    if (minutes > threshold) {
+      return { skipSend: true };
+    }
+    if (fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp,
+    };
+  }
+
+  if (input.condition.type === "flight_changed") {
+    const fp = String(input.facts.flightChangedFingerprint ?? "").trim();
+    if (!fp) {
+      return { skipSend: true };
+    }
+    if (fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp,
+    };
+  }
+
   if (input.condition.type === "expr") {
     const values = input.facts.exprFieldValues ?? {};
     const left = evalWatchExprNode(input.condition.left, values);
@@ -313,6 +359,14 @@ export function baselineShaForWatch(input: {
   }
   if (input.condition.type === "bus_eta") {
     const fp = String(input.facts.busEtaFingerprint ?? "").trim();
+    return fp || null;
+  }
+  if (input.condition.type === "flight_eta") {
+    const fp = String(input.facts.flightEtaFingerprint ?? "").trim();
+    return fp || null;
+  }
+  if (input.condition.type === "flight_changed") {
+    const fp = String(input.facts.flightChangedFingerprint ?? "").trim();
     return fp || null;
   }
   if (input.condition.type === "expr") {

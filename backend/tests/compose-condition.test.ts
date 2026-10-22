@@ -316,6 +316,72 @@ describe("evaluateComposeCondition", () => {
     ).toBe(true);
   });
 
+  it("flight_eta: quiet-skip then send within hours threshold", () => {
+    const condition = {
+      type: "flight_eta" as const,
+      airport: "TLV",
+      direction: "arrivals" as const,
+      flight: "LY831",
+      airline: "",
+      city: "",
+      minutesBefore: 0,
+      hoursBefore: 30,
+    };
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: {
+          flightEtaMinutes: 2000,
+          flightEtaFingerprint: "ly831|a",
+        },
+        lastReportSha: "",
+      }).skipSend,
+    ).toBe(true);
+    const first = evaluateComposeCondition({
+      condition,
+      facts: {
+        flightEtaMinutes: 100,
+        flightEtaFingerprint: "ly831|a",
+      },
+      lastReportSha: "",
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.shaAfterSend).toBe("ly831|a");
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: {
+          flightEtaMinutes: 90,
+          flightEtaFingerprint: "ly831|a",
+        },
+        lastReportSha: "ly831|a",
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("flight_changed: sends when fingerprint changes", () => {
+    const condition = {
+      type: "flight_changed" as const,
+      airport: "TLV",
+      direction: "departures" as const,
+      flight: "LY831",
+    };
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: { flightChangedFingerprint: "fp1" },
+        lastReportSha: "fp1",
+      }).skipSend,
+    ).toBe(true);
+    const gate = evaluateComposeCondition({
+      condition,
+      facts: { flightChangedFingerprint: "fp2" },
+      lastReportSha: "fp1",
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.shaAfterSend).toBe("fp2");
+  });
+
   it("expr: temp*2 eq 50 — edge into hold", () => {
     const key = watchFieldKey({
       field: "weather.temp_now",

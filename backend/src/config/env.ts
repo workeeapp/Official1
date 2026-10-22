@@ -36,6 +36,11 @@ const envSchema = z.object({
    * Falls back to GOOGLE_PLACES_API_KEY when unset.
    */
   GOOGLE_ROUTES_API_KEY: z.string().optional(),
+  /**
+   * AviationStack access key for live airport boards / flight status (optional).
+   * Free tier is very limited — use for POC / light polling only.
+   */
+  AVIATIONSTACK_ACCESS_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

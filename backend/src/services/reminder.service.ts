@@ -141,9 +141,12 @@ export function reminderRepeatsSubHourly(
   if (reminder.action === "remove") {
     return false;
   }
-  // Google Routes bus_eta watches may poll every ≥1 minute.
-  const busEta = reminder.composeCondition?.type === "bus_eta";
-  if (busEta) {
+  // Google Routes bus_eta + AviationStack flight watches may poll every ≥1–2 minutes.
+  const waiveSubHour =
+    reminder.composeCondition?.type === "bus_eta" ||
+    reminder.composeCondition?.type === "flight_eta" ||
+    reminder.composeCondition?.type === "flight_changed";
+  if (waiveSubHour) {
     if (reminder.recurrence) {
       if (
         reminder.recurrence.freq === "interval" &&

@@ -2037,6 +2037,132 @@ describe("parseLlmReply", () => {
     });
   });
 
+  it("reads metadata.flights", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            flights: {
+              airport: "TLV",
+              direction: "arrivals",
+              airline: "אל על",
+              city: "פריז",
+              flight: "3242CXD",
+              date: "2026-10-23",
+              aspects: ["next", "status", "bogus"],
+            },
+          },
+        }),
+      ).flights,
+    ).toEqual({
+      airport: "TLV",
+      direction: "arrivals",
+      airline: "אל על",
+      city: "פריז",
+      flight: "3242CXD",
+      date: "2026-10-23",
+      withinMinutes: 0,
+      aspects: ["next", "status"],
+    });
+  });
+
+  it("reads flights within_minutes", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            flights: {
+              direction: "arrivals",
+              within_minutes: 30,
+              aspects: ["board"],
+            },
+          },
+        }),
+      ).flights,
+    ).toEqual({
+      airport: "",
+      direction: "arrivals",
+      airline: "",
+      city: "",
+      flight: "",
+      date: "",
+      withinMinutes: 30,
+      aspects: ["board"],
+    });
+  });
+
+  it("reads flight_eta and flight_changed compose_condition", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "reminders",
+                items: [
+                  {
+                    item: "לפני נחיתה",
+                    compose_condition: {
+                      type: "flight_eta",
+                      airport: "TLV",
+                      direction: "arrivals",
+                      flight: "LY831",
+                      hours_before: 30,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ).reminders?.[0]?.composeCondition,
+    ).toEqual({
+      type: "flight_eta",
+      airport: "TLV",
+      direction: "arrivals",
+      flight: "LY831",
+      airline: "",
+      city: "",
+      minutesBefore: 0,
+      hoursBefore: 30,
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "reminders",
+                items: [
+                  {
+                    item: "שינויי טיסה",
+                    compose_condition: {
+                      type: "flight_changed",
+                      airport: "TLV",
+                      direction: "departures",
+                      flight: "LY831",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ).reminders?.[0]?.composeCondition,
+    ).toEqual({
+      type: "flight_changed",
+      airport: "TLV",
+      direction: "departures",
+      flight: "LY831",
+    });
+  });
+
   it("reads metadata.mashov without requiring password", () => {
     expect(
       parseReplyMetadata(

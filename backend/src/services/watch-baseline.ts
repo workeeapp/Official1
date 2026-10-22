@@ -8,6 +8,10 @@ import {
   isHoldingEdgeSha,
 } from "./compose-condition.js";
 import { fetchBusEtaWatch } from "./routes.js";
+import {
+  fetchFlightChangedWatch,
+  fetchFlightEtaWatch,
+} from "./flights.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
 
 export type WatchBaselineSeedResult = {
@@ -66,6 +70,32 @@ export async function seedWatchBaseline(input: {
         ...evalFacts,
         busEtaMinutes: eta.minutes,
         busEtaFingerprint: eta.fingerprint,
+      };
+    }
+    if (condition.type === "flight_eta") {
+      const eta = await fetchFlightEtaWatch({
+        airport: condition.airport,
+        direction: condition.direction,
+        flight: condition.flight,
+        airline: condition.airline,
+        city: condition.city,
+        now,
+      });
+      evalFacts = {
+        ...evalFacts,
+        flightEtaMinutes: eta.minutesUntil,
+        flightEtaFingerprint: eta.fingerprint,
+      };
+    }
+    if (condition.type === "flight_changed") {
+      const changed = await fetchFlightChangedWatch({
+        airport: condition.airport,
+        direction: condition.direction,
+        flight: condition.flight,
+      });
+      evalFacts = {
+        ...evalFacts,
+        flightChangedFingerprint: changed.fingerprint,
       };
     }
     if (condition.type === "expr" || condition.type === "field_changed") {

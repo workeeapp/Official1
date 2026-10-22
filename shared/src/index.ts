@@ -160,6 +160,9 @@ export type {
   LlmJewishAspect,
   LlmRoutesAction,
   LlmRoutesAspect,
+  LlmFlightsAction,
+  LlmFlightsAspect,
+  LlmFlightsDirection,
 } from "./llm-message";
 export {
   parseWeatherAction,
@@ -168,6 +171,7 @@ export {
   parsePlacesAction,
   parseJewishAction,
   parseRoutesAction,
+  parseFlightsAction,
   parseComposeCondition,
   parseWatchExprNode,
   countWatchExprLeaves,

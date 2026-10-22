@@ -28,6 +28,11 @@ import {
 } from "./compose-condition.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
 import { fetchBusEtaWatch } from "./routes.js";
+import {
+  fetchFlightChangedWatch,
+  fetchFlightEtaWatch,
+  flightEtaThresholdMinutes,
+} from "./flights.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -384,6 +389,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
 
     let outboundBody = reminder.messageText;
     let busEtaDefaultBody: string | null = null;
+    let flightDefaultBody: string | null = null;
     let skipSend = false;
     let conditionShaAfterSend: string | undefined;
     if (reminder.composeAtFire) {
@@ -465,6 +471,49 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             busEtaDefaultBody = `קו ${condition.line} מגיע בעוד כ־${eta.minutes} דקות מ«${condition.origin}» לכיוון «${condition.destination}» — זמן לצאת.`;
           }
         }
+        if (condition.type === "flight_eta") {
+          const eta = await fetchFlightEtaWatch({
+            airport: condition.airport,
+            direction: condition.direction,
+            flight: condition.flight,
+            airline: condition.airline,
+            city: condition.city,
+            now,
+          });
+          evalFacts = {
+            ...evalFacts,
+            flightEtaMinutes: eta.minutesUntil,
+            flightEtaFingerprint: eta.fingerprint,
+          };
+          const threshold = flightEtaThresholdMinutes({
+            minutesBefore: condition.minutesBefore,
+            hoursBefore: condition.hoursBefore,
+          });
+          if (
+            eta.minutesUntil != null &&
+            eta.minutesUntil <= threshold &&
+            eta.fingerprint &&
+            eta.summary
+          ) {
+            const verb =
+              condition.direction === "departures" ? "המראה" : "נחיתה";
+            flightDefaultBody = `${eta.summary} — עוד כ־${eta.minutesUntil} דקות עד ה${verb}.`;
+          }
+        }
+        if (condition.type === "flight_changed") {
+          const changed = await fetchFlightChangedWatch({
+            airport: condition.airport,
+            direction: condition.direction,
+            flight: condition.flight,
+          });
+          evalFacts = {
+            ...evalFacts,
+            flightChangedFingerprint: changed.fingerprint,
+          };
+          if (changed.fingerprint && changed.summary) {
+            flightDefaultBody = `עדכון בטיסה: ${changed.summary}.`;
+          }
+        }
         if (
           condition.type === "expr" ||
           condition.type === "field_changed"
@@ -529,11 +578,12 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         itemLabel: reminder.itemLabel,
         composed,
       });
+      const conditionDefaultBody = busEtaDefaultBody || flightDefaultBody;
       outboundBody =
-        busEtaDefaultBody &&
+        conditionDefaultBody &&
         (!resolved.body.trim() ||
           resolved.body.trim() === String(reminder.messageText ?? "").trim())
-          ? busEtaDefaultBody
+          ? conditionDefaultBody
           : resolved.body;
       if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
         await prisma.reminder.update({

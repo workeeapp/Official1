@@ -279,6 +279,27 @@ export type LlmComposeCondition =
       line: string;
       headsign: string;
       minutesBefore: number;
+    }
+  | {
+      /**
+       * Poll AviationStack; notify when minutes until arrival/departure
+       * ≤ minutes_before + hours_before*60.
+       */
+      type: "flight_eta";
+      airport: string;
+      direction: "arrivals" | "departures";
+      flight: string;
+      airline: string;
+      city: string;
+      minutesBefore: number;
+      hoursBefore: number;
+    }
+  | {
+      /** Poll AviationStack; notify when flight status fingerprint changes. */
+      type: "flight_changed";
+      airport: string;
+      direction: "arrivals" | "departures";
+      flight: string;
     };
 
 export interface LlmReminderAction {
@@ -487,6 +508,11 @@ export interface LlmMetadata {
    */
   routes?: LlmRoutesAction | null;
   /**
+   * Live airport board / flight status (AviationStack). Default airport TLV.
+   * Missing flight/airline/city when needed → model asks; leave unset.
+   */
+  flights?: LlmFlightsAction | null;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -579,6 +605,37 @@ export interface LlmRoutesAction {
   /** Optional headsign / direction filter. */
   headsign: string;
   aspects: LlmRoutesAspect[];
+}
+
+export type LlmFlightsAspect =
+  | "summary"
+  | "board"
+  | "next"
+  | "status"
+  | "gate"
+  | "delay";
+
+export type LlmFlightsDirection = "arrivals" | "departures" | "both";
+
+export interface LlmFlightsAction {
+  /** IATA / city; empty → engine defaults TLV. */
+  airport: string;
+  /** arrivals | departures | both; empty → both / derived by model. */
+  direction: LlmFlightsDirection | "";
+  /** Airline name or IATA (אל על / LY). */
+  airline: string;
+  /** City / IATA of other end (פריז / CDG). */
+  city: string;
+  /** Flight code as spoken (LY831, 3242CXD, …). */
+  flight: string;
+  /** YYYY-MM-DD; empty = today / live board. Engine filters client-side. */
+  date: string;
+  /**
+   * Keep only flights with ETA/STA within this many minutes from now
+   * (e.g. 30 for «בחצי שעה הקרובה»). 0 / omit = no window filter.
+   */
+  withinMinutes: number;
+  aspects: LlmFlightsAspect[];
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -687,6 +744,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const places = parsePlacesAction(meta);
   const jewish = parseJewishAction(meta);
   const routes = parseRoutesAction(meta);
+  const flights = parseFlightsAction(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -736,6 +794,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(places ? { places } : {}),
     ...(jewish ? { jewish } : {}),
     ...(routes ? { routes } : {}),
+    ...(flights ? { flights } : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -2226,6 +2285,138 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
       minutesBefore: Math.abs(minutesBefore) || 10,
     };
   }
+  if (
+    type === "flight_eta" ||
+    type === "flight_arrival" ||
+    type === "flight_departure" ||
+    type === "flight_before"
+  ) {
+    const airport = readText(record, [
+      "airport",
+      "hub",
+      "from_airport",
+      "שדה",
+    ]).slice(0, 32);
+    const directionRaw = readText(record, [
+      "direction",
+      "leg",
+      "kind",
+      "כיוון",
+    ])
+      .trim()
+      .toLowerCase();
+    const direction: "arrivals" | "departures" =
+      directionRaw === "departures" ||
+      directionRaw === "departure" ||
+      directionRaw === "dep" ||
+      directionRaw === "המראה" ||
+      directionRaw === "המראות"
+        ? "departures"
+        : "arrivals";
+    const flight = readText(record, [
+      "flight",
+      "flight_number",
+      "flightNumber",
+      "flight_iata",
+      "code",
+      "טיסה",
+    ]).slice(0, 32);
+    const airline = readText(record, ["airline", "carrier", "חברה"]).slice(
+      0,
+      64,
+    );
+    const city = readText(record, [
+      "city",
+      "destination",
+      "origin_city",
+      "עיר",
+      "יעד",
+    ]).slice(0, 64);
+    const minutesRaw =
+      record.minutes_before ??
+      record.minutesBefore ??
+      record.offset_minutes ??
+      record.offsetMinutes ??
+      record.minutes;
+    const hoursRaw =
+      record.hours_before ??
+      record.hoursBefore ??
+      record.offset_hours ??
+      record.offsetHours ??
+      record.hours;
+    const minutesBefore =
+      typeof minutesRaw === "number"
+        ? Math.round(minutesRaw)
+        : typeof minutesRaw === "string" && /^-?\d+$/.test(minutesRaw.trim())
+          ? Number(minutesRaw.trim())
+          : 0;
+    const hoursBefore =
+      typeof hoursRaw === "number"
+        ? Math.round(hoursRaw)
+        : typeof hoursRaw === "string" && /^-?\d+$/.test(hoursRaw.trim())
+          ? Number(hoursRaw.trim())
+          : 0;
+    const mins = Number.isFinite(minutesBefore) ? Math.abs(minutesBefore) : 0;
+    const hours = Number.isFinite(hoursBefore) ? Math.abs(hoursBefore) : 0;
+    if ((!flight && !airline && !city) || (mins === 0 && hours === 0)) {
+      return null;
+    }
+    return {
+      type: "flight_eta",
+      airport,
+      direction,
+      flight,
+      airline,
+      city,
+      minutesBefore: mins,
+      hoursBefore: hours,
+    };
+  }
+  if (
+    type === "flight_changed" ||
+    type === "flight_change" ||
+    type === "flight_status"
+  ) {
+    const airport = readText(record, [
+      "airport",
+      "hub",
+      "from_airport",
+      "שדה",
+    ]).slice(0, 32);
+    const directionRaw = readText(record, [
+      "direction",
+      "leg",
+      "kind",
+      "כיוון",
+    ])
+      .trim()
+      .toLowerCase();
+    const direction: "arrivals" | "departures" =
+      directionRaw === "departures" ||
+      directionRaw === "departure" ||
+      directionRaw === "dep" ||
+      directionRaw === "המראה" ||
+      directionRaw === "המראות"
+        ? "departures"
+        : "arrivals";
+    const flight = readText(record, [
+      "flight",
+      "flight_number",
+      "flightNumber",
+      "flight_iata",
+      "code",
+      "טיסה",
+    ]).slice(0, 32);
+    if (!flight) {
+      return null;
+    }
+    return {
+      type: "flight_changed",
+      airport,
+      direction,
+      flight,
+    };
+  }
   if (type === "expr" || type === "expression" || type === "numeric") {
     return parseExprCondition(record);
   }
@@ -2948,6 +3139,131 @@ export function parseRoutesAction(
     line,
     headsign,
     aspects: resolvedAspects,
+  };
+}
+
+const FLIGHTS_ASPECTS = new Set<LlmFlightsAspect>([
+  "summary",
+  "board",
+  "next",
+  "status",
+  "gate",
+  "delay",
+]);
+
+/** metadata.flights — live AviationStack airport board / flight status. */
+export function parseFlightsAction(
+  meta: Record<string, unknown>,
+): LlmFlightsAction | null {
+  const raw =
+    meta.flights ??
+    meta.flight ??
+    meta.airport_board ??
+    meta.airportBoard ??
+    meta.aviation;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const airport = readText(row, [
+    "airport",
+    "hub",
+    "from_airport",
+    "שדה",
+    "נתבג",
+  ]).slice(0, 32);
+  const directionRaw = readText(row, [
+    "direction",
+    "leg",
+    "kind",
+    "כיוון",
+  ])
+    .trim()
+    .toLowerCase();
+  let direction: LlmFlightsDirection | "" = "";
+  if (
+    directionRaw === "arrivals" ||
+    directionRaw === "arrival" ||
+    directionRaw === "arr" ||
+    directionRaw === "נחיתה" ||
+    directionRaw === "נחיתות"
+  ) {
+    direction = "arrivals";
+  } else if (
+    directionRaw === "departures" ||
+    directionRaw === "departure" ||
+    directionRaw === "dep" ||
+    directionRaw === "המראה" ||
+    directionRaw === "המראות"
+  ) {
+    direction = "departures";
+  } else if (directionRaw === "both" || directionRaw === "all") {
+    direction = "both";
+  }
+  const airline = readText(row, ["airline", "carrier", "חברה"]).slice(0, 64);
+  const city = readText(row, [
+    "city",
+    "destination",
+    "origin_city",
+    "עיר",
+    "יעד",
+  ]).slice(0, 64);
+  const flight = readText(row, [
+    "flight",
+    "flight_number",
+    "flightNumber",
+    "flight_iata",
+    "code",
+    "טיסה",
+  ]).slice(0, 32);
+  const date = readText(row, ["date", "day", "flight_date", "flightDate"]).slice(
+    0,
+    32,
+  );
+  const withinRaw =
+    row.within_minutes ??
+    row.withinMinutes ??
+    row.window_minutes ??
+    row.windowMinutes ??
+    row.minutes;
+  const withinMinutes =
+    typeof withinRaw === "number" && Number.isFinite(withinRaw)
+      ? Math.max(0, Math.round(withinRaw))
+      : typeof withinRaw === "string" && /^\d+$/.test(withinRaw.trim())
+        ? Number(withinRaw.trim())
+        : 0;
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmFlightsAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      const key = String(entry ?? "")
+        .trim()
+        .toLowerCase() as LlmFlightsAspect;
+      if (FLIGHTS_ASPECTS.has(key) && !aspects.includes(key)) {
+        aspects.push(key);
+      }
+    }
+  } else if (typeof aspectsRaw === "string" && aspectsRaw.trim()) {
+    for (const part of aspectsRaw.split(/[,;|]+/)) {
+      const key = part.trim().toLowerCase() as LlmFlightsAspect;
+      if (FLIGHTS_ASPECTS.has(key) && !aspects.includes(key)) {
+        aspects.push(key);
+      }
+    }
+  }
+  // Need at least one filter or board intent (aspects board/next/summary alone OK for hub board).
+  if (!airline && !city && !flight && aspects.length === 0) {
+    // Still allow empty board ask — model may set only airport/direction.
+  }
+  return {
+    airport,
+    direction,
+    airline,
+    city,
+    flight,
+    date,
+    withinMinutes,
+    aspects: aspects.length > 0 ? aspects : ["summary"],
   };
 }
 

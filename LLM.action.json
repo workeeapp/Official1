@@ -491,7 +491,7 @@
                               "object",
                               "null"
                             ],
-                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / market_change_compare / expr / field_changed / bus_eta)."
+                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / market_change_compare / expr / field_changed / bus_eta / flight_eta / flight_changed)."
                           },
                           "watch_once": {
                             "type": "boolean",
@@ -1281,6 +1281,64 @@
                 "required": [
                   "origin"
                 ]
+              },
+              "flights": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live airport board / flight status (AviationStack). Default airport TLV (נתב״ג). Departures AND arrivals. «איזה טיסות אל על לפריז מחר» → airline+city+date+direction departures; «מתי נוחתת הקרובה מרומא» → city+direction arrivals+aspects [next]; «איזה טיסות נוחתות בחצי שעה» → direction arrivals + within_minutes:30 + aspects [board]; «מתי נוחתת טיסה 3242CXD» → flight as spoken + direction arrivals. FORBIDDEN inventing times/gates/status. Empty airport → TLV. Missing filters when ambiguous → ASK; flights=null.",
+                "properties": {
+                  "airport": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "IATA or city (TLV / נתב״ג). Empty → engine defaults TLV."
+                  },
+                  "direction": {
+                    "type": "string",
+                    "maxLength": 16,
+                    "description": "arrivals | departures | both. From X / נוחתת → arrivals; to X / ממריאה → departures; board both ends → both."
+                  },
+                  "airline": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Airline name or IATA (אל על / LY). Empty when not specified."
+                  },
+                  "city": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Other-end city or IATA (פריז / CDG / רומא). Empty when not specified."
+                  },
+                  "flight": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "Flight code AS SPOKEN (LY831, 3242CXD, CXD3242…). Engine normalizes/search; do not invent IATA."
+                  },
+                  "date": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "YYYY-MM-DD; empty = live board. Engine filters client-side (do not rely on provider date filter)."
+                  },
+                  "within_minutes": {
+                    "type": "number",
+                    "description": "Optional window from now in minutes. «בחצי שעה הקרובה» → 30; «בשעה הקרובה» → 60. 0/omit = no window."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "summary",
+                        "board",
+                        "next",
+                        "status",
+                        "gate",
+                        "delay"
+                      ]
+                    },
+                    "description": "Board list → [board]; הקרובה / next → [next]; status/gate/delay → those; default [summary]."
+                  }
+                }
               },
               "tips": {
                 "type": [
