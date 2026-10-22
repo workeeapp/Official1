@@ -361,5 +361,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("ספר טלפונים אישי");
     expect(config.systemMessage).toContain("מעבר לשיחה עם עובד דיגיטלי אחר");
     expect(config.systemMessage).toContain("Do NOT list platform-owner-only git digests");
+    expect(config.systemMessage).toContain("COMPLEX EVENT TOPIC vs ORGANIZE INTENT");
+    expect(config.systemMessage).toContain("intentional PRODUCT CONTRACT");
+    expect(config.systemMessage).toContain("collision-safe custom list_name");
+    expect(config.systemMessage).toContain("כיבוד · ערב פוקר · 12.12.2026");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN silently sharing one list across two hosts",
+    );
   });
 });

@@ -19,6 +19,8 @@
     "share-shop-with-amit",
     "share-ask-missing-partner",
     "event-host-create-poker",
+    "event-maybe-no-host",
+    "event-help-organize-host",
     "filing-add-simple",
     "directory-add-michal",
     "reminder-create-relative",
@@ -1896,6 +1898,63 @@
         "single-turn"
       ],
       "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "minCount": 1,
+          "maxCount": 1,
+          "itemTextIncludes": "פוקר"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "custom"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "shopping"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "event-maybe-no-host",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "single-turn",
+        "intent"
+      ],
+      "description": "Considering a poker night must not create a host task",
+      "utterance": "אני חושב אולי לעשות ערב פוקר",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "event-help-organize-host",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "single-turn"
+      ],
+      "description": "Clear organize help → host tasks add; no custom yet",
+      "utterance": "תעזרי לי לארגן ערב פוקר",
       "setup": {},
       "constraints": [
         {

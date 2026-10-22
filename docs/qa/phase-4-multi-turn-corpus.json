@@ -1449,6 +1449,72 @@
           ]
         }
       ]
+    },
+    {
+      "id": "mt-event-second-poker-dated",
+      "tag": "continuity",
+      "tags": [
+        "events",
+        "tasks",
+        "mt-complex",
+        "multi-turn"
+      ],
+      "description": "Second same-title poker night on a new date gets its own host (date-disambiguated); no reuse of prior כיבוד list",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-poker-nov",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-11-15"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-kibud-nov",
+            "list_type": "custom",
+            "list_name": "כיבוד · ערב פוקר · 15.11.2026",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-chips-nov",
+                "שם": "חטיפים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעזרי לי לארגן ערב פוקר ב־12.12.2026 ב־20:00",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "פוקר"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
