@@ -123,6 +123,62 @@ function addressGenderHints(
   ];
 }
 
+/**
+ * Live weather ask tip: one short practical tip from FACTS only.
+ * Returns null on failure — caller sends facts alone (never invent tip copy in code).
+ */
+export async function composeWeatherLiveTip(input: {
+  factsBody: string;
+  addressGender?: "male" | "female" | null;
+}): Promise<string | null> {
+  const facts = input.factsBody.trim();
+  if (!facts) {
+    return null;
+  }
+  try {
+    const client = getLlmClient();
+    const config = loadLlmConfig();
+    const conversationId = await client.createConversation();
+    const freshness = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const turn = await client.createResponse({
+      conversationId,
+      model: config.model,
+      temperature: 0.85,
+      instructions: [
+        "You write one short personal weather tip for WhatsApp.",
+        "Output ONLY the tip sentence(s). No JSON, no quotes, no preamble, no bullet list of forecast numbers.",
+        "Language: Hebrew.",
+        "Ground the tip ONLY in the FACTS block (e.g. cold → warm clothes, rain → umbrella, heat → water/shade, wind → hold hat).",
+        "Do not invent temperatures, wind speeds, or conditions absent from FACTS.",
+        "Do not restate the full forecast — tip only, 1–2 short sentences.",
+        "Vary your wording every run (freshness token below).",
+        ...addressGenderHints(input.addressGender),
+      ].join("\n"),
+      message: [
+        "FACTS (weather already fetched — tip from these only):",
+        facts,
+        `Freshness token (vary wording): ${freshness}`,
+        "Write the tip now.",
+      ].join("\n"),
+    });
+    const text = turn.reply.trim();
+    if (!text) {
+      return null;
+    }
+    recordWhatsAppEvent(
+      "weather_live_tip_ok",
+      `chars=${text.length}`,
+    );
+    return text.slice(0, 500);
+  } catch (error) {
+    recordWhatsAppEvent(
+      "weather_live_tip_fail",
+      error instanceof Error ? error.message : "unknown",
+    );
+    return null;
+  }
+}
+
 function composeKindHints(
   kind: ComposeFactsBundle["kind"],
   isWatch: boolean,

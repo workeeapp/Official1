@@ -685,6 +685,36 @@ describe("WhatsApp webhook", () => {
     expect(parseLlmReply(reply).responses).toEqual([quote]);
   });
 
+  it("applyLiveDomainReply pure ask keeps tip then body as two responses", () => {
+    const tip = "אני רואה שיהיה קר — כדאי לקחת בגדים חמים.";
+    const body = "מזג האוויר בפריז היום\n*גשם*\n• עכשיו כ־8°C";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [],
+        metadata: { weather: { place: "פריז", aspects: ["summary"] } },
+      }),
+      [tip, body],
+    );
+    expect(parseLlmReply(reply).responses).toEqual([tip, body]);
+  });
+
+  it("applyLiveDomainReply WATCH sample appends body only from tip+body array", () => {
+    const tip = "כדאי לקחת מטריה.";
+    const body = "מזג האוויר בתל אביב היום\n*גשם*";
+    const reply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: ["אעקוב אחרי הגשם ואעדכן"],
+        metadata: { weather: { place: "תל אביב", aspects: ["summary"] } },
+      }),
+      [tip, body],
+      { watchSample: true },
+    );
+    expect(parseLlmReply(reply).responses).toEqual([
+      "אעקוב אחרי הגשם ואעדכן",
+      `לידיעתך כרגע:\n${body}`,
+    ]);
+  });
+
   it("replaces a false sent claim when WhatsApp delivery failed", () => {
     const fail =
       "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.";

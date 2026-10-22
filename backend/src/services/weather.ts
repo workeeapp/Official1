@@ -537,45 +537,120 @@ export function formatWeatherHebrew(
     return `אין נתון טמפרטורה זמין ל${place} ${when}.`;
   }
 
-  // summary / multi-aspect
-  lines.push(`מזג האוויר ב${place} ${when}: ${day.condition}.`);
+  // summary / multi-aspect — multi-line, condition emphasized
+  lines.push(`מזג האוויר ב${place} ${when}`);
+  lines.push(`*${day.condition}*`);
 
   if (wantsAspect(aspects, "temp")) {
-    if (day.tempNowC !== null && when === "היום") {
-      lines.push(`טמפרטורה עכשיו כ־${fmtNum(day.tempNowC, "°C")}.`);
-    }
-    if (day.tempMinC !== null && day.tempMaxC !== null) {
-      lines.push(
-        `טווח יומי ${fmtNum(day.tempMinC, "°C")}–${fmtNum(day.tempMaxC, "°C")}.`,
-      );
+    const nowTemp = fmtNum(day.tempNowC, "°C");
+    const min = fmtNum(day.tempMinC, "°C");
+    const max = fmtNum(day.tempMaxC, "°C");
+    if (nowTemp && when === "היום" && min && max) {
+      lines.push(`• עכשיו כ־${nowTemp} (טווח ${min}–${max})`);
+    } else if (nowTemp && when === "היום") {
+      lines.push(`• עכשיו כ־${nowTemp}`);
+    } else if (min && max) {
+      lines.push(`• טווח ${min}–${max}`);
+    } else if (nowTemp) {
+      lines.push(`• כ־${nowTemp}`);
     }
   }
 
   if (wantsAspect(aspects, "wind")) {
     const wind = fmtNum(day.windKmh, " קמ״ש");
-    const gust = fmtNum(day.windGustKmh, " קמ״ש");
+    const gust = fmtNum(day.windGustKmh, "");
     if (wind && gust) {
-      lines.push(`רוח כ־${wind}, משבים עד כ־${gust}.`);
+      lines.push(`• רוח כ־${wind}, משבים עד כ־${gust}`);
     } else if (wind) {
-      lines.push(`רוח כ־${wind}.`);
+      lines.push(`• רוח כ־${wind}`);
     }
   }
 
   if (wantsAspect(aspects, "humidity")) {
     const hum = fmtNum(day.humidityPct, "%");
     if (hum) {
-      lines.push(`לחות כ־${hum}.`);
+      lines.push(`• לחות כ־${hum}`);
     }
   }
 
   if (wantsAspect(aspects, "waves")) {
     const wave = fmtNum(day.waveHeightM, " מ׳");
     if (wave) {
-      lines.push(`גובה גלים כ־${wave}.`);
+      lines.push(`• גובה גלים כ־${wave}`);
     }
   }
 
-  return lines.join(" ");
+  return lines.join("\n");
+}
+
+function isFocusedSingleAspect(aspects: WeatherAspect[]): boolean {
+  if (aspects.includes("summary") || aspects.length !== 1) {
+    return false;
+  }
+  const only = aspects[0];
+  return (
+    only === "waves" ||
+    only === "wind" ||
+    only === "humidity" ||
+    only === "temp"
+  );
+}
+
+export type WeatherMessagesResult = {
+  /** Tip then body for summary asks; single entry for errors / focused aspects. */
+  messages: string[];
+  /** Facts body only (for WATCH sample wrap — no tip). */
+  body: string;
+};
+
+type WeatherTipComposer = (input: {
+  factsBody: string;
+  addressGender?: "male" | "female" | null;
+}) => Promise<string | null>;
+
+/** Resolve live weather ACTION → one or two spoken bubbles. */
+export async function resolveWeatherMessages(input: {
+  place: string;
+  date?: string | null;
+  aspects?: WeatherAspect[] | unknown;
+  now?: Date;
+  fetchImpl?: typeof fetch;
+  addressGender?: "male" | "female" | null;
+  /** Injected for tests; default loads composeWeatherLiveTip. */
+  composeTip?: WeatherTipComposer;
+}): Promise<WeatherMessagesResult> {
+  const place = input.place.trim();
+  if (!place) {
+    const text = "לאיזה מקום לבדוק את מזג האוויר?";
+    return { messages: [text], body: text };
+  }
+  try {
+    const facts = await fetchWeatherFacts(input);
+    if (!facts) {
+      const text = `לא מצאתי מקום בשם «${place}».`;
+      return { messages: [text], body: text };
+    }
+    const body = formatWeatherHebrew(facts, input.now);
+    if (isFocusedSingleAspect(facts.aspects)) {
+      return { messages: [body], body };
+    }
+    const composeTip =
+      input.composeTip ??
+      (await import("./reminder-compose.js")).composeWeatherLiveTip;
+    const tip = await composeTip({
+      factsBody: body,
+      addressGender: input.addressGender,
+    });
+    const trimmedTip = tip?.trim() || null;
+    if (trimmedTip) {
+      return { messages: [trimmedTip, body], body };
+    }
+    return { messages: [body], body };
+  } catch {
+    const text =
+      "לא הצלחתי לשלוף עכשיו את מזג האוויר. נסה שוב בעוד רגע.";
+    return { messages: [text], body: text };
+  }
 }
 
 /** Resolve live weather ACTION → spoken Hebrew (or error sentence). */
@@ -585,18 +660,9 @@ export async function resolveWeatherReply(input: {
   aspects?: WeatherAspect[] | unknown;
   now?: Date;
   fetchImpl?: typeof fetch;
+  addressGender?: "male" | "female" | null;
+  composeTip?: WeatherTipComposer;
 }): Promise<string> {
-  const place = input.place.trim();
-  if (!place) {
-    return "לאיזה מקום לבדוק את מזג האוויר?";
-  }
-  try {
-    const facts = await fetchWeatherFacts(input);
-    if (!facts) {
-      return `לא מצאתי מקום בשם «${place}».`;
-    }
-    return formatWeatherHebrew(facts, input.now);
-  } catch {
-    return "לא הצלחתי לשלוף עכשיו את מזג האוויר. נסה שוב בעוד רגע.";
-  }
+  const { messages } = await resolveWeatherMessages(input);
+  return messages.join("\n\n");
 }

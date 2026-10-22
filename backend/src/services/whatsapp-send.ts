@@ -755,18 +755,21 @@ export function formatWatchSampleLive(
 
 /**
  * Live domain reply: keep the model's ack when present, else replace with facts.
- * Pure live ask (empty spoken) → replace; WATCH/ack + sample → two bubbles.
+ * Pure live ask (empty spoken) → replace with all parts (e.g. tip + weather body).
+ * WATCH/ack + sample → append one sample bubble (last part only when array).
  * Engine EMPTY_REPLY_RETRY alone is not an ack — replace so live facts are not
  * double-bubbled after a premature empty fallback.
  * WATCH sample (`watchSample`) wraps the 2nd bubble with «לידיעתך כרגע…».
  */
 export function applyLiveDomainReply(
   reply: string,
-  liveText: string,
+  liveText: string | string[],
   options?: { watchSample?: boolean; watchDomain?: "market" | "other" },
 ): string {
-  const trimmed = liveText.trim();
-  if (!trimmed) {
+  const parts = (Array.isArray(liveText) ? liveText : [liveText])
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
     return reply;
   }
   const record = parseReplyRecord(reply);
@@ -780,11 +783,14 @@ export function applyLiveDomainReply(
     !onlyEmptyRetry && (nonEmpty.length > 0 || plain.length > 0),
   );
   if (!hasAck) {
-    return setEngineResponse(reply, trimmed);
+    const next = parseReplyRecord(reply);
+    return next ? withResponses(next, parts) : parts.join("\n\n");
   }
+  // WATCH / ack: append facts body only (last part) — never tip as sample.
+  const body = parts[parts.length - 1]!;
   const sample =
     options?.watchSample === true
-      ? formatWatchSampleLive(trimmed, options.watchDomain ?? "other")
-      : trimmed;
+      ? formatWatchSampleLive(body, options.watchDomain ?? "other")
+      : body;
   return appendEngineResponse(reply, sample);
 }

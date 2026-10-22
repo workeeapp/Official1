@@ -160,7 +160,8 @@ import {
   resolveShowDumpKind,
   type LastNumberedDumpLine,
 } from "./show-button-dump.js";
-import { resolveWeatherReply } from "./weather.js";
+import { resolveWeatherMessages } from "./weather.js";
+import { composeWeatherLiveTip } from "./reminder-compose.js";
 import { resolveMarketReply } from "./market.js";
 import { resolveMashovReply } from "./mashov.js";
 import { resolvePlacesReply } from "./places.js";
@@ -2886,18 +2887,22 @@ export async function sendChatMessage(input: {
         (row.action === "add" || row.action === "update") &&
         row.composeCondition != null,
     );
-    // Live weather ACTION → Open-Meteo; keep model ack when present, else replace.
+    // Live weather ACTION → Open-Meteo; tip LLM then facts (pure ask = 2 bubbles).
     // Guests: weather as main topic stays forbidden — skip even if model emitted it.
     const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
     if (weatherAction?.place.trim()) {
-      const weatherText = await resolveWeatherReply({
+      const weather = await resolveWeatherMessages({
         place: weatherAction.place,
         date: weatherAction.date,
         aspects: weatherAction.aspects,
+        addressGender: employee.addressGender,
+        composeTip: composeWeatherLiveTip,
       });
-      workingReply = applyLiveDomainReply(workingReply, weatherText, {
-        watchSample: watchSampleTurn,
-      });
+      workingReply = applyLiveDomainReply(
+        workingReply,
+        watchSampleTurn ? weather.body : weather.messages,
+        { watchSample: watchSampleTurn },
+      );
     }
     // Live market ACTION → Yahoo Finance; guests skip (same as weather).
     const marketAction = guestSpeaker ? null : metadata.market ?? null;
