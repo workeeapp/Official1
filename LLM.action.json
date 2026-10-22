@@ -901,7 +901,7 @@
               },
               "buttons": {
                 "type": "array",
-                "description": "Tap buttons for this turn (web + WhatsApp). Max 3 in the array. ALWAYS when YOUR responses ask a short closed choice (כן/לא, A/B, ≤3 options) — include those buttons here. Engine places «הצג» on the first responses entry and choice buttons on the last when there are several entries; a single entry gets all. label ≤12 Hebrew chars preferred (max 20), parallel pair/trio; fixed vocab: כן/לא; ברכב/תחב״צ; המטלה/רק תזכורות; יעד/קווים; 1/2/3; קניות/מטלות/תיוק; הצג after mutates. POST-SAVE reminder offer → כן+לא (+ הצג). Positive/primary first. Empty when not a choice and no post-mutate הצג.",
+                "description": "Tap buttons for this turn (web + WhatsApp). Max 3. ALWAYS when YOUR responses ask a short closed choice (כן/לא, A/B, ≤3 options). Engine places «הצג» on first entry and choices on last when several entries. FORBIDDEN any buttons (incl. 1/2/3) on bare show_dump / הצג רשימת / inventory dump — numbered lines alone are not a choice. 1/2/3 only with a spoken which-line ask and show_dump null. Fixed vocab: כן/לא; ברכב/תחב״צ; המטלה/רק תזכורות; יעד/קווים; קניות/מטלות/תיוק; הצג after mutates; POST-SAVE → כן+לא (+ הצג). Empty when not a choice and no post-mutate הצג.",
                 "maxItems": 3,
                 "items": {
                   "type": "object",

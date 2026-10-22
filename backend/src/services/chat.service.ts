@@ -3049,15 +3049,17 @@ export async function sendChatMessage(input: {
             workingReply,
           );
     const modelButtons = parseLlmReply(reply).buttons ?? [];
-    const speakerButtons = guestSpeaker
-      ? modelButtons
-      : ensureSpeakerShowButtons(metadata, modelButtons);
+    // show_dump is display-only — never attach 1/2/3 (or any) choice taps on a bare dump.
+    let speakerButtons = metadata.showDump
+      ? []
+      : guestSpeaker
+        ? modelButtons
+        : ensureSpeakerShowButtons(metadata, modelButtons);
     if (
-      speakerButtons.length > 0 &&
-      (speakerButtons.length !== modelButtons.length ||
-        speakerButtons.some(
-          (button, index) => button.command !== modelButtons[index]?.command,
-        ))
+      speakerButtons.length !== modelButtons.length ||
+      speakerButtons.some(
+        (button, index) => button.command !== modelButtons[index]?.command,
+      )
     ) {
       reply = setEngineButtons(reply, speakerButtons);
     }
