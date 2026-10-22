@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Local paste draft for Lucy UI — not a runtime source (use LLM.config.json).
+lucy2_prompt_new_version.txt
 node_modules/
 dist/
 .tools/
