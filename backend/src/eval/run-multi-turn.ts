@@ -34,6 +34,7 @@ import {
   type RegressionStateAssert,
   type RegressionTurn,
 } from "./corpus.js";
+import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -267,6 +268,10 @@ export async function createHarnessAccount(
   speaker: string,
   options?: { partners?: string[] },
 ): Promise<HarnessAccount> {
+  // Central choke point for harness DB writes (ENGINE + MODEL_APPLY + LIVE_FULL).
+  // Fail closed before any Prisma mutation — never self-approve DATABASE_URL.
+  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+
   const username = `g1_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const user = await prisma.user.create({
     data: {
@@ -334,6 +339,9 @@ export async function createHarnessAccount(
 }
 
 export async function destroyHarnessAccount(account: HarnessAccount): Promise<void> {
+  // Cleanup must not bypass the central DB gate (defense in depth).
+  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+
   // EmployeeLists / items cascade from Employee; User is Restrict until employees go.
   await prisma.reminder.deleteMany({ where: { userId: account.userId } }).catch(() => undefined);
   await prisma.contact.deleteMany({ where: { userId: account.userId } }).catch(() => undefined);
@@ -384,6 +392,9 @@ export async function seedSetup(
     nameToEmployeeId?: Map<string, string>;
   },
 ): Promise<void> {
+  // Fail closed before any Prisma read/write (defense in depth).
+  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+
   const userId = options?.userId?.trim();
   const nameToId = options?.nameToEmployeeId ?? new Map<string, string>();
   if (!nameToId.has(speaker.trim())) {
@@ -556,6 +567,16 @@ export async function seedSetup(
       const fireAt = row.fire_at
         ? new Date(String(row.fire_at))
         : new Date(Date.now() + 3600_000);
+      // Optional cascade seed: worker_item_id → already-seeded list item symbolic id.
+      const workerSymbolic = String(
+        (row as { worker_item_id?: string }).worker_item_id ?? "",
+      ).trim();
+      const workerUuid =
+        workerSymbolic && !UUID_RE.test(workerSymbolic)
+          ? idMap.get(workerSymbolic)
+          : workerSymbolic && UUID_RE.test(workerSymbolic)
+            ? workerSymbolic
+            : undefined;
       const created = await prisma.reminder.create({
         data: {
           userId,
@@ -572,9 +593,17 @@ export async function seedSetup(
           messageText: String(row.text ?? itemLabel),
           status: String(row.status ?? "active"),
           sendStatus: String(row.send_status ?? "pending"),
-          // Independent clocks for D3 tests: never set workerItemId here.
+          ...(workerUuid ? { workerItemId: workerUuid } : {}),
         },
       });
+      if (workerUuid) {
+        await prisma.employeeListItem
+          .update({
+            where: { id: workerUuid },
+            data: { reminderId: created.id },
+          })
+          .catch(() => undefined);
+      }
       if (symbolicId && !UUID_RE.test(symbolicId)) {
         idMap.set(symbolicId, created.id);
       }
@@ -672,6 +701,9 @@ export async function applyFixtureTurn(input: {
   appliedViaProduction: true;
   mutations: Awaited<ReturnType<typeof applyEmployeeRecords>>["mutations"];
 }> {
+  // Fail closed before any production apply / Prisma side effect.
+  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+
   const plannedAdds = collectSymbolicAddIds(input.fixtureRaw);
   const rewritten = rewriteAliases(input.fixtureRaw, input.idMap);
   const metadata = parseLlmMetadata(rewritten);

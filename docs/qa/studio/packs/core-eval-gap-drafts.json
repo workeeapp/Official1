@@ -1,0 +1,679 @@
+[
+  {
+    "id": "freeze-f7-need-milk-no-reminder",
+    "track": "model",
+    "description": "F7: need milk tomorrow → shopping add; no reminder clock/offer ACTION",
+    "tags": ["freeze-pack", "core-pack", "shopping", "intent", "reminders"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "צריך לקנות חלב מחר",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            },
+            { "type": "reminders_empty" },
+            { "type": "no_invented_reminder_add" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "freeze-f8-finish-presentation-offer",
+    "track": "model",
+    "description": "F8: need finish presentation → task add; no invented clock yet (offer in speech OK)",
+    "tags": ["freeze-pack", "core-pack", "tasks", "intent", "reminders"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "צריך לסיים את המצגת",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "מצגת"
+            },
+            { "type": "reminders_empty" },
+            { "type": "no_invented_reminder_add" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "freeze-f5-event-more-items",
+    "track": "model",
+    "description": "F5: add more items to existing event-linked כיבוד list (same host)",
+    "tags": ["freeze-pack", "core-pack", "events", "single-turn"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-tasks-personal",
+          "list_type": "tasks",
+          "owner": "טל",
+          "scope": "personal",
+          "items": [
+            {
+              "item_id": "eval-item-host-poker-f5",
+              "שם מטלה": "ערב פוקר",
+              "linked_lists": [{ "list_name": "כיבוד" }]
+            }
+          ]
+        },
+        {
+          "list_id": "eval-list-kibud-f5",
+          "list_type": "custom",
+          "list_name": "כיבוד",
+          "owner": "טל",
+          "scope": "personal",
+          "items": [
+            { "item_id": "eval-item-kibud-chips", "שם": "חטיפים" }
+          ]
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תוסיפי גם בירות ופיצה לכיבוד של ערב הפוקר",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "itemTextIncludes": "ביר"
+            },
+            { "type": "no_lists_add", "listType": "shopping" },
+            { "type": "list_ops_empty" },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-shopping-crud-mt",
+    "track": "mt",
+    "description": "Core 1–4: add milk → add bread → delete milk → rename bread (one conversation)",
+    "tags": ["core-pack", "shopping", "multi-turn"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-shopping-personal",
+          "list_type": "shopping",
+          "owner": "טל",
+          "scope": "personal",
+          "items": []
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תוסיפי חלב לרשימת הקניות",
+        "intent": { "type": "add_shopping", "itemText": "חלב" }
+      },
+      {
+        "utterance": "וגם לחם",
+        "intent": { "type": "add_shopping", "itemText": "לחם" }
+      },
+      {
+        "utterance": "תמחקי את החלב",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        }
+      },
+      {
+        "utterance": "תשני את הלחם ללחם מלא",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-intent-maybe-roi",
+    "track": "model",
+    "description": "Core 11: hesitant visit Roi → no task/reminder mutation",
+    "tags": ["core-pack", "intent", "tasks"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "אולי אעבור אצל רועי מחר",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "no_invented_reminder_add" },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-intent-need-doctor",
+    "track": "model",
+    "description": "Core 12: practical need doctor appointment → task add",
+    "tags": ["core-pack", "intent", "tasks"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "צריך לקבוע תור לרופא",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "רופא"
+            },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-intent-explicit-call-doctor",
+    "track": "model",
+    "description": "Core 13: explicit add call-doctor task",
+    "tags": ["core-pack", "intent", "tasks"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "תוסיפי מטלה להתקשר לרופא",
+        "intent": {
+          "type": "add_task",
+          "itemText": "רופא"
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-intent-maybe-mom",
+    "track": "model",
+    "description": "Core 16: maybe visit mom → no mutation",
+    "tags": ["core-pack", "intent", "tasks"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "אולי אבקר את אמא השבוע",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "reminders_empty" },
+            { "type": "no_invented_reminder_add" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-task-mom-tomorrow",
+    "track": "model",
+    "description": "Core 15: visit mom tomorrow → task with date signal (ACTION)",
+    "tags": ["core-pack", "tasks", "intent"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "תוסיפי מטלה לבקר את אמא מחר",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "אמא"
+            },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "full-core-task-mom-tomorrow",
+    "track": "full",
+    "description": "Core 15 FULL: visit mom tomorrow persists dated task",
+    "tags": ["core-pack", "tasks", "full-live"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-tasks-personal",
+          "list_type": "tasks",
+          "owner": "טל",
+          "scope": "personal",
+          "items": []
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תוסיפי מטלה לבקר את אמא מחר",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "אמא"
+            },
+            { "type": "reminders_empty" }
+          ]
+        },
+        "outcome": {
+          "factsInclude": ["אמא"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-reminder-offer-decline-mt",
+    "track": "mt",
+    "description": "Core 19–20–23: incomplete reminder → ask → user declines → no clock",
+    "tags": ["core-pack", "reminders", "multi-turn"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "תזכירי לי משהו",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "no_invented_reminder_add" },
+            { "type": "response_looks_like_ask" }
+          ]
+        }
+      },
+      {
+        "utterance": "בעצם לא צריך",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "reminders_empty" },
+            { "type": "no_invented_reminder_add" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-delete-last-show-empty-mt",
+    "track": "mt",
+    "description": "Core 6: delete last shopping item then show shopping dump",
+    "tags": ["core-pack", "shopping", "show", "multi-turn"],
+    "setup": {
+      "shoppingItems": [{ "id": "eval-item-last-yogurt", "label": "יוגורט" }]
+    },
+    "turns": [
+      {
+        "utterance": "קניתי יוגורט",
+        "intent": {
+          "type": "remove_item",
+          "listType": "shopping",
+          "itemId": "eval-item-last-yogurt"
+        }
+      },
+      {
+        "utterance": "הצג קניות",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "show_dump", "value": "shopping" },
+            { "type": "mutations_empty_or_read_only" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-assign-michal-shop",
+    "track": "model",
+    "description": "Core 5: assign shopping milk responsibility to Michal",
+    "tags": ["core-pack", "share", "shopping"],
+    "setup": {
+      "shoppingItems": [{ "id": "eval-item-milk-assign", "label": "חלב" }]
+    },
+    "turns": [
+      {
+        "utterance": "שימי על מיכל לקנות את החלב",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            },
+            { "type": "reminders_empty" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-task-vs-reminder-times",
+    "track": "model",
+    "description": "Core 22: task due 10:00 with reminder at 09:00 — both ACTIONs",
+    "tags": ["core-pack", "tasks", "reminders"],
+    "setup": {},
+    "turns": [
+      {
+        "utterance": "תוסיפי מטלה לפגישה מחר ב־10:00 ותזכירי לי ב־09:00",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "פגישה"
+            },
+            { "type": "reminders_has_action", "action": "add" }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "core-dup-signal-existing-milk",
+    "track": "model",
+    "description": "Avoid duplicate milk when already on shopping (no second bare add-only wipe)",
+    "tags": ["core-pack", "shopping"],
+    "setup": {
+      "shoppingItems": [{ "id": "eval-item-milk-dup", "label": "חלב" }]
+    },
+    "turns": [
+      {
+        "utterance": "תוסיפי חלב לקניות",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            { "type": "no_silent_multi_domain_wipe" },
+            { "type": "reminders_empty" },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "update",
+                  "listType": "shopping"
+                },
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "lists_has_action",
+                  "action": "add",
+                  "listType": "shopping",
+                  "itemTextIncludes": "חלב",
+                  "maxCount": 1
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "full-core-shopping-crud-mt",
+    "track": "full",
+    "description": "Core 1–4 FULL: shopping CRUD persists across turns",
+    "tags": ["core-pack", "shopping", "full-live", "multi-turn"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-shopping-personal",
+          "list_type": "shopping",
+          "owner": "טל",
+          "scope": "personal",
+          "items": []
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תוסיפי חלב לרשימת הקניות",
+        "intent": { "type": "add_shopping", "itemText": "חלב" },
+        "outcome": { "factsInclude": ["חלב"] }
+      },
+      {
+        "utterance": "וגם לחם",
+        "intent": { "type": "add_shopping", "itemText": "לחם" },
+        "outcome": { "factsInclude": ["חלב", "לחם"] }
+      },
+      {
+        "utterance": "תמחקי את החלב",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        },
+        "outcome": { "factsExclude": ["\"שם פריט\": \"חלב\""], "factsInclude": ["לחם"] }
+      },
+      {
+        "utterance": "תשני את הלחם ללחם מלא",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            }
+          ]
+        },
+        "outcome": { "factsInclude": ["לחם מלא"] }
+      }
+    ]
+  },
+  {
+    "id": "full-cascade-delete-task-24a",
+    "track": "full",
+    "description": "Core 24a: delete linked worker task → task gone + clock cancelled (facts)",
+    "tags": ["core-pack", "reminders", "tasks", "full-live", "cascade"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-tasks-personal",
+          "list_type": "tasks",
+          "owner": "טל",
+          "scope": "personal",
+          "items": [
+            {
+              "item_id": "eval-item-worker-water-24a",
+              "שם מטלה": "להזכיר לטל לשתות מים"
+            }
+          ]
+        }
+      ],
+      "reminders": [
+        {
+          "reminder_id": "eval-rem-water-24a",
+          "item": "לשתות מים",
+          "list_type": "tasks",
+          "fire_at": "2099-06-01T08:00:00.000Z",
+          "repeat": "once",
+          "ping": ["טל"],
+          "ping_ids": [],
+          "owner": "טל",
+          "text": "לשתות מים",
+          "last_composed_text": "",
+          "sent_text": "לשתות מים",
+          "compose_at_fire": false,
+          "compose_source": "",
+          "compose_lookback_hours": 0,
+          "status": "active",
+          "send_status": "pending",
+          "sent": false,
+          "sent_at": null,
+          "worker_item_id": "eval-item-worker-water-24a"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תמחקי את המטלה להזכיר לטל לשתות מים",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": ["eval-item-worker-water-24a"]
+            },
+            { "type": "list_ops_empty" }
+          ]
+        },
+        "outcome": {
+          "itemIdsAbsent": ["eval-item-worker-water-24a"],
+          "factsExclude": ["לשתות מים"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "full-cascade-delete-reminder-24b",
+    "track": "full",
+    "description": "Core 24b: cancel linked reminder → clock + worker task soft-deleted",
+    "tags": ["core-pack", "reminders", "tasks", "full-live", "cascade"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-tasks-personal",
+          "list_type": "tasks",
+          "owner": "טל",
+          "scope": "personal",
+          "items": [
+            {
+              "item_id": "eval-item-worker-water-24b",
+              "שם מטלה": "להזכיר לטל לשתות מים"
+            }
+          ]
+        }
+      ],
+      "reminders": [
+        {
+          "reminder_id": "eval-rem-water-24b",
+          "item": "לשתות מים",
+          "list_type": "tasks",
+          "fire_at": "2099-06-01T08:00:00.000Z",
+          "repeat": "once",
+          "ping": ["טל"],
+          "ping_ids": [],
+          "owner": "טל",
+          "text": "לשתות מים",
+          "last_composed_text": "",
+          "sent_text": "לשתות מים",
+          "compose_at_fire": false,
+          "compose_source": "",
+          "compose_lookback_hours": 0,
+          "status": "active",
+          "send_status": "pending",
+          "sent": false,
+          "sent_at": null,
+          "worker_item_id": "eval-item-worker-water-24b"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "תבטלי את התזכורת לשתות מים",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": ["eval-rem-water-24b"]
+            }
+          ]
+        },
+        "outcome": {
+          "itemIdsAbsent": ["eval-item-worker-water-24b"],
+          "factsExclude": ["לשתות מים"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "full-core-assign-michal-shop",
+    "track": "full",
+    "description": "Core 5 FULL: assign milk to Michal persists ownership/targets",
+    "tags": ["core-pack", "share", "shopping", "full-live"],
+    "setup": {
+      "lists": [
+        {
+          "list_id": "eval-list-shopping-personal",
+          "list_type": "shopping",
+          "owner": "טל",
+          "scope": "personal",
+          "items": [
+            {
+              "item_id": "eval-item-milk-assign-full",
+              "שם פריט": "חלב"
+            }
+          ]
+        }
+      ]
+    },
+    "turns": [
+      {
+        "utterance": "שימי על מיכל לקנות את החלב",
+        "intent": {
+          "type": "custom",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ]
+        },
+        "outcome": {
+          "itemIdsPresent": ["eval-item-milk-assign-full"],
+          "factsInclude": ["חלב"]
+        }
+      }
+    ]
+  }
+]

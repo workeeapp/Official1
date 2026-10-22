@@ -6,6 +6,7 @@ const tabs = [
   { to: "/tips", label: "Tips" },
   { to: "/chat", label: "Chat" },
   { to: "/whatsapp", label: "WhatsApp" },
+  { to: "/studio", label: "Studio" },
 ] as const;
 
 export function AppNav() {

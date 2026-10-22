@@ -1,0 +1,9 @@
+{
+  "databaseName": "workee",
+  "approvedPresent": false,
+  "approvedExactMatch": false,
+  "whatsappCredsPresent": true,
+  "openaiPresent": true,
+  "liveFullSafe": false,
+  "liveModelSideEffectNote": "run-case.ts / LIVE_MODEL path uses LLM only; no prisma apply, WA send, or reminder fire"
+}

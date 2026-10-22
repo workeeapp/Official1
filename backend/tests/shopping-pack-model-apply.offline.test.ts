@@ -12,6 +12,7 @@ import {
   type ModelApplyCase,
   type ModelApplyProposeInput,
 } from "../src/eval/run-model-apply.js";
+import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 
 function itemIdByLabel(
   snapshot: { lists: Array<{ list_type?: string; items: Array<Record<string, unknown>> }> },
@@ -152,7 +153,8 @@ describe("Shopping Pack MODEL_APPLY (offline)", () => {
   beforeAll(() => {
     const db = process.env.DATABASE_URL;
     if (!db?.trim()) throw new Error("DATABASE_URL required");
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = db;
+    // Fail closed: never self-approve DATABASE_URL (could be product `workee`).
+    assertApprovedEvalDatabaseUrl(db);
   });
 
   afterEach(() => vi.restoreAllMocks());

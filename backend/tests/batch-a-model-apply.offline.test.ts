@@ -6,7 +6,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadBatchASuite } from "../src/eval/corpus.js";
-import { UnapprovedEvalDatabaseError } from "../src/eval/studio-db-guard.js";
+import {
+  assertApprovedEvalDatabaseUrl,
+  UnapprovedEvalDatabaseError,
+} from "../src/eval/studio-db-guard.js";
 import {
   emptyModelMetadata,
   runModelApplyCase,
@@ -234,9 +237,28 @@ describe("Batch A MODEL_APPLY DB guard (offline)", () => {
     );
   });
 
+  it("fails closed when product workee URL is self-approved", async () => {
+    const product = "postgresql://workee:workee@127.0.0.1:5435/workee";
+    process.env.DATABASE_URL = product;
+    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = product;
+
+    const suiteCase: ModelApplyCase = {
+      id: "guard-product-self-approve",
+      track: "MODEL_APPLY",
+      turns: [{ utterance: "x" }],
+    };
+    const result = await runModelApplyCase(suiteCase, () => ({
+      metadata: emptyModelMetadata(),
+    }));
+    expect(result.ok).toBe(false);
+    expect(
+      result.failures.some((row) => /product database/i.test(row)),
+    ).toBe(true);
+    expect(result.failures.join("\n")).not.toMatch(/postgresql:\/\//i);
+  });
+
   it("rejects fixtureMetadata on MODEL_APPLY (model ACTION only)", async () => {
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL =
-      process.env.DATABASE_URL || "postgresql://x/y";
+    // fixtureMetadata is refused before any DB guard / Prisma — no approval needed.
     const suiteCase = {
       id: "forbid-fixture",
       track: "MODEL_APPLY" as const,
@@ -263,7 +285,8 @@ describe("Batch A MODEL_APPLY apply+reinject (stub model, real apply)", () => {
     if (!db?.trim()) {
       throw new Error("DATABASE_URL required for MODEL_APPLY offline apply test");
     }
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = db;
+    // Fail closed: never self-approve DATABASE_URL (could be product `workee`).
+    assertApprovedEvalDatabaseUrl(db);
   });
 
   afterEach(() => {
@@ -470,7 +493,8 @@ describe("Batch A suite MT1–MT3 MODEL_APPLY (stub model, real apply)", () => {
     if (!db?.trim()) {
       throw new Error("DATABASE_URL required for Batch A suite MODEL_APPLY");
     }
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = db;
+    // Fail closed: never self-approve DATABASE_URL (could be product `workee`).
+    assertApprovedEvalDatabaseUrl(db);
   });
 
   afterEach(() => {

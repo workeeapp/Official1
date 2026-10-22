@@ -152,7 +152,8 @@
       ],
       "tags": [
         "shopping",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -757,7 +758,8 @@
       ],
       "tags": [
         "show",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -775,7 +777,8 @@
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1003,7 +1006,8 @@
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1063,7 +1067,8 @@
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1323,7 +1328,8 @@
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1333,15 +1339,33 @@
       "setup": {},
       "constraints": [
         {
-          "type": "mutations_empty_or_read_only"
+          "type": "reminders_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
         },
         {
           "type": "response_looks_like_ask"
+        },
+        {
+          "type": "any",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
         }
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1433,7 +1457,8 @@
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1518,7 +1543,8 @@
       ],
       "tags": [
         "single-turn",
-        "tasks"
+        "tasks",
+        "core-pack"
       ]
     },
     {
@@ -1580,7 +1606,8 @@
       ],
       "tags": [
         "single-turn",
-        "tasks"
+        "tasks",
+        "core-pack"
       ]
     },
     {
@@ -1598,7 +1625,8 @@
       ],
       "tags": [
         "shopping",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ]
     },
     {
@@ -1606,7 +1634,8 @@
       "tag": "happy",
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "utterance": "תזכירי לי מחר ב־09:00 לקנות חלב",
       "setup": {},
@@ -1627,7 +1656,8 @@
       "tag": "action-confusion",
       "tags": [
         "tasks",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "utterance": "תוסיפי מטלה",
       "setup": {},
@@ -1661,7 +1691,8 @@
       "tag": "happy",
       "tags": [
         "shopping",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Bought ביצים → remove by item_id",
       "utterance": "קניתי ביצים",
@@ -1699,7 +1730,8 @@
       "tag": "happy",
       "tags": [
         "shopping",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Add יוגורט to shopping",
       "utterance": "תוסיפי יוגורט לקניות",
@@ -1719,7 +1751,8 @@
       "tags": [
         "shopping",
         "single-turn",
-        "tasks"
+        "tasks",
+        "core-pack"
       ],
       "utterance": "תוסיפי לקניות",
       "setup": {},
@@ -1757,9 +1790,11 @@
       "tags": [
         "share",
         "shopping",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
-      "utterance": "תשתפי את הקניות עם עמית",
+      "description": "Item-level share (built-in shopping has no whole-list participants)",
+      "utterance": "תשתפי את החלב עם עמית",
       "setup": {
         "lists": [
           {
@@ -1802,7 +1837,8 @@
       "tags": [
         "share",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "utterance": "תשימי על עמית להתקשר לרופא",
       "setup": {
@@ -1849,7 +1885,8 @@
         "share",
         "shopping",
         "single-turn",
-        "tasks"
+        "tasks",
+        "core-pack"
       ],
       "utterance": "תשתפי את הקניות",
       "setup": {
@@ -1895,7 +1932,8 @@
       "tags": [
         "events",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "utterance": "צריך לארגן ערב פוקר מחר ב־20:00",
       "setup": {},
@@ -1931,7 +1969,9 @@
         "events",
         "tasks",
         "single-turn",
-        "intent"
+        "intent",
+        "core-pack",
+        "freeze-pack"
       ],
       "description": "Considering a poker night must not create a host task",
       "utterance": "אני חושב אולי לעשות ערב פוקר",
@@ -1951,7 +1991,9 @@
       "tags": [
         "events",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "core-pack",
+        "freeze-pack"
       ],
       "description": "Clear organize help → host tasks add; no custom yet",
       "utterance": "תעזרי לי לארגן ערב פוקר",
@@ -1972,6 +2014,415 @@
         {
           "type": "no_lists_add",
           "listType": "shopping"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "freeze-f7-need-milk-no-reminder",
+      "tag": "happy",
+      "tags": [
+        "freeze-pack",
+        "core-pack",
+        "shopping",
+        "intent",
+        "reminders",
+        "single-turn"
+      ],
+      "utterance": "צריך לקנות חלב מחר",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping",
+          "itemTextIncludes": "חלב"
+        },
+        {
+          "type": "reminders_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "freeze-f8-finish-presentation-offer",
+      "tag": "happy",
+      "tags": [
+        "freeze-pack",
+        "core-pack",
+        "tasks",
+        "intent",
+        "reminders",
+        "single-turn"
+      ],
+      "utterance": "צריך לסיים את המצגת",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "מצגת"
+        },
+        {
+          "type": "reminders_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "freeze-f5-event-more-items",
+      "tag": "happy",
+      "tags": [
+        "freeze-pack",
+        "core-pack",
+        "events",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי גם בירות ופיצה לכיבוד של ערב הפוקר",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-poker-f5",
+                "שם מטלה": "ערב פוקר",
+                "linked_lists": [
+                  {
+                    "list_name": "כיבוד"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-kibud-f5",
+            "list_type": "custom",
+            "list_name": "כיבוד",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-kibud-chips",
+                "שם": "חטיפים"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "custom",
+          "itemTextIncludes": "ביר"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "shopping"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "reminders_empty"
+        }
+      ]
+    },
+    {
+      "id": "core-intent-maybe-roi",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "intent",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "אולי אעבור אצל רועי מחר",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        },
+        {
+          "type": "reminders_empty"
+        }
+      ]
+    },
+    {
+      "id": "core-intent-need-doctor",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "intent",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "צריך לקבוע תור לרופא",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "רופא"
+        },
+        {
+          "type": "reminders_empty"
+        }
+      ]
+    },
+    {
+      "id": "core-intent-explicit-call-doctor",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "intent",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי מטלה להתקשר לרופא",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "רופא"
+        }
+      ]
+    },
+    {
+      "id": "core-intent-maybe-mom",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "intent",
+        "tasks",
+        "single-turn"
+      ],
+      "utterance": "אולי אבקר את אמא השבוע",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "reminders_empty"
+        },
+        {
+          "type": "no_invented_reminder_add"
+        }
+      ]
+    },
+    {
+      "id": "core-task-mom-tomorrow",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "tasks",
+        "intent",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי מטלה לבקר את אמא מחר",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "אמא"
+        },
+        {
+          "type": "reminders_empty"
+        }
+      ]
+    },
+    {
+      "id": "core-assign-michal-shop",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "share",
+        "shopping",
+        "single-turn"
+      ],
+      "utterance": "שימי על מיכל לקנות את החלב",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk-assign",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "update",
+          "listType": "shopping"
+        },
+        {
+          "type": "reminders_empty"
+        }
+      ]
+    },
+    {
+      "id": "core-task-vs-reminder-times",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "tasks",
+        "reminders",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי מטלה לפגישה מחר ב־10:00 ותזכירי לי ב־09:00",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "itemTextIncludes": "פגישה"
+        },
+        {
+          "type": "reminders_has_action",
+          "action": "add"
+        }
+      ]
+    },
+    {
+      "id": "core-dup-signal-existing-milk",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "shopping",
+        "single-turn"
+      ],
+      "utterance": "תוסיפי חלב לקניות",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk-dup",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "no_silent_multi_domain_wipe"
+        },
+        {
+          "type": "reminders_empty"
+        },
+        {
+          "type": "any",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            },
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב",
+              "maxCount": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-event-second-poker-dated",
+      "tag": "happy",
+      "tags": [
+        "events",
+        "tasks",
+        "single-turn",
+        "core-pack",
+        "freeze-pack"
+      ],
+      "description": "Second same-title poker night on a new date gets its own host (date-disambiguated); no reuse of prior כיבוד list",
+      "utterance": "תעזרי לי לארגן ערב פוקר ב־12.12.2026 ב־20:00",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-poker-nov",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-11-15"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-kibud-nov",
+            "list_type": "custom",
+            "list_name": "כיבוד · ערב פוקר · 15.11.2026",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-chips-nov",
+                "שם": "חטיפים"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "tasks",
+          "minCount": 1,
+          "maxCount": 1,
+          "itemTextIncludes": "פוקר"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "custom"
         },
         {
           "type": "list_ops_empty"

@@ -27,7 +27,8 @@
       "tags": [
         "shopping",
         "single-turn",
-        "full-live"
+        "full-live",
+        "core-pack"
       ],
       "description": "Bought milk → remove persists in DB facts",
       "setup": {
@@ -75,7 +76,8 @@
       "tags": [
         "shopping",
         "single-turn",
-        "full-live"
+        "full-live",
+        "core-pack"
       ],
       "description": "Add milk → appears in reinjected EMPLOYEE_SAVED_DATA",
       "setup": {
@@ -186,7 +188,8 @@
       "tags": [
         "reminders",
         "single-turn",
-        "full-live"
+        "full-live",
+        "core-pack"
       ],
       "description": "Relative self-nudge persists clock + task facts",
       "setup": {},
@@ -225,7 +228,8 @@
       "tags": [
         "tasks",
         "single-turn",
-        "full-live"
+        "full-live",
+        "core-pack"
       ],
       "description": "Finish doctor task → removed from live facts",
       "setup": {
@@ -477,7 +481,8 @@
       "tags": [
         "reminders",
         "full-live",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Cancel named reminder → clock gone from facts",
       "setup": {
@@ -488,7 +493,9 @@
             "list_type": "tasks",
             "fire_at": "2099-01-01T10:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "לשתות מים",
@@ -530,7 +537,8 @@
         "reminders",
         "shopping",
         "full-live",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Explicit tomorrow reminder + shopping task persists",
       "setup": {},
@@ -768,7 +776,8 @@
       "tags": [
         "show",
         "full-live",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Show dump; milk still in facts",
       "setup": {
@@ -814,7 +823,8 @@
         "share",
         "shopping",
         "full-live",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Share shopping applies; milk still present",
       "setup": {
@@ -871,7 +881,8 @@
         "shopping",
         "mt-clarify",
         "full-live",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Share clarify then partner; milk kept",
       "setup": {
@@ -944,7 +955,8 @@
         "mt-clarify",
         "mt-complex",
         "full-live",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Event clarify→link persists host + כיבוד",
       "setup": {
@@ -1092,7 +1104,8 @@
         "events",
         "tasks",
         "full-live",
-        "single-turn"
+        "single-turn",
+        "core-pack"
       ],
       "description": "Create poker host task persists when a time is given",
       "setup": {},
@@ -1126,7 +1139,8 @@
         "tasks",
         "mt-clarify",
         "full-live",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Clarify task done; meet remains",
       "setup": {
@@ -1199,7 +1213,8 @@
         "shopping",
         "mt-multi-act",
         "full-live",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Add then buy yogurt; yogurt absent",
       "setup": {
@@ -1321,6 +1336,343 @@
             ],
             "factsInclude": [
               "לחם"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-core-task-mom-tomorrow",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "tasks",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Core 15 FULL: visit mom tomorrow persists dated task",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לבקר את אמא מחר",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "אמא"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "אמא"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-core-shopping-crud-mt",
+      "tag": "continuity",
+      "tags": [
+        "core-pack",
+        "shopping",
+        "full-live",
+        "multi-turn"
+      ],
+      "description": "Core 1–4 FULL: shopping CRUD persists across turns",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לרשימת הקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        },
+        {
+          "utterance": "וגם לחם",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב",
+              "לחם"
+            ]
+          }
+        },
+        {
+          "utterance": "תמחקי את החלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ],
+            "factsExclude": [
+              "\"שם פריט\": \"חלב\""
+            ]
+          }
+        },
+        {
+          "utterance": "תשני את הלחם ללחם מלא",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם מלא"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-cascade-delete-task-24a",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "reminders",
+        "tasks",
+        "full-live",
+        "cascade",
+        "single-turn"
+      ],
+      "description": "Core 24a: delete linked worker task → task gone + clock cancelled (facts)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-worker-water-24a",
+                "שם מטלה": "להזכיר לטל לשתות מים"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water-24a",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "last_composed_text": "",
+            "sent_text": "לשתות מים",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "worker_item_id": "eval-item-worker-water-24a"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את המטלה להזכיר לטל לשתות מים",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-worker-water-24a"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-worker-water-24a"
+            ],
+            "factsExclude": [
+              "לשתות מים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-cascade-delete-reminder-24b",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "reminders",
+        "tasks",
+        "full-live",
+        "cascade",
+        "single-turn"
+      ],
+      "description": "Core 24b: cancel linked reminder → clock + worker task soft-deleted",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-worker-water-24b",
+                "שם מטלה": "להזכיר לטל לשתות מים"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water-24b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T08:00:00.000Z",
+            "repeat": "once",
+            "ping": [
+              "טל"
+            ],
+            "ping_ids": [],
+            "owner": "טל",
+            "text": "לשתות מים",
+            "last_composed_text": "",
+            "sent_text": "לשתות מים",
+            "compose_at_fire": false,
+            "compose_source": "",
+            "compose_lookback_hours": 0,
+            "status": "active",
+            "send_status": "pending",
+            "sent": false,
+            "sent_at": null,
+            "worker_item_id": "eval-item-worker-water-24b"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת לשתות מים",
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": [
+                "eval-rem-water-24b"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": [
+              "eval-item-worker-water-24b"
+            ],
+            "factsExclude": [
+              "לשתות מים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-core-assign-michal-shop",
+      "tag": "happy",
+      "tags": [
+        "core-pack",
+        "share",
+        "shopping",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Core 5 FULL: assign milk to Michal persists ownership/targets",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk-assign-full",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שימי על מיכל לקנות את החלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-milk-assign-full"
+            ],
+            "factsInclude": [
+              "חלב"
             ]
           }
         }

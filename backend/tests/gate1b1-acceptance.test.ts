@@ -334,4 +334,46 @@ describe("Gate 1b.1 acceptance — A11 database safety (pure unit, no DB I/O)", 
     }
     expect(prismaConnect).not.toHaveBeenCalled();
   });
+
+  it("rejects exact self-match of product database identity workee", async () => {
+    const assertUrl = requireFn(
+      await loadAssertApprovedEvalDatabaseUrl(),
+      "assertApprovedEvalDatabaseUrl",
+    );
+    const product =
+      "postgresql://workee:workee@127.0.0.1:5435/workee";
+    const prev = process.env.WORKEE_APPROVED_TEST_DATABASE_URL;
+    try {
+      process.env.WORKEE_APPROVED_TEST_DATABASE_URL = product;
+      expect(() => assertUrl(product)).toThrow(/product database/i);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.WORKEE_APPROVED_TEST_DATABASE_URL;
+      } else {
+        process.env.WORKEE_APPROVED_TEST_DATABASE_URL = prev;
+      }
+    }
+  });
+
+  it("rejects matching malformed URLs and empty database names", async () => {
+    const assertUrl = requireFn(
+      await loadAssertApprovedEvalDatabaseUrl(),
+      "assertApprovedEvalDatabaseUrl",
+    );
+    const prev = process.env.WORKEE_APPROVED_TEST_DATABASE_URL;
+    try {
+      process.env.WORKEE_APPROVED_TEST_DATABASE_URL = "not-a-url";
+      expect(() => assertUrl("not-a-url")).toThrow(/malformed/i);
+
+      const emptyPath = "postgresql://workee:workee@127.0.0.1:5432/";
+      process.env.WORKEE_APPROVED_TEST_DATABASE_URL = emptyPath;
+      expect(() => assertUrl(emptyPath)).toThrow(/empty database name/i);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.WORKEE_APPROVED_TEST_DATABASE_URL;
+      } else {
+        process.env.WORKEE_APPROVED_TEST_DATABASE_URL = prev;
+      }
+    }
+  });
 });

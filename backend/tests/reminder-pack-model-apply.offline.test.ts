@@ -12,7 +12,10 @@ import {
   type ModelApplyCase,
   type ModelApplyProposeInput,
 } from "../src/eval/run-model-apply.js";
-import { UnapprovedEvalDatabaseError } from "../src/eval/studio-db-guard.js";
+import {
+  assertApprovedEvalDatabaseUrl,
+  UnapprovedEvalDatabaseError,
+} from "../src/eval/studio-db-guard.js";
 
 function reminderIdByItem(
   snapshot: { reminders?: Array<{ reminder_id?: string; item?: string; text?: string }> },
@@ -255,7 +258,8 @@ describe("Reminder Pack MODEL_APPLY apply+reinject (stub model, real apply)", ()
     if (!db?.trim()) {
       throw new Error("DATABASE_URL required for Reminder Pack MODEL_APPLY");
     }
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = db;
+    // Fail closed: never self-approve DATABASE_URL (could be product `workee`).
+    assertApprovedEvalDatabaseUrl(db);
   });
 
   afterEach(() => {

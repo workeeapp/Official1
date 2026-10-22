@@ -222,6 +222,9 @@ export function summarizeConstraints(
       case "reminders_remove_ids":
         bits.push(`reminders.remove[${c.reminderIds.join(",")}]`);
         break;
+      case "reminders_empty":
+        bits.push("no reminders");
+        break;
       case "no_invented_reminder_add":
         bits.push("no reminder add");
         break;

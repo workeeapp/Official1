@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:model-eval": "vitest run --config vitest.model-eval.config.ts",
+    "test:model-eval": "vitest run --config vitest.model-eval.config.ts tests/model-eval.live.test.ts",
     "test:model-eval-mt": "vitest run --config vitest.model-eval.config.ts tests/model-eval-multi-turn.live.test.ts",
     "test:model-eval-full": "vitest run --config vitest.model-eval.config.ts tests/model-eval-full.live.test.ts",
     "add:live-case": "tsx scripts/add-live-case.ts",

@@ -1,0 +1,1188 @@
+{
+  "version": 1,
+  "speaker": "טל",
+  "pack": "engine-gap-v1",
+  "description": "ENGINE apply+stateAfter gaps toward ~28–30 pack. Complements regression-suite.json (6) + workflow-pack ENGINE (4). No directory (harness gap). No OpenAI.",
+  "criticalCaseIds": [
+    "g1-filing-remove",
+    "g1-reminder-cancel",
+    "g1-cascade-delete-task",
+    "g1-cascade-delete-reminder",
+    "g1-list-ops-delete-list",
+    "g1-shop-update-qty",
+    "g1-share-then-unshare",
+    "g1-mt-multi-add-then-buy"
+  ],
+  "cases": [
+    {
+      "id": "g1-filing-remove",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Remove filing by filing_id; info leaves facts; shopping untouched",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-milk-keep",
+                "שם פריט": "חלב"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-filing-email-code",
+            "item_name": "קוד לכניסה לחשבון אימייל",
+            "item_description": "קוד כניסה לחשבון אימייל",
+            "item_info": "8844",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מחק קוד כניסה לחשבון אימייל",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "filing",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "filing_id": "eval-filing-email-code"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "remove_filing",
+              "filingId": "eval-filing-email-code"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-milk-keep"],
+            "factsExclude": ["8844"],
+            "factsInclude": ["חלב"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-filing-update",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Update filing item_info by filing_id; old value excluded",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-pin",
+            "item_name": "קוד",
+            "item_description": "קוד",
+            "item_info": "1111",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שנה את הקוד ל־9999",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "update",
+                "list_type": "filing",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "filing_id": "eval-filing-pin",
+                    "item_name": "קוד",
+                    "item_info": "9999",
+                    "item_description": ""
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "filing_has_action",
+              "action": "update_filing",
+              "filingId": "eval-filing-pin",
+              "infoIncludes": "9999"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": ["9999"],
+            "factsExclude": ["1111"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-reminder-cancel",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Cancel active reminder by reminder_id; clock gone from facts",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-01-01T10:00:00.000Z",
+            "repeat": "once",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת לשתות מים",
+          "fixtureMetadata": {
+            "lists": [],
+            "reminders": [
+              {
+                "action": "remove",
+                "reminder_id": "eval-rem-water",
+                "item": ""
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": ["eval-rem-water"]
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": ["לשתות מים"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-cascade-delete-task",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Delete linked worker task → task + linked clock leave live facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-worker-water-24a",
+                "שם מטלה": "להזכיר לטל לשתות מים"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water-24a",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T08:00:00.000Z",
+            "repeat": "once",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "worker_item_id": "eval-item-worker-water-24a"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחקי את המטלה להזכיר לטל לשתות מים",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "tasks",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-worker-water-24a"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": ["eval-item-worker-water-24a"]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-worker-water-24a"],
+            "factsExclude": ["לשתות מים", "להזכיר לטל לשתות מים"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-cascade-delete-reminder",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Cancel linked reminder → clock + worker task leave live facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-worker-water-24b",
+                "שם מטלה": "להזכיר לטל לשתות מים"
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-water-24b",
+            "item": "לשתות מים",
+            "list_type": "tasks",
+            "fire_at": "2099-06-01T08:00:00.000Z",
+            "repeat": "once",
+            "text": "לשתות מים",
+            "status": "active",
+            "send_status": "pending",
+            "worker_item_id": "eval-item-worker-water-24b"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את התזכורת לשתות מים",
+          "fixtureMetadata": {
+            "lists": [],
+            "reminders": [
+              {
+                "action": "remove",
+                "reminder_id": "eval-rem-water-24b",
+                "item": ""
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "reminders_remove_ids",
+              "reminderIds": ["eval-rem-water-24b"]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-worker-water-24b"],
+            "factsExclude": ["לשתות מים", "להזכיר לטל לשתות מים"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-list-ops-delete-list",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "delete_list removes custom list shell and items from live state",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-bugs",
+            "list_type": "custom",
+            "list_name": "באגים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-bug",
+                "שם": "באג"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את רשימת באגים",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "delete_list",
+                "list_id": "eval-list-custom-bugs",
+                "new_name": "",
+                "add_columns": [],
+                "remove_columns": [],
+                "rename_columns": [],
+                "add_participants": [],
+                "remove_participants": [],
+                "items": [],
+                "targets": []
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "list_ops_delete_list_ids",
+              "listIds": ["eval-list-custom-bugs"]
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-bug"],
+            "listTypeCounts": { "custom": 0 },
+            "factsExclude": ["באגים", "באג"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-shop-update-qty",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Update shopping quantity on same item_id",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-eggs",
+                "שם פריט": "ביצים",
+                "כמות": "1"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעדכני את הביצים ל־6",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "update",
+                "list_type": "shopping",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-eggs",
+                    "שם פריט": "ביצים",
+                    "כמות": "6"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "6"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "shopping"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-eggs"],
+            "factsInclude": ["ביצים", "6"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-task-meet-datetime",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Task with תאריך לביצוע persists in facts (no invented reminder)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לבקר את אמא ב־2099-06-20",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "tasks",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-mom-visit",
+                    "שם מטלה": "לבקר את אמא",
+                    "תאריך לביצוע": "2099-06-20"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "אמא"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-mom-visit"],
+            "factsInclude": ["אמא", "2099-06-20"],
+            "listTypeCounts": { "tasks": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-multi-shop-add",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "One turn adds multiple shopping items",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב ולחם וביצים לקניות",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk-multi",
+                    "שם פריט": "חלב"
+                  },
+                  {
+                    "item_id": "eval-item-bread-multi",
+                    "שם פריט": "לחם"
+                  },
+                  {
+                    "item_id": "eval-item-eggs-multi",
+                    "שם פריט": "ביצים"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 3,
+              "maxCount": 3,
+              "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-milk-multi",
+              "eval-item-bread-multi",
+              "eval-item-eggs-multi"
+            ],
+            "factsInclude": ["חלב", "לחם", "ביצים"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-share-then-unshare",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "alter_list add_participants then remove_participants",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shabbat-shop",
+            "list_type": "custom",
+            "list_name": "קניות לשבת",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-challah-share",
+                "שם": "חלות"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשתפי את קניות לשבת עם עמית",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "alter_list",
+                "list_id": "eval-list-shabbat-shop",
+                "new_name": "",
+                "add_columns": [],
+                "remove_columns": [],
+                "rename_columns": [],
+                "add_participants": ["עמית"],
+                "remove_participants": [],
+                "items": [],
+                "targets": []
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-challah-share"],
+            "factsInclude": ["עמית", "חלות"]
+          }
+        },
+        {
+          "utterance": "תפסיקי לשתף את קניות לשבת עם עמית",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "alter_list",
+                "list_id": "eval-list-shabbat-shop",
+                "new_name": "",
+                "add_columns": [],
+                "remove_columns": [],
+                "rename_columns": [],
+                "add_participants": [],
+                "remove_participants": ["עמית"],
+                "items": [],
+                "targets": []
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-challah-share"],
+            "factsInclude": ["חלות"],
+            "factsExclude": ["עמית"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-reminder-update-time",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Update reminder fire time by reminder_id; new time in facts",
+      "setup": {
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-milk-buy",
+            "item": "לקנות חלב",
+            "list_type": "tasks",
+            "fire_at": "2099-06-15T06:00:00.000Z",
+            "repeat": "once",
+            "text": "לקנות חלב",
+            "status": "active",
+            "send_status": "pending"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תזיזי את התזכורת לקנות חלב ל־14:00",
+          "fixtureMetadata": {
+            "lists": [],
+            "reminders": [
+              {
+                "action": "update",
+                "reminder_id": "eval-rem-milk-buy",
+                "item": "לקנות חלב",
+                "date": "2099-06-15",
+                "time": "14:00"
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "update"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": ["לקנות חלב", "14:00"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-no-invented-clock",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Task-only add must not invent a reminder clock",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה להתקשר לרופא",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "tasks",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-doctor-call",
+                    "שם מטלה": "להתקשר לרופא"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "רופא"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-doctor-call"],
+            "factsInclude": ["רופא"],
+            "listTypeCounts": { "tasks": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-mt-multi-add-then-buy",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Add milk+bread then remove milk; bread remains",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב ולחם",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "shopping",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk-mt",
+                    "שם פריט": "חלב"
+                  },
+                  {
+                    "item_id": "eval-item-bread-mt",
+                    "שם פריט": "לחם"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "minCount": 2,
+              "maxCount": 2
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-milk-mt", "eval-item-bread-mt"]
+          }
+        },
+        {
+          "utterance": "קניתי חלב",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "shopping",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-milk-mt"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": ["eval-item-milk-mt"]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-milk-mt"],
+            "itemIdsPresent": ["eval-item-bread-mt"],
+            "factsInclude": ["לחם"],
+            "factsExclude": ["חלב"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-custom-rename-list",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "alter_list new_name renames custom list; items keep ids",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-custom-party",
+            "list_type": "custom",
+            "list_name": "מסיבה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-balloons",
+                "שם": "בלונים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשני את שם הרשימה מסיבה לאירוע",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "alter_list",
+                "list_id": "eval-list-custom-party",
+                "new_name": "אירוע",
+                "add_columns": [],
+                "remove_columns": [],
+                "rename_columns": [],
+                "add_participants": [],
+                "remove_participants": [],
+                "items": [],
+                "targets": []
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-balloons"],
+            "factsInclude": ["אירוע", "בלונים"],
+            "factsExclude": ["מסיבה"],
+            "listTypeCounts": { "custom": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-clear-personal-shopping",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Remove all seeded shopping items in one turn",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-clear-a",
+                "שם פריט": "חלב"
+              },
+              {
+                "item_id": "eval-item-clear-b",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תנקי את רשימת הקניות",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "shopping",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-clear-a"
+                  },
+                  {
+                    "item_id": "eval-item-clear-b"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": ["eval-item-clear-a", "eval-item-clear-b"]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-clear-a", "eval-item-clear-b"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-empty-mutate-ask",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Incomplete/empty ACTION ask leaves seeded items unchanged",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-keep-ask",
+                "שם פריט": "יוגורט"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק משהו מהקניות",
+          "response": "מה למחוק?",
+          "fixtureMetadata": {
+            "lists": []
+          },
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-keep-ask"],
+            "factsInclude": ["יוגורט"],
+            "listTypeCounts": { "shopping": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-remove-wrong-list-type",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Remove shopping item authored as tasks list_type; engine resolves by item_id",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-wrong-type-milk",
+                "שם פריט": "חלב"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-keep-task",
+                "שם מטלה": "להתקשר"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תמחק את החלב",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "remove",
+                "list_type": "tasks",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-wrong-type-milk"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "itemIds": ["eval-item-wrong-type-milk"]
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsAbsent": ["eval-item-wrong-type-milk"],
+            "itemIdsPresent": ["eval-item-keep-task"],
+            "factsInclude": ["להתקשר"],
+            "listTypeCounts": { "shopping": 1, "tasks": 1 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1-task-plain-add",
+      "track": "ENGINE",
+      "tag": "gap",
+      "description": "Plain tasks.add (non-event) persists item_id and facts",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי מטלה לשלם חשבון חשמל",
+          "fixtureMetadata": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "tasks",
+                "list_name": "",
+                "targets": [],
+                "items": [
+                  {
+                    "item_id": "eval-item-pay-bill",
+                    "שם מטלה": "לשלם חשבון חשמל"
+                  }
+                ]
+              }
+            ]
+          },
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "minCount": 1,
+              "maxCount": 1,
+              "itemTextIncludes": "חשמל"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": ["eval-item-pay-bill"],
+            "factsInclude": ["חשמל"],
+            "listTypeCounts": { "tasks": 1 }
+          }
+        }
+      ]
+    }
+  ]
+}

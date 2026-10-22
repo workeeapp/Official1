@@ -768,6 +768,11 @@ export function startReminderTicker(): void {
   if (getEnv().NODE_ENV === "test") {
     return;
   }
+  // Studio / isolated eval: keep fireDueReminders implementation, but do not
+  // schedule ticks that could message real users from a shared process.
+  if (process.env.WORKEE_DISABLE_REMINDER_FIRE === "1") {
+    return;
+  }
   setInterval(() => {
     void fireDueReminders().catch((error) => {
       console.error(

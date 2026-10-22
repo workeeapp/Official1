@@ -294,6 +294,43 @@ describe("Phase 4 constraint checkers", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("reminders_empty rejects any reminders action", () => {
+    const fail = evaluateConstraints(
+      [{ type: "reminders_empty" }],
+      meta({
+        reminders: [
+          {
+            action: "add",
+            item: "מים",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "once",
+            ping: ["טל"],
+            targets: ["טל"],
+            text: "מים",
+            inSeconds: null,
+            everyCount: null,
+            everyUnit: null,
+            weekdays: null,
+            confirmed: false,
+            compose: false,
+            composeSource: "",
+            composeLookbackHours: 0,
+          },
+        ],
+      }),
+      "אוקיי",
+    );
+    expect(fail.ok).toBe(false);
+    const pass = evaluateConstraints(
+      [{ type: "reminders_empty" }],
+      meta({ reminders: [] }),
+      "אוקיי",
+    );
+    expect(pass.ok).toBe(true);
+  });
+
   it("requires recurring every_count on reminders.add when asked", () => {
     const constraints: ModelEvalConstraint[] = [
       { type: "reminders_has_action", action: "add", recurring: true },

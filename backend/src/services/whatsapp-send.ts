@@ -405,6 +405,16 @@ async function sendWhatsAppPayload(
   options?: { ignoreSession?: boolean },
 ): Promise<WhatsAppTextResult> {
   const env = getEnv();
+  // Isolation for Studio / approved-test runs: keep real send code paths, but
+  // never hit Meta Graph when outbound is explicitly disabled.
+  if (process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND === "1") {
+    recordWhatsAppEvent("send_skip", "reason=outbound_disabled");
+    return "failed";
+  }
+  if (env.NODE_ENV === "test") {
+    recordWhatsAppEvent("send_skip", "reason=node_env_test");
+    return "failed";
+  }
   const token = env.WHATSAPP_ACCESS_TOKEN?.trim();
   const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID?.trim();
   if (!token || !phoneNumberId) {

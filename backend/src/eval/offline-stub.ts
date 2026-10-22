@@ -60,6 +60,7 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
     case "lists_empty":
     case "filing_empty":
     case "directory_empty":
+    case "reminders_empty":
     case "list_ops_empty":
     case "no_invented_reminder_add":
     case "no_silent_multi_domain_wipe":
@@ -142,33 +143,28 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
         });
       }
       return "ביטלתי";
-    case "lists_has_action":
+    case "lists_has_action": {
+      const label = c.itemTextIncludes ?? (c.listType === "tasks" ? "מטלה" : "חלב");
+      const labeledItem =
+        c.listType === "tasks"
+          ? { "שם מטלה": label }
+          : c.listType === "custom"
+            ? { שם: label }
+            : { "שם פריט": label };
       meta.lists.push({
         action: c.action,
         list_type: c.listType ?? "shopping",
         list_name: "",
         items:
           c.action === "add"
-            ? [
-                {
-                  ...(c.listType === "tasks"
-                    ? { "שם מטלה": c.itemTextIncludes ?? "מטלה" }
-                    : { "שם פריט": c.itemTextIncludes ?? "חלב" }),
-                },
-              ]
+            ? [labeledItem]
             : c.action === "remove"
-              ? [{ item_id: "eval-item-x" }]
-              : [
-                  {
-                    item_id: "eval-item-x",
-                    ...(c.listType === "tasks"
-                      ? { "שם מטלה": "מעודכן" }
-                      : { "שם פריט": "מעודכן" }),
-                  },
-                ],
+              ? [{ item_id: "eval-item-x", ...labeledItem }]
+              : [{ item_id: "eval-item-x", ...labeledItem }],
         targets: [],
       });
       return "עדכנתי";
+    }
     case "lists_remove_item_ids":
       meta.lists.push({
         action: "remove",

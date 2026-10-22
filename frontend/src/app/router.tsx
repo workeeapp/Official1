@@ -6,6 +6,7 @@ import { EmployeesPage } from "@/pages/Employees/EmployeesPage";
 import { TipsPage } from "@/pages/Tips/TipsPage";
 import { ChatPage } from "@/pages/Chat/ChatPage";
 import { WhatsAppPage } from "@/pages/WhatsApp/WhatsAppPage";
+import { StudioPage } from "@/pages/Studio/StudioPage";
 
 export function AppRoutes() {
   return (
@@ -18,6 +19,7 @@ export function AppRoutes() {
         <Route path="/tips" element={<TipsPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/whatsapp" element={<WhatsAppPage />} />
+        <Route path="/studio" element={<StudioPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

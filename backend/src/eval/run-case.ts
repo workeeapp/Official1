@@ -24,6 +24,8 @@ import {
   type ModelEvalMultiTurnCase,
   type ModelEvalMultiTurnCorpus,
 } from "./corpus.js";
+import { applyLiveModelMetadataToSnapshot } from "./live-model-snapshot-apply.js";
+import type { EmployeeRecordSnapshot } from "../services/employee-records.service.js";
 
 export interface ModelEvalRunCaseResult extends ModelEvalCaseResult {
   id: string;
@@ -122,7 +124,17 @@ function fixtureEmployees(speaker: string): {
     phone: null,
     isOwner: false,
   };
-  return { employees: [human, worker, coworker], worker, human };
+  const michal: PublicEmployee = {
+    id: "eval-human-3",
+    kind: "human",
+    name: "מיכל",
+    surname: "",
+    nickname: "מיכל",
+    email: null,
+    phone: null,
+    isOwner: false,
+  };
+  return { employees: [human, worker, coworker, michal], worker, human };
 }
 
 export async function runModelEvalCase(
@@ -230,9 +242,10 @@ export interface ModelEvalMultiTurnRunResult {
 }
 
 /**
- * LIVE multi-turn (metadata only, no Prisma apply).
- * Same conversationId across turns; facts re-injected each turn from setup
- * (no apply → snapshot does not change between turns).
+ * LIVE multi-turn (metadata scoring; no Prisma / WA / clocks).
+ * Same conversationId across turns. After each turn, proposed lists/reminders
+ * mutate an in-memory snapshot so later turns see prior ACTION effects
+ * (still not product DB / LIVE_FULL parity).
  */
 export async function runModelEvalMultiTurnCase(
   corpusCase: ModelEvalMultiTurnCase,
@@ -246,22 +259,15 @@ export async function runModelEvalMultiTurnCase(
     speaker,
     worker,
   });
-  const snapshot = snapshotFromSetup(corpusCase.setup, speaker);
+  const snapshot: EmployeeRecordSnapshot = structuredClone(
+    snapshotFromSetup(corpusCase.setup, speaker),
+  );
   const contacts = (corpusCase.setup.contacts ?? []).map((row, index) => ({
     id: `contact-${index}`,
     name: row.name,
     phone: row.phone,
     kind: "person",
   }));
-  const factsBlock = [
-    formatSessionClockContext(),
-    formatEmployeeContext(snapshot),
-    formatEmployeeContext(
-      { lists: [], filing: [], reminders: [] },
-      "WORKER_SAVED_DATA",
-    ),
-    formatSpeakerContacts(contacts),
-  ].join("\n\n");
 
   const client = getLlmClient();
   const conversationId = await client.createConversation();
@@ -270,6 +276,15 @@ export async function runModelEvalMultiTurnCase(
 
   for (let i = 0; i < corpusCase.turns.length; i += 1) {
     const turn = corpusCase.turns[i]!;
+    const factsBlock = [
+      formatSessionClockContext(),
+      formatEmployeeContext(snapshot),
+      formatEmployeeContext(
+        { lists: [], filing: [], reminders: [] },
+        "WORKER_SAVED_DATA",
+      ),
+      formatSpeakerContacts(contacts),
+    ].join("\n\n");
     const message = `${factsBlock}\n\n${speaker}: ${turn.utterance}`;
     const llmStarted = Date.now();
     const llmTurn = await client.createResponse({
@@ -294,6 +309,8 @@ export async function runModelEvalMultiTurnCase(
       metadata,
       parsed.response,
     );
+    // Evolve in-memory facts for the next turn only (eval harness, not product DB).
+    applyLiveModelMetadataToSnapshot(snapshot, metadata, speaker);
     turnResults.push({
       index: i,
       utterance: turn.utterance,

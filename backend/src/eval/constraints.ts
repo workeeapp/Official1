@@ -81,6 +81,8 @@ export type ModelEvalConstraint =
       /** Exact set of reminder_id values on reminders.remove. */
       reminderIds: string[];
     }
+  /** No reminders.* actions (forbid offer/create clocks on this turn). */
+  | { type: "reminders_empty" }
   | {
       type: "jobs_has_action";
       action: string;
@@ -493,6 +495,10 @@ export function checkConstraint(
       const mismatch = sameIdMultiset(actual, constraint.reminderIds);
       return mismatch ? `reminders_remove_ids: ${mismatch}` : null;
     }
+    case "reminders_empty":
+      return (meta.reminders?.length ?? 0) === 0
+        ? null
+        : `expected empty reminders, got ${meta.reminders?.length}`;
     case "jobs_has_action": {
       const rows = (meta.jobs ?? []).filter(
         (row) => row.action === constraint.action,

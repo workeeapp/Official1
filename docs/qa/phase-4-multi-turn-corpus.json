@@ -69,7 +69,8 @@
       "tags": [
         "multi-turn",
         "shopping",
-        "mt-clarify"
+        "mt-clarify",
+        "core-pack"
       ]
     },
     {
@@ -114,7 +115,8 @@
       "tags": [
         "multi-turn",
         "shopping",
-        "mt-multi-act"
+        "mt-multi-act",
+        "core-pack"
       ]
     },
     {
@@ -408,7 +410,8 @@
       "tags": [
         "multi-turn",
         "reminders",
-        "mt-clarify"
+        "mt-clarify",
+        "core-pack"
       ]
     },
     {
@@ -493,7 +496,8 @@
       "tags": [
         "multi-turn",
         "reminders",
-        "mt-clarify"
+        "mt-clarify",
+        "core-pack"
       ]
     },
     {
@@ -583,7 +587,8 @@
       "tags": [
         "multi-turn",
         "shopping",
-        "mt-multi-act"
+        "mt-multi-act",
+        "core-pack"
       ]
     },
     {
@@ -709,9 +714,10 @@
         "share",
         "shopping",
         "mt-clarify",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
-      "description": "Share without who → ask → Amit",
+      "description": "Item share without who → ask → Amit (built-in shopping is item-level only)",
       "setup": {
         "lists": [
           {
@@ -742,7 +748,7 @@
       },
       "turns": [
         {
-          "utterance": "תשתפי את הקניות",
+          "utterance": "תשתפי את החלב",
           "constraints": [
             {
               "type": "mutations_empty_or_read_only"
@@ -771,7 +777,9 @@
         "events",
         "mt-clarify",
         "mt-complex",
-        "multi-turn"
+        "multi-turn",
+        "core-pack",
+        "freeze-pack"
       ],
       "description": "Ask כיבוד contents → custom list + link host",
       "setup": {
@@ -837,7 +845,8 @@
       "tags": [
         "tasks",
         "mt-clarify",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Ambiguous task delete → pick doctor",
       "setup": {
@@ -962,7 +971,9 @@
             "list_type": "tasks",
             "fire_at": "2099-01-01T10:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "לשתות מים",
@@ -982,7 +993,9 @@
             "list_type": "tasks",
             "fire_at": "2099-01-02T10:00:00.000Z",
             "repeat": "once",
-            "ping": ["טל"],
+            "ping": [
+              "טל"
+            ],
             "ping_ids": [],
             "owner": "טל",
             "text": "להוציא כלב",
@@ -1073,7 +1086,8 @@
       "tags": [
         "shopping",
         "mt-multi-act",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Add yogurt then immediately bought it",
       "setup": {
@@ -1118,7 +1132,8 @@
       "tags": [
         "tasks",
         "mt-multi-act",
-        "multi-turn"
+        "multi-turn",
+        "core-pack"
       ],
       "description": "Add bill task then mark done",
       "setup": {
@@ -1451,40 +1466,137 @@
       ]
     },
     {
-      "id": "mt-event-second-poker-dated",
+      "id": "core-shopping-crud-mt",
       "tag": "continuity",
       "tags": [
-        "events",
-        "tasks",
-        "mt-complex",
+        "core-pack",
+        "shopping",
         "multi-turn"
       ],
-      "description": "Second same-title poker night on a new date gets its own host (date-disambiguated); no reuse of prior כיבוד list",
+      "description": "Core 1–4: add milk → add bread → delete milk → rename bread (one conversation)",
       "setup": {
         "lists": [
           {
-            "list_id": "eval-list-tasks-personal",
-            "list_type": "tasks",
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
-            "items": [
-              {
-                "item_id": "eval-item-host-poker-nov",
-                "שם מטלה": "ערב פוקר",
-                "תאריך לביצוע": "2026-11-15"
-              }
-            ]
-          },
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לרשימת הקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        },
+        {
+          "utterance": "וגם לחם",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            }
+          ]
+        },
+        {
+          "utterance": "תמחקי את החלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "remove",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        },
+        {
+          "utterance": "תשני את הלחם ללחם מלא",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "update",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "core-reminder-offer-decline-mt",
+      "tag": "continuity",
+      "tags": [
+        "core-pack",
+        "reminders",
+        "multi-turn"
+      ],
+      "description": "Core 19–20–23: incomplete reminder → ask → user declines → no clock",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי משהו",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "בעצם לא צריך",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "core-delete-last-show-empty-mt",
+      "tag": "continuity",
+      "tags": [
+        "core-pack",
+        "shopping",
+        "show",
+        "multi-turn"
+      ],
+      "description": "Core 6: delete last shopping item then show shopping dump",
+      "setup": {
+        "lists": [
           {
-            "list_id": "eval-list-kibud-nov",
-            "list_type": "custom",
-            "list_name": "כיבוד · ערב פוקר · 15.11.2026",
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
             "owner": "טל",
             "scope": "personal",
             "items": [
               {
-                "item_id": "eval-item-chips-nov",
-                "שם": "חטיפים"
+                "item_id": "eval-item-last-yogurt",
+                "שם פריט": "יוגורט"
               }
             ]
           }
@@ -1492,25 +1604,29 @@
       },
       "turns": [
         {
-          "utterance": "תעזרי לי לארגן ערב פוקר ב־12.12.2026 ב־20:00",
+          "utterance": "קניתי יוגורט",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "add",
-              "listType": "tasks",
-              "minCount": 1,
-              "maxCount": 1,
-              "itemTextIncludes": "פוקר"
-            },
-            {
-              "type": "no_lists_add",
-              "listType": "custom"
+              "type": "lists_remove_item_ids",
+              "listType": "shopping",
+              "itemIds": [
+                "eval-item-last-yogurt"
+              ]
             },
             {
               "type": "list_ops_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "הצג קניות",
+          "constraints": [
+            {
+              "type": "show_dump",
+              "value": "shopping"
             },
             {
-              "type": "no_invented_reminder_add"
+              "type": "mutations_empty_or_read_only"
             }
           ]
         }

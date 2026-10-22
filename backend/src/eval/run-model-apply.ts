@@ -101,6 +101,9 @@ export async function applyModelMetadataTurn(input: {
   appliedViaProduction: true;
   mutations: Awaited<ReturnType<typeof applyEmployeeRecords>>["mutations"];
 }> {
+  // Fail closed before any production apply / Prisma side effect.
+  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+
   const { metadata, account } = input;
 
   if ((metadata.listOps?.length ?? 0) > 0) {

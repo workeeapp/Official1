@@ -13,6 +13,7 @@ import {
   type ModelApplyCase,
   type ModelApplyProposeInput,
 } from "../src/eval/run-model-apply.js";
+import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 
 function hostItemId(
   snapshot: {
@@ -117,7 +118,8 @@ describe("Event pack MODEL_APPLY (offline)", () => {
     if (!db?.trim()) {
       throw new Error("DATABASE_URL required for Event pack MODEL_APPLY");
     }
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL = db;
+    // Fail closed: never self-approve DATABASE_URL (could be product `workee`).
+    assertApprovedEvalDatabaseUrl(db);
   });
 
   afterEach(() => {
