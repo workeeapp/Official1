@@ -105,6 +105,13 @@ if (Test-ApiPort) {
   }
 }
 
+# Prefer this checkout's .env over a polluted parent DATABASE_URL (eval :5436).
+foreach ($name in @("DATABASE_URL", "DIRECT_URL", "WORKEE_DISABLE_WHATSAPP_OUTBOUND")) {
+  if (Test-Path "Env:$name") {
+    Remove-Item "Env:$name"
+  }
+}
+
 Set-Location $root
 Write-Log "Applying DB migrations"
 try {

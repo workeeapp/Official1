@@ -2,8 +2,14 @@ import { config as loadEnv } from "dotenv";
 import { z } from "zod";
 import { resolve } from "node:path";
 
-loadEnv({ path: resolve(process.cwd(), ".env"), quiet: true });
-loadEnv({ path: resolve(process.cwd(), "../.env"), quiet: true });
+// Prefer file values over a polluted parent env (e.g. agent/eval shell left
+// DATABASE_URL=workee_test:5436 and WhatsApp inbound then hit the wrong DB).
+loadEnv({ path: resolve(process.cwd(), ".env"), quiet: true, override: true });
+loadEnv({
+  path: resolve(process.cwd(), "../.env"),
+  quiet: true,
+  override: true,
+});
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),

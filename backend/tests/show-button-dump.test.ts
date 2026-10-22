@@ -13,6 +13,7 @@ import {
   formatRelativeDayLabel,
   formatRelativeFireAt,
   formatReminderWhen,
+  formatAgendaOneOffLine,
   formatAgendaStandingLine,
   formatScheduleSuffix,
   stripMatchingTitleClock,
@@ -567,6 +568,68 @@ describe("formatShowDumpFromKind", () => {
         { now },
       ),
     ).toBe("1. ערב פוקר 📎 🗂️");
+    expect(
+      formatNumberedItem(
+        1,
+        "ללכת לספר",
+        { כתובת: "הרצל 1, תל אביב" },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ללכת לספר 📍");
+    expect(
+      formatNumberedItem(
+        1,
+        "להתקשר לאורי",
+        { טלפון: "050-1234567" },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. להתקשר לאורי 📞");
+    expect(
+      formatNumberedItem(
+        1,
+        "ללכת לספר",
+        {
+          כתובת: "הרצל 1",
+          טלפון: "03-5555555",
+          attachments: [{ id: "a" }],
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ללכת לספר 📎 📍 📞");
+    expect(
+      formatNumberedItem(
+        1,
+        "חלב",
+        { כתובת: "should-not-show", טלפון: "050" },
+        "shopping",
+        { now },
+      ),
+    ).toBe("1. חלב");
+    expect(
+      formatAgendaStandingLine(
+        1,
+        "ללכת לספר",
+        {
+          חוזר: "כל יום שישי ב־10:00",
+          כתובת: "דיזנגוף 10",
+          next_occurrences: ["2026-10-24 10:00"],
+        },
+        "10:00",
+        { now },
+      ),
+    ).toBe("1. ללכת לספר 📍 — כל יום שישי ב־10:00 (קבוע)");
+    expect(
+      formatAgendaOneOffLine(
+        2,
+        "להתקשר לאורי",
+        { טלפון: "050-111", "שעה לביצוע": "09:00" },
+        "09:00",
+        { now },
+      ),
+    ).toBe("2. להתקשר לאורי 📞 — 09:00");
     expect(
       formatScheduleSuffix(
         {
@@ -2456,6 +2519,130 @@ describe("uniform standing + ping dump lines", () => {
     // Bare reminders dump still lists the watch (speaker's alert clocks).
     const remOnly = formatShowDumpFromKind("reminders", snap, { now })!;
     expect(remOnly).toContain("ביטקוין");
+  });
+
+  it("day-agenda excludes standing watch worker task (interval next_occurrences flood)", () => {
+    // Mashov/market watches: worker task + linked compose_condition clock.
+    // occurrenceRange expands interval polls across the day — must not print ~N times.
+    const hourly: string[] = [];
+    for (let h = 0; h < 24; h += 1) {
+      const hh = String(h).padStart(2, "0");
+      hourly.push(`2026-10-24 ${hh}:04`);
+    }
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "לוסי",
+          scope: "personal",
+          items: [
+            {
+              item_id: "mashov-watch",
+              "שם מטלה":
+                "לעקוב במשוב אחרי חיסורים, איחורים וציונים חדשים של יואב ב־21:00",
+              חוזר: "כל שעה",
+              next_occurrences: hourly,
+              reminder: {
+                reminder_id: "r-mashov-watch",
+                fire_at: "2026-10-22 21:04",
+                repeat: "custom",
+                recurrence_text: "כל שעה",
+              },
+            },
+            {
+              item_id: "kids",
+              "שם מטלה": "לאסוף את הילדים",
+              חוזר: "כל יום שישי ב־11:45",
+              next_occurrences: ["2026-10-24 11:45"],
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-mashov-watch",
+          item:
+            "לעקוב במשוב אחרי חיסורים, איחורים וציונים חדשים של יואב ב־21:00",
+          list_type: "tasks",
+          fire_at: "2026-10-22 21:04",
+          repeat: "custom",
+          recurrence_text: "כל שעה",
+          next_occurrences: hourly,
+          ping: ["טל"],
+          ping_ids: [],
+          owner: "לוסי",
+          text: "בדיקת משוב",
+          last_composed_text: "",
+          sent_text: "",
+          compose_at_fire: true,
+          compose_source: "mashov",
+          compose_lookback_hours: 0,
+          compose_place: "יואב",
+          compose_condition: {
+            type: "mashov_new",
+            aspects: ["grades", "absences", "behavior"],
+          },
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    };
+
+    const agenda = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-24",
+      dateTo: "2026-10-24",
+    })!;
+
+    expect(agenda).toContain("לאסוף את הילדים");
+    expect(agenda).not.toContain("לעקוב במשוב");
+    expect(agenda).not.toContain("00:04");
+    expect(
+      agenda.match(/לעקוב במשוב/g)?.length ?? 0,
+    ).toBe(0);
+  });
+
+  it("day-agenda collapses interval standing task to one line per day", () => {
+    const slots: string[] = [];
+    for (let h = 0; h < 12; h += 1) {
+      slots.push(
+        `2026-10-24 ${String(h * 2).padStart(2, "0")}:00`,
+      );
+    }
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "water",
+              "שם מטלה": "לשתות מים",
+              חוזר: "כל שעתיים",
+              next_occurrences: slots,
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const agenda = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-24",
+      dateTo: "2026-10-24",
+    })!;
+    expect(
+      agenda.match(/לשתות מים/g)?.length,
+    ).toBe(1);
   });
 
   it("day-agenda uses same fold mark; excludes linked clock as its own line", () => {

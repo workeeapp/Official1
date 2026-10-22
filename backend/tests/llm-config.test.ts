@@ -395,7 +395,7 @@ describe("LLM action schema", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("LIST MUTATE");
     expect(config.systemMessage).toContain(
-      "ALWAYS include one show-this-list button",
+      "ALWAYS include one show button",
     );
     expect(config.systemMessage).toContain('label «הצג קניות»');
     expect(config.systemMessage).toContain('label «הצג מטלות»');
@@ -408,7 +408,43 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("הצג רשימת באגים בקוד");
     expect(config.systemMessage).toContain(
-      "Same for update/remove on that list",
+      "Same for most update/remove on that list",
+    );
+  });
+
+  it("requires item-show button after tasks address/phone update", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("TASK ADDRESS/PHONE UPDATE");
+    expect(config.systemMessage).toContain("do NOT emit «הצג מטלות»");
+    expect(config.systemMessage).toContain("להצגת המטלה");
+    expect(config.systemMessage).toContain("הציגי את המטלה ללכת לספר");
+    expect(config.systemMessage).toContain('label:"ללכת לספר"');
+  });
+
+  it("teaches סמן כבוצע button as same finished-chore path", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("סמן כבוצע: <title>");
+    expect(config.systemMessage).toContain("SAME path as spoken finished-chore");
+    expect(config.systemMessage).toContain("SINGLE-TASK SHOW");
+    expect(config.systemMessage).toContain('command «סמן כבוצע: <exact שם מטלה>»');
+  });
+
+  it("teaches single-task show reminder add/update buttons", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("SINGLE-TASK SHOW");
+    expect(config.systemMessage).toContain('label «הוסף תזכורת»');
+    expect(config.systemMessage).toContain(
+      'command «הוסף תזכורת: <exact שם מטלה>»',
+    );
+    expect(config.systemMessage).toContain('label «עדכן תזכורת»');
+    expect(config.systemMessage).toContain(
+      'command «עדכן תזכורת: <exact שם מטלה>»',
+    );
+    expect(config.systemMessage).toContain(
+      "Add-reminder button «הוסף תזכורת: <title>»",
+    );
+    expect(config.systemMessage).toContain(
+      "Update-reminder button «עדכן תזכורת: <title>»",
     );
   });
 });

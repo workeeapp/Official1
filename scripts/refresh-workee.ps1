@@ -22,6 +22,14 @@ $scriptCheckout = Split-Path -Parent $PSScriptRoot
 $root = Get-WorkeeRuntimeRoot -ScriptCheckoutRoot $scriptCheckout -ForceLocal:$Local
 Set-Location $root
 
+# Drop inherited DB URLs so prisma/npm never prefer an agent/eval shell's
+# workee_test:5436 over this checkout's .env (live must stay on workee:5435).
+foreach ($name in @("DATABASE_URL", "DIRECT_URL", "WORKEE_DISABLE_WHATSAPP_OUTBOUND")) {
+  if (Test-Path "Env:$name") {
+    Remove-Item "Env:$name"
+  }
+}
+
 if ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(0|false|no)$') {
   $InheritConfig = $false
 } elseif ($env:WORKEE_REFRESH_INHERIT_CONFIG -match '^(1|true|yes)$') {

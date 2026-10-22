@@ -19,11 +19,8 @@ function asInfinitive(value: string): string {
 
 export const REMINDER_SNOOZE_MINUTES = 10;
 
-/**
- * Text a «נדנד» tap sends back as the recipient's next message. Only for a plain
- * ping clock — not a dictated send to someone or a compose-at-fire message.
- */
-export function reminderSnoozeCommand(input: {
+/** Shared gate + chore label for plain-ping fire buttons (נדנד / סמן כבוצע). */
+function plainPingContent(input: {
   item: string;
   text: string;
   composeAtFire: boolean;
@@ -36,8 +33,51 @@ export function reminderSnoozeCommand(input: {
   if (dictated && dictated !== label) {
     return "";
   }
-  const content = reminderLine(label, input.text).replace(/^תזכורת:\s*/u, "");
+  return reminderLine(label, input.text).replace(/^תזכורת:\s*/u, "");
+}
+
+/**
+ * Text a «נדנד» tap sends back as the recipient's next message. Only for a plain
+ * ping clock — not a dictated send to someone or a compose-at-fire message.
+ */
+export function reminderSnoozeCommand(input: {
+  item: string;
+  text: string;
+  composeAtFire: boolean;
+}): string {
+  const content = plainPingContent(input);
   return content ? `נדנדי לי ${content} בעוד ${REMINDER_SNOOZE_MINUTES} דקות` : "";
+}
+
+/**
+ * Text a «סמן כבוצע» tap sends — same eligibility as snooze. Model treats it like
+ * spoken «סיימתי / הלכתי…» (lists.remove or occurrence_done); no new engine path.
+ */
+export function reminderMarkDoneCommand(input: {
+  item: string;
+  text: string;
+  composeAtFire: boolean;
+}): string {
+  const content = plainPingContent(input);
+  return content ? `סמן כבוצע: ${content}` : "";
+}
+
+/** Plain-ping fire reply buttons: נדנד + סמן כבוצע (same gate; ≤ REPLY_BUTTON_MAX). */
+export function reminderFireButtons(input: {
+  item: string;
+  text: string;
+  composeAtFire: boolean;
+}): Array<{ label: string; command: string }> {
+  const buttons: Array<{ label: string; command: string }> = [];
+  const snooze = reminderSnoozeCommand(input);
+  if (snooze) {
+    buttons.push({ label: "נדנד", command: snooze });
+  }
+  const markDone = reminderMarkDoneCommand(input);
+  if (markDone) {
+    buttons.push({ label: "סמן כבוצע", command: markDone });
+  }
+  return buttons;
 }
 
 export function formatAttributedOutbound(input: {

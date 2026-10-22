@@ -668,6 +668,23 @@ function isConditionalWatchReminder(
   return gate != null && typeof gate === "object" && !Array.isArray(gate);
 }
 
+/** reminder_ids of conditional watches — their worker tasks must not flood day agenda. */
+function conditionalWatchReminderIds(
+  reminders: ReminderSnapshotRow[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const rem of reminders) {
+    if (!isConditionalWatchReminder(rem)) {
+      continue;
+    }
+    const id = rem.reminder_id?.trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 /** reminder_id values already shown via LINKED REMINDER on a task line. */
 function linkedReminderIdsFromTasks(
   snapshot: EmployeeRecordSnapshot,
@@ -1105,8 +1122,16 @@ export function formatTasksDayAgendaDump(
   const to = opts?.dateTo?.trim().slice(0, 10) || null;
   const now = opts?.now ?? new Date();
   const slots: AgendaSlot[] = [];
+  // Same rule as clocks: mashov/market/… watches are the digital worker's job.
+  // Their standing worker task still carries interval next_occurrences (every
+  // 5–60m) — without this skip, one Friday button prints the same line ~24–288×.
+  const watchReminderIds = conditionalWatchReminderIds(reminders);
 
   for (const row of rows) {
+    const linkedId = reminderIdFromTaskItem(row.item);
+    if (linkedId && watchReminderIds.has(linkedId)) {
+      continue;
+    }
     slots.push(...expandTaskAgendaSlots(row, from, to, now));
   }
 
@@ -1206,18 +1231,20 @@ function expandTaskAgendaSlots(
   const next = item.next_occurrences;
   if (recurring && Array.isArray(next) && next.length > 0) {
     const slots: AgendaSlot[] = [];
-    const seen = new Set<string>();
+    // One slot per calendar day — interval polls (כל 5 דקות / כל שעה) must not
+    // mint a numbered line for every fire time on that day.
+    const seenDays = new Set<string>();
     for (const occ of next) {
       const ymd = ymdFromDumpValue(occ);
       if (!ymd || !ymdInInclusiveRange(ymd, from, to)) {
         continue;
       }
-      const hm = hmFromDumpValue(occ) ?? extractHmFromText(recurring) ?? "";
-      const key = `${ymd}|${hm}`;
-      if (seen.has(key)) {
+      if (seenDays.has(ymd)) {
         continue;
       }
-      seen.add(key);
+      seenDays.add(ymd);
+      const hm =
+        extractHmFromText(recurring) ?? hmFromDumpValue(occ) ?? "";
       const stem = row.title.trim() || "מטלה";
       const id = String(item.item_id ?? "").trim();
       slots.push({
@@ -1278,18 +1305,22 @@ function expandReminderAgendaSlots(
   const next = row.next_occurrences;
   if (Array.isArray(next) && next.length > 0) {
     const slots: AgendaSlot[] = [];
-    const seen = new Set<string>();
+    // One clock line per day (interval series otherwise floods the agenda).
+    const seenDays = new Set<string>();
+    const seriesHm =
+      extractHmFromText(row.recurrence_text ?? "") ??
+      hmFromDumpValue(row.fire_at) ??
+      "";
     for (const occ of next) {
       const ymd = ymdFromDumpValue(occ);
       if (!ymd || !ymdInInclusiveRange(ymd, from, to)) {
         continue;
       }
-      const hm = hmFromDumpValue(occ) ?? "";
-      const key = `${ymd}|${hm}`;
-      if (seen.has(key)) {
+      if (seenDays.has(ymd)) {
         continue;
       }
-      seen.add(key);
+      seenDays.add(ymd);
+      const hm = seriesHm || hmFromDumpValue(occ) || "";
       const stem = row.item.trim() || "תזכורת";
       slots.push({
         ymd,
@@ -1393,6 +1424,7 @@ export function formatAgendaStandingLine(
   if (hasLinkedLists(item)) {
     body += " 🗂️";
   }
+  body += taskPlacePhoneMarks(item);
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -1425,6 +1457,7 @@ export function formatAgendaOneOffLine(
   if (hasLinkedLists(item)) {
     body += " 🗂️";
   }
+  body += taskPlacePhoneMarks(item);
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -2560,6 +2593,9 @@ export function formatNumberedItem(
   if (hasLinkedLists(item)) {
     body += " 🗂️";
   }
+  if (listType === "tasks") {
+    body += taskPlacePhoneMarks(item);
+  }
   // responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
   // sharedWithLabel is legacy; prefer responsibilityMark (no «עם»).
   if (opts?.responsibilityMark?.trim()) {
@@ -3055,4 +3091,16 @@ function hasAttachments(row: Record<string, unknown> | ReminderSnapshotRow): boo
 function hasLinkedLists(row: Record<string, unknown>): boolean {
   const linked = row.linked_lists;
   return Array.isArray(linked) && linked.length > 0;
+}
+
+/** Task dump marks: 📍 when כתובת set, 📞 when טלפון set (after 📎/🗂️). */
+export function taskPlacePhoneMarks(item: Record<string, unknown>): string {
+  let marks = "";
+  if (readText(item, ["כתובת", "address"])) {
+    marks += " 📍";
+  }
+  if (readText(item, ["טלפון", "phone", "telephone"])) {
+    marks += " 📞";
+  }
+  return marks;
 }

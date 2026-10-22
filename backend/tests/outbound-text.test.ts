@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   formatAttributedOutbound,
+  reminderFireButtons,
+  reminderMarkDoneCommand,
   reminderSnoozeCommand,
 } from "../src/services/outbound-text.js";
 
@@ -25,6 +27,80 @@ describe("reminderSnoozeCommand", () => {
     expect(
       reminderSnoozeCommand({ item: "ברכת יום הולדת", text: "", composeAtFire: true }),
     ).toBe("");
+  });
+});
+
+describe("reminderMarkDoneCommand", () => {
+  it("asks to mark the same chore done (same gate as snooze)", () => {
+    expect(
+      reminderMarkDoneCommand({
+        item: "ללכת לספר",
+        text: "",
+        composeAtFire: false,
+      }),
+    ).toBe("סמן כבוצע: ללכת לספר");
+    expect(
+      reminderMarkDoneCommand({
+        item: "ללכת לספר",
+        text: "ללכת לספר",
+        composeAtFire: false,
+      }),
+    ).toBe("סמן כבוצע: ללכת לספר");
+  });
+
+  it("has no mark-done for a dictated message or a composed send", () => {
+    expect(
+      reminderMarkDoneCommand({
+        item: "לשלוח הודעה לערן",
+        text: "ערן, אל תשכח את הפגישה",
+        composeAtFire: false,
+      }),
+    ).toBe("");
+    expect(
+      reminderMarkDoneCommand({
+        item: "ברכת יום הולדת",
+        text: "",
+        composeAtFire: true,
+      }),
+    ).toBe("");
+  });
+});
+
+describe("reminderFireButtons", () => {
+  it("puts נדנד and סמן כבוצע on a plain ping fire", () => {
+    expect(
+      reminderFireButtons({
+        item: "ללכת לספר",
+        text: "",
+        composeAtFire: false,
+      }),
+    ).toEqual([
+      {
+        label: "נדנד",
+        command: "נדנדי לי ללכת לספר בעוד 10 דקות",
+      },
+      {
+        label: "סמן כבוצע",
+        command: "סמן כבוצע: ללכת לספר",
+      },
+    ]);
+  });
+
+  it("emits no buttons for compose-at-fire or dictated send", () => {
+    expect(
+      reminderFireButtons({
+        item: "ברכת יום הולדת",
+        text: "",
+        composeAtFire: true,
+      }),
+    ).toEqual([]);
+    expect(
+      reminderFireButtons({
+        item: "לשלוח הודעה לערן",
+        text: "ערן, אל תשכח את הפגישה",
+        composeAtFire: false,
+      }),
+    ).toEqual([]);
   });
 });
 

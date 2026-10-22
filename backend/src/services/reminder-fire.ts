@@ -19,7 +19,10 @@ import { publishChatEvent } from "./chat-events.service.js";
 import { rememberInModelConversation } from "./llm-client.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
-import { formatAttributedOutbound, reminderSnoozeCommand } from "./outbound-text.js";
+import {
+  formatAttributedOutbound,
+  reminderFireButtons,
+} from "./outbound-text.js";
 import { composeScheduledOutbound } from "./reminder-compose.js";
 import { loadComposeFacts } from "./compose-facts.js";
 import {
@@ -622,14 +625,11 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         item: reminder.composeAtFire ? undefined : reminder.itemLabel,
         text: outboundBody,
       });
-      const snooze = reminderSnoozeCommand({
+      const buttons: LlmReplyButton[] = reminderFireButtons({
         item: reminder.itemLabel,
         text: outboundBody,
         composeAtFire: reminder.composeAtFire,
       });
-      const buttons: LlmReplyButton[] = snooze
-        ? [{ label: "נדנד", command: snooze }]
-        : [];
 
       let destDelivered = false;
       if (target && speaker) {
