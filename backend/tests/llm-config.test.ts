@@ -363,6 +363,11 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("Do NOT list platform-owner-only git digests");
     expect(config.systemMessage).toContain("COMPLEX EVENT TOPIC vs ORGANIZE INTENT");
     expect(config.systemMessage).toContain("intentional PRODUCT CONTRACT");
+    expect(config.systemMessage).toContain("DYNAMIC AXES");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN always offering the same trio",
+    );
+    expect(config.systemMessage).toContain("מפגש קולנוע → איזה סרט");
     expect(config.systemMessage).toContain("collision-safe custom list_name");
     expect(config.systemMessage).toContain("כיבוד · ערב פוקר · 12.12.2026");
     expect(config.systemMessage).toContain(

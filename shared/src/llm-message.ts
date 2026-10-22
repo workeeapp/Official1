@@ -3950,8 +3950,9 @@ export function toReplyButtons(rawMetadata: unknown): LlmReplyButton[] {
 
 /**
  * Closed-choice vocabulary (כן/לא, domain picks, …) — stays on the bubble
- * the model assigned. Everything else that is not this set can be confirm
- * show chrome (classic «הצג» or content-aware natural asks).
+ * the model assigned. Also: short label≈command covers invented complex-event
+ * axes (e.g. «איזה סרט»). Everything else can be confirm show chrome
+ * (classic «הצג» or content-aware natural asks with a longer command).
  */
 const CLOSED_CHOICE_REPLY_TOKENS = new Set(
   [
@@ -3980,20 +3981,31 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
   ].map((token) => token.toLowerCase()),
 );
 
-/** Closed choice taps (כן/לא / domain / car…) — not post-mutate show chrome. */
+/** Max length for invented closed-choice axes (label≈command). */
+const CLOSED_CHOICE_SHORT_MAX = 20;
+
+/** Closed choice taps (כן/לא / domain / invented axis…) — not post-mutate show chrome. */
 export function isClosedChoiceReplyButton(button: LlmReplyButton): boolean {
   const label = button.label.trim().toLowerCase();
   const command = button.command.trim().toLowerCase();
-  return (
+  if (
     CLOSED_CHOICE_REPLY_TOKENS.has(label) ||
     CLOSED_CHOICE_REPLY_TOKENS.has(command)
+  ) {
+    return true;
+  }
+  // Invented parallel choices (complex-event axes): short label equals command.
+  return (
+    label.length > 0 &&
+    label === command &&
+    label.length <= CLOSED_CHOICE_SHORT_MAX
   );
 }
 
 /**
  * Post-mutate show taps — sit on the first spoken bubble.
- * Classic «הצג» / «show …», or any non-choice content-aware suggestion
- * (e.g. «מה יש לי מחר», «למי אני צריך להתקשר»).
+ * Classic «הצג» / «show …», or content-aware suggestions where the command
+ * is a longer natural ask than the short label (POST-MUTATE SHOW shape).
  */
 export function isShowListReplyButton(button: LlmReplyButton): boolean {
   const label = button.label.trim();

@@ -711,9 +711,10 @@ describe("parseLlmReply", () => {
     expect(
       isShowListReplyButton({ label: "הצג", command: "הצג רשימת מטלות" }),
     ).toBe(true);
+    // POST-MUTATE SHOW: short label + longer natural ask in command.
     expect(
       isShowListReplyButton({
-        label: "מה יש לי מחר",
+        label: "מחר",
         command: "מה יש לי מחר",
       }),
     ).toBe(true);
@@ -736,10 +737,23 @@ describe("parseLlmReply", () => {
     expect(
       isClosedChoiceReplyButton({ label: "כיבוד", command: "כיבוד" }),
     ).toBe(true);
+    // Invented complex-event axes (label≈command, short) stay closed-choice.
+    expect(
+      isClosedChoiceReplyButton({ label: "איזה סרט", command: "איזה סרט" }),
+    ).toBe(true);
+    expect(
+      isShowListReplyButton({ label: "איזה סרט", command: "איזה סרט" }),
+    ).toBe(false);
     expect(
       isClosedChoiceReplyButton({
-        label: "מה יש לי מחר",
-        command: "מה יש לי מחר",
+        label: "באיזו שעה",
+        command: "באיזו שעה",
+      }),
+    ).toBe(true);
+    expect(
+      isShowListReplyButton({
+        label: "באיזו שעה",
+        command: "באיזו שעה",
       }),
     ).toBe(false);
   });

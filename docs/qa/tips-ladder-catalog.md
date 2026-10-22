@@ -32,7 +32,7 @@ Engine fires **one tip per turn**; mid unlocks after any basic in the topic was 
 | 301 | custom_basic_show | custom | basic | add | דרך אגב, אפשר לבקש «הציגי את בעיות» (או השם שבחרת) ואראה מה יש שם. |
 | 302 | custom_mid_more | custom | intermediate | add | אפשר גם להוסיף עוד פריטים לאותו אוסף במשפט הבא — בלי לפתוח משהו חדש. |
 | 303 | custom_mid_share | custom | intermediate | add | כדאי לנסות לשתף אוסף עם מישהו — «תשתפי את בעיות עם עמית» — כדי שתראו את אותו דבר. |
-| 304 | custom_adv_event | custom | advanced | add | אני ממליצה: כשמתארגנים לערב (פוקר, יום הולדת) אפשר לחבר אליו כיבוד או מי מגיע — ואנהל את זה יחד עם המטלה של האירוע. |
+| 304 | custom_adv_event | custom | advanced | add | אני ממליצה: כשמתארגנים לערב (פוקר, יום הולדת, קולנוע) אפשר לחבר אליו רשימות מתאימות לאירוע — ואנהל את זה יחד עם המטלה של האירוע. |
 | 305 | custom_mid_edit | custom | intermediate | update | דרך אגב, אפשר לעדכן פריט באוסף — «תשני בבעיות את לבדוק שרת ללבדוק פרודקשן». |
 | 306 | custom_mid_delete | custom | intermediate | remove | כדאי לנסות למחוק פריט ספציפי בשם — «מחקתי לבדוק שרת מבעיות» — בלי למחוק את כל האוסף. |
 | 400 | filing_basic_what | filing | basic | add | לידיעתך: תיוק שומר עובדה קבועה — כתובת, קוד, העדפה — לא משהו לקנות או לעשות היום. |
