@@ -390,4 +390,25 @@ describe("LLM action schema", () => {
       "FORBIDDEN removing items from more than one shell",
     );
   });
+
+  it("requires list-show POST-MUTATE button with short kind labels", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("LIST MUTATE");
+    expect(config.systemMessage).toContain(
+      "ALWAYS include one show-this-list button",
+    );
+    expect(config.systemMessage).toContain('label «הצג קניות»');
+    expect(config.systemMessage).toContain('label «הצג מטלות»');
+    expect(config.systemMessage).toContain('label «הצג אנשי קשר»');
+    expect(config.systemMessage).toContain(
+      "custom → label «הצג רשימה»",
+    );
+    expect(config.systemMessage).toContain(
+      "NEVER put a custom list_name on the label",
+    );
+    expect(config.systemMessage).toContain("הצג רשימת באגים בקוד");
+    expect(config.systemMessage).toContain(
+      "Same for update/remove on that list",
+    );
+  });
 });
