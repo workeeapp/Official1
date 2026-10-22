@@ -160,4 +160,43 @@ describe("mergeStudioEvalPromptProvenance (offline)", () => {
     expect(serialized.promptHash).toBe("deadbeefcafebabe");
     expect(serialized.instructionsSha256).toBeUndefined();
   });
+
+  it("blocked-before-start provenance stays pre-merge (startStudioRun skips merge)", () => {
+    // Documents startStudioRun: when assertStudioTrackRunnable throws, the
+    // blocked record is written with promptSource "not_started" and never
+    // calls mergeStudioEvalPromptProvenance (no summary.prompt yet).
+    const blocked: StudioRunProvenance = {
+      productionApply: false,
+      promptSource: "not_started",
+      promptHash: "n/a",
+      speakerIdentity: {
+        kind: "fixture",
+        employeeId: null,
+        name: "(not started)",
+        note: "Run blocked before identity binding",
+      },
+      digitalEmployee: {
+        kind: "fixture",
+        id: null,
+        name: "(not started)",
+        instructionsSource: "n/a",
+        note: "Run blocked before prompt load",
+      },
+      userId: null,
+      userIdKind: "none",
+      databaseTarget: { classification: "none", detail: "blocked" },
+      safetyGate: { allowed: false, blockers: ["track refused"] },
+    };
+    expect(blocked.instructionsSha256).toBeUndefined();
+    expect(blocked.promptSource).toBe("not_started");
+    expect(blocked.promptHash).toBe("n/a");
+    // Merge is a no-op only if not called — calling it would overwrite
+    // promptSource; blocked path must not call it.
+    const accidentallyMerged = mergeStudioEvalPromptProvenance(
+      blocked,
+      samplePrompt(),
+    );
+    expect(accidentallyMerged.promptSource).not.toBe("not_started");
+    expect(blocked.promptSource).toBe("not_started");
+  });
 });

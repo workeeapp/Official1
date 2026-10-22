@@ -1134,6 +1134,138 @@ describe("employee records", () => {
     expect(deriveCustomListName([])).toBe("");
   });
 
+  it("refuses creating a custom list when listName stays empty after derivation", async () => {
+    listFindFirst.mockResolvedValue(null);
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [
+        {
+          action: "add",
+          listType: "custom",
+          listName: "",
+          items: [{ שם: "עוגה" }, { שם: "שתיה" }],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(listCreate).not.toHaveBeenCalled();
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(result.mutations).toEqual([]);
+  });
+
+  it("creates a named custom list with collision-safe list_name", async () => {
+    const listName = "כיבוד · ערב יום הולדת";
+    listFindFirst.mockResolvedValue(null);
+    listCreate.mockResolvedValue({
+      id: "kibud-list",
+      employeeId,
+      listType: "custom",
+      name: listName,
+      scope: "personal",
+      visibleTo: [],
+    });
+    itemCreate
+      .mockResolvedValueOnce({ id: "item-cake" })
+      .mockResolvedValueOnce({ id: "item-drink" });
+    itemFindMany.mockResolvedValue([]);
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [
+        {
+          action: "add",
+          listType: "custom",
+          listName,
+          items: [{ שם: "עוגה" }, { שם: "שתיה" }],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(listCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        employeeId,
+        listType: "custom",
+        name: listName,
+      }),
+    });
+    expect(itemCreate).toHaveBeenCalledTimes(2);
+    expect(result.mutations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "add",
+          listName,
+          itemKey: "עוגה",
+        }),
+        expect.objectContaining({
+          action: "add",
+          listName,
+          itemKey: "שתיה",
+        }),
+      ]),
+    );
+  });
+
+  it("still creates shopping and tasks shells with empty list_name", async () => {
+    const shop = {
+      id: "shop-1",
+      employeeId,
+      listType: "shopping",
+      name: "",
+      scope: "personal",
+      visibleTo: [],
+    };
+    const tasks = {
+      id: "tasks-1",
+      employeeId,
+      listType: "tasks",
+      name: "",
+      scope: "personal",
+      visibleTo: [],
+    };
+    listFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    listCreate
+      .mockResolvedValueOnce(shop)
+      .mockResolvedValueOnce(tasks);
+    itemCreate
+      .mockResolvedValueOnce({ id: "milk-1" })
+      .mockResolvedValueOnce({ id: "task-1" });
+    itemFindMany.mockResolvedValue([]);
+
+    const result = await applyEmployeeRecords(employeeId, {
+      lists: [
+        {
+          action: "add",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "חלב" }],
+          targets: [],
+        },
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "להתקשר" }],
+          targets: [],
+        },
+      ],
+      filing: [],
+    });
+
+    expect(listCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ listType: "shopping", name: "" }),
+    });
+    expect(listCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ listType: "tasks", name: "" }),
+    });
+    expect(itemCreate).toHaveBeenCalledTimes(2);
+    expect(result.mutations).toHaveLength(2);
+  });
+
   it("treats list-title placeholders as phantom custom items", () => {
     const title = "המטרות של הפועל פתח תקווה עד 2030";
     expect(isPhantomCustomListItem(title, { שנה: title })).toBe(true);

@@ -1,0 +1,33 @@
+# Isolated LIVE_FULL / eval Postgres — separate instance from product (workee-postgres :5435).
+# Usage: docker compose -f docker-compose.live-full-eval.yml --env-file .env.live-full-eval up -d
+# Does not modify product compose, volume, or shared .env.
+
+services:
+  postgres_eval:
+    image: postgres:16-alpine
+    container_name: workee-postgres-eval
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: workee_bootstrap
+      POSTGRES_PASSWORD: ${WORKEE_BOOTSTRAP_PASSWORD}
+      # Bootstrap catalog only — app/eval DB is created in init (workee_test).
+      POSTGRES_DB: postgres
+      WORKEE_EVAL_PASSWORD: ${WORKEE_EVAL_PASSWORD}
+    ports:
+      - "5436:5432"
+    volumes:
+      - workee_pg_eval_data:/var/lib/postgresql/data
+      - ./docker/live-full-eval/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U workee_bootstrap -d workee_test && psql -U workee_bootstrap -d workee_test -tAc \"SELECT 1 FROM pg_roles WHERE rolname='workee_eval' AND NOT rolsuper\" | grep -q 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  workee_pg_eval_data:

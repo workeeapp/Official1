@@ -374,4 +374,20 @@ describe("LLM action schema", () => {
       "FORBIDDEN silently sharing one list across two hosts",
     );
   });
+
+  it("encodes multi-shell clear ASK and same-turn custom list_name alignment", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("SAME-TURN CREATE+LINK");
+    expect(config.systemMessage).toContain(
+      "lists.add.list_name MUST be the same collision-safe string",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN empty list_name on the custom add when adding items",
+    );
+    expect(config.systemMessage).toContain("MULTI-SHELL CLEAR");
+    expect(config.systemMessage).toContain("נקה את הקניות");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN removing items from more than one shell",
+    );
+  });
 });

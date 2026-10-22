@@ -2427,6 +2427,20 @@ async function applyListAction(
       deletedAt: null,
     },
   });
+  // Custom lists require a real name. Refuse creating an unnamed custom shell
+  // (and do not apply its items). Built-in shopping/tasks/contacts keep empty name.
+  if (
+    !existingList &&
+    resolvedAction.listType === "custom" &&
+    !listName.trim()
+  ) {
+    return {
+      events: [],
+      mutations: [],
+      cancelledReminders: [],
+      cancelledReminderIds: [],
+    };
+  }
   const createdList = !existingList;
   const list =
     existingList ??

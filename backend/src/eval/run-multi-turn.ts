@@ -380,6 +380,46 @@ export function collectPartnerNamesFromSetup(
   return [...names];
 }
 
+/** DB unique key for EmployeeLists: (list_type, name). Pure — no I/O. */
+export function setupListSeedKey(list: {
+  list_type?: string;
+  list_name?: string;
+  name?: string;
+}): string {
+  const listType = String(list.list_type ?? "").trim();
+  const listName = String(list.list_name ?? list.name ?? "");
+  return `${listType}\0${listName}`;
+}
+
+/**
+ * Fail closed when setup authors two lists that share (list_type, name).
+ * That collides with EmployeeLists unique (employee_id, list_type, name) and
+ * would silently merge under seedSetup findFirst reuse.
+ */
+export function assertSetupListKeysIsolated(
+  lists: Array<{
+    list_type?: string;
+    list_name?: string;
+    name?: string;
+    list_id?: string;
+  }>,
+): void {
+  const seen = new Map<string, string>();
+  for (const list of lists) {
+    const key = setupListSeedKey(list);
+    const label =
+      String(list.list_id ?? "").trim() ||
+      `${list.list_type ?? "?"}:${list.list_name ?? list.name ?? ""}`;
+    const prior = seen.get(key);
+    if (prior) {
+      throw new Error(
+        `seed setup duplicate list identity (${JSON.stringify(key.split("\0")[0])}, name=${JSON.stringify(key.split("\0")[1] ?? "")}): ${prior} and ${label} — give distinct list_name`,
+      );
+    }
+    seen.set(key, label);
+  }
+}
+
 /** Seed corpus setup rows into Prisma; map symbolic ids → real UUIDs. */
 export async function seedSetup(
   employeeId: string,
@@ -412,13 +452,34 @@ export async function seedSetup(
     return ids;
   };
 
+  /** Track (list_type, name) claimed in this seed so two empty-name shopping lists stay isolated. */
+  const claimedListKeys = new Set<string>();
+
   for (const list of setup?.lists ?? []) {
     const symbolicListId = String(list.list_id ?? "").trim();
-    const listName = String(
+    let listName = String(
       (list as { list_name?: string; name?: string }).list_name ??
         (list as { name?: string }).name ??
         "",
     );
+    let seedKey = setupListSeedKey({
+      list_type: list.list_type,
+      list_name: listName,
+    });
+    if (claimedListKeys.has(seedKey)) {
+      // Distinct EmployeeLists row required — suffix with symbolic id (or short uuid).
+      const suffix =
+        symbolicListId && !UUID_RE.test(symbolicListId)
+          ? symbolicListId
+          : randomUUID().slice(0, 8);
+      listName = listName ? `${listName}·${suffix}` : suffix;
+      seedKey = setupListSeedKey({
+        list_type: list.list_type,
+        list_name: listName,
+      });
+    }
+    claimedListKeys.add(seedKey);
+
     const listPartners = resolvePartnerIds(
       (list as { shared_with?: unknown }).shared_with,
     );
@@ -530,6 +591,13 @@ export async function seedSetup(
       const name = String(row.name ?? "").trim();
       const phone = String(row.phone ?? "").trim();
       if (!name || !phone) continue;
+      const symbolic =
+        typeof (row as { contact_id?: string }).contact_id === "string"
+          ? String((row as { contact_id?: string }).contact_id).trim()
+          : "";
+      // Optional authored UUID — production Contacts.id is Uuid; keep seed aligned.
+      const fixedId =
+        symbolic && UUID_RE.test(symbolic) ? symbolic : undefined;
       const created = await prisma.contact.upsert({
         where: {
           ownerEmployeeId_phone: {
@@ -538,6 +606,7 @@ export async function seedSetup(
           },
         },
         create: {
+          ...(fixedId ? { id: fixedId } : {}),
           userId,
           ownerEmployeeId: employeeId,
           name,
@@ -550,12 +619,10 @@ export async function seedSetup(
         update: { name },
       });
       idMap.set(`contact-${index}`, created.id);
-      const symbolic =
-        typeof (row as { contact_id?: string }).contact_id === "string"
-          ? String((row as { contact_id?: string }).contact_id).trim()
-          : "";
       if (symbolic && !UUID_RE.test(symbolic)) {
         idMap.set(symbolic, created.id);
+      } else if (fixedId) {
+        idMap.set(fixedId, created.id);
       }
     }
   }

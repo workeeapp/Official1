@@ -77,6 +77,42 @@ export interface ModelApplyProposeResult {
 }
 
 /**
+ * Harness-only bridge until shared `toListAction` accepts camelCase `listType`
+ * (server fix pending). LIVE propose returns already-normalized `LlmMetadata`
+ * with `listType`; a second `parseLlmMetadata` would otherwise default missing
+ * snake `list_type` to `"custom"` and hide real product failures.
+ *
+ * Copies `listType` → `list_type` on lists[] when snake is absent. Does not
+ * invent shopping/tasks from Hebrew or change apply semantics.
+ */
+export function bridgeListTypeAliasesForParse(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const root = { ...(value as Record<string, unknown>) };
+  if (!Array.isArray(root.lists)) {
+    return root;
+  }
+  root.lists = root.lists.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return entry;
+    }
+    const row = { ...(entry as Record<string, unknown>) };
+    const snake = row.list_type;
+    const camel = row.listType;
+    if (
+      (snake == null || snake === "") &&
+      typeof camel === "string" &&
+      camel.trim()
+    ) {
+      row.list_type = camel.trim();
+    }
+    return row;
+  });
+  return root;
+}
+
+/**
  * Fail closed before any Prisma use. Never logs URL/credentials.
  */
 export function assertModelApplyDatabaseApproved(): void {
@@ -248,7 +284,9 @@ export async function runModelApplyCase(
       });
 
       const metadata = parseLlmMetadata(
-        rewriteAliases(proposed.metadata, idMap),
+        bridgeListTypeAliasesForParse(
+          rewriteAliases(proposed.metadata, idMap),
+        ),
       );
       const response = proposed.response ?? turn.response ?? "";
       priorMetadata.push(metadata);

@@ -1,0 +1,46 @@
+npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> @workee/backend@1.0.0 test:model-eval-full
+> vitest run --config vitest.model-eval.config.ts tests/model-eval-full.live.test.ts
+
+
+ RUN  v3.2.7 C:/Users/dorta/Desktop/Official1/backend
+
+ ❯ tests/model-eval-full.live.test.ts (1 test | 1 failed) 218915ms
+   × LIVE-full model→apply→facts (Lucy) > meets soft pass-rate on the live-full corpus 218913ms
+     → passRate 0.17 < required 0.7; critical failed: full-list-buy-milk, full-shopping-add-milk, full-task-done-doctor, full-share-shop-with-amit, full-event-host-create-poker, full-mt-event-clarify-then-link, full-mt-clarify-task-which, full-mt-multi-add-then-buy, full-mt-share-ask-then-partner; failed: full-list-buy-milk[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-shopping-add-milk[turn 0 constraints: expected lists.add/shopping], full-reminder-create-relative[turn 0 constraints: expected lists.add/tasks], full-task-done-doctor[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-reminder-create-explicit[turn 0 constraints: expected lists.add/shopping], full-share-shop-with-amit[turn 0 constraints: expected lists.update/shopping], full-mt-share-ask-then-partner[turn 1 constraints: expected lists.update/shopping], full-mt-event-clarify-then-link[turn 1 constraints: lists.update/tasks count 0 < 1|turn 1 facts: expected to include "כיבוד"], full-event-host-create-poker[turn 0 constraints: expected lists.add/tasks; must not lists.add/custom], full-mt-clarify-task-which[turn 1 constraints: lists_remove_item_ids: remove on unexpected list_type], full-mt-multi-add-then-buy[turn 0 constraints: expected lists.add/shopping|turn 1 constraints: expected lists.remove/shopping|turn 1 facts: expected to exclude "יוגורט"], full-core-task-mom-tomorrow[turn 0 constraints: expected lists.add/tasks], full-core-shopping-crud-mt[turn 0 constraints: expected lists.add/shopping|turn 1 constraints: expected lists.add/shopping|turn 2 constraints: expected lists.remove/shopping|turn 3 constraints: expected lists.update/shopping|turn 3 facts: expected to include "לחם מלא"], full-cascade-delete-task-24a[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-core-assign-michal-shop[turn 0 constraints: expected lists.update/shopping]: expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/model-eval-full.live.test.ts > LIVE-full model→apply→facts (Lucy) > meets soft pass-rate on the live-full corpus
+AssertionError: passRate 0.17 < required 0.7; critical failed: full-list-buy-milk, full-shopping-add-milk, full-task-done-doctor, full-share-shop-with-amit, full-event-host-create-poker, full-mt-event-clarify-then-link, full-mt-clarify-task-which, full-mt-multi-add-then-buy, full-mt-share-ask-then-partner; failed: full-list-buy-milk[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-shopping-add-milk[turn 0 constraints: expected lists.add/shopping], full-reminder-create-relative[turn 0 constraints: expected lists.add/tasks], full-task-done-doctor[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-reminder-create-explicit[turn 0 constraints: expected lists.add/shopping], full-share-shop-with-amit[turn 0 constraints: expected lists.update/shopping], full-mt-share-ask-then-partner[turn 1 constraints: expected lists.update/shopping], full-mt-event-clarify-then-link[turn 1 constraints: lists.update/tasks count 0 < 1|turn 1 facts: expected to include "כיבוד"], full-event-host-create-poker[turn 0 constraints: expected lists.add/tasks; must not lists.add/custom], full-mt-clarify-task-which[turn 1 constraints: lists_remove_item_ids: remove on unexpected list_type], full-mt-multi-add-then-buy[turn 0 constraints: expected lists.add/shopping|turn 1 constraints: expected lists.remove/shopping|turn 1 facts: expected to exclude "יוגורט"], full-core-task-mom-tomorrow[turn 0 constraints: expected lists.add/tasks], full-core-shopping-crud-mt[turn 0 constraints: expected lists.add/shopping|turn 1 constraints: expected lists.add/shopping|turn 2 constraints: expected lists.remove/shopping|turn 3 constraints: expected lists.update/shopping|turn 3 facts: expected to include "לחם מלא"], full-cascade-delete-task-24a[turn 0 constraints: lists_remove_item_ids: remove on unexpected list_type], full-core-assign-michal-shop[turn 0 constraints: expected lists.update/shopping]: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/model-eval-full.live.test.ts:143:7
+    141|         .filter(Boolean)
+    142|         .join("; "),
+    143|     ).toBe(true);
+       |       ^
+    144|   }, 900_000);
+    145| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  18:58:28
+   Duration  221.17s (transform 1.16s, setup 49ms, collect 1.87s, tests 218.91s, environment 0ms, prepare 136ms)
+
+npm error Lifecycle script `test:model-eval-full` failed with error:
+npm error code 1
+npm error path C:\Users\dorta\Desktop\Official1\backend
+npm error workspace @workee/backend@1.0.0
+npm error location C:\Users\dorta\Desktop\Official1\backend
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c vitest run --config vitest.model-eval.config.ts tests/model-eval-full.live.test.ts

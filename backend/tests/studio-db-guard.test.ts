@@ -7,8 +7,10 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertApprovedEvalDatabaseUrl,
+  assertLiveFullDatabaseName,
   assertValidEvalPostgresUrl,
   evalDatabaseNameFromUrl,
+  LIVE_FULL_REQUIRED_DATABASE_NAME,
   UnapprovedEvalDatabaseError,
 } from "../src/eval/studio-db-guard.js";
 import { approvedTestDatabaseConfigured } from "../src/eval/studio-safety.js";
@@ -150,6 +152,19 @@ describe("studio-db-guard (pure unit, no DB I/O)", () => {
     expect(evalDatabaseNameFromUrl(ISOLATED)).toBe("workee_eval_isolated");
     expect(evalDatabaseNameFromUrl(EMPTY_PATH)).toBeNull();
     expect(evalDatabaseNameFromUrl(MALFORMED)).toBeNull();
+  });
+
+  it("assertLiveFullDatabaseName requires exactly workee_test", () => {
+    expect(LIVE_FULL_REQUIRED_DATABASE_NAME).toBe("workee_test");
+    expect(() =>
+      assertLiveFullDatabaseName(
+        "postgresql://workee:workee@127.0.0.1:5432/workee_test",
+      ),
+    ).not.toThrow();
+    expect(() => assertLiveFullDatabaseName(ISOLATED)).toThrow(/workee_test/i);
+    expect(() => assertLiveFullDatabaseName(PRODUCT_WORKEE)).toThrow(
+      /workee_test/i,
+    );
   });
 
   it("does not open a Prisma connection while evaluating URLs", async () => {

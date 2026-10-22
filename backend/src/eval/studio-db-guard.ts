@@ -23,6 +23,12 @@ export class UnapprovedEvalDatabaseError extends Error {
 /** Product DB pathname — never allowed for eval writes, even on exact match. */
 const PRODUCT_DATABASE_NAME = "workee";
 
+/**
+ * Canonical LIVE_FULL database name. Stricter than ENGINE/MODEL_APPLY (any
+ * non-product approved URL): FULL must target this identity only.
+ */
+export const LIVE_FULL_REQUIRED_DATABASE_NAME = "workee_test";
+
 const POSTGRES_SCHEMES = new Set(["postgresql", "postgres"]);
 
 /**
@@ -113,6 +119,25 @@ export function assertApprovedEvalDatabaseUrl(
   if (name.toLowerCase() === PRODUCT_DATABASE_NAME) {
     throw new UnapprovedEvalDatabaseError(
       "database identity 'workee' is the product database; refusing database use",
+    );
+  }
+}
+
+/**
+ * LIVE_FULL-only: approved URL must name exactly `workee_test`.
+ * Does not replace assertApprovedEvalDatabaseUrl — call after it.
+ * Pure: never opens a database connection.
+ */
+export function assertLiveFullDatabaseName(url: string | undefined): void {
+  if (typeof url !== "string" || !url.trim()) {
+    throw new UnapprovedEvalDatabaseError(
+      "database URL is missing; refusing LIVE_FULL",
+    );
+  }
+  const name = assertValidEvalPostgresUrl(url);
+  if (name !== LIVE_FULL_REQUIRED_DATABASE_NAME) {
+    throw new UnapprovedEvalDatabaseError(
+      `LIVE_FULL requires database name '${LIVE_FULL_REQUIRED_DATABASE_NAME}' (got '${name}'); refusing`,
     );
   }
 }

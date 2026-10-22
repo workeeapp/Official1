@@ -29,7 +29,8 @@ import {
   type ModelApplyCaseResult,
   type ModelApplyProposeInput,
 } from "./run-model-apply.js";
-import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
+import { assertLiveFullDbRoleIsolation } from "./studio-db-role-isolation.js";
+import { assertLiveFullCliAllowed } from "./studio-safety.js";
 
 export type LiveFullCaseResult = ModelApplyCaseResult & {
   track: "LIVE_FULL";
@@ -58,7 +59,10 @@ export async function runLiveFullCase(
   suiteCase: LiveFullCorpusCase,
   options?: { speaker?: string; prompt?: ResolvedEvalPrompt },
 ): Promise<LiveFullCaseResult> {
-  assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+  // Fail closed: approved test DB + WA/reminder kill switches in this process.
+  assertLiveFullCliAllowed();
+  // Fail closed: connected role must not be able to CONNECT to product `workee`.
+  await assertLiveFullDbRoleIsolation();
 
   const speaker = options?.speaker ?? "טל";
   // LIVE_FULL historically omitted מיכל from Known employees — keep byte-identical.
@@ -73,19 +77,9 @@ export async function runLiveFullCase(
   const result = await runModelApplyCase(
     applyCase,
     async (input: ModelApplyProposeInput) => {
-      // Prefer live Contacts rows (real UUIDs) so directory.remove can apply.
-      const liveContacts = await listContactsForEmployee(
-        input.account.employeeId,
-      );
-      const contacts =
-        liveContacts.length > 0
-          ? liveContacts
-          : (suiteCase.setup?.contacts ?? []).map((row, index) => ({
-              id: `contact-${index}`,
-              name: row.name,
-              phone: row.phone,
-              kind: "person" as const,
-            }));
+      // Always inject live Contacts rows (real UUIDs). Never fall back to
+      // symbolic contact-N ids — those are not valid Contacts.id and break apply.
+      const contacts = await listContactsForEmployee(input.account.employeeId);
       const message = [
         formatSessionClockContext(),
         input.facts,
@@ -141,6 +135,10 @@ export async function runLiveFullCorpus(
   if (options?.caseIds?.length) {
     selected = selected.filter((row) => options.caseIds!.includes(row.id));
   }
+
+  // Once before any OpenAI / apply — same gate as runLiveFullCase.
+  assertLiveFullCliAllowed();
+  await assertLiveFullDbRoleIsolation();
 
   const prompt = await resolveEvalPrompt({
     speaker: corpus.speaker,

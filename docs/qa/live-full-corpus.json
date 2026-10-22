@@ -699,8 +699,9 @@
       "setup": {
         "contacts": [
           {
+            "contact_id": "contact-0",
             "name": "מיכל",
-            "phone": "0501234567"
+            "phone": "0541111111"
           }
         ]
       },
@@ -1285,14 +1286,22 @@
               {
                 "item_id": "eval-item-shop-milk",
                 "שם פריט": "חלב"
-              },
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-shopping-shared",
+            "list_type": "shopping",
+            "list_name": "קניות משותפת",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "עמית"
+            ],
+            "items": [
               {
                 "item_id": "eval-item-shop-shared-bread",
-                "שם פריט": "לחם",
-                "scope": "shared",
-                "shared_with": [
-                  "עמית"
-                ]
+                "שם פריט": "לחם"
               }
             ]
           }

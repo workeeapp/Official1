@@ -11,7 +11,10 @@
  */
 import {
   assertApprovedEvalDatabaseUrl,
+  assertLiveFullDatabaseName,
+  LIVE_FULL_REQUIRED_DATABASE_NAME,
   UnapprovedEvalDatabaseError,
+  evalDatabaseNameFromUrl,
 } from "./studio-db-guard.js";
 
 export type StudioTrack = "LIVE_MODEL" | "LIVE_MODEL_MT" | "LIVE_FULL";
@@ -166,6 +169,105 @@ export function assertLiveFullAllowed(): void {
   if (!report.allowed) {
     throw new UnapprovedEvalDatabaseError(
       `LIVE_FULL blocked (isolation incomplete): ${report.blockers.join("; ")}`,
+    );
+  }
+}
+
+/**
+ * CLI LIVE_FULL isolation (npm run test:model-eval-full / runLiveFull*).
+ * Same DB + outbound/reminder fail-closed rules as Studio FULL probe, but does
+ * **not** require STUDIO_ALLOW_LIVE_FULL (Studio Phase A still refuses FULL).
+ * Reads only this process's env — never opens Prisma or mutates other processes.
+ */
+export function probeLiveFullCliSafety(): StudioSafetyReport {
+  const checks: StudioSafetyCheck[] = [];
+  const notes: string[] = [];
+
+  const db = approvedTestDatabaseConfigured();
+  checks.push({
+    id: "approved_test_database",
+    ok: db.ok,
+    detail: db.detail,
+  });
+
+  // Stricter than ENGINE: FULL must target canonical workee_test by name.
+  let liveFullNameOk = false;
+  let liveFullNameDetail: string;
+  if (!db.ok) {
+    liveFullNameDetail =
+      "skipped until approved_test_database passes (LIVE_FULL still requires " +
+      `database name '${LIVE_FULL_REQUIRED_DATABASE_NAME}')`;
+  } else {
+    try {
+      assertLiveFullDatabaseName(process.env.DATABASE_URL);
+      liveFullNameOk = true;
+      liveFullNameDetail = `database name is '${LIVE_FULL_REQUIRED_DATABASE_NAME}'`;
+    } catch (err) {
+      liveFullNameDetail =
+        err instanceof UnapprovedEvalDatabaseError
+          ? err.message
+          : `LIVE_FULL requires database name '${LIVE_FULL_REQUIRED_DATABASE_NAME}'`;
+    }
+  }
+  checks.push({
+    id: "live_full_database_name",
+    ok: liveFullNameOk,
+    detail: liveFullNameDetail,
+  });
+
+  const waDisabled = process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND === "1";
+  checks.push({
+    id: "whatsapp_outbound_disabled",
+    ok: waDisabled,
+    detail: waDisabled
+      ? "WORKEE_DISABLE_WHATSAPP_OUTBOUND=1 — Graph send is intercepted in this process"
+      : "Set WORKEE_DISABLE_WHATSAPP_OUTBOUND=1 in the LIVE_FULL CLI process before running",
+  });
+
+  const remDisabled = process.env.WORKEE_DISABLE_REMINDER_FIRE === "1";
+  checks.push({
+    id: "reminder_fire_disabled",
+    ok: remDisabled,
+    detail: remDisabled
+      ? "WORKEE_DISABLE_REMINDER_FIRE=1 — reminder ticker will not schedule fires in this process"
+      : "Set WORKEE_DISABLE_REMINDER_FIRE=1 in the LIVE_FULL CLI process before running",
+  });
+
+  if (whatsappCredsPresent() && waDisabled) {
+    notes.push(
+      "WhatsApp credentials may be present in this process env; outbound flag isolates side effects for this process only",
+    );
+  }
+  notes.push(
+    "CLI isolation flags apply to this Node process only — they do not reconfigure a separately running API/reminder server",
+  );
+  notes.push(
+    "DB role isolation (no CONNECT to product 'workee') is checked at LIVE_FULL start via read-only catalog probe — not by env URL alone",
+  );
+  // Hint only (no secrets): name from URL for operators scanning the report.
+  const nameHint = evalDatabaseNameFromUrl(process.env.DATABASE_URL ?? "");
+  if (nameHint) {
+    notes.push(`process DATABASE_URL database name hint: ${nameHint}`);
+  }
+
+  const blockers = checks
+    .filter((c) => !c.ok)
+    .map((c) => `${c.id}: ${c.detail}`);
+
+  return {
+    track: "LIVE_FULL",
+    allowed: blockers.length === 0,
+    checks,
+    blockers,
+    notes,
+  };
+}
+
+export function assertLiveFullCliAllowed(): void {
+  const report = probeLiveFullCliSafety();
+  if (!report.allowed) {
+    throw new UnapprovedEvalDatabaseError(
+      `LIVE_FULL CLI blocked (isolation incomplete): ${report.blockers.join("; ")}`,
     );
   }
 }

@@ -25,6 +25,7 @@ import {
   buildEvalFingerprint,
   type EvalFingerprint,
 } from "./fingerprint.js";
+import { bridgeListTypeAliasesForParse } from "./run-model-apply.js";
 
 /**
  * Exact thin instructions string used for Batch A MODEL fingerprints.
@@ -82,7 +83,9 @@ export function runBatchAModelCaseOffline(
     };
   }
   const evalCase = batchAModelCaseToEvalCase(row);
-  const metadata = parseLlmMetadata(proposed.metadata);
+  const metadata = parseLlmMetadata(
+    bridgeListTypeAliasesForParse(proposed.metadata),
+  );
   const response = proposed.response ?? "";
   const checked = evaluateConstraints(
     evalCase.constraints,

@@ -309,3 +309,13 @@ LIVE_FULL variant: use `turns: [{ utterance, constraints, stateAfter: { itemIdsA
 - `LIVE_MODEL` never applies — green means metadata looked right.
 - Prefer `LIVE_FULL` for user-visible confidence; use `LIVE_MODEL` for cheap prompt iteration.
 - Report **warnings** (e.g. wrong `listType`) separately from FAIL in `*-last-report.*`.
+
+## Diagnosing LIVE failures
+
+Use the suite header and per-case blocks in `*-last-report.md` / `.json` (from `buildEvalUiReport` in `backend/src/eval/human-report.ts`).
+
+1. **Gates** — `gates.softOk` is `passRate ≥ requiredPassRate` (typically 0.7). `gates.criticalOk` requires every id in the corpus `criticalCaseIds` list to pass. `gates.criticalFailed` lists which critical ids failed. `gates.suiteOk` / report `ok` require **both** soft and critical gates.
+2. **Soft pass ≠ all green** — a suite can be soft-OK while individual non-critical cases fail (and while `criticalFailed` is empty). Always scan failed cases, not only the suite PASS/FAIL line.
+3. **Per case / turn** — read Scenario → Expectation → Observed → Verdict. Turn `failures` come from constraint checks (and, on FULL, state checks). Turn `warnings` (e.g. unexpected `listType`) are soft flags in the report; they do not by themselves flip the case to FAIL unless a constraint also failed.
+4. **ACTION-only vs apply/state (LIVE_FULL)** — LIVE_MODEL / MT reports have `productionApply: false` and score ACTION vs constraints only. LIVE_FULL has `productionApply: true`; turns may show `appliedViaProduction` and a state note. Failures that mention constraints / ACTION shape are model-output issues; failures that mention state / facts / DB (or `state FAIL` in the markdown apply line) are post-apply assertions. A single case can fail on either or both — the report lists them on the turn.
+5. **Where to open files** — see the run matrix and report table in [`README.md`](README.md). Current recorded scores: [`test-layer-contract.md`](test-layer-contract.md#qa-infrastructure-phase-closeout-2026-10-22).

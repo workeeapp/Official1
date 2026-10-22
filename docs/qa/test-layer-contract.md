@@ -19,7 +19,24 @@ Source-of-truth corpora stay committed under `docs/qa/`. Studio drafts under `do
 | LIVE_MODEL / MT | No DB user (`userId: null`) | Fixture `eval-human-1` (name from corpus, usually טל) | Fixture `eval-lucy-1`, `instructions: null` → **`LLM.config.json` systemMessage** via `loadLlmConfig`. Not Lucy2 / `Employees.instructions`. |
 | LIVE_FULL / ENGINE / MODEL_APPLY | Disposable harness `g1_*` (when allowed) | New harness human UUID | LLM path same fixture for LIVE_FULL; ENGINE uses fixtures only |
 
-Selecting Lucy2 (or any worker) in the Chat UI **does not** change eval prompt source. Studio run records store `promptSource` + `promptHash` (hash of systemMessage only; no secrets).
+Selecting Lucy2 (or any worker) in the Chat UI **does not** change eval prompt source.
+
+### Prompt identity fields
+
+- **`promptHash`** (legacy): first 16 hex chars of SHA-256 of `LLM.config.json`’s `systemMessage` (via `loadLlmConfig`). Identifies the file system message only — **not** the final model instructions string. No secrets.
+- **`instructionsSha256`**: SHA-256 of the **final** instructions string passed to the model (after fixture employees + envelope composition). This is the identity to compare across runs when asking “which prompt was scored?”
+
+Studio run records keep legacy `promptHash` and, after a completed LIVE run, merge `instructionsSha256` (and related fields) from the runner’s `summary.prompt`.
+
+### `WORKEE_EVAL_PROMPT_SOURCE` (LIVE runners via `resolveEvalPrompt`)
+
+| Value | Behavior |
+|-------|----------|
+| unset / `config` | Default LIVE path: fixture worker + `LLM.config.json` systemMessage through the Lucy eval instruction builder |
+| `file` | Load instructions from `WORKEE_EVAL_INSTRUCTIONS_FILE` into an in-memory worker fixture |
+| `employee` | Load a digital employee row from the **approved** test DB only (`WORKEE_EVAL_DIGITAL_EMPLOYEE_ID`); fails closed before Prisma if the URL is unapproved |
+
+**Batch A** builds thin instructions with `buildDefaultEvalFixtures(..., { includeMichal: false })` and **does not** call `resolveEvalPrompt`. Setting `file` or `employee` therefore **must not** change Batch A fingerprints or offline MODEL scoring.
 
 ## Studio Phase A approval matrix
 
@@ -42,3 +59,28 @@ Required: `DATABASE_URL` exact-equals `WORKEE_APPROVED_TEST_DATABASE_URL`, valid
 ## Historical note (out of scope for Studio Phase A)
 
 A 2026-10-20 LIVE_FULL run performed production-style apply; product DB `workee` is inferred. Leftover harness rows are unresolved. No cleanup in Phase A.
+
+## QA Infrastructure Phase Closeout (2026-10-22)
+
+The QA infrastructure implementation phase is **closed**. Further infrastructure work should be driven only by concrete gaps discovered during ongoing use—not by expanding the harness preemptively.
+
+### Latest recorded LIVE results
+
+| Track | Score | Artifact | Generated |
+|-------|-------|----------|-----------|
+| LIVE_MODEL | **34/34 PASS** | [`phase-4-last-report.md`](phase-4-last-report.md) / `.json` | 2026-10-22 |
+| LIVE_MODEL_MT | **13/13 PASS** | [`phase-4-multi-turn-last-report.md`](phase-4-multi-turn-last-report.md) / `.json` | 2026-10-22 |
+| LIVE_FULL | **6/27 FAIL** | [`live-full-last-report.md`](live-full-last-report.md) / `.json` | 2026-10-20 |
+
+LIVE_FULL has **not** been re-verified after the recent infrastructure commits (eval prompt-source resolver/provenance, Studio provenance alignment, Batch A fixture alignment with LIVE_FULL defaults).
+
+### Explicitly deferred
+
+- Re-run LIVE_FULL only when an approved, isolated `workee_test` environment is confirmed safe (`DATABASE_URL` exact-equals `WORKEE_APPROVED_TEST_DATABASE_URL`, outbound/reminder kill switches as required).
+- LIVE_ONLY coverage gaps (directory/contacts harness, `show_dump` Chat replace, WA delivery, reminder fire, Lucy2 DB prompt, jobs/handoff): see [`engine-pyramid-coverage.md`](engine-pyramid-coverage.md).
+- LLM Judge and evaluation-cost tracking.
+- Studio LIVE_FULL / Phase D (Studio Phase A continues to refuse LIVE_FULL).
+
+### Status document note
+
+[`unit-test-summary.md`](unit-test-summary.md) is a **historical snapshot** (2026-10-21). It is **not** the authoritative current QA status; use this contract and the dated `*-last-report.*` artifacts above.
