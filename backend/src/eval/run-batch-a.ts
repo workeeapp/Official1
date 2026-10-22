@@ -1,8 +1,12 @@
 /**
  * Batch A orchestration — MODEL (thin, no apply) + fingerprints.
  * Does not import an LLM client; LIVE wiring stays out of Steps 0–4.
+ *
+ * Default instructions share LIVE_FULL fixtures (includeMichal: false) via
+ * buildDefaultEvalFixtures + buildLucyModelEvalInstructions. Intentionally does
+ * NOT call resolveEvalPrompt — WORKEE_EVAL_PROMPT_SOURCE=file|employee must not
+ * change Batch A fingerprints or offline MODEL scoring.
  */
-import type { PublicEmployee } from "@workee/shared";
 import { parseLlmMetadata, type LlmMetadata } from "@workee/shared";
 import { buildLucyModelEvalInstructions } from "../services/chat.service.js";
 import {
@@ -16,54 +20,20 @@ import {
   type BatchASuite,
   type BatchASuiteCase,
 } from "./corpus.js";
+import { buildDefaultEvalFixtures } from "./eval-prompt-source.js";
 import {
   buildEvalFingerprint,
   type EvalFingerprint,
 } from "./fingerprint.js";
 
-function fixtureEmployees(speaker: string): {
-  employees: PublicEmployee[];
-  worker: PublicEmployee;
-} {
-  const human: PublicEmployee = {
-    id: "eval-human-1",
-    kind: "human",
-    name: speaker,
-    surname: "",
-    nickname: speaker,
-    email: null,
-    phone: null,
-    isOwner: true,
-  };
-  const worker: PublicEmployee = {
-    id: "eval-lucy-1",
-    kind: "digital",
-    name: "לוסי",
-    surname: "",
-    nickname: "לוסי",
-    email: null,
-    phone: null,
-    protected: true,
-    model: null,
-    temperature: null,
-    instructions: null,
-  };
-  const coworker: PublicEmployee = {
-    id: "eval-human-2",
-    kind: "human",
-    name: "עמית",
-    surname: "",
-    nickname: "עמית",
-    email: null,
-    phone: null,
-    isOwner: false,
-  };
-  return { employees: [human, worker, coworker], worker };
-}
-
-/** Exact thin instructions string used for Batch A MODEL / MODEL_APPLY prompts. */
+/**
+ * Exact thin instructions string used for Batch A MODEL fingerprints.
+ * Fixture parity: LIVE_FULL default (no מיכל). Not LIVE_MODEL (has מיכל).
+ */
 export function buildBatchAThinInstructions(speaker = "טל"): string {
-  const { employees, worker } = fixtureEmployees(speaker);
+  const { employees, worker } = buildDefaultEvalFixtures(speaker, {
+    includeMichal: false,
+  });
   return buildLucyModelEvalInstructions({ employees, speaker, worker });
 }
 
