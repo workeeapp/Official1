@@ -728,12 +728,43 @@ export function appendEngineNotice(reply: string, notice: string): string {
 }
 
 /**
+ * Preface for the WATCH baseline sample (2nd bubble after the model ack).
+ * Pure live asks stay unwrapped — only WATCH+ack uses this.
+ */
+export function formatWatchSampleLive(
+  liveText: string,
+  domain: "market" | "other" = "other",
+): string {
+  const body = liveText.trim();
+  if (!body) {
+    return "";
+  }
+  if (/^לידיעתך\s+כרגע/u.test(body)) {
+    return body;
+  }
+  if (domain === "market") {
+    const isFx =
+      /\([A-Z]{2,5}=X\)/.test(body) ||
+      /\b[A-Z]{3}\/[A-Z]{3}\b/.test(body) ||
+      /שער/.test(body);
+    const label = isFx ? "השער הוא" : "המחיר הוא";
+    return `לידיעתך כרגע ${label} ${body}`;
+  }
+  return `לידיעתך כרגע:\n${body}`;
+}
+
+/**
  * Live domain reply: keep the model's ack when present, else replace with facts.
  * Pure live ask (empty spoken) → replace; WATCH/ack + sample → two bubbles.
  * Engine EMPTY_REPLY_RETRY alone is not an ack — replace so live facts are not
  * double-bubbled after a premature empty fallback.
+ * WATCH sample (`watchSample`) wraps the 2nd bubble with «לידיעתך כרגע…».
  */
-export function applyLiveDomainReply(reply: string, liveText: string): string {
+export function applyLiveDomainReply(
+  reply: string,
+  liveText: string,
+  options?: { watchSample?: boolean; watchDomain?: "market" | "other" },
+): string {
   const trimmed = liveText.trim();
   if (!trimmed) {
     return reply;
@@ -748,7 +779,12 @@ export function applyLiveDomainReply(reply: string, liveText: string): string {
   const hasAck = Boolean(
     !onlyEmptyRetry && (nonEmpty.length > 0 || plain.length > 0),
   );
-  return hasAck
-    ? appendEngineResponse(reply, trimmed)
-    : setEngineResponse(reply, trimmed);
+  if (!hasAck) {
+    return setEngineResponse(reply, trimmed);
+  }
+  const sample =
+    options?.watchSample === true
+      ? formatWatchSampleLive(trimmed, options.watchDomain ?? "other")
+      : trimmed;
+  return appendEngineResponse(reply, sample);
 }

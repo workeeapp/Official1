@@ -495,7 +495,7 @@
                           },
                           "watch_once": {
                             "type": "boolean",
-                            "description": "list_type reminders: true = one-shot watch (done after first successful condition send)."
+                            "description": "list_type reminders with compose_condition: true/omit = one-shot («כש…» — send once then done + soft-delete). false = recurring level («כל פעם» / «כל בוקר ב־8 אם…» — send then sleep until next interval, repeat while true). Omit + daily/weekly/… recurrence defaults false; omit + interval/once defaults true."
                           },
                           "compose_aspects": {
                             "type": "array",

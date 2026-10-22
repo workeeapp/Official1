@@ -1453,8 +1453,10 @@ function isWatchClockTurn(metadata: LlmMetadata): boolean {
 
 /**
  * Engine fallback for the speaker: after list / filing / reminder mutates,
- * if the model omitted the matching «הצג» button(s), append them (same
- * product commands as partner notifies). Keeps any existing model buttons.
+ * append the matching «הצג» button(s) (same product commands as partner
+ * notifies). Engine-derived show commands win; model show buttons that do not
+ * match are dropped (typos / «רשימת רשימת…» must not fill a 3rd slot).
+ * Non-show model buttons (כן/לא/…) are kept.
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
@@ -1480,8 +1482,14 @@ export function ensureSpeakerShowButtons(
     return buttons;
   }
 
-  const buttons = existing.slice(0, REPLY_BUTTON_MAX);
-  const seen = new Set(buttons.map((button) => button.command));
+  const engineShow = showButtonsForNotify(metadata);
+  const engineCommands = new Set(engineShow.map((button) => button.command));
+  if (reminderMutates(metadata)) {
+    engineCommands.add(SHOW_REMINDERS_COMMAND);
+  }
+
+  const buttons: LlmReplyButton[] = [];
+  const seen = new Set<string>();
   const append = (button: LlmReplyButton): void => {
     if (buttons.length >= REPLY_BUTTON_MAX || seen.has(button.command)) {
       return;
@@ -1489,7 +1497,8 @@ export function ensureSpeakerShowButtons(
     seen.add(button.command);
     buttons.push(button);
   };
-  for (const button of showButtonsForNotify(metadata)) {
+
+  for (const button of engineShow) {
     append(button);
   }
   // Partner notify skips תזכורות when a list button already exists; speaker
@@ -1497,12 +1506,22 @@ export function ensureSpeakerShowButtons(
   if (reminderMutates(metadata)) {
     append(SHOW_REMINDERS_BUTTON);
   }
+  for (const button of existing) {
+    if (isShowListReplyButton(button)) {
+      if (engineCommands.has(button.command)) {
+        append(button);
+      }
+      continue;
+    }
+    append(button);
+  }
   return buttons;
 }
 
 /**
  * Engine-built «הצג» buttons for partner notifies (add/remove/update lists).
  * Same product names as the speaker SHOW BUTTON rule — not LLM-emitted.
+ * Same-turn item move (remove + add of the same item) → dest list only.
  */
 export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
@@ -1514,13 +1533,14 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
       row.action === "remove" ||
       row.action === "update",
   );
+  const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
   for (const list of listMutates) {
     const name = showListCommandName(list);
     if (!name) {
       continue;
     }
     const command = showListButtonCommand(name);
-    if (seen.has(command)) {
+    if (seen.has(command) || skipSourceCommands.has(command)) {
       continue;
     }
     seen.add(command);
@@ -1552,11 +1572,92 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
   return buttons;
 }
 
+/** Strip repeated «רשימת » / «הצג רשימת » so we never emit «הצג רשימת רשימת …». */
+export function stripRepeatedReshimatPrefix(name: string): string {
+  let out = name.trim();
+  while (true) {
+    const next = out.replace(/^(הצג\s+)?רשימת\s+/u, "").trim();
+    if (next === out) {
+      break;
+    }
+    out = next;
+  }
+  return out;
+}
+
 function showListCommandName(list: LlmListAction): string {
   if (isBuiltinListType(list.listType)) {
     return builtinListHebrew(list.listType);
   }
-  return customListDerivedName(list).trim();
+  return stripRepeatedReshimatPrefix(customListDerivedName(list));
+}
+
+/** item_id and/or normalized label fingerprints for move matching. */
+function listItemFingerprints(list: LlmListAction): Set<string> {
+  const out = new Set<string>();
+  for (const item of list.items ?? []) {
+    const record =
+      item && typeof item === "object"
+        ? (item as Record<string, unknown>)
+        : null;
+    const id = String(record?.item_id ?? record?.itemId ?? "").trim();
+    if (id) {
+      out.add(`id:${id}`);
+    }
+    const label = llmItemLabel(item).trim();
+    if (label) {
+      out.add(`label:${normalizeLoose(label)}`);
+    }
+  }
+  return out;
+}
+
+function listsShareMovedItem(
+  remove: LlmListAction,
+  add: LlmListAction,
+): boolean {
+  const fromRemove = listItemFingerprints(remove);
+  const fromAdd = listItemFingerprints(add);
+  for (const fingerprint of fromRemove) {
+    if (fromAdd.has(fingerprint)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Same-turn remove+add of the same item across lists → skip source list's
+ * «הצג» (only the destination should appear).
+ */
+function sourceShowCommandsSkippedForMoves(
+  listMutates: LlmListAction[],
+): Set<string> {
+  const removes = listMutates.filter(
+    (row) => row.action === "remove" && (row.items?.length ?? 0) > 0,
+  );
+  const adds = listMutates.filter(
+    (row) => row.action === "add" && (row.items?.length ?? 0) > 0,
+  );
+  const skip = new Set<string>();
+  for (const rem of removes) {
+    for (const add of adds) {
+      if (!listsShareMovedItem(rem, add)) {
+        continue;
+      }
+      const remName = showListCommandName(rem);
+      const addName = showListCommandName(add);
+      if (!remName || !addName) {
+        continue;
+      }
+      const remCmd = showListButtonCommand(remName);
+      const addCmd = showListButtonCommand(addName);
+      if (remCmd !== addCmd) {
+        skip.add(remCmd);
+      }
+    }
+  }
+  return skip;
 }
 
 export function fallbackNotificationText(

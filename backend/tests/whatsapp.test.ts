@@ -6,6 +6,7 @@ import {
   appendEngineNotice,
   appendEngineResponse,
   applyLiveDomainReply,
+  formatWatchSampleLive,
   composeAssistantReply,
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
@@ -583,6 +584,51 @@ describe("WhatsApp webhook", () => {
       "אעקוב אחרי שער הביטקוין ואעדכן אותך כשיהיה מעל 84,000 דולר",
       quote,
     ]);
+  });
+
+  it("formatWatchSampleLive prefaced FX quote for WATCH baseline", () => {
+    expect(
+      formatWatchSampleLive("USD/ILS (ILS=X): 3.09 ILS.\nלא ייעוץ השקעות.", "market"),
+    ).toBe(
+      "לידיעתך כרגע השער הוא USD/ILS (ILS=X): 3.09 ILS.\nלא ייעוץ השקעות.",
+    );
+    expect(
+      formatWatchSampleLive("Bitcoin USD (BTC-USD): 84,180.34 USD.", "market"),
+    ).toBe("לידיעתך כרגע המחיר הוא Bitcoin USD (BTC-USD): 84,180.34 USD.");
+  });
+
+  it("applyLiveDomainReply WATCH sample wraps 2nd bubble; pure ask does not", () => {
+    const quote = "USD/ILS (ILS=X): 3.09 ILS.\nלא ייעוץ השקעות.";
+    const watchReply = applyLiveDomainReply(
+      JSON.stringify({
+        responses: ["אעקוב אחרי שער הדולר ואעדכן אותך כשיעבור 3 שקלים"],
+        metadata: {
+          market: { queries: ["ILS=X"], aspects: ["price"] },
+          reminders: [
+            {
+              action: "add",
+              item: "דולר",
+              compose_condition: { type: "market_price", op: "gt", value: 3 },
+            },
+          ],
+        },
+      }),
+      quote,
+      { watchSample: true, watchDomain: "market" },
+    );
+    expect(parseLlmReply(watchReply).responses).toEqual([
+      "אעקוב אחרי שער הדולר ואעדכן אותך כשיעבור 3 שקלים",
+      "לידיעתך כרגע השער הוא USD/ILS (ILS=X): 3.09 ILS.\nלא ייעוץ השקעות.",
+    ]);
+    const pureAsk = applyLiveDomainReply(
+      JSON.stringify({
+        responses: [],
+        metadata: { market: { queries: ["ILS=X"] } },
+      }),
+      quote,
+      { watchSample: true, watchDomain: "market" },
+    );
+    expect(parseLlmReply(pureAsk).responses).toEqual([quote]);
   });
 
   it("applyLiveDomainReply replaces when spoken is empty (pure live ask)", () => {

@@ -1387,7 +1387,7 @@ describe("parseLlmReply", () => {
         scheduleAnchor: "",
         scheduleOffsetMinutes: 0,
         composeCondition: null,
-        watchOnce: false,
+        watchOnce: undefined,
         composeAspects: [],
         reminderId: "",
       },

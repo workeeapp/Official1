@@ -1,14 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { reminderUpdate, reminderUpdateMany, reminderDelete, reminderFindUnique, itemUpdateMany, itemUpdate } =
-  vi.hoisted(() => ({
-    reminderUpdate: vi.fn(),
-    reminderUpdateMany: vi.fn(),
-    reminderDelete: vi.fn(),
-    reminderFindUnique: vi.fn(),
-    itemUpdateMany: vi.fn(),
-    itemUpdate: vi.fn(),
-  }));
+const {
+  reminderUpdate,
+  reminderUpdateMany,
+  reminderDelete,
+  reminderFindUnique,
+  itemUpdateMany,
+  itemUpdate,
+  itemFindMany,
+} = vi.hoisted(() => ({
+  reminderUpdate: vi.fn(),
+  reminderUpdateMany: vi.fn(),
+  reminderDelete: vi.fn(),
+  reminderFindUnique: vi.fn(),
+  itemUpdateMany: vi.fn(),
+  itemUpdate: vi.fn(),
+  itemFindMany: vi.fn(),
+}));
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
@@ -21,6 +29,7 @@ vi.mock("../src/database/prisma.js", () => ({
     employeeListItem: {
       updateMany: itemUpdateMany,
       update: itemUpdate,
+      findMany: itemFindMany,
     },
   },
 }));
@@ -85,8 +94,34 @@ describe("settleFiredReminder", () => {
     reminderFindUnique.mockReset().mockResolvedValue({ workerItemId: "task-1" });
     itemUpdateMany.mockReset().mockResolvedValue({ count: 1 });
     itemUpdate.mockReset().mockResolvedValue({});
+    itemFindMany.mockReset().mockResolvedValue([]);
     activateScheduledJob.mockReset().mockResolvedValue(false);
     continueJobAfterNudge.mockReset();
+  });
+
+  it("forceDone soft-deletes the worker task even when only linked via reminderId", async () => {
+    reminderFindUnique.mockResolvedValue({ workerItemId: null });
+    itemFindMany.mockResolvedValue([{ id: "orphan-task" }]);
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "5:minutes",
+        recurrence: { freq: "interval", interval: 5, unit: "minutes" },
+      },
+      now,
+      "sent",
+      { forceDone: true },
+    );
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "orphan-task" },
+      data: { deletedAt: expect.any(Date), reminderId: null },
+    });
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: expect.objectContaining({ status: "done", workerItemId: null }),
+    });
   });
 
   it("marks a one-shot clock done with sent_at and detaches the worker task", async () => {

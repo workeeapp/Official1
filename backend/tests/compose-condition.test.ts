@@ -59,6 +59,48 @@ describe("evaluateComposeCondition", () => {
     expect(gate.immediateSha).toBe("market:below");
   });
 
+  it("market_price: level — re-alerts every poll while still holding", () => {
+    const gate = evaluateComposeCondition({
+      condition: { type: "market_price", op: "gt", value: 80 },
+      facts: { marketPrice: 90 },
+      lastReportSha: "market:below",
+      alertWhileHolding: true,
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.immediateSha).toBe("market:below");
+  });
+
+  it("market_price: level — skips while not holding", () => {
+    const gate = evaluateComposeCondition({
+      condition: { type: "market_price", op: "gt", value: 80 },
+      facts: { marketPrice: 70 },
+      lastReportSha: "market:above",
+      alertWhileHolding: true,
+    });
+    expect(gate.skipSend).toBe(true);
+    expect(gate.immediateSha).toBe("market:above");
+  });
+
+  it("market_price gt level: already holding baseline keeps holding sha", () => {
+    const condition = {
+      type: "market_price" as const,
+      op: "gt" as const,
+      value: 80,
+    };
+    const facts = { marketPrice: 90 };
+    const raw = baselineShaForWatch({ condition, facts });
+    expect(raw).toBe("market:below");
+    // Level seed stamps holding as-is (no idle) — next poll sends.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts,
+        lastReportSha: raw,
+        alertWhileHolding: true,
+      }).skipSend,
+    ).toBe(false);
+  });
+
   it("market_price: re-alerts when crossing above→below again", () => {
     const gate = evaluateComposeCondition({
       condition: { type: "market_price", op: "lt", value: 80_000 },

@@ -608,15 +608,14 @@ describe("employee targets", () => {
         [{ label: "הצג", command: "הצג תזכורות" }],
       ),
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    // Model show for a list that did not mutate this turn is dropped — engine
+    // show set wins (reminders-only → תזכורות alone).
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
         [{ label: "הצג", command: "הצג רשימת מטלות" }],
       ),
-    ).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
-      { label: "הצג", command: "הצג תזכורות" },
-    ]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
@@ -660,6 +659,117 @@ describe("employee targets", () => {
         ],
       }),
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+  });
+
+  it("custom list move emits only dest הצג (not source + dest)", () => {
+    const moveMeta = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "remove" as const,
+          listType: "custom" as const,
+          listName: "באגים בקוד",
+          items: [
+            {
+              item_id: "5",
+              שם: "לעיתים מוצגים שני כפתורי הצג",
+            },
+          ],
+          targets: [] as string[],
+        },
+        {
+          action: "add" as const,
+          listType: "custom" as const,
+          listName: "דברים שעלו לשרת",
+          items: [{ שם: "לעיתים מוצגים שני כפתורי הצג" }],
+          targets: [] as string[],
+        },
+      ],
+    };
+    expect(showButtonsForNotify(moveMeta)).toEqual([
+      { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+    ]);
+    expect(ensureSpeakerShowButtons(moveMeta)).toEqual([
+      { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+    ]);
+  });
+
+  it("drops mismatched model הצג on move so typo never makes a 3rd button", () => {
+    const moveMeta = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "remove" as const,
+          listType: "custom" as const,
+          listName: "באגים בקוד",
+          items: [{ item_id: "5", שם: "פריט" }],
+          targets: [] as string[],
+        },
+        {
+          action: "add" as const,
+          listType: "custom" as const,
+          listName: "דברים שעלו לשרת",
+          items: [{ שם: "פריט" }],
+          targets: [] as string[],
+        },
+      ],
+    };
+    expect(
+      ensureSpeakerShowButtons(moveMeta, [
+        { label: "הצג", command: "הצג רשימת דברים שעלו לשרט" },
+        { label: "הצג", command: "הצג רשימת רשימת דברים שעלו לשרת" },
+        { label: "כן", command: "כן" },
+      ]),
+    ).toEqual([
+      { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+      { label: "כן", command: "כן" },
+    ]);
+    expect(
+      ensureSpeakerShowButtons(moveMeta, [
+        { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+      ]),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת דברים שעלו לשרת" }]);
+  });
+
+  it("canonicalizes «רשימת רשימת …» custom list names on show buttons", () => {
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "רשימת דברים שעלו לשרת",
+            items: [{ שם: "פריט" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת דברים שעלו לשרת" }]);
+  });
+
+  it("shopping remove+add on the same builtin still yields one הצג רשימת קניות", () => {
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "remove",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "1", "שם פריט": "חלב" }],
+            targets: [],
+          },
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
   });
 
   it("ensures speaker הצג רשימת … when lists mutate and model omitted buttons", () => {

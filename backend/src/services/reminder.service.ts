@@ -106,6 +106,31 @@ export type ReminderSkipReason =
 export const SUB_HOURLY_REFUSAL =
   "אי אפשר לקבוע חזרה כל פחות מ־5 דקות או בשניות. הכי תכוף שאפשר הוא כל 5 דקות.";
 
+/**
+ * Default reminders[].watch_once when the model omits it and compose_condition
+ * is set. Calendar recurrence → recurring level (false). Interval/once →
+ * one-shot (true) so «כש…» can poll until the first hit. «כל פעם» must emit
+ * watch_once:false explicitly (same interval shape as the poll cadence).
+ */
+export function defaultWatchOnceForCondition(input: {
+  hasComposeCondition: boolean;
+  recurrenceFreq?: string | null;
+}): boolean {
+  if (!input.hasComposeCondition) {
+    return false;
+  }
+  const freq = String(input.recurrenceFreq ?? "").trim().toLowerCase();
+  if (
+    freq === "daily" ||
+    freq === "weekly" ||
+    freq === "monthly" ||
+    freq === "yearly"
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /** A new / changed clock that repeats too often (refused). */
 export function reminderRepeatsSubHourly(
   reminder: Pick<
@@ -1858,12 +1883,23 @@ export async function applyReminders(input: {
         existing && "watchOnce" in existing
           ? Boolean((existing as { watchOnce?: boolean }).watchOnce)
           : false;
+      const hasComposeCondition = nextCondition !== Prisma.DbNull;
+      const recurringFreq =
+        recurring?.recurrence?.freq ??
+        (typeof reminder.recurrence?.freq === "string"
+          ? reminder.recurrence.freq
+          : null);
       const nextWatchOnce =
         reminder.watchOnce === true
           ? true
-          : canReuseClock
-            ? existingWatchOnce
-            : false;
+          : reminder.watchOnce === false
+            ? false
+            : canReuseClock
+              ? existingWatchOnce
+              : defaultWatchOnceForCondition({
+                  hasComposeCondition,
+                  recurrenceFreq: recurringFreq,
+                });
       const existingAspects =
         existing &&
         "composeAspects" in existing &&
@@ -1978,7 +2014,10 @@ export async function applyReminders(input: {
           (Array.isArray(pingIds) && typeof pingIds[0] === "string"
             ? pingIds[0]
             : null) || ownerId;
-        const seeded = await seedWatchBaseline({
+        // Baseline only — never bump fireAt to now; first check is the next
+        // scheduled poll. Level (watch_once:false) stamps holding; edge stamps
+        // idle when already holding so that next poll can edge-send once.
+        await seedWatchBaseline({
           reminderId: row.id,
           composeSource: nextSource,
           composePlace: nextPlace,
@@ -1986,17 +2025,8 @@ export async function applyReminders(input: {
           composeAspects: nextAspects,
           subjectEmployeeId: subjectId,
           repeat: nextRepeat,
+          alertWhileHolding: nextWatchOnce === false,
         }).catch(() => null);
-        // Already holding at create (e.g. BTC already > threshold): idle was
-        // stamped so the next fire edges into a send — bump fireAt to now.
-        if (seeded?.alreadyHolding) {
-          const dueNow = new Date();
-          await prisma.reminder.update({
-            where: { id: row.id },
-            data: { fireAt: dueNow },
-          });
-          scheduleSoon(dueNow);
-        }
       }
       await recordAuditEvent({
         userId: input.userId,

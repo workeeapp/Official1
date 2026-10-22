@@ -12,7 +12,7 @@ import { enrichEvalFactsForExpr } from "./watch-expr.js";
 
 export type WatchBaselineSeedResult = {
   sha: string | null;
-  /** Condition already true at create — sha stamped as idle so next fire alerts. */
+  /** Condition already true at create (informational; caller must not fire now). */
   alreadyHolding: boolean;
 };
 
@@ -20,8 +20,10 @@ export type WatchBaselineSeedResult = {
  * After creating/updating a conditional watch clock, sample current facts and
  * stamp last_report_sha so the first fire does not treat "current state" as new.
  *
- * Edge watches (market / expr): if already holding at create, stamp the idle
- * token instead so the next fire can send once (caller may bump fireAt to now).
+ * Edge (watch_once): if already holding, stamp idle so the *next* scheduled
+ * poll can edge-send once — never bump fireAt to now.
+ * Level (alertWhileHolding / watch_once:false): stamp holding as-is; next poll
+ * sends while true.
  */
 export async function seedWatchBaseline(input: {
   reminderId: string;
@@ -31,6 +33,8 @@ export async function seedWatchBaseline(input: {
   composeAspects?: unknown;
   subjectEmployeeId: string;
   repeat: string;
+  /** Level recurring watch — stamp holding; do not idle-arm. */
+  alertWhileHolding?: boolean;
   now?: Date;
 }): Promise<WatchBaselineSeedResult> {
   const condition = conditionFromReminderJson(input.composeCondition);
@@ -38,6 +42,7 @@ export async function seedWatchBaseline(input: {
     return { sha: null, alreadyHolding: false };
   }
   const now = input.now ?? new Date();
+  const alertWhileHolding = input.alertWhileHolding === true;
   try {
     let factsBundle = await loadComposeFacts({
       composeSource: input.composeSource,
@@ -80,8 +85,11 @@ export async function seedWatchBaseline(input: {
       return { sha: null, alreadyHolding: false };
     }
     const alreadyHolding = isHoldingEdgeSha(rawSha);
+    // Level: keep holding. Edge already-holding: idle so next poll edges once.
     const sha = (
-      alreadyHolding ? idleEdgeShaForHolding(rawSha) : rawSha
+      alreadyHolding && !alertWhileHolding
+        ? idleEdgeShaForHolding(rawSha)
+        : rawSha
     ).slice(0, 64);
     await prisma.reminder.update({
       where: { id: input.reminderId },

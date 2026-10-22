@@ -237,28 +237,39 @@ export async function settleFiredReminder(
     },
   });
 
-  if (prisma.employeeListItem?.updateMany) {
-    await prisma.employeeListItem.updateMany({
-      where: { reminderId: reminder.id },
-      data: { reminderId: null },
-    });
-    // Soft-links must not keep pointing at a done one-shot (same as cancel).
-    await prisma.employeeListItem.updateMany({
-      where: { linkedReminderId: reminder.id, deletedAt: null },
-      data: { linkedReminderId: null },
-    });
-  }
-
   let firedTaskData: unknown = null;
-  if (workerItemId && !keptAsScheduledJob && prisma.employeeListItem?.update) {
-    try {
-      const task = await prisma.employeeListItem.update({
-        where: { id: workerItemId },
-        data: { deletedAt: new Date(), reminderId: null },
-      });
-      firedTaskData = task?.data ?? null;
-    } catch {
-      // Already removed.
+  if (!keptAsScheduledJob && prisma.employeeListItem) {
+    // Soft-delete before clearing FKs — workerItemId and/or items that still
+    // point at this clock via reminderId (covers a missing reverse FK).
+    const softDeleteIds = new Set<string>();
+    if (workerItemId) {
+      softDeleteIds.add(workerItemId);
+    }
+    if (prisma.employeeListItem.findMany) {
+      try {
+        const linked = await prisma.employeeListItem.findMany({
+          where: { reminderId: reminder.id, deletedAt: null },
+          select: { id: true },
+        });
+        for (const row of linked ?? []) {
+          if (row?.id) softDeleteIds.add(row.id);
+        }
+      } catch {
+        // Table missing in tests / early migrate.
+      }
+    }
+    for (const itemId of softDeleteIds) {
+      try {
+        const task = await prisma.employeeListItem.update({
+          where: { id: itemId },
+          data: { deletedAt: new Date(), reminderId: null },
+        });
+        if (itemId === workerItemId || firedTaskData == null) {
+          firedTaskData = task?.data ?? null;
+        }
+      } catch {
+        // Already removed.
+      }
     }
   } else if (workerItemId && keptAsScheduledJob && prisma.employeeListItem?.findUnique) {
     try {
@@ -269,6 +280,18 @@ export async function settleFiredReminder(
     } catch {
       firedTaskData = null;
     }
+  }
+
+  if (prisma.employeeListItem?.updateMany) {
+    // Clear any leftover primary FKs and soft-links (same as cancel).
+    await prisma.employeeListItem.updateMany({
+      where: { reminderId: reminder.id },
+      data: { reminderId: null },
+    });
+    await prisma.employeeListItem.updateMany({
+      where: { linkedReminderId: reminder.id, deletedAt: null },
+      data: { linkedReminderId: null },
+    });
   }
 
   const nudge = jobMetaFrom(firedTaskData);
@@ -464,6 +487,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           condition,
           facts: evalFacts,
           lastReportSha: reminder.lastReportSha,
+          // Explicit watch_once:false → level (alert every poll while holding).
+          // true (default one-shot) → edge (false→true only).
+          alertWhileHolding:
+            "watchOnce" in reminder && reminder.watchOnce === false,
         });
         if (gate.immediateSha) {
           await prisma.reminder.update({
@@ -554,6 +581,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         ? [{ label: "נדנד", command: snooze }]
         : [];
 
+      let destDelivered = false;
       if (target && speaker) {
         const conversation = await prisma.chatConversation.findUnique({
           where: {
@@ -597,6 +625,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             raw: { reminder: true },
           });
           await rememberInModelConversation(conversation.openaiConversationId, text);
+          // In-app chat counts as delivered — watch_once must close even when
+          // WhatsApp is missing/fails (otherwise Lucy's worker task stays open).
+          destDelivered = true;
         }
       }
 
@@ -610,26 +641,26 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           const result = await sendWhatsAppButtons(phone, text, buttons, {
             ignoreSession: true,
           });
-          sendResults.push(result === "sent");
-          if (result === "sent" && files.length > 0) {
-            const delivered = await deliverAttachmentsToPhone(phone, files, {
-              ignoreSession: true,
-            });
-            recordWhatsAppEvent(
-              "reminder_files",
-              `sent=${delivered.sent} failed=${delivered.failed}`,
-            );
+          if (result === "sent") {
+            destDelivered = true;
+            if (files.length > 0) {
+              const delivered = await deliverAttachmentsToPhone(phone, files, {
+                ignoreSession: true,
+              });
+              recordWhatsAppEvent(
+                "reminder_files",
+                `sent=${delivered.sent} failed=${delivered.failed}`,
+              );
+            }
           }
         } catch (error) {
           console.error(
             "Reminder WhatsApp failed",
             error instanceof Error ? error.message : "unknown",
           );
-          sendResults.push(false);
         }
-      } else {
-        sendResults.push(false);
       }
+      sendResults.push(destDelivered);
     }
 
     const sendStatus =

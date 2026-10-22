@@ -67,7 +67,11 @@ export const weatherContentFingerprint = mashovContentFingerprint;
 /** Edge sha tokens that mean the condition is currently holding (true). */
 export function isHoldingEdgeSha(sha: string | null | undefined): boolean {
   const token = String(sha ?? "").trim();
-  return token === "market:below" || token === "expr:hold";
+  return (
+    token === "market:below" ||
+    token === "expr:hold" ||
+    token === "weather:wet"
+  );
 }
 
 /** Idle counterpart so the next fire can edge into a send. */
@@ -79,19 +83,37 @@ export function idleEdgeShaForHolding(sha: string): string {
   if (token === "market:below") {
     return "market:above";
   }
+  if (token === "weather:wet") {
+    return "weather:dry";
+  }
   return token;
 }
 
 /**
+ * Holding conditions: edge = false→true only; level (alertWhileHolding) = send
+ * whenever currently true (recurring watch_once:false).
+ */
+function shouldSendHolding(
+  holding: boolean,
+  prevHolding: boolean,
+  alertWhileHolding: boolean,
+): boolean {
+  return alertWhileHolding ? holding : holding && !prevHolding;
+}
+
+/**
  * Evaluate a structured compose_condition against fire-time facts.
- * Market uses edge trigger (false→true) via lastReportSha market:below/above.
+ * Market/expr/rain/compare: edge by default; level when alertWhileHolding.
  */
 export function evaluateComposeCondition(input: {
   condition: LlmComposeCondition;
   facts: ComposeEvalFacts;
   lastReportSha?: string | null;
+  /** Recurring watch: alert every poll while condition holds. */
+  alertWhileHolding?: boolean;
 }): ComposeConditionFireGate {
   const last = String(input.lastReportSha ?? "").trim();
+  const alertWhileHolding = input.alertWhileHolding === true;
 
   if (input.condition.type === "market_price") {
     const price = input.facts.marketPrice;
@@ -106,8 +128,11 @@ export function evaluateComposeCondition(input: {
     );
     const prevHolding = last === "market:below";
     const immediateSha = holding ? "market:below" : "market:above";
-    // Edge: send only on transition into holding (including first fire from empty).
-    const shouldSend = holding && !prevHolding;
+    const shouldSend = shouldSendHolding(
+      holding,
+      prevHolding,
+      alertWhileHolding,
+    );
     return {
       skipSend: !shouldSend,
       immediateSha,
@@ -128,7 +153,11 @@ export function evaluateComposeCondition(input: {
     const holding = comparePrice(left, input.condition.op, right);
     const prevHolding = last === "market:below";
     const immediateSha = holding ? "market:below" : "market:above";
-    const shouldSend = holding && !prevHolding;
+    const shouldSend = shouldSendHolding(
+      holding,
+      prevHolding,
+      alertWhileHolding,
+    );
     return {
       skipSend: !shouldSend,
       immediateSha,
@@ -139,7 +168,11 @@ export function evaluateComposeCondition(input: {
     const raining = input.facts.weatherIsRain === true;
     const prevHolding = last === "weather:wet";
     const immediateSha = raining ? "weather:wet" : "weather:dry";
-    const shouldSend = raining && !prevHolding;
+    const shouldSend = shouldSendHolding(
+      raining,
+      prevHolding,
+      alertWhileHolding,
+    );
     return {
       skipSend: !shouldSend,
       immediateSha,
@@ -207,7 +240,11 @@ export function evaluateComposeCondition(input: {
     );
     const prevHolding = last === "expr:hold";
     const immediateSha = holding ? "expr:hold" : "expr:idle";
-    const shouldSend = holding && !prevHolding;
+    const shouldSend = shouldSendHolding(
+      holding,
+      prevHolding,
+      alertWhileHolding,
+    );
     return {
       skipSend: !shouldSend,
       immediateSha,

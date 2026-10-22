@@ -5,6 +5,7 @@ import {
   formatTodosReply,
   applyTimeToTaskLabel,
   canReuseExistingReminderClock,
+  defaultWatchOnceForCondition,
   findMatchingActiveReminder,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
@@ -244,6 +245,47 @@ describe("formatPingLabel", () => {
   it("shows the employee name, not masked phone digits", () => {
     expect(formatPingLabel(tal.id, [tal])).toBe("טל");
     expect(formatPingLabel("0502222222", [tal])).toBe("…2222");
+  });
+});
+
+describe("defaultWatchOnceForCondition", () => {
+  it("defaults one-shot when condition + interval/once (omit watch_once)", () => {
+    expect(
+      defaultWatchOnceForCondition({
+        hasComposeCondition: true,
+        recurrenceFreq: "interval",
+      }),
+    ).toBe(true);
+    expect(
+      defaultWatchOnceForCondition({
+        hasComposeCondition: true,
+        recurrenceFreq: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("defaults recurring when condition + calendar daily/weekly/…", () => {
+    expect(
+      defaultWatchOnceForCondition({
+        hasComposeCondition: true,
+        recurrenceFreq: "daily",
+      }),
+    ).toBe(false);
+    expect(
+      defaultWatchOnceForCondition({
+        hasComposeCondition: true,
+        recurrenceFreq: "weekly",
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when there is no compose_condition", () => {
+    expect(
+      defaultWatchOnceForCondition({
+        hasComposeCondition: false,
+        recurrenceFreq: "daily",
+      }),
+    ).toBe(false);
   });
 });
 

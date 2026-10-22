@@ -347,8 +347,10 @@ export interface LlmReminderAction {
    */
   composeCondition?: LlmComposeCondition | null;
   /**
-   * One-shot watch: after first successful condition WhatsApp, settle done.
-   * Quiet skips keep polling. Omit/false = recurring watch.
+   * One-shot watch: after first successful condition send, settle done and
+   * soft-delete the worker task. Quiet skips keep polling.
+   * Explicit false = recurring («בכל פעם»). Omit → engine defaults true when
+   * compose_condition is set.
    */
   watchOnce?: boolean;
   /**
@@ -2030,10 +2032,24 @@ function parseDayOffset(raw: unknown): number | undefined {
   return n;
 }
 
-/** Parse reminders[].watch_once — false when absent. */
-export function parseWatchOnce(record: Record<string, unknown>): boolean {
+/**
+ * Parse reminders[].watch_once.
+ * Returns undefined when absent so the engine can default watches to one-shot.
+ */
+export function parseWatchOnce(
+  record: Record<string, unknown>,
+): boolean | undefined {
   const raw = record.watch_once ?? record.watchOnce ?? record.once;
-  return raw === true || raw === "true" || raw === 1 || raw === "1";
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  if (raw === true || raw === "true" || raw === 1 || raw === "1") {
+    return true;
+  }
+  if (raw === false || raw === "false" || raw === 0 || raw === "0") {
+    return false;
+  }
+  return undefined;
 }
 
 /** Parse reminders[].compose_aspects — empty array when absent/invalid. */

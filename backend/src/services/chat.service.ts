@@ -510,7 +510,7 @@ const STATUS_ADDRESSEE_RULE =
   "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED; server dump + ממתינים). show_dump=tasks alone = the SPEAKER's book — FORBIDDEN for second-person inventory. First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows (show_dump without about, or full). A name («מה יש לטל») = that person's rows via show_dump_about. FORBIDDEN free-writing «אין לי מטלות» / «אין לי כלום» while WORKER_SAVED_DATA or OPEN_JOBS has a row — emit the dump ACTION.";
 
 const RESPONSES_RULE =
-  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons: one metadata.buttons array — engine puts «הצג» on the first entry and choice buttons (כן/לא/…) on the last when there are several entries; single entry gets all. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
+  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons: one metadata.buttons array — engine puts «הצג» on the first entry and choice buttons (כן/לא/…) on the last when there are several entries; single entry gets all. After an item MOVE (lists.remove + lists.add) → ONE «הצג» for the DEST list only (never source+dest; never «הצג רשימת רשימת…»). metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
@@ -722,8 +722,8 @@ function workerTargetingInstructions(
     "MASHOV YEAR (critical): year is NEVER invented. Missing שנת לימודים למשוב → ask ONLY «לאיזו שנת לימודים?» (one question; mashov=null; FORBIDDEN mixing gender/tips). Example: you asked for year → speaker «זכר / 2026» or just «2026» → SAME TURN lists add filing item_name=שנת לימודים למשוב item_info=2026 AND metadata.mashov with the pending child/aspects. YOU file — never tell them «שמור בתיוק». FORBIDDEN: hearing 2026 and not filing; mashov while year filing is still missing.",
     "MASHOV (live): «מה הציונים של דניאל» / שיעורי בית / התנהגות / מערכת / חיסורים / הודעות → metadata.mashov { child:\"דניאל\"|\"\", aspects:[grades|homework|behavior|timetable|absences|messages] }; lists/no reminders clock. הודעות = inbox (parent account; child optional). Pure ask → responses may be empty; server fills. WITH ack (WATCH sample) → ack only; server appends mashov as 2nd message. Server reads filings (incl. סיסמת משוב + שנת לימודים) + fetches. Missing creds → ask (mashov=null) then file on answer; never mashov without complete filings. Several children and no child → ask which.",
     "SCHEDULED MASHOV: «כל יום ב־18 שלחי לי את הציונים של דניאל» → compose:true, compose_source:\"mashov\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH mashov_new exception: no ask-when.",
-    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov). Types: market_price | weather_rain | weather_changed | mashov_new | market_change_compare | expr | field_changed | bus_eta. SAME TURN: emit live weather/market/mashov sample ACTION + responses = short watch ack ONLY (e.g. «אעקוב אחרי שער הביטקוין ואעדכן כשיהיה מעל 84,000») — FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message. Server stamps baseline — never «עדיין לא». No spoken time → hourly interval (FORBIDDEN ask מתי) except bus_eta every 2 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
-    "WATCH ONCE vs RECURRING: «תעדכני אותי כש…» / first time the condition holds → watch_once:true (after alert the server deletes YOUR worker task). «בכל פעם…» / keep checking → omit watch_once (or false). weather_changed + watch_once for «כשמזג האוויר משתנה». mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. market_change_compare e.g. {type:\"market_change_compare\",left:\"דולר\",right:\"יורו\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
+    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov). Types: market_price | weather_rain | weather_changed | mashov_new | market_change_compare | expr | field_changed | bus_eta. SAME TURN: emit live weather/market/mashov sample ACTION + responses = short watch ack ONLY (e.g. «אעקוב אחרי שער הביטקוין ואעדכן כשיהיה מעל 84,000») — FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message prefaced «לידיעתך כרגע…». Server stamps baseline only — first condition check is the next poll (never fire immediately on create). No spoken time → recurrence {freq:\"interval\",interval:5,unit:\"minutes\"} (FORBIDDEN ask מתי; FORBIDDEN defaulting to hourly). bus_eta → every 2 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
+    "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT «תעדכני אותי כששער הדולר מעל 3» → watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING «תעדכני כל פעם ששער הדולר מעל 3» → watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true → send then sleep until next interval. (3) RECURRING SCHEDULED «תעדכני אותי כל בוקר ב־8 אם שער הדולר מעל 3» → watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for «כשמזג האוויר משתנה». mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. market_change_compare e.g. {type:\"market_change_compare\",left:\"דולר\",right:\"יורו\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "WATCH EXPR (arithmetic on catalog fields): «טמפרטורה בפתח תקווה כפול 2 = 50» → compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"פתח תקווה\"},{const:2}]},right:{const:50}}; compose_source weather. «יורו + דולר קטן מכ־10» → expr compare approx/lt with market.price fields (symbols יורו/דולר). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (כ־ → approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. «כשהטמפרטורה משתנה» on a number → field_changed {field:\"weather.temp_now\",place:…}. FORBIDDEN putting the math only in the brief.",
     "PLACES (live local business): «תמצאי לי חשמלאי בפתח תקווה» / «מה הטלפון של מקדונלדס בקרית אונו» → metadata.places { query, place, aspects }. «מה המסעדות באזור שלי» + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\" }. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): «מתי מדליקים נרות בפתח תקווה» / «מתי יוצאת שבת בתל אביב» / «מה פרשת השבוע» / «איזה חג הבא» → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays] }; lists/no reminders clock. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare «מתי שבת» → [summary]; מתי נרות → [candles]; מוצאי/יציאת שבת → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכירי לי להדליק נרות — use CANDLE-OFFSET REMINDER.",
@@ -2875,6 +2875,13 @@ export async function sendChatMessage(input: {
         }
       }
     }
+    // WATCH create turn: live sample is a 2nd bubble after the model ack —
+    // preface «לידיעתך כרגע…» (pure live asks stay unwrapped).
+    const watchSampleTurn = (metadata.reminders ?? []).some(
+      (row) =>
+        (row.action === "add" || row.action === "update") &&
+        row.composeCondition != null,
+    );
     // Live weather ACTION → Open-Meteo; keep model ack when present, else replace.
     // Guests: weather as main topic stays forbidden — skip even if model emitted it.
     const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
@@ -2884,7 +2891,9 @@ export async function sendChatMessage(input: {
         date: weatherAction.date,
         aspects: weatherAction.aspects,
       });
-      workingReply = applyLiveDomainReply(workingReply, weatherText);
+      workingReply = applyLiveDomainReply(workingReply, weatherText, {
+        watchSample: watchSampleTurn,
+      });
     }
     // Live market ACTION → Yahoo Finance; guests skip (same as weather).
     const marketAction = guestSpeaker ? null : metadata.market ?? null;
@@ -2893,7 +2902,10 @@ export async function sendChatMessage(input: {
         queries: marketAction.queries,
         aspects: marketAction.aspects,
       });
-      workingReply = applyLiveDomainReply(workingReply, marketText);
+      workingReply = applyLiveDomainReply(workingReply, marketText, {
+        watchSample: watchSampleTurn,
+        watchDomain: "market",
+      });
     }
     // Live Mashov ACTION → login from filings; guests skip.
     const mashovAction = guestSpeaker ? null : metadata.mashov ?? null;
@@ -2904,7 +2916,9 @@ export async function sendChatMessage(input: {
         child: mashovAction.child,
         aspects: mashovAction.aspects,
       });
-      workingReply = applyLiveDomainReply(workingReply, mashovText);
+      workingReply = applyLiveDomainReply(workingReply, mashovText, {
+        watchSample: watchSampleTurn,
+      });
     }
     // Live places ACTION → Google Places; guests skip.
     const placesAction = guestSpeaker ? null : metadata.places ?? null;
@@ -2921,7 +2935,9 @@ export async function sendChatMessage(input: {
         lat: placesAction.lat ?? pendingLoc?.lat ?? null,
         lng: placesAction.lng ?? pendingLoc?.lng ?? null,
       });
-      workingReply = applyLiveDomainReply(workingReply, placesText);
+      workingReply = applyLiveDomainReply(workingReply, placesText, {
+        watchSample: watchSampleTurn,
+      });
       if (
         nearSpeaker &&
         pendingLoc &&
@@ -2945,7 +2961,9 @@ export async function sendChatMessage(input: {
         date: jewishAction.date,
         aspects: jewishAction.aspects,
       });
-      workingReply = applyLiveDomainReply(workingReply, jewishText);
+      workingReply = applyLiveDomainReply(workingReply, jewishText, {
+        watchSample: watchSampleTurn,
+      });
     }
     // Live routes ACTION → Google Routes TRANSIT / Places stop board; guests skip.
     const routesAction = guestSpeaker ? null : metadata.routes ?? null;
@@ -2974,7 +2992,9 @@ export async function sendChatMessage(input: {
             ? pin?.lng ?? null
             : null,
       });
-      workingReply = applyLiveDomainReply(workingReply, routesResult.text);
+      workingReply = applyLiveDomainReply(workingReply, routesResult.text, {
+        watchSample: watchSampleTurn,
+      });
       if (
         routesResult.navigateAddress &&
         !parseLlmReply(workingReply).navigateAddress
