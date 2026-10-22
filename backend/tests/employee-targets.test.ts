@@ -573,7 +573,7 @@ describe("employee targets", () => {
     expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("ensures speaker הצג תזכורות when reminders mutate and model omitted buttons", () => {
+  it("speaker show buttons are model-only (no engine inject when omitted)", () => {
     const reminderAdd: LlmReminderAction = {
       action: "update",
       item: "לקחת אקמול",
@@ -593,7 +593,7 @@ describe("employee targets", () => {
       compose: false,
       composeSource: "",
       composeLookbackHours: 0,
-          composePlace: "",
+      composePlace: "",
       reminderId: "r1",
     };
     expect(
@@ -601,25 +601,24 @@ describe("employee targets", () => {
         ...emptyLlmMetadata(),
         reminders: [reminderAdd],
       }),
-    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    ).toEqual([]);
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
         [{ label: "הצג", command: "הצג תזכורות" }],
       ),
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
-    // Model show for a list that did not mutate this turn is dropped — engine
-    // show set wins (reminders-only → תזכורות alone).
+    // Model commands are kept as-is (no allowlist replace / inject).
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
-        [{ label: "הצג", command: "הצג רשימת מטלות" }],
+        [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
-    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "מה יש לי מחר", command: "מה יש לי מחר" }]);
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("ensures only הצג תזכורות on a WATCH turn (not also מטלות)", () => {
+  it("does not inject הצג on a WATCH turn when the model omitted buttons", () => {
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -658,10 +657,10 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    ).toEqual([]);
   });
 
-  it("custom list move emits only dest הצג (not source + dest)", () => {
+  it("custom list move emits only dest הצג for partner notify (not source + dest)", () => {
     const moveMeta = {
       ...emptyLlmMetadata(),
       lists: [
@@ -689,12 +688,11 @@ describe("employee targets", () => {
     expect(showButtonsForNotify(moveMeta)).toEqual([
       { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
     ]);
-    expect(ensureSpeakerShowButtons(moveMeta)).toEqual([
-      { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
-    ]);
+    // Speaker path: no model buttons → nothing injected.
+    expect(ensureSpeakerShowButtons(moveMeta)).toEqual([]);
   });
 
-  it("drops mismatched model הצג on move so typo never makes a 3rd button", () => {
+  it("keeps model show suggestions and choices (no engine replace on move)", () => {
     const moveMeta = {
       ...emptyLlmMetadata(),
       lists: [
@@ -716,19 +714,25 @@ describe("employee targets", () => {
     };
     expect(
       ensureSpeakerShowButtons(moveMeta, [
-        { label: "הצג", command: "הצג רשימת דברים שעלו לשרט" },
-        { label: "הצג", command: "הצג רשימת רשימת דברים שעלו לשרת" },
+        { label: "מה ברשימה", command: "הצג רשימת דברים שעלו לשרת" },
         { label: "כן", command: "כן" },
       ]),
     ).toEqual([
-      { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+      { label: "מה ברשימה", command: "הצג רשימת דברים שעלו לשרת" },
       { label: "כן", command: "כן" },
     ]);
     expect(
       ensureSpeakerShowButtons(moveMeta, [
-        { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
+        { label: "למי להתקשר", command: "למי אני צריך להתקשר" },
+        { label: "מה טל לקנות", command: "מה טל צריך לקנות" },
+        { label: "מה ביום שלישי", command: "מה יש לטל ביום שלישי" },
+        { label: "כן", command: "כן" },
       ]),
-    ).toEqual([{ label: "הצג", command: "הצג רשימת דברים שעלו לשרת" }]);
+    ).toEqual([
+      { label: "למי להתקשר", command: "למי אני צריך להתקשר" },
+      { label: "מה טל לקנות", command: "מה טל צריך לקנות" },
+      { label: "מה ביום שלישי", command: "מה יש לטל ביום שלישי" },
+    ]);
   });
 
   it("canonicalizes «רשימת רשימת …» custom list names on show buttons", () => {
@@ -772,7 +776,7 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
   });
 
-  it("ensures speaker הצג רשימת … when lists mutate and model omitted buttons", () => {
+  it("does not inject speaker הצג when lists mutate and model omitted buttons", () => {
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -786,7 +790,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    ).toEqual([]);
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -800,7 +804,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
+    ).toEqual([]);
     expect(
       ensureSpeakerShowButtons(
         {
@@ -815,9 +819,9 @@ describe("employee targets", () => {
             },
           ],
         },
-        [{ label: "הצג", command: "הצג רשימת מטלות" }],
+        [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
-    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    ).toEqual([{ label: "מה יש לי מחר", command: "מה יש לי מחר" }]);
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -841,10 +845,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([
-      { label: "הצג", command: "הצג רשימת בדיקת שם" },
-      { label: "הצג", command: "הצג תיוקים" },
-    ]);
+    ).toEqual([]);
   });
 
   it("appends a linked reminder clock to a task notification", () => {

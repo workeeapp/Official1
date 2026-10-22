@@ -10,6 +10,7 @@ import {
   redactRegisterSecrets,
   wazeNavigateUrl,
   distributeReplyButtons,
+  isClosedChoiceReplyButton,
   isShowListReplyButton,
 } from "./llm-message.js";
 
@@ -706,11 +707,41 @@ describe("parseLlmReply", () => {
     expect(wazeNavigateUrl("a&b=c")).toBe("https://waze.com/ul?q=a%26b%3Dc&navigate=yes");
   });
 
-  it("classifies הצג as a show-list button", () => {
+  it("classifies classic and content-aware show taps vs closed choices", () => {
     expect(
       isShowListReplyButton({ label: "הצג", command: "הצג רשימת מטלות" }),
     ).toBe(true);
+    expect(
+      isShowListReplyButton({
+        label: "מה יש לי מחר",
+        command: "מה יש לי מחר",
+      }),
+    ).toBe(true);
+    expect(
+      isShowListReplyButton({
+        label: "למי להתקשר",
+        command: "למי אני צריך להתקשר",
+      }),
+    ).toBe(true);
+    expect(
+      isShowListReplyButton({
+        label: "מה טל לקנות",
+        command: "מה טל צריך לקנות",
+      }),
+    ).toBe(true);
     expect(isShowListReplyButton({ label: "כן", command: "כן" })).toBe(false);
+    expect(isClosedChoiceReplyButton({ label: "כן", command: "כן" })).toBe(
+      true,
+    );
+    expect(
+      isClosedChoiceReplyButton({ label: "כיבוד", command: "כיבוד" }),
+    ).toBe(true);
+    expect(
+      isClosedChoiceReplyButton({
+        label: "מה יש לי מחר",
+        command: "מה יש לי מחר",
+      }),
+    ).toBe(false);
   });
 
   it("distributes show buttons to first bubble and choices to last", () => {
@@ -830,6 +861,47 @@ describe("parseLlmReply", () => {
       { label: "לא", command: "לא" },
     ]);
     expect(bubbles[2]?.buttons).toBeUndefined();
+  });
+
+  it("applyShowButtonsToBubbles puts content-aware show on the first bubble", () => {
+    const bubbles = applyShowButtonsToBubbles(
+      [
+        {
+          text: "הוספתי התקשרות ליוסי.",
+          buttons: [
+            {
+              label: "למי להתקשר",
+              command: "למי אני צריך להתקשר",
+            },
+          ],
+        },
+        {
+          text: "רוצה תזכורת?",
+          buttons: [
+            { label: "כן", command: "כן" },
+            { label: "לא", command: "לא" },
+          ],
+        },
+      ],
+      [
+        {
+          label: "למי להתקשר",
+          command: "למי אני צריך להתקשר",
+        },
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ],
+    );
+    expect(bubbles[0]?.buttons).toEqual([
+      {
+        label: "למי להתקשר",
+        command: "למי אני צריך להתקשר",
+      },
+    ]);
+    expect(bubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
   });
 
   it("ignores a null metadata action", () => {

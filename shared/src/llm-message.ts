@@ -3948,17 +3948,66 @@ export function toReplyButtons(rawMetadata: unknown): LlmReplyButton[] {
   return buttons;
 }
 
-/** Post-mutate «הצג …» / show-list taps — sit on the first spoken bubble. */
+/**
+ * Closed-choice vocabulary (כן/לא, domain picks, …) — stays on the bubble
+ * the model assigned. Everything else that is not this set can be confirm
+ * show chrome (classic «הצג» or content-aware natural asks).
+ */
+const CLOSED_CHOICE_REPLY_TOKENS = new Set(
+  [
+    "כן",
+    "לא",
+    "yes",
+    "no",
+    "ברכב",
+    "תחב״צ",
+    "תחב\"צ",
+    "בתחבורה ציבורית",
+    "המטלה",
+    "רק תזכורות",
+    "יעד",
+    "קווים",
+    "1",
+    "2",
+    "3",
+    "קניות",
+    "מטלות",
+    "תיוק",
+    "תזכורות",
+    "כיבוד",
+    "מי מגיע",
+    "מה להביא",
+  ].map((token) => token.toLowerCase()),
+);
+
+/** Closed choice taps (כן/לא / domain / car…) — not post-mutate show chrome. */
+export function isClosedChoiceReplyButton(button: LlmReplyButton): boolean {
+  const label = button.label.trim().toLowerCase();
+  const command = button.command.trim().toLowerCase();
+  return (
+    CLOSED_CHOICE_REPLY_TOKENS.has(label) ||
+    CLOSED_CHOICE_REPLY_TOKENS.has(command)
+  );
+}
+
+/**
+ * Post-mutate show taps — sit on the first spoken bubble.
+ * Classic «הצג» / «show …», or any non-choice content-aware suggestion
+ * (e.g. «מה יש לי מחר», «למי אני צריך להתקשר»).
+ */
 export function isShowListReplyButton(button: LlmReplyButton): boolean {
   const label = button.label.trim();
   const command = button.command.trim();
   if (label === "הצג" || label.toLowerCase() === "show") {
     return true;
   }
-  return (
+  if (
     command.startsWith("הצג") ||
     command.toLowerCase().startsWith("show ")
-  );
+  ) {
+    return true;
+  }
+  return !isClosedChoiceReplyButton(button);
 }
 
 /**

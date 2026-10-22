@@ -315,17 +315,17 @@
                 "buttons": {
                   "type": "array",
                   "maxItems": 3,
-                  "description": "Tap buttons for THIS bubble only (max 3). Closed-choice ask → those options here; post-mutate הצג on the confirm bubble; POST-SAVE offer → כן+לא on the offer bubble. Empty or omit when this bubble has no taps.",
+                  "description": "Tap buttons for THIS bubble only (max 3). Closed-choice ask → those options here; post-mutate content-aware show on the confirm bubble (short label ≤12 preferred, full ask in command; reminder+day+shopping/meeting → often TWO: YOUR day inventory + speaker domain ask; omit when no useful angle — engine does not invent הצג); POST-SAVE offer → כן+לא on the offer bubble. Empty or omit when this bubble has no taps.",
                   "items": {
                     "type": "object",
                     "properties": {
                       "label": {
                         "type": "string",
-                        "description": "Short button text, max 20 characters (e.g. כן, לא, ברכב, הצג)."
+                        "description": "Short button text, prefer ≤12 chars, hard max 20 (e.g. כן, לא, מה מחר, למי להתקשר, יום ג׳ אצלך, מה לקנות)."
                       },
                       "command": {
                         "type": "string",
-                        "description": "Exact text sent as the next message on tap."
+                        "description": "Exact text sent as the next user message on tap (full natural ask or closed choice; may be longer than label)."
                       }
                     },
                     "required": [
@@ -959,7 +959,7 @@
                   "properties": {
                     "label": {
                       "type": "string",
-                      "description": "Short button text, max 20 characters (e.g. כן, לא, ברכב, הצג)."
+                      "description": "Short button text, prefer ≤12 chars, hard max 20 (e.g. כן, לא, ברכב, מה לקנות)."
                     },
                     "command": {
                       "type": "string",

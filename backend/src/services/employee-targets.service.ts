@@ -2,7 +2,6 @@ import {
   emptyLlmMetadata,
   isDigitalEmployee,
   isGuestEmployee,
-  isShowListReplyButton,
   llmItemLabel,
   messageHasSchedule,
   REPLY_BUTTON_MAX,
@@ -1442,78 +1441,24 @@ function reminderMutates(metadata: LlmMetadata): boolean {
   );
 }
 
-/** Conditional watch clock (compose_condition) — worker task + ping clock. */
-function isWatchClockTurn(metadata: LlmMetadata): boolean {
-  return (metadata.reminders ?? []).some(
-    (row) =>
-      (row.action === "add" || row.action === "update") &&
-      row.composeCondition != null,
-  );
-}
-
 /**
- * Engine fallback for the speaker: after list / filing / reminder mutates,
- * append the matching «הצג» button(s) (same product commands as partner
- * notifies). Engine-derived show commands win; model show buttons that do not
- * match are dropped (typos / «רשימת רשימת…» must not fill a 3rd slot).
- * Non-show model buttons (כן/לא/…) are kept.
+ * Speaker confirm taps are model-only: keep whatever the model emitted
+ * (content-aware show suggestions and/or כן/לא/…), capped and deduped.
+ * Never inject generic «הצג רשימת…» / «הצג תזכורות» — if the model sent no
+ * show buttons, none appear. Partner notifies still use showButtonsForNotify.
  */
 export function ensureSpeakerShowButtons(
-  metadata: LlmMetadata,
+  _metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
 ): LlmReplyButton[] {
-  // Watch: Lucy worker task + compose clock → only «הצג תזכורות» (not also
-  // «הצג רשימת מטלות», which looks like a duplicate «הצג» on the chat bubble).
-  if (isWatchClockTurn(metadata) && reminderMutates(metadata)) {
-    const buttons = existing
-      .filter(
-        (button) =>
-          !isShowListReplyButton(button) ||
-          button.command === SHOW_REMINDERS_COMMAND,
-      )
-      .slice(0, REPLY_BUTTON_MAX);
-    const seen = new Set(buttons.map((button) => button.command));
-    if (
-      buttons.length < REPLY_BUTTON_MAX &&
-      !seen.has(SHOW_REMINDERS_COMMAND)
-    ) {
-      buttons.push(SHOW_REMINDERS_BUTTON);
-    }
-    return buttons;
-  }
-
-  const engineShow = showButtonsForNotify(metadata);
-  const engineCommands = new Set(engineShow.map((button) => button.command));
-  if (reminderMutates(metadata)) {
-    engineCommands.add(SHOW_REMINDERS_COMMAND);
-  }
-
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
-  const append = (button: LlmReplyButton): void => {
+  for (const button of existing) {
     if (buttons.length >= REPLY_BUTTON_MAX || seen.has(button.command)) {
-      return;
+      continue;
     }
     seen.add(button.command);
     buttons.push(button);
-  };
-
-  for (const button of engineShow) {
-    append(button);
-  }
-  // Partner notify skips תזכורות when a list button already exists; speaker
-  // still gets both after a self-nudge (task + clock) if the model omitted them.
-  if (reminderMutates(metadata)) {
-    append(SHOW_REMINDERS_BUTTON);
-  }
-  for (const button of existing) {
-    if (isShowListReplyButton(button)) {
-      if (engineCommands.has(button.command)) {
-        append(button);
-      }
-      continue;
-    }
-    append(button);
   }
   return buttons;
 }

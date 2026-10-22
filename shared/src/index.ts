@@ -138,6 +138,7 @@ export {
   llmItemLabel,
   toReplyButtons,
   isShowListReplyButton,
+  isClosedChoiceReplyButton,
   distributeReplyButtons,
   REPLY_BUTTON_MAX,
   REPLY_BUTTON_LABEL_MAX,
