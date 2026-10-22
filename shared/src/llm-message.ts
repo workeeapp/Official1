@@ -2955,6 +2955,46 @@ export function toReplyButtons(rawMetadata: unknown): LlmReplyButton[] {
   return buttons;
 }
 
+/** Post-mutate «הצג …» / show-list taps — sit on the first spoken bubble. */
+export function isShowListReplyButton(button: LlmReplyButton): boolean {
+  const label = button.label.trim();
+  const command = button.command.trim();
+  if (label === "הצג" || label.toLowerCase() === "show") {
+    return true;
+  }
+  return (
+    command.startsWith("הצג") ||
+    command.toLowerCase().startsWith("show ")
+  );
+}
+
+/**
+ * Place reply buttons on the right spoken bubble when `responses` has several entries.
+ * Single entry → all buttons there. Multi: «הצג» on first, choice (כן/לא/…) on last.
+ */
+export function distributeReplyButtons(
+  responseCount: number,
+  buttons: LlmReplyButton[],
+): LlmReplyButton[][] {
+  const n = Math.max(0, Math.floor(responseCount));
+  const out: LlmReplyButton[][] = Array.from({ length: n }, () => []);
+  if (n === 0 || buttons.length === 0) {
+    return out;
+  }
+  const capped = buttons.slice(0, REPLY_BUTTON_MAX * 2);
+  if (n === 1) {
+    out[0] = capped.slice(0, REPLY_BUTTON_MAX);
+    return out;
+  }
+  const show = capped.filter(isShowListReplyButton).slice(0, REPLY_BUTTON_MAX);
+  const choice = capped
+    .filter((button) => !isShowListReplyButton(button))
+    .slice(0, REPLY_BUTTON_MAX);
+  out[0] = show;
+  out[n - 1] = choice;
+  return out;
+}
+
 function extractJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);

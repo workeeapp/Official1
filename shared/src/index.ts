@@ -132,6 +132,8 @@ export {
   parseTargets,
   llmItemLabel,
   toReplyButtons,
+  isShowListReplyButton,
+  distributeReplyButtons,
   REPLY_BUTTON_MAX,
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_COMMAND_MAX,

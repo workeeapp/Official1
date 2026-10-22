@@ -15,6 +15,7 @@ import {
   redactMetadataSecrets,
   redactRegisterSecrets,
   showDumpNames,
+  distributeReplyButtons,
   toReplyButtons,
   type ChatAttachmentRef,
   type ChatHistoryResponse,
@@ -508,7 +509,7 @@ const STATUS_ADDRESSEE_RULE =
   "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED; server dump + ממתינים). show_dump=tasks alone = the SPEAKER's book — FORBIDDEN for second-person inventory. First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows (show_dump without about, or full). A name («מה יש לטל») = that person's rows via show_dump_about. FORBIDDEN free-writing «אין לי מטלות» / «אין לי כלום» while WORKER_SAVED_DATA or OPEN_JOBS has a row — emit the dump ACTION.";
 
 const RESPONSES_RULE =
-  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons attach to the first entry. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
+  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons: one metadata.buttons array — engine puts «הצג» on the first entry and choice buttons (כן/לא/…) on the last when there are several entries; single entry gets all. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
@@ -951,9 +952,14 @@ async function syncTurnReplies(input: {
   lastNumberedDump?: LastNumberedDumpLine[];
 }): Promise<ChatTurnMessageIds> {
   const [first = "", ...rest] = input.responses;
-  const buttons = input.buttons?.length
+  const allButtons = input.buttons?.length
     ? toReplyButtons({ buttons: input.buttons })
     : [];
+  const buttonsByEntry = distributeReplyButtons(
+    input.responses.length,
+    allButtons,
+  );
+  const firstButtons = buttonsByEntry[0] ?? [];
   const showIcon = input.showIcon?.trim() || null;
   if (showIcon) {
     await prisma.chatMessage.update({
@@ -976,23 +982,28 @@ async function syncTurnReplies(input: {
     data: {
       text: first,
       actions: Prisma.JsonNull,
-      buttons: buttons.length > 0 ? toJsonValue(buttons) : Prisma.JsonNull,
+      buttons:
+        firstButtons.length > 0 ? toJsonValue(firstButtons) : Prisma.JsonNull,
       ...(input.attachments?.length
         ? { attachments: toJsonValue(input.attachments) }
         : {}),
       ...(dumpLines.length > 0 ? { raw: toJsonValue(nextRaw) } : {}),
     },
   });
-  const extra = rest.map((text, index) => ({
-    id: randomUUID(),
-    conversationId: input.conversationId,
-    author: "assistant",
-    speaker: input.assistantSpeaker,
-    text,
-    actions: Prisma.JsonNull,
-    buttons: Prisma.JsonNull,
-    createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
-  }));
+  const extra = rest.map((text, index) => {
+    const entryButtons = buttonsByEntry[index + 1] ?? [];
+    return {
+      id: randomUUID(),
+      conversationId: input.conversationId,
+      author: "assistant",
+      speaker: input.assistantSpeaker,
+      text,
+      actions: Prisma.JsonNull,
+      buttons:
+        entryButtons.length > 0 ? toJsonValue(entryButtons) : Prisma.JsonNull,
+      createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
+    };
+  });
   if (extra.length > 0) {
     await prisma.chatMessage.createMany({ data: extra });
   }

@@ -4,6 +4,7 @@ import {
   humanEmployees,
   isGuestEmployee,
   parseAttachmentKind,
+  distributeReplyButtons,
   parseLlmReply,
   parseReplyMetadata,
   typingPauseMs,
@@ -493,6 +494,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
     const parsed = parseLlmReply(turn.reply);
     const replies = parsed.responses.map((text) => text.trim()).filter(Boolean);
     const buttons = parsed.buttons ?? [];
+    const buttonsByReply = distributeReplyButtons(replies.length, buttons);
     recordWhatsAppEvent(
       "llm_ok",
       `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
@@ -518,7 +520,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       const sendResult = await sendWhatsAppButtons(
         from,
         reply,
-        index === 0 ? buttons : [],
+        buttonsByReply[index] ?? [],
         { ignoreSession: true },
       );
       recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);

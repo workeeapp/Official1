@@ -7,6 +7,8 @@ import {
   redactMetadataSecrets,
   redactRegisterSecrets,
   wazeNavigateUrl,
+  distributeReplyButtons,
+  isShowListReplyButton,
 } from "./llm-message.js";
 
 describe("custom list title_field", () => {
@@ -699,6 +701,41 @@ describe("parseLlmReply", () => {
       `https://waze.com/ul?q=${encodeURIComponent("הרצל 12, תל אביב")}&navigate=yes`,
     );
     expect(wazeNavigateUrl("a&b=c")).toBe("https://waze.com/ul?q=a%26b%3Dc&navigate=yes");
+  });
+
+  it("classifies הצג as a show-list button", () => {
+    expect(
+      isShowListReplyButton({ label: "הצג", command: "הצג רשימת מטלות" }),
+    ).toBe(true);
+    expect(isShowListReplyButton({ label: "כן", command: "כן" })).toBe(false);
+  });
+
+  it("distributes show buttons to first bubble and choices to last", () => {
+    const buttons = [
+      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ];
+    expect(distributeReplyButtons(1, buttons)).toEqual([buttons]);
+    expect(distributeReplyButtons(2, buttons)).toEqual([
+      [{ label: "הצג", command: "הצג רשימת מטלות" }],
+      [
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ],
+    ]);
+    expect(
+      distributeReplyButtons(2, [
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ]),
+    ).toEqual([
+      [],
+      [
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ],
+    ]);
   });
 
   it("ignores a null metadata action", () => {
