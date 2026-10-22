@@ -620,6 +620,48 @@ describe("employee targets", () => {
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
+  it("ensures only הצג תזכורות on a WATCH turn (not also מטלות)", () => {
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
+            targets: ["לוסי"],
+          },
+        ],
+        reminders: [
+          {
+            action: "add",
+            item: "מזג אוויר",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "1:hours",
+            ping: [],
+            about: [],
+            targets: [],
+            text: "עדכון מזג אוויר",
+            inSeconds: null,
+            everyCount: 1,
+            everyUnit: "hours",
+            weekdays: null,
+            confirmed: false,
+            compose: true,
+            composeSource: "weather",
+            composeLookbackHours: 0,
+            composePlace: "פתח תקווה",
+            composeCondition: { type: "weather_changed" },
+            reminderId: "",
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+  });
+
   it("ensures speaker הצג רשימת … when lists mutate and model omitted buttons", () => {
     expect(
       ensureSpeakerShowButtons({

@@ -2,6 +2,7 @@ import {
   emptyLlmMetadata,
   isDigitalEmployee,
   isGuestEmployee,
+  isShowListReplyButton,
   llmItemLabel,
   messageHasSchedule,
   REPLY_BUTTON_MAX,
@@ -1441,6 +1442,15 @@ function reminderMutates(metadata: LlmMetadata): boolean {
   );
 }
 
+/** Conditional watch clock (compose_condition) — worker task + ping clock. */
+function isWatchClockTurn(metadata: LlmMetadata): boolean {
+  return (metadata.reminders ?? []).some(
+    (row) =>
+      (row.action === "add" || row.action === "update") &&
+      row.composeCondition != null,
+  );
+}
+
 /**
  * Engine fallback for the speaker: after list / filing / reminder mutates,
  * if the model omitted the matching «הצג» button(s), append them (same
@@ -1450,6 +1460,26 @@ export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
 ): LlmReplyButton[] {
+  // Watch: Lucy worker task + compose clock → only «הצג תזכורות» (not also
+  // «הצג רשימת מטלות», which looks like a duplicate «הצג» on the chat bubble).
+  if (isWatchClockTurn(metadata) && reminderMutates(metadata)) {
+    const buttons = existing
+      .filter(
+        (button) =>
+          !isShowListReplyButton(button) ||
+          button.command === SHOW_REMINDERS_COMMAND,
+      )
+      .slice(0, REPLY_BUTTON_MAX);
+    const seen = new Set(buttons.map((button) => button.command));
+    if (
+      buttons.length < REPLY_BUTTON_MAX &&
+      !seen.has(SHOW_REMINDERS_COMMAND)
+    ) {
+      buttons.push(SHOW_REMINDERS_BUTTON);
+    }
+    return buttons;
+  }
+
   const buttons = existing.slice(0, REPLY_BUTTON_MAX);
   const seen = new Set(buttons.map((button) => button.command));
   const append = (button: LlmReplyButton): void => {
