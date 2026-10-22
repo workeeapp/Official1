@@ -13,6 +13,7 @@ import {
   sendWhatsAppMarkRead,
   sendWhatsAppTyping,
   setEngineButtons,
+  setEngineSpokenBubbles,
   toWhatsAppFormatting,
   whatsappButtonsBody,
   whatsappCtaUrlBody,
@@ -774,14 +775,75 @@ describe("WhatsApp webhook", () => {
       }),
       [{ label: "הצג", command: "הצג תזכורות" }],
     );
-    const parsed = JSON.parse(patched) as {
-      responses: string[];
-      metadata: { buttons: Array<{ label: string; command: string }> };
-    };
+    const parsed = parseLlmReply(patched);
     expect(parsed.responses).toEqual(["עדכנתי את התזכורת ל־14:50"]);
-    expect(parsed.metadata.buttons).toEqual([
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
       { label: "הצג", command: "הצג תזכורות" },
     ]);
+    expect(parsed.buttons).toEqual([
+      { label: "הצג", command: "הצג תזכורות" },
+    ]);
+  });
+
+  it("keeps offer כן/לא on the offer bubble after an engine tip", () => {
+    const withTip = appendEngineResponse(
+      JSON.stringify({
+        responses: [
+          {
+            text: "הוספתי לשלוח מייל לעירייה למטלות להיום.",
+            buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+          },
+          {
+            text: "רוצה שאוסיף גם תזכורת בוואטסאפ?",
+            buttons: [
+              { label: "כן", command: "כן" },
+              { label: "לא", command: "לא" },
+            ],
+          },
+        ],
+        metadata: {},
+      }),
+      "באפשרותי לשמור פגישה קבועה, לדוגמא: *כל יום ראשון ב10 בבוקר פגישת צוות*",
+    );
+    const parsed = parseLlmReply(withTip);
+    expect(parsed.responses).toHaveLength(3);
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(parsed.responseBubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(parsed.responseBubbles[2]?.buttons).toBeUndefined();
+    expect(parsed.responseBubbles[2]?.text).toContain("פגישה קבועה");
+  });
+
+  it("freezes legacy turn-level buttons before tip so choices stay off the tip", () => {
+    const model = JSON.stringify({
+      responses: ["הוספתי מטלה.", "רוצה שאוסיף גם תזכורת?"],
+      metadata: {
+        buttons: [
+          { label: "הצג", command: "הצג רשימת מטלות" },
+          { label: "כן", command: "כן" },
+          { label: "לא", command: "לא" },
+        ],
+      },
+    });
+    const frozen = setEngineSpokenBubbles(
+      model,
+      parseLlmReply(model).responseBubbles,
+    );
+    const withTip = appendEngineResponse(frozen, "טיפ על פגישה קבועה");
+    const parsed = parseLlmReply(withTip);
+    expect(parsed.responses).toHaveLength(3);
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(parsed.responseBubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(parsed.responseBubbles[2]?.buttons).toBeUndefined();
   });
 });
 

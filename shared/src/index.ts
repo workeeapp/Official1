@@ -120,7 +120,12 @@ export {
   parseListOps,
   parseLlmReply,
   readSpokenResponses,
+  readSpokenBubbles,
   joinSpokenResponses,
+  serializeSpokenBubbles,
+  bindTurnChromeToBubbles,
+  applyShowButtonsToBubbles,
+  clearBubbleButtons,
   parseReplyMetadata,
   parseReportSections,
   parseReportHistoryKinds,
@@ -276,4 +281,5 @@ export type {
   WatchExprCompare,
   ParsedLlmMessage,
   LlmReplyButton,
+  LlmSpokenBubble,
 } from "./llm-message";

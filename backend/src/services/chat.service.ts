@@ -15,7 +15,8 @@ import {
   redactMetadataSecrets,
   redactRegisterSecrets,
   showDumpNames,
-  distributeReplyButtons,
+  applyShowButtonsToBubbles,
+  clearBubbleButtons,
   toReplyButtons,
   type ChatAttachmentRef,
   type ChatHistoryResponse,
@@ -25,6 +26,7 @@ import {
   type LlmListAction,
   type LlmMetadata,
   type LlmReplyButton,
+  type LlmSpokenBubble,
   type PublicEmployee,
   type ReasoningEffort,
 } from "@workee/shared";
@@ -142,9 +144,9 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   applyLiveDomainReply,
-  setEngineButtons,
   setEngineNavigateAddress,
   setEngineResponse,
+  setEngineSpokenBubbles,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
 import {
@@ -512,7 +514,7 @@ const STATUS_ADDRESSEE_RULE =
   "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED; server dump + ממתינים). show_dump=tasks alone = the SPEAKER's book — FORBIDDEN for second-person inventory. First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows (show_dump without about, or full). A name («מה יש לטל») = that person's rows via show_dump_about. FORBIDDEN free-writing «אין לי מטלות» / «אין לי כלום» while WORKER_SAVED_DATA or OPEN_JOBS has a row — emit the dump ACTION.";
 
 const RESPONSES_RULE =
-  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is sent to the speaker as its own message, in order. Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries. Buttons: one metadata.buttons array — engine puts «הצג» on the first entry and choice buttons (כן/לא/…) on the last when there are several entries; single entry gets all. After an item MOVE (lists.remove + lists.add) → ONE «הצג» for the DEST list only (never source+dest; never «הצג רשימת רשימת…»). metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
+  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is an object {text, buttons?, navigate_address?} sent as its own message, in order. Put tap buttons and Waze on the bubble they belong to (הצג on confirm; כן/לא on the offer ask; navigate_address on the address line). Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries' text. After an item MOVE (lists.remove + lists.add) → ONE «הצג» for the DEST list only (never source+dest; never «הצג רשימת רשימת…»). metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
@@ -929,10 +931,12 @@ async function saveTurn(input: {
         speaker: input.assistantSpeaker,
         // Later messages of the turn are written by syncTurnReplies once the engine is done,
         // so history polling does not show them before the reply returns.
-        text: parsed.responses[0] ?? "",
+        text: parsed.responseBubbles[0]?.text ?? parsed.responses[0] ?? "",
         actions: Prisma.JsonNull,
-        buttons: parsed.buttons ? toJsonValue(parsed.buttons) : Prisma.JsonNull,
-        navigateAddress: parsed.navigateAddress ?? null,
+        buttons: parsed.responseBubbles[0]?.buttons
+          ? toJsonValue(parsed.responseBubbles[0].buttons)
+          : Prisma.JsonNull,
+        navigateAddress: parsed.responseBubbles[0]?.navigateAddress ?? null,
         raw: toJsonValue(packStoredLlmRaw(safeRequest, safeRaw)),
         createdAt: assistantAt,
       },
@@ -949,25 +953,20 @@ async function syncTurnReplies(input: {
   conversationId: string;
   assistantSpeaker: string;
   saved: ChatTurnMessageIds & { assistantAt: Date };
-  responses: string[];
+  /** Final spoken bubbles (text + per-bubble buttons / Waze). */
+  bubbles: LlmSpokenBubble[];
   /** Files the engine sends with this reply (metadata.send_attachments). */
   attachments?: ChatAttachmentRef[];
-  /** Final reply buttons (model + engine fallback). */
-  buttons?: LlmReplyButton[];
   /** Emoji reaction on the speaker's message (metadata.show_icon). */
   showIcon?: string;
   /** Line map from this turn's show_dump REPLACE (for next-turn BY LINE). */
   lastNumberedDump?: LastNumberedDumpLine[];
 }): Promise<ChatTurnMessageIds> {
-  const [first = "", ...rest] = input.responses;
-  const allButtons = input.buttons?.length
-    ? toReplyButtons({ buttons: input.buttons })
-    : [];
-  const buttonsByEntry = distributeReplyButtons(
-    input.responses.length,
-    allButtons,
-  );
-  const firstButtons = buttonsByEntry[0] ?? [];
+  const bubbles =
+    input.bubbles.length > 0 ? input.bubbles : [{ text: "" }];
+  const [first, ...rest] = bubbles;
+  const firstButtons = first?.buttons ?? [];
+  const firstNavigate = first?.navigateAddress ?? null;
   const showIcon = input.showIcon?.trim() || null;
   if (showIcon) {
     await prisma.chatMessage.update({
@@ -988,27 +987,29 @@ async function syncTurnReplies(input: {
   await prisma.chatMessage.update({
     where: { id: input.saved.assistant },
     data: {
-      text: first,
+      text: first?.text ?? "",
       actions: Prisma.JsonNull,
       buttons:
         firstButtons.length > 0 ? toJsonValue(firstButtons) : Prisma.JsonNull,
+      navigateAddress: firstNavigate,
       ...(input.attachments?.length
         ? { attachments: toJsonValue(input.attachments) }
         : {}),
       ...(dumpLines.length > 0 ? { raw: toJsonValue(nextRaw) } : {}),
     },
   });
-  const extra = rest.map((text, index) => {
-    const entryButtons = buttonsByEntry[index + 1] ?? [];
+  const extra = rest.map((bubble, index) => {
+    const entryButtons = bubble.buttons ?? [];
     return {
       id: randomUUID(),
       conversationId: input.conversationId,
       author: "assistant",
       speaker: input.assistantSpeaker,
-      text,
+      text: bubble.text,
       actions: Prisma.JsonNull,
       buttons:
         entryButtons.length > 0 ? toJsonValue(entryButtons) : Prisma.JsonNull,
+      navigateAddress: bubble.navigateAddress ?? null,
       createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
     };
   });
@@ -3064,6 +3065,23 @@ export async function sendChatMessage(input: {
         (row) => row.action === "update" || row.action === "share_book",
       ),
     });
+    // Freeze per-bubble buttons/Waze onto the model reply BEFORE engine
+    // tips/notices append, so legacy turn-level metadata.buttons are not
+    // redistributed onto trailing tip bubbles.
+    {
+      const preTip = parseLlmReply(workingReply);
+      let bubbles = preTip.responseBubbles;
+      if (metadata.showDump) {
+        // show_dump is display-only — never attach choice taps on a bare dump.
+        bubbles = clearBubbleButtons(bubbles);
+      } else if (!guestSpeaker) {
+        bubbles = applyShowButtonsToBubbles(
+          bubbles,
+          ensureSpeakerShowButtons(metadata, preTip.buttons ?? []),
+        );
+      }
+      workingReply = setEngineSpokenBubbles(workingReply, bubbles);
+    }
     const tipTurn =
       (await withoutFailingTurn("tips_apply_failed", () =>
         resolveAndRecordTipsForTurn({
@@ -3084,7 +3102,7 @@ export async function sendChatMessage(input: {
       .filter(Boolean)
       .join("\n\n");
     const replaceSpoken = deliveryFailed;
-    let reply = replaceSpoken
+    const reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
           notice: [...consultAnswers, notice, ...tipTurn.texts]
@@ -3098,21 +3116,6 @@ export async function sendChatMessage(input: {
             (current, extra) => appendEngineNotice(current, extra),
             workingReply,
           );
-    const modelButtons = parseLlmReply(reply).buttons ?? [];
-    // show_dump is display-only — never attach 1/2/3 (or any) choice taps on a bare dump.
-    let speakerButtons = metadata.showDump
-      ? []
-      : guestSpeaker
-        ? modelButtons
-        : ensureSpeakerShowButtons(metadata, modelButtons);
-    if (
-      speakerButtons.length !== modelButtons.length ||
-      speakerButtons.some(
-        (button, index) => button.command !== modelButtons[index]?.command,
-      )
-    ) {
-      reply = setEngineButtons(reply, speakerButtons);
-    }
     const outboundAttachments = guestSpeaker
       ? []
       : ((await withoutFailingTurn("attachments_send_failed", () =>
@@ -3123,9 +3126,8 @@ export async function sendChatMessage(input: {
       conversationId: conversation.id,
       assistantSpeaker,
       saved: messageIds,
-      responses: finalParsed.responses,
+      bubbles: finalParsed.responseBubbles,
       attachments: outboundAttachments.map(toChatAttachmentRef),
-      buttons: speakerButtons,
       ...(finalParsed.showIcon ? { showIcon: finalParsed.showIcon } : {}),
       ...(turnLastNumberedDump.length > 0
         ? { lastNumberedDump: turnLastNumberedDump }

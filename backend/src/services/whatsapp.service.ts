@@ -4,7 +4,6 @@ import {
   humanEmployees,
   isGuestEmployee,
   parseAttachmentKind,
-  distributeReplyButtons,
   parseLlmReply,
   parseReplyMetadata,
   typingPauseMs,
@@ -492,12 +491,19 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       recordWhatsAppEvent("handoff", `worker=${handoff}`);
     }
     const parsed = parseLlmReply(turn.reply);
-    const replies = parsed.responses.map((text) => text.trim()).filter(Boolean);
-    const buttons = parsed.buttons ?? [];
-    const buttonsByReply = distributeReplyButtons(replies.length, buttons);
+    const bubbles = parsed.responseBubbles
+      .map((bubble) => ({
+        ...bubble,
+        text: bubble.text.trim(),
+      }))
+      .filter((bubble) => bubble.text);
+    const buttonCount = bubbles.reduce(
+      (sum, bubble) => sum + (bubble.buttons?.length ?? 0),
+      0,
+    );
     recordWhatsAppEvent(
       "llm_ok",
-      `replies=${replies.length} replyChars=${parsed.response.length} buttons=${buttons.length} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
+      `replies=${bubbles.length} replyChars=${parsed.response.length} buttons=${buttonCount} icon=${parsed.showIcon ?? ""} files_out=${turn.outboundAttachmentIds.length}`,
     );
     // Fast path after LLM: acknowledge already sent → reaction (if any) → typing → reply.
     if (parsed.showIcon) {
@@ -508,19 +514,19 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       );
       recordWhatsAppEvent("reaction_send", `result=${reactionResult}`);
     }
-    if (parsed.showIcon || replies.length > 0) {
+    if (parsed.showIcon || bubbles.length > 0) {
       stopTyping = await beginWhatsAppTyping(last.messageId);
     }
     let delivered = true;
-    for (const [index, reply] of replies.entries()) {
+    for (const [index, bubble] of bubbles.entries()) {
       if (index > 0) {
         await sendWhatsAppTyping(last.messageId);
-        await sleep(typingPauseMs(reply));
+        await sleep(typingPauseMs(bubble.text));
       }
       const sendResult = await sendWhatsAppButtons(
         from,
-        reply,
-        buttonsByReply[index] ?? [],
+        bubble.text,
+        bubble.buttons ?? [],
         { ignoreSession: true },
       );
       recordWhatsAppEvent("reply_send", `part=${index + 1} result=${sendResult}`);
@@ -528,10 +534,10 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         delivered = false;
         break;
       }
-      if (index === 0 && parsed.navigateAddress) {
+      if (bubble.navigateAddress) {
         const navigateResult = await sendWhatsAppNavigate(
           from,
-          parsed.navigateAddress,
+          bubble.navigateAddress,
           { ignoreSession: true },
         );
         recordWhatsAppEvent("navigate_send", `result=${navigateResult}`);

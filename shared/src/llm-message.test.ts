@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyShowButtonsToBubbles,
   coerceMetadataFromPayload,
   normalizeListsField,
   parseLlmReply,
@@ -297,6 +298,7 @@ describe("parseLlmReply", () => {
     expect(parseLlmReply("Hello from the assistant")).toEqual({
       response: "Hello from the assistant",
       responses: ["Hello from the assistant"],
+      responseBubbles: [{ text: "Hello from the assistant" }],
       actions: [],
     });
   });
@@ -737,6 +739,97 @@ describe("parseLlmReply", () => {
         { label: "לא", command: "לא" },
       ],
     ]);
+  });
+
+  it("binds per-bubble buttons and Waze from object responses", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: [
+          {
+            text: "הוספתי מטלה.",
+            buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+          },
+          {
+            text: "רוצה תזכורת?",
+            buttons: [
+              { label: "כן", command: "כן" },
+              { label: "לא", command: "לא" },
+            ],
+          },
+          {
+            text: "הכתובת: הרצל 12, תל אביב",
+            navigate_address: "הרצל 12, תל אביב",
+          },
+        ],
+        metadata: {
+          buttons: [{ label: "כן", command: "כן" }],
+          navigate_address: "ignored when per-bubble set",
+        },
+      }),
+    );
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(parsed.responseBubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(parsed.responseBubbles[2]?.navigateAddress).toBe("הרצל 12, תל אביב");
+    expect(parsed.navigateAddress).toBe("הרצל 12, תל אביב");
+  });
+
+  it("legacy turn-level buttons still distribute first/last", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: ["אישור", "רוצה תזכורת?"],
+        metadata: {
+          buttons: [
+            { label: "הצג", command: "הצג רשימת מטלות" },
+            { label: "כן", command: "כן" },
+            { label: "לא", command: "לא" },
+          ],
+        },
+      }),
+    );
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(parsed.responseBubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+  });
+
+  it("applyShowButtonsToBubbles keeps choices on their bubble", () => {
+    const bubbles = applyShowButtonsToBubbles(
+      [
+        {
+          text: "הוספתי",
+          buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+        },
+        {
+          text: "רוצה?",
+          buttons: [
+            { label: "כן", command: "כן" },
+            { label: "לא", command: "לא" },
+          ],
+        },
+        { text: "טיפ" },
+      ],
+      [
+        { label: "הצג", command: "הצג רשימת מטלות" },
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ],
+    );
+    expect(bubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(bubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(bubbles[2]?.buttons).toBeUndefined();
   });
 
   it("ignores a null metadata action", () => {

@@ -602,8 +602,8 @@ export function placeTurnReply(
 }
 
 /**
- * One bubble per spoken response, in send order. Buttons, actions, and timing
- * belong to the first bubble.
+ * One bubble per spoken response, in send order. Per-bubble buttons / Waze come
+ * from parseLlmReply; actions, attachments, and timing stay on the first bubble.
  */
 export function buildTurnReplies(input: {
   reply: string;
@@ -613,22 +613,27 @@ export function buildTurnReplies(input: {
   attachments?: ChatAttachmentRef[];
 }): ChatMessage[] {
   const parsed = parseLlmReply(input.reply);
-  const texts = parsed.responses.length > 0 ? parsed.responses : [parsed.response];
+  const bubbles =
+    parsed.responseBubbles.length > 0
+      ? parsed.responseBubbles
+      : [{ text: parsed.response }];
   const ids =
     input.messageIds?.assistants ??
     (input.messageIds ? [input.messageIds.assistant] : []);
   const createdAt = new Date().toISOString();
-  return texts.map((text, index): ChatMessage => ({
+  return bubbles.map((bubble, index): ChatMessage => ({
     id: ids[index] ?? crypto.randomUUID(),
     author: "assistant",
     speaker: input.speaker,
-    text,
+    text: bubble.text,
     createdAt,
+    ...(bubble.buttons?.length ? { buttons: bubble.buttons } : {}),
+    ...(bubble.navigateAddress
+      ? { navigateAddress: bubble.navigateAddress }
+      : {}),
     ...(index === 0
       ? {
           actions: parsed.actions,
-          ...(parsed.buttons ? { buttons: parsed.buttons } : {}),
-          ...(parsed.navigateAddress ? { navigateAddress: parsed.navigateAddress } : {}),
           ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           llmMs: input.timing?.llmMs,
           afterLlmMs: input.timing?.afterLlmMs,

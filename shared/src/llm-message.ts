@@ -14,14 +14,28 @@ export interface LlmReplyButton {
   command: string;
 }
 
+/** One spoken bubble: text plus optional reply buttons and Waze address. */
+export interface LlmSpokenBubble {
+  text: string;
+  buttons?: LlmReplyButton[];
+  navigateAddress?: string;
+}
+
 export interface ParsedLlmMessage {
   /** All spoken messages joined — for readers that only need the text. */
   response: string;
   /** Spoken messages in send order; each one is its own chat bubble / WhatsApp send. */
   responses: string[];
+  /**
+   * Per-bubble text + chrome after parse.
+   * Object-shaped responses bind buttons/Waze on that entry; legacy string
+   * responses + turn-level metadata.buttons use distributeReplyButtons.
+   */
+  responseBubbles: LlmSpokenBubble[];
   actions: string[];
+  /** Flattened unique buttons across bubbles (legacy / ensureSpeakerShowButtons). */
   buttons?: LlmReplyButton[];
-  /** The single address the model put in metadata.navigate_address (Waze button). */
+  /** First non-empty navigate across bubbles (legacy readers). */
   navigateAddress?: string;
   /** Emoji from metadata.show_icon — attached to the speaker's message. */
   showIcon?: string;
@@ -3465,8 +3479,31 @@ function readText(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-/** Unwrap one spoken entry: string, {text}, or stringified {"text":"..."}. */
-function normalizeSpokenEntry(entry: unknown): string | null {
+/** True when a responses[] entry declares its own buttons or navigate_address. */
+function entryDeclaresBubbleChrome(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+  return "buttons" in entry || "navigate_address" in entry;
+}
+
+function parseBubbleButtons(raw: unknown): LlmReplyButton[] {
+  return toReplyButtons({ buttons: raw });
+}
+
+function parseBubbleNavigate(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const address = raw.trim().slice(0, NAVIGATE_ADDRESS_MAX).trim();
+  return address || undefined;
+}
+
+/**
+ * Unwrap one spoken entry: string, {text, buttons?, navigate_address?},
+ * or stringified {"text":"..."}.
+ */
+function normalizeSpokenBubble(entry: unknown): LlmSpokenBubble | null {
   if (typeof entry === "string") {
     const trimmed = entry.trim();
     if (!trimmed) {
@@ -3476,21 +3513,46 @@ function normalizeSpokenEntry(entry: unknown): string | null {
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
       const nested = parseObject(trimmed);
       if (nested) {
-        const fromNested = normalizeSpokenEntry(nested);
+        const fromNested = normalizeSpokenBubble(nested);
         if (fromNested) {
           return fromNested;
         }
       }
     }
-    return trimmed;
+    return { text: trimmed };
   }
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-    const text = (entry as { text?: unknown }).text;
-    if (typeof text === "string" && text.trim()) {
-      return text.trim();
+    const record = entry as {
+      text?: unknown;
+      buttons?: unknown;
+      navigate_address?: unknown;
+    };
+    const text =
+      typeof record.text === "string" ? record.text.trim() : "";
+    if (!text) {
+      return null;
     }
+    const bubble: LlmSpokenBubble = { text };
+    if ("buttons" in record) {
+      const buttons = parseBubbleButtons(record.buttons);
+      if (buttons.length > 0) {
+        bubble.buttons = buttons;
+      }
+    }
+    if ("navigate_address" in record) {
+      const address = parseBubbleNavigate(record.navigate_address);
+      if (address) {
+        bubble.navigateAddress = address;
+      }
+    }
+    return bubble;
   }
   return null;
+}
+
+/** Unwrap one spoken entry to plain text (legacy helpers). */
+function normalizeSpokenEntry(entry: unknown): string | null {
+  return normalizeSpokenBubble(entry)?.text ?? null;
 }
 
 function looksLikeLlmReplyPayload(parsed: Record<string, unknown>): boolean {
@@ -3503,30 +3565,188 @@ function looksLikeLlmReplyPayload(parsed: Record<string, unknown>): boolean {
   );
 }
 
-export function readSpokenResponses(parsed: Record<string, unknown>): string[] | null {
+/** Read spoken bubbles from a parsed reply record (preserves per-entry chrome). */
+export function readSpokenBubbles(
+  parsed: Record<string, unknown>,
+): LlmSpokenBubble[] | null {
   if (Array.isArray(parsed.responses)) {
-    return parsed.responses
-      .map(normalizeSpokenEntry)
-      .filter((entry): entry is string => Boolean(entry));
+    const bubbles = parsed.responses
+      .map(normalizeSpokenBubble)
+      .filter((entry): entry is LlmSpokenBubble => Boolean(entry));
+    return bubbles;
   }
   if (typeof parsed.response === "string") {
-    const legacy = normalizeSpokenEntry(parsed.response);
+    const legacy = normalizeSpokenBubble(parsed.response);
     return legacy ? [legacy] : [];
   }
-  if (parsed.response && typeof parsed.response === "object" && !Array.isArray(parsed.response)) {
-    const fromObject = normalizeSpokenEntry(parsed.response);
+  if (
+    parsed.response &&
+    typeof parsed.response === "object" &&
+    !Array.isArray(parsed.response)
+  ) {
+    const fromObject = normalizeSpokenBubble(parsed.response);
     return fromObject ? [fromObject] : [];
   }
-  // Shape drift: top-level text instead of responses / response.
   if (typeof parsed.text === "string") {
-    const fromText = normalizeSpokenEntry(parsed.text);
+    const fromText = normalizeSpokenBubble(parsed.text);
     return fromText ? [fromText] : [];
   }
   return null;
 }
 
+export function readSpokenResponses(
+  parsed: Record<string, unknown>,
+): string[] | null {
+  const bubbles = readSpokenBubbles(parsed);
+  return bubbles ? bubbles.map((bubble) => bubble.text) : null;
+}
+
 export function joinSpokenResponses(responses: string[]): string {
   return responses.join("\n\n");
+}
+
+/** Serialize bubbles for JSON replies (objects when any entry has chrome). */
+export function serializeSpokenBubbles(
+  bubbles: LlmSpokenBubble[],
+): Array<string | Record<string, unknown>> {
+  const anyChrome = bubbles.some(
+    (bubble) =>
+      (bubble.buttons && bubble.buttons.length > 0) ||
+      Boolean(bubble.navigateAddress),
+  );
+  if (!anyChrome) {
+    return bubbles.map((bubble) => bubble.text);
+  }
+  return bubbles.map((bubble) => {
+    const entry: Record<string, unknown> = { text: bubble.text };
+    if (bubble.buttons && bubble.buttons.length > 0) {
+      entry.buttons = bubble.buttons.map(({ label, command }) => ({
+        label,
+        command,
+      }));
+    } else {
+      // Keep the key so re-parse stays in per-bubble mode (tips stay buttonless).
+      entry.buttons = [];
+    }
+    if (bubble.navigateAddress) {
+      entry.navigate_address = bubble.navigateAddress;
+    }
+    return entry;
+  });
+}
+
+function flattenBubbleButtons(bubbles: LlmSpokenBubble[]): LlmReplyButton[] {
+  const out: LlmReplyButton[] = [];
+  const seen = new Set<string>();
+  for (const bubble of bubbles) {
+    for (const button of bubble.buttons ?? []) {
+      if (seen.has(button.command)) {
+        continue;
+      }
+      seen.add(button.command);
+      out.push(button);
+    }
+  }
+  return out;
+}
+
+function firstBubbleNavigate(bubbles: LlmSpokenBubble[]): string | undefined {
+  for (const bubble of bubbles) {
+    if (bubble.navigateAddress) {
+      return bubble.navigateAddress;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Bind turn-level metadata.buttons / navigate_address onto bubbles when the
+ * model used plain string responses (legacy). Object entries that already
+ * declare chrome are left as-is; turn-level navigate fills the first empty slot.
+ */
+export function bindTurnChromeToBubbles(
+  bubbles: LlmSpokenBubble[],
+  options: {
+    turnButtons: LlmReplyButton[];
+    turnNavigate?: string;
+    /** True when at least one raw responses entry declared buttons/navigate. */
+    perBubbleChrome: boolean;
+  },
+): LlmSpokenBubble[] {
+  let next = bubbles.map((bubble) => ({
+    ...bubble,
+    ...(bubble.buttons ? { buttons: [...bubble.buttons] } : {}),
+  }));
+  if (!options.perBubbleChrome && options.turnButtons.length > 0) {
+    const distributed = distributeReplyButtons(next.length, options.turnButtons);
+    next = next.map((bubble, index) => {
+      const buttons = distributed[index] ?? [];
+      if (buttons.length === 0) {
+        const { buttons: _drop, ...rest } = bubble;
+        return rest;
+      }
+      return { ...bubble, buttons };
+    });
+  }
+  if (options.turnNavigate && !firstBubbleNavigate(next) && next.length > 0) {
+    next = next.map((bubble, index) =>
+      index === 0
+        ? { ...bubble, navigateAddress: options.turnNavigate }
+        : bubble,
+    );
+  }
+  return next;
+}
+
+/**
+ * After ensureSpeakerShowButtons: put show taps on the first bubble; keep each
+ * bubble's non-show (choice) buttons where the model placed them.
+ */
+export function applyShowButtonsToBubbles(
+  bubbles: LlmSpokenBubble[],
+  speakerButtons: LlmReplyButton[],
+): LlmSpokenBubble[] {
+  if (bubbles.length === 0) {
+    return [];
+  }
+  const show = speakerButtons.filter(isShowListReplyButton);
+  return bubbles.map((bubble, index) => {
+    const choices = (bubble.buttons ?? []).filter(
+      (button) => !isShowListReplyButton(button),
+    );
+    const buttons =
+      index === 0
+        ? uniqueReplyButtons([...show, ...choices]).slice(0, REPLY_BUTTON_MAX)
+        : choices.slice(0, REPLY_BUTTON_MAX);
+    if (buttons.length === 0) {
+      const { buttons: _drop, ...rest } = bubble;
+      return rest;
+    }
+    return { ...bubble, buttons };
+  });
+}
+
+function uniqueReplyButtons(buttons: LlmReplyButton[]): LlmReplyButton[] {
+  const out: LlmReplyButton[] = [];
+  const seen = new Set<string>();
+  for (const button of buttons) {
+    if (seen.has(button.command)) {
+      continue;
+    }
+    seen.add(button.command);
+    out.push(button);
+  }
+  return out;
+}
+
+/** Clear reply buttons from every bubble (bare show_dump). */
+export function clearBubbleButtons(
+  bubbles: LlmSpokenBubble[],
+): LlmSpokenBubble[] {
+  return bubbles.map((bubble) => {
+    const { buttons: _drop, ...rest } = bubble;
+    return rest;
+  });
 }
 
 const LIST_BUCKET_ACTIONS = new Set(["add", "remove", "update"]);
@@ -3589,6 +3809,8 @@ export function coerceMetadataFromPayload(
 
 function extractLlmPayload(text: string): {
   responses: string[];
+  responseBubbles: LlmSpokenBubble[];
+  perBubbleChrome: boolean;
   rawMetadata: unknown;
   metadata: LlmMetadata;
 } | null {
@@ -3597,14 +3819,20 @@ function extractLlmPayload(text: string): {
     return null;
   }
 
-  const spoken = readSpokenResponses(parsed);
+  const spokenBubbles = readSpokenBubbles(parsed);
   // Never leak raw JSON when we parsed an LLM-shaped payload but got no spoken text.
-  const responses =
-    spoken ?? (looksLikeLlmReplyPayload(parsed) ? [] : [text]);
+  const responseBubbles =
+    spokenBubbles ??
+    (looksLikeLlmReplyPayload(parsed) ? [] : text.trim() ? [{ text }] : []);
+  const perBubbleChrome = Array.isArray(parsed.responses)
+    ? parsed.responses.some(entryDeclaresBubbleChrome)
+    : entryDeclaresBubbleChrome(parsed.response);
 
   const rawMetadata = coerceMetadataFromPayload(parsed);
   return {
-    responses,
+    responses: responseBubbles.map((bubble) => bubble.text),
+    responseBubbles,
+    perBubbleChrome,
     rawMetadata,
     metadata: parseLlmMetadata(rawMetadata),
   };
@@ -3629,15 +3857,29 @@ const ACTION_LABELS: Record<string, string> = {
 export function parseLlmReply(text: string): ParsedLlmMessage {
   const payload = extractLlmPayload(text);
   if (!payload) {
-    return { response: text, responses: text.trim() ? [text] : [], actions: [] };
+    const bubbles = text.trim() ? [{ text }] : [];
+    return {
+      response: text,
+      responses: text.trim() ? [text] : [],
+      responseBubbles: bubbles,
+      actions: [],
+    };
   }
 
-  const buttons = toReplyButtons(payload.rawMetadata);
-  const navigateAddress = toNavigateAddress(payload.rawMetadata);
+  const turnButtons = toReplyButtons(payload.rawMetadata);
+  const turnNavigate = toNavigateAddress(payload.rawMetadata);
   const showIcon = toShowIcon(payload.rawMetadata);
+  const responseBubbles = bindTurnChromeToBubbles(payload.responseBubbles, {
+    turnButtons,
+    ...(turnNavigate ? { turnNavigate } : {}),
+    perBubbleChrome: payload.perBubbleChrome,
+  });
+  const buttons = flattenBubbleButtons(responseBubbles);
+  const navigateAddress = firstBubbleNavigate(responseBubbles);
   return {
-    response: joinSpokenResponses(payload.responses),
-    responses: payload.responses,
+    response: joinSpokenResponses(responseBubbles.map((bubble) => bubble.text)),
+    responses: responseBubbles.map((bubble) => bubble.text),
+    responseBubbles,
     actions: collectActionDescriptions(payload.rawMetadata),
     ...(buttons.length > 0 ? { buttons } : {}),
     ...(navigateAddress ? { navigateAddress } : {}),
@@ -3720,8 +3962,9 @@ export function isShowListReplyButton(button: LlmReplyButton): boolean {
 }
 
 /**
- * Place reply buttons on the right spoken bubble when `responses` has several entries.
- * Single entry → all buttons there. Multi: «הצג» on first, choice (כן/לא/…) on last.
+ * Legacy placement when the model used plain string `responses` + turn-level
+ * `metadata.buttons`. Single entry → all buttons there. Multi: «הצג» on first,
+ * choice (כן/לא/…) on last. Prefer per-bubble `responses[].buttons` instead.
  */
 export function distributeReplyButtons(
   responseCount: number,

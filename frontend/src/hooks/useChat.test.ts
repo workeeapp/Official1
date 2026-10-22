@@ -8,7 +8,7 @@ import {
 } from "./useChat";
 
 describe("buildTurnReplies", () => {
-  it("makes one bubble per response with buttons and timing on the first", () => {
+  it("makes one bubble per response; legacy turn buttons go to first (הצג) / last (choices)", () => {
     const replies = buildTurnReplies({
       reply: JSON.stringify({
         responses: ["הוספתי חלב", "אגב, ביקשת שאבדוק אם קנית שוקו?"],
@@ -31,8 +31,45 @@ describe("buildTurnReplies", () => {
     expect(replies[1].llmMs).toBeUndefined();
   });
 
-  it("puts the navigate address on the first bubble only", () => {
+  it("keeps per-bubble buttons and Waze on the declared entries", () => {
     const replies = buildTurnReplies({
+      reply: JSON.stringify({
+        responses: [
+          {
+            text: "הוספתי לשלוח מייל למטלות.",
+            buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+          },
+          {
+            text: "רוצה שאוסיף גם תזכורת?",
+            buttons: [
+              { label: "כן", command: "כן" },
+              { label: "לא", command: "לא" },
+            ],
+          },
+          { text: "באפשרותי לשמור פגישה קבועה.", buttons: [] },
+        ],
+        metadata: { buttons: [] },
+      }),
+      messageIds: {
+        user: "u1",
+        assistant: "a1",
+        assistants: ["a1", "a2", "a3"],
+      },
+      speaker: "לוסי",
+    });
+
+    expect(replies[0].buttons).toEqual([
+      { label: "הצג", command: "הצג רשימת מטלות" },
+    ]);
+    expect(replies[1].buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(replies[2].buttons).toBeUndefined();
+  });
+
+  it("puts legacy turn navigate on the first bubble; per-bubble Waze stays put", () => {
+    const legacy = buildTurnReplies({
       reply: JSON.stringify({
         responses: ["הכתובת שלך היא הרצל 12, תל אביב", "עוד משהו?"],
         metadata: { navigate_address: "הרצל 12, תל אביב" },
@@ -40,9 +77,25 @@ describe("buildTurnReplies", () => {
       messageIds: { user: "u1", assistant: "a1", assistants: ["a1", "a2"] },
       speaker: "לוסי",
     });
+    expect(legacy[0].navigateAddress).toBe("הרצל 12, תל אביב");
+    expect(legacy[1].navigateAddress).toBeUndefined();
 
-    expect(replies[0].navigateAddress).toBe("הרצל 12, תל אביב");
-    expect(replies[1].navigateAddress).toBeUndefined();
+    const bound = buildTurnReplies({
+      reply: JSON.stringify({
+        responses: [
+          { text: "מצאתי את המקום." },
+          {
+            text: "הכתובת: הרצל 12, תל אביב",
+            navigate_address: "הרצל 12, תל אביב",
+          },
+        ],
+        metadata: {},
+      }),
+      messageIds: { user: "u1", assistant: "a1", assistants: ["a1", "a2"] },
+      speaker: "לוסי",
+    });
+    expect(bound[0].navigateAddress).toBeUndefined();
+    expect(bound[1].navigateAddress).toBe("הרצל 12, תל אביב");
   });
 });
 

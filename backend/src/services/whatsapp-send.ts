@@ -1,12 +1,15 @@
 import {
   isDigitalEmployee,
+  readSpokenBubbles,
   readSpokenResponses,
+  serializeSpokenBubbles,
   REPLY_BUTTON_COMMAND_MAX,
   REPLY_BUTTON_LABEL_MAX,
   REPLY_BUTTON_MAX,
   wazeNavigateUrl,
   type AttachmentKind,
   type LlmReplyButton,
+  type LlmSpokenBubble,
   type PublicEmployee,
 } from "@workee/shared";
 import { getEnv } from "../config/env.js";
@@ -646,12 +649,51 @@ function parseReplyRecord(reply: string): Record<string, unknown> | null {
   return null;
 }
 
+function withSpokenBubbles(
+  record: Record<string, unknown>,
+  bubbles: LlmSpokenBubble[],
+): string {
+  const { response: _legacy, ...rest } = record;
+  const flatButtons = bubbles.flatMap((bubble) => bubble.buttons ?? []);
+  const metadata =
+    rest.metadata &&
+    typeof rest.metadata === "object" &&
+    !Array.isArray(rest.metadata)
+      ? { ...(rest.metadata as Record<string, unknown>) }
+      : {};
+  if (flatButtons.length === 0) {
+    delete metadata.buttons;
+  } else {
+    const seen = new Set<string>();
+    metadata.buttons = flatButtons.filter((button) => {
+      if (seen.has(button.command)) {
+        return false;
+      }
+      seen.add(button.command);
+      return true;
+    });
+  }
+  const navigate = bubbles.find((bubble) => bubble.navigateAddress)?.navigateAddress;
+  if (navigate) {
+    metadata.navigate_address = navigate;
+  } else {
+    delete metadata.navigate_address;
+  }
+  return JSON.stringify({
+    ...rest,
+    responses: serializeSpokenBubbles(bubbles),
+    metadata,
+  });
+}
+
 function withResponses(
   record: Record<string, unknown>,
   responses: string[],
 ): string {
-  const { response: _legacy, ...rest } = record;
-  return JSON.stringify({ ...rest, responses });
+  return withSpokenBubbles(
+    record,
+    responses.map((text) => ({ text })),
+  );
 }
 
 /** Replaces every spoken message of the turn with one engine message. */
@@ -660,7 +702,25 @@ export function setEngineResponse(reply: string, response: string): string {
   return record ? withResponses(record, [response]) : response;
 }
 
-/** Patches metadata.buttons on a JSON LLM reply (WhatsApp + web read this). */
+/** Writes per-bubble text + buttons + Waze (and mirrors flat metadata for legacy). */
+export function setEngineSpokenBubbles(
+  reply: string,
+  bubbles: LlmSpokenBubble[],
+): string {
+  const record = parseReplyRecord(reply);
+  if (!record) {
+    return reply;
+  }
+  return withSpokenBubbles(record, bubbles);
+}
+
+/**
+ * Patches buttons on a JSON LLM reply.
+ * When responses already use per-bubble chrome, merges onto the first bubble
+ * (show taps) while preserving other bubbles' choice buttons via the caller —
+ * prefer {@link setEngineSpokenBubbles} after applyShowButtonsToBubbles.
+ * Legacy string responses: writes turn-level metadata.buttons.
+ */
 export function setEngineButtons(
   reply: string,
   buttons: Array<{ label: string; command: string }>,
@@ -668,6 +728,24 @@ export function setEngineButtons(
   const record = parseReplyRecord(reply);
   if (!record) {
     return reply;
+  }
+  const bubbles = readSpokenBubbles(record);
+  if (bubbles && bubbles.length > 0) {
+    const next = bubbles.map((bubble, index) => {
+      if (index !== 0) {
+        return bubble;
+      }
+      if (buttons.length === 0) {
+        const { buttons: _drop, ...rest } = bubble;
+        return rest;
+      }
+      return { ...bubble, buttons: [...buttons] };
+    });
+    // If only one bubble, put all buttons there; multi-bubble callers should
+    // use setEngineSpokenBubbles with applyShowButtonsToBubbles instead.
+    if (bubbles.length === 1) {
+      return withSpokenBubbles(record, next);
+    }
   }
   const metadata =
     record.metadata &&
@@ -683,7 +761,7 @@ export function setEngineButtons(
   return JSON.stringify({ ...record, metadata });
 }
 
-/** Patches metadata.navigate_address (Waze) on a JSON LLM reply. */
+/** Patches navigate_address (Waze) onto the first bubble without one, plus metadata. */
 export function setEngineNavigateAddress(
   reply: string,
   address: string | null,
@@ -692,13 +770,31 @@ export function setEngineNavigateAddress(
   if (!record) {
     return reply;
   }
+  const trimmed = address?.trim() ?? "";
+  const bubbles = readSpokenBubbles(record);
+  if (bubbles && bubbles.length > 0) {
+    const next = bubbles.map((bubble, index) => {
+      if (!trimmed) {
+        const { navigateAddress: _drop, ...rest } = bubble;
+        return rest;
+      }
+      if (bubble.navigateAddress) {
+        return bubble;
+      }
+      const firstEmpty = bubbles.findIndex((row) => !row.navigateAddress);
+      if (index === (firstEmpty >= 0 ? firstEmpty : 0)) {
+        return { ...bubble, navigateAddress: trimmed };
+      }
+      return bubble;
+    });
+    return withSpokenBubbles(record, next);
+  }
   const metadata =
     record.metadata &&
     typeof record.metadata === "object" &&
     !Array.isArray(record.metadata)
       ? { ...(record.metadata as Record<string, unknown>) }
       : {};
-  const trimmed = address?.trim() ?? "";
   if (!trimmed) {
     delete metadata.navigate_address;
   } else {
@@ -707,16 +803,16 @@ export function setEngineNavigateAddress(
   return JSON.stringify({ ...record, metadata });
 }
 
-/** Adds an engine body as its own message after the model's messages. */
+/** Adds an engine body as its own message after the model's messages (no buttons/Waze). */
 export function appendEngineResponse(reply: string, text: string): string {
   if (!text.trim()) {
     return reply;
   }
   const record = parseReplyRecord(reply);
   if (record) {
-    const spoken = readSpokenResponses(record);
+    const spoken = readSpokenBubbles(record);
     if (spoken) {
-      return withResponses(record, [...spoken, text.trim()]);
+      return withSpokenBubbles(record, [...spoken, { text: text.trim() }]);
     }
   }
   return `${reply.trim()}\n\n${text.trim()}`;
