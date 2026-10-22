@@ -39,7 +39,7 @@ The model emits a `recurrence` object (never invent clocks from weekday words in
 
 **Occurrence done:** `lists.update` with `item_id` + `occurrence_done` (`YYYY-MM-DD` or `true` for today). The standing row stays; only that occurrence leaves `next_occurrences`. Do **not** `lists.remove` a standing task just because they finished today’s gym.
 
-**Minimum repeat is every hour.** A new or changed repeat every N seconds/minutes (`freq=interval` with `unit` `seconds`/`minutes`, or legacy `every_unit`) is refused on every path (`isSubHourlyRecurrence`): reminders are skipped as `too_frequent`, list items are not saved, scheduled messages are not created, and when the model emits one anyway the server drops that turn's actions and replies «אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.». One-time delays in minutes (`in`) are unaffected; clocks already stored with minutes keep firing.
+**Minimum repeat is every 5 minutes.** A new or changed repeat faster than that (`freq=interval` with `unit` `seconds`, or `unit` `minutes` with `interval < 5`, or legacy `every_unit` the same way) is refused on every path (`isSubHourlyRecurrence`): reminders are skipped as `too_frequent`, list items are not saved, scheduled messages are not created, and when the model emits one anyway the server drops that turn's actions and replies «אי אפשר לקבוע חזרה כל פחות מ־5 דקות או בשניות. הכי תכוף שאפשר הוא כל 5 דקות.». `כל 5 דקות` / `כל חצי שעה` are allowed. One-time delays in minutes (`in`) are unaffected; clocks already stored with a faster cadence keep firing.
 
 **Every X hours** (`freq=interval`, «כל שלוש שעות אני צריך להוריד את הכלב» / «תזכירי לי לשתות שוקו כל שעתיים»):
 

@@ -617,15 +617,25 @@ describe("standing task every X hours", () => {
     ]);
   });
 
-  it("refuses a task that repeats every N minutes or seconds", () => {
-    for (const unit of ["minutes", "seconds"]) {
-      const shaped = shapeItemRecurrence(
-        { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 10, unit } },
-        NOW,
-      );
-      expect(shaped.tooFrequent).toBe(true);
-      expect(shaped.item[RECURRENCE_META_KEY]).toBeUndefined();
-    }
+  it("refuses a task that repeats faster than every 5 minutes or in seconds", () => {
+    const tooFastMinutes = shapeItemRecurrence(
+      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 3, unit: "minutes" } },
+      NOW,
+    );
+    expect(tooFastMinutes.tooFrequent).toBe(true);
+    expect(tooFastMinutes.item[RECURRENCE_META_KEY]).toBeUndefined();
+    const seconds = shapeItemRecurrence(
+      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 30, unit: "seconds" } },
+      NOW,
+    );
+    expect(seconds.tooFrequent).toBe(true);
+    expect(seconds.item[RECURRENCE_META_KEY]).toBeUndefined();
+    const everyFive = shapeItemRecurrence(
+      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 5, unit: "minutes" } },
+      NOW,
+    );
+    expect(everyFive.tooFrequent).toBeUndefined();
+    expect(everyFive.item[RECURRENCE_META_KEY]).toBeTruthy();
     expect(dog).not.toHaveProperty("tooFrequent");
   });
 

@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  baselineShaForWatch,
   evaluateComposeCondition,
   mashovContentFingerprint,
+  weatherContentFingerprint,
 } from "../src/services/compose-condition.js";
+import {
+  collectConditionFieldRefs,
+  compareWatchExpr,
+  encodeFieldValueSha,
+  evalWatchExprNode,
+  sourcesNeededForRefs,
+  watchFieldKey,
+} from "../src/services/watch-expr.js";
 import { isWmoRainCode } from "../src/services/weather.js";
 import { resolveComposeFireOutbound } from "../src/services/reminder-fire.js";
 
@@ -57,21 +67,96 @@ describe("evaluateComposeCondition", () => {
   });
 
   it("weather_rain: skips when dry", () => {
-    expect(
-      evaluateComposeCondition({
-        condition: { type: "weather_rain" },
-        facts: { weatherIsRain: false },
-      }).skipSend,
-    ).toBe(true);
+    const gate = evaluateComposeCondition({
+      condition: { type: "weather_rain" },
+      facts: { weatherIsRain: false },
+    });
+    expect(gate.skipSend).toBe(true);
+    expect(gate.immediateSha).toBe("weather:dry");
   });
 
-  it("weather_rain: sends when raining", () => {
+  it("weather_rain: sends when raining (edge into wet)", () => {
+    const gate = evaluateComposeCondition({
+      condition: { type: "weather_rain" },
+      facts: { weatherIsRain: true },
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.immediateSha).toBe("weather:wet");
+  });
+
+  it("weather_rain: edge — stays wet without re-alerting", () => {
     expect(
       evaluateComposeCondition({
         condition: { type: "weather_rain" },
         facts: { weatherIsRain: true },
+        lastReportSha: "weather:wet",
       }).skipSend,
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("weather_changed: skips when fingerprint matches", () => {
+    const fp = weatherContentFingerprint("מעונן בפתח תקווה");
+    expect(
+      evaluateComposeCondition({
+        condition: { type: "weather_changed" },
+        facts: { weatherFingerprint: fp },
+        lastReportSha: fp,
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("weather_changed: sends on new fingerprint", () => {
+    const fp = weatherContentFingerprint("גשום בפתח תקווה");
+    const gate = evaluateComposeCondition({
+      condition: { type: "weather_changed" },
+      facts: { weatherFingerprint: fp },
+      lastReportSha: weatherContentFingerprint("מעונן"),
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.shaAfterSend).toBe(fp);
+  });
+
+  it("market_change_compare: edge when left gt right", () => {
+    const first = evaluateComposeCondition({
+      condition: {
+        type: "market_change_compare",
+        left: "דולר",
+        right: "יורו",
+        op: "gt",
+        metric: "daily_change_pct",
+        leftDayOffset: 0,
+        rightDayOffset: -1,
+      },
+      facts: { marketLeftChangePct: 1.2, marketRightChangePct: 0.4 },
+      lastReportSha: "",
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.immediateSha).toBe("market:below");
+    expect(
+      evaluateComposeCondition({
+        condition: {
+          type: "market_change_compare",
+          left: "דולר",
+          right: "יורו",
+          op: "gt",
+          metric: "daily_change_pct",
+          leftDayOffset: 0,
+          rightDayOffset: -1,
+        },
+        facts: { marketLeftChangePct: 1.5, marketRightChangePct: 0.3 },
+        lastReportSha: "market:below",
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("baselineShaForWatch stamps fingerprint for weather_changed", () => {
+    const fp = weatherContentFingerprint("מעונן");
+    expect(
+      baselineShaForWatch({
+        condition: { type: "weather_changed" },
+        facts: { weatherFingerprint: fp },
+      }),
+    ).toBe(fp);
   });
 
   it("mashov_new: skips when fingerprint matches lastReportSha", () => {
@@ -136,6 +221,161 @@ describe("evaluateComposeCondition", () => {
         lastReportSha: "51|08:40",
       }).skipSend,
     ).toBe(true);
+  });
+
+  it("expr: temp*2 eq 50 — edge into hold", () => {
+    const key = watchFieldKey({
+      field: "weather.temp_now",
+      place: "פתח תקווה",
+    });
+    const condition = {
+      type: "expr" as const,
+      compare: "eq" as const,
+      left: {
+        op: "mul" as const,
+        args: [
+          { field: "weather.temp_now", place: "פתח תקווה" },
+          { const: 2 },
+        ],
+      },
+      right: { const: 50 },
+    };
+    const first = evaluateComposeCondition({
+      condition,
+      facts: { exprFieldValues: { [key]: 25 } },
+      lastReportSha: "",
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.immediateSha).toBe("expr:hold");
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: { exprFieldValues: { [key]: 25 } },
+        lastReportSha: "expr:hold",
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("expr: eur+usd lt 10 — idle when sum is above", () => {
+    const eurKey = watchFieldKey({ field: "market.price", symbol: "יורו" });
+    const usdKey = watchFieldKey({ field: "market.price", symbol: "דולר" });
+    const condition = {
+      type: "expr" as const,
+      compare: "lt" as const,
+      left: {
+        op: "add" as const,
+        args: [
+          { field: "market.price", symbol: "יורו" },
+          { field: "market.price", symbol: "דולר" },
+        ],
+      },
+      right: { const: 10 },
+    };
+    const gate = evaluateComposeCondition({
+      condition,
+      facts: {
+        exprFieldValues: { [eurKey]: 6, [usdKey]: 5 },
+      },
+      lastReportSha: "",
+    });
+    expect(gate.skipSend).toBe(true);
+    expect(gate.immediateSha).toBe("expr:idle");
+    const hold = evaluateComposeCondition({
+      condition,
+      facts: {
+        exprFieldValues: { [eurKey]: 4, [usdKey]: 3.6 },
+      },
+      lastReportSha: "expr:idle",
+    });
+    expect(hold.skipSend).toBe(false);
+    expect(hold.immediateSha).toBe("expr:hold");
+  });
+
+  it("expr: approx for כ־", () => {
+    expect(compareWatchExpr(9.7, "approx", 10, 0.5)).toBe(true);
+    expect(compareWatchExpr(8, "approx", 10, 0.5)).toBe(false);
+  });
+
+  it("field_changed: skips until value differs from baseline", () => {
+    const key = watchFieldKey({
+      field: "weather.temp_now",
+      place: "פתח תקווה",
+    });
+    const encoded = encodeFieldValueSha(22);
+    expect(
+      evaluateComposeCondition({
+        condition: {
+          type: "field_changed",
+          field: "weather.temp_now",
+          place: "פתח תקווה",
+        },
+        facts: { exprFieldValues: { [key]: 22 } },
+        lastReportSha: encoded,
+      }).skipSend,
+    ).toBe(true);
+    const gate = evaluateComposeCondition({
+      condition: {
+        type: "field_changed",
+        field: "weather.temp_now",
+        place: "פתח תקווה",
+      },
+      facts: { exprFieldValues: { [key]: 28 } },
+      lastReportSha: encoded,
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.shaAfterSend).toBe(encodeFieldValueSha(28));
+  });
+
+  it("evalWatchExprNode mul and add", () => {
+    const tempKey = watchFieldKey({
+      field: "weather.temp_now",
+      place: "פתח תקווה",
+    });
+    const eurKey = watchFieldKey({ field: "market.price", symbol: "יורו" });
+    const usdKey = watchFieldKey({ field: "market.price", symbol: "דולר" });
+    expect(
+      evalWatchExprNode(
+        {
+          op: "mul",
+          args: [
+            { field: "weather.temp_now", place: "פתח תקווה" },
+            { const: 2 },
+          ],
+        },
+        { [tempKey]: 25 },
+      ),
+    ).toBe(50);
+    expect(
+      evalWatchExprNode(
+        {
+          op: "add",
+          args: [
+            { field: "market.price", symbol: "יורו" },
+            { field: "market.price", symbol: "דולר" },
+          ],
+        },
+        { [eurKey]: 4, [usdKey]: 3.6 },
+      ),
+    ).toBeCloseTo(7.6);
+  });
+
+  it("multi-source: collectConditionFieldRefs needs weather+market", () => {
+    const refs = collectConditionFieldRefs({
+      type: "expr",
+      compare: "lt",
+      left: {
+        op: "add",
+        args: [
+          { field: "weather.temp_now", place: "תל אביב" },
+          { field: "market.price", symbol: "דולר" },
+        ],
+      },
+      right: { const: 100 },
+    });
+    expect(sourcesNeededForRefs(refs)).toEqual({
+      weather: true,
+      market: true,
+    });
   });
 });
 

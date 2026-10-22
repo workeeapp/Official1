@@ -4,7 +4,9 @@ export type MashovAspect =
   | "grades"
   | "homework"
   | "behavior"
-  | "timetable";
+  | "timetable"
+  | "absences"
+  | "messages";
 
 export type MashovFilingRow = {
   item_name?: string;
@@ -60,6 +62,13 @@ export type MashovFacts = {
   homework: Array<{ subject: string; text: string; date: string }>;
   behavior: Array<{ subject: string; text: string; date: string }>;
   timetable: Array<{ day: string; lessons: string }>;
+  absences: Array<{ subject: string; text: string; date: string }>;
+  messages: Array<{
+    subject: string;
+    from: string;
+    date: string;
+    preview: string;
+  }>;
   missingCreds: string[];
   error?: string;
 };
@@ -70,6 +79,8 @@ const ASPECT_SET = new Set<MashovAspect>([
   "homework",
   "behavior",
   "timetable",
+  "absences",
+  "messages",
 ]);
 
 const MASHOV_HEADERS_BASE: HeadersInit = {
@@ -87,19 +98,33 @@ export function parseMashovAspects(raw: unknown): MashovAspect[] {
   for (const entry of raw) {
     const key = String(entry ?? "")
       .trim()
-      .toLowerCase() as MashovAspect;
-    const mapped =
-      key === "behave" || key === "behaviour"
-        ? ("behavior" as MashovAspect)
+      .toLowerCase();
+    const mapped: MashovAspect | string =
+      key === "behave" || key === "behaviour" || key === "התנהגות"
+        ? "behavior"
         : key === "schedule" || key === "מערכת"
-          ? ("timetable" as MashovAspect)
+          ? "timetable"
           : key === "ציונים"
-            ? ("grades" as MashovAspect)
+            ? "grades"
             : key === "שיעורי בית" || key === "שעורים"
-              ? ("homework" as MashovAspect)
-              : key;
-    if (ASPECT_SET.has(mapped) && !out.includes(mapped)) {
-      out.push(mapped);
+              ? "homework"
+              : key === "חיסורים" ||
+                  key === "absence" ||
+                  key === "absences" ||
+                  key === "נוכחות"
+                ? "absences"
+                : key === "הודעות" ||
+                    key === "messages" ||
+                    key === "mail" ||
+                    key === "inbox" ||
+                    key === "דואר"
+                  ? "messages"
+                  : key;
+    if (
+      ASPECT_SET.has(mapped as MashovAspect) &&
+      !out.includes(mapped as MashovAspect)
+    ) {
+      out.push(mapped as MashovAspect);
     }
   }
   return out.length > 0 ? out : ["grades"];
@@ -776,6 +801,93 @@ export function normalizeBehavior(raw: unknown) {
     .slice(0, 30);
 }
 
+function looksLikeAbsenceRow(row: Record<string, unknown>): boolean {
+  const blob = [
+    str(row, ["achvaName", "achva", "type", "eventType", "name", "text"]),
+    str(row, ["justification", "remark"]),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return /חיסור|העדר|absence|missed|לא הגיע|איחור/.test(blob);
+}
+
+/** lessonsCount payload and/or filtered behave rows → absences list. */
+export function normalizeAbsences(raw: unknown) {
+  const rows = asRecordArray(raw);
+  const mapped = rows
+    .map((row) => ({
+      subject: str(row, [
+        "subjectName",
+        "subject",
+        "groupName",
+        "group",
+        "מקצוע",
+      ]),
+      text: str(row, [
+        "achvaName",
+        "achva",
+        "type",
+        "eventType",
+        "name",
+        "text",
+        "remark",
+        "justification",
+        "status",
+        "חיסור",
+      ]),
+      date: str(row, [
+        "date",
+        "lessonDate",
+        "timestamp",
+        "eventDate",
+        "תאריך",
+      ]),
+      _absence: looksLikeAbsenceRow(row),
+    }))
+    .filter((row) => row.text || row.subject);
+  const onlyAbsences = mapped.filter((row) => row._absence);
+  const use = onlyAbsences.length > 0 ? onlyAbsences : mapped;
+  return use
+    .map(({ subject, text, date }) => ({ subject, text, date }))
+    .slice(0, 40);
+}
+
+export function normalizeMessages(raw: unknown) {
+  const rows = asRecordArray(raw);
+  return rows
+    .map((row) => ({
+      subject: str(row, [
+        "subject",
+        "title",
+        "conversationSubject",
+        "נושא",
+      ]),
+      from: str(row, [
+        "senderName",
+        "from",
+        "fromName",
+        "lastMessageSender",
+        "שולח",
+      ]),
+      date: str(row, [
+        "date",
+        "sendDate",
+        "lastMessageDate",
+        "timestamp",
+        "תאריך",
+      ]),
+      preview: str(row, [
+        "body",
+        "preview",
+        "lastMessage",
+        "snippet",
+        "text",
+      ]).slice(0, 200),
+    }))
+    .filter((row) => row.subject || row.from || row.preview)
+    .slice(0, 20);
+}
+
 export function normalizeTimetable(raw: unknown) {
   const rows = asRecordArray(raw);
   // Mashov timetable is often nested; flatten best-effort.
@@ -799,6 +911,49 @@ export function normalizeTimetable(raw: unknown) {
       lessons: lessons.slice(0, 12).join("; "),
     }))
     .slice(0, 7);
+}
+
+export async function fetchMashovMessages(
+  session: MashovSession,
+  fetchImpl: typeof fetch = fetch,
+): Promise<MashovFacts["messages"]> {
+  try {
+    const raw = await mashovGetJson(
+      session,
+      "/mail/inbox/conversations",
+      fetchImpl,
+    );
+    return normalizeMessages(raw);
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchMashovAbsences(input: {
+  session: MashovSession;
+  childGuid: string;
+  fetchImpl?: typeof fetch;
+}): Promise<MashovFacts["absences"]> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const base = `/students/${encodeURIComponent(input.childGuid)}`;
+  try {
+    const fromCount = normalizeAbsences(
+      await mashovGetJson(input.session, `${base}/lessonsCount`, fetchImpl),
+    );
+    if (fromCount.length > 0) {
+      return fromCount;
+    }
+  } catch {
+    // fall through to behave filter
+  }
+  try {
+    const behave = asRecordArray(
+      await mashovGetJson(input.session, `${base}/behave`, fetchImpl),
+    );
+    return normalizeAbsences(behave.filter(looksLikeAbsenceRow));
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchMashovAspects(input: {
@@ -828,7 +983,17 @@ export async function fetchMashovAspects(input: {
         await mashovGetJson(input.session, `${base}/timetable`, fetchImpl),
       )
     : [];
-  return { aspects, grades, homework, behavior, timetable };
+  const absences = aspects.includes("absences")
+    ? await fetchMashovAbsences({
+        session: input.session,
+        childGuid: input.childGuid,
+        fetchImpl,
+      })
+    : [];
+  const messages = aspects.includes("messages")
+    ? await fetchMashovMessages(input.session, fetchImpl)
+    : [];
+  return { aspects, grades, homework, behavior, timetable, absences, messages };
 }
 
 export function formatMashovHebrew(facts: MashovFacts): string {
@@ -893,6 +1058,32 @@ export function formatMashovHebrew(facts: MashovFacts): string {
       }
     }
   }
+  if (facts.aspects.includes("absences")) {
+    if (facts.absences.length === 0) {
+      lines.push(`אין חיסורים ${who}.`.replace(/\s+/g, " ").trim());
+    } else {
+      lines.push(`חיסורים ${who}:`.trim());
+      for (const a of facts.absences.slice(0, 15)) {
+        lines.push(
+          `• ${[a.subject, a.text, a.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
+        );
+      }
+    }
+  }
+  if (facts.aspects.includes("messages")) {
+    if (facts.messages.length === 0) {
+      lines.push("אין הודעות חדשות בתיבת הדואר במשוב.");
+    } else {
+      lines.push("הודעות במשוב:");
+      for (const m of facts.messages.slice(0, 10)) {
+        lines.push(
+          `• ${[m.from, m.subject, m.preview, m.date.slice(0, 10)]
+            .filter(Boolean)
+            .join(" — ")}`,
+        );
+      }
+    }
+  }
   if (lines.length === 0) {
     return "לא מצאתי נתונים במשוב.";
   }
@@ -933,14 +1124,34 @@ export async function resolveMashovReply(input: {
       homework: [],
       behavior: [],
       timetable: [],
+      absences: [],
+      messages: [],
       missingCreds: loaded.missing,
     });
   }
 
   try {
     const session = await mashovLogin(creds, fetchImpl);
+    const needsChild = aspects.some(
+      (a) => a !== "messages",
+    );
+    const messagesOnly = aspects.length > 0 && aspects.every((a) => a === "messages");
+    if (messagesOnly) {
+      const messages = await fetchMashovMessages(session, fetchImpl);
+      return formatMashovHebrew({
+        childName: "",
+        aspects,
+        grades: [],
+        homework: [],
+        behavior: [],
+        timetable: [],
+        absences: [],
+        messages,
+        missingCreds: [],
+      });
+    }
     const picked = pickMashovChild(session.children, input.child);
-    if (!picked.child) {
+    if (!picked.child && needsChild) {
       if (picked.askWhich.length > 1) {
         return `לאיזה ילד לבדוק במשוב — ${picked.askWhich.join(" או ")}?`;
       }
@@ -948,6 +1159,22 @@ export async function resolveMashovReply(input: {
         return "ההתחברות למשוב הצליחה אבל לא מצאתי ילדים בחשבון.";
       }
       return `לא מצאתי ילד בשם «${input.child}». אצלך: ${picked.askWhich.join(", ")}.`;
+    }
+    if (!picked.child) {
+      const messages = aspects.includes("messages")
+        ? await fetchMashovMessages(session, fetchImpl)
+        : [];
+      return formatMashovHebrew({
+        childName: "",
+        aspects,
+        grades: [],
+        homework: [],
+        behavior: [],
+        timetable: [],
+        absences: [],
+        messages,
+        missingCreds: [],
+      });
     }
     const data = await fetchMashovAspects({
       session,

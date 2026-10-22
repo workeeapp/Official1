@@ -108,13 +108,13 @@ describe("applyReminders recurrence updates", () => {
     expect(data.fireAt).toEqual(existing.fireAt);
   });
 
-  it("refuses a new clock that repeats every N minutes or seconds", async () => {
+  it("refuses a new clock that repeats faster than every 5 minutes or in seconds", async () => {
     const result = await run({
       ...base,
       action: "add",
       item: "לשלוח בוקר טוב",
       reminderId: "",
-      recurrence: { freq: "interval", interval: 10, unit: "minutes" },
+      recurrence: { freq: "interval", interval: 3, unit: "minutes" },
     });
     expect(result.skipped).toEqual([{ item: "לשלוח בוקר טוב", reason: "too_frequent" }]);
     expect(reminderCreate).not.toHaveBeenCalled();
@@ -130,10 +130,10 @@ describe("applyReminders recurrence updates", () => {
     expect(reminderCreate).not.toHaveBeenCalled();
   });
 
-  it("refuses changing an existing clock to every N minutes", async () => {
+  it("refuses changing an existing clock to under 5 minutes", async () => {
     const result = await run({
       ...base,
-      recurrence: { freq: "interval", interval: 15, unit: "minutes" },
+      recurrence: { freq: "interval", interval: 2, unit: "minutes" },
     });
     expect(result.skipped[0]?.reason).toBe("too_frequent");
     expect(reminderUpdate).not.toHaveBeenCalled();

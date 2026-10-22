@@ -19,6 +19,7 @@ import {
   type WeatherAspect,
 } from "./weather.js";
 import {
+  fetchDailyChangePct,
   fetchMarketFacts,
   formatMarketHebrew,
   parseMarketAspects,
@@ -32,8 +33,10 @@ import {
 } from "./mashov.js";
 import {
   mashovContentFingerprint,
+  weatherContentFingerprint,
   type ComposeEvalFacts,
 } from "./compose-condition.js";
+import type { LlmComposeCondition } from "@workee/shared";
 
 export type ComposeSourceKind =
   | ""
@@ -63,6 +66,15 @@ export type ComposeFactsBundle = {
   eval?: ComposeEvalFacts;
 };
 
+function aspectsFromList(
+  raw: string[] | unknown,
+): string[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return undefined;
+  }
+  return raw.map((entry) => String(entry ?? "").trim()).filter(Boolean);
+}
+
 export async function loadComposeFacts(input: {
   composeSource: string;
   subjectEmployeeId: string;
@@ -76,9 +88,17 @@ export async function loadComposeFacts(input: {
   marketAspects?: MarketAspect[] | unknown;
   /** Optional mashov aspects; default grades. */
   mashovAspects?: MashovAspect[] | unknown;
+  /** Unified aspects list from Reminder.composeAspects. */
+  composeAspects?: string[] | unknown;
+  /** Day index for weather_rain / weather_changed (0=today). */
+  weatherDayOffset?: number;
+  /** When set, also load left/right daily change % into eval. */
+  composeCondition?: LlmComposeCondition | null;
   now?: Date;
 }): Promise<ComposeFactsBundle> {
   const source = input.composeSource.trim();
+  const listAspects = aspectsFromList(input.composeAspects);
+
   if (source === "git_log") {
     const lookbackHours =
       typeof input.lookbackHours === "number" ? input.lookbackHours : 0;
@@ -141,7 +161,17 @@ export async function loadComposeFacts(input: {
         fixedBody: "לאיזה מקום לבדוק את מזג האוויר?",
       };
     }
-    const aspects = parseWeatherAspects(input.weatherAspects);
+    const aspects = parseWeatherAspects(
+      input.weatherAspects ?? listAspects,
+    );
+    const dayOffset =
+      typeof input.weatherDayOffset === "number" &&
+      Number.isFinite(input.weatherDayOffset)
+        ? Math.max(0, Math.round(input.weatherDayOffset))
+        : input.composeCondition?.type === "weather_rain" ||
+            input.composeCondition?.type === "weather_changed"
+          ? Math.max(0, Math.round(input.composeCondition.dayOffset ?? 0))
+          : 0;
     try {
       const weather = await fetchWeatherFacts({
         place,
@@ -157,7 +187,7 @@ export async function loadComposeFacts(input: {
         };
       }
       const body = formatWeatherHebrew(weather, input.now);
-      const day = weather.days[0];
+      const day = weather.days[dayOffset] ?? weather.days[0];
       return {
         kind: "weather",
         facts: body,
@@ -166,6 +196,7 @@ export async function loadComposeFacts(input: {
         sessionClock: formatSessionClockContext(input.now),
         eval: {
           weatherIsRain: day?.isRain === true,
+          weatherFingerprint: weatherContentFingerprint(body),
         },
       };
     } catch {
@@ -180,7 +211,12 @@ export async function loadComposeFacts(input: {
   }
 
   if (source === "market") {
-    const queries = parseMarketQueries(input.composePlace);
+    const condition = input.composeCondition;
+    const compare =
+      condition?.type === "market_change_compare" ? condition : null;
+    const queries = compare
+      ? [compare.left, compare.right]
+      : parseMarketQueries(input.composePlace);
     if (queries.length === 0) {
       return {
         kind: "market",
@@ -189,22 +225,31 @@ export async function loadComposeFacts(input: {
         fixedBody: "לאיזה מניה, מדד או מטבע קריפטו לבדוק?",
       };
     }
-    const aspects = parseMarketAspects(input.marketAspects);
+    const aspects = parseMarketAspects(input.marketAspects ?? listAspects);
     try {
       const facts = await fetchMarketFacts({ queries, aspects });
       const body = formatMarketHebrew(facts);
       const firstPrice = facts.quotes.find(
         (q) => q.price != null && Number.isFinite(q.price),
       )?.price;
+      const evalFacts: ComposeEvalFacts = {
+        marketPrice: firstPrice ?? null,
+      };
+      if (compare) {
+        const [leftPct, rightPct] = await Promise.all([
+          fetchDailyChangePct(compare.left, compare.leftDayOffset),
+          fetchDailyChangePct(compare.right, compare.rightDayOffset),
+        ]);
+        evalFacts.marketLeftChangePct = leftPct;
+        evalFacts.marketRightChangePct = rightPct;
+      }
       return {
         kind: "market",
         facts: body,
         factsLabel: "Market (Yahoo Finance)",
         fixedBody: body,
         sessionClock: formatSessionClockContext(input.now),
-        eval: {
-          marketPrice: firstPrice ?? null,
-        },
+        eval: evalFacts,
       };
     } catch {
       return {
@@ -219,7 +264,9 @@ export async function loadComposeFacts(input: {
 
   if (source === "mashov") {
     const child = String(input.composePlace ?? "").trim();
-    const aspects = parseMashovAspects(input.mashovAspects);
+    const aspects = parseMashovAspects(
+      input.mashovAspects ?? listAspects,
+    );
     try {
       const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
       const body = await resolveMashovReply({

@@ -158,6 +158,31 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     chatMessage: {
       findFirst: messageFindFirst,
+      findMany: vi.fn().mockImplementation(
+        async ({
+          where,
+          take,
+        }: {
+          where?: { conversationId?: string; author?: string };
+          take?: number;
+        }) => {
+          const rows = messageStore.filter((message) => {
+            if (where?.conversationId && message.conversationId !== where.conversationId) {
+              return false;
+            }
+            if (where?.author && message.author !== where.author) {
+              return false;
+            }
+            return true;
+          });
+          rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+          return typeof take === "number" ? rows.slice(0, take) : rows;
+        },
+      ),
+      findUnique: vi.fn().mockImplementation(
+        async ({ where }: { where: { id: string } }) =>
+          messageStore.find((message) => message.id === where.id) ?? null,
+      ),
       create: messageCreate,
       createMany: messageCreateMany,
       deleteMany: messageDeleteMany,
@@ -810,7 +835,7 @@ describe("chat API", () => {
     );
   });
 
-  it("refuses a repeat every 10 minutes and saves none of its actions", async () => {
+  it("refuses a repeat every 2 minutes and saves none of its actions", async () => {
     const cookie = await login();
     mockOwnedEmployee();
     createResponse.mockResolvedValue({
@@ -832,7 +857,7 @@ describe("chat API", () => {
               action: "add",
               item: "בוקר טוב",
               time: "",
-              recurrence: { freq: "interval", interval: 10, unit: "minutes" },
+              recurrence: { freq: "interval", interval: 2, unit: "minutes" },
             },
           ],
         },
@@ -843,10 +868,10 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "תשלחי לי בוקר טוב כל 10 דקות", employeeId });
+      .send({ message: "תשלחי לי בוקר טוב כל 2 דקות", employeeId });
 
     expect(response.status).toBe(200);
-    expect(response.body.reply).toContain("הכי תכוף שאפשר הוא כל שעה");
+    expect(response.body.reply).toContain("הכי תכוף שאפשר הוא כל 5 דקות");
     expect(response.body.reply).not.toContain("אשלח לך בוקר טוב");
     expect(itemCreate).not.toHaveBeenCalled();
   });

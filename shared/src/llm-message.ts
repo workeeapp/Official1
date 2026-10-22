@@ -203,6 +203,29 @@ export type LlmReminderRepeat =
   | "weekly"
   | "monthly";
 
+/** Arithmetic ops for watch expr AST. */
+export type WatchExprOp = "add" | "sub" | "mul" | "div" | "pct";
+
+/** Compare ops for watch expr (approx = |left-right| ≤ tol). */
+export type WatchExprCompare =
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte"
+  | "eq"
+  | "approx";
+
+/** Leaf or binop node in a watch expression (max depth 3). */
+export type WatchExprNode =
+  | { const: number }
+  | {
+      field: string;
+      place?: string;
+      symbol?: string;
+      dayOffset?: number;
+    }
+  | { op: WatchExprOp; args: WatchExprNode[] };
+
 /** Structured gate for conditional watch clocks («תעדכני אותי אם…»). */
 export type LlmComposeCondition =
   | {
@@ -210,8 +233,44 @@ export type LlmComposeCondition =
       op: "lt" | "lte" | "gt" | "gte" | "eq";
       value: number;
     }
-  | { type: "weather_rain" }
+  | {
+      type: "weather_rain";
+      /** 0 = today (default); 1 = tomorrow forecast day. */
+      dayOffset?: number;
+    }
+  | {
+      /** Fingerprint weather body; send when it changes vs last_report_sha. */
+      type: "weather_changed";
+      dayOffset?: number;
+    }
   | { type: "mashov_new" }
+  | {
+      /** Compare daily % change of two tickers (optionally on different day offsets). */
+      type: "market_change_compare";
+      left: string;
+      right: string;
+      op: "lt" | "lte" | "gt" | "gte" | "eq";
+      metric: "daily_change_pct";
+      leftDayOffset: number;
+      rightDayOffset: number;
+    }
+  | {
+      /** General arithmetic compare on catalog numeric fields. */
+      type: "expr";
+      compare: WatchExprCompare;
+      left: WatchExprNode;
+      right: WatchExprNode;
+      /** Absolute tolerance for compare:"approx" (default 0.5). */
+      tol?: number;
+    }
+  | {
+      /** Alert when a catalog numeric field value changes. */
+      type: "field_changed";
+      field: string;
+      place?: string;
+      symbol?: string;
+      dayOffset?: number;
+    }
   | {
       /** Poll Google Routes stop→dest; notify when next matching departure ≤ minutes_before. */
       type: "bus_eta";
@@ -287,6 +346,16 @@ export interface LlmReminderAction {
    * null/omit = always send (normal compose).
    */
   composeCondition?: LlmComposeCondition | null;
+  /**
+   * One-shot watch: after first successful condition WhatsApp, settle done.
+   * Quiet skips keep polling. Omit/false = recurring watch.
+   */
+  watchOnce?: boolean;
+  /**
+   * Aspects for compose plugins at fire (esp. mashov): grades, behavior, homework,
+   * absences, messages, weather/market aspects. Empty = plugin defaults.
+   */
+  composeAspects?: string[];
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
   /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
@@ -1777,6 +1846,10 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeCondition: parseComposeCondition(
       record.compose_condition ?? record.composeCondition,
     ),
+    watchOnce: parseWatchOnce(record),
+    composeAspects: parseComposeAspectsList(
+      record.compose_aspects ?? record.composeAspects,
+    ),
     reminderId,
     ...(occurrenceChange ? { occurrenceChange } : {}),
     ...optionalIds("attachmentIds", record.attachment_ids ?? record.attachmentIds),
@@ -1940,6 +2013,56 @@ function parseScheduleOffsetMinutes(record: Record<string, unknown>): number {
 
 const MARKET_PRICE_OPS = new Set(["lt", "lte", "gt", "gte", "eq"]);
 
+function parseDayOffset(raw: unknown): number | undefined {
+  const value =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && /^-?\d+$/.test(raw.trim())
+        ? Number(raw.trim())
+        : NaN;
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+  const n = Math.round(value);
+  if (n < -7 || n > 7) {
+    return undefined;
+  }
+  return n;
+}
+
+/** Parse reminders[].watch_once — false when absent. */
+export function parseWatchOnce(record: Record<string, unknown>): boolean {
+  const raw = record.watch_once ?? record.watchOnce ?? record.once;
+  return raw === true || raw === "true" || raw === 1 || raw === "1";
+}
+
+/** Parse reminders[].compose_aspects — empty array when absent/invalid. */
+export function parseComposeAspectsList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    if (typeof raw === "string" && raw.trim()) {
+      return raw
+        .split(/[,;|]+/)
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 12);
+    }
+    return [];
+  }
+  const out: string[] = [];
+  for (const entry of raw) {
+    const key = String(entry ?? "")
+      .trim()
+      .toLowerCase();
+    if (key && !out.includes(key)) {
+      out.push(key.slice(0, 32));
+    }
+    if (out.length >= 12) {
+      break;
+    }
+  }
+  return out;
+}
+
 /** Parse reminders[].compose_condition — null when absent or invalid. */
 export function parseComposeCondition(raw: unknown): LlmComposeCondition | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -1950,10 +2073,69 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
     .trim()
     .toLowerCase();
   if (type === "weather_rain" || type === "rain") {
-    return { type: "weather_rain" };
+    const dayOffset = parseDayOffset(
+      record.day_offset ?? record.dayOffset ?? record.offset,
+    );
+    return dayOffset != null && dayOffset !== 0
+      ? { type: "weather_rain", dayOffset }
+      : { type: "weather_rain" };
+  }
+  if (
+    type === "weather_changed" ||
+    type === "weather_change" ||
+    type === "weather_diff"
+  ) {
+    const dayOffset = parseDayOffset(
+      record.day_offset ?? record.dayOffset ?? record.offset,
+    );
+    return dayOffset != null && dayOffset !== 0
+      ? { type: "weather_changed", dayOffset }
+      : { type: "weather_changed" };
   }
   if (type === "mashov_new" || type === "mashov") {
     return { type: "mashov_new" };
+  }
+  if (
+    type === "market_change_compare" ||
+    type === "market_compare" ||
+    type === "change_compare"
+  ) {
+    const left = readText(record, ["left", "a", "first", "דולר"]).slice(0, 64);
+    const right = readText(record, ["right", "b", "second", "יורו"]).slice(0, 64);
+    const op = String(record.op ?? record.operator ?? "gt")
+      .trim()
+      .toLowerCase();
+    const metricRaw = String(record.metric ?? "daily_change_pct")
+      .trim()
+      .toLowerCase();
+    const metric =
+      metricRaw === "daily_change_pct" ||
+      metricRaw === "change_pct" ||
+      metricRaw === "pct"
+        ? "daily_change_pct"
+        : null;
+    const leftDayOffset =
+      parseDayOffset(
+        record.left_day_offset ?? record.leftDayOffset ?? record.left_offset,
+      ) ?? 0;
+    const rightDayOffset =
+      parseDayOffset(
+        record.right_day_offset ??
+          record.rightDayOffset ??
+          record.right_offset,
+      ) ?? 0;
+    if (!left || !right || !MARKET_PRICE_OPS.has(op) || !metric) {
+      return null;
+    }
+    return {
+      type: "market_change_compare",
+      left,
+      right,
+      op: op as "lt" | "lte" | "gt" | "gte" | "eq",
+      metric,
+      leftDayOffset,
+      rightDayOffset,
+    };
   }
   if (type === "market_price" || type === "market" || type === "price") {
     const op = String(record.op ?? record.operator ?? "")
@@ -2028,7 +2210,244 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
       minutesBefore: Math.abs(minutesBefore) || 10,
     };
   }
+  if (type === "expr" || type === "expression" || type === "numeric") {
+    return parseExprCondition(record);
+  }
+  if (
+    type === "field_changed" ||
+    type === "field_change" ||
+    type === "value_changed"
+  ) {
+    return parseFieldChangedCondition(record);
+  }
   return null;
+}
+
+const WATCH_EXPR_OPS = new Set<WatchExprOp>([
+  "add",
+  "sub",
+  "mul",
+  "div",
+  "pct",
+]);
+const WATCH_EXPR_COMPARE = new Set<WatchExprCompare>([
+  "lt",
+  "lte",
+  "gt",
+  "gte",
+  "eq",
+  "approx",
+]);
+const WATCH_EXPR_FIELDS = new Set([
+  "weather.temp_now",
+  "weather.temp_max",
+  "weather.temp_min",
+  "weather.is_rain",
+  "market.price",
+  "market.change_pct",
+  "market.change_abs",
+]);
+const WATCH_EXPR_MAX_DEPTH = 3;
+const WATCH_EXPR_MAX_LEAVES = 4;
+
+function parseNumberLeaf(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string" && /^-?\d+(\.\d+)?$/.test(raw.trim())) {
+    return Number(raw.trim());
+  }
+  return null;
+}
+
+/** Count leaf nodes (const / field) in an expr tree. */
+export function countWatchExprLeaves(node: WatchExprNode): number {
+  if ("const" in node || "field" in node) {
+    return 1;
+  }
+  if ("op" in node && Array.isArray(node.args)) {
+    return node.args.reduce((sum, arg) => sum + countWatchExprLeaves(arg), 0);
+  }
+  return 0;
+}
+
+export function parseWatchExprNode(
+  raw: unknown,
+  depth = 0,
+): WatchExprNode | null {
+  if (depth > WATCH_EXPR_MAX_DEPTH) {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    const n = parseNumberLeaf(raw);
+    return n != null ? { const: n } : null;
+  }
+  const row = raw as Record<string, unknown>;
+  if ("const" in row || "value" in row || "n" in row) {
+    const n = parseNumberLeaf(row.const ?? row.value ?? row.n);
+    return n != null ? { const: n } : null;
+  }
+  const fieldRaw = row.field ?? row.path ?? row.name;
+  if (typeof fieldRaw === "string" && fieldRaw.trim()) {
+    const field = fieldRaw.trim().toLowerCase().replace(/\s+/g, "_");
+    const normalized =
+      field === "temp_now" || field === "temperature"
+        ? "weather.temp_now"
+        : field === "temp_max" || field === "tmax"
+          ? "weather.temp_max"
+          : field === "temp_min" || field === "tmin"
+            ? "weather.temp_min"
+            : field === "is_rain" || field === "rain"
+              ? "weather.is_rain"
+              : field === "price"
+                ? "market.price"
+                : field === "change_pct" || field === "pct_change"
+                  ? "market.change_pct"
+                  : field === "change_abs"
+                    ? "market.change_abs"
+                    : field.startsWith("weather.") || field.startsWith("market.")
+                      ? field
+                      : field;
+    if (!WATCH_EXPR_FIELDS.has(normalized)) {
+      return null;
+    }
+    const place = readText(row, ["place", "location", "city", "מקום"]).slice(
+      0,
+      255,
+    );
+    const symbol = readText(row, [
+      "symbol",
+      "ticker",
+      "query",
+      "סימול",
+    ]).slice(0, 64);
+    const dayOffset = parseDayOffset(
+      row.day_offset ?? row.dayOffset ?? row.offset,
+    );
+    return {
+      field: normalized,
+      ...(place ? { place } : {}),
+      ...(symbol ? { symbol } : {}),
+      ...(dayOffset != null ? { dayOffset } : {}),
+    };
+  }
+  const opRaw = String(row.op ?? row.operator ?? "")
+    .trim()
+    .toLowerCase();
+  const opAlias: Record<string, WatchExprOp> = {
+    add: "add",
+    "+": "add",
+    plus: "add",
+    sub: "sub",
+    "-": "sub",
+    minus: "sub",
+    mul: "mul",
+    "*": "mul",
+    times: "mul",
+    multiply: "mul",
+    div: "div",
+    "/": "div",
+    divide: "div",
+    pct: "pct",
+    percent: "pct",
+    "%": "pct",
+  };
+  const op = opAlias[opRaw];
+  if (!op || !WATCH_EXPR_OPS.has(op)) {
+    return null;
+  }
+  const argsRaw = row.args ?? row.operands ?? row.children;
+  if (!Array.isArray(argsRaw) || argsRaw.length < 2 || argsRaw.length > 4) {
+    return null;
+  }
+  const args: WatchExprNode[] = [];
+  for (const entry of argsRaw) {
+    const child = parseWatchExprNode(entry, depth + 1);
+    if (!child) {
+      return null;
+    }
+    args.push(child);
+  }
+  if (countWatchExprLeaves({ op, args }) > WATCH_EXPR_MAX_LEAVES) {
+    return null;
+  }
+  return { op, args };
+}
+
+function parseExprCondition(
+  record: Record<string, unknown>,
+): Extract<LlmComposeCondition, { type: "expr" }> | null {
+  const compareRaw = String(
+    record.compare ?? record.op ?? record.operator ?? "eq",
+  )
+    .trim()
+    .toLowerCase();
+  const compareAlias: Record<string, WatchExprCompare> = {
+    lt: "lt",
+    "<": "lt",
+    lte: "lte",
+    "<=": "lte",
+    gt: "gt",
+    ">": "gt",
+    gte: "gte",
+    ">=": "gte",
+    eq: "eq",
+    "=": "eq",
+    "==": "eq",
+    approx: "approx",
+    "~": "approx",
+    about: "approx",
+  };
+  const compare = compareAlias[compareRaw];
+  if (!compare || !WATCH_EXPR_COMPARE.has(compare)) {
+    return null;
+  }
+  const left = parseWatchExprNode(record.left ?? record.lhs ?? record.a);
+  const right = parseWatchExprNode(record.right ?? record.rhs ?? record.b);
+  if (!left || !right) {
+    return null;
+  }
+  if (
+    countWatchExprLeaves(left) + countWatchExprLeaves(right) >
+    WATCH_EXPR_MAX_LEAVES
+  ) {
+    return null;
+  }
+  const tolRaw = record.tol ?? record.tolerance ?? record.epsilon;
+  const tol =
+    typeof tolRaw === "number" && Number.isFinite(tolRaw) && tolRaw >= 0
+      ? tolRaw
+      : typeof tolRaw === "string" && /^\d+(\.\d+)?$/.test(tolRaw.trim())
+        ? Number(tolRaw.trim())
+        : undefined;
+  return {
+    type: "expr",
+    compare,
+    left,
+    right,
+    ...(tol != null ? { tol } : {}),
+  };
+}
+
+function parseFieldChangedCondition(
+  record: Record<string, unknown>,
+): Extract<LlmComposeCondition, { type: "field_changed" }> | null {
+  const leaf = parseWatchExprNode({
+    field: record.field ?? record.path ?? record.name,
+    place: record.place ?? record.location ?? record.city,
+    symbol: record.symbol ?? record.ticker ?? record.query,
+    day_offset: record.day_offset ?? record.dayOffset,
+  });
+  if (!leaf || !("field" in leaf)) {
+    return null;
+  }
+  return {
+    type: "field_changed",
+    field: leaf.field,
+    ...(leaf.place ? { place: leaf.place } : {}),
+    ...(leaf.symbol ? { symbol: leaf.symbol } : {}),
+    ...(leaf.dayOffset != null ? { dayOffset: leaf.dayOffset } : {}),
+  };
 }
 
 const WEATHER_ASPECTS = new Set<LlmWeatherAspect>([

@@ -7,7 +7,9 @@ import {
   MASHOV_PASSWORD_TOO_SHORT_HE,
   matchMashovSchool,
   mashovSchoolMatchScore,
+  normalizeAbsences,
   normalizeGrades,
+  normalizeMessages,
   parseMashovAspects,
   pickMashovChild,
   resolveMashovReply,
@@ -22,6 +24,13 @@ describe("parseMashovAspects", () => {
     expect(parseMashovAspects(["behave", "schedule"])).toEqual([
       "behavior",
       "timetable",
+    ]);
+  });
+
+  it("maps absences and messages hebrew aliases", () => {
+    expect(parseMashovAspects(["חיסורים", "הודעות"])).toEqual([
+      "absences",
+      "messages",
     ]);
   });
 });
@@ -194,6 +203,8 @@ describe("pickMashovChild / format", () => {
       homework: [],
       behavior: [],
       timetable: [],
+      absences: [],
+      messages: [],
       missingCreds: [],
     });
     expect(text).toContain("מתמטיקה");
@@ -209,9 +220,79 @@ describe("pickMashovChild / format", () => {
         homework: [],
         behavior: [],
         timetable: [],
+        absences: [],
+        messages: [],
         missingCreds: ["שנת לימודים למשוב"],
       }),
     ).toContain("לאיזו שנת לימודים");
+  });
+
+  it("formats absences and messages", () => {
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["absences", "messages"],
+      grades: [],
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [
+        { subject: "אנגלית", text: "חיסור", date: "2026-10-20" },
+      ],
+      messages: [
+        {
+          from: "מחנכת",
+          subject: "טיול",
+          preview: "נא לאשר",
+          date: "2026-10-21",
+        },
+      ],
+      missingCreds: [],
+    });
+    expect(text).toContain("חיסורים");
+    expect(text).toContain("אנגלית");
+    expect(text).toContain("הודעות");
+    expect(text).toContain("טיול");
+  });
+});
+
+describe("normalizeAbsences / normalizeMessages", () => {
+  it("keeps absence-like behave rows", () => {
+    expect(
+      normalizeAbsences([
+        {
+          subjectName: "ספורט",
+          achvaName: "חיסור",
+          lessonDate: "2026-10-01",
+        },
+        {
+          subjectName: "מתמטיקה",
+          achvaName: "חיזוק חיובי",
+          lessonDate: "2026-10-02",
+        },
+      ]),
+    ).toEqual([
+      { subject: "ספורט", text: "חיסור", date: "2026-10-01" },
+    ]);
+  });
+
+  it("maps inbox conversation rows", () => {
+    expect(
+      normalizeMessages([
+        {
+          subject: "אסיפת הורים",
+          senderName: "מנהלת",
+          lastMessage: "שלום",
+          sendDate: "2026-10-21T10:00:00",
+        },
+      ]),
+    ).toEqual([
+      {
+        subject: "אסיפת הורים",
+        from: "מנהלת",
+        date: "2026-10-21T10:00:00",
+        preview: "שלום",
+      },
+    ]);
   });
 });
 

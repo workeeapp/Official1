@@ -4,6 +4,7 @@ import {
   normalizeListsField,
   parseLlmReply,
   parseReplyMetadata,
+  parseWatchExprNode,
   redactMetadataSecrets,
   redactRegisterSecrets,
   wazeNavigateUrl,
@@ -1386,6 +1387,8 @@ describe("parseLlmReply", () => {
         scheduleAnchor: "",
         scheduleOffsetMinutes: 0,
         composeCondition: null,
+        watchOnce: false,
+        composeAspects: [],
         reminderId: "",
       },
     ]);
@@ -1608,6 +1611,233 @@ describe("parseLlmReply", () => {
       },
       { composeCondition: { type: "weather_rain" } },
       { composeCondition: { type: "mashov_new" } },
+    ]);
+  });
+
+  it("rejects invalid expr AST (unknown op / too deep)", () => {
+    expect(
+      parseWatchExprNode({
+        op: "pow",
+        args: [{ const: 2 }, { const: 3 }],
+      }),
+    ).toBeNull();
+    expect(
+      parseWatchExprNode({
+        op: "add",
+        args: [
+          {
+            op: "add",
+            args: [
+              {
+                op: "add",
+                args: [
+                  {
+                    op: "add",
+                    args: [{ const: 1 }, { const: 2 }],
+                  },
+                  { const: 3 },
+                ],
+              },
+              { const: 4 },
+            ],
+          },
+          { const: 5 },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "x",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "bad",
+                compose: true,
+                compose_condition: {
+                  type: "expr",
+                  compare: "eq",
+                  left: { op: "xor", args: [{ const: 1 }, { const: 2 }] },
+                  right: { const: 3 },
+                },
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders[0]?.composeCondition,
+    ).toBeNull();
+  });
+
+  it("reads expr and field_changed compose_condition", () => {
+    const reminders = parseReplyMetadata(
+      JSON.stringify({
+        response: "אבדוק",
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "טמפ×2",
+              compose: true,
+              compose_source: "weather",
+              compose_place: "פתח תקווה",
+              compose_condition: {
+                type: "expr",
+                compare: "eq",
+                left: {
+                  op: "mul",
+                  args: [
+                    { field: "weather.temp_now", place: "פתח תקווה" },
+                    { const: 2 },
+                  ],
+                },
+                right: { const: 50 },
+              },
+              ping: ["עמית"],
+            },
+            {
+              action: "add",
+              item: "שינוי טמפ",
+              compose: true,
+              compose_source: "weather",
+              compose_condition: {
+                type: "field_changed",
+                field: "weather.temp_now",
+                place: "פתח תקווה",
+              },
+              ping: ["עמית"],
+            },
+            {
+              action: "add",
+              item: "יורו+דולר",
+              compose: true,
+              compose_source: "market",
+              compose_condition: {
+                type: "expr",
+                compare: "approx",
+                tol: 0.5,
+                left: {
+                  op: "add",
+                  args: [
+                    { field: "market.price", symbol: "יורו" },
+                    { field: "market.price", symbol: "דולר" },
+                  ],
+                },
+                right: { const: 10 },
+              },
+              ping: ["עמית"],
+            },
+          ],
+        },
+      }),
+    ).reminders;
+    expect(reminders).toMatchObject([
+      {
+        composeCondition: {
+          type: "expr",
+          compare: "eq",
+          left: { op: "mul" },
+          right: { const: 50 },
+        },
+      },
+      {
+        composeCondition: {
+          type: "field_changed",
+          field: "weather.temp_now",
+          place: "פתח תקווה",
+        },
+      },
+      {
+        composeCondition: {
+          type: "expr",
+          compare: "approx",
+          tol: 0.5,
+        },
+      },
+    ]);
+  });
+
+  it("reads watch_once, compose_aspects, weather_changed, market_change_compare", () => {
+    const reminders = parseReplyMetadata(
+      JSON.stringify({
+        response: "אבדוק",
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "שינוי מזג אוויר",
+              compose: true,
+              compose_source: "weather",
+              compose_place: "פתח תקווה",
+              compose_condition: { type: "weather_changed" },
+              watch_once: true,
+              text: "עדכון מזג אוויר",
+              ping: ["עמית"],
+            },
+            {
+              action: "add",
+              item: "משוב רחב",
+              compose: true,
+              compose_source: "mashov",
+              compose_place: "דניאל",
+              compose_condition: { type: "mashov_new" },
+              compose_aspects: [
+                "grades",
+                "behavior",
+                "homework",
+                "absences",
+                "messages",
+              ],
+              text: "משוב",
+              ping: ["עמית"],
+            },
+            {
+              action: "add",
+              item: "דולר מול יורו",
+              compose: true,
+              compose_source: "market",
+              compose_condition: {
+                type: "market_change_compare",
+                left: "דולר",
+                right: "יורו",
+                op: "gt",
+                metric: "daily_change_pct",
+                left_day_offset: 0,
+                right_day_offset: -1,
+              },
+              text: "השוואת שינוי",
+              ping: ["עמית"],
+            },
+          ],
+        },
+      }),
+    ).reminders;
+    expect(reminders).toMatchObject([
+      {
+        watchOnce: true,
+        composeCondition: { type: "weather_changed" },
+      },
+      {
+        composeAspects: [
+          "grades",
+          "behavior",
+          "homework",
+          "absences",
+          "messages",
+        ],
+        composeCondition: { type: "mashov_new" },
+      },
+      {
+        composeCondition: {
+          type: "market_change_compare",
+          left: "דולר",
+          right: "יורו",
+          op: "gt",
+          leftDayOffset: 0,
+          rightDayOffset: -1,
+        },
+      },
     ]);
   });
 

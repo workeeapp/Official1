@@ -26,6 +26,7 @@ import {
   conditionFromReminderJson,
   evaluateComposeCondition,
 } from "./compose-condition.js";
+import { enrichEvalFactsForExpr } from "./watch-expr.js";
 import { fetchBusEtaWatch } from "./routes.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
@@ -179,10 +180,13 @@ export async function settleFiredReminder(
   },
   now: Date,
   sendStatus: "sent" | "failed",
+  options?: { forceDone?: boolean },
 ): Promise<void> {
   const sentAt = sendStatus === "sent" ? now : null;
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
-  const nextAt = await resolveNextFireAt(reminder, now, firedCount);
+  const nextAt = options?.forceDone
+    ? null
+    : await resolveNextFireAt(reminder, now, firedCount);
   const rule = parseRecurrence(reminder.recurrence);
   const hasRule = Boolean(rule);
   const workerItemId = await workerItemIdForReminder(reminder.id);
@@ -377,6 +381,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       try {
         const subjectId =
           firstTarget?.id ?? reminder.actorId ?? reminder.ownerId;
+        const conditionEarly = conditionFromReminderJson(
+          "composeCondition" in reminder ? reminder.composeCondition : null,
+        );
         factsBundle = await loadComposeFacts({
           composeSource: reminder.composeSource ?? "",
           subjectEmployeeId: subjectId,
@@ -390,6 +397,9 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             typeof reminder.composePlace === "string"
               ? reminder.composePlace
               : "",
+          composeAspects:
+            "composeAspects" in reminder ? reminder.composeAspects : undefined,
+          composeCondition: conditionEarly,
           now,
         });
         advanceLastReportSha = Boolean(factsBundle.advanceLastReportSha);
@@ -408,6 +418,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       const condition = conditionFromReminderJson(
         "composeCondition" in reminder ? reminder.composeCondition : null,
       );
+      const isWatch = Boolean(condition);
       if (condition) {
         let evalFacts = { ...(factsBundle.eval ?? {}) };
         if (condition.type === "bus_eta") {
@@ -431,6 +442,24 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             busEtaDefaultBody = `קו ${condition.line} מגיע בעוד כ־${eta.minutes} דקות מ«${condition.origin}» לכיוון «${condition.destination}» — זמן לצאת.`;
           }
         }
+        if (
+          condition.type === "expr" ||
+          condition.type === "field_changed"
+        ) {
+          const enriched = await enrichEvalFactsForExpr({
+            condition,
+            evalFacts,
+            factsBundle,
+            composeSource: reminder.composeSource ?? "",
+            composePlace:
+              typeof reminder.composePlace === "string"
+                ? reminder.composePlace
+                : "",
+            now,
+          });
+          evalFacts = enriched.evalFacts;
+          factsBundle = enriched.factsBundle;
+        }
         const gate = evaluateComposeCondition({
           condition,
           facts: evalFacts,
@@ -450,6 +479,14 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         conditionShaAfterSend = gate.shaAfterSend;
       }
 
+      const recipientGender =
+        firstTarget &&
+        "addressGender" in firstTarget &&
+        (firstTarget.addressGender === "male" ||
+          firstTarget.addressGender === "female")
+          ? firstTarget.addressGender
+          : null;
+
       const composed = await composeScheduledOutbound({
         brief: reminder.messageText,
         itemLabel: reminder.itemLabel,
@@ -457,6 +494,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         recipientName,
         previousText: reminder.lastComposedText,
         facts: factsBundle,
+        watch: isWatch,
+        addressGender: recipientGender,
       });
       const resolved = resolveComposeFireOutbound({
         brief: reminder.messageText,
@@ -607,7 +646,20 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       });
     }
 
-    await settleFiredReminder(reminder, now, sendStatus);
+    const watchOnce =
+      "watchOnce" in reminder && reminder.watchOnce === true;
+    const hadCondition = Boolean(
+      conditionFromReminderJson(
+        "composeCondition" in reminder ? reminder.composeCondition : null,
+      ),
+    );
+    await settleFiredReminder(reminder, now, sendStatus, {
+      forceDone:
+        watchOnce &&
+        hadCondition &&
+        sendStatus === "sent" &&
+        !skipSend,
+    });
   }
 
   return due.length;

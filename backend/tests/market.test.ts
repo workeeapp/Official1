@@ -5,10 +5,22 @@ import {
   parseMarketAspects,
   parseMarketQueries,
   resolveMarketReply,
+  resolveSymbol,
   type MarketFacts,
 } from "../src/services/market.js";
 
 describe("parseMarketQueries / aspects", () => {
+  it("aliases דולר / יורו to ILS FX tickers", async () => {
+    expect(await resolveSymbol("דולר")).toEqual({
+      symbol: "USDILS=X",
+      name: "דולר",
+    });
+    expect(await resolveSymbol("יורו")).toEqual({
+      symbol: "EURILS=X",
+      name: "יורו",
+    });
+  });
+
   it("splits comma-separated compose_place", () => {
     expect(parseMarketQueries("AAPL, BTC-USD")).toEqual(["AAPL", "BTC-USD"]);
   });

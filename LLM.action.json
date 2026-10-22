@@ -490,7 +490,18 @@
                               "object",
                               "null"
                             ],
-                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / mashov_new)."
+                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / market_change_compare / expr / field_changed / bus_eta)."
+                          },
+                          "watch_once": {
+                            "type": "boolean",
+                            "description": "list_type reminders: true = one-shot watch (done after first successful condition send)."
+                          },
+                          "compose_aspects": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "list_type reminders: plugin aspects at fire (e.g. mashov grades/behavior/homework/absences/messages)."
                           },
                           "schedule_anchor": {
                             "type": "string",

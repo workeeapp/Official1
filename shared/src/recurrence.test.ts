@@ -96,8 +96,10 @@ describe("parseRecurrence", () => {
     expect(parseRecurrence({ freq: "none" })).toBeNull();
   });
 
-  it("flags repeats faster than hourly", () => {
-    expect(isSubHourlyRecurrence({ freq: "interval", interval: 10, unit: "minutes" })).toBe(true);
+  it("flags repeats faster than every 5 minutes", () => {
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 4, unit: "minutes" })).toBe(true);
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 5, unit: "minutes" })).toBe(false);
+    expect(isSubHourlyRecurrence({ freq: "interval", interval: 10, unit: "minutes" })).toBe(false);
     expect(isSubHourlyRecurrence({ freq: "interval", interval: 30, unit: "seconds" })).toBe(true);
     expect(isSubHourlyRecurrence({ freq: "interval", interval: 1, unit: "hours" })).toBe(false);
     expect(isSubHourlyRecurrence({ freq: "daily", interval: 1, time: "09:00" })).toBe(false);

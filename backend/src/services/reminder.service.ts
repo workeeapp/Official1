@@ -12,6 +12,7 @@ import {
   formatRecurrenceHe,
   formatReminderIntervalHe,
   isSubHourlyRecurrence,
+  MIN_REPEAT_INTERVAL_MINUTES,
   jerusalemParts,
   jerusalemWallTimeToDate,
   legacyRepeatFor,
@@ -40,6 +41,7 @@ import { applyAttachmentLinks } from "./attachment.service.js";
 import { applyClockRuleToTask } from "./list-recurrence.js";
 import { nextCandleLighting } from "./jewish.js";
 import { scheduleSoon } from "./reminder-fire.js";
+import { seedWatchBaseline } from "./watch-baseline.js";
 
 export function formatJerusalemDateTime(value: Date): string {
   return formatJerusalemWallTime(value);
@@ -73,6 +75,10 @@ export interface ReminderSnapshotRow {
   compose_place?: string;
   /** Conditional watch gate (null when unconditional). */
   compose_condition?: unknown;
+  /** One-shot watch: done after first successful condition send. */
+  watch_once?: boolean;
+  /** Plugin aspects at fire (mashov/weather/market). */
+  compose_aspects?: string[];
   status: string;
   send_status: "pending" | "sent" | "failed";
   sent: boolean;
@@ -98,9 +104,9 @@ export type ReminderSkipReason =
   | "anchor_failed";
 
 export const SUB_HOURLY_REFUSAL =
-  "אי אפשר לקבוע חזרה כל כמה דקות או שניות. הכי תכוף שאפשר הוא כל שעה.";
+  "אי אפשר לקבוע חזרה כל פחות מ־5 דקות או בשניות. הכי תכוף שאפשר הוא כל 5 דקות.";
 
-/** A new / changed clock that would repeat every N seconds or minutes (refused). */
+/** A new / changed clock that repeats too often (refused). */
 export function reminderRepeatsSubHourly(
   reminder: Pick<
     LlmReminderAction,
@@ -139,7 +145,13 @@ export function reminderRepeatsSubHourly(
   if (reminder.recurrence) {
     return isSubHourlyRecurrence(reminder.recurrence);
   }
-  return reminder.everyUnit === "minutes" || reminder.everyUnit === "seconds";
+  if (reminder.everyUnit === "seconds") {
+    return true;
+  }
+  if (reminder.everyUnit === "minutes") {
+    return (reminder.everyCount ?? 0) < MIN_REPEAT_INTERVAL_MINUTES;
+  }
+  return false;
 }
 
 function intervalOf(reminder: LlmReminderAction): ReminderInterval | null {
@@ -1842,13 +1854,46 @@ export async function applyReminders(input: {
           : canReuseClock && existingCondition != null
             ? existingCondition
             : Prisma.DbNull;
+      const existingWatchOnce =
+        existing && "watchOnce" in existing
+          ? Boolean((existing as { watchOnce?: boolean }).watchOnce)
+          : false;
+      const nextWatchOnce =
+        reminder.watchOnce === true
+          ? true
+          : canReuseClock
+            ? existingWatchOnce
+            : false;
+      const existingAspects =
+        existing &&
+        "composeAspects" in existing &&
+        Array.isArray((existing as { composeAspects?: unknown }).composeAspects)
+          ? ((existing as { composeAspects: unknown[] }).composeAspects
+              .map((entry) => String(entry ?? "").trim().toLowerCase())
+              .filter(Boolean) as string[])
+          : [];
+      const nextAspects =
+        Array.isArray(reminder.composeAspects) &&
+        reminder.composeAspects.length > 0
+          ? reminder.composeAspects
+              .map((entry) => String(entry ?? "").trim().toLowerCase())
+              .filter(Boolean)
+              .slice(0, 12)
+          : canReuseClock && existingAspects.length > 0
+            ? existingAspects
+            : [];
+      const nextAspectsJson: Prisma.InputJsonValue | typeof Prisma.DbNull =
+        nextAspects.length > 0
+          ? (nextAspects as Prisma.InputJsonValue)
+          : Prisma.DbNull;
       const composeAtFire =
         nextCompose ||
         nextSource === "git_log" ||
         nextSource === "saved_data" ||
         nextSource === "weather" ||
         nextSource === "market" ||
-        nextSource === "mashov";
+        nextSource === "mashov" ||
+        nextCondition !== Prisma.DbNull;
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -1868,6 +1913,8 @@ export async function applyReminders(input: {
               scheduleAnchor: nextScheduleAnchor,
               scheduleOffsetMinutes: nextScheduleOffset,
               composeCondition: nextCondition,
+              watchOnce: nextWatchOnce,
+              composeAspects: nextAspectsJson,
             },
           })
         : await prisma.reminder.create({
@@ -1891,6 +1938,8 @@ export async function applyReminders(input: {
               scheduleAnchor: nextScheduleAnchor,
               scheduleOffsetMinutes: nextScheduleOffset,
               composeCondition: nextCondition,
+              watchOnce: nextWatchOnce,
+              composeAspects: nextAspectsJson,
             },
           });
       const linkedWorkerItemId =
@@ -1924,6 +1973,21 @@ export async function applyReminders(input: {
             ? null
             : undefined,
       });
+      if (nextCondition !== Prisma.DbNull) {
+        const subjectId =
+          (Array.isArray(pingIds) && typeof pingIds[0] === "string"
+            ? pingIds[0]
+            : null) || ownerId;
+        await seedWatchBaseline({
+          reminderId: row.id,
+          composeSource: nextSource,
+          composePlace: nextPlace,
+          composeCondition: nextCondition,
+          composeAspects: nextAspects,
+          subjectEmployeeId: subjectId,
+          repeat: nextRepeat,
+        }).catch(() => null);
+      }
       await recordAuditEvent({
         userId: input.userId,
         actorEmployeeId: input.actor.id,
@@ -2205,6 +2269,8 @@ export function toReminderSnapshotRow(
     composeLookbackHours?: number;
     composePlace?: string;
     composeCondition?: unknown;
+    watchOnce?: boolean;
+    composeAspects?: unknown;
     lastComposedText?: string | null;
     status: string;
     sendStatus?: string;
@@ -2276,6 +2342,12 @@ export function toReminderSnapshotRow(
       !Array.isArray(row.composeCondition)
         ? row.composeCondition
         : null,
+    watch_once: row.watchOnce === true,
+    compose_aspects: Array.isArray(row.composeAspects)
+      ? row.composeAspects
+          .map((entry) => String(entry ?? "").trim().toLowerCase())
+          .filter(Boolean)
+      : [],
     status: row.status,
     send_status: sendStatus,
     sent: sendStatus === "sent",

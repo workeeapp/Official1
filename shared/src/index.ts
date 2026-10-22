@@ -169,6 +169,8 @@ export {
   parseJewishAction,
   parseRoutesAction,
   parseComposeCondition,
+  parseWatchExprNode,
+  countWatchExprLeaves,
 } from "./llm-message";
 export {
   looksLikePhone,
@@ -205,6 +207,7 @@ export {
   formatRecurrenceExceptionsHe,
   formatRecurrenceHe,
   isSubHourlyRecurrence,
+  MIN_REPEAT_INTERVAL_MINUTES,
   legacyRepeatFor,
   listOccurrences,
   nextOccurrence,
@@ -264,6 +267,9 @@ export type {
   LlmReminderActionName,
   LlmReminderRepeat,
   LlmComposeCondition,
+  WatchExprNode,
+  WatchExprOp,
+  WatchExprCompare,
   ParsedLlmMessage,
   LlmReplyButton,
 } from "./llm-message";

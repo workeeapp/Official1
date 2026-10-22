@@ -345,10 +345,20 @@ model Reminder {
    * e.g. {type:"market_price",op:"lt",value:80000} | {type:"weather_rain"} | {type:"mashov_new"}.
    */
   composeCondition Json? @map("compose_condition")
+  /**
+   * One-shot conditional watch: after a successful condition send, settle as done
+   * (soft-delete Lucy worker task). Quiet skips still advance fire_at.
+   */
+  watchOnce Boolean @default(false) @map("watch_once")
+  /**
+   * Optional aspects for compose plugins at fire (weather/market/mashov), e.g.
+   * ["grades","behavior","homework","absences","messages"].
+   */
+  composeAspects Json? @map("compose_aspects")
   lastComposedText String @default("") @map("last_composed_text") @db.Text
   /**
    * HEAD sha after the last git digest fire; also market edge state
-   * (market:below / market:above) or mashov content fingerprint.
+   * (market:below / market:above) or mashov/weather content fingerprint.
    */
   lastReportSha String @default("") @map("last_report_sha") @db.VarChar(64)
   status      String   @default("active") @db.VarChar(16)

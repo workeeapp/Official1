@@ -55,6 +55,15 @@ const ALIAS_SYMBOLS: Record<string, string> = {
   "s&p500": "^GSPC",
   sp500: "^GSPC",
   "s&p 500": "^GSPC",
+  /** ILS FX (שער הדולר / היורו). */
+  דולר: "USDILS=X",
+  dollar: "USDILS=X",
+  usd: "USDILS=X",
+  "שער הדולר": "USDILS=X",
+  יורו: "EURILS=X",
+  euro: "EURILS=X",
+  eur: "EURILS=X",
+  "שער היורו": "EURILS=X",
 };
 
 export function parseMarketAspects(raw: unknown): MarketAspect[] {
@@ -125,6 +134,12 @@ type ChartResponse = {
         regularMarketDayHigh?: number;
         regularMarketDayLow?: number;
         currency?: string;
+      };
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          close?: Array<number | null>;
+        }>;
       };
     }>;
     error?: { description?: string } | null;
@@ -224,6 +239,49 @@ export async function fetchQuote(
     currency: meta.currency?.trim() || "USD",
     query,
   };
+}
+
+/**
+ * Daily percent change for a ticker.
+ * dayOffset 0 = today's change vs previous close (same as quote.changePct).
+ * dayOffset -1 = previous trading day's close vs the day before that.
+ */
+export async function fetchDailyChangePct(
+  query: string,
+  dayOffset = 0,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number | null> {
+  const resolved = await resolveSymbol(query, fetchImpl);
+  if (!resolved) {
+    return null;
+  }
+  if (dayOffset === 0) {
+    const quote = await fetchQuote(query, fetchImpl);
+    return quote?.changePct ?? null;
+  }
+  const rangeDays = Math.min(30, Math.max(5, Math.abs(dayOffset) + 5));
+  const url = `${CHART_URL}/${encodeURIComponent(resolved.symbol)}?interval=1d&range=${rangeDays}d`;
+  const res = await fetchImpl(url, { headers: YAHOO_HEADERS });
+  if (!res.ok) {
+    throw new Error(`market chart HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as ChartResponse;
+  const closes = (body.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [])
+    .map((n) => (typeof n === "number" && Number.isFinite(n) ? n : null))
+    .filter((n): n is number => n != null && n !== 0);
+  // closes[end] = most recent; for offset -1 use closes[end-1] vs closes[end-2]
+  const end = closes.length - 1;
+  const newerIdx = end + dayOffset;
+  const olderIdx = newerIdx - 1;
+  if (newerIdx < 1 || olderIdx < 0 || newerIdx >= closes.length) {
+    return null;
+  }
+  const newer = closes[newerIdx];
+  const older = closes[olderIdx];
+  if (!newer || !older) {
+    return null;
+  }
+  return roundMoney(((newer - older) / older) * 100);
 }
 
 export async function fetchMarketFacts(input: {

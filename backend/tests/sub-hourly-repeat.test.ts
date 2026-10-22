@@ -24,17 +24,17 @@ const reminder = {
   compose: false,
   composeSource: "",
   composeLookbackHours: 0,
-          composePlace: "",
+  composePlace: "",
   reminderId: "",
 } as NonNullable<LlmMetadata["reminders"]>[number];
 
 describe("actionRepeatsSubHourly", () => {
-  it("flags a clock every N minutes, and the legacy every_unit form", () => {
+  it("flags a clock faster than every 5 minutes, and seconds", () => {
     expect(
       actionRepeatsSubHourly(
         meta({
           reminders: [
-            { ...reminder, recurrence: { freq: "interval", interval: 10, unit: "minutes" } },
+            { ...reminder, recurrence: { freq: "interval", interval: 3, unit: "minutes" } },
           ],
         }),
       ),
@@ -46,7 +46,16 @@ describe("actionRepeatsSubHourly", () => {
     ).toBe(true);
   });
 
-  it("flags a standing task or a scheduled message every N minutes", () => {
+  it("allows every 5+ minutes on clocks, standing tasks, and messages", () => {
+    expect(
+      actionRepeatsSubHourly(
+        meta({
+          reminders: [
+            { ...reminder, recurrence: { freq: "interval", interval: 5, unit: "minutes" } },
+          ],
+        }),
+      ),
+    ).toBe(false);
     expect(
       actionRepeatsSubHourly(
         meta({
@@ -57,13 +66,16 @@ describe("actionRepeatsSubHourly", () => {
               listName: "",
               targets: [],
               items: [
-                { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 5, unit: "minutes" } },
+                {
+                  "שם מטלה": "לשתות מים",
+                  recurrence: { freq: "interval", interval: 5, unit: "minutes" },
+                },
               ],
             },
           ],
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       actionRepeatsSubHourly(
         meta({
@@ -72,6 +84,29 @@ describe("actionRepeatsSubHourly", () => {
               targets: ["טל"],
               text: "עשית?",
               recurrence: { freq: "interval", interval: 20, unit: "minutes" },
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("still flags standing tasks / messages under 5 minutes", () => {
+    expect(
+      actionRepeatsSubHourly(
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              targets: [],
+              items: [
+                {
+                  "שם מטלה": "לשתות מים",
+                  recurrence: { freq: "interval", interval: 2, unit: "minutes" },
+                },
+              ],
             },
           ],
         }),

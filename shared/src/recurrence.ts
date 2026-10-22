@@ -198,13 +198,26 @@ export function parseRecurrence(value: unknown): Recurrence | null {
   };
 }
 
+/** Product minimum for repeating clocks (`freq=interval`, `unit=minutes`). */
+export const MIN_REPEAT_INTERVAL_MINUTES = 5;
+
 /**
- * New repeats faster than hourly (every N seconds / minutes) are refused. Accepts a
- * parsed rule or the model's raw `recurrence` object.
+ * New repeats faster than every {@link MIN_REPEAT_INTERVAL_MINUTES} minutes are refused
+ * (seconds always; minutes with interval under 5). Accepts a parsed rule or the model's
+ * raw `recurrence` object. Name kept for call-site stability.
  */
 export function isSubHourlyRecurrence(value: unknown): boolean {
   const rule = parseRecurrence(value);
-  return rule?.freq === "interval" && (rule.unit === "seconds" || rule.unit === "minutes");
+  if (!rule || rule.freq !== "interval") {
+    return false;
+  }
+  if (rule.unit === "seconds") {
+    return true;
+  }
+  if (rule.unit === "minutes") {
+    return (rule.interval ?? 0) < MIN_REPEAT_INTERVAL_MINUTES;
+  }
+  return false;
 }
 
 /** Stored / injected JSON shape (snake case, same as the model emits). */

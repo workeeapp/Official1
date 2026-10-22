@@ -6,6 +6,7 @@ import type { ComposeFactsBundle } from "./compose-facts.js";
 /**
  * One outbound WhatsApp compose path. Optional facts come from compose-facts
  * loaders (git_log / saved_data); creative clocks have no facts block.
+ * Conditional watches skip fixedBody short-circuit and get tips + gender.
  */
 export async function composeScheduledOutbound(input: {
   brief: string;
@@ -14,19 +15,24 @@ export async function composeScheduledOutbound(input: {
   recipientName: string;
   previousText?: string;
   facts?: ComposeFactsBundle;
+  /** Conditional watch fire — styled tip message, use FACTS not raw fixedBody. */
+  watch?: boolean;
+  addressGender?: "male" | "female" | null;
 }): Promise<string | null> {
   const brief = input.brief.trim() || input.itemLabel.trim();
   const bundle = input.facts;
   const facts = bundle?.facts?.trim() ?? "";
   const kind = bundle?.kind ?? "creative";
-  if (bundle?.fixedBody?.trim()) {
+  const isWatch = input.watch === true;
+  if (!isWatch && bundle?.fixedBody?.trim()) {
     return bundle.fixedBody.trim().slice(0, 4096);
   }
-  if (!brief && !facts) {
+  if (!brief && !facts && !bundle?.fixedBody?.trim()) {
     return null;
   }
 
-  const hasFacts = Boolean(facts);
+  const hasFacts = Boolean(facts) || Boolean(bundle?.fixedBody?.trim());
+  const factsBlock = facts || bundle?.fixedBody?.trim() || "";
 
   try {
     const client = getLlmClient();
@@ -36,7 +42,7 @@ export async function composeScheduledOutbound(input: {
     const turn = await client.createResponse({
       conversationId,
       model: config.model,
-      temperature: hasFacts ? 0.4 : 1,
+      temperature: hasFacts ? (isWatch ? 0.55 : 0.4) : 1,
       instructions: [
         "You write one outbound WhatsApp message.",
         "Output ONLY the message body. No JSON, no quotes, no preamble.",
@@ -46,13 +52,17 @@ export async function composeScheduledOutbound(input: {
           : "No FACTS block — invent the message from the brief alone (greeting, joke, note, etc.).",
         "Do not claim you saved, updated, or sent anything else — this turn is message-only.",
         "Keep it readable WhatsApp text. Bold with single *asterisks* when useful.",
-        ...composeKindHints(kind),
+        ...composeKindHints(kind, isWatch),
+        ...addressGenderHints(input.addressGender),
       ].join("\n"),
       message: [
         `Sender: ${input.actorName || (hasFacts ? "someone" : "מישהו")}`,
         `Recipient: ${input.recipientName || (hasFacts ? "teammate" : "הנמען")}`,
         `Clock label: ${input.itemLabel || "scheduled message"}`,
         `Brief / question to answer now: ${brief || "(follow FACTS)"}`,
+        isWatch
+          ? "Mode: CONDITIONAL WATCH alert — the watched condition just became true. Open with לבקשתך…, state the update from FACTS, and add one short practical tip when natural (umbrella when rain, etc.). Do not invent numbers."
+          : "",
         bundle?.sessionClock?.trim()
           ? `SESSION_CLOCK:\n${bundle.sessionClock.trim()}`
           : "",
@@ -60,7 +70,7 @@ export async function composeScheduledOutbound(input: {
           ? `Time window: ${bundle.windowLabel.trim()}`
           : "",
         hasFacts
-          ? `${bundle?.factsLabel || "FACTS"}:\n${facts}`
+          ? `${bundle?.factsLabel || "FACTS"}:\n${factsBlock}`
           : "FACTS: (none — invent from the brief)",
         input.previousText?.trim()
           ? `Previous send (avoid repeating the same wording when covering overlapping content):\n${input.previousText.trim()}`
@@ -73,11 +83,14 @@ export async function composeScheduledOutbound(input: {
     });
     const text = turn.reply.trim();
     if (!text) {
+      if (isWatch && bundle?.fixedBody?.trim()) {
+        return bundle.fixedBody.trim().slice(0, 4096);
+      }
       return null;
     }
     recordWhatsAppEvent(
       "reminder_compose_ok",
-      `item=${input.itemLabel.slice(0, 40)} chars=${text.length} kind=${kind}`,
+      `item=${input.itemLabel.slice(0, 40)} chars=${text.length} kind=${kind} watch=${isWatch}`,
     );
     return text.slice(0, 4096);
   } catch (error) {
@@ -85,11 +98,40 @@ export async function composeScheduledOutbound(input: {
       "reminder_compose_fail",
       error instanceof Error ? error.message : "unknown",
     );
+    if (isWatch && bundle?.fixedBody?.trim()) {
+      return bundle.fixedBody.trim().slice(0, 4096);
+    }
     return null;
   }
 }
 
-function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
+function addressGenderHints(
+  gender: "male" | "female" | null | undefined,
+): string[] {
+  if (gender === "female") {
+    return [
+      "Recipient address gender: female — use feminine Hebrew (את, תשכחי, לכי).",
+    ];
+  }
+  if (gender === "male") {
+    return [
+      "Recipient address gender: male — use masculine Hebrew (אתה, תשכח, לך).",
+    ];
+  }
+  return [
+    "Recipient address gender: unknown — prefer neutral / plural when possible (תזכרו, אפשר לקחת).",
+  ];
+}
+
+function composeKindHints(
+  kind: ComposeFactsBundle["kind"],
+  isWatch: boolean,
+): string[] {
+  const watchExtra = isWatch
+    ? [
+        "Watch tip: one short actionable tip tied to the FACTS is encouraged; keep the whole message under ~4 short lines.",
+      ]
+    : [];
   if (kind === "git_log") {
     return [
       "Git digest: summarize product/user-facing changes from the commit notes.",
@@ -109,22 +151,26 @@ function composeKindHints(kind: ComposeFactsBundle["kind"]): string[] {
   }
   if (kind === "weather") {
     return [
-      "Weather: prefer the fixed FACTS / fixedBody numbers; do not invent temperatures, wind, or wave heights.",
+      "Weather: use ONLY temperatures/conditions from FACTS; do not invent numbers.",
+      ...watchExtra,
     ];
   }
   if (kind === "market") {
     return [
-      "Market: prefer the fixed FACTS / fixedBody numbers; do not invent prices or percent changes.",
+      "Market: use ONLY prices/percents from FACTS; do not invent numbers. Not investment advice.",
+      ...watchExtra,
     ];
   }
   if (kind === "mashov") {
     return [
-      "Mashov: prefer the fixed FACTS / fixedBody; do not invent grades or homework; never repeat passwords.",
+      "Mashov: use ONLY grades/homework/behavior/absences/messages from FACTS; never invent or repeat passwords.",
+      ...watchExtra,
     ];
   }
   return [
     "Creative/fixed-brief send: second person when messaging them; for a joke to the speaker, just tell the joke.",
     "Every run must be NEW. Never repeat a previous joke or the same punchline.",
     "If the brief says בדיחה / עדות and does not mention בית משפט / משפט / עד בבית משפט: treat עדות as ethnic communities (אשכנזים, ספרדים, מזרחים, תימנים, etc.) — NOT courtroom testimony.",
+    ...watchExtra,
   ];
 }
