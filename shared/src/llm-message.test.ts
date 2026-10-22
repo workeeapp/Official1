@@ -877,6 +877,192 @@ describe("parseLlmReply", () => {
     expect(bubbles[2]?.buttons).toBeUndefined();
   });
 
+  it("explicit same-turn reminder confirm has nav only — no soft-offer כן/לא", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: [
+          {
+            text: "רשמתי ללכת לחבר מחר ב־20:00, ותזכורת ב־19:45.",
+            buttons: [
+              {
+                label: "ללכת לחבר",
+                command: "הציגי את המטלה ללכת לחבר",
+              },
+              { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+            ],
+          },
+        ],
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "tasks",
+              list_name: "",
+              items: [{ "שם מטלה": "ללכת לחבר" }],
+            },
+            {
+              action: "add",
+              list_type: "reminders",
+              list_name: "",
+              items: [{ item: "ללכת לחבר", time: "19:45", ping: ["טל"] }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.responseBubbles).toHaveLength(1);
+    expect(parsed.responseBubbles[0]?.buttons?.map((b) => b.command)).toEqual([
+      "הציגי את המטלה ללכת לחבר",
+      "הצג רשימת מטלות",
+    ]);
+    expect(
+      parsed.responseBubbles.some((bubble) =>
+        (bubble.buttons ?? []).some((b) => isClosedChoiceReplyButton(b)),
+      ),
+    ).toBe(false);
+    expect(parsed.responseBubbles[0]?.text).not.toMatch(/רוצה שאוסיף גם תזכורת/);
+  });
+
+  it("partial explicit path: task saved text without claiming reminder when no reminder in reply", () => {
+    const parsed = parseLlmReply(
+      JSON.stringify({
+        responses: [
+          {
+            text: "רשמתי את המטלה ללכת לחבר. מתי לשלוח את התזכורת?",
+            buttons: [
+              { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+            ],
+          },
+        ],
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "tasks",
+              list_name: "",
+              items: [{ "שם מטלה": "ללכת לחבר" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(parsed.responseBubbles).toHaveLength(1);
+    expect(parsed.responseBubbles[0]?.text).toContain("רשמתי את המטלה");
+    expect(parsed.responseBubbles[0]?.text).not.toMatch(
+      /תיזכרתי|הוספתי תזכורת|קבעתי תזכורת/,
+    );
+    expect(
+      parsed.responseBubbles[0]?.buttons?.some((b) =>
+        isClosedChoiceReplyButton(b),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps post-tasks-add confirm item+list and soft-reminder כן/לא on separate bubbles", () => {
+    const raw = JSON.stringify({
+      responses: [
+        {
+          text: "רשמתי לך מטלה ללכת לחבר מחר ב־20:00.",
+          buttons: [
+            {
+              label: "ללכת לחבר",
+              command: "הציגי את המטלה ללכת לחבר",
+            },
+            { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          ],
+        },
+        {
+          text: "רוצה שאוסיף גם תזכורת למטלה הזו?",
+          buttons: [
+            { label: "כן", command: "כן" },
+            { label: "לא", command: "לא" },
+          ],
+        },
+      ],
+      metadata: { lists: [], messages: [], jobs: [], directory: [] },
+    });
+    const parsed = parseLlmReply(raw);
+    expect(parsed.responseBubbles).toHaveLength(2);
+    // Message 1: navigation only (item + list) — not כן/לא
+    expect(parsed.responseBubbles[0]?.buttons).toEqual([
+      {
+        label: "ללכת לחבר",
+        command: "הציגי את המטלה ללכת לחבר",
+      },
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+    expect(
+      parsed.responseBubbles[0]?.buttons?.some((b) =>
+        isClosedChoiceReplyButton(b),
+      ),
+    ).toBe(false);
+    // Message 2: reminder offer only — כן/לא, no navigation
+    expect(parsed.responseBubbles[1]?.buttons).toEqual([
+      { label: "כן", command: "כן" },
+      { label: "לא", command: "לא" },
+    ]);
+    expect(
+      parsed.responseBubbles[1]?.buttons?.some((b) =>
+        isShowListReplyButton(b),
+      ),
+    ).toBe(false);
+    const distributed = applyShowButtonsToBubbles(
+      parsed.responseBubbles,
+      parsed.responseBubbles.flatMap((entry) => entry.buttons ?? []),
+    );
+    expect(distributed).toHaveLength(2);
+    expect(distributed[0]?.buttons?.map((b) => b.command)).toEqual([
+      "הציגי את המטלה ללכת לחבר",
+      "הצג רשימת מטלות",
+    ]);
+    expect(distributed[1]?.buttons?.map((b) => b.command)).toEqual([
+      "כן",
+      "לא",
+    ]);
+    expect(distributed[0]!.buttons!.length).toBeLessThanOrEqual(3);
+    expect(distributed[1]!.buttons!.length).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps filing confirm item+list on one bubble (list-only when no item)", () => {
+    const withItem = parseLlmReply(
+      JSON.stringify({
+        responses: [
+          {
+            text: "תייקתי את כתובת מרב.",
+            buttons: [
+              {
+                label: "כתובת מרב",
+                command: "הציגי את התיוק כתובת מרב",
+              },
+              { label: "הצג תיוקים", command: "הצג תיוקים" },
+            ],
+          },
+        ],
+        metadata: {},
+      }),
+    );
+    expect(withItem.responseBubbles[0]?.buttons).toHaveLength(2);
+    expect(withItem.responseBubbles[0]?.buttons?.[0]?.command).toBe(
+      "הציגי את התיוק כתובת מרב",
+    );
+    const listOnly = parseLlmReply(
+      JSON.stringify({
+        responses: [
+          {
+            text: "הוספתי חלב לקניות.",
+            buttons: [
+              { label: "הצג קניות", command: "הצג רשימת קניות" },
+            ],
+          },
+        ],
+        metadata: {},
+      }),
+    );
+    expect(listOnly.responseBubbles[0]?.buttons).toEqual([
+      { label: "הצג קניות", command: "הצג רשימת קניות" },
+    ]);
+  });
+
   it("applyShowButtonsToBubbles puts content-aware show on the first bubble", () => {
     const bubbles = applyShowButtonsToBubbles(
       [

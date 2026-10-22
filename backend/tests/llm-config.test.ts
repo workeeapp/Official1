@@ -393,13 +393,14 @@ describe("LLM action schema", () => {
 
   it("requires list-show POST-MUTATE button with short kind labels", () => {
     const config = loadLlmConfig(repoRoot);
-    expect(config.systemMessage).toContain("LIST MUTATE");
+    expect(config.systemMessage).toContain("LIST BUTTON");
     expect(config.systemMessage).toContain(
-      "ALWAYS include one show button",
+      "ALWAYS include the list-show button",
     );
     expect(config.systemMessage).toContain('label «הצג קניות»');
     expect(config.systemMessage).toContain('label «הצג מטלות»');
     expect(config.systemMessage).toContain('label «הצג אנשי קשר»');
+    expect(config.systemMessage).toContain('label «הצג תיוקים»');
     expect(config.systemMessage).toContain(
       "custom → label «הצג רשימה»",
     );
@@ -408,17 +409,89 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("הצג רשימת באגים בקוד");
     expect(config.systemMessage).toContain(
-      "Same for most update/remove on that list",
+      "After remove → list button only",
     );
   });
 
-  it("requires item-show button after tasks address/phone update", () => {
+  it("requires item+list POST-MUTATE when title uniquely opens the row", () => {
     const config = loadLlmConfig(repoRoot);
-    expect(config.systemMessage).toContain("TASK ADDRESS/PHONE UPDATE");
-    expect(config.systemMessage).toContain("do NOT emit «הצג מטלות»");
+    expect(config.systemMessage).toContain("ITEM + LIST");
+    expect(config.systemMessage).toContain(
+      "UNIQUELY identifies that row",
+    );
+    expect(config.systemMessage).toContain(
+      "command «הציגי את המטלה <exact שם מטלה>»",
+    );
+    expect(config.systemMessage).toContain(
+      "command «הציגי את התיוק <exact item_name>»",
+    );
     expect(config.systemMessage).toContain("להצגת המטלה");
-    expect(config.systemMessage).toContain("הציגי את המטלה ללכת לספר");
-    expect(config.systemMessage).toContain('label:"ללכת לספר"');
+    expect(config.systemMessage).toContain("להצגת התיוק");
+    expect(config.systemMessage).toContain(
+      "Duplicate/ambiguous title → list button ONLY",
+    );
+    expect(config.systemMessage).toContain(
+      'label:"ללכת לספר"',
+    );
+    expect(config.systemMessage).toContain('label:"הצג מטלות"');
+    expect(config.systemMessage).not.toContain(
+      "do NOT emit «הצג מטלות»",
+    );
+  });
+
+  it("teaches filing inventory show_dump vs semantic lookup", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("FILING SHOW");
+    expect(config.systemMessage).toContain("show_dump=filings");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN model-written numbered filing inventory",
+    );
+    expect(config.systemMessage).toContain("Semantic lookup");
+    expect(config.systemMessage).toContain(
+      "bold only the item title with a single WhatsApp pair *title*",
+    );
+  });
+
+  it("requires two-entry soft reminder offer after tasks add without explicit ping", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain(
+      "POST-SAVE REMINDER OFFER vs EXPLICIT REMINDER",
+    );
+    expect(config.systemMessage).toContain("Branch B — TASK ONLY");
+    expect(config.systemMessage).toContain(
+      "TWO separate WhatsApp messages",
+    );
+    expect(config.systemMessage).toContain(
+      "NEVER choose between navigation and כן/לא",
+    );
+    expect(config.systemMessage).toContain(
+      "רוצה שאוסיף גם תזכורת למטלה הזו?",
+    );
+    expect(config.systemMessage).toContain(
+      "כן without a complete reminder schedule → ask schedule only",
+    );
+  });
+
+  it("teaches explicit same-turn reminder skips soft offer", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain(
+      "Branch A — EXPLICIT REMINDER SAME TURN",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN soft-offer bubble",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN כן/לא for a reminder they already requested",
+    );
+    expect(config.systemMessage).toContain(
+      "NEVER claim a תזכורת was created",
+    );
+    expect(config.systemMessage).toContain(
+      "Branch A: create the clock now; FORBIDDEN soft-offer כן/לא",
+    );
+    expect(config.systemMessage).toContain(
+      "Same-turn explicit path = POST-SAVE Branch A",
+    );
   });
 
   it("teaches סמן כבוצע button as same finished-chore path", () => {
