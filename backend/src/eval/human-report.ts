@@ -38,11 +38,26 @@ export interface EvalReportCaseInput {
   turns: EvalReportTurnInput[];
 }
 
+export interface EvalReportPromptProvenance {
+  instructionsSha256?: string;
+  envelopeMode?: string;
+  attachLucyRuntimeEngine?: boolean;
+  model?: string;
+  temperature?: number;
+  reasoningEffort?: string;
+  workerName?: string;
+  workerProtected?: boolean;
+  employeeId?: string | null;
+  instructionsFile?: string | null;
+}
+
 export interface EvalReportSummaryInput {
   track: EvalReportTrack;
   suite: string;
   generatedAt?: string;
   promptSource?: string;
+  /** Same resolved provenance used for createResponse (optional extras). */
+  promptProvenance?: EvalReportPromptProvenance;
   productionApply: boolean;
   tagsFilter?: string[] | null;
   caseIdsFilter?: string[] | null;
@@ -88,7 +103,12 @@ export interface EvalUiReportCase {
 
 /**
  * Stable JSON shape for UI / Test Studio.
- * version bumps when fields are renamed or semantics change.
+ * version bumps when fields are renamed, removed, or change semantics.
+ *
+ * Keep version: 1 for additive optional provenance fields
+ * (instructionsSha256, envelopeMode, model/settings, worker identity).
+ * Older consumers that only read promptSource remain valid; bump only on
+ * breaking renames/removals or required-field changes.
  */
 export interface EvalUiReport {
   version: 1;
@@ -97,6 +117,16 @@ export interface EvalUiReport {
   suite: string;
   generatedAt: string;
   promptSource: string;
+  instructionsSha256?: string;
+  envelopeMode?: string;
+  attachLucyRuntimeEngine?: boolean;
+  model?: string;
+  temperature?: number;
+  reasoningEffort?: string;
+  workerName?: string;
+  workerProtected?: boolean;
+  employeeId?: string | null;
+  instructionsFile?: string | null;
   productionApply: boolean;
   tagsFilter: string[] | null;
   caseIdsFilter: string[] | null;
@@ -361,6 +391,7 @@ export function buildEvalUiReport(input: EvalReportSummaryInput): EvalUiReport {
     };
   });
 
+  const p = input.promptProvenance;
   return {
     version: 1,
     kind: "live-eval-ui-report",
@@ -368,6 +399,26 @@ export function buildEvalUiReport(input: EvalReportSummaryInput): EvalUiReport {
     suite: input.suite,
     generatedAt,
     promptSource: input.promptSource ?? "(default)",
+    ...(p?.instructionsSha256
+      ? { instructionsSha256: p.instructionsSha256 }
+      : {}),
+    ...(p?.envelopeMode ? { envelopeMode: p.envelopeMode } : {}),
+    ...(typeof p?.attachLucyRuntimeEngine === "boolean"
+      ? { attachLucyRuntimeEngine: p.attachLucyRuntimeEngine }
+      : {}),
+    ...(p?.model ? { model: p.model } : {}),
+    ...(typeof p?.temperature === "number"
+      ? { temperature: p.temperature }
+      : {}),
+    ...(p?.reasoningEffort ? { reasoningEffort: p.reasoningEffort } : {}),
+    ...(p?.workerName ? { workerName: p.workerName } : {}),
+    ...(typeof p?.workerProtected === "boolean"
+      ? { workerProtected: p.workerProtected }
+      : {}),
+    ...(p?.employeeId !== undefined ? { employeeId: p.employeeId } : {}),
+    ...(p?.instructionsFile !== undefined
+      ? { instructionsFile: p.instructionsFile }
+      : {}),
     productionApply: input.productionApply,
     tagsFilter: input.tagsFilter?.length ? input.tagsFilter : null,
     caseIdsFilter: input.caseIdsFilter?.length ? input.caseIdsFilter : null,
@@ -396,6 +447,30 @@ export function formatEvalUiReportMarkdown(report: EvalUiReport): string {
   lines.push(`- **Track:** ${report.track}`);
   lines.push(`- **Generated:** ${report.generatedAt}`);
   lines.push(`- **Prompt:** ${report.promptSource}`);
+  if (report.instructionsSha256) {
+    lines.push(`- **Instructions SHA-256:** ${report.instructionsSha256}`);
+  }
+  if (report.envelopeMode) {
+    lines.push(
+      `- **Envelope:** ${report.envelopeMode} (attachLucyRuntimeEngine=${report.attachLucyRuntimeEngine ?? "?"})`,
+    );
+  }
+  if (report.model) {
+    lines.push(
+      `- **Model:** ${report.model} (temp=${report.temperature ?? "?"}${report.reasoningEffort ? `, reasoning=${report.reasoningEffort}` : ""})`,
+    );
+  }
+  if (report.workerName) {
+    lines.push(
+      `- **Worker:** ${report.workerName} (protected=${report.workerProtected ?? "?"})`,
+    );
+  }
+  if (report.employeeId !== undefined && report.employeeId !== null) {
+    lines.push(`- **Employee id:** ${report.employeeId}`);
+  }
+  if (report.instructionsFile) {
+    lines.push(`- **Instructions file:** ${report.instructionsFile}`);
+  }
   lines.push(
     `- **Production apply:** ${report.productionApply ? "yes" : "no"}`,
   );

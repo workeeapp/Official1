@@ -1,11 +1,9 @@
 import {
   parseLlmReply,
   parseReplyMetadata,
-  type PublicEmployee,
 } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { formatSpeakerContacts } from "../services/contact.service.js";
-import { buildLucyModelEvalInstructions } from "../services/chat.service.js";
 import { formatEmployeeContext } from "../services/employee-records.service.js";
 import { getLlmClient } from "../services/llm-client.js";
 import { formatSessionClockContext } from "../utils/relative-date.js";
@@ -24,6 +22,11 @@ import {
   type ModelEvalMultiTurnCase,
   type ModelEvalMultiTurnCorpus,
 } from "./corpus.js";
+import {
+  evalPromptProvenance,
+  resolveEvalPrompt,
+  type ResolvedEvalPrompt,
+} from "./eval-prompt-source.js";
 import { applyLiveModelMetadataToSnapshot } from "./live-model-snapshot-apply.js";
 import type { EmployeeRecordSnapshot } from "../services/employee-records.service.js";
 
@@ -35,6 +38,8 @@ export interface ModelEvalRunCaseResult extends ModelEvalCaseResult {
   metadata: ReturnType<typeof parseReplyMetadata>;
   rawReply: string;
   llmMs: number;
+  /** Prompt provenance for the createResponse call (same object as hashed). */
+  prompt?: ReturnType<typeof evalPromptProvenance>;
 }
 
 export interface ModelEvalSummary {
@@ -86,69 +91,15 @@ export function summarizeModelEvalResults(
   };
 }
 
-function fixtureEmployees(speaker: string): {
-  employees: PublicEmployee[];
-  worker: PublicEmployee;
-  human: PublicEmployee;
-} {
-  const human: PublicEmployee = {
-    id: "eval-human-1",
-    kind: "human",
-    name: speaker,
-    surname: "",
-    nickname: speaker,
-    email: null,
-    phone: null,
-    isOwner: true,
-  };
-  const worker: PublicEmployee = {
-    id: "eval-lucy-1",
-    kind: "digital",
-    name: "לוסי",
-    surname: "",
-    nickname: "לוסי",
-    email: null,
-    phone: null,
-    protected: true,
-    model: null,
-    temperature: null,
-    instructions: null,
-  };
-  const coworker: PublicEmployee = {
-    id: "eval-human-2",
-    kind: "human",
-    name: "עמית",
-    surname: "",
-    nickname: "עמית",
-    email: null,
-    phone: null,
-    isOwner: false,
-  };
-  const michal: PublicEmployee = {
-    id: "eval-human-3",
-    kind: "human",
-    name: "מיכל",
-    surname: "",
-    nickname: "מיכל",
-    email: null,
-    phone: null,
-    isOwner: false,
-  };
-  return { employees: [human, worker, coworker, michal], worker, human };
-}
-
 export async function runModelEvalCase(
   corpusCase: ModelEvalCorpusCase,
-  options?: { speaker?: string },
+  options?: { speaker?: string; prompt?: ResolvedEvalPrompt },
 ): Promise<ModelEvalRunCaseResult> {
   const speaker = options?.speaker ?? "טל";
-  const { employees, worker } = fixtureEmployees(speaker);
+  const prompt =
+    options?.prompt ??
+    (await resolveEvalPrompt({ speaker, includeMichal: true }));
   const config = loadLlmConfig();
-  const instructions = buildLucyModelEvalInstructions({
-    employees,
-    speaker,
-    worker,
-  });
   const snapshot = snapshotFromSetup(corpusCase.setup, speaker);
   const contacts = (corpusCase.setup.contacts ?? []).map((row, index) => ({
     id: `contact-${index}`,
@@ -173,13 +124,10 @@ export async function runModelEvalCase(
   const turn = await client.createResponse({
     conversationId,
     message,
-    model: worker.model?.trim() || config.model,
-    temperature:
-      typeof worker.temperature === "number" && Number.isFinite(worker.temperature)
-        ? worker.temperature
-        : config.temperature,
-    reasoningEffort: config.reasoningEffort,
-    instructions,
+    model: prompt.model,
+    temperature: prompt.temperature,
+    reasoningEffort: prompt.reasoningEffort,
+    instructions: prompt.instructions,
     textFormat: config.responseFormat,
   });
   const llmMs = Date.now() - llmStarted;
@@ -199,6 +147,7 @@ export async function runModelEvalCase(
     metadata,
     rawReply: turn.reply,
     llmMs,
+    prompt: evalPromptProvenance(prompt),
     ...checked,
   };
 }
@@ -206,7 +155,7 @@ export async function runModelEvalCase(
 export async function runModelEvalCorpus(
   corpus: ModelEvalCorpus = loadModelEvalCorpus(),
   options?: { caseIds?: string[]; tags?: string[] | null },
-): Promise<ModelEvalSummary> {
+): Promise<ModelEvalSummary & { prompt: ReturnType<typeof evalPromptProvenance> }> {
   let selected = corpus.cases;
   const tags =
     options?.tags !== undefined ? options.tags : parseModelEvalTags();
@@ -214,14 +163,23 @@ export async function runModelEvalCorpus(
   if (options?.caseIds?.length) {
     selected = selected.filter((row) => options.caseIds!.includes(row.id));
   }
+  const prompt = await resolveEvalPrompt({
+    speaker: corpus.speaker,
+    includeMichal: true,
+  });
   const results: ModelEvalRunCaseResult[] = [];
   for (const row of selected) {
-    results.push(await runModelEvalCase(row, { speaker: corpus.speaker }));
+    results.push(
+      await runModelEvalCase(row, { speaker: corpus.speaker, prompt }),
+    );
   }
-  return summarizeModelEvalResults(results, {
-    requiredPassRate: corpus.passRate,
-    criticalCaseIds: corpus.criticalCaseIds,
-  });
+  return {
+    ...summarizeModelEvalResults(results, {
+      requiredPassRate: corpus.passRate,
+      criticalCaseIds: corpus.criticalCaseIds,
+    }),
+    prompt: evalPromptProvenance(prompt),
+  };
 }
 
 export interface ModelEvalMultiTurnRunResult {
@@ -239,6 +197,7 @@ export interface ModelEvalMultiTurnRunResult {
     metadata: ReturnType<typeof parseReplyMetadata>;
   }>;
   llmMs: number;
+  prompt?: ReturnType<typeof evalPromptProvenance>;
 }
 
 /**
@@ -249,16 +208,13 @@ export interface ModelEvalMultiTurnRunResult {
  */
 export async function runModelEvalMultiTurnCase(
   corpusCase: ModelEvalMultiTurnCase,
-  options?: { speaker?: string },
+  options?: { speaker?: string; prompt?: ResolvedEvalPrompt },
 ): Promise<ModelEvalMultiTurnRunResult> {
   const speaker = options?.speaker ?? "טל";
-  const { employees, worker } = fixtureEmployees(speaker);
+  const prompt =
+    options?.prompt ??
+    (await resolveEvalPrompt({ speaker, includeMichal: true }));
   const config = loadLlmConfig();
-  const instructions = buildLucyModelEvalInstructions({
-    employees,
-    speaker,
-    worker,
-  });
   const snapshot: EmployeeRecordSnapshot = structuredClone(
     snapshotFromSetup(corpusCase.setup, speaker),
   );
@@ -290,14 +246,10 @@ export async function runModelEvalMultiTurnCase(
     const llmTurn = await client.createResponse({
       conversationId,
       message,
-      model: worker.model?.trim() || config.model,
-      temperature:
-        typeof worker.temperature === "number" &&
-        Number.isFinite(worker.temperature)
-          ? worker.temperature
-          : config.temperature,
-      reasoningEffort: config.reasoningEffort,
-      instructions,
+      model: prompt.model,
+      temperature: prompt.temperature,
+      reasoningEffort: prompt.reasoningEffort,
+      instructions: prompt.instructions,
       textFormat: config.responseFormat,
     });
     const llmMs = Date.now() - llmStarted;
@@ -332,13 +284,19 @@ export async function runModelEvalMultiTurnCase(
     failures,
     turns: turnResults,
     llmMs: totalMs,
+    prompt: evalPromptProvenance(prompt),
   };
 }
 
 export async function runModelEvalMultiTurnCorpus(
   corpus: ModelEvalMultiTurnCorpus = loadModelEvalMultiTurnCorpus(),
   options?: { caseIds?: string[]; tags?: string[] | null },
-): Promise<ModelEvalSummary & { multiTurnResults: ModelEvalMultiTurnRunResult[] }> {
+): Promise<
+  ModelEvalSummary & {
+    multiTurnResults: ModelEvalMultiTurnRunResult[];
+    prompt: ReturnType<typeof evalPromptProvenance>;
+  }
+> {
   let selected = corpus.cases;
   const tags =
     options?.tags !== undefined ? options.tags : parseModelEvalTags();
@@ -346,10 +304,17 @@ export async function runModelEvalMultiTurnCorpus(
   if (options?.caseIds?.length) {
     selected = selected.filter((row) => options.caseIds!.includes(row.id));
   }
+  const prompt = await resolveEvalPrompt({
+    speaker: corpus.speaker,
+    includeMichal: true,
+  });
   const multiTurnResults: ModelEvalMultiTurnRunResult[] = [];
   for (const row of selected) {
     multiTurnResults.push(
-      await runModelEvalMultiTurnCase(row, { speaker: corpus.speaker }),
+      await runModelEvalMultiTurnCase(row, {
+        speaker: corpus.speaker,
+        prompt,
+      }),
     );
   }
   const results: ModelEvalRunCaseResult[] = multiTurnResults.map((row) => {
@@ -364,6 +329,7 @@ export async function runModelEvalMultiTurnCorpus(
       metadata: last.metadata,
       rawReply: "",
       llmMs: row.llmMs,
+      prompt: row.prompt,
     };
   });
   return {
@@ -372,5 +338,6 @@ export async function runModelEvalMultiTurnCorpus(
       criticalCaseIds: corpus.criticalCaseIds,
     }),
     multiTurnResults,
+    prompt: evalPromptProvenance(prompt),
   };
 }

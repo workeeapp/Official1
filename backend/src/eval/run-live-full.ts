@@ -10,7 +10,6 @@ import {
   formatSpeakerContacts,
   listContactsForEmployee,
 } from "../services/contact.service.js";
-import { buildLucyModelEvalInstructions } from "../services/chat.service.js";
 import { getLlmClient } from "../services/llm-client.js";
 import { formatSessionClockContext } from "../utils/relative-date.js";
 import {
@@ -19,6 +18,11 @@ import {
   type LiveFullCorpus,
   type LiveFullCorpusCase,
 } from "./corpus.js";
+import {
+  evalPromptProvenance,
+  resolveEvalPrompt,
+  type ResolvedEvalPrompt,
+} from "./eval-prompt-source.js";
 import {
   runModelApplyCase,
   type ModelApplyCase,
@@ -29,6 +33,7 @@ import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
 
 export type LiveFullCaseResult = ModelApplyCaseResult & {
   track: "LIVE_FULL";
+  prompt?: ReturnType<typeof evalPromptProvenance>;
 };
 
 function toModelApplyCase(row: LiveFullCorpusCase): ModelApplyCase {
@@ -51,54 +56,18 @@ function toModelApplyCase(row: LiveFullCorpusCase): ModelApplyCase {
  */
 export async function runLiveFullCase(
   suiteCase: LiveFullCorpusCase,
-  options?: { speaker?: string },
+  options?: { speaker?: string; prompt?: ResolvedEvalPrompt },
 ): Promise<LiveFullCaseResult> {
   assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
 
   const speaker = options?.speaker ?? "טל";
+  // LIVE_FULL historically omitted מיכל from Known employees — keep byte-identical.
+  const prompt =
+    options?.prompt ??
+    (await resolveEvalPrompt({ speaker, includeMichal: false }));
   const config = loadLlmConfig();
   const client = getLlmClient();
   const conversationId = await client.createConversation();
-
-  // Minimal employee fixtures for instructions (same as Phase 4 LIVE model).
-  const human = {
-    id: "eval-human-1",
-    kind: "human" as const,
-    name: speaker,
-    surname: "",
-    nickname: speaker,
-    email: null,
-    phone: null,
-    isOwner: true,
-  };
-  const worker = {
-    id: "eval-lucy-1",
-    kind: "digital" as const,
-    name: "לוסי",
-    surname: "",
-    nickname: "לוסי",
-    email: null,
-    phone: null,
-    protected: true,
-    model: null,
-    temperature: null,
-    instructions: null,
-  };
-  const coworker = {
-    id: "eval-human-2",
-    kind: "human" as const,
-    name: "עמית",
-    surname: "",
-    nickname: "עמית",
-    email: null,
-    phone: null,
-    isOwner: false,
-  };
-  const instructions = buildLucyModelEvalInstructions({
-    employees: [human, worker, coworker],
-    speaker,
-    worker,
-  });
 
   const applyCase = toModelApplyCase(suiteCase);
   const result = await runModelApplyCase(
@@ -127,14 +96,10 @@ export async function runLiveFullCase(
       const turn = await client.createResponse({
         conversationId,
         message,
-        model: worker.model?.trim() || config.model,
-        temperature:
-          typeof worker.temperature === "number" &&
-          Number.isFinite(worker.temperature)
-            ? worker.temperature
-            : config.temperature,
-        reasoningEffort: config.reasoningEffort,
-        instructions,
+        model: prompt.model,
+        temperature: prompt.temperature,
+        reasoningEffort: prompt.reasoningEffort,
+        instructions: prompt.instructions,
         textFormat: config.responseFormat,
       });
       const parsed = parseLlmReply(turn.reply);
@@ -149,6 +114,7 @@ export async function runLiveFullCase(
   return {
     ...result,
     track: "LIVE_FULL",
+    prompt: evalPromptProvenance(prompt),
   };
 }
 
@@ -166,6 +132,7 @@ export async function runLiveFullCorpus(
   criticalFailed: string[];
   ok: boolean;
   results: LiveFullCaseResult[];
+  prompt: ReturnType<typeof evalPromptProvenance>;
 }> {
   let selected = corpus.cases;
   const tags =
@@ -175,9 +142,15 @@ export async function runLiveFullCorpus(
     selected = selected.filter((row) => options.caseIds!.includes(row.id));
   }
 
+  const prompt = await resolveEvalPrompt({
+    speaker: corpus.speaker,
+    includeMichal: false,
+  });
   const results: LiveFullCaseResult[] = [];
   for (const row of selected) {
-    results.push(await runLiveFullCase(row, { speaker: corpus.speaker }));
+    results.push(
+      await runLiveFullCase(row, { speaker: corpus.speaker, prompt }),
+    );
   }
 
   const passed = results.filter((r) => r.ok).length;
@@ -201,5 +174,6 @@ export async function runLiveFullCorpus(
     criticalFailed,
     ok: softOk && criticalFailed.length === 0,
     results,
+    prompt: evalPromptProvenance(prompt),
   };
 }

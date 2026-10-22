@@ -513,7 +513,8 @@ const SPEAKER_CLOCK_ASKS =
 const STATUS_ADDRESSEE_RULE =
   "WHO A STATUS QUESTION IS ABOUT — read the person the speaker used: second person to YOU (לך / את / אתה / שלך / אצלך — «מה יש לך», «מה פתוח אצלך») = YOUR work → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED; server dump + ממתינים). show_dump=tasks alone = the SPEAKER's book — FORBIDDEN for second-person inventory. First person (לי / אני / שלי — «מה יש לי») = the speaker's own rows (show_dump without about, or full). A name («מה יש לטל») = that person's rows via show_dump_about. FORBIDDEN free-writing «אין לי מטלות» / «אין לי כלום» while WORKER_SAVED_DATA or OPEN_JOBS has a row — emit the dump ACTION.";
 
-const RESPONSES_RULE =
+/** Shared with eval thin-custom envelope; Chat custom-prompt branch uses the same text. */
+export const RESPONSES_RULE =
   "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is an object {text, buttons?, navigate_address?} sent as its own message, in order. Put tap buttons and Waze on the bubble they belong to (content-aware post-mutate show on confirm when useful — natural Hebrew label+command; כן/לא on the offer ask; navigate_address on the address line). Usually one entry; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries' text. After an item MOVE (lists.remove + lists.add) → at most one useful dest-side show angle (never source+dest; never «הצג רשימת רשימת…»). Engine never invents show buttons. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
 const OPEN_JOBS_RULES = [
@@ -542,7 +543,8 @@ const OPEN_JOBS_RULES = [
   `INVENTORY (${WORKER_INVENTORY_ASKS}): metadata.show_dump=tasks + show_dump_about=YOUR display name (nickname or name as Known employees know you) — BOTH REQUIRED every inventory turn; lists=[]; no reminders clock; buttons=[]. Same as «מטלות של X» — server replaces with YOUR tasks dump (WORKER scope) + ממתינים from OPEN_JOBS (omit if empty; job shadows stripped from מטלות). show_dump=tasks WITHOUT about = SPEAKER's tasks (WRONG for «מה יש לך»). FORBIDDEN: omitting show_dump_about; free-writing «אין לי מטלות» / «אין לי כלום» while WORKER_SAVED_DATA or OPEN_JOBS has rows; writing inventory item lines yourself; RAISE that reply; saying job / job_id / expects_reply / OPEN_JOBS in response.`,
 ].join("\n");
 
-function thinSessionEnvelope(input: {
+/** Thin session envelope for custom digital prompts (Chat + eval). Not Lucy catalog. */
+export function thinSessionEnvelope(input: {
   employees: PublicEmployee[];
   speaker: string;
   worker: PublicEmployee;
