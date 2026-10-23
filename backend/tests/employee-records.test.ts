@@ -129,6 +129,7 @@ import {
   correctShareClaimReply,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
+  SHARE_CLAIM_MISS,
   formatShareOutcomeReply,
   looksLikeShareClaim,
   summarizeShareApply,
@@ -826,6 +827,120 @@ describe("employee records", () => {
         setResponse: (_r, response) => response,
       }),
     ).toBe(reply);
+  });
+
+  it("correctShareClaimReply: bare שיתפתי with no share apply → SHARE_CLAIM_MISS", () => {
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי עם מיכל את גלידה ונייר פרה.",
+        spoken: "שיתפתי עם מיכל את גלידה ונייר פרה.",
+        mutations: [],
+        misses: [],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(SHARE_CLAIM_MISS);
+  });
+
+  it("correctShareClaimReply: claim with non-share update only → SHARE_CLAIM_MISS", () => {
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי את החלב.",
+        spoken: "שיתפתי את החלב.",
+        mutations: [
+          {
+            action: "update",
+            itemId: "a",
+            employeeId: talId,
+            listType: "shopping",
+            itemKey: "חלב",
+            itemLabel: "חלב",
+          },
+        ],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(SHARE_CLAIM_MISS);
+  });
+
+  it("correctShareClaimReply: already-shared evidence is not treated as failure", () => {
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי את החלב עם מיכל.",
+        spoken: "שיתפתי את החלב עם מיכל.",
+        mutations: [
+          {
+            action: "update",
+            itemId: "a",
+            employeeId: talId,
+            listType: "shopping",
+            itemKey: "חלב",
+            itemLabel: "חלב",
+            shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+          },
+        ],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("הפריטים כבר משותפים — לא נוסף שיתוף חדש.");
+  });
+
+  it("correctShareClaimReply: already-shared plus misses reflects both", () => {
+    expect(
+      formatShareOutcomeReply(
+        summarizeShareApply(
+          [
+            {
+              action: "update",
+              itemId: "a",
+              employeeId: talId,
+              listType: "shopping",
+              itemKey: "חלב",
+              itemLabel: "חלב",
+              shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+            },
+          ],
+          [{ itemId: "gone", reason: "missing" }],
+        ),
+      ),
+    ).toBe("1 כבר היו משותפים, 1 לא נמצאו.");
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי הכל.",
+        spoken: "שיתפתי הכל.",
+        mutations: [
+          {
+            action: "update",
+            itemId: "a",
+            employeeId: talId,
+            listType: "shopping",
+            itemKey: "חלב",
+            itemLabel: "חלב",
+            shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+          },
+        ],
+        misses: [{ itemId: "gone", reason: "missing" }],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("1 כבר היו משותפים, 1 לא נמצאו.");
+  });
+
+  it("correctShareClaimReply: shareIntent with zero new/already and no misses → SHARE_CLAIM_MISS", () => {
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי את החלב.",
+        spoken: "שיתפתי את החלב.",
+        mutations: [
+          {
+            action: "update",
+            itemId: "a",
+            employeeId: talId,
+            listType: "shopping",
+            itemKey: "חלב",
+            itemLabel: "חלב",
+            shareOutcome: { newlySharedCount: 0, alreadySharedCount: 0 },
+          },
+        ],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(SHARE_CLAIM_MISS);
   });
 
   it("formats cascaded worker-task remove as מטלות fallback", () => {

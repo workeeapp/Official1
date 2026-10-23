@@ -564,12 +564,20 @@ export type LlmMashovAspect =
   | "grades"
   | "homework"
   | "behavior"
-  | "timetable";
+  | "timetable"
+  | "absences"
+  | "messages";
 
 export interface LlmMashovAction {
   /** Child first name; empty = only child / ask. */
   child: string;
   aspects: LlmMashovAspect[];
+  /**
+   * Inclusive calendar day filter (Asia/Jerusalem YYYY-MM-DD).
+   * null = no range requested (not the same as Mashov login academic year).
+   */
+  dateFrom: string | null;
+  dateTo: string | null;
 }
 
 export type LlmPlacesAspect = "summary" | "phone" | "address" | "hours";
@@ -2847,7 +2855,24 @@ const MASHOV_ASPECTS = new Set<LlmMashovAspect>([
   "homework",
   "behavior",
   "timetable",
+  "absences",
+  "messages",
 ]);
+
+/** metadata.mashov date_from / date_to — YYYY-MM-DD or null. */
+function parseMashovDateBound(row: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const raw = row[key];
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const value = raw.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+  }
+  return null;
+}
 
 /** metadata.mashov — live Mashov fetch from filings; never includes password. */
 export function parseMashovAction(
@@ -2858,7 +2883,7 @@ export function parseMashovAction(
     return null;
   }
   if (raw === true || raw === "true") {
-    return { child: "", aspects: ["grades"] };
+    return { child: "", aspects: ["grades"], dateFrom: null, dateTo: null };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     return null;
@@ -2878,15 +2903,39 @@ export function parseMashovAction(
       if (key === "schedule") {
         key = "timetable";
       }
+      if (
+        key === "absence" ||
+        key === "חיסורים" ||
+        key === "נוכחות"
+      ) {
+        key = "absences";
+      }
+      if (
+        key === "mail" ||
+        key === "inbox" ||
+        key === "הודעות" ||
+        key === "דואר"
+      ) {
+        key = "messages";
+      }
       const aspect = key as LlmMashovAspect;
       if (MASHOV_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
         aspects.push(aspect);
       }
     }
   }
+  let dateFrom = parseMashovDateBound(row, "date_from", "dateFrom", "from");
+  let dateTo = parseMashovDateBound(row, "date_to", "dateTo", "to");
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    const swap = dateFrom;
+    dateFrom = dateTo;
+    dateTo = swap;
+  }
   return {
     child,
     aspects: aspects.length > 0 ? aspects : ["grades"],
+    dateFrom,
+    dateTo,
   };
 }
 

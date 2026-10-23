@@ -2694,6 +2694,51 @@ describe("parseLlmReply", () => {
     ).toEqual({
       child: "דניאל",
       aspects: ["grades", "homework"],
+      dateFrom: null,
+      dateTo: null,
+    });
+  });
+
+  it("reads mashov absences/messages and date range", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            mashov: {
+              child: "נועה",
+              aspects: ["absences", "messages", "חיסורים"],
+              date_from: "2025-01-01",
+              date_to: "2025-12-31",
+            },
+          },
+        }),
+      ).mashov,
+    ).toEqual({
+      child: "נועה",
+      aspects: ["absences", "messages"],
+      dateFrom: "2025-01-01",
+      dateTo: "2025-12-31",
+    });
+  });
+
+  it("swaps inverted mashov date_from/date_to", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            mashov: {
+              aspects: ["grades"],
+              date_from: "2025-12-31",
+              date_to: "2025-01-01",
+            },
+          },
+        }),
+      ).mashov,
+    ).toMatchObject({
+      dateFrom: "2025-01-01",
+      dateTo: "2025-12-31",
     });
   });
 

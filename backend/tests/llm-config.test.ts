@@ -103,6 +103,10 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("APPOINTMENT VS PING");
     expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
     expect(config.systemMessage).toContain("BY LINE NUMBER (critical)");
+    expect(config.systemMessage).toContain("שתף 1,2 עם מיכל");
+    expect(config.systemMessage).toContain(
+      "Past-tense «שיתפתי» ONLY when this turn emits those updates",
+    );
     expect(config.systemMessage).toContain(
       "FORBIDDEN show_dump on any line-index turn",
     );

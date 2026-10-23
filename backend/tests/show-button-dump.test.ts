@@ -1023,6 +1023,7 @@ describe("formatShowDumpFromKind", () => {
         { now },
       ),
     ).toBe("1. ערב פוקר 📎 🗂️");
+    // List dump: icons only (no address/phone text).
     expect(
       formatNumberedItem(
         1,
@@ -1031,7 +1032,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. ללכת לספר 📍 הרצל 1, תל אביב");
+    ).toBe("1. ללכת לספר 📍");
     expect(
       formatNumberedItem(
         1,
@@ -1039,6 +1040,38 @@ describe("formatShowDumpFromKind", () => {
         { טלפון: "050-1234567" },
         "tasks",
         { now },
+      ),
+    ).toBe("1. להתקשר לאורי 📞");
+    expect(
+      formatNumberedItem(
+        1,
+        "ללכת לספר",
+        {
+          כתובת: "הרצל 1",
+          טלפון: "03-5555555",
+          attachments: [{ id: "a" }],
+        },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. ללכת לספר 📎 📍 📞");
+    // ITEM DUMP (itemIds set): icons + stored values.
+    expect(
+      formatNumberedItem(
+        1,
+        "ללכת לספר",
+        { כתובת: "הרצל 1, תל אביב" },
+        "tasks",
+        { now, itemIds: new Set(["task-1"]) },
+      ),
+    ).toBe("1. ללכת לספר 📍 הרצל 1, תל אביב");
+    expect(
+      formatNumberedItem(
+        1,
+        "להתקשר לאורי",
+        { טלפון: "050-1234567" },
+        "tasks",
+        { now, itemIds: new Set(["task-2"]) },
       ),
     ).toBe("1. להתקשר לאורי 📞 050-1234567");
     expect(
@@ -1051,7 +1084,7 @@ describe("formatShowDumpFromKind", () => {
           attachments: [{ id: "a" }],
         },
         "tasks",
-        { now },
+        { now, itemIds: new Set(["task-3"]) },
       ),
     ).toBe("1. ללכת לספר 📎 📍 הרצל 1 📞 03-5555555");
     expect(
@@ -1075,7 +1108,7 @@ describe("formatShowDumpFromKind", () => {
         "10:00",
         { now },
       ),
-    ).toBe("1. ללכת לספר 📍 דיזנגוף 10 — כל יום שישי ב־10:00 (קבוע)");
+    ).toBe("1. ללכת לספר 📍 — כל יום שישי ב־10:00 (קבוע)");
     expect(
       formatAgendaOneOffLine(
         2,
@@ -1084,7 +1117,7 @@ describe("formatShowDumpFromKind", () => {
         "09:00",
         { now },
       ),
-    ).toBe("2. להתקשר לאורי 📞 050-111 — 09:00");
+    ).toBe("2. להתקשר לאורי 📞 — 09:00");
     expect(
       formatScheduleSuffix(
         {

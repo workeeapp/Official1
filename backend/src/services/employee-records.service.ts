@@ -521,6 +521,8 @@ export function formatAppliedMutationFallback(
 
 const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
 export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
+/** Spoken when the model claimed share but apply has no shareOutcome / misses. */
+export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.";
 
 /** Last-resort spoken line when the model left responses empty. */
 export const EMPTY_REPLY_RETRY =
@@ -581,7 +583,11 @@ export function summarizeShareApply(
   };
 }
 
-/** Hebrew confirm when share apply diverges from a full-success claim. */
+/**
+ * Hebrew confirm when share apply diverges from a full-success claim.
+ * Empty string = full new-share success (caller keeps model text) OR no
+ * formatable outcome (caller decides SHARE_CLAIM_MISS vs keep).
+ */
 export function formatShareOutcomeReply(summary: ShareApplySummary): string {
   const {
     newlySharedCount,
@@ -590,12 +596,24 @@ export function formatShareOutcomeReply(summary: ShareApplySummary): string {
     missingCount,
     forbiddenCount,
   } = summary;
+  // Already shared only — proven co-share, no new partners this turn.
   if (
     newlySharedCount === 0 &&
     alreadySharedCount > 0 &&
     missCount === 0
   ) {
     return "הפריטים כבר משותפים — לא נוסף שיתוף חדש.";
+  }
+  // Already shared + misses (no new partners) — reflect both.
+  if (newlySharedCount === 0 && alreadySharedCount > 0 && missCount > 0) {
+    const parts = [`${alreadySharedCount} כבר היו משותפים`];
+    if (missingCount > 0) {
+      parts.push(`${missingCount} לא נמצאו`);
+    }
+    if (forbiddenCount > 0) {
+      parts.push(`${forbiddenCount} בלי הרשאה`);
+    }
+    return `${parts.join(", ")}.`;
   }
   if (newlySharedCount === 0 && missCount > 0 && alreadySharedCount === 0) {
     if (forbiddenCount > 0 && missingCount === 0) {
@@ -623,8 +641,11 @@ export function formatShareOutcomeReply(summary: ShareApplySummary): string {
 }
 
 /**
- * When the model claimed a new share but apply shows already-shared / partial /
- * miss, replace the spoken reply. Full new-share success keeps the model text.
+ * When the model claimed share, align the spoken reply with apply evidence:
+ * - full new-share success → keep model text
+ * - already-shared / partial / miss → formatShareOutcomeReply
+ * - claim with no shareOutcome and no misses → SHARE_CLAIM_MISS
+ * Never treat newlySharedCount===0 alone as failure when alreadySharedCount>0.
  */
 export function correctShareClaimReply(input: {
   reply: string;
@@ -637,14 +658,21 @@ export function correctShareClaimReply(input: {
     return input.reply;
   }
   const summary = summarizeShareApply(input.mutations, input.misses ?? []);
-  if (summary.shareIntentCount === 0 && summary.missCount === 0) {
+  // Proven full new-share success — keep the model's confirm.
+  if (
+    summary.newlySharedCount > 0 &&
+    summary.alreadySharedCount === 0 &&
+    summary.missCount === 0
+  ) {
     return input.reply;
   }
   const corrected = formatShareOutcomeReply(summary);
-  if (!corrected) {
-    return input.reply;
+  if (corrected) {
+    return input.setResponse(input.reply, corrected);
   }
-  return input.setResponse(input.reply, corrected);
+  // No formatable outcome and no proven new share → deny false success.
+  // (already-shared is handled above via formatShareOutcomeReply.)
+  return input.setResponse(input.reply, SHARE_CLAIM_MISS);
 }
 
 function looksLikeAttachClaim(spoken: string): boolean {

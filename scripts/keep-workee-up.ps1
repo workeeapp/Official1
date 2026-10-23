@@ -130,6 +130,24 @@ while ($true) {
   } catch {
     Write-Log $_
   }
+
+  # Another refresh/concurrently stack may already own 3003. Do not spam
+  # `npm run dev` (EADDRINUSE → exit 1 every 5s) while the healthy API lives.
+  if (Test-ApiPort) {
+    Write-Log "API already listening on 3003; holding sleep lock (will restart if port drops)"
+    while (Test-ApiPort) {
+      Keep-Awake
+      Start-Sleep -Seconds 15
+      try {
+        Ensure-Postgres
+      } catch {
+        Write-Log $_
+      }
+    }
+    Write-Log "API port 3003 lost; restarting API"
+    continue
+  }
+
   try {
     npm run dev -w backend
     Write-Log "API exited $LASTEXITCODE; restarting in 5s"

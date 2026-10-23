@@ -55,6 +55,21 @@ export type MashovSession = {
   displayName: string;
 };
 
+/** Inclusive calendar-day filter (YYYY-MM-DD). Null bounds = open on that side. */
+export type MashovDateRange = {
+  dateFrom: string | null;
+  dateTo: string | null;
+};
+
+export type MashovDateStats = {
+  matched: number;
+  undated: number;
+  invalid: number;
+  outOfRange: number;
+  /** True when matched rows exceeded the local display cap after filter+sort. */
+  truncated: boolean;
+};
+
 export type MashovFacts = {
   childName: string;
   aspects: MashovAspect[];
@@ -71,7 +86,153 @@ export type MashovFacts = {
   }>;
   missingCreds: string[];
   error?: string;
+  /** Event-date filter from ACTION (not Mashov login academic year). */
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  dateStats?: Partial<
+    Record<
+      "grades" | "homework" | "behavior" | "absences" | "messages",
+      MashovDateStats
+    >
+  >;
 };
+
+export function hasMashovDateRange(
+  range?: MashovDateRange | null,
+): boolean {
+  return Boolean(range?.dateFrom || range?.dateTo);
+}
+
+function isValidYmd(ymd: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return false;
+  }
+  const y = Number(ymd.slice(0, 4));
+  const m = Number(ymd.slice(5, 7));
+  const d = Number(ymd.slice(8, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return false;
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31) {
+    return false;
+  }
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+/**
+ * Normalize Mashov/ISO/local date strings to YYYY-MM-DD.
+ * Uses the calendar day from the string (first 10 chars for ISO) — does not
+ * reinterpret via local timezone. Returns null for empty or invalid dates.
+ */
+export function normalizeMashovEventDate(raw: string): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) {
+    return null;
+  }
+  const isoPrefix = s.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoPrefix)) {
+    return isValidYmd(isoPrefix) ? isoPrefix : null;
+  }
+  const dmy = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
+  if (dmy) {
+    const d = Number(dmy[1]);
+    const m = Number(dmy[2]);
+    const y = Number(dmy[3]);
+    const ymd = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    return isValidYmd(ymd) ? ymd : null;
+  }
+  return null;
+}
+
+export function emptyMashovDateStats(): MashovDateStats {
+  return {
+    matched: 0,
+    undated: 0,
+    invalid: 0,
+    outOfRange: 0,
+    truncated: false,
+  };
+}
+
+/**
+ * Filter by optional inclusive date range, sort newest-first, then apply cap.
+ *
+ * API note: Mashov GETs used here have no page/limit query params in this
+ * client — one response body per aspect. Local caps are display-only; do not
+ * claim a complete newest-page when the upstream payload may already be partial.
+ *
+ * Undated / invalid rows are never counted as confirmed out-of-range matches.
+ * With no range they stay in the result (sorted after dated rows).
+ */
+export function applyMashovDateFilterSortCap<T extends { date: string }>(
+  rows: T[],
+  opts: { range?: MashovDateRange | null; cap: number },
+): { rows: T[]; stats: MashovDateStats } {
+  const range = opts.range ?? null;
+  const filtering = hasMashovDateRange(range);
+  const from = range?.dateFrom && isValidYmd(range.dateFrom) ? range.dateFrom : null;
+  const to = range?.dateTo && isValidYmd(range.dateTo) ? range.dateTo : null;
+
+  const stats = emptyMashovDateStats();
+  const kept: Array<{ row: T; sortKey: string }> = [];
+
+  for (const row of rows) {
+    const raw = String(row.date ?? "").trim();
+    const ymd = normalizeMashovEventDate(raw);
+    if (!raw) {
+      stats.undated += 1;
+      if (!filtering) {
+        kept.push({ row, sortKey: "" });
+      }
+      continue;
+    }
+    if (!ymd) {
+      stats.invalid += 1;
+      if (!filtering) {
+        kept.push({ row, sortKey: "" });
+      }
+      continue;
+    }
+    const normalizedRow = { ...row, date: ymd } as T;
+    if (filtering) {
+      if (from && ymd < from) {
+        stats.outOfRange += 1;
+        continue;
+      }
+      if (to && ymd > to) {
+        stats.outOfRange += 1;
+        continue;
+      }
+    }
+    stats.matched += 1;
+    kept.push({ row: normalizedRow, sortKey: ymd });
+  }
+
+  kept.sort((a, b) => {
+    if (a.sortKey && b.sortKey) {
+      return b.sortKey.localeCompare(a.sortKey);
+    }
+    if (a.sortKey && !b.sortKey) {
+      return -1;
+    }
+    if (!a.sortKey && b.sortKey) {
+      return 1;
+    }
+    return 0;
+  });
+
+  const cap = Math.max(0, opts.cap);
+  stats.truncated = kept.length > cap;
+  return {
+    rows: kept.slice(0, cap).map((entry) => entry.row),
+    stats,
+  };
+}
 
 const BASE = "https://web.mashov.info/api";
 const ASPECT_SET = new Set<MashovAspect>([
@@ -760,7 +921,7 @@ function str(row: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-export function normalizeGrades(raw: unknown) {
+export function mapMashovGrades(raw: unknown) {
   return asRecordArray(raw)
     .map((row) => ({
       subject: str(row, ["subjectName", "subject", "groupName", "שם מקצוע"]),
@@ -768,22 +929,60 @@ export function normalizeGrades(raw: unknown) {
       date: str(row, ["eventDate", "date", "gradingEventDate", "תאריך"]),
       type: str(row, ["gradingEvent", "gradingType", "type", "סוג"]),
     }))
-    .filter((row) => row.subject || row.grade)
-    .slice(0, 40);
+    .filter((row) => row.subject || row.grade);
 }
 
-export function normalizeHomework(raw: unknown) {
+export function normalizeGrades(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovGrades(raw), {
+    range: opts?.range ?? null,
+    cap: 40,
+  }).rows;
+}
+
+export function normalizeGradesWithStats(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovGrades(raw), {
+    range: opts?.range ?? null,
+    cap: 40,
+  });
+}
+
+export function mapMashovHomework(raw: unknown) {
   return asRecordArray(raw)
     .map((row) => ({
       subject: str(row, ["subjectName", "subject", "groupName"]),
       text: str(row, ["homework", "remark", "text", "body", "שיעורי בית"]),
       date: str(row, ["date", "lessonDate", "timestamp"]),
     }))
-    .filter((row) => row.text || row.subject)
-    .slice(0, 30);
+    .filter((row) => row.text || row.subject);
 }
 
-export function normalizeBehavior(raw: unknown) {
+export function normalizeHomework(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovHomework(raw), {
+    range: opts?.range ?? null,
+    cap: 30,
+  }).rows;
+}
+
+export function normalizeHomeworkWithStats(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovHomework(raw), {
+    range: opts?.range ?? null,
+    cap: 30,
+  });
+}
+
+export function mapMashovBehavior(raw: unknown) {
   return asRecordArray(raw)
     .map((row) => ({
       subject: str(row, ["subjectName", "subject", "groupName"]),
@@ -797,8 +996,27 @@ export function normalizeBehavior(raw: unknown) {
       ]),
       date: str(row, ["date", "lessonDate", "timestamp"]),
     }))
-    .filter((row) => row.text || row.subject)
-    .slice(0, 30);
+    .filter((row) => row.text || row.subject);
+}
+
+export function normalizeBehavior(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovBehavior(raw), {
+    range: opts?.range ?? null,
+    cap: 30,
+  }).rows;
+}
+
+export function normalizeBehaviorWithStats(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovBehavior(raw), {
+    range: opts?.range ?? null,
+    cap: 30,
+  });
 }
 
 function looksLikeAbsenceRow(row: Record<string, unknown>): boolean {
@@ -812,7 +1030,7 @@ function looksLikeAbsenceRow(row: Record<string, unknown>): boolean {
 }
 
 /** lessonsCount payload and/or filtered behave rows → absences list. */
-export function normalizeAbsences(raw: unknown) {
+export function mapMashovAbsences(raw: unknown) {
   const rows = asRecordArray(raw);
   const mapped = rows
     .map((row) => ({
@@ -847,14 +1065,31 @@ export function normalizeAbsences(raw: unknown) {
     .filter((row) => row.text || row.subject);
   const onlyAbsences = mapped.filter((row) => row._absence);
   const use = onlyAbsences.length > 0 ? onlyAbsences : mapped;
-  return use
-    .map(({ subject, text, date }) => ({ subject, text, date }))
-    .slice(0, 40);
+  return use.map(({ subject, text, date }) => ({ subject, text, date }));
 }
 
-export function normalizeMessages(raw: unknown) {
-  const rows = asRecordArray(raw);
-  return rows
+export function normalizeAbsences(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovAbsences(raw), {
+    range: opts?.range ?? null,
+    cap: 40,
+  }).rows;
+}
+
+export function normalizeAbsencesWithStats(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovAbsences(raw), {
+    range: opts?.range ?? null,
+    cap: 40,
+  });
+}
+
+export function mapMashovMessages(raw: unknown) {
+  return asRecordArray(raw)
     .map((row) => ({
       subject: str(row, [
         "subject",
@@ -884,8 +1119,27 @@ export function normalizeMessages(raw: unknown) {
         "text",
       ]).slice(0, 200),
     }))
-    .filter((row) => row.subject || row.from || row.preview)
-    .slice(0, 20);
+    .filter((row) => row.subject || row.from || row.preview);
+}
+
+export function normalizeMessages(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovMessages(raw), {
+    range: opts?.range ?? null,
+    cap: 20,
+  }).rows;
+}
+
+export function normalizeMessagesWithStats(
+  raw: unknown,
+  opts?: { range?: MashovDateRange | null },
+) {
+  return applyMashovDateFilterSortCap(mapMashovMessages(raw), {
+    range: opts?.range ?? null,
+    cap: 20,
+  });
 }
 
 export function normalizeTimetable(raw: unknown) {
@@ -916,16 +1170,17 @@ export function normalizeTimetable(raw: unknown) {
 export async function fetchMashovMessages(
   session: MashovSession,
   fetchImpl: typeof fetch = fetch,
-): Promise<MashovFacts["messages"]> {
+  range?: MashovDateRange | null,
+): Promise<{ rows: MashovFacts["messages"]; stats: MashovDateStats }> {
   try {
     const raw = await mashovGetJson(
       session,
       "/mail/inbox/conversations",
       fetchImpl,
     );
-    return normalizeMessages(raw);
+    return normalizeMessagesWithStats(raw, { range });
   } catch {
-    return [];
+    return { rows: [], stats: emptyMashovDateStats() };
   }
 }
 
@@ -933,14 +1188,24 @@ export async function fetchMashovAbsences(input: {
   session: MashovSession;
   childGuid: string;
   fetchImpl?: typeof fetch;
-}): Promise<MashovFacts["absences"]> {
+  range?: MashovDateRange | null;
+}): Promise<{ rows: MashovFacts["absences"]; stats: MashovDateStats }> {
   const fetchImpl = input.fetchImpl ?? fetch;
+  const range = input.range ?? null;
   const base = `/students/${encodeURIComponent(input.childGuid)}`;
   try {
-    const fromCount = normalizeAbsences(
+    const fromCount = normalizeAbsencesWithStats(
       await mashovGetJson(input.session, `${base}/lessonsCount`, fetchImpl),
+      { range },
     );
-    if (fromCount.length > 0) {
+    if (fromCount.rows.length > 0 || fromCount.stats.matched > 0) {
+      return fromCount;
+    }
+    // Prefer stats from first payload when it had undated/invalid only.
+    if (
+      fromCount.stats.undated + fromCount.stats.invalid + fromCount.stats.outOfRange >
+      0
+    ) {
       return fromCount;
     }
   } catch {
@@ -950,9 +1215,11 @@ export async function fetchMashovAbsences(input: {
     const behave = asRecordArray(
       await mashovGetJson(input.session, `${base}/behave`, fetchImpl),
     );
-    return normalizeAbsences(behave.filter(looksLikeAbsenceRow));
+    return normalizeAbsencesWithStats(behave.filter(looksLikeAbsenceRow), {
+      range,
+    });
   } catch {
-    return [];
+    return { rows: [], stats: emptyMashovDateStats() };
   }
 }
 
@@ -961,39 +1228,142 @@ export async function fetchMashovAspects(input: {
   childGuid: string;
   aspects: MashovAspect[];
   fetchImpl?: typeof fetch;
-}): Promise<Omit<MashovFacts, "childName" | "missingCreds" | "error">> {
+  range?: MashovDateRange | null;
+}): Promise<
+  Omit<MashovFacts, "childName" | "missingCreds" | "error">
+> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const aspects = input.aspects;
+  const range = input.range ?? null;
   const base = `/students/${encodeURIComponent(input.childGuid)}`;
-  const grades = aspects.includes("grades")
-    ? normalizeGrades(await mashovGetJson(input.session, `${base}/grades`, fetchImpl))
-    : [];
-  const homework = aspects.includes("homework")
-    ? normalizeHomework(
-        await mashovGetJson(input.session, `${base}/homework`, fetchImpl),
-      )
-    : [];
-  const behavior = aspects.includes("behavior")
-    ? normalizeBehavior(
-        await mashovGetJson(input.session, `${base}/behave`, fetchImpl),
-      )
-    : [];
+  const dateStats: MashovFacts["dateStats"] = {};
+
+  let grades: MashovFacts["grades"] = [];
+  if (aspects.includes("grades")) {
+    const result = normalizeGradesWithStats(
+      await mashovGetJson(input.session, `${base}/grades`, fetchImpl),
+      { range },
+    );
+    grades = result.rows;
+    dateStats.grades = result.stats;
+  }
+
+  let homework: MashovFacts["homework"] = [];
+  if (aspects.includes("homework")) {
+    const result = normalizeHomeworkWithStats(
+      await mashovGetJson(input.session, `${base}/homework`, fetchImpl),
+      { range },
+    );
+    homework = result.rows;
+    dateStats.homework = result.stats;
+  }
+
+  let behavior: MashovFacts["behavior"] = [];
+  if (aspects.includes("behavior")) {
+    const result = normalizeBehaviorWithStats(
+      await mashovGetJson(input.session, `${base}/behave`, fetchImpl),
+      { range },
+    );
+    behavior = result.rows;
+    dateStats.behavior = result.stats;
+  }
+
   const timetable = aspects.includes("timetable")
     ? normalizeTimetable(
         await mashovGetJson(input.session, `${base}/timetable`, fetchImpl),
       )
     : [];
-  const absences = aspects.includes("absences")
-    ? await fetchMashovAbsences({
-        session: input.session,
-        childGuid: input.childGuid,
-        fetchImpl,
-      })
-    : [];
-  const messages = aspects.includes("messages")
-    ? await fetchMashovMessages(input.session, fetchImpl)
-    : [];
-  return { aspects, grades, homework, behavior, timetable, absences, messages };
+
+  let absences: MashovFacts["absences"] = [];
+  if (aspects.includes("absences")) {
+    const result = await fetchMashovAbsences({
+      session: input.session,
+      childGuid: input.childGuid,
+      fetchImpl,
+      range,
+    });
+    absences = result.rows;
+    dateStats.absences = result.stats;
+  }
+
+  let messages: MashovFacts["messages"] = [];
+  if (aspects.includes("messages")) {
+    const result = await fetchMashovMessages(input.session, fetchImpl, range);
+    messages = result.rows;
+    dateStats.messages = result.stats;
+  }
+
+  return {
+    aspects,
+    grades,
+    homework,
+    behavior,
+    timetable,
+    absences,
+    messages,
+    dateFrom: range?.dateFrom ?? null,
+    dateTo: range?.dateTo ?? null,
+    dateStats,
+  };
+}
+
+function formatMashovRangeLabel(facts: MashovFacts): string {
+  const from = facts.dateFrom?.trim() || "";
+  const to = facts.dateTo?.trim() || "";
+  if (from && to) {
+    return from === to ? from : `${from}–${to}`;
+  }
+  if (from) {
+    return `מ־${from}`;
+  }
+  if (to) {
+    return `עד ${to}`;
+  }
+  return "";
+}
+
+function unclassifiedCount(stats?: MashovDateStats): number {
+  if (!stats) {
+    return 0;
+  }
+  return stats.undated + stats.invalid;
+}
+
+function formatAspectEmptyLine(input: {
+  label: string;
+  who: string;
+  rangeLabel: string;
+  filtering: boolean;
+  stats?: MashovDateStats;
+  emptyNoRange: string;
+}): string {
+  const whoBit = input.who ? ` ${input.who}` : "";
+  const unclassified = unclassifiedCount(input.stats);
+  if (!input.filtering) {
+    return input.emptyNoRange;
+  }
+  if (unclassified > 0) {
+    return `לא מצאתי ${input.label} עם תאריך תקין בטווח ${input.rangeLabel}${whoBit} — יש ${unclassified} רשומות בלי תאריך תקין שלא סווגו לטווח, ולכן זו לא תוצאה שלילית מלאה.`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return `אין ${input.label} בטווח ${input.rangeLabel}${whoBit}.`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatUnclassifiedNote(
+  stats: MashovDateStats | undefined,
+  filtering: boolean,
+): string | null {
+  if (!filtering) {
+    return null;
+  }
+  const n = unclassifiedCount(stats);
+  if (n <= 0) {
+    return null;
+  }
+  return `(שים לב: ${n} רשומות נוספות בלי תאריך תקין לא סווגו לטווח.)`;
 }
 
 export function formatMashovHebrew(facts: MashovFacts): string {
@@ -1011,40 +1381,102 @@ export function formatMashovHebrew(facts: MashovFacts): string {
   }
   const lines: string[] = [];
   const who = facts.childName ? `של ${facts.childName}` : "";
+  const filtering = hasMashovDateRange({
+    dateFrom: facts.dateFrom ?? null,
+    dateTo: facts.dateTo ?? null,
+  });
+  const rangeLabel = formatMashovRangeLabel(facts) || "המבוקש";
+
   if (facts.aspects.includes("grades")) {
+    const stats = facts.dateStats?.grades;
     if (facts.grades.length === 0) {
-      lines.push(`אין ציונים חדשים ${who}.`.replace(/\s+/g, " ").trim());
+      lines.push(
+        formatAspectEmptyLine({
+          label: "ציונים",
+          who,
+          rangeLabel,
+          filtering,
+          stats,
+          emptyNoRange: `אין ציונים חדשים ${who}.`.replace(/\s+/g, " ").trim(),
+        }),
+      );
     } else {
-      lines.push(`ציונים ${who}:`.trim());
+      lines.push(
+        filtering
+          ? `ציונים ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
+          : `ציונים ${who}:`.trim(),
+      );
       for (const g of facts.grades.slice(0, 15)) {
         const bits = [g.subject, g.grade, g.type, g.date.slice(0, 10)].filter(
           Boolean,
         );
         lines.push(`• ${bits.join(" — ")}`);
       }
+      const note = formatUnclassifiedNote(stats, filtering);
+      if (note) {
+        lines.push(note);
+      }
     }
   }
   if (facts.aspects.includes("homework")) {
+    const stats = facts.dateStats?.homework;
     if (facts.homework.length === 0) {
-      lines.push(`אין שיעורי בית ${who}.`.replace(/\s+/g, " ").trim());
+      lines.push(
+        formatAspectEmptyLine({
+          label: "שיעורי בית",
+          who,
+          rangeLabel,
+          filtering,
+          stats,
+          emptyNoRange: `אין שיעורי בית ${who}.`.replace(/\s+/g, " ").trim(),
+        }),
+      );
     } else {
-      lines.push(`שיעורי בית ${who}:`.trim());
+      lines.push(
+        filtering
+          ? `שיעורי בית ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
+          : `שיעורי בית ${who}:`.trim(),
+      );
       for (const h of facts.homework.slice(0, 10)) {
         lines.push(
           `• ${[h.subject, h.text, h.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
       }
+      const note = formatUnclassifiedNote(stats, filtering);
+      if (note) {
+        lines.push(note);
+      }
     }
   }
   if (facts.aspects.includes("behavior")) {
+    const stats = facts.dateStats?.behavior;
     if (facts.behavior.length === 0) {
-      lines.push(`אין אירועי התנהגות ${who}.`.replace(/\s+/g, " ").trim());
+      lines.push(
+        formatAspectEmptyLine({
+          label: "אירועי התנהגות",
+          who,
+          rangeLabel,
+          filtering,
+          stats,
+          emptyNoRange: `אין אירועי התנהגות ${who}.`
+            .replace(/\s+/g, " ")
+            .trim(),
+        }),
+      );
     } else {
-      lines.push(`התנהגות ${who}:`.trim());
+      lines.push(
+        filtering
+          ? `התנהגות ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
+          : `התנהגות ${who}:`.trim(),
+      );
       for (const b of facts.behavior.slice(0, 10)) {
         lines.push(
           `• ${[b.subject, b.text, b.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
+      }
+      const note = formatUnclassifiedNote(stats, filtering);
+      if (note) {
+        lines.push(note);
       }
     }
   }
@@ -1059,28 +1491,62 @@ export function formatMashovHebrew(facts: MashovFacts): string {
     }
   }
   if (facts.aspects.includes("absences")) {
+    const stats = facts.dateStats?.absences;
     if (facts.absences.length === 0) {
-      lines.push(`אין חיסורים ${who}.`.replace(/\s+/g, " ").trim());
+      lines.push(
+        formatAspectEmptyLine({
+          label: "חיסורים",
+          who,
+          rangeLabel,
+          filtering,
+          stats,
+          emptyNoRange: `אין חיסורים ${who}.`.replace(/\s+/g, " ").trim(),
+        }),
+      );
     } else {
-      lines.push(`חיסורים ${who}:`.trim());
+      lines.push(
+        filtering
+          ? `חיסורים ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
+          : `חיסורים ${who}:`.trim(),
+      );
       for (const a of facts.absences.slice(0, 15)) {
         lines.push(
           `• ${[a.subject, a.text, a.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
       }
+      const note = formatUnclassifiedNote(stats, filtering);
+      if (note) {
+        lines.push(note);
+      }
     }
   }
   if (facts.aspects.includes("messages")) {
+    const stats = facts.dateStats?.messages;
     if (facts.messages.length === 0) {
-      lines.push("אין הודעות חדשות בתיבת הדואר במשוב.");
+      lines.push(
+        formatAspectEmptyLine({
+          label: "הודעות",
+          who: "",
+          rangeLabel,
+          filtering,
+          stats,
+          emptyNoRange: "אין הודעות חדשות בתיבת הדואר במשוב.",
+        }),
+      );
     } else {
-      lines.push("הודעות במשוב:");
+      lines.push(
+        filtering ? `הודעות במשוב בטווח ${rangeLabel}:` : "הודעות במשוב:",
+      );
       for (const m of facts.messages.slice(0, 10)) {
         lines.push(
           `• ${[m.from, m.subject, m.preview, m.date.slice(0, 10)]
             .filter(Boolean)
             .join(" — ")}`,
         );
+      }
+      const note = formatUnclassifiedNote(stats, filtering);
+      if (note) {
+        lines.push(note);
       }
     }
   }
@@ -1090,14 +1556,45 @@ export function formatMashovHebrew(facts: MashovFacts): string {
   return lines.join("\n");
 }
 
+function normalizeMashovReplyRange(input: {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+}): MashovDateRange {
+  let dateFrom =
+    typeof input.dateFrom === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(input.dateFrom.trim()) &&
+    isValidYmd(input.dateFrom.trim())
+      ? input.dateFrom.trim()
+      : null;
+  let dateTo =
+    typeof input.dateTo === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(input.dateTo.trim()) &&
+    isValidYmd(input.dateTo.trim())
+      ? input.dateTo.trim()
+      : null;
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    const swap = dateFrom;
+    dateFrom = dateTo;
+    dateTo = swap;
+  }
+  return { dateFrom, dateTo };
+}
+
 export async function resolveMashovReply(input: {
   filings: MashovFilingRow[];
   child?: string | null;
   aspects?: MashovAspect[] | unknown;
+  /** Inclusive event-date filter (not login academic year). */
+  dateFrom?: string | null;
+  dateTo?: string | null;
   now?: Date;
   fetchImpl?: typeof fetch;
 }): Promise<string> {
   const aspects = parseMashovAspects(input.aspects);
+  const range = normalizeMashovReplyRange({
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+  });
   const loaded = loadMashovCredsFromFilings(input.filings, {
     child: input.child ?? undefined,
     now: input.now,
@@ -1127,17 +1624,22 @@ export async function resolveMashovReply(input: {
       absences: [],
       messages: [],
       missingCreds: loaded.missing,
+      dateFrom: range.dateFrom,
+      dateTo: range.dateTo,
     });
   }
 
   try {
     const session = await mashovLogin(creds, fetchImpl);
-    const needsChild = aspects.some(
-      (a) => a !== "messages",
-    );
-    const messagesOnly = aspects.length > 0 && aspects.every((a) => a === "messages");
+    const needsChild = aspects.some((a) => a !== "messages");
+    const messagesOnly =
+      aspects.length > 0 && aspects.every((a) => a === "messages");
     if (messagesOnly) {
-      const messages = await fetchMashovMessages(session, fetchImpl);
+      const messagesResult = await fetchMashovMessages(
+        session,
+        fetchImpl,
+        range,
+      );
       return formatMashovHebrew({
         childName: "",
         aspects,
@@ -1146,8 +1648,11 @@ export async function resolveMashovReply(input: {
         behavior: [],
         timetable: [],
         absences: [],
-        messages,
+        messages: messagesResult.rows,
         missingCreds: [],
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        dateStats: { messages: messagesResult.stats },
       });
     }
     const picked = pickMashovChild(session.children, input.child);
@@ -1161,9 +1666,9 @@ export async function resolveMashovReply(input: {
       return `לא מצאתי ילד בשם «${input.child}». אצלך: ${picked.askWhich.join(", ")}.`;
     }
     if (!picked.child) {
-      const messages = aspects.includes("messages")
-        ? await fetchMashovMessages(session, fetchImpl)
-        : [];
+      const messagesResult = aspects.includes("messages")
+        ? await fetchMashovMessages(session, fetchImpl, range)
+        : { rows: [] as MashovFacts["messages"], stats: emptyMashovDateStats() };
       return formatMashovHebrew({
         childName: "",
         aspects,
@@ -1172,8 +1677,13 @@ export async function resolveMashovReply(input: {
         behavior: [],
         timetable: [],
         absences: [],
-        messages,
+        messages: messagesResult.rows,
         missingCreds: [],
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        dateStats: aspects.includes("messages")
+          ? { messages: messagesResult.stats }
+          : undefined,
       });
     }
     const data = await fetchMashovAspects({
@@ -1181,6 +1691,7 @@ export async function resolveMashovReply(input: {
       childGuid: picked.child.guid,
       aspects,
       fetchImpl,
+      range,
     });
     const childName =
       `${picked.child.privateName}${picked.child.familyName ? ` ${picked.child.familyName}` : ""}`.trim();

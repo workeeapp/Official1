@@ -1587,7 +1587,7 @@ export function formatAgendaStandingLine(
   if (hasLinkedLists(item)) {
     body += " 🗂️";
   }
-  body += taskPlacePhoneMarks(item);
+  body += taskPlacePhoneMarks(item, "icons");
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -1620,7 +1620,7 @@ export function formatAgendaOneOffLine(
   if (hasLinkedLists(item)) {
     body += " 🗂️";
   }
-  body += taskPlacePhoneMarks(item);
+  body += taskPlacePhoneMarks(item, "icons");
   if (opts?.responsibilityMark?.trim()) {
     const mark = opts.responsibilityMark.trim();
     if (!titleAlreadyListsPartners(body, mark)) {
@@ -2363,6 +2363,7 @@ function formatSingleHeaderDump(
       return formatNumberedItem(n, row.title, row.item, listType, {
         responsibilityMark: row.responsibilityMark,
         now: opts?.now,
+        itemIds: opts?.itemIds,
       });
     }),
   ].join("\n");
@@ -2757,6 +2758,11 @@ export function formatNumberedItem(
     /** @deprecated Stage-1 co-share — prefer responsibilityMark (no עם). */
     sharedWithLabel?: string;
     now?: Date;
+    /**
+     * ITEM DUMP filter from ShowDumpOptions — when set, place/phone marks
+     * include stored values; list dumps omit values (icons only).
+     */
+    itemIds?: ReadonlySet<string> | null;
   },
 ): string {
   let body = title.trim() || "פריט";
@@ -2775,7 +2781,10 @@ export function formatNumberedItem(
     body += " 🗂️";
   }
   if (listType === "tasks") {
-    body += taskPlacePhoneMarks(item);
+    body += taskPlacePhoneMarks(
+      item,
+      opts?.itemIds != null ? "full" : "icons",
+    );
   }
   // responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».
   // sharedWithLabel is legacy; prefer responsibilityMark (no «עם»).
@@ -3275,18 +3284,22 @@ function hasLinkedLists(row: Record<string, unknown>): boolean {
 }
 
 /**
- * Task dump place/phone: 📍/📞 plus the stored value (not icon-only).
- * After 📎/🗂️; list dump and item-open (`show_dump_ids`) share this path.
+ * Task dump place/phone marks (after 📎/🗂️).
+ * - `icons` (default): 📍/📞 only — list / agenda lines.
+ * - `full`: icon + stored value — ITEM DUMP (`show_dump_ids` / itemIds set).
  */
-export function taskPlacePhoneMarks(item: Record<string, unknown>): string {
+export function taskPlacePhoneMarks(
+  item: Record<string, unknown>,
+  mode: "icons" | "full" = "icons",
+): string {
   let marks = "";
   const address = readText(item, ["כתובת", "address"]);
   if (address) {
-    marks += ` 📍 ${address}`;
+    marks += mode === "full" ? ` 📍 ${address}` : " 📍";
   }
   const phone = readText(item, ["טלפון", "phone", "telephone"]);
   if (phone) {
-    marks += ` 📞 ${phone}`;
+    marks += mode === "full" ? ` 📞 ${phone}` : " 📞";
   }
   return marks;
 }

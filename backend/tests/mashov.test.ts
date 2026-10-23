@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyMashovDateFilterSortCap,
   defaultMashovYear,
   formatMashovHebrew,
+  hasMashovDateRange,
   isMashovPasswordTooShortError,
   loadMashovCredsFromFilings,
   MASHOV_PASSWORD_TOO_SHORT_HE,
@@ -9,6 +11,7 @@ import {
   mashovSchoolMatchScore,
   normalizeAbsences,
   normalizeGrades,
+  normalizeMashovEventDate,
   normalizeMessages,
   parseMashovAspects,
   pickMashovChild,
@@ -289,7 +292,7 @@ describe("normalizeAbsences / normalizeMessages", () => {
       {
         subject: "אסיפת הורים",
         from: "מנהלת",
-        date: "2026-10-21T10:00:00",
+        date: "2026-10-21",
         preview: "שלום",
       },
     ]);
@@ -311,10 +314,248 @@ describe("normalizeGrades", () => {
       {
         subject: "אנגלית",
         grade: "85",
-        date: "2026-09-01T00:00:00",
+        date: "2026-09-01",
         type: "בוחן",
       },
     ]);
+  });
+});
+
+describe("mashov event dates", () => {
+  it("normalizes ISO, dmy, leap day, and rejects invalid", () => {
+    expect(normalizeMashovEventDate("2025-03-01T22:00:00Z")).toBe("2025-03-01");
+    expect(normalizeMashovEventDate("01.09.2025")).toBe("2025-09-01");
+    expect(normalizeMashovEventDate("29/02/2024")).toBe("2024-02-29");
+    expect(normalizeMashovEventDate("29/02/2025")).toBeNull();
+    expect(normalizeMashovEventDate("2025-13-01")).toBeNull();
+    expect(normalizeMashovEventDate("")).toBeNull();
+    expect(normalizeMashovEventDate("לא ידוע")).toBeNull();
+  });
+
+  it("treats null range as no filter", () => {
+    expect(hasMashovDateRange({ dateFrom: null, dateTo: null })).toBe(false);
+    expect(hasMashovDateRange({ dateFrom: "2025-01-01", dateTo: null })).toBe(
+      true,
+    );
+  });
+
+  it("filters inclusive month bounds and sorts newest-first before cap", () => {
+    const { rows, stats } = applyMashovDateFilterSortCap(
+      [
+        { id: "a", date: "2025-01-31T12:00:00" },
+        { id: "b", date: "2025-02-01" },
+        { id: "c", date: "2025-01-01" },
+        { id: "d", date: "2024-12-31" },
+        { id: "e", date: "" },
+        { id: "f", date: "bad-date" },
+      ],
+      {
+        range: { dateFrom: "2025-01-01", dateTo: "2025-01-31" },
+        cap: 10,
+      },
+    );
+    expect(rows.map((r) => r.id)).toEqual(["a", "c"]);
+    expect(stats.matched).toBe(2);
+    expect(stats.outOfRange).toBe(2);
+    expect(stats.undated).toBe(1);
+    expect(stats.invalid).toBe(1);
+    expect(stats.truncated).toBe(false);
+  });
+
+  it("keeps undated when no range and sorts dated newest-first before cap", () => {
+    const { rows, stats } = applyMashovDateFilterSortCap(
+      [
+        { id: "old", date: "2024-01-01" },
+        { id: "new", date: "2025-06-01" },
+        { id: "mid", date: "2025-01-15" },
+        { id: "none", date: "" },
+      ],
+      { range: { dateFrom: null, dateTo: null }, cap: 2 },
+    );
+    expect(rows.map((r) => r.id)).toEqual(["new", "mid"]);
+    expect(stats.matched).toBe(3);
+    expect(stats.undated).toBe(1);
+    expect(stats.truncated).toBe(true);
+  });
+
+  it("supports full historical calendar year 2025", () => {
+    const grades = normalizeGrades(
+      [
+        {
+          subjectName: "היסטוריה",
+          grade: 70,
+          eventDate: "2025-06-15",
+          gradingEvent: "מבחן",
+        },
+        {
+          subjectName: "מתמטיקה",
+          grade: 90,
+          eventDate: "2024-12-20",
+          gradingEvent: "מבחן",
+        },
+        {
+          subjectName: "אנגלית",
+          grade: 80,
+          eventDate: "2026-01-05",
+          gradingEvent: "בוחן",
+        },
+      ],
+      { range: { dateFrom: "2025-01-01", dateTo: "2025-12-31" } },
+    );
+    expect(grades).toEqual([
+      {
+        subject: "היסטוריה",
+        grade: "70",
+        date: "2025-06-15",
+        type: "מבחן",
+      },
+    ]);
+  });
+
+  it("filters mixed event types independently via normalize helpers", () => {
+    expect(
+      normalizeAbsences(
+        [
+          {
+            subjectName: "ספורט",
+            achvaName: "חיסור",
+            lessonDate: "2025-03-01",
+          },
+          {
+            subjectName: "ספורט",
+            achvaName: "חיסור",
+            lessonDate: "2025-05-01",
+          },
+        ],
+        { range: { dateFrom: "2025-04-01", dateTo: "2025-04-30" } },
+      ),
+    ).toEqual([]);
+    expect(
+      normalizeMessages(
+        [
+          {
+            subject: "ישן",
+            senderName: "א",
+            lastMessage: "x",
+            sendDate: "2025-01-01",
+          },
+          {
+            subject: "חדש",
+            senderName: "ב",
+            lastMessage: "y",
+            sendDate: "2025-08-01T09:00:00",
+          },
+        ],
+        { range: { dateFrom: "2025-07-01", dateTo: null } },
+      ).map((m) => m.subject),
+    ).toEqual(["חדש"]);
+  });
+
+  it("Hebrew empty range distinguishes unclassified undated rows", () => {
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["grades"],
+      grades: [],
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [],
+      messages: [],
+      missingCreds: [],
+      dateFrom: "2025-01-01",
+      dateTo: "2025-12-31",
+      dateStats: {
+        grades: {
+          matched: 0,
+          undated: 2,
+          invalid: 1,
+          outOfRange: 5,
+          truncated: false,
+        },
+      },
+    });
+    expect(text).toContain("לא מצאתי ציונים עם תאריך תקין");
+    expect(text).toContain("לא סווגו לטווח");
+    expect(text).not.toMatch(/^אין ציונים בטווח/);
+  });
+
+  it("Hebrew empty range with no unclassified is a clean negative", () => {
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["grades"],
+      grades: [],
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [],
+      messages: [],
+      missingCreds: [],
+      dateFrom: "2025-01-01",
+      dateTo: "2025-01-31",
+      dateStats: {
+        grades: {
+          matched: 0,
+          undated: 0,
+          invalid: 0,
+          outOfRange: 4,
+          truncated: false,
+        },
+      },
+    });
+    expect(text).toContain("אין ציונים בטווח 2025-01-01–2025-01-31");
+    expect(text).not.toContain("לא סווגו");
+  });
+
+  it("Hebrew matches note unclassified without claiming completeness of API pages", () => {
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["grades"],
+      grades: [
+        {
+          subject: "מתמטיקה",
+          grade: "90",
+          date: "2025-05-01",
+          type: "מבחן",
+        },
+      ],
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [],
+      messages: [],
+      missingCreds: [],
+      dateFrom: "2025-01-01",
+      dateTo: "2025-12-31",
+      dateStats: {
+        grades: {
+          matched: 1,
+          undated: 2,
+          invalid: 0,
+          outOfRange: 0,
+          truncated: false,
+        },
+      },
+    });
+    expect(text).toContain("מתמטיקה");
+    expect(text).toContain("בטווח 2025-01-01–2025-12-31");
+    expect(text).toContain("2 רשומות נוספות בלי תאריך תקין");
+    expect(text).not.toContain("הכי חדשים");
+  });
+
+  it("documents no pagination: single-response local cap only", () => {
+    // Client Mashov GETs have no page/limit query; truncation is local only.
+    const many = Array.from({ length: 5 }, (_, i) => ({
+      id: `r${i}`,
+      date: `2025-06-${String(10 - i).padStart(2, "0")}`,
+    }));
+    const { rows, stats } = applyMashovDateFilterSortCap(many, {
+      range: { dateFrom: "2025-01-01", dateTo: "2025-12-31" },
+      cap: 3,
+    });
+    expect(rows).toHaveLength(3);
+    expect(stats.matched).toBe(5);
+    expect(stats.truncated).toBe(true);
+    expect(rows[0]?.id).toBe("r0");
   });
 });
 

@@ -1163,7 +1163,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. With school name the server resolves semel via /schools. Year is never defaulted — ask if missing. Missing filings → ask and file them (including the password); leave mashov null. Several children → set child or ask.",
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable/absences/messages. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. Login year = academic year filing (NOT an event-date filter). Optional date_from/date_to = calendar day range from SESSION_CLOCK for filtering returned rows. Year filing never invented. Missing filings → ask and file; leave mashov null. Several children → set child or ask.",
                 "properties": {
                   "child": {
                     "type": "string",
@@ -1178,10 +1178,28 @@
                         "grades",
                         "homework",
                         "behavior",
-                        "timetable"
+                        "timetable",
+                        "absences",
+                        "messages"
                       ]
                     },
-                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות → [behavior]; מערכת שעות → [timetable]. Can combine."
+                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות → [behavior]; מערכת → [timetable]; חיסורים/איחורים → [absences]; הודעות → [messages]. Can combine."
+                  },
+                  "date_from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 10,
+                    "description": "Inclusive YYYY-MM-DD from SESSION_CLOCK («החודש» / «מ־1.9»). null when no calendar range was requested. Never invent. Not the academic login year."
+                  },
+                  "date_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 10,
+                    "description": "Inclusive YYYY-MM-DD end of range. null when no calendar range. Swap-safe with date_from on the server."
                   }
                 }
               },
