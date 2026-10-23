@@ -186,6 +186,10 @@ export type TipTriggerArea = (typeof TIP_TRIGGER_AREAS)[number];
 export const TIP_TRIGGER_OPS = ["add", "remove", "update"] as const;
 export type TipTriggerOp = (typeof TIP_TRIGGER_OPS)[number];
 
+/** How tip text is turned into the spoken bubble. */
+export const TIP_OUTPUT_MODES = ["static", "dynamic"] as const;
+export type TipOutputMode = (typeof TIP_OUTPUT_MODES)[number];
+
 /** Pedagogy ladder for tips. */
 export const TIP_TIERS = [
   "basic",
@@ -280,6 +284,8 @@ export interface PublicTip {
   listType: string | null;
   unlockAfterKey: string | null;
   systemSeed: boolean;
+  outputMode: TipOutputMode;
+  minIntervalMinutes: number;
   maxShows: number;
   order: number;
   text: string;
@@ -304,6 +310,8 @@ export interface TipInput {
   topic?: TipTopic | null;
   listType?: string | null;
   unlockAfterKey?: string | null;
+  outputMode?: TipOutputMode;
+  minIntervalMinutes?: number;
   maxShows: number;
   order: number;
   text: string;
@@ -320,6 +328,8 @@ export interface TipUpdateInput {
   topic?: TipTopic | null;
   listType?: string | null;
   unlockAfterKey?: string | null;
+  outputMode?: TipOutputMode;
+  minIntervalMinutes?: number;
   maxShows?: number;
   order?: number;
   text?: string;

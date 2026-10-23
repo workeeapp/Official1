@@ -229,9 +229,28 @@ describe("recordLlmUsage", () => {
       reasoningTokens: 0,
       totalTokens: 2500,
       priceModel: "gpt-4.1-mini",
+      purpose: "chat",
       usage: expect.objectContaining({ input_tokens: 2000 }),
     });
     expect(data.costUsd.toString()).toBe("0.0013");
+  });
+
+  it("stores purpose when provided", async () => {
+    await recordLlmUsage({
+      ...base,
+      purpose: "catalog_tip",
+      turn: {
+        reply: "{}",
+        raw: {
+          id: "resp_tip",
+          model: "gpt-4.1-mini-2025-04-14",
+          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        },
+      },
+    });
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({
+      purpose: "catalog_tip",
+    });
   });
 
   it("stores usage without cost when the model has no price", async () => {

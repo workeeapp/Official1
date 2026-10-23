@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 import {
   TIP_AUDIENCES,
   TIP_LIST_FORM_TOPICS,
+  TIP_OUTPUT_MODES,
   TIP_TRIGGER_AREAS,
   TIP_TRIGGER_KINDS,
   TIP_TRIGGER_OPS,
@@ -14,6 +15,7 @@ import {
   type TipAudience,
   type TipInput,
   type TipListFormTopic,
+  type TipOutputMode,
   type TipTriggerArea,
   type TipTriggerKind,
   type TipTriggerOp,
@@ -44,6 +46,30 @@ const LIST_TOPIC_LABELS: Record<TipListFormTopic, string> = {
   contacts: "אנשי קשר",
 };
 
+/** Fixed FACTS / placeholder tokens for tip authors (static + dynamic). */
+const TIP_FACTS_HELP: ReadonlyArray<{ token: string; hint: string }> = [
+  {
+    token: "{item_label}",
+    hint: "שם עברי של הפריט שנשמר בתור (למשל חלב, להוריד את הכלב)",
+  },
+  {
+    token: "{item_key}",
+    hint: "מפתח נגזר של אותו פריט (לרוב זהה ל־item_label)",
+  },
+  {
+    token: "{list_type}",
+    hint: "סוג הרשימה: shopping / tasks / custom וכו׳",
+  },
+  {
+    token: "{op}",
+    hint: "סוג הפעולה בתור: add / update / remove",
+  },
+  {
+    token: "{items}",
+    hint: "כל שמות הפריטים מהתור, מופרדים בפסיק (כשיש כמה)",
+  },
+];
+
 export function TipFormDialog({
   mode,
   tip,
@@ -70,11 +96,18 @@ export function TipFormDialog({
   const [listTopic, setListTopic] = useState<TipListFormTopic | "">(
     tip ? tipListFormTopicFromTip(tip) : "",
   );
+  const [outputMode, setOutputMode] = useState<TipOutputMode>(
+    tip?.outputMode ?? "static",
+  );
+  const [minIntervalMinutes, setMinIntervalMinutes] = useState(
+    String(tip?.minIntervalMinutes ?? 0),
+  );
   const [maxShows, setMaxShows] = useState(String(tip?.maxShows ?? 1));
   const [order, setOrder] = useState(String(tip?.order ?? 0));
   const [text, setText] = useState(tip?.text ?? "");
   const [enabled, setEnabled] = useState(tip?.enabled !== false);
   const [touched, setTouched] = useState(false);
+  const [factsHelpOpen, setFactsHelpOpen] = useState(false);
 
   const fieldErrors = useMemo(() => {
     if (mode === "update") {
@@ -87,6 +120,8 @@ export function TipFormDialog({
       triggerKind,
       triggerArea: triggerKind === "action" ? triggerArea || null : null,
       triggerOp: triggerKind === "action" ? triggerOp : null,
+      outputMode,
+      minIntervalMinutes: Number(minIntervalMinutes),
       maxShows: Number(maxShows),
       order: Number(order),
       text,
@@ -100,6 +135,8 @@ export function TipFormDialog({
     triggerKind,
     triggerArea,
     triggerOp,
+    outputMode,
+    minIntervalMinutes,
     maxShows,
     order,
     text,
@@ -114,10 +151,13 @@ export function TipFormDialog({
     }
     const maxShowsNum = Number(maxShows);
     const orderNum = Number(order);
+    const minIntervalNum = Number(minIntervalMinutes);
     if (
       !Number.isInteger(maxShowsNum) ||
       maxShowsNum < 1 ||
       !Number.isInteger(orderNum) ||
+      !Number.isInteger(minIntervalNum) ||
+      minIntervalNum < 0 ||
       !text.trim()
     ) {
       return;
@@ -143,6 +183,8 @@ export function TipFormDialog({
         ...(listsFields
           ? { topic: listsFields.topic, listType: listsFields.listType }
           : { topic: null, listType: null }),
+        outputMode,
+        minIntervalMinutes: minIntervalNum,
         maxShows: maxShowsNum,
         order: orderNum,
         text: text.trim(),
@@ -162,6 +204,8 @@ export function TipFormDialog({
         : leftLists
           ? { topic: null, listType: null }
           : {}),
+      outputMode,
+      minIntervalMinutes: minIntervalNum,
       maxShows: maxShowsNum,
       order: orderNum,
       text: text.trim(),
@@ -330,7 +374,27 @@ export function TipFormDialog({
             </>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex w-full flex-col gap-1.5">
+            <label htmlFor="tip-output-mode" className="text-sm font-medium text-text-primary">
+              פלט
+            </label>
+            <select
+              id="tip-output-mode"
+              className={selectClass}
+              value={outputMode}
+              onChange={(event) =>
+                setOutputMode(event.target.value as TipOutputMode)
+              }
+            >
+              {TIP_OUTPUT_MODES.map((value) => (
+                <option key={value} value={value}>
+                  {value === "static" ? "סטטי" : "דינמי"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Input
               name="tip-max-shows"
               label="Max shows"
@@ -344,6 +408,18 @@ export function TipFormDialog({
               onChange={(event) => setMaxShows(event.target.value)}
             />
             <Input
+              name="tip-min-interval"
+              label="מרווח מינימלי (דקות)"
+              type="number"
+              value={minIntervalMinutes}
+              error={
+                showErrors && fieldErrors.minIntervalMinutes
+                  ? fieldErrors.minIntervalMinutes
+                  : undefined
+              }
+              onChange={(event) => setMinIntervalMinutes(event.target.value)}
+            />
+            <Input
               name="tip-order"
               label="Order"
               type="number"
@@ -355,14 +431,66 @@ export function TipFormDialog({
             />
           </div>
 
-          <Textarea
-            name="tip-text"
-            label="Text"
-            value={text}
-            error={showErrors ? fieldErrors.text : undefined}
-            onChange={(event) => setText(event.target.value)}
-            rows={5}
-          />
+          <div className="flex w-full flex-col gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <label
+                htmlFor="tip-text"
+                className="text-sm font-medium text-text-primary"
+              >
+                {outputMode === "dynamic"
+                  ? "הוראות לטיפ (עם FACTS)"
+                  : "טקסט הטיפ"}
+              </label>
+              <button
+                type="button"
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-xs font-semibold text-text-secondary transition-colors hover:border-primary hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                aria-label="משתני טיפ זמינים"
+                aria-expanded={factsHelpOpen}
+                aria-controls="tip-facts-help"
+                onClick={() => setFactsHelpOpen((open) => !open)}
+              >
+                ?
+              </button>
+            </div>
+            {factsHelpOpen ? (
+              <div
+                id="tip-facts-help"
+                className="rounded-xl border border-border bg-background p-3 text-start text-xs text-text-primary"
+              >
+                <p className="mb-2 font-medium">
+                  {outputMode === "dynamic"
+                    ? "FACTS לשימוש בהוראות:"
+                    : "Placeholders להחלפה אוטומטית:"}
+                </p>
+                <ul className="flex flex-col gap-2">
+                  {TIP_FACTS_HELP.map((row) => (
+                    <li key={row.token}>
+                      <code className="rounded bg-surface px-1 py-0.5 font-mono text-[11px] text-primary">
+                        {row.token}
+                      </code>
+                      <span className="mt-0.5 block text-text-secondary">
+                        {row.hint}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <Textarea
+              id="tip-text"
+              name="tip-text"
+              label={
+                outputMode === "dynamic"
+                  ? "הוראות לטיפ (עם FACTS)"
+                  : "טקסט הטיפ"
+              }
+              hideLabel
+              value={text}
+              error={showErrors ? fieldErrors.text : undefined}
+              onChange={(event) => setText(event.target.value)}
+              rows={5}
+            />
+          </div>
 
           <label className="flex min-h-11 items-center gap-2 text-sm text-text-primary">
             <input

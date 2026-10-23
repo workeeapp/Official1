@@ -3,6 +3,7 @@ import {
   normalizeTipInput,
   normalizeTipUpdateInput,
   parseTipAudience,
+  parseTipOutputMode,
   parseTipTopic,
   parseTipTriggerArea,
   parseTipTriggerKind,
@@ -77,6 +78,25 @@ export function parseTipCreateBody(body: unknown): TipInput {
     record.listType === ""
       ? null
       : String(record.listType).trim();
+  const outputMode =
+    record.outputMode === undefined ||
+    record.outputMode === null ||
+    record.outputMode === ""
+      ? "static"
+      : parseTipOutputMode(record.outputMode);
+  if (!outputMode) {
+    throw new ValidationError("Please correct the highlighted fields", {
+      outputMode: "Output mode must be static or dynamic",
+    });
+  }
+  const minIntervalMinutes =
+    record.minIntervalMinutes === undefined ||
+    record.minIntervalMinutes === null ||
+    record.minIntervalMinutes === ""
+      ? 0
+      : typeof record.minIntervalMinutes === "number"
+        ? record.minIntervalMinutes
+        : Number(record.minIntervalMinutes);
 
   const errors = validateTipInput({
     key: record.key,
@@ -85,6 +105,8 @@ export function parseTipCreateBody(body: unknown): TipInput {
     triggerKind,
     triggerArea: triggerKind === "action" ? triggerArea : null,
     triggerOp: triggerKind === "action" ? triggerOp : null,
+    outputMode,
+    minIntervalMinutes,
     maxShows,
     order,
     text: record.text,
@@ -109,6 +131,8 @@ export function parseTipCreateBody(body: unknown): TipInput {
     triggerOp: triggerKind === "action" ? (triggerOp ?? "add") : null,
     topic,
     listType,
+    outputMode,
+    minIntervalMinutes,
     maxShows,
     order,
     text: String(record.text),
@@ -191,6 +215,21 @@ export function parseTipUpdateBody(body: unknown): TipUpdateInput {
       record.digitalEmployeeId === null || record.digitalEmployeeId === ""
         ? null
         : String(record.digitalEmployeeId);
+  }
+  if (record.outputMode !== undefined) {
+    const mode = parseTipOutputMode(record.outputMode);
+    if (!mode) {
+      throw new ValidationError("Please correct the highlighted fields", {
+        outputMode: "Output mode must be static or dynamic",
+      });
+    }
+    patch.outputMode = mode;
+  }
+  if (record.minIntervalMinutes !== undefined) {
+    patch.minIntervalMinutes =
+      typeof record.minIntervalMinutes === "number"
+        ? record.minIntervalMinutes
+        : Number(record.minIntervalMinutes);
   }
   if (record.maxShows !== undefined) {
     patch.maxShows =

@@ -15,6 +15,7 @@ const {
   employeeFindMany,
   employeeFindFirst,
   sendWhatsAppText,
+  composeCatalogTip,
 } = vi.hoisted(() => ({
   tipFindMany: vi.fn(),
   tipFindUnique: vi.fn(),
@@ -30,6 +31,7 @@ const {
   employeeFindMany: vi.fn(),
   employeeFindFirst: vi.fn(),
   sendWhatsAppText: vi.fn(),
+  composeCatalogTip: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -60,6 +62,15 @@ vi.mock("../src/services/whatsapp-send.js", () => ({
   sendWhatsAppText,
 }));
 
+vi.mock("../src/services/tip-compose.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/tip-compose.js")>();
+  return {
+    ...actual,
+    composeCatalogTip,
+  };
+});
+
 import {
   collectAppliedTipOps,
   createTipForUser,
@@ -67,7 +78,9 @@ import {
   resolveAndRecordTipsForTurn,
   sendTipForUser,
   tipAudienceMatchesForTest,
+  tipCooldownOk,
 } from "../src/services/tips.service.js";
+import { renderStaticTipText } from "../src/services/tip-compose.js";
 import { SYSTEM_TIP_SEEDS } from "../src/services/tip-catalog.js";
 import { ValidationError } from "../src/utils/errors.js";
 
@@ -90,6 +103,8 @@ function tipRow(
     listType: string | null;
     unlockAfterKey: string | null;
     systemSeed: boolean;
+    outputMode: string;
+    minIntervalMinutes: number;
     maxShows: number;
     order: number;
     text: string;
@@ -110,6 +125,8 @@ function tipRow(
     listType: overrides.listType ?? "reminders",
     unlockAfterKey: overrides.unlockAfterKey ?? null,
     systemSeed: overrides.systemSeed ?? true,
+    outputMode: overrides.outputMode ?? "static",
+    minIntervalMinutes: overrides.minIntervalMinutes ?? 0,
     maxShows: overrides.maxShows ?? 1,
     order: overrides.order ?? 0,
     text: overrides.text ?? "tip text",
@@ -144,6 +161,7 @@ describe("tips service", () => {
     tipProgressUpdate.mockReset();
     employeeFindMany.mockReset();
     employeeFindFirst.mockReset();
+    composeCatalogTip.mockReset();
     employeeFindMany.mockResolvedValue([]);
     tipFindUnique.mockResolvedValue(null);
     tipDeleteMany.mockResolvedValue({ count: 0 });
@@ -383,6 +401,194 @@ describe("tips service", () => {
     expect(third.texts).toEqual(["mid tip"]);
   });
 
+  it("substitutes static placeholders from turn FACTS", async () => {
+    const tip = tipRow({
+      id: "shop-del",
+      key: "shopping_delete_howto",
+      topic: "shopping",
+      listType: "shopping",
+      triggerArea: "lists",
+      text: "תמחקי את {item_label}",
+      outputMode: "static",
+    });
+    tipFindMany.mockResolvedValue([tip]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+      turnFactItems: [
+        { listType: "shopping", op: "add", itemLabel: "חלב", itemKey: "חלב" },
+      ],
+    });
+    expect(turn.texts).toEqual(["תמחקי את חלב"]);
+    expect(composeCatalogTip).not.toHaveBeenCalled();
+    expect(tipProgressCreate).toHaveBeenCalled();
+  });
+
+  it("skips static tip when placeholder FACTS missing", async () => {
+    const tip = tipRow({
+      id: "shop-del",
+      key: "shopping_delete_howto",
+      topic: "shopping",
+      listType: "shopping",
+      triggerArea: "lists",
+      text: "תמחקי את {item_label}",
+      outputMode: "static",
+    });
+    tipFindMany.mockResolvedValue([tip]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+      turnFactItems: [],
+    });
+    expect(turn.texts).toEqual([]);
+    expect(tipProgressCreate).not.toHaveBeenCalled();
+  });
+
+  it("composes dynamic tip and bumps progress; skips on compose fail", async () => {
+    const tip = tipRow({
+      id: "dyn-1",
+      key: "shopping_dyn",
+      topic: "shopping",
+      listType: "shopping",
+      triggerArea: "lists",
+      text: "כתוב טיפ עם שם הפריט מ-FACTS",
+      outputMode: "dynamic",
+    });
+    tipFindMany.mockResolvedValue([tip]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+    composeCatalogTip.mockResolvedValue("לידיעתך תמחקי את החלב");
+
+    const billing = {
+      conversationId: "conv-1",
+      employeeId: SPEAKER,
+      digitalEmployeeId: LUCY,
+    };
+    const ok = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+      turnFactItems: [
+        { listType: "shopping", op: "add", itemLabel: "חלב", itemKey: "חלב" },
+      ],
+      billing,
+    });
+    expect(ok.texts).toEqual(["לידיעתך תמחקי את החלב"]);
+    expect(composeCatalogTip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billing,
+        facts: expect.objectContaining({ item_label: "חלב" }),
+      }),
+    );
+    expect(tipProgressCreate).toHaveBeenCalled();
+
+    tipProgressCreate.mockClear();
+    composeCatalogTip.mockResolvedValue(null);
+    const fail = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+      turnFactItems: [
+        { listType: "shopping", op: "add", itemLabel: "חלב", itemKey: "חלב" },
+      ],
+      billing,
+    });
+    expect(fail.texts).toEqual([]);
+    expect(tipProgressCreate).not.toHaveBeenCalled();
+  });
+
+  it("respects minIntervalMinutes cooldown", async () => {
+    const tip = tipRow({
+      id: "cool-1",
+      key: "shopping_cool",
+      topic: "shopping",
+      listType: "shopping",
+      triggerArea: "lists",
+      text: "tip",
+      maxShows: 5,
+      minIntervalMinutes: 60,
+    });
+    tipFindMany.mockResolvedValue([tip]);
+    tipProgressFindMany.mockResolvedValue([
+      {
+        tipId: tip.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(),
+      },
+    ]);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const blocked = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+    });
+    expect(blocked.texts).toEqual([]);
+
+    tipProgressFindMany.mockResolvedValue([
+      {
+        tipId: tip.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(Date.now() - 2 * 60 * 60_000),
+      },
+    ]);
+    tipProgressFindUnique.mockResolvedValue({
+      id: "prog-1",
+      tipId: tip.id,
+      showCount: 1,
+    });
+    tipProgressUpdate.mockResolvedValue({});
+    const allowed = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+    });
+    expect(allowed.texts).toEqual(["tip"]);
+  });
+
   it("emits at most one tip per turn even if several match", async () => {
     const shopping = tipRow({
       id: "s1",
@@ -452,12 +658,53 @@ describe("sendTipForUser", () => {
 
   it("sends tip text to the normalized preview phone", async () => {
     process.env.TIPS_PREVIEW_PHONE = "0544365812";
-    tipFindFirst.mockResolvedValue({ id: tipId, text: "  Preview tip  " });
+    tipFindFirst.mockResolvedValue({
+      id: tipId,
+      text: "  Preview tip  ",
+      outputMode: "static",
+    });
     await sendTipForUser(USER, tipId);
     expect(sendWhatsAppText).toHaveBeenCalledWith(
       "972544365812",
       "Preview tip",
       { ignoreSession: true },
     );
+  });
+
+  it("preview substitutes static placeholders with sample FACTS", async () => {
+    process.env.TIPS_PREVIEW_PHONE = "0544365812";
+    tipFindFirst.mockResolvedValue({
+      id: tipId,
+      text: "תמחקי את {item_label}",
+      outputMode: "static",
+    });
+    await sendTipForUser(USER, tipId);
+    expect(sendWhatsAppText).toHaveBeenCalledWith(
+      "972544365812",
+      "תמחקי את חלב",
+      { ignoreSession: true },
+    );
+  });
+});
+
+describe("renderStaticTipText / tipCooldownOk", () => {
+  it("replaces known tokens and skips when missing", () => {
+    expect(
+      renderStaticTipText("תמחקי את {item_label}", {
+        item_label: "חלב",
+        items: ["חלב"],
+      }),
+    ).toBe("תמחקי את חלב");
+    expect(
+      renderStaticTipText("תמחקי את {item_label}", { item_label: "" }),
+    ).toBeNull();
+    expect(renderStaticTipText("plain tip", {})).toBe("plain tip");
+  });
+
+  it("gates cooldown by minutes", () => {
+    const now = new Date("2026-10-23T12:00:00Z");
+    expect(tipCooldownOk(undefined, 30, now)).toBe(true);
+    expect(tipCooldownOk(new Date("2026-10-23T11:45:00Z"), 30, now)).toBe(false);
+    expect(tipCooldownOk(new Date("2026-10-23T11:20:00Z"), 30, now)).toBe(true);
   });
 });

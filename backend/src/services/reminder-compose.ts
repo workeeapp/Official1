@@ -1,5 +1,9 @@
 import { loadLlmConfig } from "../config/llm.js";
 import { getLlmClient } from "./llm-client.js";
+import {
+  recordLlmUsage,
+  type ComposeLlmBilling,
+} from "./llm-usage.service.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import type { ComposeFactsBundle } from "./compose-facts.js";
 
@@ -18,6 +22,8 @@ export async function composeScheduledOutbound(input: {
   /** Conditional watch fire — styled tip message, use FACTS not raw fixedBody. */
   watch?: boolean;
   addressGender?: "male" | "female" | null;
+  /** When set, records LlmUsages with purpose=reminder_compose. */
+  billing?: ComposeLlmBilling | null;
 }): Promise<string | null> {
   const brief = input.brief.trim() || input.itemLabel.trim();
   const bundle = input.facts;
@@ -37,10 +43,10 @@ export async function composeScheduledOutbound(input: {
   try {
     const client = getLlmClient();
     const config = loadLlmConfig();
-    const conversationId = await client.createConversation();
+    const openaiConversationId = await client.createConversation();
     const freshness = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const turn = await client.createResponse({
-      conversationId,
+      conversationId: openaiConversationId,
       model: config.model,
       temperature: hasFacts ? (isWatch ? 0.55 : 0.4) : 1,
       instructions: [
@@ -81,6 +87,17 @@ export async function composeScheduledOutbound(input: {
         .filter(Boolean)
         .join("\n"),
     });
+    if (input.billing) {
+      await recordLlmUsage({
+        conversationId: input.billing.conversationId,
+        employeeId: input.billing.employeeId,
+        digitalEmployeeId: input.billing.digitalEmployeeId,
+        openaiConversationId,
+        model: config.model,
+        turn,
+        purpose: "reminder_compose",
+      });
+    }
     const text = turn.reply.trim();
     if (!text) {
       if (isWatch && bundle?.fixedBody?.trim()) {
@@ -130,6 +147,8 @@ function addressGenderHints(
 export async function composeWeatherLiveTip(input: {
   factsBody: string;
   addressGender?: "male" | "female" | null;
+  /** When set, records LlmUsages with purpose=weather_tip. */
+  billing?: ComposeLlmBilling | null;
 }): Promise<string | null> {
   const facts = input.factsBody.trim();
   if (!facts) {
@@ -138,10 +157,10 @@ export async function composeWeatherLiveTip(input: {
   try {
     const client = getLlmClient();
     const config = loadLlmConfig();
-    const conversationId = await client.createConversation();
+    const openaiConversationId = await client.createConversation();
     const freshness = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const turn = await client.createResponse({
-      conversationId,
+      conversationId: openaiConversationId,
       model: config.model,
       temperature: 0.85,
       instructions: [
@@ -161,6 +180,17 @@ export async function composeWeatherLiveTip(input: {
         "Write the tip now.",
       ].join("\n"),
     });
+    if (input.billing) {
+      await recordLlmUsage({
+        conversationId: input.billing.conversationId,
+        employeeId: input.billing.employeeId,
+        digitalEmployeeId: input.billing.digitalEmployeeId,
+        openaiConversationId,
+        model: config.model,
+        turn,
+        purpose: "weather_tip",
+      });
+    }
     const text = turn.reply.trim();
     if (!text) {
       return null;

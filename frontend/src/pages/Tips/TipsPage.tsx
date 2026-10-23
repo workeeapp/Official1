@@ -79,11 +79,12 @@ const EMPTY_FILTERS: TipFilters = {
 
 function triggerSummary(tip: PublicTip): string {
   const ladder = [tip.topic, tip.tier].filter(Boolean).join("/");
+  const modeBit = tip.outputMode === "dynamic" ? "dyn" : "static";
   if (tip.triggerKind === "general") {
-    return ladder ? `general · ${ladder}` : "general";
+    return ladder ? `general · ${ladder} · ${modeBit}` : `general · ${modeBit}`;
   }
   if (tip.triggerKind === "model") {
-    return ladder ? `model · ${ladder}` : "model";
+    return ladder ? `model · ${ladder} · ${modeBit}` : `model · ${modeBit}`;
   }
   const listBit =
     tip.triggerArea === "lists" && tip.listType && tip.listType !== tip.topic
@@ -97,7 +98,8 @@ function triggerSummary(tip: PublicTip): string {
     listBit,
   ].filter(Boolean);
   const action = `action ${actionParts.join("/")}`;
-  return ladder ? `${action} · ${ladder}` : action;
+  const base = ladder ? `${action} · ${ladder}` : action;
+  return `${base} · ${modeBit}`;
 }
 
 function truncate(text: string, max = 80): string {
@@ -127,6 +129,8 @@ function matchesSearch(tip: PublicTip, raw: string): boolean {
     tip.topic ?? "",
     tip.order,
     tip.maxShows,
+    tip.outputMode,
+    tip.minIntervalMinutes,
     triggerSummary(tip),
   ]
     .join(" ")
@@ -710,7 +714,9 @@ export function TipsPage() {
                   <th className="px-2 py-2 font-medium">Audience</th>
                   <th className="px-2 py-2 font-medium">Digital</th>
                   <th className="px-2 py-2 font-medium">Trigger</th>
+                  <th className="px-2 py-2 font-medium">פלט</th>
                   <th className="px-2 py-2 font-medium">Max</th>
+                  <th className="px-2 py-2 font-medium">דק׳</th>
                   <th className="px-2 py-2 font-medium">Order</th>
                   <th className="px-2 py-2 font-medium">On</th>
                   <th className="px-2 py-2 font-medium">Text</th>
@@ -746,7 +752,13 @@ export function TipsPage() {
                         {triggerSummary(tip)}
                       </td>
                       <td className="px-2 py-2 text-text-secondary">
+                        {tip.outputMode === "dynamic" ? "דינמי" : "סטטי"}
+                      </td>
+                      <td className="px-2 py-2 text-text-secondary">
                         {tip.maxShows}
+                      </td>
+                      <td className="px-2 py-2 text-text-secondary">
+                        {tip.minIntervalMinutes}
                       </td>
                       <td className="px-2 py-2 text-text-secondary">
                         {tip.order}

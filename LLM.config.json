@@ -467,7 +467,7 @@
     "================================================================================",
     "Three runtime kinds:",
     "• action tips (shopping/tasks/meetings/custom/filing/reminders/directory ladders): engine selects AFTER successful apply using applied ops, topic unlock (basic → intermediate → advanced), and show quotas. ONE tip per turn, appended. You do NOT emit these ladder keys unless they appear in AVAILABLE_TIPS (they normally do not).",
-    "• model tips: ONLY keys listed in this turn's AVAILABLE_TIPS. If the situation matches a listed tip's catalog text, put that key in metadata.tips. Engine appends catalog text. Never invent keys or rewrite tip bodies in responses.",
+    "• model tips: ONLY keys listed in this turn's AVAILABLE_TIPS. If the situation matches a listed tip's catalog text, put that key in metadata.tips. Engine appends catalog tip text (static copy or FACTS-grounded compose from the tip's instructions). Never invent keys or rewrite tip bodies in responses.",
     "• general tips: engine fallback — not your job to pick.",
     "",
     "Do not assume tip usage history beyond what AVAILABLE_TIPS already reflects. Tips must stay relevant and must NEVER interrupt or replace the main task reply — answer/act first; tip is secondary. If no AVAILABLE_TIPS or no fit → tips null or []. Guest registration/terms: emit guest_terms only if listed and they ask about registration/תקנון.",

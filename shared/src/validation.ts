@@ -1,6 +1,7 @@
 import {
   parseReasoningEffort,
   TIP_AUDIENCES,
+  TIP_OUTPUT_MODES,
   TIP_TIERS,
   TIP_TOPICS,
   TIP_TRIGGER_AREAS,
@@ -8,6 +9,7 @@ import {
   TIP_TRIGGER_OPS,
   type TipAudience,
   type TipInput,
+  type TipOutputMode,
   type TipTier,
   type TipTopic,
   type TipTriggerArea,
@@ -32,6 +34,8 @@ export interface TipFieldErrors {
   topic?: string;
   listType?: string;
   unlockAfterKey?: string;
+  outputMode?: string;
+  minIntervalMinutes?: string;
   maxShows?: string;
   order?: string;
   text?: string;
@@ -418,6 +422,13 @@ export function parseTipTopic(value: unknown): TipTopic | null {
     : null;
 }
 
+export function parseTipOutputMode(value: unknown): TipOutputMode | null {
+  return typeof value === "string" &&
+    (TIP_OUTPUT_MODES as readonly string[]).includes(value)
+    ? (value as TipOutputMode)
+    : null;
+}
+
 export function validateTipKey(key: unknown): string | undefined {
   if (typeof key !== "string" || key.trim().length === 0) {
     return "Key is required";
@@ -449,6 +460,8 @@ export function validateTipInput(input: {
   triggerKind?: unknown;
   triggerArea?: unknown;
   triggerOp?: unknown;
+  outputMode?: unknown;
+  minIntervalMinutes?: unknown;
   maxShows?: unknown;
   order?: unknown;
   text?: unknown;
@@ -491,6 +504,24 @@ export function validateTipInput(input: {
     }
   }
   if (
+    input.outputMode !== undefined &&
+    input.outputMode !== null &&
+    input.outputMode !== "" &&
+    !parseTipOutputMode(input.outputMode)
+  ) {
+    errors.outputMode = "Output mode must be static or dynamic";
+  }
+  if (input.minIntervalMinutes !== undefined) {
+    if (
+      typeof input.minIntervalMinutes !== "number" ||
+      !Number.isInteger(input.minIntervalMinutes) ||
+      input.minIntervalMinutes < 0
+    ) {
+      errors.minIntervalMinutes =
+        "Min interval must be an integer of at least 0";
+    }
+  }
+  if (
     typeof input.maxShows !== "number" ||
     !Number.isInteger(input.maxShows) ||
     input.maxShows < 1
@@ -522,6 +553,8 @@ export function validateTipUpdateInput(input: {
   triggerKind?: unknown;
   triggerArea?: unknown;
   triggerOp?: unknown;
+  outputMode?: unknown;
+  minIntervalMinutes?: unknown;
   maxShows?: unknown;
   order?: unknown;
   text?: unknown;
@@ -564,6 +597,24 @@ export function validateTipUpdateInput(input: {
     const idError = validateEmployeeId(input.digitalEmployeeId);
     if (idError) {
       errors.digitalEmployeeId = idError;
+    }
+  }
+  if (
+    input.outputMode !== undefined &&
+    input.outputMode !== null &&
+    input.outputMode !== "" &&
+    !parseTipOutputMode(input.outputMode)
+  ) {
+    errors.outputMode = "Output mode must be static or dynamic";
+  }
+  if (input.minIntervalMinutes !== undefined) {
+    if (
+      typeof input.minIntervalMinutes !== "number" ||
+      !Number.isInteger(input.minIntervalMinutes) ||
+      input.minIntervalMinutes < 0
+    ) {
+      errors.minIntervalMinutes =
+        "Min interval must be an integer of at least 0";
     }
   }
   if (input.maxShows !== undefined) {
@@ -612,6 +663,8 @@ export function normalizeTipInput(input: {
   topic?: TipTopic | null;
   listType?: string | null;
   unlockAfterKey?: string | null;
+  outputMode?: TipOutputMode;
+  minIntervalMinutes?: number;
 }): TipInput {
   const triggerKind = input.triggerKind;
   return {
@@ -627,6 +680,8 @@ export function normalizeTipInput(input: {
     topic: input.topic ?? null,
     listType: input.listType?.trim() || null,
     unlockAfterKey: input.unlockAfterKey?.trim() || null,
+    outputMode: input.outputMode ?? "static",
+    minIntervalMinutes: input.minIntervalMinutes ?? 0,
     maxShows: input.maxShows,
     order: input.order,
     text: input.text.trim(),
@@ -671,6 +726,12 @@ export function normalizeTipUpdateInput(input: TipUpdateInput): TipUpdateInput {
       input.unlockAfterKey === null || input.unlockAfterKey === ""
         ? null
         : String(input.unlockAfterKey).trim();
+  }
+  if (input.outputMode !== undefined) {
+    out.outputMode = input.outputMode;
+  }
+  if (input.minIntervalMinutes !== undefined) {
+    out.minIntervalMinutes = input.minIntervalMinutes;
   }
   if (input.maxShows !== undefined) {
     out.maxShows = input.maxShows;

@@ -3082,12 +3082,21 @@ export async function sendChatMessage(input: {
     // Guests: weather as main topic stays forbidden — skip even if model emitted it.
     const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
     if (weatherAction?.place.trim()) {
+      const weatherBilling = {
+        conversationId: conversation.id,
+        employeeId: employee.id,
+        digitalEmployeeId: digital.id,
+      };
       const weather = await resolveWeatherMessages({
         place: weatherAction.place,
         date: weatherAction.date,
         aspects: weatherAction.aspects,
         addressGender: employee.addressGender,
-        composeTip: composeWeatherLiveTip,
+        composeTip: (tipInput) =>
+          composeWeatherLiveTip({
+            ...tipInput,
+            billing: weatherBilling,
+          }),
       });
       workingReply = applyLiveDomainReply(
         workingReply,
@@ -3255,6 +3264,20 @@ export async function sendChatMessage(input: {
         (row) => row.action === "update" || row.action === "share_book",
       ),
     });
+    const tipTurnFactItems = listMutations
+      .filter(
+        (row) =>
+          row.action === "add" ||
+          row.action === "update" ||
+          row.action === "remove",
+      )
+      .map((row) => ({
+        listType: row.listType,
+        op: row.action,
+        itemLabel: row.itemLabel?.trim() || row.itemKey?.trim() || "",
+        itemKey: row.itemKey?.trim() || row.itemLabel?.trim() || "",
+      }))
+      .filter((row) => row.itemLabel);
     // Freeze per-bubble buttons/Waze onto the model reply BEFORE engine
     // tips/notices append, so legacy turn-level metadata.buttons are not
     // redistributed onto trailing tip bubbles.
@@ -3318,6 +3341,13 @@ export async function sendChatMessage(input: {
           digitalEmployeeId: digital.id,
           appliedOps: tipOps,
           modelTipKeys: metadata.tips ?? [],
+          turnFactItems: tipTurnFactItems,
+          addressGender: employee.addressGender,
+          billing: {
+            conversationId: conversation.id,
+            employeeId: employee.id,
+            digitalEmployeeId: digital.id,
+          },
         }),
       )) ?? { texts: [], tipIds: [] };
     const notice = [

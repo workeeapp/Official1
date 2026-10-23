@@ -194,6 +194,20 @@ export async function getTeamUsageSummary(
   return { ...totals(perEmployee), months };
 }
 
+/** Why this LlmUsages row was written (analytics / cost filters). */
+export type LlmUsagePurpose =
+  | "chat"
+  | "catalog_tip"
+  | "weather_tip"
+  | "reminder_compose";
+
+/** Billing context for ephemeral compose LLM calls (not the main chat turn). */
+export type ComposeLlmBilling = {
+  conversationId: string;
+  employeeId: string;
+  digitalEmployeeId: string;
+};
+
 export async function recordLlmUsage(input: {
   conversationId: string;
   employeeId: string;
@@ -201,6 +215,7 @@ export async function recordLlmUsage(input: {
   openaiConversationId: string;
   model: string;
   turn: LlmTurn;
+  purpose?: LlmUsagePurpose;
 }): Promise<void> {
   const usage = input.turn.usage ?? extractUsage(input.turn.raw);
   if (!usage) {
@@ -228,6 +243,7 @@ export async function recordLlmUsage(input: {
         totalTokens: usage.totalTokens,
         costUsd: price ? computeLlmCost(usage, price) : null,
         priceModel: price?.model ?? null,
+        purpose: input.purpose ?? "chat",
         usage:
           usage.raw === undefined || usage.raw === null
             ? Prisma.JsonNull

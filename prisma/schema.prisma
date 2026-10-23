@@ -93,6 +93,10 @@ model Tip {
   unlockAfterKey    String?   @map("unlock_after_key") @db.VarChar(64)
   /** Catalog seed — upserted in place by ensureDefaultTips; UI edits set false. */
   systemSeed        Boolean   @default(false) @map("system_seed")
+  /** static = Tip.text is final copy; dynamic = Tip.text is instructions + turn FACTS compose. */
+  outputMode        String    @default("static") @map("output_mode") @db.VarChar(16)
+  /** Min minutes between shows for the same speaker×digital (0 = no cooldown). */
+  minIntervalMinutes Int      @default(0) @map("min_interval_minutes")
   maxShows          Int       @default(1) @map("max_shows")
   order             Int       @default(0)
   text              String    @db.Text
@@ -184,6 +188,8 @@ model LlmUsage {
   totalTokens          Int              @default(0) @map("total_tokens")
   costUsd              Decimal?         @map("cost_usd") @db.Decimal(14, 8)
   priceModel           String?          @map("price_model") @db.VarChar(100)
+  /** chat | catalog_tip | weather_tip | reminder_compose */
+  purpose              String           @default("chat") @db.VarChar(32)
   usage                Json?
   createdAt            DateTime         @default(now()) @map("created_at")
   conversation         ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -191,6 +197,7 @@ model LlmUsage {
   @@index([conversationId, createdAt])
   @@index([employeeId, createdAt])
   @@index([digitalEmployeeId, createdAt])
+  @@index([purpose, createdAt])
   @@map("LlmUsages")
 }
 

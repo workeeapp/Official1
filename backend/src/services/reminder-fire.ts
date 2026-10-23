@@ -14,9 +14,12 @@ import {
 import { Prisma } from "@prisma/client";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
-import { isMissingTableError } from "../utils/errors.js";
+import {
+  isMissingTableError,
+  isUniqueConstraintError,
+} from "../utils/errors.js";
 import { publishChatEvent } from "./chat-events.service.js";
-import { rememberInModelConversation } from "./llm-client.js";
+import { getLlmClient, rememberInModelConversation } from "./llm-client.js";
 import { listEmployeesForUser } from "./employee.service.js";
 import { looksLikePhone, phonesMatch } from "../utils/phone.js";
 import {
@@ -38,6 +41,59 @@ import {
 } from "./flights.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
+
+/** ChatConversations row for actor×digital so reminder_compose can FK LlmUsages. */
+async function getOrCreateBillingConversation(input: {
+  userId: string;
+  employeeId: string;
+  digitalEmployeeId: string;
+}): Promise<string | null> {
+  const existing = await prisma.chatConversation.findUnique({
+    where: {
+      userId_employeeId_digitalEmployeeId: {
+        userId: input.userId,
+        employeeId: input.employeeId,
+        digitalEmployeeId: input.digitalEmployeeId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return existing.id;
+  }
+  try {
+    const openaiConversationId = await getLlmClient().createConversation();
+    const created = await prisma.chatConversation.create({
+      data: {
+        userId: input.userId,
+        employeeId: input.employeeId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        openaiConversationId,
+      },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) {
+      recordWhatsAppEvent(
+        "reminder_compose_billing_conv_fail",
+        error instanceof Error ? error.message : "unknown",
+      );
+      return null;
+    }
+    const raced = await prisma.chatConversation.findUnique({
+      where: {
+        userId_employeeId_digitalEmployeeId: {
+          userId: input.userId,
+          employeeId: input.employeeId,
+          digitalEmployeeId: input.digitalEmployeeId,
+        },
+      },
+      select: { id: true },
+    });
+    return raced?.id ?? null;
+  }
+}
 import { recordAuditEvent } from "./audit.service.js";
 import {
   deliverAttachmentsToPhone,
@@ -566,6 +622,27 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           ? firstTarget.addressGender
           : null;
 
+      let composeBilling:
+        | {
+            conversationId: string;
+            employeeId: string;
+            digitalEmployeeId: string;
+          }
+        | null = null;
+      if (actor && speaker) {
+        const billingConversationId = await getOrCreateBillingConversation({
+          userId: reminder.userId,
+          employeeId: actor.id,
+          digitalEmployeeId: speaker.id,
+        });
+        if (billingConversationId) {
+          composeBilling = {
+            conversationId: billingConversationId,
+            employeeId: actor.id,
+            digitalEmployeeId: speaker.id,
+          };
+        }
+      }
       const composed = await composeScheduledOutbound({
         brief: reminder.messageText,
         itemLabel: reminder.itemLabel,
@@ -575,6 +652,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         facts: factsBundle,
         watch: isWatch,
         addressGender: recipientGender,
+        billing: composeBilling,
       });
       const resolved = resolveComposeFireOutbound({
         brief: reminder.messageText,

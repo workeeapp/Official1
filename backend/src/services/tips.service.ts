@@ -4,6 +4,7 @@ import type {
   PublicTip,
   TipAudience,
   TipInput,
+  TipOutputMode,
   TipTier,
   TipTopic,
   TipTriggerArea,
@@ -15,6 +16,7 @@ import {
   isGuestEmployee,
   isGuestLucy,
   normalizeEmployeePhone,
+  parseTipOutputMode,
   parseTipTier,
   parseTipTopic,
 } from "@workee/shared";
@@ -33,6 +35,12 @@ import {
   areaFromTopic,
   topicFromListType,
 } from "./tip-catalog.js";
+import type { ComposeLlmBilling } from "./llm-usage.service.js";
+import {
+  composeCatalogTip,
+  renderStaticTipText,
+  type TipComposeFacts,
+} from "./tip-compose.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
 
 const LUCY_NAME = "לוסי";
@@ -43,6 +51,14 @@ export interface AppliedTipOp {
   /** shopping | tasks | custom | filing | reminders | contacts */
   listType?: string | null;
   topic?: TipTopic | null;
+}
+
+/** One applied list mutation label for tip FACTS / static placeholders. */
+export interface TipTurnFactItem {
+  listType: string;
+  op: string;
+  itemLabel: string;
+  itemKey?: string;
 }
 
 export interface TipTurnResult {
@@ -73,6 +89,8 @@ function toPublicTip(row: TipWithDigital): PublicTip {
     listType: row.listType ?? null,
     unlockAfterKey: row.unlockAfterKey ?? null,
     systemSeed: row.systemSeed === true,
+    outputMode: (parseTipOutputMode(row.outputMode) ?? "static") as TipOutputMode,
+    minIntervalMinutes: row.minIntervalMinutes ?? 0,
     maxShows: row.maxShows,
     order: row.order,
     text: row.text,
@@ -184,6 +202,8 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
       listType: seed.listType,
       unlockAfterKey: seed.unlockAfterKey,
       systemSeed: true,
+      outputMode: "static",
+      minIntervalMinutes: 0,
       maxShows: seed.maxShows,
       order: seed.order,
       text: seed.text,
@@ -259,6 +279,8 @@ export async function createTipForUser(
         listType: input.listType ?? null,
         unlockAfterKey: input.unlockAfterKey ?? null,
         systemSeed: false,
+        outputMode: input.outputMode ?? "static",
+        minIntervalMinutes: input.minIntervalMinutes ?? 0,
         maxShows: input.maxShows,
         order: input.order,
         text: input.text,
@@ -336,6 +358,12 @@ export async function updateTipForUser(
       ...(input.unlockAfterKey !== undefined
         ? { unlockAfterKey: input.unlockAfterKey }
         : {}),
+      ...(input.outputMode !== undefined
+        ? { outputMode: input.outputMode }
+        : {}),
+      ...(input.minIntervalMinutes !== undefined
+        ? { minIntervalMinutes: input.minIntervalMinutes }
+        : {}),
       ...(input.maxShows !== undefined ? { maxShows: input.maxShows } : {}),
       ...(input.order !== undefined ? { order: input.order } : {}),
       ...(input.text !== undefined ? { text: input.text } : {}),
@@ -364,14 +392,23 @@ export async function deleteTipForUser(
   await prisma.tip.delete({ where: { id: tipId } });
 }
 
-/** Send tip text to TIPS_PREVIEW_PHONE (Tips admin preview). */
+/** Sample FACTS for admin preview (static substitute / dynamic compose). */
+const PREVIEW_TIP_FACTS: TipComposeFacts = {
+  list_type: "shopping",
+  op: "add",
+  item_label: "חלב",
+  item_key: "חלב",
+  items: ["חלב"],
+};
+
+/** Send tip text to TIPS_PREVIEW_PHONE (Tips admin preview). No LlmUsages. */
 export async function sendTipForUser(
   userId: string,
   tipId: string,
 ): Promise<void> {
   const tip = await prisma.tip.findFirst({
     where: { id: tipId, userId },
-    select: { id: true, text: true },
+    select: { id: true, text: true, outputMode: true },
   });
   if (!tip) {
     throw new NotFoundError("Tip not found");
@@ -380,9 +417,30 @@ export async function sendTipForUser(
   if (!phone) {
     throw new ValidationError("Tips preview phone is not configured");
   }
-  const text = tip.text.trim();
-  if (!text) {
+  const instructions = tip.text.trim();
+  if (!instructions) {
     throw new ValidationError("Tip text is empty");
+  }
+  let text: string | null = instructions;
+  const mode = parseTipOutputMode(tip.outputMode) ?? "static";
+  if (mode === "dynamic") {
+    text = await composeCatalogTip({
+      instructions,
+      facts: PREVIEW_TIP_FACTS,
+    });
+  } else {
+    text = renderStaticTipText(instructions, PREVIEW_TIP_FACTS);
+    // No placeholders → verbatim template.
+    if (text === null && !/\{[a-z_]+\}/.test(instructions)) {
+      text = instructions;
+    }
+  }
+  if (!text?.trim()) {
+    throw new ValidationError(
+      mode === "dynamic"
+        ? "Dynamic tip preview compose failed or returned empty"
+        : "Static tip preview could not substitute placeholders (need sample FACTS)",
+    );
   }
   await sendWhatsAppText(phone, text, { ignoreSession: true });
 }
@@ -411,12 +469,51 @@ function underQuota(showCount: number, maxShows: number): boolean {
   return showCount < maxShows;
 }
 
+/** True when minIntervalMinutes is 0 or enough time passed since lastShownAt. */
+export function tipCooldownOk(
+  lastShownAt: Date | null | undefined,
+  minIntervalMinutes: number,
+  now: Date = new Date(),
+): boolean {
+  if (!minIntervalMinutes || minIntervalMinutes <= 0) {
+    return true;
+  }
+  if (!lastShownAt) {
+    return true;
+  }
+  return (
+    now.getTime() - lastShownAt.getTime() >= minIntervalMinutes * 60_000
+  );
+}
+
 function tipTopic(tip: Tip): TipTopic | null {
   return parseTipTopic(tip.topic) ?? topicFromListType(tip.listType);
 }
 
 function tipTier(tip: Tip): TipTier {
   return parseTipTier(tip.tier) ?? "basic";
+}
+
+function tipOutputMode(tip: Tip): TipOutputMode {
+  return parseTipOutputMode(tip.outputMode) ?? "static";
+}
+
+function buildComposeFactsFromTurn(
+  factItems: TipTurnFactItem[] | undefined,
+): TipComposeFacts {
+  const items = (factItems ?? [])
+    .map((row) => row.itemLabel.trim())
+    .filter(Boolean);
+  const primary = factItems?.[0];
+  const label = items[0] ?? null;
+  const key = primary?.itemKey?.trim() || label;
+  return {
+    list_type: primary?.listType?.trim() || null,
+    op: primary?.op?.trim() || null,
+    item_label: label,
+    item_key: key,
+    items,
+  };
 }
 
 /** Build applied ops from this turn's engine results. */
@@ -638,9 +735,24 @@ function isUnlocked(
   });
 }
 
+function tipEligibleByQuotaAndCooldown(
+  tip: Tip,
+  showCountByTip: Map<string, number>,
+  lastShownByTip: Map<string, Date>,
+): boolean {
+  if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
+    return false;
+  }
+  return tipCooldownOk(
+    lastShownByTip.get(tip.id),
+    tip.minIntervalMinutes ?? 0,
+  );
+}
+
 /**
  * Resolve which tip texts to append this turn and bump progress.
  * Action/model first (one tip); general only if none contextual.
+ * Dynamic tips: compose from tip.text + turn FACTS; fail/empty → skip (no progress).
  */
 export async function resolveAndRecordTipsForTurn(input: {
   userId: string;
@@ -648,6 +760,11 @@ export async function resolveAndRecordTipsForTurn(input: {
   digitalEmployeeId: string;
   appliedOps: AppliedTipOp[];
   modelTipKeys: string[];
+  /** Applied list item labels for tip FACTS / static placeholders. */
+  turnFactItems?: TipTurnFactItem[];
+  addressGender?: "male" | "female" | null;
+  /** Chat conversation for catalog_tip LlmUsages (required for dynamic). */
+  billing?: ComposeLlmBilling | null;
 }): Promise<TipTurnResult> {
   await ensureDefaultTips(input.userId);
   const speakerIsGuest = isGuestEmployee(input.speaker);
@@ -674,6 +791,9 @@ export async function resolveAndRecordTipsForTurn(input: {
   const showCountByTip = new Map(
     progressRows.map((row) => [row.tipId, row.showCount] as const),
   );
+  const lastShownByTip = new Map(
+    progressRows.map((row) => [row.tipId, row.lastShownAt] as const),
+  );
   const keyToTipId = new Map(eligible.map((tip) => [tip.key, tip.id] as const));
 
   const candidates: Tip[] = [];
@@ -681,7 +801,7 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (tip.triggerKind !== "action") {
       continue;
     }
-    if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
+    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip)) {
       continue;
     }
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
@@ -703,7 +823,7 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (!modelKeys.has(tip.key)) {
       continue;
     }
-    if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
+    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip)) {
       continue;
     }
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
@@ -727,7 +847,7 @@ export async function resolveAndRecordTipsForTurn(input: {
       if (tip.triggerKind !== "general") {
         return false;
       }
-      return underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows);
+      return tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip);
     });
     if (generals.length > 0) {
       const minShown = Math.min(
@@ -742,10 +862,30 @@ export async function resolveAndRecordTipsForTurn(input: {
   if (!chosen) {
     return { texts: [], tipIds: [] };
   }
-  const body = chosen.text.trim();
-  if (!body) {
+
+  const instructions = chosen.text.trim();
+  if (!instructions) {
     return { texts: [], tipIds: [] };
   }
+
+  const facts = buildComposeFactsFromTurn(input.turnFactItems);
+  let body: string | null;
+  if (tipOutputMode(chosen) === "dynamic") {
+    body = await composeCatalogTip({
+      instructions,
+      facts,
+      addressGender: input.addressGender,
+      billing: input.billing,
+    });
+  } else if (/\{[a-z_]+\}/.test(instructions)) {
+    body = renderStaticTipText(instructions, facts);
+  } else {
+    body = instructions;
+  }
+  if (!body?.trim()) {
+    return { texts: [], tipIds: [] };
+  }
+
   await recordTipShown({
     tipId: chosen.id,
     employeeId: input.speaker.id,
@@ -788,17 +928,21 @@ export async function formatAvailableTipsContext(input: {
   const showCountByTip = new Map(
     progressRows.map((row) => [row.tipId, row.showCount] as const),
   );
+  const lastShownByTip = new Map(
+    progressRows.map((row) => [row.tipId, row.lastShownAt] as const),
+  );
   const remaining = eligible.filter((tip) =>
-    underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows),
+    tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip),
   );
   if (remaining.length === 0) {
     return "";
   }
   return [
-    "AVAILABLE_TIPS (match this turn's chat to each tip's catalog text; when it fits, emit that key in metadata.tips — engine appends the text; never invent keys or rewrite tip copy in responses):",
+    "AVAILABLE_TIPS (match this turn's chat to each tip's catalog text; when it fits, emit that key in metadata.tips — engine appends catalog tip text, static or FACTS-grounded; never invent keys or rewrite tip copy in responses):",
     ...remaining.map((tip) => {
       const body = tip.text.trim().replace(/\s+/g, " ");
-      return `- key=${tip.key} text: ${body}`;
+      const mode = tipOutputMode(tip);
+      return `- key=${tip.key} output=${mode} text: ${body}`;
     }),
   ].join("\n");
 }

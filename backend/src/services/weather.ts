@@ -606,6 +606,11 @@ export type WeatherMessagesResult = {
 type WeatherTipComposer = (input: {
   factsBody: string;
   addressGender?: "male" | "female" | null;
+  billing?: {
+    conversationId: string;
+    employeeId: string;
+    digitalEmployeeId: string;
+  } | null;
 }) => Promise<string | null>;
 
 /** Resolve live weather ACTION → one or two spoken bubbles. */
