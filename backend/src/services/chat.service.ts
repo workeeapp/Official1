@@ -633,8 +633,8 @@ export function buildLucyModelEvalInstructions(input: {
     OPEN_JOBS_RULES,
     "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
     "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently. Do not claim you lack a fact that appears there.",
-    "FILING REMOVE: מחק/תמחק a code/address/doc that appears under EMPLOYEE_SAVED_DATA.filing (*תיוקים*) → remove_filing with EXACT item_name from that JSON. lists=[]. Never lists.remove for filings.",
-    "FILING UPDATE: שנה/עדכני a filing value → update_filing with EXACT item_name from EMPLOYEE_SAVED_DATA.filing + new item_info. lists=[]. Never lists.update for filings.",
+    "FILING REMOVE: מחק/תמחק a filing under EMPLOYEE_SAVED_DATA.filing (*תיוקים*) or line N after a תיוקים dump → remove_filing with filing_id from THIS turn (LAST_NUMBERED_DUMP id for that n, or the row's filing_id). lists=[]. Never lists.remove for filings. Never invent ids.",
+    "FILING UPDATE: שנה/עדכני a filing → update_filing with filing_id from THIS turn + new fields. lists=[]. Never lists.update for filings.",
     "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
     "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks.",
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
@@ -1725,7 +1725,7 @@ export async function sendChatMessage(input: {
           : "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
         guestSpeaker
           ? ""
-          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / מטלות / תיוקים / הצג רשימת מטלות|קניות|אנשי קשר): pick ONE category. For shopping|tasks|contacts|filings set metadata.show_dump = shopping|tasks|contacts|filings and lists=[] — the server replaces response with the live dump. ABOUT X («מה מיכל צריכה לקנות» / מטלות של טל) → same show_dump + show_dump_about=X. Filings/contacts = two-section share-only (אישיים→משותפים with (עם …); never assign). Bare FULL DUMP («מה יש לי» / הציגי הכל) → show_dump=full (not a category). Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
+          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / מטלות / תיוקים / הצג רשימת מטלות|קניות|אנשי קשר): pick ONE category. For shopping|tasks|contacts|filings set metadata.show_dump = shopping|tasks|contacts|filings and lists=[] — the server replaces response with the live dump. ABOUT X («מה מיכל צריכה לקנות» / מטלות של טל) → same show_dump + show_dump_about=X. All domains use the same dump marks: co-share (A, B) and assign (באחריות X · מאת Y). Bare FULL DUMP («מה יש לי» / הציגי הכל) → show_dump=full (not a category). Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
         guestSpeaker
           ? ""
           : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / מטלות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → show_dump=full (+ show_dump_about=X).",
@@ -2523,6 +2523,15 @@ export async function sendChatMessage(input: {
       (row) => row.action === "add" && !row.listShell,
     );
     const appliedListOps = listOpResults.some((row) => row.applied);
+    const appliedFilingRemove = filingMutations.some(
+      (row) => row.action === "remove",
+    );
+    const appliedFilingUpdate = filingMutations.some(
+      (row) => row.action === "update",
+    );
+    const appliedFilingAdd = filingMutations.some(
+      (row) => row.action === "add",
+    );
     const listOpFallback = formatListOpFallback(listOpResults);
     const appliedFallback = formatAppliedMutationFallback(
       listMutations,
@@ -2542,14 +2551,27 @@ export async function sendChatMessage(input: {
             ? "בוצע."
             : "") ||
         listOpFallback ||
-        (appliedListRemove || appliedListUpdate || appliedListAdd
+        (appliedListRemove ||
+        appliedListUpdate ||
+        appliedListAdd ||
+        appliedFilingRemove ||
+        appliedFilingUpdate ||
+        appliedFilingAdd
           ? appliedFallback
           : "") ||
         reminderDeleteFallback ||
-        (!appliedListOps && requestedListRemove && !appliedListRemove
+        (!appliedListOps &&
+        !appliedFilingRemove &&
+        !appliedFilingUpdate &&
+        requestedListRemove &&
+        !appliedListRemove
           ? LIST_FIND_MISS
           : "") ||
-        (!appliedListOps && requestedListUpdate && !appliedListUpdate
+        (!appliedListOps &&
+        !appliedFilingRemove &&
+        !appliedFilingUpdate &&
+        requestedListUpdate &&
+        !appliedListUpdate
           ? LIST_FIND_MISS
           : "");
       if (fallback) {
@@ -2568,6 +2590,8 @@ export async function sendChatMessage(input: {
       setResponse: setEngineResponse,
       spoken: parseLlmReply(workingReply).response,
       appliedListOps,
+      appliedFilingRemove,
+      appliedFilingUpdate,
     });
     if (
       requestedListRemove &&

@@ -923,9 +923,9 @@ export function navigateAddressFromFilingsDump(
   return addresses.length === 1 ? addresses[0]! : null;
 }
 
-/** Two-section share-only dump (no assign / של X). */
 /**
- * Filings dump — one header + co-share marks (share-only, no assign).
+ * Filings dump — one header; co-share `(A, B)` and assign `(באחריות X · מאת Y)`
+ * same as shopping/tasks.
  */
 export function formatFilingsDump(
   rows: EmployeeRecordSnapshot["filing"],
@@ -938,10 +938,24 @@ export function formatFilingsDump(
   );
   const collected: DumpItem[] = rows.map((row) => {
     const title = formatFilingDumpBody(row);
+    const assignedBy = (row.assigned_by ?? "").trim();
     const sharedWith = (row.shared_with ?? [])
       .map((name) => name.trim())
       .filter(Boolean);
     const partners = sharedWith.filter((name) => !viewerNames.has(name));
+    if (assignedBy && partners.length === 0) {
+      const owner = (row.owner ?? "").trim();
+      const assignee = owner || viewer;
+      const mark = formatAssignResponsibilityMark(assignee, assignedBy);
+      return {
+        title,
+        item: row as unknown as Record<string, unknown>,
+        isShared: true,
+        partnerFilterKey: assignedBy,
+        assigneeName: assignee || undefined,
+        ...(mark ? { responsibilityMark: mark } : {}),
+      };
+    }
     const isShared = row.scope === "shared" && partners.length > 0;
     const allInvolved = isShared
       ? allInvolvedNames(sharedWith, viewer, aliases)
@@ -2440,9 +2454,8 @@ export function partnerBucketMatches(
 }
 
 /**
- * Co-share mark for a custom-list row (all involved). No assign/הטלה on custom.
- * Whole-list scope=shared → no per-line mark. Prefer item.shared_with; on
- * shared_items without it, synthesize owner+viewer as co-partners.
+ * Row mark for a custom-list item: assign `(באחריות X · מאת Y)` or co-share
+ * `(A, B)`. Whole-list scope=shared → no per-line mark.
  */
 export function customItemCoShareMark(
   list: EmployeeRecordSnapshot["lists"][number],
@@ -2453,7 +2466,14 @@ export function customItemCoShareMark(
   if (list.scope === "shared") {
     return undefined;
   }
+  const assignedBy =
+    typeof item.assigned_by === "string" ? item.assigned_by.trim() : "";
   const sharedWith = stringArray(item.shared_with);
+  if (assignedBy && sharedWith.length === 0) {
+    const owner = (list.owner ?? "").trim() || viewerName.trim();
+    const mark = formatAssignResponsibilityMark(owner, assignedBy);
+    return mark.trim() ? mark : undefined;
+  }
   if (sharedWith.length > 0) {
     const mark = allInvolvedNames(sharedWith, viewerName, viewerAliases);
     return mark.trim() ? mark : undefined;
@@ -2462,6 +2482,10 @@ export function customItemCoShareMark(
     const owner = (list.owner ?? "").trim();
     if (!owner) {
       return undefined;
+    }
+    if (assignedBy) {
+      const mark = formatAssignResponsibilityMark(owner, assignedBy);
+      return mark.trim() ? mark : undefined;
     }
     const mark = allInvolvedNames([owner], viewerName, viewerAliases);
     return mark.trim() ? mark : undefined;

@@ -109,6 +109,8 @@ export interface EmployeeRecordSnapshot {
     scope: ItemScope;
     /** Partner display names when scope is shared (includes owner). */
     shared_with?: string[];
+    /** Assigner display name when addedById ≠ filing owner (הטלה). */
+    assigned_by?: string;
   }>;
   reminders?: ReminderSnapshotRow[];
 }
@@ -548,6 +550,9 @@ export function correctListMutationClaimReply(input: {
   spoken?: string;
   /** True when any metadata.list_ops row applied this turn. */
   appliedListOps?: boolean;
+  /** True when remove_filing / update_filing applied this turn. */
+  appliedFilingRemove?: boolean;
+  appliedFilingUpdate?: boolean;
 }): string {
   const {
     requestedRemove,
@@ -559,7 +564,10 @@ export function correctListMutationClaimReply(input: {
     appliedFallback,
     setResponse,
     appliedListOps,
+    appliedFilingRemove,
+    appliedFilingUpdate,
   } = input;
+  const filingApplied = Boolean(appliedFilingRemove || appliedFilingUpdate);
   if (appliedListOps) {
     if (requestedAdd && !appliedAdd) {
       if (appliedRemove || appliedUpdate || appliedFallback.trim()) {
@@ -568,6 +576,10 @@ export function correctListMutationClaimReply(input: {
       }
       return setResponse(input.reply, LIST_ADD_MISS);
     }
+    return input.reply;
+  }
+  // Successful filing mutate — never overwrite with list-item miss (e.g. «מחקי 15»).
+  if (filingApplied) {
     return input.reply;
   }
   if (
@@ -691,8 +703,8 @@ export function formatEmployeeContext(
     "BY LINE NUMBER: after a numbered dump, spoken indices («3» / «ל3» / «תמחק את 3») map to LAST_NUMBERED_DUMP for that n when present (copy id+kind) — else match dump line N's title stem (שם פריט / שם מטלה / item_name / reminder item; strip quantity, marks, urgency wrap) to an id in THIS JSON. FORBIDDEN treating N as JSON array index when that picks a different row than dump line N. Shopping/tasks JSON order is personal → co-share → assign per list only; dump numbering may span several shells. Numbering restarts per header / day / ממתינים; several 1. sequences → ASK which section if ambiguous. Unique → ACTION NOW; ≥2 same stem → ASK.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value), and optional item_description (מידע לחיפוש — find-helper context words). Find the right filing by item_name + item_info + item_description. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
-    "scope=shared_items shopping/tasks: work the viewer ASSIGNED onto owner X (assigner view). Flat dumps show those rows under one «קניות/מטלות:» header with mark «(באחריות X · מאת <assigner>)». Custom shared_items: ONE «רשימת «name»:» with co-share mark «(A, B)» all involved (no assign). «איזה רשימות משותפות יש לי» → only scope=shared entries.",
-    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list owner. Dump shopping/tasks/contacts/custom: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign within each list shell (dump line N is global — use LAST_NUMBERED_DUMP or title stem, not array index).",
+    "scope=shared_items: work the viewer ASSIGNED onto owner X (assigner view) for shopping/tasks/contacts/custom. Flat dumps show those rows under one list header with mark «(באחריות X · מאת <assigner>)». Filings use the same assigned_by field when the row lives on someone else's book. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
+    "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list/filing owner. Dump shopping/tasks/contacts/custom/filings: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign within each list shell (dump line N is global — use LAST_NUMBERED_DUMP or title stem, not array index).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
     "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למטלה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
     "Each list has list_id (copy into lists alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
@@ -3423,6 +3435,7 @@ function toFilingSnapshotRow(
     ...(sharedWith && sharedWith.length > 0
       ? { shared_with: sharedWith }
       : {}),
+    ...assignedByField(filing.employeeId, filing.addedById, names),
   };
 }
 

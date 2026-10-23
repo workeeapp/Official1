@@ -203,7 +203,7 @@ export interface LlmDirectoryAction {
   phone: string;
   /** Copy from this turn's SPEAKER_CONTACTS[].contact_id on remove/update. */
   contactId: string;
-  /** Co-share partners (share-only — speaker stays owner). Empty = personal. */
+  /** Co-share (speaker+partners) or assign (partners only) — same as list items. Empty = personal. */
   targets: string[];
   /** update / share_book: partner names to drop from visible_to. */
   unshareWith?: string[];

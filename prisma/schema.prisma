@@ -476,7 +476,7 @@ model ContactBook {
 }
 
 // Personal phone book for a human employee (POC). Later: ownerEmployeeId null = business-wide.
-// Row share (Stage 1): scope/visible_to like filings — co-share only, never assign.
+// Row share/assign: scope/visible_to + addedById — same co-share vs הטלה rules as list items.
 model Contact {
   id               String   @id @default(uuid()) @db.Uuid
   userId           String   @map("user_id") @db.Uuid

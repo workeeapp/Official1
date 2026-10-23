@@ -577,6 +577,44 @@ describe("employee records", () => {
     ).toBe(LIST_FIND_MISS);
   });
 
+  it("keeps מחקתי when remove_filing applied (line-index filing delete)", () => {
+    const reply = "מחקתי את התיוק «קוד שער».";
+    expect(
+      correctListMutationClaimReply({
+        reply,
+        requestedRemove: false,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: 'הסרתי תיוק: «קוד שער».',
+        setResponse: (_r, response) => response,
+        spoken: reply,
+        appliedFilingRemove: true,
+      }),
+    ).toBe(reply);
+  });
+
+  it("does not LIST_FIND_MISS when lists.remove missed but remove_filing applied", () => {
+    const reply = "מחקתי את 15.";
+    expect(
+      correctListMutationClaimReply({
+        reply,
+        requestedRemove: true,
+        requestedUpdate: false,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: 'הסרתי תיוק: «קוד שער».',
+        setResponse: (_r, response) => response,
+        spoken: reply,
+        appliedFilingRemove: true,
+      }),
+    ).toBe(reply);
+  });
+
   it("does not force LIST_FIND_MISS when list_ops applied despite failed lists.remove", () => {
     const reply = "מחקתי את שלוש רשימות המשתתפים.";
     expect(

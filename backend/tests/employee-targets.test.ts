@@ -2489,7 +2489,7 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.metadata.lists[0]?.listType).toBe("shopping");
   });
 
-  it("forces filing co-share on the speaker when targets omit the speaker", () => {
+  it("assigns filing onto the other person when targets omit the speaker", () => {
     const plan = planTargetedActions({
       actor: tal,
       employees,
@@ -2506,15 +2506,39 @@ describe("employee targets", () => {
       },
     });
     expect(plan.applications).toHaveLength(1);
-    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.employeeId).toBe(amit.id);
     expect(plan.applications[0]?.visibility).toMatchObject({
-      scope: "shared",
+      addedById: tal.id,
       visibleTo: expect.arrayContaining([tal.id, amit.id]),
     });
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
   });
 
-  it("forces contacts co-share on the speaker (share-only, no assign fan-out)", () => {
+  it("co-shares filing on the speaker when targets include speaker+partner", () => {
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      metadata: {
+        ...emptyLlmMetadata(),
+        filing: [
+          {
+            action: "add_filing",
+            itemName: "קוד שער",
+            itemInfo: "1234",
+            targets: ["טל", "עמית"],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.visibility).toMatchObject({
+      scope: "shared",
+      visibleTo: expect.arrayContaining([tal.id, amit.id]),
+    });
+  });
+
+  it("assigns contacts onto the other person when targets omit the speaker", () => {
     const plan = planTargetedActions({
       actor: tal,
       employees,
@@ -2532,8 +2556,8 @@ describe("employee targets", () => {
       },
     });
     expect(plan.applications).toHaveLength(1);
-    expect(plan.applications[0]?.employeeId).toBe(tal.id);
-    expect(plan.applications[0]?.visibility?.scope).toBe("shared");
+    expect(plan.applications[0]?.employeeId).toBe(amit.id);
+    expect(plan.applications[0]?.visibility?.addedById).toBe(tal.id);
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
   });
 

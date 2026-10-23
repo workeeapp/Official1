@@ -231,8 +231,8 @@ const SHARED_CONTACT_RULES = [
   "→ Same turn: directory=[] and ASK «לשמור את «name» (phone) בספר הטלפונים שלך?». כן → directory add (name + first phone). לא → directory=[]; acknowledge. Several clearly different phones on one card → ask which to save first (directory []).",
   "Already in SPEAKER_CONTACTS with the same phone → say it is already saved; do not re-add silently. Same name with a different phone → ASK whether to update; on כן → directory remove (old contact_id) + add (new phone).",
   "A card without any phone cannot be saved — say so. A card without a name → ask what name to save it under (directory []).",
-  "SHARE ONE CONTACT: directory add/update MAY include targets (partner names). Speaker stays owner; partners see the row via shared_with.",
-  "SHARE WHOLE PHONE BOOK: «שתף את ספר הטלפונים עם עמית» → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners. Never assign a contact onto someone else's book.",
+  "SHARE / ASSIGN ONE CONTACT: directory add/update MAY include targets. Speaker+partners → speaker-owned co-share (shared_with). Partners only (speaker omitted) → assign onto each assignee's phone book (addedById = speaker). Same as shopping/tasks.",
+  "SHARE WHOLE PHONE BOOK: «שתף את ספר הטלפונים עם עמית» → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners (whole-book share, not item assign).",
 ];
 
 export function formatSpeakerContacts(
@@ -498,11 +498,65 @@ export async function applyDirectoryActions(input: {
       continue;
     }
 
+    const rawTargets = action.targets ?? [];
     const partnerIds = resolveDirectoryPartnerIds(
-      action.targets ?? [],
+      rawTargets,
       employees,
       input.ownerEmployeeId,
     );
+    const actorInTargets = directoryTargetsIncludeActor(
+      rawTargets,
+      employees,
+      input.ownerEmployeeId,
+    );
+    // Assign: partners only → row on each assignee's book (same as shopping/tasks).
+    if (!actorInTargets && partnerIds.length > 0) {
+      const directoryMeta: LlmMetadata = {
+        ...emptyLlmMetadata(),
+        directory: [{ ...action, targets: rawTargets }],
+      };
+      for (const partnerId of partnerIds) {
+        const visibleTo = uniqueIds([input.ownerEmployeeId, partnerId]);
+        const row = await prisma.contact.upsert({
+          where: {
+            ownerEmployeeId_phone: {
+              ownerEmployeeId: partnerId,
+              phone,
+            },
+          },
+          create: {
+            userId: input.userId,
+            ownerEmployeeId: partnerId,
+            name,
+            phone,
+            kind: "personal",
+            addedById: input.ownerEmployeeId,
+            scope: "shared",
+            visibleTo,
+          },
+          update: {
+            name,
+            kind: "personal",
+            scope: "shared",
+            visibleTo,
+            addedById: input.ownerEmployeeId,
+          },
+        });
+        saved.push({
+          id: row.id,
+          name: row.name,
+          phone: row.phone,
+          kind: row.kind,
+          scope: "shared",
+        });
+        shareNotices.push({
+          employeeId: partnerId,
+          metadata: directoryMeta,
+        });
+      }
+      continue;
+    }
+
     const inherited = bookPartnerIds.filter(
       (id) => id !== input.ownerEmployeeId,
     );
@@ -552,7 +606,7 @@ export async function applyDirectoryActions(input: {
     if (partnerIds.length > 0) {
       const directoryMeta: LlmMetadata = {
         ...emptyLlmMetadata(),
-        directory: [{ ...action, targets: action.targets ?? [] }],
+        directory: [{ ...action, targets: rawTargets }],
       };
       for (const partnerId of partnerIds) {
         shareNotices.push({
@@ -600,6 +654,27 @@ function resolveDirectoryPartnerIds(
     }
   }
   return [...ids];
+}
+
+/** Empty / «all» / actor named in targets → speaker keeps ownership (co-share or personal). */
+function directoryTargetsIncludeActor(
+  rawTargets: string[],
+  employees: PublicEmployee[],
+  actorId: string,
+): boolean {
+  if (rawTargets.length === 0) {
+    return true;
+  }
+  for (const raw of rawTargets) {
+    if (/^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i.test(raw.trim())) {
+      return true;
+    }
+    const matched = matchDirectoryTarget(raw, employees);
+    if (matched?.id === actorId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function matchDirectoryTarget(

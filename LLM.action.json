@@ -1035,7 +1035,7 @@
                   "maxLength": 80
                 },
                 "maxLength": 80,
-                "description": "shopping/tasks only: responsibility filter — self (speaker) and/or display name(s). string or string[] — multiple = OR (עליי או מיכל). null = no filter. Ignored for contacts/filings. Multi-name co-share marks are excluded when set. AND with other dump filters."
+                "description": "responsibility filter for assign marks — self (speaker) and/or display name(s). string or string[] — multiple = OR (עליי או מיכל). null = no filter. Applies to shopping/tasks/contacts/filings/custom when assign marks exist. Multi-name co-share marks are excluded when set. AND with other dump filters."
               },
               "show_dump_about": {
                 "type": [

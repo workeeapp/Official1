@@ -664,10 +664,6 @@ function withoutUnshareField(
   return rest;
 }
 
-function isOwnShoppingOrTasks(listType: string): boolean {
-  return listType === "shopping" || listType === "tasks";
-}
-
 /** Route item_id mutates to the row owner (shopping/tasks/contacts). */
 function isBuiltinItemIdRoute(listType: string): boolean {
   return (
@@ -677,9 +673,20 @@ function isBuiltinItemIdRoute(listType: string): boolean {
   );
 }
 
-/** Contacts (and later directory): share-only — never assign onto someone else's book. */
-function isShareOnlyListType(listType: string): boolean {
-  return listType === "contacts";
+/**
+ * Item co-share vs assign (same rule for every list-like domain):
+ * speaker ∈ human targets + ≥1 human partner → one speaker-owned shared row;
+ * partners only → fan-out onto each assignee's book (הטלה).
+ */
+function isItemCoShareAdd(
+  actorId: string,
+  humanTargets: PublicEmployee[],
+): boolean {
+  const humanPartners = humanTargets.filter((target) => target.id !== actorId);
+  return (
+    humanTargets.some((target) => target.id === actorId) &&
+    humanPartners.length > 0
+  );
 }
 
 /**
@@ -1037,16 +1044,13 @@ export function planTargetedActions(input: {
     const humanPartnerTargets = humanTargets.filter(
       (target) => target.id !== input.actor.id,
     );
-    // Shopping/tasks: co-share only when speaker is in targets (else = assign).
-    // Contacts: always speaker-owned co-share when partners present (share-only).
+    // All item list types: co-share when speaker ∈ targets; else assign fan-out.
     const sharedSingleRow =
       normalizedList.action === "add" &&
-      ((isOwnShoppingOrTasks(normalizedList.listType) &&
-        humanTargets.some((target) => target.id === input.actor.id) &&
-        humanPartnerTargets.length > 0) ||
-        (isShareOnlyListType(normalizedList.listType) &&
-          (humanPartnerTargets.length > 0 ||
-            isAllTarget(normalizedList.targets))));
+      (isItemCoShareAdd(input.actor.id, humanTargets) ||
+        (isAllTarget(normalizedList.targets) &&
+          humanPartnerTargets.length > 0 &&
+          humanTargets.some((target) => target.id === input.actor.id)));
     if (sharedSingleRow) {
       // One row on the speaker's list; partners see it through visible_to.
       const shareVisibility = visibilityFor(
@@ -1164,11 +1168,12 @@ export function planTargetedActions(input: {
       input.workers,
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
-    const humanOthers = others.filter((target) => !isDigitalEmployee(target));
-    // Share-only: any human partner → one filing on the speaker (never assignee fan-out).
+    const humanTargets = targets.filter(
+      (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
+    );
+    // Same as lists: speaker ∈ targets + partner → co-share; partners only → assign.
     const coshare =
-      humanOthers.length > 0 ||
-      isAllTarget(filing.targets) ||
+      isItemCoShareAdd(input.actor.id, humanTargets) ||
       isSharedCollectionAction(
         "filing",
         null,
@@ -1176,7 +1181,11 @@ export function planTargetedActions(input: {
         input.actor.id,
         filing.targets,
       );
-    const visibility = visibilityFor(input.actor.id, targets, coshare);
+    const visibility = visibilityFor(
+      input.actor.id,
+      targets,
+      coshare || humanTargets.some((t) => t.id !== input.actor.id),
+    );
     const metadata = { lists: [], filing: [{ ...filing, targets: [] }] };
 
     if (coshare) {

@@ -160,6 +160,27 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("של ");
   });
 
+  it("filings dump marks assign with באחריות · מאת", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f-assign",
+          item_name: "מה נשמע",
+          item_info: "שלום",
+          item_description: "",
+          owner: "מיכל",
+          scope: "shared",
+          assigned_by: "טל",
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "מיכל",
+    })!;
+    expect(dump).toContain("באחריות מיכל · מאת טל");
+  });
+
   it("treats scope=shared with no non-viewer partners as personal", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
@@ -1340,6 +1361,20 @@ describe("formatShowDumpFromKind", () => {
         "מיכל",
       ),
     ).toBe("טל, מיכל");
+
+    expect(
+      customItemCoShareMark(
+        {
+          list_type: "custom",
+          list_name: "באגים",
+          owner: "מיכל",
+          scope: "personal",
+          items: [],
+        } as EmployeeRecordSnapshot["lists"][number],
+        { item_id: "x", שם: "x", assigned_by: "טל" },
+        "מיכל",
+      ),
+    ).toBe("באחריות מיכל · מאת טל");
   });
 
   it("full dump custom counts mark item-level share partners", () => {
