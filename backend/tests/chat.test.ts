@@ -1960,4 +1960,157 @@ describe("chat API", () => {
       "עמית מודה לך על הטיסה",
     );
   });
+
+  it("ITEM DUMP: unknown show_dump_ids → no-match, not the full tasks list", async () => {
+    const taskTitle = "לשיננית מחר";
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-dump",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-real-1",
+                data: { "שם מטלה": taskTitle },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "task-real-2",
+                data: { "שם מטלה": "לקנות חלב" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "הנה המטלה שביקשת" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: "missing-item-id-xyz",
+        },
+      }),
+      raw: { output_text: "dump miss" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי את המטלה החסרה", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain(taskTitle);
+    expect(response.body.reply).not.toContain("לקנות חלב");
+    expect(response.body.reply).not.toContain("מטלות:");
+    expect(response.body.reply).not.toContain("הנה המטלה שביקשת");
+  });
+
+  it("ITEM DUMP: id from another list kind → no-match, no cross-kind or full dump", async () => {
+    const taskTitle = "ללכת לרופא";
+    const filingName = "קוד שער";
+    const filingId = "filing-only-id-99";
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-cross",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-doctor",
+                data: { "שם מטלה": taskTitle },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    filingFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: filingId,
+            itemName: filingName,
+            itemInfo: "1234",
+            itemDescription: "",
+            employeeId,
+            scope: "personal",
+            employee: { name: "עמית", nickname: "עמית" },
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "מציגה את הפריט" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          // Exists only as a filing_id — must not open that filing or dump all tasks.
+          show_dump_ids: filingId,
+        },
+      }),
+      raw: { output_text: "cross-kind" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי את המטלה לפי מזהה תיוק", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain(taskTitle);
+    expect(response.body.reply).not.toContain(filingName);
+    expect(response.body.reply).not.toContain("1234");
+    expect(response.body.reply).not.toContain("מטלות:");
+    expect(response.body.reply).not.toContain("תיוקים:");
+  });
 });

@@ -1451,13 +1451,15 @@ function reminderMutates(metadata: LlmMetadata): boolean {
 }
 
 /**
- * Speaker confirm taps are model-only: keep whatever the model emitted
- * (content-aware show suggestions and/or כן/לא/…), capped and deduped.
- * Never inject generic «הצג רשימת…» / «הצג תזכורות» — if the model sent no
- * show buttons, none appear. Partner notifies still use showButtonsForNotify.
+ * Speaker confirm taps: keep model buttons (content-aware show / כן/לא / …),
+ * then enforce LIST BUTTON — after lists.add|update|remove or filing
+ * add/update/remove, the matching list-show command must appear (product
+ * labels). Dedupes by command so a model-emitted button is preserved.
+ * Does not invent «הצג תזכורות» or item-open taps. Partner notifies stay on
+ * showButtonsForNotify (unchanged).
  */
 export function ensureSpeakerShowButtons(
-  _metadata: LlmMetadata,
+  metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
@@ -1469,7 +1471,77 @@ export function ensureSpeakerShowButtons(
     seen.add(button.command);
     buttons.push(button);
   }
+  for (const required of requiredSpeakerListShowButtons(metadata)) {
+    if (buttons.length >= REPLY_BUTTON_MAX || seen.has(required.command)) {
+      continue;
+    }
+    seen.add(required.command);
+    buttons.push(required);
+  }
   return buttons;
+}
+
+/** LIST BUTTON commands/labels for speaker confirm (not partner notify). */
+function requiredSpeakerListShowButtons(
+  metadata: LlmMetadata,
+): LlmReplyButton[] {
+  const buttons: LlmReplyButton[] = [];
+  const seen = new Set<string>();
+  const listMutates = metadata.lists.filter(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
+  );
+  const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
+  for (const list of listMutates) {
+    const name = showListCommandName(list);
+    if (!name) {
+      continue;
+    }
+    const command = showListButtonCommand(name);
+    if (seen.has(command) || skipSourceCommands.has(command)) {
+      continue;
+    }
+    seen.add(command);
+    buttons.push({
+      label: speakerListShowLabel(list),
+      command,
+    });
+    if (buttons.length >= REPLY_BUTTON_MAX) {
+      return buttons;
+    }
+  }
+
+  if (
+    buttons.length < REPLY_BUTTON_MAX &&
+    (metadata.filing ?? []).some(
+      (row) =>
+        row.action === "add_filing" ||
+        row.action === "remove_filing" ||
+        row.action === "update_filing",
+    )
+  ) {
+    const command = SHOW_FILINGS_COMMAND;
+    if (!seen.has(command)) {
+      buttons.push({ label: "הצג תיוקים", command });
+    }
+  }
+  return buttons;
+}
+
+/** Fixed LIST BUTTON labels by kind (custom never puts list_name on the label). */
+function speakerListShowLabel(list: LlmListAction): string {
+  if (list.listType === "shopping") {
+    return "הצג קניות";
+  }
+  if (list.listType === "tasks") {
+    return "הצג מטלות";
+  }
+  if (list.listType === "contacts") {
+    return "הצג אנשי קשר";
+  }
+  return "הצג רשימה";
 }
 
 /**

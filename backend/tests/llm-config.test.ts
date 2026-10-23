@@ -420,23 +420,21 @@ describe("LLM action schema", () => {
       "UNIQUELY identifies that row",
     );
     expect(config.systemMessage).toContain(
-      "command «הציגי את המטלה <exact שם מטלה>»",
+      "הציגי את המטלה <exact שם מטלה>",
     );
     expect(config.systemMessage).toContain(
-      "command «הציגי את התיוק <exact item_name>»",
+      "הציגי את התיוק <exact item_name>",
     );
     expect(config.systemMessage).toContain("להצגת המטלה");
     expect(config.systemMessage).toContain("להצגת התיוק");
     expect(config.systemMessage).toContain(
-      "Duplicate/ambiguous title → list button ONLY",
+      "Shopping / contacts / custom → list button ONLY",
     );
     expect(config.systemMessage).toContain(
-      'label:"ללכת לספר"',
+      "Duplicate/ambiguous title → list button ONLY",
     );
-    expect(config.systemMessage).toContain('label:"הצג מטלות"');
-    expect(config.systemMessage).not.toContain(
-      "do NOT emit «הצג מטלות»",
-    );
+    expect(config.systemMessage).toContain("ITEM DUMP");
+    expect(config.systemMessage).toContain("show_dump_ids");
   });
 
   it("teaches filing inventory show_dump vs semantic lookup", () => {
@@ -498,20 +496,20 @@ describe("LLM action schema", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("סמן כבוצע: <title>");
     expect(config.systemMessage).toContain("SAME path as spoken finished-chore");
-    expect(config.systemMessage).toContain("SINGLE-TASK SHOW");
-    expect(config.systemMessage).toContain('command «סמן כבוצע: <exact שם מטלה>»');
+    expect(config.systemMessage).toContain("ITEM DUMP");
+    expect(config.systemMessage).toContain("סמן כבוצע");
   });
 
-  it("teaches single-task show reminder add/update buttons", () => {
+  it("teaches item dump with server-attached task reminder buttons", () => {
     const config = loadLlmConfig(repoRoot);
-    expect(config.systemMessage).toContain("SINGLE-TASK SHOW");
-    expect(config.systemMessage).toContain('label «הוסף תזכורת»');
+    expect(config.systemMessage).toContain("ITEM DUMP");
+    expect(config.systemMessage).toContain("show_dump_ids");
+    expect(config.systemMessage).toContain("הוסף/עדכן תזכורת");
     expect(config.systemMessage).toContain(
-      'command «הוסף תזכורת: <exact שם מטלה>»',
+      "LAST_NUMBERED_DUMP for line numbers",
     );
-    expect(config.systemMessage).toContain('label «עדכן תזכורת»');
     expect(config.systemMessage).toContain(
-      'command «עדכן תזכורת: <exact שם מטלה>»',
+      "never the full list",
     );
     expect(config.systemMessage).toContain(
       "Add-reminder button «הוסף תזכורת: <title>»",
@@ -519,5 +517,18 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "Update-reminder button «עדכן תזכורת: <title>»",
     );
+  });
+
+  it("ITEM DUMP ambiguity → ASK with null ids (prompt contract; not live model)", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("ITEM DUMP");
+    expect(config.systemMessage).toContain(
+      "Ambiguous without a clear set → ASK, show_dump/ids null",
+    );
+    expect(config.systemMessage).toContain(
+      "Forbidden inventing ids or cross-kind ids",
+    );
+    // Offline MODEL_APPLY stubs author the ACTION; they cannot prove a live model
+    // asks instead of picking one of two similar tasks. No LIVE run here.
   });
 });

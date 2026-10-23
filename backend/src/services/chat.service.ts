@@ -15,6 +15,8 @@ import {
   redactMetadataSecrets,
   redactRegisterSecrets,
   showDumpNames,
+  showDumpIdList,
+  isShowDumpIdsRequested,
   applyShowButtonsToBubbles,
   clearBubbleButtons,
   toReplyButtons,
@@ -144,11 +146,13 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   applyLiveDomainReply,
+  setEngineButtons,
   setEngineNavigateAddress,
   setEngineResponse,
   setEngineSpokenBubbles,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
+import { singleTaskShowButtons } from "./outbound-text.js";
 import {
   composeTasksDumpWithWaiting,
   emptyListDumpSentence,
@@ -467,6 +471,68 @@ async function withAttachmentRefsSafe(
   );
 }
 
+function findTaskItemInSnapshot(
+  snapshot: EmployeeRecordSnapshot,
+  itemId: string,
+): Record<string, unknown> | null {
+  const needle = itemId.trim();
+  if (!needle) {
+    return null;
+  }
+  for (const list of snapshot.lists) {
+    if (list.list_type !== "tasks") {
+      continue;
+    }
+    for (const item of list.items) {
+      if (String(item.item_id ?? "").trim() === needle) {
+        return item;
+      }
+    }
+  }
+  return null;
+}
+
+function taskTitleFromSnapshot(
+  snapshot: EmployeeRecordSnapshot,
+  itemId: string,
+): string {
+  const item = findTaskItemInSnapshot(snapshot, itemId);
+  if (!item) {
+    return "";
+  }
+  for (const key of ["שם מטלה", "name", "task", "item_name"] as const) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function taskHasLinkedReminder(
+  snapshot: EmployeeRecordSnapshot,
+  itemId: string,
+): boolean {
+  const item = findTaskItemInSnapshot(snapshot, itemId);
+  if (!item) {
+    return false;
+  }
+  const reminder = item.reminder;
+  if (reminder && typeof reminder === "object" && !Array.isArray(reminder)) {
+    const id = (reminder as { reminder_id?: unknown }).reminder_id;
+    if (typeof id === "string" && id.trim()) {
+      return true;
+    }
+  }
+  for (const key of ["reminder_id", "linked_reminder_id"] as const) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function withoutFailingTurn<T>(
   label: string,
   run: () => Promise<T>,
@@ -515,7 +581,7 @@ const STATUS_ADDRESSEE_RULE =
 
 /** Shared with eval thin-custom envelope; Chat custom-prompt branch uses the same text. */
 export const RESPONSES_RULE =
-  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is an object {text, buttons?, navigate_address?} sent as its own message, in order. Put tap buttons and Waze on the bubble they belong to (POST-MUTATE SHOW on confirm; כן/לא on the soft-reminder offer; navigate_address on the address line). After any list add/update/remove → confirm MUST include the list-show button (POST-MUTATE SHOW): shopping «הצג קניות» / tasks «הצג מטלות» / contacts «הצג אנשי קשר» / custom «הצג רשימה» (NEVER the custom title on the label) / filing «הצג תיוקים»; command = «הצג רשימת קניות|מטלות|אנשי קשר|<custom name>» or «הצג תיוקים». After tasks or filing add|update, when the item title uniquely identifies that row → ALSO an item button BEFORE the list button (tasks command «הציגי את המטלה <שם>»; filing «הציגי את התיוק <שם>»; label = name ≤12/hard 20 else «להצגת המטלה»/«להצגת התיוק»). Duplicate/ambiguous title or shopping/contacts/custom → list only. After remove → list only. New tasks add WITHOUT explicit «תזכירי לי» → TWO responses entries (confirm with POST-MUTATE nav, then soft reminder offer with כן/לא). New tasks add WITH explicit reminder schedule same turn → ONE confirm (task+reminder under APPLY FEEDBACK) + nav only; FORBIDDEN soft-offer כן/לא. Usually one entry otherwise; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries' text. After an item MOVE (lists.remove + lists.add) → dest list-show only (never source+dest; never «הצג רשימת רשימת…»). Engine never invents show buttons. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
+  "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is an object {text, buttons?, navigate_address?} sent as its own message, in order. Put tap buttons and Waze on the bubble they belong to (POST-MUTATE SHOW on confirm; כן/לא on the soft-reminder offer; navigate_address on the address line). After any list add/update/remove → confirm MUST include the list-show button (POST-MUTATE SHOW): shopping «הצג קניות» / tasks «הצג מטלות» / contacts «הצג אנשי קשר» / custom «הצג רשימה» (NEVER the custom title on the label) / filing «הצג תיוקים»; command = «הצג רשימת קניות|מטלות|אנשי קשר|<custom name>» or «הצג תיוקים». After add|update, when the title uniquely opens that row → ALSO an item-show button ONLY for tasks|filing (reliable open commands); shopping/contacts/custom → list button only. ITEM DUMP: show specific row(s) → show_dump + show_dump_ids (server replaces; FORBIDDEN writing the body; empty/mismatch ids → no-match, never full list). After remove → list only. New tasks add WITHOUT explicit «תזכירי לי» → TWO responses entries (confirm with POST-MUTATE nav, then soft reminder offer with כן/לא). New tasks add WITH explicit reminder schedule same turn → ONE confirm (task+reminder under APPLY FEEDBACK) + nav only; FORBIDDEN soft-offer כן/לא. Usually one entry otherwise; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries' text. After an item MOVE (lists.remove + lists.add) → dest list-show only (never source+dest; never «הצג רשימת רשימת…»). Engine never invents show buttons. metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
@@ -2654,6 +2720,8 @@ export async function sendChatMessage(input: {
             : {}),
         }),
       );
+      const dumpIds = showDumpIdList(metadata.showDumpIds);
+      const itemDumpRequested = isShowDumpIdsRequested(metadata.showDumpIds);
       const baseDumpOpts = {
         section: metadata.showDumpSection ?? null,
         partner: metadata.showDumpPartner ?? null,
@@ -2662,6 +2730,9 @@ export async function sendChatMessage(input: {
         dateFrom: metadata.showDumpFrom ?? null,
         dateTo: metadata.showDumpTo ?? null,
         urgency: metadata.showDumpUrgency ?? null,
+        ...(itemDumpRequested
+          ? { itemIds: new Set(dumpIds), omitEmptySentence: true }
+          : {}),
       };
       const resolvedDumpKind = resolveShowDumpKind(showDumpKind);
       const needsPhoneBook =
@@ -2744,6 +2815,28 @@ export async function sendChatMessage(input: {
               workingReply = setEngineNavigateAddress(workingReply, dumpAddress);
             }
           }
+          if (
+            dumpIds.length === 1 &&
+            resolved?.kind === "tasks" &&
+            lines.length === 1
+          ) {
+            const title =
+              lines[0]!.title_stem.trim() ||
+              taskTitleFromSnapshot(snapshot, dumpIds[0]!);
+            const hasLinked = taskHasLinkedReminder(snapshot, dumpIds[0]!);
+            const itemButtons = singleTaskShowButtons({
+              title,
+              hasLinkedReminder: hasLinked,
+            });
+            if (itemButtons.length > 0) {
+              workingReply = setEngineButtons(workingReply, itemButtons);
+            }
+          }
+        } else if (itemDumpRequested) {
+          workingReply = setEngineResponse(
+            workingReply,
+            "לא מצאתי את הפריט.",
+          );
         }
       } else {
         const blocks: string[] = [];
@@ -2872,6 +2965,15 @@ export async function sendChatMessage(input: {
             missing.length === 1
               ? `לא מצאתי את ${missing[0]}.`
               : `לא מצאתי את ${missing.join(" או ")}.`,
+          );
+        } else if (
+          blocks.length === 0 &&
+          missing.length === 0 &&
+          itemDumpRequested
+        ) {
+          workingReply = setEngineResponse(
+            workingReply,
+            "לא מצאתי את הפריט.",
           );
         } else {
           const parts = [...blocks];

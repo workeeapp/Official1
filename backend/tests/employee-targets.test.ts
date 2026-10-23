@@ -573,7 +573,7 @@ describe("employee targets", () => {
     expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("speaker show buttons are model-only (no engine inject when omitted)", () => {
+  it("speaker show buttons keep model taps; reminder-only still injects nothing", () => {
     const reminderAdd: LlmReminderAction = {
       action: "update",
       item: "לקחת אקמול",
@@ -618,7 +618,7 @@ describe("employee targets", () => {
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("does not inject הצג on a WATCH turn when the model omitted buttons", () => {
+  it("WATCH tasks add still gets LIST BUTTON הצג מטלות when model omitted buttons", () => {
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -657,7 +657,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
   });
 
   it("custom list move emits only dest הצג for partner notify (not source + dest)", () => {
@@ -688,8 +688,10 @@ describe("employee targets", () => {
     expect(showButtonsForNotify(moveMeta)).toEqual([
       { label: "הצג", command: "הצג רשימת דברים שעלו לשרת" },
     ]);
-    // Speaker path: no model buttons → nothing injected.
-    expect(ensureSpeakerShowButtons(moveMeta)).toEqual([]);
+    // Speaker LIST BUTTON: dest list only (same move skip as notify).
+    expect(ensureSpeakerShowButtons(moveMeta)).toEqual([
+      { label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" },
+    ]);
   });
 
   it("keeps model show suggestions and choices (no engine replace on move)", () => {
@@ -776,7 +778,40 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
   });
 
-  it("does not inject speaker הצג when lists mutate and model omitted buttons", () => {
+  it("LIST BUTTON: injects missing show-list after list/filing mutate; no duplicate", () => {
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג קניות", command: "הצג רשימת קניות" }]);
+
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: [],
+            },
+          ],
+        },
+        [{ label: "הצג קניות", command: "הצג רשימת קניות" }],
+      ),
+    ).toEqual([{ label: "הצג קניות", command: "הצג רשימת קניות" }]);
+
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -790,7 +825,8 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
+
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -804,7 +840,8 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג קניות", command: "הצג רשימת קניות" }]);
+
     expect(
       ensureSpeakerShowButtons(
         {
@@ -821,7 +858,11 @@ describe("employee targets", () => {
         },
         [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
-    ).toEqual([{ label: "מה יש לי מחר", command: "מה יש לי מחר" }]);
+    ).toEqual([
+      { label: "מה יש לי מחר", command: "מה יש לי מחר" },
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -842,6 +883,55 @@ describe("employee targets", () => {
             itemDescription: "עובדה",
             targets: [],
             filingId: "",
+          },
+        ],
+      }),
+    ).toEqual([
+      { label: "הצג רשימה", command: "הצג רשימת בדיקת שם" },
+      { label: "הצג תיוקים", command: "הצג תיוקים" },
+    ]);
+
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "contacts",
+            listName: "",
+            items: [{ "שם פרטי": "דני", טלפון: "0501111111" }],
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג אנשי קשר", command: "הצג רשימת אנשי קשר" }]);
+  });
+
+  it("LIST BUTTON: does not invent הצג תזכורות on reminder-only turns", () => {
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        reminders: [
+          {
+            action: "add",
+            item: "בדיקה",
+            listType: "tasks",
+            date: "",
+            time: "",
+            repeat: "once",
+            ping: [],
+            targets: [],
+            text: "",
+            inSeconds: 60,
+            everyCount: null,
+            everyUnit: null,
+            weekdays: null,
+            confirmed: false,
+            compose: false,
+            composeSource: "",
+            composeLookbackHours: 0,
+            composePlace: "",
+            reminderId: "",
           },
         ],
       }),

@@ -160,6 +160,404 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("של ");
   });
 
+  it("ITEM DUMP filters filings to show_dump_ids only", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f2",
+          item_name: "קוד שער",
+          item_info: "1234",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      itemIds: new Set(["f2"]),
+    })!;
+    expect(dump).toContain("קוד שער");
+    expect(dump).not.toContain("רישיון");
+    expect(dump).toMatch(/^תיוקים:\n1\. /);
+  });
+
+  it("ITEM DUMP filters tasks to multiple item ids", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "t1", "שם מטלה": "לשיננית" },
+            { item_id: "t2", "שם מטלה": "לקנות חלב" },
+            { item_id: "t3", "שם מטלה": "לחזור מהשיננית" },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const dump = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      itemIds: new Set(["t1", "t3"]),
+    })!;
+    expect(dump).toContain("לשיננית");
+    expect(dump).toContain("לחזור מהשיננית");
+    expect(dump).not.toContain("לקנות חלב");
+  });
+
+  it("ITEM DUMP: filing_id under show_dump=tasks does not surface the filing or full tasks", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "t1", "שם מטלה": "ללכת לרופא" },
+            { item_id: "t2", "שם מטלה": "לקנות חלב" },
+          ],
+        },
+      ],
+      filing: [
+        {
+          filing_id: "f-gate",
+          item_name: "קוד שער",
+          item_info: "9999",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      omitEmptySentence: true,
+      itemIds: new Set(["f-gate"]),
+    });
+    expect(dump).toBe("");
+    expect(dump).not.toContain("קוד שער");
+    expect(dump).not.toContain("ללכת לרופא");
+    expect(dump).not.toContain("מטלות:");
+  });
+
+  describe("ITEM DUMP id filter — all kinds (1 / many / wrong / empty)", () => {
+    const omitEmpty = { omitEmptySentence: true as const, viewerName: "טל" };
+
+    it("shopping: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "shopping",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "s1", "שם פריט": "חלב", כמות: 1 },
+              { item_id: "s2", "שם פריט": "לחם", כמות: 2 },
+              { item_id: "s3", "שם פריט": "ביצים", כמות: 1 },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+      };
+      const one = formatShowDumpFromKind("shopping", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["s2"]),
+      })!;
+      expect(one).toContain("לחם");
+      expect(one).not.toContain("חלב");
+      expect(one).not.toContain("ביצים");
+
+      const many = formatShowDumpFromKind("shopping", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["s1", "s3"]),
+      })!;
+      expect(many).toContain("חלב");
+      expect(many).toContain("ביצים");
+      expect(many).not.toContain("לחם");
+
+      expect(
+        formatShowDumpFromKind("shopping", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["nope"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("shopping", snap, {
+          ...omitEmpty,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+
+    it("tasks: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "t1", "שם מטלה": "א" },
+              { item_id: "t2", "שם מטלה": "ב" },
+              { item_id: "t3", "שם מטלה": "ג" },
+            ],
+          },
+        ],
+        filing: [],
+      };
+      expect(
+        formatShowDumpFromKind("tasks", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["t1"]),
+        }),
+      ).toMatch(/א/);
+      const many = formatShowDumpFromKind("tasks", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["t2", "t3"]),
+      })!;
+      expect(many).toContain("ב");
+      expect(many).toContain("ג");
+      expect(many).not.toContain("1. א");
+      expect(
+        formatShowDumpFromKind("tasks", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["missing"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("tasks", snap, {
+          ...omitEmpty,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+
+    it("filings: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [],
+        filing: [
+          {
+            filing_id: "f1",
+            item_name: "רישיון",
+            item_info: "א",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+          {
+            filing_id: "f2",
+            item_name: "קוד",
+            item_info: "ב",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+          {
+            filing_id: "f3",
+            item_name: "כתובת",
+            item_info: "ג",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+      };
+      expect(
+        formatShowDumpFromKind("filings", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["f1"]),
+        }),
+      ).toContain("רישיון");
+      const many = formatShowDumpFromKind("filings", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["f2", "f3"]),
+      })!;
+      expect(many).toContain("קוד");
+      expect(many).toContain("כתובת");
+      expect(many).not.toContain("רישיון");
+      expect(
+        formatShowDumpFromKind("filings", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["x"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("filings", snap, {
+          ...omitEmpty,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+
+    it("contacts: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "contacts",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "c1", "שם פרטי": "דני", טלפון: "0501111111" },
+              { item_id: "c2", "שם פרטי": "מיכל", טלפון: "0502222222" },
+              { item_id: "c3", "שם פרטי": "עמית", טלפון: "0503333333" },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+      };
+      const one = formatShowDumpFromKind("contacts", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["c2"]),
+      })!;
+      expect(one).toContain("מיכל");
+      expect(one).not.toContain("דני");
+      const many = formatShowDumpFromKind("contacts", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["c1", "c3"]),
+      })!;
+      expect(many).toContain("דני");
+      expect(many).toContain("עמית");
+      expect(many).not.toContain("מיכל");
+      expect(
+        formatShowDumpFromKind("contacts", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["nope"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("contacts", snap, {
+          ...omitEmpty,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+
+    it("custom list: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "custom",
+            list_name: "באגים",
+            owner: "טל",
+            scope: "personal",
+            columns: ["שם"],
+            title_field: "שם",
+            items: [
+              { item_id: "x1", שם: "דליפה" },
+              { item_id: "x2", שם: "קריסה" },
+              { item_id: "x3", שם: "האטה" },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+      };
+      expect(
+        formatShowDumpFromKind("באגים", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["x2"]),
+        }),
+      ).toContain("קריסה");
+      const many = formatShowDumpFromKind("באגים", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["x1", "x3"]),
+      })!;
+      expect(many).toContain("דליפה");
+      expect(many).toContain("האטה");
+      expect(many).not.toContain("קריסה");
+      expect(
+        formatShowDumpFromKind("באגים", snap, {
+          ...omitEmpty,
+          itemIds: new Set(["missing"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("באגים", snap, {
+          ...omitEmpty,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+
+    it("reminders: single, many, wrong, empty Set", () => {
+      const now = new Date("2026-10-23T10:00:00+03:00");
+      const baseRem = {
+        list_type: "tasks",
+        repeat: "once",
+        ping: ["טל"],
+        ping_ids: ["e1"],
+        owner: "טל",
+        text: "",
+        status: "active",
+      };
+      const snap: EmployeeRecordSnapshot = {
+        lists: [],
+        filing: [],
+        reminders: [
+          {
+            ...baseRem,
+            reminder_id: "r1",
+            item: "חלב",
+            fire_at: "2026-10-23 12:00",
+          },
+          {
+            ...baseRem,
+            reminder_id: "r2",
+            item: "רופא",
+            fire_at: "2026-10-24 12:00",
+          },
+          {
+            ...baseRem,
+            reminder_id: "r3",
+            item: "שיננית",
+            fire_at: "2026-10-25 12:00",
+          },
+        ] as EmployeeRecordSnapshot["reminders"],
+      };
+      const one = formatShowDumpFromKind("reminders", snap, {
+        ...omitEmpty,
+        now,
+        itemIds: new Set(["r1"]),
+      })!;
+      expect(one).toContain("חלב");
+      expect(one).not.toContain("רופא");
+      const many = formatShowDumpFromKind("reminders", snap, {
+        ...omitEmpty,
+        now,
+        itemIds: new Set(["r2", "r3"]),
+      })!;
+      expect(many).toContain("רופא");
+      expect(many).toContain("שיננית");
+      expect(many).not.toContain("חלב");
+      expect(
+        formatShowDumpFromKind("reminders", snap, {
+          ...omitEmpty,
+          now,
+          itemIds: new Set(["nope"]),
+        }),
+      ).toBe("");
+      expect(
+        formatShowDumpFromKind("reminders", snap, {
+          ...omitEmpty,
+          now,
+          itemIds: new Set(),
+        }),
+      ).toBe("");
+    });
+  });
+
   it("filings dump marks assign with באחריות · מאת", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatAttributedOutbound,
   reminderFireButtons,
+  singleTaskShowButtons,
   reminderMarkDoneCommand,
   reminderSnoozeCommand,
 } from "../src/services/outbound-text.js";
@@ -101,6 +102,23 @@ describe("reminderFireButtons", () => {
         composeAtFire: false,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("singleTaskShowButtons", () => {
+  it("adds סמן כבוצע and הוסף/עדכן תזכורת for one tasks dump row", () => {
+    expect(
+      singleTaskShowButtons({ title: "ללכת לספר", hasLinkedReminder: false }),
+    ).toEqual([
+      { label: "סמן כבוצע", command: "סמן כבוצע: ללכת לספר" },
+      { label: "הוסף תזכורת", command: "הוסף תזכורת: ללכת לספר" },
+    ]);
+    expect(
+      singleTaskShowButtons({ title: "ללכת לספר", hasLinkedReminder: true }),
+    ).toEqual([
+      { label: "סמן כבוצע", command: "סמן כבוצע: ללכת לספר" },
+      { label: "עדכן תזכורת", command: "עדכן תזכורת: ללכת לספר" },
+    ]);
   });
 });
 

@@ -90,6 +90,13 @@ export type ShowDumpOptions = {
    * Used before composeTasksDumpWithWaiting so emptiness is structural.
    */
   omitEmptySentence?: boolean;
+  /**
+   * ITEM DUMP: keep only rows whose opaque id is in this set
+   * (item_id / filing_id / reminder_id / contact_id).
+   * null/undefined = no id filter (full category dump).
+   * Empty Set = ITEM DUMP with no ids → keep nothing (caller shows no-match).
+   */
+  itemIds?: ReadonlySet<string> | null;
 };
 
 /** Phone-book dump row (directory / SPEAKER_CONTACTS). */
@@ -981,9 +988,16 @@ function formatRemindersDump(
   section?: string,
 ): DumpTextResult {
   const now = opts?.now ?? new Date();
+  const itemIds = opts?.itemIds ?? null;
   const active = rows.filter((row) => {
     if (row.status !== "active") {
       return false;
+    }
+    if (itemIds) {
+      const id = row.reminder_id?.trim() ?? "";
+      if (!id || !itemIds.has(id)) {
+        return false;
+      }
     }
     return reminderMatchesDateRange(row, opts?.dateFrom, opts?.dateTo);
   });
@@ -1958,8 +1972,12 @@ function filterDumpRows(
 ): DumpItem[] {
   const section = opts?.section ?? null;
   const partnerFilters = dumpFilterNames(opts?.partner);
+  const itemIds = opts?.itemIds ?? null;
 
   let kept = rows.filter((row) => {
+    if (dumpRowExcludedByItemIds(listType, row.item, itemIds)) {
+      return false;
+    }
     const shared = row.isShared === true;
     if (section === "personal" && shared) {
       return false;
@@ -2131,9 +2149,25 @@ function dumpItemId(listType: ListDumpType, item: Record<string, unknown>): stri
     return String(item.filing_id ?? "").trim();
   }
   if (listType === "phone_book") {
-    return "";
+    return String(item.contact_id ?? item.item_id ?? "").trim();
   }
   return String(item.item_id ?? "").trim();
+}
+
+/** True when opts.itemIds is set and this row's id is not in the set. */
+export function dumpRowExcludedByItemIds(
+  listType: ListDumpType,
+  item: Record<string, unknown>,
+  itemIds: ReadonlySet<string> | null | undefined,
+): boolean {
+  if (!itemIds) {
+    return false;
+  }
+  if (itemIds.size === 0) {
+    return true;
+  }
+  const id = dumpItemId(listType, item);
+  return !id || !itemIds.has(id);
 }
 
 function dumpItemTitleStem(

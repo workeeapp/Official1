@@ -68,6 +68,7 @@
     "    \"show_dump_from\": null,",
     "    \"show_dump_to\": null,",
     "    \"show_dump_urgency\": null,",
+    "    \"show_dump_ids\": null,",
     "    \"weather\": null,",
     "    \"market\": null,",
     "    \"mashov\": null,",
@@ -1072,6 +1073,19 @@
                   "null"
                 ],
                 "description": "Urgency dump filter: urgent = urgent|very_urgent items; very_urgent = only that. Pair with show_dump (tasks/shopping/full). null = no filter. «מה דחוף» → show_dump=tasks (or full) + show_dump_urgency=urgent."
+              },
+              "show_dump_ids": {
+                "type": [
+                  "string",
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "maxLength": 80,
+                "description": "ITEM DUMP: opaque id(s) from THIS turn that exist in live data AND match show_dump kind (item_id / filing_id / contact_id / reminder_id). string or string[] — one or many. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows and replaces response. Ambiguous → ASK with null. Empty array or no matching ids → server no-match message (never full list). null = full category dump (existing filters still apply). Forbidden inventing ids or cross-kind ids."
               },
               "weather": {
                 "type": [

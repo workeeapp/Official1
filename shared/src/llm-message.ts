@@ -490,6 +490,11 @@ export interface LlmMetadata {
    */
   showDumpUrgency?: "urgent" | "very_urgent" | null;
   /**
+   * ITEM DUMP: opaque id(s) from this turn matching show_dump kind
+   * (item_id / filing_id / contact_id / reminder_id). string | string[].
+   */
+  showDumpIds?: string | string[] | null;
+  /**
    * Live weather ask — engine fetches Open-Meteo and replaces response.
    * null/omit when not a weather turn. Missing place → model asks; leave unset.
    */
@@ -752,6 +757,11 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
   const showDumpUrgency = parseShowDumpUrgency(meta);
+  const showDumpIdsRaw = meta.show_dump_ids ?? meta.showDumpIds;
+  /** Explicit array/string (incl. []) = ITEM DUMP; null/absent = full category dump. */
+  const showDumpIdsRequested =
+    showDumpIdsRaw !== undefined && showDumpIdsRaw !== null;
+  const showDumpIds = parseShowDumpIds(meta);
   const weather = parseWeatherAction(meta);
   const market = parseMarketAction(meta);
   const mashov = parseMashovAction(meta);
@@ -802,6 +812,16 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(showDumpFrom ? { showDumpFrom } : {}),
     ...(showDumpTo ? { showDumpTo } : {}),
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
+    ...(showDumpIdsRequested
+      ? {
+          showDumpIds:
+            showDumpIds.length === 0
+              ? []
+              : showDumpIds.length === 1
+                ? showDumpIds[0]!
+                : showDumpIds,
+        }
+      : {}),
     ...(weather ? { weather } : {}),
     ...(market ? { market } : {}),
     ...(mashov ? { mashov } : {}),
@@ -946,6 +966,52 @@ export function parseShowDumpUrgency(
     return trimmed;
   }
   return null;
+}
+
+const SHOW_DUMP_ID_MAX = 80;
+const SHOW_DUMP_IDS_MAX = 50;
+
+/** metadata.show_dump_ids — opaque item/filing/contact/reminder id(s). */
+export function parseShowDumpIds(meta: Record<string, unknown>): string[] {
+  const raw = meta.show_dump_ids ?? meta.showDumpIds;
+  const parts: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim().slice(0, SHOW_DUMP_ID_MAX);
+    if (trimmed && !parts.includes(trimmed)) {
+      parts.push(trimmed);
+    }
+  };
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      push(entry);
+      if (parts.length >= SHOW_DUMP_IDS_MAX) {
+        break;
+      }
+    }
+  } else {
+    push(raw);
+  }
+  return parts;
+}
+
+/** Coerce stored showDumpIds to a list. */
+export function showDumpIdList(
+  value: string | string[] | null | undefined,
+): string[] {
+  return parseShowDumpIds({ show_dump_ids: value ?? null });
+}
+
+/**
+ * True when metadata.show_dump_ids was set to a string or array (incl. []).
+ * null/undefined = full category dump (not an ITEM DUMP).
+ */
+export function isShowDumpIdsRequested(
+  value: string | string[] | null | undefined,
+): boolean {
+  return value !== undefined && value !== null;
 }
 
 /** metadata.show_dump_from / show_dump_to — YYYY-MM-DD inclusive. */

@@ -691,6 +691,56 @@ describe("parseLlmReply", () => {
     expect(bad.showDumpUrgency).toBeUndefined();
   });
 
+  it("reads show_dump_ids (single, many, empty array; null = full dump)", () => {
+    const one = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: " t1 ",
+        },
+      }),
+    );
+    expect(one.showDumpIds).toBe("t1");
+
+    const many = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "filings",
+          show_dump_ids: [" f1 ", "f2", "f1"],
+        },
+      }),
+    );
+    expect(many.showDumpIds).toEqual(["f1", "f2"]);
+
+    const empty = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "shopping",
+          show_dump_ids: [],
+        },
+      }),
+    );
+    expect(empty.showDumpIds).toEqual([]);
+
+    const full = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: null,
+        },
+      }),
+    );
+    expect(full.showDumpIds).toBeUndefined();
+  });
+
   it("omits navigate_address when null, empty, or not a string", () => {
     for (const navigate_address of [null, "", "   ", 12]) {
       const parsed = parseLlmReply(

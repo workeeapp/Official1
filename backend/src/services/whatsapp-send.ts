@@ -178,6 +178,30 @@ export function toWhatsAppFormatting(text: string): string {
 export const WHATSAPP_BUTTON_BODY_MAX = 1024;
 const WHATSAPP_BUTTONS_FOLLOWUP_BODY = "לצפייה ברשימה";
 
+/** Hebrew — avoid \\b (JS word chars are ASCII-only even with /u). */
+const ITEM_SHOW_TASK_COMMAND = /^הציגי?\s+את\s+המטלה(?:\s|$)/u;
+const ITEM_SHOW_FILING_COMMAND = /^הציגי?\s+את\s+התיוק(?:\s|$)/u;
+
+/**
+ * WhatsApp reply titles hard-cap at REPLY_BUTTON_LABEL_MAX (20). Prefer the
+ * fixed item-show fallbacks over mid-string slice when the model put a long
+ * task/filing title on the label (full ask stays in command).
+ */
+export function fitReplyButtonLabel(button: LlmReplyButton): string {
+  const label = button.label.trim();
+  if (label.length <= REPLY_BUTTON_LABEL_MAX) {
+    return label;
+  }
+  const command = button.command.trim();
+  if (ITEM_SHOW_TASK_COMMAND.test(command)) {
+    return "להצגת המטלה";
+  }
+  if (ITEM_SHOW_FILING_COMMAND.test(command)) {
+    return "להצגת התיוק";
+  }
+  return label.slice(0, REPLY_BUTTON_LABEL_MAX);
+}
+
 export function whatsappButtonsBody(
   destination: string,
   body: string,
@@ -195,7 +219,7 @@ export function whatsappButtonsBody(
           type: "reply",
           reply: {
             id: button.command.slice(0, REPLY_BUTTON_COMMAND_MAX),
-            title: button.label.slice(0, REPLY_BUTTON_LABEL_MAX),
+            title: fitReplyButtonLabel(button),
           },
         })),
       },

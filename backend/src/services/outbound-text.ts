@@ -80,6 +80,26 @@ export function reminderFireButtons(input: {
   return buttons;
 }
 
+/**
+ * Buttons after engine ITEM DUMP of exactly one tasks row (same commands as
+ * former model SINGLE-TASK SHOW).
+ */
+export function singleTaskShowButtons(input: {
+  title: string;
+  hasLinkedReminder: boolean;
+}): Array<{ label: string; command: string }> {
+  const title = input.title.trim();
+  if (!title) {
+    return [];
+  }
+  return [
+    { label: "סמן כבוצע", command: `סמן כבוצע: ${title}` },
+    input.hasLinkedReminder
+      ? { label: "עדכן תזכורת", command: `עדכן תזכורת: ${title}` }
+      : { label: "הוסף תזכורת", command: `הוסף תזכורת: ${title}` },
+  ];
+}
+
 export function formatAttributedOutbound(input: {
   actorName: string;
   destIsActor: boolean;

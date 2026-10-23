@@ -15,6 +15,7 @@ import {
   setEngineButtons,
   setEngineSpokenBubbles,
   toWhatsAppFormatting,
+  fitReplyButtonLabel,
   whatsappButtonsBody,
   whatsappCtaUrlBody,
   whatsappMarkReadBody,
@@ -284,6 +285,37 @@ describe("WhatsApp webhook", () => {
         },
       },
     });
+  });
+
+  it("replaces long item-show labels with להצגת המטלה/תיוק instead of mid-cut", () => {
+    const longTask = "להוריד את סקאזי לטיול";
+    expect(longTask.length).toBeGreaterThan(20);
+    expect(
+      fitReplyButtonLabel({
+        label: longTask,
+        command: `הציגי את המטלה ${longTask}`,
+      }),
+    ).toBe("להצגת המטלה");
+    expect(
+      fitReplyButtonLabel({
+        label: "סיסמת וייפיי של הבית של סבתא",
+        command: "הציגי את התיוק סיסמת וייפיי של הבית של סבתא",
+      }),
+    ).toBe("להצגת התיוק");
+    const body = whatsappButtonsBody("972501234567", "הוספתי", [
+      { label: longTask, command: `הציגי את המטלה ${longTask}` },
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+    const titles = (
+      body.interactive as {
+        action: { buttons: Array<{ reply: { title: string; id: string } }> };
+      }
+    ).action.buttons.map((row) => row.reply);
+    expect(titles[0]).toEqual({
+      title: "להצגת המטלה",
+      id: `הציגי את המטלה ${longTask}`.slice(0, 256),
+    });
+    expect(titles[1]?.title).toBe("הצג מטלות");
   });
 
   it("builds a Waze CTA URL message", () => {
