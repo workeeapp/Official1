@@ -30,6 +30,19 @@ vi.mock("../src/database/prisma.js", () => {
 
 vi.mock("../src/services/audit.service.js", () => ({ recordAuditEvent }));
 
+const { applyAttachmentLinksMock } = vi.hoisted(() => ({
+  applyAttachmentLinksMock: vi.fn(),
+}));
+
+vi.mock("../src/services/attachment.service.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/attachment.service.js")>();
+  return {
+    ...actual,
+    applyAttachmentLinks: applyAttachmentLinksMock,
+  };
+});
+
 vi.mock("../src/services/reminder.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/services/reminder.service.js")>()),
   cancelReminderLinkedToWorkerItem,
@@ -111,6 +124,12 @@ describe("list ops", () => {
     itemUpdate.mockReset().mockResolvedValue({});
     itemUpdateMany.mockReset().mockResolvedValue({ count: 0 });
     recordAuditEvent.mockReset();
+    applyAttachmentLinksMock.mockReset().mockResolvedValue({
+      linked: 0,
+      alreadyLinked: 0,
+      detached: 0,
+      attachRequested: false,
+    });
     cancelReminderLinkedToWorkerItem.mockReset().mockResolvedValue(null);
     cancelActiveRemindersMatchingWork
       .mockReset()
@@ -349,6 +368,55 @@ describe("list ops", () => {
     expect(itemUpdateMany).toHaveBeenCalled();
     expect(listUpdate).not.toHaveBeenCalled();
     expect(formatListOpFallback([result])).toBe("ניקיתי את רשימת «קניות».");
+  });
+
+  it("attachments-only: applied when new link created", async () => {
+    const attId = "11111111-1111-4111-8111-111111111111";
+    listFindFirst.mockResolvedValueOnce(bugsList());
+    applyAttachmentLinksMock.mockResolvedValueOnce({
+      linked: 1,
+      alreadyLinked: 0,
+      detached: 0,
+      attachRequested: true,
+    });
+    const [result] = await run([op({ addAttachments: [attId] })]);
+    expect(result.applied).toBe(true);
+    expect(result.attachmentOutcome?.linked).toBe(1);
+    expect(formatListOpFallback([result])).toBe("עדכנתי את הרשימה «בעיות».");
+  });
+
+  it("attachments-only: alreadyLinked counts as applied success", async () => {
+    const attId = "11111111-1111-4111-8111-111111111111";
+    listFindFirst.mockResolvedValueOnce(bugsList());
+    applyAttachmentLinksMock.mockResolvedValueOnce({
+      linked: 0,
+      alreadyLinked: 1,
+      detached: 0,
+      attachRequested: true,
+    });
+    const [result] = await run([op({ addAttachments: [attId] })]);
+    expect(result.applied).toBe(true);
+  });
+
+  it("attachments-only: attach fail is not applied even if detach succeeded", async () => {
+    const attId = "11111111-1111-4111-8111-111111111111";
+    listFindFirst.mockResolvedValueOnce(bugsList());
+    applyAttachmentLinksMock.mockResolvedValueOnce({
+      linked: 0,
+      alreadyLinked: 0,
+      detached: 1,
+      attachRequested: true,
+    });
+    const [result] = await run([
+      op({ addAttachments: [attId], removeAttachments: [attId] }),
+    ]);
+    expect(result.applied).toBe(false);
+    expect(result.refusal).toMatchObject({
+      reason: "empty",
+      detail: "attach_failed",
+    });
+    expect(formatListOpFallback([result])).toBe("");
+    expect(formatListOpRefusals([result])).toContain("לא הצלחתי לצרף");
   });
 
   it("treats a missing or malformed list_id as not found", async () => {

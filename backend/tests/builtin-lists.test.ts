@@ -4,7 +4,11 @@ import {
   builtinListTypeFromHebrew,
   SHOW_LIST_PREFIX,
   SHOW_REMINDERS_COMMAND,
+  showAllListButtonCommand,
+  showAssigneeButtonCommand,
   showListButtonCommand,
+  showSharedWithButtonCommand,
+  showSharedWithButtonLabel,
   staticShowButtonDumpMap,
 } from "../src/services/builtin-lists.js";
 
@@ -40,5 +44,18 @@ describe("builtin-lists", () => {
     expect(map[showListButtonCommand("shopping")]).toBe("shopping");
     expect(map[showListButtonCommand("tasks")]).toBe("tasks");
     expect(map[showListButtonCommand("contacts")]).toBe("contacts");
+    expect(map[showAllListButtonCommand("shopping")]).toBe("shopping");
+    expect(map[showAllListButtonCommand("filings")]).toBe("filings");
+  });
+
+  it("builds shared-with / assignee / all collab commands and short labels", () => {
+    expect(showSharedWithButtonCommand("shopping", "מיכל")).toBe(
+      "הצג קניות משותפות עם מיכל",
+    );
+    expect(showAssigneeButtonCommand("tasks", "מיכל")).toBe(
+      "הצג מטלות באחריות מיכל",
+    );
+    expect(showAllListButtonCommand("shopping")).toBe("כל הקניות");
+    expect(showSharedWithButtonLabel("מיכל").length).toBeLessThanOrEqual(20);
   });
 });

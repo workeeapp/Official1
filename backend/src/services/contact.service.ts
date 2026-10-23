@@ -17,6 +17,11 @@ export interface SpeakerContact {
   sharedWith?: string[];
   /** True when this row is owned by someone else and shared with the viewer. */
   sharedFromOwner?: string;
+  /**
+   * Assigner display name when someone else put this row on the owner's book
+   * (same ESD meaning as list/filing `assigned_by` — not the responsible party).
+   */
+  assignedBy?: string;
 }
 
 /** Whole-book partners for this owner (includes owner when shared). */
@@ -164,6 +169,7 @@ function toSpeakerContact(
     ownerEmployeeId: string;
     scope?: string | null;
     visibleTo?: unknown;
+    addedById?: string | null;
   },
   viewerId: string,
   names: Map<string, string>,
@@ -182,6 +188,11 @@ function toSpeakerContact(
         : [];
   const scope: "personal" | "shared" =
     sharedWith.length > 1 ? "shared" : "personal";
+  const assignerId = row.addedById?.trim() ?? "";
+  const assignedBy =
+    assignerId &&
+    assignerId !== row.ownerEmployeeId &&
+    (names.get(assignerId)?.trim() ?? "");
   return {
     id: row.id,
     name: row.name,
@@ -195,6 +206,7 @@ function toSpeakerContact(
             names.get(row.ownerEmployeeId)?.trim() || undefined,
         }
       : {}),
+    ...(assignedBy ? { assignedBy } : {}),
   };
 }
 
@@ -272,6 +284,8 @@ export function formatSpeakerContacts(
         ...(row.sharedFromOwner
           ? { owner: row.sharedFromOwner }
           : {}),
+        // assigned_by = assigner (who הטיל), not the responsible owner.
+        ...(row.assignedBy ? { assigned_by: row.assignedBy } : {}),
       })),
     ),
   ].join("\n");

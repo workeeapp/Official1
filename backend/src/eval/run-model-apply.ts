@@ -17,6 +17,8 @@ import {
   applyEmployeeRecords,
   formatEmployeeContext,
   getEmployeeRecordSnapshot,
+  loadFilingOwners,
+  loadListItemOwners,
   type EmployeeRecordSnapshot,
 } from "../services/employee-records.service.js";
 import { withLinkedListRefs } from "../services/list-item-list-link.service.js";
@@ -26,6 +28,11 @@ import {
 } from "../services/contact.service.js";
 import { applyListOps } from "../services/list-ops.service.js";
 import { applyReminders } from "../services/reminder.service.js";
+import {
+  filingActionIds,
+  listActionItemIds,
+  planTargetedActions,
+} from "../services/employee-targets.service.js";
 import { evaluateConstraints } from "./constraints.js";
 import type { ModelEvalConstraint } from "./constraints.js";
 import type { StudioTurn } from "./corpus.js";
@@ -128,7 +135,13 @@ function metadataHasMutations(metadata: LlmMetadata): boolean {
   return lists + listOps + filing + directory + reminders > 0;
 }
 
-/** Apply a model-proposed ACTION through production paths (no symbolic rewrite). */
+/**
+ * Apply a model-proposed ACTION through production paths (no symbolic rewrite).
+ *
+ * Mirrors chat.service list/filing targeting: planTargetedActions →
+ * applyEmployeeRecords per application (co-share vs assign visibility).
+ * Still skips full sendChatMessage (no reply correction, dumps, tips, WA).
+ */
 export async function applyModelMetadataTurn(input: {
   account: HarnessAccount;
   metadata: LlmMetadata;
@@ -141,26 +154,52 @@ export async function applyModelMetadataTurn(input: {
   assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
 
   const { metadata, account } = input;
+  const humans = account.employees.filter((row) => row.kind !== "digital");
 
   if ((metadata.listOps?.length ?? 0) > 0) {
     await applyListOps({
       userId: account.userId,
       actor: account.actor,
-      employees: [account.actor],
+      employees: humans,
       ops: metadata.listOps ?? [],
     });
   }
 
-  const applied = await applyEmployeeRecords(
-    account.employeeId,
-    metadata,
-    {
-      scope: "personal",
-      addedById: account.employeeId,
-      visibleTo: [account.employeeId],
-    },
-    account.employeeId,
+  const metadataForApply = {
+    ...metadata,
+    lists: [
+      ...(metadata.lists ?? []).filter((row) => row.action !== "remove"),
+      ...(metadata.lists ?? []).filter((row) => row.action === "remove"),
+    ],
+  };
+  const itemOwners = await loadListItemOwners(
+    account.userId,
+    listActionItemIds(metadataForApply.lists ?? []),
   );
+  const filingOwners = await loadFilingOwners(
+    account.userId,
+    filingActionIds(metadataForApply.filing ?? []),
+  );
+  const plan = planTargetedActions({
+    actor: account.actor,
+    employees: humans,
+    metadata: metadataForApply,
+    itemOwners,
+    filingOwners,
+  });
+
+  const mutations: Awaited<
+    ReturnType<typeof applyEmployeeRecords>
+  >["mutations"] = [];
+  for (const application of plan.applications) {
+    const applied = await applyEmployeeRecords(
+      application.employeeId,
+      application.metadata,
+      application.visibility,
+      account.actor.id,
+    );
+    mutations.push(...applied.mutations);
+  }
 
   // Production path (chat.service): clocks go through applyReminders, not records alone.
   if ((metadata.reminders?.length ?? 0) > 0) {
@@ -171,7 +210,7 @@ export async function applyModelMetadataTurn(input: {
     await applyReminders({
       userId: account.userId,
       actor: account.actor,
-      employees: [account.actor],
+      employees: humans,
       reminders: reminderWrites,
     });
   }
@@ -181,14 +220,14 @@ export async function applyModelMetadataTurn(input: {
       userId: account.userId,
       ownerEmployeeId: account.employeeId,
       actions: metadata.directory ?? [],
-      employees: [account.actor],
+      employees: humans,
     });
   }
 
   return {
     metadata,
     appliedViaProduction: true,
-    mutations: applied.mutations,
+    mutations,
   };
 }
 
@@ -219,7 +258,7 @@ export async function runModelApplyCase(
   proposeTurn: (
     input: ModelApplyProposeInput,
   ) => Promise<ModelApplyProposeResult> | ModelApplyProposeResult,
-  options?: { speaker?: string },
+  options?: { speaker?: string; partners?: string[] },
 ): Promise<ModelApplyCaseResult> {
   const speaker = options?.speaker ?? "טל";
   const failures: string[] = [];
@@ -258,7 +297,12 @@ export async function runModelApplyCase(
     // DB safety before any Prisma connection/mutation. Never log URLs.
     assertModelApplyDatabaseApproved();
 
-    const partners = collectPartnerNamesFromSetup(suiteCase.setup);
+    const partners = [
+      ...new Set([
+        ...collectPartnerNamesFromSetup(suiteCase.setup),
+        ...(options?.partners ?? []),
+      ]),
+    ];
     account = await createHarnessAccount(speaker, { partners });
     const nameToEmployeeId = new Map<string, string>([
       [speaker.trim(), account.employeeId],

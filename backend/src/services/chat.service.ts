@@ -44,7 +44,9 @@ import {
 import {
   alignListTypeInReply,
   applyEmployeeRecords,
+  correctAttachmentClaimReply,
   correctListMutationClaimReply,
+  correctShareClaimReply,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
   formatAppliedMutationFallback,
@@ -59,6 +61,7 @@ import {
   type EmployeeRecordSnapshot,
   type FilingMutation,
   type ListItemMutation,
+  type ShareApplyMiss,
   type SharedItemEvent,
 } from "./employee-records.service.js";
 import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
@@ -161,7 +164,8 @@ import {
   formatLastNumberedDumpContext,
   formatShowDumpWithLineMap,
   isTasksShowDumpKind,
-  mapShowButtonCommandToDump,
+  dumpFilterNames,
+  mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
   type LastNumberedDumpLine,
@@ -188,9 +192,11 @@ import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
 import {
+  emptyAttachmentOutcome,
   formatNewAttachmentsBlock,
   formatPendingAttachmentsContext,
   listPendingAttachments,
+  mergeAttachmentOutcomes,
   resolveUsableAttachments,
   toChatAttachmentRef,
   withAttachmentRefs,
@@ -455,7 +461,7 @@ export function shouldAttachLucyRuntimeEngine(
  * written and the relay is out. A job problem must never fail the turn.
  */
 const ATTACHMENTS_RULE =
-  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. A caption / voice transcript is the request — handle it like any message and put the files' attachment_id values on the action it creates (lists items[].attachment_ids (incl. filing rows), reminders[].attachment_ids, lists alter_list add_attachments, lists[].list_attachment_ids). No caption → ask where to file / attach them («איך לתייק את 2 התמונות?») with actions empty, then emit the action with those ids from PENDING_ATTACHMENTS. A reminder with files → same ids on the task and on the reminder (sent at fire). PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title (before linked-reminder parentheses, inside an urgency «…» wrap). Applies equally to shopping / tasks / contacts / custom list items, filings, reminders / active_reminders, and WORKER_SAVED_DATA task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר / custom), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and button «📎 קבצים מצורפים» ONLY when has_attachments is true (list-level files on any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory (no attachment links). LINK ICON: tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). VIEW ONE LINKED TASK: show/view ONE task that has linked_lists → two responses entries (first = item; second = 2+ numbered list names, or exactly 1 = that list name + its items). LIMITS exception: emoji on saved-data lines are only 📎 / 🗂️ (when warranted) and ‼️ (very_urgent closing guillemet) — never invent them. A question about ONE saved item with files → also metadata.send_attachments with its ids. On the list files button → send_attachments = the list's and its items' files (max 10). Never speak ids; never invent video/document content.";
+  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. ATTACH via items[].attachment_ids / filing|reminders attachment_ids / lists alter_list add_attachments / lists[].list_attachment_ids. DESTINATION LADDER: clear existing item/filing (named uniquely OR one clear active-context row — NOT last-mentioned latch) → attach with that id; clear list shell → alter_list add_attachments; clear NEW filing → filing add + attachment_ids; still ambiguous → ASK once with actions empty. FORBIDDEN: new filing only from תייקי; FORBIDDEN: new task/item only because a file arrived. Caption/transcript IS the request when destination/create is clear. No caption + no clear context → ask («איך לתייק את 2 התמונות?»); complete with PENDING_ATTACHMENTS. Reminder with files → same ids on task and reminder (sent at fire). PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title (before linked-reminder parentheses, inside an urgency «…» wrap). Applies equally to shopping / tasks / contacts / custom list items, filings, reminders / active_reminders, and WORKER_SAVED_DATA task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר / custom), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and button «📎 קבצים מצורפים» ONLY when has_attachments is true (list-level files on any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory (no attachment links). LINK ICON: tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). VIEW ONE LINKED TASK: show/view ONE task that has linked_lists → two responses entries (first = item; second = 2+ numbered list names, or exactly 1 = that list name + its items). LIMITS exception: emoji on saved-data lines are only 📎 / 🗂️ (when warranted) and ‼️ (very_urgent closing guillemet) — never invent them. A question about ONE saved item with files → also metadata.send_attachments with its ids. On the list files button → send_attachments = the list's and its items' files (max 10). Never speak ids; never invent video/document content.";
 
 async function withAttachmentRefsSafe(
   snapshot: EmployeeRecordSnapshot,
@@ -838,7 +844,7 @@ function workerTargetingInstructions(
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/מטלות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL: exactly ONE list_name equals what they said → mutate NOW, no ask. Spoken token in TWO OR MORE titles (באגים / באגים לקוד / …) → NOT unique — treat as (3). (2) VERY SIMILAR but not identical (exactly one near-miss) → lists=[] and ASK once «התכוונת לרשימת «X»?» — never mutate until confirm. (3) Several close candidates, OR spoken token in ≥2 list_name titles, OR none → lists=[] and ASK which as NUMBERED 1. 2. 3. (exact list_name; personal vs משותפת עם X); never pick first/shared/looks-like. Example: «לאיזו רשימה התכוונת?» then «1. באגים» / «2. באגים לקוד (משותפת עם עמית)». After they answer with the title OR a line index («2» / «ל2») → map to the LAST list-pick ask line → exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index → re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone («הוסיפי באג» → a באגים* list). Server will not fix a wrong list_name.",
     "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» with empty actions; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. Never ignore SPEAKER_ADDRESS.",
-    "Durable personal memory — file with lists add list_type filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB: תייקי/תתייקי → lists add filing only; תוסיפי ל־X / לרשימת X → LIST NAME MATCH on X. תשמרי without list → infer or ASK. TOPIC-ONLY / NO LIST NAMED («הוסיפי באג: …» / «תשמרי את הבאג»): lists=[] — if ≥2 list_names contain באג/באגים → ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a באגים* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description = optional find-helper (מידע לחיפוש) after ANY code/ID/doc/car-number/gate-code/ת.ז/file filing when description empty (bare «מספר הרכב 703…» counts — not only תתייק); never after soft auto-memory (לשון פנייה/משפחה/כתובת…). Find filings by name+info+description. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
+    "Durable personal memory — file with lists add list_type filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB (text-only, no files this turn): תייקי/תתייקי → lists add filing; תוסיפי ל־X / לרשימת X → LIST NAME MATCH on X; תשמרי without list → infer or ASK. SAVE VERB WITH FILES: follow ATTACHMENTS DESTINATION LADDER — do NOT create a filing only because they said תייקי; ask if destination still ambiguous after active context. TOPIC-ONLY / NO LIST NAMED («הוסיפי באג: …» / «תשמרי את הבאג»): lists=[] — if ≥2 list_names contain באג/באגים → ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a באגים* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description = optional find-helper (מידע לחיפוש) after ANY code/ID/doc/car-number/gate-code/ת.ז/file filing when description empty (bare «מספר הרכב 703…» counts — not only תתייק); never after soft auto-memory (לשון פנייה/משפחה/כתובת…). Find filings by name+info+description. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
 
@@ -1976,12 +1982,12 @@ export async function sendChatMessage(input: {
     // Free-form never maps here — model must emit show_dump. Dump intent is ACTION-only.
     if (!(metadata.showDump?.trim() ?? "")) {
       const buttonText = stripWhatsAppReplyPrefix(input.message);
-      let buttonDump = mapShowButtonCommandToDump(buttonText);
+      let buttonDump = mapShowButtonCommandToDumpTarget(buttonText);
       if (!buttonDump) {
         const listsForAllowlist = await getEmployeeRecordSnapshot(
           input.employeeId,
         );
-        buttonDump = mapShowButtonCommandToDump(
+        buttonDump = mapShowButtonCommandToDumpTarget(
           buttonText,
           listsForAllowlist,
         );
@@ -1989,7 +1995,16 @@ export async function sendChatMessage(input: {
       if (buttonDump) {
         metadata = {
           ...clearMutatingMetadata(metadata),
-          showDump: buttonDump,
+          showDump: buttonDump.kind,
+          ...(buttonDump.section != null
+            ? { showDumpSection: buttonDump.section }
+            : {}),
+          ...(buttonDump.partner
+            ? { showDumpPartner: buttonDump.partner }
+            : {}),
+          ...(buttonDump.assignee
+            ? { showDumpAssignee: buttonDump.assignee }
+            : {}),
         };
       }
     }
@@ -2046,6 +2061,12 @@ export async function sendChatMessage(input: {
     const collectedEvents: SharedItemEvent[] = [];
     const listMutations: ListItemMutation[] = [];
     const filingMutations: FilingMutation[] = [];
+    const shareMisses: ShareApplyMiss[] = [];
+    let attachmentOutcome = mergeAttachmentOutcomes(
+      ...listOpResults.map(
+        (row) => row.attachmentOutcome ?? emptyAttachmentOutcome(),
+      ),
+    );
     const cancelledReminderIds: string[] = listOpResults.flatMap(
       (row) => row.cancelledReminderIds,
     );
@@ -2060,6 +2081,11 @@ export async function sendChatMessage(input: {
       listMutations.push(...applied.mutations);
       filingMutations.push(...applied.filingMutations);
       cancelledReminderIds.push(...applied.cancelledReminderIds);
+      shareMisses.push(...applied.shareMisses);
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        applied.attachmentOutcome,
+      );
     }
     const customRemoves = metadataForApply.lists.filter(
       (row) => row.action === "remove" && row.listType === "custom",
@@ -2149,6 +2175,10 @@ export async function sendChatMessage(input: {
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
     });
+    attachmentOutcome = mergeAttachmentOutcomes(
+      attachmentOutcome,
+      reminderResult.attachmentOutcome,
+    );
     // Clock cancel soft-deletes the linked worker להזכיר — count it as a list
     // remove so reply correction does not claim «לא מצאתי את הפריט ברשימה».
     const knownMutationIds = new Set(listMutations.map((row) => row.itemId));
@@ -2659,6 +2689,19 @@ export async function sendChatMessage(input: {
       appliedFilingRemove,
       appliedFilingUpdate,
     });
+    workingReply = correctShareClaimReply({
+      reply: workingReply,
+      spoken: parseLlmReply(workingReply).response,
+      mutations: listMutations,
+      misses: shareMisses,
+      setResponse: setEngineResponse,
+    });
+    workingReply = correctAttachmentClaimReply({
+      reply: workingReply,
+      spoken: parseLlmReply(workingReply).response,
+      outcome: attachmentOutcome,
+      setResponse: setEngineResponse,
+    });
     if (
       requestedListRemove &&
       appliedListRemove &&
@@ -2722,14 +2765,28 @@ export async function sendChatMessage(input: {
       );
       const dumpIds = showDumpIdList(metadata.showDumpIds);
       const itemDumpRequested = isShowDumpIdsRequested(metadata.showDumpIds);
+      const dumpPartner = metadata.showDumpPartner ?? null;
+      const dumpAssignee = metadata.showDumpAssignee ?? null;
+      const dumpSection = metadata.showDumpSection ?? null;
+      // Derive pure collaboration mode for allowlisted / model filters.
+      const dumpCollaboration =
+        dumpFilterNames(dumpAssignee).length > 0 &&
+        dumpFilterNames(dumpPartner).length === 0
+          ? ("assign" as const)
+          : dumpFilterNames(dumpPartner).length > 0 &&
+              dumpSection === "shared" &&
+              dumpFilterNames(dumpAssignee).length === 0
+            ? ("co_share" as const)
+            : null;
       const baseDumpOpts = {
-        section: metadata.showDumpSection ?? null,
-        partner: metadata.showDumpPartner ?? null,
-        assignee: metadata.showDumpAssignee ?? null,
+        section: dumpSection,
+        partner: dumpPartner,
+        assignee: dumpAssignee,
         assigneeSelfNames: speakerAliases,
         dateFrom: metadata.showDumpFrom ?? null,
         dateTo: metadata.showDumpTo ?? null,
         urgency: metadata.showDumpUrgency ?? null,
+        collaboration: dumpCollaboration,
         ...(itemDumpRequested
           ? { itemIds: new Set(dumpIds), omitEmptySentence: true }
           : {}),
@@ -2746,6 +2803,8 @@ export async function sendChatMessage(input: {
             ...(row.sharedWith && row.sharedWith.length > 1
               ? { shared_with: row.sharedWith }
               : {}),
+            ...(row.assignedBy ? { assigned_by: row.assignedBy } : {}),
+            ...(row.sharedFromOwner ? { owner: row.sharedFromOwner } : {}),
           }))
         : undefined;
 
@@ -3206,7 +3265,14 @@ export async function sendChatMessage(input: {
       } else if (!guestSpeaker) {
         bubbles = applyShowButtonsToBubbles(
           bubbles,
-          ensureSpeakerShowButtons(metadata, preTip.buttons ?? []),
+          ensureSpeakerShowButtons(metadata, preTip.buttons ?? [], {
+            speakerNames: [
+              speakerName(employee),
+              employeeDisplayName(employee),
+              employee.nickname?.trim() ?? "",
+              employee.name?.trim() ?? "",
+            ].filter(Boolean),
+          }),
         );
       }
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);

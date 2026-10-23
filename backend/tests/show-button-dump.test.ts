@@ -25,12 +25,18 @@ import {
   isTasksShowDumpKind,
   itemMatchesDateRange,
   mapShowButtonCommandToDump,
+  mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
   partnerBucketMatches,
   partnersKey,
   shortCadenceParen,
   titleAlreadyListsPartners,
 } from "../src/services/show-button-dump.js";
+import {
+  showAllListButtonCommand,
+  showAssigneeButtonCommand,
+  showSharedWithButtonCommand,
+} from "../src/services/builtin-lists.js";
 import {
   formatWhatsAppReplyContext,
   stripWhatsAppReplyPrefix,
@@ -43,12 +49,42 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הצג תיוקים")).toBe("filings");
     expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
     expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("contacts");
+    expect(mapShowButtonCommandToDump(showAllListButtonCommand("shopping"))).toBe(
+      "shopping",
+    );
     expect(mapShowButtonCommandToDump("הצג רשימת קניות בבקשה")).toBeNull();
     expect(mapShowButtonCommandToDump("הצג רשימת קניות אישית")).toBeNull();
     expect(mapShowButtonCommandToDump("מה יש לי לקנות")).toBeNull();
     expect(mapShowButtonCommandToDump("הציגי את רשימת הקניות")).toBeNull();
     expect(isKnownShowButtonCommand("הצג רשימת קניות")).toBe(true);
     expect(isKnownShowButtonCommand("הצג רשימת קניות אישית")).toBe(false);
+  });
+
+  it("maps shared-with / assignee / all commands to kind + pure filters", () => {
+    const shared = mapShowButtonCommandToDumpTarget(
+      showSharedWithButtonCommand("shopping", "מיכל"),
+    );
+    expect(shared).toEqual({
+      kind: "shopping",
+      section: "shared",
+      partner: "מיכל",
+      collaboration: "co_share",
+    });
+    const assign = mapShowButtonCommandToDumpTarget(
+      showAssigneeButtonCommand("tasks", "מיכל"),
+    );
+    expect(assign).toEqual({
+      kind: "tasks",
+      section: "shared",
+      assignee: "מיכל",
+      collaboration: "assign",
+    });
+    expect(
+      mapShowButtonCommandToDumpTarget(showAllListButtonCommand("filings")),
+    ).toEqual({ kind: "filings" });
+    expect(
+      isKnownShowButtonCommand(showSharedWithButtonCommand("shopping", "מיכל")),
+    ).toBe(true);
   });
 
   it("maps custom list buttons only by exact equality to a live list_name", () => {
@@ -1982,6 +2018,64 @@ describe("formatShowDumpFromKind", () => {
     expect(missing).not.toContain("קמח מלא");
   });
 
+  it("partner+shared excludes assign rows (pure משותף עם)", () => {
+    const mix: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "co1",
+              "שם פריט": "קפה משותף",
+              shared_with: ["טל", "מיכל"],
+            },
+            {
+              item_id: "as1",
+              "שם פריט": "חלב באחריות",
+              assigned_by: "מיכל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "מיכל",
+          scope: "shared_items",
+          items: [
+            {
+              item_id: "as2",
+              "שם פריט": "שמן למיכל",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const sharedWith = formatShowDumpFromKind("shopping", mix, {
+      viewerName: "טל",
+      section: "shared",
+      partner: "מיכל",
+      collaboration: "co_share",
+    })!;
+    expect(sharedWith).toContain("קפה משותף");
+    expect(sharedWith).not.toContain("חלב באחריות");
+    expect(sharedWith).not.toContain("שמן למיכל");
+    expect(sharedWith).not.toContain("באחריות");
+
+    const assignedTo = formatShowDumpFromKind("shopping", mix, {
+      viewerName: "טל",
+      section: "shared",
+      assignee: "מיכל",
+      collaboration: "assign",
+    })!;
+    expect(assignedTo).toContain("שמן למיכל");
+    expect(assignedTo).toContain("באחריות");
+    expect(assignedTo).not.toContain("קפה משותף");
+  });
+
   it("assignee filter keeps sole-responsibility marks only", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
@@ -2126,9 +2220,10 @@ describe("formatShowDumpFromKind", () => {
       dateFrom: "2026-10-17",
       dateTo: "2026-10-20",
     })!;
+    // Pure «משותף עם»: co-share only — assign rows excluded.
     expect(partnerOnly).toContain("עם עמית");
-    expect(partnerOnly).toContain("עליי בטווח");
-    expect(partnerOnly).toContain("שמן למיכל בטווח");
+    expect(partnerOnly).not.toContain("עליי בטווח");
+    expect(partnerOnly).not.toContain("שמן למיכל בטווח");
   });
 
   it("date range composes with partner/assignee on tasks; ignored for shopping", () => {

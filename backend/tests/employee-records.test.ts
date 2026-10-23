@@ -124,9 +124,14 @@ import {
   chooseSavedListType,
   deleteEmployeeRecord,
   deriveCustomListName,
+  correctAttachmentClaimReply,
   correctListMutationClaimReply,
+  correctShareClaimReply,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
+  formatShareOutcomeReply,
+  looksLikeShareClaim,
+  summarizeShareApply,
   formatAppliedMutationFallback,
   clusterSnapshotShoppingTasksItems,
   formatEmployeeContext,
@@ -652,6 +657,177 @@ describe("employee records", () => {
     ).toBe(reply);
   });
 
+  it("detects past-tense share claims in spoken reply", () => {
+    expect(looksLikeShareClaim("שיתפתי את הקניות עם טל.")).toBe(true);
+    expect(looksLikeShareClaim("הוספתי חלב לקניות.")).toBe(false);
+  });
+
+  it("corrects already-shared claim when apply added no new partners", () => {
+    const mutations = [
+      {
+        action: "update" as const,
+        itemId: "a",
+        employeeId: talId,
+        listType: "shopping" as const,
+        itemKey: "חלב",
+        itemLabel: "חלב",
+        shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+      },
+      {
+        action: "update" as const,
+        itemId: "b",
+        employeeId: talId,
+        listType: "shopping" as const,
+        itemKey: "לחם",
+        itemLabel: "לחם",
+        shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+      },
+    ];
+    expect(summarizeShareApply(mutations)).toEqual({
+      shareIntentCount: 2,
+      newlySharedCount: 0,
+      alreadySharedCount: 2,
+      missCount: 0,
+      missingCount: 0,
+      forbiddenCount: 0,
+    });
+    expect(formatShareOutcomeReply(summarizeShareApply(mutations))).toBe(
+      "הפריטים כבר משותפים — לא נוסף שיתוף חדש.",
+    );
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי את שני הפריטים עם אמיר.",
+        spoken: "שיתפתי את שני הפריטים עם אמיר.",
+        mutations,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("הפריטים כבר משותפים — לא נוסף שיתוף חדש.");
+  });
+
+  it("correctAttachmentClaimReply: false attach claim when linked+alreadyLinked=0", () => {
+    expect(
+      correctAttachmentClaimReply({
+        reply: "צרפתי את התמונה לרשימה.",
+        spoken: "צרפתי את התמונה לרשימה.",
+        outcome: {
+          linked: 0,
+          alreadyLinked: 0,
+          detached: 1,
+          attachRequested: true,
+        },
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("לא הצלחתי לצרף את הקובץ.");
+  });
+
+  it("correctAttachmentClaimReply: detach alone does not prove attach", () => {
+    expect(
+      correctAttachmentClaimReply({
+        reply: "תייקתי את הקובץ.",
+        spoken: "תייקתי את הקובץ.",
+        outcome: {
+          linked: 0,
+          alreadyLinked: 0,
+          detached: 2,
+          attachRequested: true,
+        },
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("לא הצלחתי לצרף את הקובץ.");
+  });
+
+  it("correctAttachmentClaimReply: alreadyLinked counts as attach success", () => {
+    const reply = "צרפתי את התמונה לפריט.";
+    expect(
+      correctAttachmentClaimReply({
+        reply,
+        spoken: reply,
+        outcome: {
+          linked: 0,
+          alreadyLinked: 1,
+          detached: 0,
+          attachRequested: true,
+        },
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
+  it("correctAttachmentClaimReply: skips when no attach was requested", () => {
+    const reply = "צרפתי את התמונה.";
+    expect(
+      correctAttachmentClaimReply({
+        reply,
+        spoken: reply,
+        outcome: {
+          linked: 0,
+          alreadyLinked: 0,
+          detached: 1,
+          attachRequested: false,
+        },
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
+  it("corrects partial share success with misses", () => {
+    const mutations = [
+      {
+        action: "update" as const,
+        itemId: "ok",
+        employeeId: talId,
+        listType: "tasks" as const,
+        itemKey: "לקנות",
+        itemLabel: "לקנות",
+        shareOutcome: { newlySharedCount: 1, alreadySharedCount: 0 },
+      },
+      {
+        action: "update" as const,
+        itemId: "dup",
+        employeeId: talId,
+        listType: "tasks" as const,
+        itemKey: "לנקות",
+        itemLabel: "לנקות",
+        shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+      },
+    ];
+    const misses = [
+      { itemId: "gone", reason: "missing" as const },
+      { itemId: "nope", reason: "forbidden" as const },
+    ];
+    expect(
+      correctShareClaimReply({
+        reply: "שיתפתי את כל המטלות.",
+        spoken: "שיתפתי את כל המטלות.",
+        mutations,
+        misses,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe("שיתפתי 1 פריטים (1 כבר היו משותפים, 1 לא נמצאו, 1 בלי הרשאה).");
+  });
+
+  it("keeps model share reply on full new-share success", () => {
+    const reply = "שיתפתי את החלב עם טל.";
+    expect(
+      correctShareClaimReply({
+        reply,
+        spoken: reply,
+        mutations: [
+          {
+            action: "update",
+            itemId: "a",
+            employeeId: talId,
+            listType: "shopping",
+            itemKey: "חלב",
+            itemLabel: "חלב",
+            shareOutcome: { newlySharedCount: 1, alreadySharedCount: 0 },
+          },
+        ],
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
   it("formats cascaded worker-task remove as מטלות fallback", () => {
     expect(
       formatAppliedMutationFallback(
@@ -824,6 +1000,110 @@ describe("employee records", () => {
           listOwnerId: employeeId,
           addedById: employeeId,
         }),
+      ]);
+      expect(result.mutations[0]?.shareOutcome).toEqual({
+        newlySharedCount: 1,
+        alreadySharedCount: 0,
+      });
+    });
+
+    it("already-shared share update is a noop write and records alreadyShared", async () => {
+      itemFindFirst.mockResolvedValue(coffee([employeeId, talId]));
+      itemUpdate.mockClear();
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "99ea236b-9203-4a4f-be3f-69882dacf8ac" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          visibleTo: [employeeId, talId],
+        },
+        employeeId,
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.events).toEqual([]);
+      expect(result.shareMisses).toEqual([]);
+      expect(result.mutations).toEqual([
+        expect.objectContaining({
+          action: "update",
+          itemId: "99ea236b-9203-4a4f-be3f-69882dacf8ac",
+          shareOutcome: { newlySharedCount: 0, alreadySharedCount: 1 },
+        }),
+      ]);
+    });
+
+    it("share update of a missing id records a missing miss", async () => {
+      itemFindFirst.mockResolvedValue(null);
+      const missingId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: missingId }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          visibleTo: [employeeId, shareeId],
+        },
+        employeeId,
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
+      expect(result.shareMisses).toEqual([
+        { itemId: missingId, reason: "missing" },
+      ]);
+    });
+
+    it("share update refused for outsider records a forbidden miss", async () => {
+      itemFindFirst.mockResolvedValue(coffee([employeeId, talId]));
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "99ea236b-9203-4a4f-be3f-69882dacf8ac" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: shareeId,
+          visibleTo: [employeeId, shareeId],
+        },
+        shareeId,
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
+      expect(result.shareMisses).toEqual([
+        {
+          itemId: "99ea236b-9203-4a4f-be3f-69882dacf8ac",
+          reason: "forbidden",
+        },
       ]);
     });
 

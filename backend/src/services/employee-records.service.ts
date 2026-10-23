@@ -19,7 +19,10 @@ import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import {
   applyAttachmentLinks,
+  emptyAttachmentOutcome,
   loadAttachmentRefs,
+  mergeAttachmentOutcomes,
+  type AttachmentApplyOutcome,
   type AttachmentSavedRef,
 } from "./attachment.service.js";
 import {
@@ -526,6 +529,158 @@ export const EMPTY_REPLY_RETRY =
 /** Model past-tense delete claim in the spoken reply (not user utterance). */
 export function looksLikeListDeleteClaim(spoken: string): boolean {
   return /מחקתי|הסרתי/.test(spoken);
+}
+
+/** Model past-tense share claim in the spoken reply (not user utterance). */
+export function looksLikeShareClaim(spoken: string): boolean {
+  return /שיתפתי|שיתפנו|שיתפתי את|שיתפתי עם/.test(spoken);
+}
+
+export type ShareApplySummary = {
+  /** Rows that recorded a shareOutcome (share intent on update). */
+  shareIntentCount: number;
+  newlySharedCount: number;
+  alreadySharedCount: number;
+  missCount: number;
+  missingCount: number;
+  forbiddenCount: number;
+};
+
+/** Aggregate share apply results for reply correction (pure). */
+export function summarizeShareApply(
+  mutations: ListItemMutation[],
+  misses: ShareApplyMiss[] = [],
+): ShareApplySummary {
+  let shareIntentCount = 0;
+  let newlySharedCount = 0;
+  let alreadySharedCount = 0;
+  for (const row of mutations) {
+    if (!row.shareOutcome) {
+      continue;
+    }
+    shareIntentCount += 1;
+    newlySharedCount += row.shareOutcome.newlySharedCount;
+    alreadySharedCount += row.shareOutcome.alreadySharedCount;
+  }
+  let missingCount = 0;
+  let forbiddenCount = 0;
+  for (const miss of misses) {
+    if (miss.reason === "missing") {
+      missingCount += 1;
+    } else {
+      forbiddenCount += 1;
+    }
+  }
+  return {
+    shareIntentCount,
+    newlySharedCount,
+    alreadySharedCount,
+    missCount: misses.length,
+    missingCount,
+    forbiddenCount,
+  };
+}
+
+/** Hebrew confirm when share apply diverges from a full-success claim. */
+export function formatShareOutcomeReply(summary: ShareApplySummary): string {
+  const {
+    newlySharedCount,
+    alreadySharedCount,
+    missCount,
+    missingCount,
+    forbiddenCount,
+  } = summary;
+  if (
+    newlySharedCount === 0 &&
+    alreadySharedCount > 0 &&
+    missCount === 0
+  ) {
+    return "הפריטים כבר משותפים — לא נוסף שיתוף חדש.";
+  }
+  if (newlySharedCount === 0 && missCount > 0 && alreadySharedCount === 0) {
+    if (forbiddenCount > 0 && missingCount === 0) {
+      return "אין הרשאה לשתף את הפריטים האלה.";
+    }
+    if (missingCount > 0 && forbiddenCount === 0) {
+      return LIST_FIND_MISS;
+    }
+    return "חלק מהפריטים לא נמצאו או שאין הרשאה לשתף אותם.";
+  }
+  if (newlySharedCount > 0 && (alreadySharedCount > 0 || missCount > 0)) {
+    const parts = [`שיתפתי ${newlySharedCount} פריטים`];
+    if (alreadySharedCount > 0) {
+      parts.push(`${alreadySharedCount} כבר היו משותפים`);
+    }
+    if (missingCount > 0) {
+      parts.push(`${missingCount} לא נמצאו`);
+    }
+    if (forbiddenCount > 0) {
+      parts.push(`${forbiddenCount} בלי הרשאה`);
+    }
+    return `${parts[0]} (${parts.slice(1).join(", ")}).`;
+  }
+  return "";
+}
+
+/**
+ * When the model claimed a new share but apply shows already-shared / partial /
+ * miss, replace the spoken reply. Full new-share success keeps the model text.
+ */
+export function correctShareClaimReply(input: {
+  reply: string;
+  spoken: string;
+  mutations: ListItemMutation[];
+  misses?: ShareApplyMiss[];
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  if (!looksLikeShareClaim(input.spoken)) {
+    return input.reply;
+  }
+  const summary = summarizeShareApply(input.mutations, input.misses ?? []);
+  if (summary.shareIntentCount === 0 && summary.missCount === 0) {
+    return input.reply;
+  }
+  const corrected = formatShareOutcomeReply(summary);
+  if (!corrected) {
+    return input.reply;
+  }
+  return input.setResponse(input.reply, corrected);
+}
+
+function looksLikeAttachClaim(spoken: string): boolean {
+  const text = spoken.trim();
+  if (!text) {
+    return false;
+  }
+  return /(?:צרפתי|תייקתי|שמרתי).{0,40}(?:קובץ|תמונ|מסמך|סרטון|הקלטה|קבצים|תמונות)|(?:צרפתי|תייקתי) את (?:ה)?(?:קובץ|תמונ)/u.test(
+    text,
+  );
+}
+
+/**
+ * When the model claimed a file attach but no attach succeeded this turn
+ * (new link or already-linked), replace the spoken reply. Detach-only success
+ * does not count as attach success. alreadyLinked counts as success.
+ */
+export function correctAttachmentClaimReply(input: {
+  reply: string;
+  spoken: string;
+  outcome: AttachmentApplyOutcome;
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  if (!input.outcome.attachRequested) {
+    return input.reply;
+  }
+  if (!looksLikeAttachClaim(input.spoken)) {
+    return input.reply;
+  }
+  if (input.outcome.linked + input.outcome.alreadyLinked > 0) {
+    return input.reply;
+  }
+  return input.setResponse(
+    input.reply,
+    "לא הצלחתי לצרף את הקובץ.",
+  );
 }
 
 /**
@@ -1721,7 +1876,23 @@ export interface ListItemMutation {
   listShell?: boolean;
   /** Set on a remove/update of a digital-worker task: everyone it involved before the change. */
   workerTaskInvolvedIds?: string[];
+  /**
+   * Co-share apply outcome for this row (update with partners).
+   * newlySharedCount 1 = at least one partner first added this turn;
+   * alreadySharedCount 1 = share intent but every intended partner was already
+   * in the audience (noop / no new share). Counts are per row, not partners.
+   */
+  shareOutcome?: {
+    newlySharedCount: number;
+    alreadySharedCount: number;
+  };
 }
+
+/** Share/update by id that did not apply (missing row or no permission). */
+export type ShareApplyMiss = {
+  itemId: string;
+  reason: "missing" | "forbidden";
+};
 
 type WorkerAccessCache = {
   ownerDigital?: boolean;
@@ -1813,6 +1984,8 @@ export async function applyEmployeeRecords(
   filingMutations: FilingMutation[];
   cancelledReminders: string[];
   cancelledReminderIds: string[];
+  shareMisses: ShareApplyMiss[];
+  attachmentOutcome: AttachmentApplyOutcome;
 }> {
   if (metadata.lists.length === 0 && metadata.filing.length === 0) {
     return {
@@ -1821,6 +1994,8 @@ export async function applyEmployeeRecords(
       filingMutations: [],
       cancelledReminders: [],
       cancelledReminderIds: [],
+      shareMisses: [],
+      attachmentOutcome: emptyAttachmentOutcome(),
     };
   }
 
@@ -1835,6 +2010,8 @@ export async function applyEmployeeRecords(
   const filingMutations: FilingMutation[] = [];
   const cancelledReminders: string[] = [];
   const cancelledReminderIds: string[] = [];
+  const shareMisses: ShareApplyMiss[] = [];
+  let attachmentOutcome = emptyAttachmentOutcome();
 
   for (const action of metadata.lists) {
     const result = await applyListAction(employeeId, action, resolved, actor);
@@ -1842,6 +2019,11 @@ export async function applyEmployeeRecords(
     mutations.push(...result.mutations);
     cancelledReminders.push(...result.cancelledReminders);
     cancelledReminderIds.push(...result.cancelledReminderIds);
+    shareMisses.push(...result.shareMisses);
+    attachmentOutcome = mergeAttachmentOutcomes(
+      attachmentOutcome,
+      result.attachmentOutcome,
+    );
   }
 
   const filingOwner = await prisma.employee.findUnique({
@@ -1921,12 +2103,15 @@ export async function applyEmployeeRecords(
         !hasUnshare &&
         Boolean(action.attachmentIds?.length || action.detachAttachmentIds?.length);
       if (attachOnly) {
-        await applyAttachmentLinks({
-          actorId: actor,
-          target: { filingId: existingFiling.id },
-          attachmentIds: action.attachmentIds,
-          detachIds: action.detachAttachmentIds,
-        });
+        attachmentOutcome = mergeAttachmentOutcomes(
+          attachmentOutcome,
+          await applyAttachmentLinks({
+            actorId: actor,
+            target: { filingId: existingFiling.id },
+            attachmentIds: action.attachmentIds,
+            detachIds: action.detachAttachmentIds,
+          }),
+        );
         filingMutations.push({
           action: "update",
           itemName: existingFiling.itemName,
@@ -1990,12 +2175,15 @@ export async function applyEmployeeRecords(
       const nextName = action.itemName.trim()
         ? action.itemName.trim().slice(0, 200)
         : existingFiling.itemName;
-      await applyAttachmentLinks({
-        actorId: actor,
-        target: { filingId: existingFiling.id },
-        attachmentIds: action.attachmentIds,
-        detachIds: action.detachAttachmentIds,
-      });
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        await applyAttachmentLinks({
+          actorId: actor,
+          target: { filingId: existingFiling.id },
+          attachmentIds: action.attachmentIds,
+          detachIds: action.detachAttachmentIds,
+        }),
+      );
       filingMutations.push({
         action: "update",
         itemName: nextName,
@@ -2046,11 +2234,14 @@ export async function applyEmployeeRecords(
             : {}),
         },
       });
-      await applyAttachmentLinks({
-        actorId: actor,
-        target: { filingId: created.id },
-        attachmentIds: action.attachmentIds,
-      });
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        await applyAttachmentLinks({
+          actorId: actor,
+          target: { filingId: created.id },
+          attachmentIds: action.attachmentIds,
+        }),
+      );
       filingMutations.push({
         action: "add",
         itemName,
@@ -2091,6 +2282,8 @@ export async function applyEmployeeRecords(
     filingMutations,
     cancelledReminders,
     cancelledReminderIds,
+    shareMisses,
+    attachmentOutcome,
   };
 }
 
@@ -2374,12 +2567,19 @@ async function applyListAction(
   mutations: ListItemMutation[];
   cancelledReminders: string[];
   cancelledReminderIds: string[];
+  shareMisses: ShareApplyMiss[];
+  attachmentOutcome: AttachmentApplyOutcome;
 }> {
   const events: SharedItemEvent[] = [];
   const mutations: ListItemMutation[] = [];
   const cancelledReminders: string[] = [];
   const cancelledReminderIds: string[] = [];
+  let attachmentOutcome = emptyAttachmentOutcome();
+  const shareMisses: ShareApplyMiss[] = [];
   const accessCache: WorkerAccessCache = {};
+  const shareIntent =
+    visibility.scope === "shared" ||
+    visibility.visibleTo.some((id) => id !== employeeId);
   const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
   const itemListLinks = itemAttachments.map((entry) => splitItemListLinks(entry.item));
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, {
@@ -2451,6 +2651,8 @@ async function applyListAction(
       mutations: [],
       cancelledReminders: [],
       cancelledReminderIds: [],
+      shareMisses: [],
+      attachmentOutcome: emptyAttachmentOutcome(),
     };
   }
   const createdList = !existingList;
@@ -2638,12 +2840,18 @@ async function applyListAction(
         ? await findLiveListItemById(mutateId, employeeId)
         : null;
     if (resolvedAction.action === "update" && !existing?.id) {
+      if (shareIntent && mutateId) {
+        shareMisses.push({ itemId: mutateId, reason: "missing" });
+      }
       continue;
     }
     const access = existing
       ? await workerTaskAccess(employeeId, actorId, existing, accessCache)
       : null;
     if (access && !access.allowed) {
+      if (shareIntent && existing?.id) {
+        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
+      }
       continue;
     }
     if (
@@ -2651,6 +2859,9 @@ async function applyListAction(
       !access &&
       !(await humanItemAccessAllowed(employeeId, actorId, existing, accessCache))
     ) {
+      if (shareIntent) {
+        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
+      }
       continue;
     }
     // Editing a worker task never re-shares it; who it involves comes from the task itself.
@@ -2732,17 +2943,102 @@ async function applyListAction(
       select: { userId: true },
     });
     if (existing) {
-      await prisma.employeeListItem.update({
-        where: { id: existing.id },
-        data: {
-          ...fields,
-          ...(resolvedAction.action === "update" &&
-          nextItemKey &&
-          nextItemKey !== existing.itemKey
-            ? { itemKey: nextItemKey }
-            : {}),
-        },
-      });
+      // People this update just added to visible_to hear «שיתף איתך», not «עדכן».
+      const newlySharedForOutcome = shareIntent
+        ? newlySharedIds(existing, resolvedVisibility, employeeId, actorId)
+        : [];
+      const beforeAudience = new Set([
+        employeeId,
+        existing.addedById ?? "",
+        ...idList(existing.visibleTo),
+      ]);
+      const intendedPartners = uniqueIds(resolvedVisibility.visibleTo).filter(
+        (id) => id !== employeeId && id !== actorId,
+      );
+      const alreadySharedPartners = intendedPartners.filter((id) =>
+        beforeAudience.has(id),
+      );
+      const contentFieldChanged = Object.keys(fieldsItem).some(
+        (key) => !ITEM_ID_KEYS.has(key),
+      );
+      const visibilityUnchanged =
+        uniqueIds([employeeId, ...idList(existing.visibleTo)])
+          .sort()
+          .join("\0") ===
+          uniqueIds(resolvedVisibility.visibleTo).sort().join("\0") &&
+        (existing.addedById ?? employeeId) ===
+          (resolvedVisibility.addedById ?? employeeId);
+      const shareNoop =
+        shareIntent &&
+        newlySharedForOutcome.length === 0 &&
+        unshared.length === 0 &&
+        !contentFieldChanged &&
+        visibilityUnchanged;
+      // Count this row once (not partner cardinality) so bulk reply text
+      // matches item counts: «שיתפתי N פריטים».
+      const shareOutcome = shareIntent
+        ? {
+            newlySharedCount: newlySharedForOutcome.length > 0 ? 1 : 0,
+            alreadySharedCount:
+              newlySharedForOutcome.length === 0 &&
+              alreadySharedPartners.length > 0
+                ? 1
+                : 0,
+          }
+        : undefined;
+
+      if (!shareNoop) {
+        await prisma.employeeListItem.update({
+          where: { id: existing.id },
+          data: {
+            ...fields,
+            ...(resolvedAction.action === "update" &&
+            nextItemKey &&
+            nextItemKey !== existing.itemKey
+              ? { itemKey: nextItemKey }
+              : {}),
+          },
+        });
+        attachmentOutcome = mergeAttachmentOutcomes(
+          attachmentOutcome,
+          await applyAttachmentLinks({
+            actorId,
+            target: { listItemId: existing.id },
+            attachmentIds: attachments?.attach,
+            detachIds: attachments?.detach,
+          }),
+        );
+        await applyListItemListLinks({
+          actorId,
+          listItemId: existing.id,
+          hostListId: existing.listId,
+          hostListType: resolvedAction.listType,
+          linkedListIds: listLinks?.linkedListIds,
+          linkedLists: listLinks?.linkedLists,
+          unlinkListIds: listLinks?.unlinkListIds,
+        });
+        if (listOwner) {
+          const occurrenceDone =
+            Boolean(done.doneDate) && doneRecord !== ruledRecord;
+          const change = occurrenceChanged ? occurrence.change : null;
+          await recordAuditEvent({
+            userId: listOwner.userId,
+            actorEmployeeId: actorId,
+            action: change
+              ? "list_occurrence_change"
+              : occurrenceDone
+                ? "list_occurrence_done"
+                : "list_update",
+            entityType: "EmployeeListItem",
+            entityId: existing.id,
+            summary: change
+              ? `occurrence ${change.cancel ? "cancel" : `time ${change.time}`} ${change.date} ${resolvedAction.listType}: ${existing.itemKey}`
+              : occurrenceDone
+                ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
+                : `update ${resolvedAction.listType}: ${existing.itemKey}`,
+          });
+        }
+      }
       mutations.push({
         action: "update",
         itemId: existing.id,
@@ -2762,41 +3058,10 @@ async function applyListAction(
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
+        ...(shareOutcome ? { shareOutcome } : {}),
       });
-      await applyAttachmentLinks({
-        actorId,
-        target: { listItemId: existing.id },
-        attachmentIds: attachments?.attach,
-        detachIds: attachments?.detach,
-      });
-      await applyListItemListLinks({
-        actorId,
-        listItemId: existing.id,
-        hostListId: existing.listId,
-        hostListType: resolvedAction.listType,
-        linkedListIds: listLinks?.linkedListIds,
-        linkedLists: listLinks?.linkedLists,
-        unlinkListIds: listLinks?.unlinkListIds,
-      });
-      if (listOwner) {
-        const occurrenceDone = Boolean(done.doneDate) && doneRecord !== ruledRecord;
-        const change = occurrenceChanged ? occurrence.change : null;
-        await recordAuditEvent({
-          userId: listOwner.userId,
-          actorEmployeeId: actorId,
-          action: change
-            ? "list_occurrence_change"
-            : occurrenceDone
-              ? "list_occurrence_done"
-              : "list_update",
-          entityType: "EmployeeListItem",
-          entityId: existing.id,
-          summary: change
-            ? `occurrence ${change.cancel ? "cancel" : `time ${change.time}`} ${change.date} ${resolvedAction.listType}: ${existing.itemKey}`
-            : occurrenceDone
-              ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
-              : `update ${resolvedAction.listType}: ${existing.itemKey}`,
-        });
+      if (shareNoop) {
+        continue;
       }
     } else {
       if (!nextItemKey) {
@@ -2824,11 +3089,14 @@ async function applyListAction(
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
       });
-      await applyAttachmentLinks({
-        actorId,
-        target: { listItemId: created.id },
-        attachmentIds: attachments?.attach,
-      });
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        await applyAttachmentLinks({
+          actorId,
+          target: { listItemId: created.id },
+          attachmentIds: attachments?.attach,
+        }),
+      );
       await applyListItemListLinks({
         actorId,
         listItemId: created.id,
@@ -2947,14 +3215,24 @@ async function applyListAction(
   }
 
   if (resolvedAction.action !== "remove" && resolvedAction.listAttachmentIds?.length) {
-    await applyAttachmentLinks({
-      actorId,
-      target: { listId: list.id },
-      attachmentIds: resolvedAction.listAttachmentIds,
-    });
+    attachmentOutcome = mergeAttachmentOutcomes(
+      attachmentOutcome,
+      await applyAttachmentLinks({
+        actorId,
+        target: { listId: list.id },
+        attachmentIds: resolvedAction.listAttachmentIds,
+      }),
+    );
   }
 
-  return { events, mutations, cancelledReminders, cancelledReminderIds };
+  return {
+    events,
+    mutations,
+    cancelledReminders,
+    cancelledReminderIds,
+    shareMisses,
+    attachmentOutcome,
+  };
 }
 
 const ITEM_ATTACH_KEYS = ["attachment_ids", "attachmentIds"];

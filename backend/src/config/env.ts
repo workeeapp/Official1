@@ -4,11 +4,18 @@ import { resolve } from "node:path";
 
 // Prefer file values over a polluted parent env (e.g. agent/eval shell left
 // DATABASE_URL=workee_test:5436 and WhatsApp inbound then hit the wrong DB).
-loadEnv({ path: resolve(process.cwd(), ".env"), quiet: true, override: true });
+// Exception: eval harness that locked `.env.live-full-eval` must not be
+// overwritten by product `.env` (see load-live-full-eval-env.ts).
+const evalEnvLocked = process.env.WORKEE_EVAL_ENV_LOCKED === "1";
+loadEnv({
+  path: resolve(process.cwd(), ".env"),
+  quiet: true,
+  override: !evalEnvLocked,
+});
 loadEnv({
   path: resolve(process.cwd(), "../.env"),
   quiet: true,
-  override: true,
+  override: !evalEnvLocked,
 });
 
 const envSchema = z.object({

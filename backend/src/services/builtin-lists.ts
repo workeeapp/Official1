@@ -17,9 +17,17 @@ const BUILTIN_LIST_HEBREW: Record<BuiltinListType, string> = {
   contacts: "אנשי קשר",
 };
 
+/** Noun used in «כל ה…» labels (with definite article where natural). */
+const BUILTIN_ALL_NOUN: Record<BuiltinListType, string> = {
+  shopping: "הקניות",
+  tasks: "המטלות",
+  contacts: "אנשי הקשר",
+};
+
 export const SHOW_REMINDERS_COMMAND = "הצג תזכורות";
 export const SHOW_FILINGS_COMMAND = "הצג תיוקים";
 export const SHOW_LIST_PREFIX = "הצג רשימת ";
+export const SHOW_FILINGS_ALL_COMMAND = "כל התיוקים";
 
 export function isBuiltinListType(value: string): value is BuiltinListType {
   return (BUILTIN_LIST_TYPES as readonly string[]).includes(value);
@@ -56,13 +64,81 @@ export function showListButtonCommand(
   return name ? `${SHOW_LIST_PREFIX}${name}` : SHOW_LIST_PREFIX.trimEnd();
 }
 
+/** «כל ה…» alias for unfiltered dump (same kind as הצג רשימת …). */
+export function showAllListButtonCommand(
+  listTypeOrFilings: BuiltinListType | "filings",
+): string {
+  if (listTypeOrFilings === "filings") {
+    return SHOW_FILINGS_ALL_COMMAND;
+  }
+  return `כל ${BUILTIN_ALL_NOUN[listTypeOrFilings]}`;
+}
+
+/** Short WhatsApp label for «all» (§8.1). */
+export function showAllListButtonLabel(
+  listTypeOrFilings: BuiltinListType | "filings",
+): string {
+  return showAllListButtonCommand(listTypeOrFilings);
+}
+
+/** Opaque command: shared-with person dump (co_share only). */
+export function showSharedWithButtonCommand(
+  listTypeOrFilings: BuiltinListType | "filings" | string,
+  person: string,
+): string {
+  const who = person.trim();
+  if (!who) {
+    return "";
+  }
+  if (listTypeOrFilings === "filings") {
+    return `הצג תיוקים משותפים עם ${who}`;
+  }
+  if (isBuiltinListType(listTypeOrFilings)) {
+    return `הצג ${builtinListHebrew(listTypeOrFilings)} משותפות עם ${who}`;
+  }
+  const name = listTypeOrFilings.trim();
+  return name ? `הצג רשימת ${name} משותפות עם ${who}` : "";
+}
+
+/** Opaque command: assignee/באחריות dump. */
+export function showAssigneeButtonCommand(
+  listTypeOrFilings: BuiltinListType | "filings" | string,
+  person: string,
+): string {
+  const who = person.trim();
+  if (!who) {
+    return "";
+  }
+  if (listTypeOrFilings === "filings") {
+    return `הצג תיוקים באחריות ${who}`;
+  }
+  if (isBuiltinListType(listTypeOrFilings)) {
+    return `הצג ${builtinListHebrew(listTypeOrFilings)} באחריות ${who}`;
+  }
+  const name = listTypeOrFilings.trim();
+  return name ? `הצג רשימת ${name} באחריות ${who}` : "";
+}
+
+/** Short labels (§8.1) — max ~20 with typical names. */
+export function showSharedWithButtonLabel(person: string): string {
+  return `משותף עם ${person.trim()}`.trim();
+}
+
+export function showAssigneeButtonLabel(person: string): string {
+  return `באחריות ${person.trim()}`.trim();
+}
+
 /** Exact builtin/reminder button command → show_dump kind. */
 export function staticShowButtonDumpMap(): Readonly<Record<string, string>> {
   return {
     [SHOW_REMINDERS_COMMAND]: "reminders",
     [SHOW_FILINGS_COMMAND]: "filings",
+    [SHOW_FILINGS_ALL_COMMAND]: "filings",
     [showListButtonCommand("shopping")]: "shopping",
     [showListButtonCommand("tasks")]: "tasks",
     [showListButtonCommand("contacts")]: "contacts",
+    [showAllListButtonCommand("shopping")]: "shopping",
+    [showAllListButtonCommand("tasks")]: "tasks",
+    [showAllListButtonCommand("contacts")]: "contacts",
   };
 }

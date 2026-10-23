@@ -8,7 +8,12 @@ import {
 } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
-import { applyAttachmentLinks } from "./attachment.service.js";
+import {
+  applyAttachmentLinks,
+  attachmentAttachSucceeded,
+  emptyAttachmentOutcome,
+  type AttachmentApplyOutcome,
+} from "./attachment.service.js";
 import { jsonStringList, visibleListColumns } from "./employee-records.service.js";
 import { employeeDisplayName, matchEmployee } from "./employee-targets.service.js";
 import { toPlainJson } from "./llm-client.js";
@@ -41,6 +46,8 @@ export interface ListOpResult {
   notices: Array<{ employeeId: string; text: string }>;
   cancelledReminders: string[];
   cancelledReminderIds: string[];
+  /** Attach/detach outcome when this op touched files (independent counters). */
+  attachmentOutcome?: AttachmentApplyOutcome;
 }
 
 const UUID_RE =
@@ -110,13 +117,26 @@ async function applyListOp(
     if (!canSee) {
       return { ...base, refusal: { reason: "not_owner" } };
     }
-    await applyAttachmentLinks({
+    const attachmentOutcome = await applyAttachmentLinks({
       actorId: input.actor.id,
       target: { listId: list.id },
       attachmentIds: op.addAttachments,
       detachIds: op.removeAttachments,
     });
-    return { ...base, applied: true };
+    const wantAttach = (op.addAttachments?.length ?? 0) > 0;
+    const wantDetach = (op.removeAttachments?.length ?? 0) > 0;
+    // Attach and detach are independent: detach success alone never proves attach.
+    const attachOk = !wantAttach || attachmentAttachSucceeded(attachmentOutcome);
+    const detachOk = !wantDetach || attachmentOutcome.detached > 0;
+    const applied = attachOk && detachOk && (wantAttach || wantDetach);
+    return {
+      ...base,
+      applied,
+      attachmentOutcome,
+      ...(!applied
+        ? { refusal: { reason: "empty" as const, detail: "attach_failed" } }
+        : {}),
+    };
   }
   const canMutate =
     list.employeeId === input.actor.id ||
@@ -131,12 +151,17 @@ async function applyListOp(
     }
     const altered = await alterList(input, list, op, base);
     if (altered.applied) {
-      await applyAttachmentLinks({
-        actorId: input.actor.id,
-        target: { listId: list.id },
-        attachmentIds: op.addAttachments,
-        detachIds: op.removeAttachments,
-      });
+      const attachmentOutcome =
+        (op.addAttachments?.length ?? 0) > 0 ||
+        (op.removeAttachments?.length ?? 0) > 0
+          ? await applyAttachmentLinks({
+              actorId: input.actor.id,
+              target: { listId: list.id },
+              attachmentIds: op.addAttachments,
+              detachIds: op.removeAttachments,
+            })
+          : emptyAttachmentOutcome();
+      return { ...altered, attachmentOutcome };
     }
     return altered;
   } catch (error) {
@@ -463,7 +488,10 @@ const REFUSAL_TEXT: Record<ListOpRefusalReason, (detail: string, label: string) 
     `רק הבעלים של הרשימה${label ? ` «${label}»` : ""} יכול לשנות או למחוק אותה.`,
   builtin: (_detail, label) =>
     `ברשימת «${label}» אי אפשר לשנות שם, עמודות או שיתוף רשימה שלם — שתפי פריט בודד דרך המטלות/קניות.`,
-  empty: () => "לא ציינת מה לשנות ברשימה.",
+  empty: (detail) =>
+    detail === "attach_failed"
+      ? "לא הצלחתי לצרף את הקובץ לרשימה."
+      : "לא ציינת מה לשנות ברשימה.",
   name_taken: (detail) => `כבר יש רשימה בשם «${detail}».`,
   unknown_column: (detail, label) => `אין ברשימה «${label}» עמודה בשם «${detail}».`,
   column_exists: (detail, label) => `כבר יש ברשימה «${label}» עמודה בשם «${detail}».`,

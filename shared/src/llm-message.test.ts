@@ -927,6 +927,51 @@ describe("parseLlmReply", () => {
     expect(bubbles[2]?.buttons).toBeUndefined();
   });
 
+  it("collab nav commands stay on confirm; כן/לא on offer; not all on first only", () => {
+    const sharedCmd = "הצג קניות משותפות עם מיכל";
+    const allCmd = "כל הקניות";
+    const bubbles = applyShowButtonsToBubbles(
+      [
+        {
+          text: "שיתפתי את הקניות עם מיכל.",
+          buttons: [
+            { label: "משותף עם מיכל", command: sharedCmd },
+            { label: "כל הקניות", command: allCmd },
+          ],
+        },
+        {
+          text: "רוצה שאוסיף גם תזכורת?",
+          buttons: [
+            { label: "כן", command: "כן" },
+            { label: "לא", command: "לא" },
+          ],
+        },
+      ],
+      [
+        { label: "משותף עם מיכל", command: sharedCmd },
+        { label: "כל הקניות", command: allCmd },
+        { label: "כן", command: "כן" },
+        { label: "לא", command: "לא" },
+      ],
+    );
+    // Bubble ↔ command binding (not position-only): confirm has nav cmds only.
+    expect(bubbles[0]?.buttons?.map((b) => b.command)).toEqual([
+      sharedCmd,
+      allCmd,
+    ]);
+    expect(bubbles[0]?.buttons?.some((b) => b.command === "כן")).toBe(false);
+    expect(bubbles[1]?.buttons?.map((b) => b.command)).toEqual(["כן", "לא"]);
+    expect(bubbles[1]?.buttons?.some((b) => b.command === sharedCmd)).toBe(
+      false,
+    );
+    // Anti-regression: choices must not collapse onto the first reply only.
+    const firstCommands = new Set(
+      (bubbles[0]?.buttons ?? []).map((b) => b.command),
+    );
+    expect(firstCommands.has("כן")).toBe(false);
+    expect(firstCommands.has("לא")).toBe(false);
+  });
+
   it("explicit same-turn reminder confirm has nav only — no soft-offer כן/לא", () => {
     const parsed = parseLlmReply(
       JSON.stringify({

@@ -778,6 +778,95 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
   });
 
+  it("collab nav: bulk co-share → shared-with + כל; assign → באחריות; multi-partner → כל only", () => {
+    const bulkShare = ensureSpeakerShowButtons(
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [
+              { item_id: "a", "שם פריט": "חלב" },
+              { item_id: "b", "שם פריט": "לחם" },
+            ],
+            targets: ["טל", "מיכל"],
+          },
+        ],
+      },
+      [],
+      { speakerNames: ["טל"] },
+    );
+    expect(bulkShare.map((b) => b.command)).toEqual([
+      "הצג קניות משותפות עם מיכל",
+      "כל הקניות",
+    ]);
+    expect(bulkShare[0]?.label).toBe("משותף עם מיכל");
+
+    const singleShare = ensureSpeakerShowButtons(
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: ["טל", "מיכל"],
+          },
+        ],
+      },
+      [],
+      { speakerNames: ["טל"] },
+    );
+    expect(singleShare.map((b) => b.command)).toEqual([
+      "הצג קניות משותפות עם מיכל",
+    ]);
+
+    const assign = ensureSpeakerShowButtons(
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לקנות חלב" }],
+            targets: ["מיכל"],
+          },
+        ],
+      },
+      [],
+      { speakerNames: ["טל"] },
+    );
+    expect(assign.map((b) => b.command)).toEqual([
+      "הצג מטלות באחריות מיכל",
+    ]);
+    expect(assign[0]?.label).toBe("באחריות מיכל");
+
+    const multi = ensureSpeakerShowButtons(
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [
+              { item_id: "a", "שם פריט": "חלב" },
+              { item_id: "b", "שם פריט": "לחם" },
+            ],
+            targets: ["טל", "מיכל", "עמית"],
+          },
+        ],
+      },
+      [],
+      { speakerNames: ["טל"] },
+    );
+    expect(multi.map((b) => b.command)).toEqual(["כל הקניות"]);
+  });
+
   it("LIST BUTTON: injects missing show-list after list/filing mutate; no duplicate", () => {
     expect(
       ensureSpeakerShowButtons({

@@ -29,10 +29,26 @@ export {
   SHOW_REMINDERS_COMMAND,
   SHOW_FILINGS_COMMAND,
   SHOW_LIST_PREFIX,
+  showAllListButtonCommand,
+  showSharedWithButtonCommand,
+  showAssigneeButtonCommand,
+  showSharedWithButtonLabel,
+  showAssigneeButtonLabel,
+  showAllListButtonLabel,
 } from "./builtin-lists.js";
 
 /** Opaque button payloads the engine emits — equality only, no prefix/regex. */
 const STATIC_SHOW_BUTTON_DUMP = staticShowButtonDumpMap();
+
+/** Structured allowlist hit: kind + optional collaboration filters. */
+export type ShowButtonDumpTarget = {
+  kind: string;
+  section?: LlmShowDumpSection | null;
+  partner?: string | null;
+  assignee?: string | null;
+  /** Pure co-share vs assign — never conflate the two. */
+  collaboration?: "co_share" | "assign" | null;
+};
 
 const TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
@@ -97,6 +113,14 @@ export type ShowDumpOptions = {
    * Empty Set = ITEM DUMP with no ids → keep nothing (caller shows no-match).
    */
   itemIds?: ReadonlySet<string> | null;
+  /**
+   * Pure collaboration filter:
+   * - co_share: shared-with rows only (exclude באחריות / assignee)
+   * - assign: sole-assignee rows only (exclude multi-party co-share)
+   * null/omit: legacy section/partner/assignee only (partner+shared still
+   * excludes assign when partner is set — see filterDumpRows).
+   */
+  collaboration?: "co_share" | "assign" | null;
 };
 
 /** Phone-book dump row (directory / SPEAKER_CONTACTS). */
@@ -106,6 +130,10 @@ export type PhoneBookDumpRow = {
   scope?: "personal" | "shared";
   /** Partner display names when shared (may include owner). */
   shared_with?: string[];
+  /** Assigner display name (ESD assigned_by) — not the responsible owner. */
+  assigned_by?: string;
+  /** Book owner when viewing an assigned/shared row on someone else's book. */
+  owner?: string;
 };
 
 /** Normalize dump filter name(s) to a trimmed list. */
@@ -137,22 +165,79 @@ function partnerFilterLabel(partners: string[]): string {
 }
 
 /**
- * Closed allowlist: exact UI button command → show_dump value.
- * Custom lists: only when command equals «הצג רשימת <list_name>» for a live
- * custom list in the snapshot (opaque button id), never free-form variants.
+ * Closed allowlist: exact UI button command → dump target (kind + filters).
+ * Custom lists: «הצג רשימת <list_name>» (+ optional משותפות עם / באחריות).
  */
-export function mapShowButtonCommandToDump(
+export function mapShowButtonCommandToDumpTarget(
   text: string,
   snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
-): string | null {
+): ShowButtonDumpTarget | null {
   const trimmed = text.trim();
   if (!trimmed) {
     return null;
   }
   const staticKind = STATIC_SHOW_BUTTON_DUMP[trimmed];
   if (staticKind) {
-    return staticKind;
+    return { kind: staticKind };
   }
+
+  const builtinShared = trimmed.match(
+    /^הצג (קניות|מטלות|אנשי קשר) משותפות עם (.+)$/u,
+  );
+  if (builtinShared) {
+    const hebrew = builtinShared[1] ?? "";
+    const person = (builtinShared[2] ?? "").trim();
+    const listType = builtinListTypeFromHebrew(hebrew);
+    if (listType && person) {
+      return {
+        kind: listType,
+        section: "shared",
+        partner: person,
+        collaboration: "co_share",
+      };
+    }
+  }
+  const filingsShared = trimmed.match(/^הצג תיוקים משותפים עם (.+)$/u);
+  if (filingsShared) {
+    const person = (filingsShared[1] ?? "").trim();
+    if (person) {
+      return {
+        kind: "filings",
+        section: "shared",
+        partner: person,
+        collaboration: "co_share",
+      };
+    }
+  }
+  const builtinAssign = trimmed.match(
+    /^הצג (קניות|מטלות|אנשי קשר) באחריות (.+)$/u,
+  );
+  if (builtinAssign) {
+    const hebrew = builtinAssign[1] ?? "";
+    const person = (builtinAssign[2] ?? "").trim();
+    const listType = builtinListTypeFromHebrew(hebrew);
+    if (listType && person) {
+      return {
+        kind: listType,
+        section: "shared",
+        assignee: person,
+        collaboration: "assign",
+      };
+    }
+  }
+  const filingsAssign = trimmed.match(/^הצג תיוקים באחריות (.+)$/u);
+  if (filingsAssign) {
+    const person = (filingsAssign[1] ?? "").trim();
+    if (person) {
+      return {
+        kind: "filings",
+        section: "shared",
+        assignee: person,
+        collaboration: "assign",
+      };
+    }
+  }
+
   if (!snapshot) {
     return null;
   }
@@ -165,10 +250,46 @@ export function mapShowButtonCommandToDump(
       continue;
     }
     if (trimmed === showListButtonCommand(listName)) {
-      return listName;
+      return { kind: listName };
+    }
+    const sharedSuffix = ` משותפות עם `;
+    const assignSuffix = ` באחריות `;
+    const prefix = showListButtonCommand(listName);
+    if (trimmed.startsWith(prefix + sharedSuffix)) {
+      const person = trimmed.slice((prefix + sharedSuffix).length).trim();
+      if (person) {
+        return {
+          kind: listName,
+          section: "shared",
+          partner: person,
+          collaboration: "co_share",
+        };
+      }
+    }
+    if (trimmed.startsWith(prefix + assignSuffix)) {
+      const person = trimmed.slice((prefix + assignSuffix).length).trim();
+      if (person) {
+        return {
+          kind: listName,
+          section: "shared",
+          assignee: person,
+          collaboration: "assign",
+        };
+      }
     }
   }
   return null;
+}
+
+/**
+ * Closed allowlist: exact UI button command → show_dump kind string.
+ * Prefer mapShowButtonCommandToDumpTarget when filters are needed.
+ */
+export function mapShowButtonCommandToDump(
+  text: string,
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
+): string | null {
+  return mapShowButtonCommandToDumpTarget(text, snapshot)?.kind ?? null;
 }
 
 /** True when the message is an exact known show-button command string. */
@@ -176,7 +297,7 @@ export function isKnownShowButtonCommand(
   text: string,
   snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
 ): boolean {
-  return mapShowButtonCommandToDump(text, snapshot) !== null;
+  return mapShowButtonCommandToDumpTarget(text, snapshot) !== null;
 }
 
 /** Map metadata.show_dump labels to a dump target (no section/polite stripping). */
@@ -646,6 +767,20 @@ export function formatPhoneBookDump(
       .map((value) => value.trim())
       .filter(Boolean);
     const partners = sharedWith.filter((value) => !viewerNames.has(value));
+    const assignedBy = (row.assigned_by ?? "").trim();
+    const owner = (row.owner ?? "").trim();
+    if (assignedBy && sharedWith.length === 0) {
+      const assignee = owner || viewer;
+      const mark = formatAssignResponsibilityMark(assignee, assignedBy);
+      return {
+        title,
+        item: row as unknown as Record<string, unknown>,
+        isShared: true,
+        partnerFilterKey: assignedBy,
+        assigneeName: assignee || undefined,
+        ...(mark ? { responsibilityMark: mark } : {}),
+      };
+    }
     const isShared = row.scope === "shared" && partners.length > 0;
     const allInvolved = isShared
       ? allInvolvedNames(sharedWith, viewer, aliases)
@@ -1739,13 +1874,20 @@ type ListDumpType =
   | "filings"
   | "phone_book";
 
+/** Assign / באחריות row (sole responsibility) — not multi-party co-share. */
+export function isAssignDumpRow(row: DumpItem): boolean {
+  const mark = row.responsibilityMark?.trim() ?? "";
+  return Boolean(row.assigneeName?.trim()) || mark.startsWith("באחריות");
+}
+
+/** Co-share / whole-list shared row (not assign). */
+export function isCoShareDumpRow(row: DumpItem): boolean {
+  return row.isShared === true && !isAssignDumpRow(row);
+}
+
 /** 0 = personal, 1 = co-share / whole shared list, 2 = assign. */
 function dumpItemKindRank(row: DumpItem): number {
-  const mark = row.responsibilityMark?.trim() ?? "";
-  if (
-    Boolean(row.assigneeName?.trim()) ||
-    mark.startsWith("באחריות")
-  ) {
+  if (isAssignDumpRow(row)) {
     return 2;
   }
   if (row.isShared === true) {
@@ -1888,60 +2030,20 @@ function collectListDumpRows(
       }
 
       if (listType === "contacts") {
-        let mark: string | undefined;
-        let isShared = false;
-        let partnerFilterKey = "";
-        if (list.scope === "shared") {
-          isShared = true;
-          const itemPartners = stringArray(item.shared_with);
-          const names =
-            itemPartners.length > 0
-              ? itemPartners
-              : (list.shared_with ?? []);
-          partnerFilterKey = partnersKey(names, viewer, aliases);
-          const allInvolved = allInvolvedNames(names, viewer, aliases);
-          if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
-            mark = allInvolved;
-          }
-        } else if (list.scope === "shared_items") {
-          isShared = true;
-          const owner = (list.owner ?? "").trim();
-          const itemPartners = stringArray(item.shared_with);
-          const names =
-            itemPartners.length > 0
-              ? itemPartners
-              : owner
-                ? [owner]
-                : [];
-          partnerFilterKey = partnersKey(names, viewer, aliases);
-          const allInvolved = allInvolvedNames(
-            names.length > 0 ? names : [owner].filter(Boolean),
-            viewer,
-            aliases,
-          );
-          if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
-            mark = allInvolved;
-          }
-        } else {
-          const sharedWith = stringArray(item.shared_with);
-          const itemScoped =
-            item.scope === "shared" && sharedWith.length > 0;
-          if (itemScoped) {
-            isShared = true;
-            partnerFilterKey = partnersKey(sharedWith, viewer, aliases);
-            const allInvolved = allInvolvedNames(sharedWith, viewer, aliases);
-            if (allInvolved && !titleAlreadyListsPartners(title, allInvolved)) {
-              mark = allInvolved;
-            }
-          }
-        }
+        // Same assign vs co-share marks as shopping/tasks (assigned_by = assigner).
+        const meta = resolveShoppingTasksRowMeta(
+          list,
+          item,
+          title,
+          viewer,
+          aliases,
+          skipMarks,
+        );
         rows.push({
           title,
           item,
           listFiles,
-          isShared,
-          ...(partnerFilterKey ? { partnerFilterKey } : {}),
-          ...(mark ? { responsibilityMark: mark } : {}),
+          ...meta,
         });
         continue;
       }
@@ -1972,7 +2074,19 @@ function filterDumpRows(
 ): DumpItem[] {
   const section = opts?.section ?? null;
   const partnerFilters = dumpFilterNames(opts?.partner);
+  const assigneeFilters = dumpFilterNames(opts?.assignee);
   const itemIds = opts?.itemIds ?? null;
+  const collaboration = opts?.collaboration ?? null;
+  // «משותף עם X» (partner + shared, no assignee) — never include assign rows.
+  // Combined partner+assignee keeps legacy intersection; collaboration=assign
+  // forces assign-only.
+  const pureCoShare =
+    collaboration === "co_share" ||
+    (partnerFilters.length > 0 &&
+      section === "shared" &&
+      collaboration !== "assign" &&
+      assigneeFilters.length === 0);
+  const pureAssign = collaboration === "assign";
 
   let kept = rows.filter((row) => {
     if (dumpRowExcludedByItemIds(listType, row.item, itemIds)) {
@@ -1983,6 +2097,12 @@ function filterDumpRows(
       return false;
     }
     if (section === "shared" && !shared) {
+      return false;
+    }
+    if (pureCoShare && !isCoShareDumpRow(row)) {
+      return false;
+    }
+    if (pureAssign && !isAssignDumpRow(row)) {
       return false;
     }
     if (partnerFilters.length > 0) {
@@ -2016,11 +2136,14 @@ function filterDumpRows(
     return true;
   });
 
-  // Partner-filtered tasks: also keep personal about-X rows.
+  // Partner-filtered tasks: also keep personal about-X rows for spoken inventory.
+  // Post-share nav (collaboration=co_share) skips about-expansion — pure shared-with.
   if (
     listType === "tasks" &&
     section === "shared" &&
-    partnerFilters.length > 0
+    partnerFilters.length > 0 &&
+    collaboration !== "co_share" &&
+    !pureAssign
   ) {
     const seen = new Set(
       kept.map((row) => String(row.item.item_id ?? "")).filter(Boolean),

@@ -22,7 +22,14 @@ import {
   isBuiltinListType,
   SHOW_FILINGS_COMMAND,
   SHOW_REMINDERS_COMMAND,
+  showAllListButtonCommand,
+  showAllListButtonLabel,
+  showAssigneeButtonCommand,
+  showAssigneeButtonLabel,
   showListButtonCommand,
+  showSharedWithButtonCommand,
+  showSharedWithButtonLabel,
+  type BuiltinListType,
 } from "./builtin-lists.js";
 import type {
   FilingOwnerRef,
@@ -1461,6 +1468,7 @@ function reminderMutates(metadata: LlmMetadata): boolean {
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
+  options?: { speakerNames?: string[] },
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
@@ -1471,7 +1479,10 @@ export function ensureSpeakerShowButtons(
     seen.add(button.command);
     buttons.push(button);
   }
-  for (const required of requiredSpeakerListShowButtons(metadata)) {
+  for (const required of requiredSpeakerListShowButtons(
+    metadata,
+    options?.speakerNames ?? [],
+  )) {
     if (buttons.length >= REPLY_BUTTON_MAX || seen.has(required.command)) {
       continue;
     }
@@ -1481,9 +1492,89 @@ export function ensureSpeakerShowButtons(
   return buttons;
 }
 
-/** LIST BUTTON commands/labels for speaker confirm (not partner notify). */
+function speakerNameSet(speakerNames: string[]): Set<string> {
+  return new Set(speakerNames.map((name) => name.trim()).filter(Boolean));
+}
+
+function targetNamesOf(row: { targets?: string[] }): string[] {
+  return (row.targets ?? []).map((name) => name.trim()).filter(Boolean);
+}
+
+/** co_share: speaker ∈ targets + partner; assign: partners only; else personal. */
+export function classifyCollabFromTargets(
+  targets: string[],
+  speakerNames: string[],
+): "co_share" | "assign" | "personal" {
+  const names = targets.map((name) => name.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return "personal";
+  }
+  const speakers = speakerNameSet(speakerNames);
+  // Without speaker identity, keep legacy general LIST BUTTON (WATCH/worker
+  // targets must not become «באחריות לוסי»).
+  if (speakers.size === 0) {
+    return "personal";
+  }
+  const partners = names.filter((name) => !speakers.has(name));
+  const hasSpeaker = names.some((name) => speakers.has(name));
+  if (hasSpeaker && partners.length > 0) {
+    return "co_share";
+  }
+  if (!hasSpeaker && partners.length > 0) {
+    return "assign";
+  }
+  return "personal";
+}
+
+function fitNavButtonLabel(label: string, max = 20): string {
+  const trimmed = label.trim();
+  return trimmed.length <= max ? trimmed : trimmed.slice(0, max);
+}
+
+function countMutableItems(list: LlmListAction): number {
+  return (list.items ?? []).filter((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const record = item as Record<string, unknown>;
+    return Boolean(
+      String(record.item_id ?? record.itemId ?? "").trim() ||
+        llmItemLabel(item).trim(),
+    );
+  }).length;
+}
+
+function kindKeyForList(
+  list: LlmListAction,
+): BuiltinListType | "filings" | string {
+  if (isBuiltinListType(list.listType)) {
+    return list.listType;
+  }
+  return stripRepeatedReshimatPrefix(customListDerivedName(list));
+}
+
+function pushNavButton(
+  buttons: LlmReplyButton[],
+  seen: Set<string>,
+  button: LlmReplyButton | null,
+): void {
+  if (!button?.command.trim()) {
+    return;
+  }
+  if (buttons.length >= REPLY_BUTTON_MAX || seen.has(button.command)) {
+    return;
+  }
+  seen.add(button.command);
+  buttons.push({
+    label: fitNavButtonLabel(button.label),
+    command: button.command,
+  });
+}
+
+/** LIST BUTTON / collab nav for speaker confirm (not partner notify). */
 function requiredSpeakerListShowButtons(
   metadata: LlmMetadata,
+  speakerNames: string[],
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
@@ -1495,36 +1586,131 @@ function requiredSpeakerListShowButtons(
   );
   const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
   for (const list of listMutates) {
+    if (list.listType === "reminders") {
+      continue;
+    }
     const name = showListCommandName(list);
     if (!name) {
       continue;
     }
-    const command = showListButtonCommand(name);
-    if (seen.has(command) || skipSourceCommands.has(command)) {
+    const generalCommand = showListButtonCommand(name);
+    if (skipSourceCommands.has(generalCommand)) {
       continue;
     }
-    seen.add(command);
-    buttons.push({
-      label: speakerListShowLabel(list),
-      command,
-    });
-    if (buttons.length >= REPLY_BUTTON_MAX) {
-      return buttons;
+    const kind = kindKeyForList(list);
+    const targets = targetNamesOf(list);
+    const collab = classifyCollabFromTargets(targets, speakerNames);
+    const speakers = speakerNameSet(speakerNames);
+    const partners = targets.filter((target) => !speakers.has(target));
+    const isBulk = countMutableItems(list) >= 2;
+
+    if (collab === "co_share" && partners.length === 1) {
+      const person = partners[0]!;
+      pushNavButton(buttons, seen, {
+        label: showSharedWithButtonLabel(person),
+        command: showSharedWithButtonCommand(kind, person),
+      });
+      // Bulk co-share only (§0): shared-with + כל; single → shared-with alone.
+      if (isBulk) {
+        if (isBuiltinListType(kind) || kind === "filings") {
+          pushNavButton(buttons, seen, {
+            label: showAllListButtonLabel(kind),
+            command: showAllListButtonCommand(kind),
+          });
+        } else {
+          pushNavButton(buttons, seen, {
+            label: speakerListShowLabel(list),
+            command: generalCommand,
+          });
+        }
+      }
+      continue;
     }
+    if (collab === "co_share" && partners.length > 1) {
+      pushNavButton(buttons, seen, {
+        label:
+          isBuiltinListType(kind) || kind === "filings"
+            ? showAllListButtonLabel(kind)
+            : speakerListShowLabel(list),
+        command:
+          isBuiltinListType(kind) || kind === "filings"
+            ? showAllListButtonCommand(kind)
+            : generalCommand,
+      });
+      continue;
+    }
+    if (collab === "assign" && partners.length === 1) {
+      const person = partners[0]!;
+      pushNavButton(buttons, seen, {
+        label: showAssigneeButtonLabel(person),
+        command: showAssigneeButtonCommand(kind, person),
+      });
+      continue;
+    }
+    if (collab === "assign" && partners.length > 1) {
+      pushNavButton(buttons, seen, {
+        label:
+          isBuiltinListType(kind) || kind === "filings"
+            ? showAllListButtonLabel(kind)
+            : speakerListShowLabel(list),
+        command:
+          isBuiltinListType(kind) || kind === "filings"
+            ? showAllListButtonCommand(kind)
+            : generalCommand,
+      });
+      continue;
+    }
+
+    pushNavButton(buttons, seen, {
+      label: speakerListShowLabel(list),
+      command: generalCommand,
+    });
   }
 
-  if (
-    buttons.length < REPLY_BUTTON_MAX &&
-    (metadata.filing ?? []).some(
-      (row) =>
-        row.action === "add_filing" ||
-        row.action === "remove_filing" ||
-        row.action === "update_filing",
-    )
-  ) {
-    const command = SHOW_FILINGS_COMMAND;
-    if (!seen.has(command)) {
-      buttons.push({ label: "הצג תיוקים", command });
+  const filingMutates = (metadata.filing ?? []).filter(
+    (row) =>
+      row.action === "add_filing" ||
+      row.action === "remove_filing" ||
+      row.action === "update_filing",
+  );
+  if (filingMutates.length > 0) {
+    const withTargets = filingMutates.find(
+      (row) => targetNamesOf(row).length > 0,
+    );
+    if (withTargets) {
+      const targets = targetNamesOf(withTargets);
+      const collab = classifyCollabFromTargets(targets, speakerNames);
+      const speakers = speakerNameSet(speakerNames);
+      const partners = targets.filter((target) => !speakers.has(target));
+      if (collab === "co_share" && partners.length === 1) {
+        const person = partners[0]!;
+        pushNavButton(buttons, seen, {
+          label: showSharedWithButtonLabel(person),
+          command: showSharedWithButtonCommand("filings", person),
+        });
+        if (filingMutates.length >= 2) {
+          pushNavButton(buttons, seen, {
+            label: showAllListButtonLabel("filings"),
+            command: showAllListButtonCommand("filings"),
+          });
+        }
+      } else if (collab === "assign" && partners.length === 1) {
+        const person = partners[0]!;
+        pushNavButton(buttons, seen, {
+          label: showAssigneeButtonLabel(person),
+          command: showAssigneeButtonCommand("filings", person),
+        });
+      } else {
+        pushNavButton(buttons, seen, {
+          label: "הצג תיוקים",
+          command: SHOW_FILINGS_COMMAND,
+        });
+      }
+    } else {
+      pushNavButton(buttons, seen, {
+        label: "הצג תיוקים",
+        command: SHOW_FILINGS_COMMAND,
+      });
     }
   }
   return buttons;

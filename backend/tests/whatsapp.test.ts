@@ -850,6 +850,68 @@ describe("WhatsApp webhook", () => {
     expect(parsed.responseBubbles[2]?.text).toContain("פגישה קבועה");
   });
 
+  it("collab nav commands stay on confirm after tip; כן/לא stay on offer (command-bound)", () => {
+    const sharedCmd = "הצג קניות משותפות עם מיכל";
+    const allCmd = "כל הקניות";
+    const frozen = setEngineSpokenBubbles(
+      JSON.stringify({
+        responses: [
+          {
+            text: "שיתפתי את הקניות עם מיכל.",
+            buttons: [
+              { label: "משותף עם מיכל", command: sharedCmd },
+              { label: "כל הקניות", command: allCmd },
+            ],
+          },
+          {
+            text: "רוצה שאוסיף גם תזכורת?",
+            buttons: [
+              { label: "כן", command: "כן" },
+              { label: "לא", command: "לא" },
+            ],
+          },
+        ],
+        metadata: {},
+      }),
+      parseLlmReply(
+        JSON.stringify({
+          responses: [
+            {
+              text: "שיתפתי את הקניות עם מיכל.",
+              buttons: [
+                { label: "משותף עם מיכל", command: sharedCmd },
+                { label: "כל הקניות", command: allCmd },
+              ],
+            },
+            {
+              text: "רוצה שאוסיף גם תזכורת?",
+              buttons: [
+                { label: "כן", command: "כן" },
+                { label: "לא", command: "לא" },
+              ],
+            },
+          ],
+          metadata: {},
+        }),
+      ).responseBubbles,
+    );
+    const withTip = appendEngineResponse(frozen, "טיפ על פגישה קבועה");
+    const parsed = parseLlmReply(withTip);
+    expect(parsed.responseBubbles[0]?.buttons?.map((b) => b.command)).toEqual([
+      sharedCmd,
+      allCmd,
+    ]);
+    expect(parsed.responseBubbles[1]?.buttons?.map((b) => b.command)).toEqual([
+      "כן",
+      "לא",
+    ]);
+    expect(parsed.responseBubbles[2]?.buttons).toBeUndefined();
+    // Not all buttons collapsed onto first reply.
+    expect(
+      parsed.responseBubbles[0]?.buttons?.some((b) => b.command === "כן"),
+    ).toBe(false);
+  });
+
   it("freezes legacy turn-level buttons before tip so choices stay off the tip", () => {
     const model = JSON.stringify({
       responses: ["הוספתי מטלה.", "רוצה שאוסיף גם תזכורת?"],

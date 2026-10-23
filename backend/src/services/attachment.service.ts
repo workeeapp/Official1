@@ -69,6 +69,46 @@ export type AttachmentTarget =
   | { filingId: string }
   | { reminderId: string };
 
+/** Outcome of one applyAttachmentLinks call. Attach and detach are independent. */
+export type AttachmentApplyOutcome = {
+  /** New AttachmentLinks created this call. */
+  linked: number;
+  /** Requested attach ids already linked to this target (not duplicated). */
+  alreadyLinked: number;
+  /** Links removed this call. */
+  detached: number;
+  /** True when the ACTION requested at least one attach id. */
+  attachRequested: boolean;
+};
+
+export function emptyAttachmentOutcome(
+  attachRequested = false,
+): AttachmentApplyOutcome {
+  return { linked: 0, alreadyLinked: 0, detached: 0, attachRequested };
+}
+
+export function mergeAttachmentOutcomes(
+  ...rows: AttachmentApplyOutcome[]
+): AttachmentApplyOutcome {
+  return rows.reduce(
+    (acc, row) => ({
+      linked: acc.linked + row.linked,
+      alreadyLinked: acc.alreadyLinked + row.alreadyLinked,
+      detached: acc.detached + row.detached,
+      attachRequested: acc.attachRequested || row.attachRequested,
+    }),
+    emptyAttachmentOutcome(),
+  );
+}
+
+/** Attach succeeded when a new link was made or the file was already on the target. */
+export function attachmentAttachSucceeded(outcome: AttachmentApplyOutcome): boolean {
+  return (
+    outcome.attachRequested &&
+    outcome.linked + outcome.alreadyLinked > 0
+  );
+}
+
 /** Download WhatsApp media, keep our own copy, transcribe voice. Null when it cannot be stored. */
 export async function ingestInboundMedia(input: {
   userId: string;
@@ -367,26 +407,29 @@ export async function applyAttachmentLinks(input: {
   target: AttachmentTarget;
   attachmentIds?: string[];
   detachIds?: string[];
-}): Promise<{ linked: number; detached: number }> {
+}): Promise<AttachmentApplyOutcome> {
   const attach = input.attachmentIds ?? [];
   const detach = input.detachIds ?? [];
+  const attachRequested = attach.some((id) => id.trim().length > 0);
   if (attach.length === 0 && detach.length === 0) {
-    return { linked: 0, detached: 0 };
+    return emptyAttachmentOutcome(false);
   }
   const actor = await prisma.employee.findUnique({
     where: { id: input.actorId },
     select: { userId: true },
   });
   if (!actor) {
-    return { linked: 0, detached: 0 };
+    return emptyAttachmentOutcome(attachRequested);
   }
   let linked = 0;
+  let alreadyLinked = 0;
   for (const row of await resolveUsableAttachments(input.actorId, attach)) {
     const existing = await prisma.attachmentLink.findFirst({
       where: { attachmentId: row.id, ...input.target },
       select: { id: true },
     });
     if (existing) {
+      alreadyLinked += 1;
       continue;
     }
     await prisma.attachmentLink.create({
@@ -414,10 +457,10 @@ export async function applyAttachmentLinks(input: {
       action: linked > 0 ? "attachment_link" : "attachment_unlink",
       entityType,
       entityId,
-      summary: `attachments +${linked} -${detached}`,
+      summary: `attachments +${linked} already=${alreadyLinked} -${detached}`,
     });
   }
-  return { linked, detached };
+  return { linked, alreadyLinked, detached, attachRequested };
 }
 
 function targetEntity(target: AttachmentTarget): [string, string] {
