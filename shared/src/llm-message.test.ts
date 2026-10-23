@@ -1292,6 +1292,61 @@ describe("parseLlmReply", () => {
     ]);
   });
 
+  it("maps filing Hebrew תיאור to item_info (product detail), not מידע לחיפוש", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "שמרתי",
+          metadata: {
+            filing: [
+              {
+                action: "add_filing",
+                item_name: "טלפון רופא",
+                תיאור: "050-1234567",
+                מידע_לחיפוש: "משפחה",
+              },
+            ],
+          },
+        }),
+      ).filing,
+    ).toEqual([
+      {
+        action: "add_filing",
+        itemName: "טלפון רופא",
+        itemInfo: "050-1234567",
+        itemDescription: "",
+        targets: [],
+        filingId: "",
+      },
+    ]);
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "שמרתי",
+          metadata: {
+            filing: [
+              {
+                action: "add_filing",
+                item_name: "טלפון רופא",
+                תיאור: "050-9999999",
+                "מידע לחיפוש": "משפחה",
+              },
+            ],
+          },
+        }),
+      ).filing,
+    ).toEqual([
+      {
+        action: "add_filing",
+        itemName: "טלפון רופא",
+        itemInfo: "050-9999999",
+        itemDescription: "משפחה",
+        targets: [],
+        filingId: "",
+      },
+    ]);
+  });
+
   it("extracts structured list, task, and filing actions", () => {
     expect(
       parseReplyMetadata(

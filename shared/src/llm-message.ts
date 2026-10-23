@@ -3516,11 +3516,13 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
   return {
     action,
     itemName,
-    itemInfo: readText(value, ["item_info", "מידע נוסף", "info"]),
+    // Product תיאור = item_info (detail/value). Do not map «תיאור» to
+    // item_description (מידע לחיפוש) — that hid phones/addresses in dumps.
+    itemInfo: readText(value, ["item_info", "מידע נוסף", "info", "תיאור"]),
     itemDescription: readText(value, [
       "item_description",
       "description",
-      "תיאור",
+      "מידע לחיפוש",
       "תיאור הפריט",
     ]),
     targets: parseTargets(value),
@@ -3765,8 +3767,10 @@ export function bindTurnChromeToBubbles(
 }
 
 /**
- * After ensureSpeakerShowButtons: put show taps on the first bubble; keep each
- * bubble's non-show (choice) buttons where the model placed them.
+ * After ensureSpeakerShowButtons: put show / LIST / collab / item-open taps on
+ * the confirm (first) bubble; keep each bubble's closed-choice buttons where
+ * the model placed them (כן/לא on soft-offer stay there — never migrate nav
+ * onto the offer).
  */
 export function applyShowButtonsToBubbles(
   bubbles: LlmSpokenBubble[],
@@ -3777,6 +3781,7 @@ export function applyShowButtonsToBubbles(
   }
   const show = speakerButtons.filter(isShowListReplyButton);
   return bubbles.map((bubble, index) => {
+    // Strip show/LIST/nav shapes from non-confirm bubbles (soft-offer, tips).
     const choices = (bubble.buttons ?? []).filter(
       (button) => !isShowListReplyButton(button),
     );

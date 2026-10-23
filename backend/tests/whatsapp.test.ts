@@ -318,6 +318,24 @@ describe("WhatsApp webhook", () => {
     expect(titles[1]?.title).toBe("הצג מטלות");
   });
 
+  it("dedupes WhatsApp reply titles so interactive send stays valid", () => {
+    const body = whatsappButtonsBody("972501234567", "מחקתי", [
+      {
+        label: "הצג רשימה",
+        command: "הצג רשימת רשימת דברים שעלו לשרת",
+      },
+      { label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" },
+    ]);
+    const replies = (
+      body.interactive as {
+        action: { buttons: Array<{ reply: { title: string; id: string } }> };
+      }
+    ).action.buttons.map((row) => row.reply);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]?.title).toBe("הצג רשימה");
+    expect(replies[0]?.id).toBe("הצג רשימת רשימת דברים שעלו לשרת");
+  });
+
   it("builds a Waze CTA URL message", () => {
     const url = wazeNavigateUrl("הרצל 12, תל אביב");
     expect(

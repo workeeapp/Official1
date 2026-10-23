@@ -1031,7 +1031,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. ללכת לספר 📍");
+    ).toBe("1. ללכת לספר 📍 הרצל 1, תל אביב");
     expect(
       formatNumberedItem(
         1,
@@ -1040,7 +1040,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. להתקשר לאורי 📞");
+    ).toBe("1. להתקשר לאורי 📞 050-1234567");
     expect(
       formatNumberedItem(
         1,
@@ -1053,7 +1053,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. ללכת לספר 📎 📍 📞");
+    ).toBe("1. ללכת לספר 📎 📍 הרצל 1 📞 03-5555555");
     expect(
       formatNumberedItem(
         1,
@@ -1075,7 +1075,7 @@ describe("formatShowDumpFromKind", () => {
         "10:00",
         { now },
       ),
-    ).toBe("1. ללכת לספר 📍 — כל יום שישי ב־10:00 (קבוע)");
+    ).toBe("1. ללכת לספר 📍 דיזנגוף 10 — כל יום שישי ב־10:00 (קבוע)");
     expect(
       formatAgendaOneOffLine(
         2,
@@ -1084,7 +1084,7 @@ describe("formatShowDumpFromKind", () => {
         "09:00",
         { now },
       ),
-    ).toBe("2. להתקשר לאורי 📞 — 09:00");
+    ).toBe("2. להתקשר לאורי 📞 050-111 — 09:00");
     expect(
       formatScheduleSuffix(
         {
@@ -2299,6 +2299,100 @@ describe("formatShowDumpFromKind", () => {
         "2026-10-21",
       ),
     ).toBe(true);
+  });
+
+  describe("retrieval contract dump path (T1–T3, T6 — engine behavior)", () => {
+    const weekSnap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "meet-1",
+              "שם מטלה": "פגישה עם רואה חשבון",
+              "תאריך לביצוע": "2026-10-12",
+              "שעה לביצוע": "09:00",
+            },
+            {
+              item_id: "doc-1",
+              "שם מטלה": "תור לרופא",
+              "תאריך לביצוע": "2026-10-13",
+              "שעה לביצוע": "11:00",
+            },
+            {
+              item_id: "pkg-1",
+              "שם מטלה": "לאסוף חבילה",
+              "תאריך לביצוע": "2026-10-14",
+              "שעה לביצוע": "16:00",
+            },
+            {
+              item_id: "out-1",
+              "שם מטלה": "מטלה מחוץ לטווח",
+              "תאריך לביצוע": "2026-10-25",
+              "שעה לביצוע": "09:00",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+
+    // T1: FULL inventory date window — every in-range task row.
+    it("T1: date-range dump without ids includes every in-range task", () => {
+      const dump = formatShowDumpFromKind("tasks", weekSnap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-11",
+        dateTo: "2026-10-17",
+      })!;
+      expect(dump).toContain("פגישה עם רואה חשבון");
+      expect(dump).toContain("תור לרופא");
+      expect(dump).toContain("לאסוף חבילה");
+      expect(dump).not.toContain("מטלה מחוץ לטווח");
+    });
+
+    // T2: same-kind semantic via ids — only chosen rows.
+    it("T2: show_dump_ids keeps only the selected meeting row", () => {
+      const dump = formatShowDumpFromKind("tasks", weekSnap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-11",
+        dateTo: "2026-10-17",
+        itemIds: new Set(["meet-1"]),
+      })!;
+      expect(dump).toContain("פגישה עם רואה חשבון");
+      expect(dump).not.toContain("תור לרופא");
+      expect(dump).not.toContain("לאסוף חבילה");
+    });
+
+    // T3: characterization only — documents current engine expansion when
+    // bare show_dump has no ids. NOT desired model behavior for semantic asks.
+    it("T3 characterization: bare date-range dump without ids expands to all in-range rows (engine fact; not a semantic-ok path)", () => {
+      const dump = formatShowDumpFromKind("tasks", weekSnap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-11",
+        dateTo: "2026-10-17",
+      })!;
+      // Engine fact: without itemIds the dump is the full window — including
+      // non-meeting chores. Prompt forbids the model from using this for
+      // «פגישות»; this test does not bless that as a semantic answer.
+      expect(dump).toContain("פגישה עם רואה חשבון");
+      expect(dump).toContain("לאסוף חבילה");
+    });
+
+    // T6: day filter does not drop by hour-of-day.
+    it("T6: date-range dump keeps both morning and afternoon tasks (no hour filter)", () => {
+      const dump = formatShowDumpFromKind("tasks", weekSnap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-11",
+        dateTo: "2026-10-17",
+      })!;
+      expect(dump).toContain("09:00");
+      expect(dump).toContain("16:00");
+      expect(dump).toContain("פגישה עם רואה חשבון");
+      expect(dump).toContain("לאסוף חבילה");
+    });
   });
 
   it("reminders dump filters by fire_at date range", () => {

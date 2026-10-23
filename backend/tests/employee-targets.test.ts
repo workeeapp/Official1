@@ -16,7 +16,12 @@ import {
   resolveActionTargets,
   resolveRelayMessages,
   resolveSpokenMetadata,
+  buildCollabByListKey,
   ensureSpeakerShowButtons,
+  isEngineOwnedListNavButton,
+  normalizeShowNavCommand,
+  parseItemOpenButton,
+  shouldKeepItemOpenButton,
   showButtonsForNotify,
   type ListItemOwnerRef,
 } from "../src/services/employee-targets.service.js";
@@ -694,7 +699,7 @@ describe("employee targets", () => {
     ]);
   });
 
-  it("keeps model show suggestions and choices (no engine replace on move)", () => {
+  it("keeps conversational taps; keeps validated model dest LIST on move (no double inject)", () => {
     const moveMeta = {
       ...emptyLlmMetadata(),
       lists: [
@@ -714,6 +719,7 @@ describe("employee targets", () => {
         },
       ],
     };
+    // Model dest LIST kept; כן kept; no second inject for same list.
     expect(
       ensureSpeakerShowButtons(moveMeta, [
         { label: "מה ברשימה", command: "הצג רשימת דברים שעלו לשרת" },
@@ -723,6 +729,7 @@ describe("employee targets", () => {
       { label: "מה ברשימה", command: "הצג רשימת דברים שעלו לשרת" },
       { label: "כן", command: "כן" },
     ]);
+    // Three content-aware + כן fills the max — no room for safety-net LIST.
     expect(
       ensureSpeakerShowButtons(moveMeta, [
         { label: "למי להתקשר", command: "למי אני צריך להתקשר" },
@@ -778,7 +785,25 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג", command: "הצג רשימת קניות" }]);
   });
 
-  it("collab nav: bulk co-share → shared-with + כל; assign → באחריות; multi-partner → כל only", () => {
+  it("collab nav: model-emitted shapes kept only with apply evidence; else plain LIST", () => {
+    const nameById = new Map([
+      ["tal", "טל"],
+      ["michal", "מיכל"],
+      ["amit", "עמית"],
+    ]);
+    const bulkMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
     const bulkShare = ensureSpeakerShowButtons(
       {
         ...emptyLlmMetadata(),
@@ -795,8 +820,21 @@ describe("employee targets", () => {
           },
         ],
       },
-      [],
-      { speakerNames: ["טל"] },
+      [
+        {
+          label: "משותף עם מיכל",
+          command: "הצג קניות משותפות עם מיכל",
+        },
+        { label: "כל הקניות", command: "כל הקניות" },
+      ],
+      {
+        speakerNames: ["טל"],
+        appliedNav: {
+          listKeys: new Set(["shopping"]),
+          filing: false,
+          collabByListKey: bulkMap,
+        },
+      },
     );
     expect(bulkShare.map((b) => b.command)).toEqual([
       "הצג קניות משותפות עם מיכל",
@@ -804,6 +842,15 @@ describe("employee targets", () => {
     ]);
     expect(bulkShare[0]?.label).toBe("משותף עם מיכל");
 
+    const singleMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
     const singleShare = ensureSpeakerShowButtons(
       {
         ...emptyLlmMetadata(),
@@ -817,13 +864,34 @@ describe("employee targets", () => {
           },
         ],
       },
-      [],
-      { speakerNames: ["טל"] },
+      [
+        {
+          label: "משותף עם מיכל",
+          command: "הצג קניות משותפות עם מיכל",
+        },
+      ],
+      {
+        speakerNames: ["טל"],
+        appliedNav: {
+          listKeys: new Set(["shopping"]),
+          filing: false,
+          collabByListKey: singleMap,
+        },
+      },
     );
     expect(singleShare.map((b) => b.command)).toEqual([
       "הצג קניות משותפות עם מיכל",
     ]);
 
+    const assignMap = buildCollabByListKey(
+      [
+        {
+          listType: "tasks",
+          collabApply: { mode: "assign", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
     const assign = ensureSpeakerShowButtons(
       {
         ...emptyLlmMetadata(),
@@ -837,14 +905,38 @@ describe("employee targets", () => {
           },
         ],
       },
-      [],
-      { speakerNames: ["טל"] },
+      [
+        {
+          label: "באחריות מיכל",
+          command: "הצג מטלות באחריות מיכל",
+        },
+      ],
+      {
+        speakerNames: ["טל"],
+        appliedNav: {
+          listKeys: new Set(["tasks"]),
+          filing: false,
+          collabByListKey: assignMap,
+        },
+      },
     );
     expect(assign.map((b) => b.command)).toEqual([
       "הצג מטלות באחריות מיכל",
     ]);
     expect(assign[0]?.label).toBe("באחריות מיכל");
 
+    const multiMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: {
+            mode: "co_share",
+            partnerIds: ["michal", "amit"],
+          },
+        },
+      ],
+      nameById,
+    );
     const multi = ensureSpeakerShowButtons(
       {
         ...emptyLlmMetadata(),
@@ -861,10 +953,750 @@ describe("employee targets", () => {
           },
         ],
       },
-      [],
-      { speakerNames: ["טל"] },
+      [{ label: "כל הקניות", command: "כל הקניות" }],
+      {
+        speakerNames: ["טל"],
+        appliedNav: {
+          listKeys: new Set(["shopping"]),
+          filing: false,
+          collabByListKey: multiMap,
+        },
+      },
     );
     expect(multi.map((b) => b.command)).toEqual(["כל הקניות"]);
+
+    // Safety net without model buttons → plain LIST only (never invents collab).
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: singleMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["הצג רשימת קניות"]);
+  });
+
+  it("collab nav from apply evidence only: share/assign/fail/noop/mixed/bulk", () => {
+    const nameById = new Map([
+      ["tal", "טל"],
+      ["michal", "מיכל"],
+      ["amit", "עמית"],
+    ]);
+
+    // Successful co-share: model collab kept when evidence matches.
+    const shareMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [
+          {
+            label: "משותף עם מיכל",
+            command: "הצג קניות משותפות עם מיכל",
+          },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: shareMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["הצג קניות משותפות עם מיכל"]);
+    // Safety net alone never invents collab — plain LIST only.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: shareMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["הצג רשימת קניות"]);
+
+    // Successful assign → model באחריות kept.
+    const assignMap = buildCollabByListKey(
+      [
+        {
+          listType: "tasks",
+          collabApply: { mode: "assign", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לקנות חלב" }],
+              targets: ["מיכל"],
+            },
+          ],
+        },
+        [
+          {
+            label: "באחריות מיכל",
+            command: "הצג מטלות באחריות מיכל",
+          },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["tasks"]),
+            filing: false,
+            collabByListKey: assignMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["הצג מטלות באחריות מיכל"]);
+
+    // Failed share: model collab without evidence → normalize to plain LIST.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "a", "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [
+          {
+            label: "משותף עם מיכל",
+            command: "הצג קניות משותפות עם מיכל",
+          },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: new Map(),
+          },
+        },
+      ).map((b) => ({ label: b.label, command: b.command })),
+    ).toEqual([{ label: "הצג קניות", command: "הצג רשימת קניות" }]);
+
+    // shareOutcome noop (already shared) still proves co_share via collabApply.
+    const noopMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "a", "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [
+          {
+            label: "משותף עם מיכל",
+            command: "הצג קניות משותפות עם מיכל",
+          },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: noopMap,
+          },
+        },
+      ).map((b) => ({ label: b.label, command: b.command })),
+    ).toEqual([
+      {
+        label: "משותף עם מיכל",
+        command: "הצג קניות משותפות עם מיכל",
+      },
+    ]);
+
+    // Personal mutate succeeded on same list while share ACTION targets failed → plain.
+    const personalOnly = buildCollabByListKey(
+      [{ listType: "shopping" /* no collabApply */ }],
+      nameById,
+    );
+    expect(personalOnly.size).toBe(0);
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "לחם" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [{ label: "כן", command: "כן" }],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: personalOnly,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["כן", "הצג רשימת קניות"]);
+
+    // Bulk co-share: model emits shared-with + כל — both kept with evidence.
+    const bulkMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+        {
+          listType: "shopping",
+          collabApply: { mode: "co_share", partnerIds: ["michal"] },
+        },
+      ],
+      nameById,
+    );
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [
+                { item_id: "a", "שם פריט": "חלב" },
+                { item_id: "b", "שם פריט": "לחם" },
+              ],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [
+          {
+            label: "משותף עם מיכל",
+            command: "הצג קניות משותפות עם מיכל",
+          },
+          { label: "כל הקניות", command: "כל הקניות" },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: bulkMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["הצג קניות משותפות עם מיכל", "כל הקניות"]);
+
+    const multiPartnerMap = buildCollabByListKey(
+      [
+        {
+          listType: "shopping",
+          collabApply: {
+            mode: "co_share",
+            partnerIds: ["michal", "amit"],
+          },
+        },
+      ],
+      nameById,
+    );
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "a", "שם פריט": "חלב" }],
+              targets: ["טל", "מיכל", "עמית"],
+            },
+          ],
+        },
+        [{ label: "כל הקניות", command: "כל הקניות" }],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: multiPartnerMap,
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["כל הקניות"]);
+
+    // Conversational taps still kept alongside apply-gated plain nav.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "בדיקה" }],
+              targets: ["טל", "מיכל"],
+            },
+          ],
+        },
+        [
+          { label: "כן", command: "כן" },
+          { label: "לא", command: "לא" },
+        ],
+        {
+          speakerNames: ["טל"],
+          appliedNav: {
+            listKeys: new Set(["tasks"]),
+            filing: false,
+            collabByListKey: new Map(),
+          },
+        },
+      ).map((b) => b.command),
+    ).toEqual(["כן", "לא", "הצג רשימת מטלות"]);
+  });
+
+  it("item-open: keeps existing-row tap without mutate; drops failed save; keeps proven apply", () => {
+    const openTask = {
+      label: "ללכת לספר",
+      command: "הציגי את המטלה ללכת לספר",
+    };
+    expect(parseItemOpenButton(openTask)).toEqual({
+      kind: "tasks",
+      title: "ללכת לספר",
+    });
+
+    // No mutate intent this turn → existing item open stays.
+    expect(
+      shouldKeepItemOpenButton(openTask, emptyLlmMetadata(), {
+        lists: [],
+        filings: [],
+      }),
+    ).toBe(true);
+    expect(
+      ensureSpeakerShowButtons(emptyLlmMetadata(), [openTask, { label: "כן", command: "כן" }], {
+        appliedItems: { lists: [], filings: [] },
+      }),
+    ).toEqual([openTask, { label: "כן", command: "כן" }]);
+
+    const addMeta = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add" as const,
+          listType: "tasks" as const,
+          listName: "",
+          items: [{ "שם מטלה": "ללכת לספר" }],
+          targets: [] as string[],
+        },
+      ],
+    };
+    // Mutate claimed but not applied → drop item-open; keep כן.
+    expect(
+      ensureSpeakerShowButtons(addMeta, [openTask, { label: "כן", command: "כן" }], {
+        appliedItems: { lists: [], filings: [] },
+        appliedNav: { listKeys: new Set(), filing: false },
+      }),
+    ).toEqual([{ label: "כן", command: "כן" }]);
+
+    // Applied add (unique title) → keep item-open + engine list nav.
+    expect(
+      ensureSpeakerShowButtons(addMeta, [openTask], {
+        appliedItems: {
+          lists: [
+            {
+              action: "add",
+              itemId: "task-1",
+              itemLabel: "ללכת לספר",
+              listType: "tasks",
+            },
+          ],
+          filings: [],
+        },
+        appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+      }),
+    ).toEqual([
+      openTask,
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+
+    // Prefer item_id when ACTION carries it.
+    const updateMeta = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "update" as const,
+          listType: "tasks" as const,
+          listName: "",
+          items: [{ item_id: "task-9", "שם מטלה": "ללכת לספר" }],
+          targets: [] as string[],
+        },
+      ],
+    };
+    expect(
+      ensureSpeakerShowButtons(updateMeta, [openTask], {
+        appliedItems: {
+          lists: [
+            {
+              action: "update",
+              itemId: "task-9",
+              itemLabel: "ללכת לספר",
+              listType: "tasks",
+            },
+          ],
+          filings: [],
+        },
+      }),
+    ).toEqual([
+      openTask,
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+    // Wrong id applied → drop.
+    expect(
+      shouldKeepItemOpenButton(openTask, updateMeta, {
+        lists: [
+          {
+            action: "update",
+            itemId: "other",
+            itemLabel: "ללכת לספר",
+            listType: "tasks",
+          },
+        ],
+        filings: [],
+      }),
+    ).toBe(false);
+
+    // Ambiguous title (two applied adds same label) → drop.
+    expect(
+      shouldKeepItemOpenButton(openTask, addMeta, {
+        lists: [
+          {
+            action: "add",
+            itemId: "a",
+            itemLabel: "ללכת לספר",
+            listType: "tasks",
+          },
+          {
+            action: "add",
+            itemId: "b",
+            itemLabel: "ללכת לספר",
+            listType: "tasks",
+          },
+        ],
+        filings: [],
+      }),
+    ).toBe(false);
+
+    // Filing: proven add keeps; missing apply drops; existing (no intent) keeps.
+    const openFiling = {
+      label: "רישיון",
+      command: "הציגי את התיוק רישיון",
+    };
+    const filingAdd = {
+      ...emptyLlmMetadata(),
+      filing: [
+        {
+          action: "add_filing" as const,
+          itemName: "רישיון",
+          itemInfo: "",
+          itemDescription: "",
+          filingId: "",
+          targets: [] as string[],
+        },
+      ],
+    };
+    expect(
+      shouldKeepItemOpenButton(openFiling, filingAdd, {
+        lists: [],
+        filings: [],
+      }),
+    ).toBe(false);
+    expect(
+      shouldKeepItemOpenButton(openFiling, filingAdd, {
+        lists: [],
+        filings: [{ action: "add", itemName: "רישיון" }],
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepItemOpenButton(openFiling, emptyLlmMetadata(), {
+        lists: [],
+        filings: [],
+      }),
+    ).toBe(true);
+
+    // Remove applied → drop item-open.
+    expect(
+      shouldKeepItemOpenButton(openTask, addMeta, {
+        lists: [
+          {
+            action: "remove",
+            itemId: "task-1",
+            itemLabel: "ללכת לספר",
+            listType: "tasks",
+          },
+        ],
+        filings: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("LIST BUTTON: validates model fixed nav; dedupes messy duplicate command", () => {
+    expect(
+      normalizeShowNavCommand("הצג רשימת רשימת דברים שעלו לשרת"),
+    ).toBe("הצג רשימת דברים שעלו לשרת");
+    expect(
+      isEngineOwnedListNavButton({
+        label: "הצג רשימה",
+        command: "הצג רשימת רשימת דברים שעלו לשרת",
+      }),
+    ).toBe(true);
+    expect(
+      isEngineOwnedListNavButton({
+        label: "כן",
+        command: "כן",
+      }),
+    ).toBe(false);
+    expect(
+      isEngineOwnedListNavButton({
+        label: "ללכת לספר",
+        command: "הציגי את המטלה ללכת לספר",
+      }),
+    ).toBe(false);
+
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "custom",
+              listName: "דברים שעלו לשרת",
+              items: [{ item_id: "2", נושא: "כפתור waze" }],
+              targets: [],
+            },
+          ],
+        },
+        [
+          {
+            label: "הצג רשימה",
+            command: "הצג רשימת רשימת דברים שעלו לשרת",
+          },
+          { label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" },
+        ],
+      ),
+    ).toEqual([
+      { label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" },
+    ]);
+  });
+
+  it("LIST BUTTON: keeps conversational כן/לא; keeps model list nav once (no double)", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "ללכת לספר" }],
+              targets: [],
+            },
+          ],
+        },
+        [
+          {
+            label: "ללכת לספר",
+            command: "הציגי את המטלה ללכת לספר",
+          },
+          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+        ],
+      ),
+    ).toEqual([
+      {
+        label: "ללכת לספר",
+        command: "הציגי את המטלה ללכת לספר",
+      },
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+  });
+
+  it("keeps model reminder day-angle taps; does not invent אצלך/לתור; adds LIST BUTTON", () => {
+    const meta = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add" as const,
+          listType: "reminders" as const,
+          listName: "",
+          items: [{ item: "תור לספר", time: "09:00" }],
+          targets: [] as string[],
+        },
+        {
+          action: "add" as const,
+          listType: "tasks" as const,
+          listName: "",
+          items: [{ "שם מטלה": "תור לספר" }],
+          targets: [] as string[],
+        },
+      ],
+    };
+    const modelAngles = [
+      {
+        label: "יום ד׳ אצלך",
+        command: "מה יש לך ביום רביעי",
+      },
+      { label: "התור", command: "מה יש לי ביום רביעי" },
+    ];
+    // Engine preserves model content-aware taps; never synthesizes אצלך/לתור alone.
+    expect(ensureSpeakerShowButtons(meta, modelAngles)).toEqual([
+      ...modelAngles,
+      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+    ]);
+    expect(
+      ensureSpeakerShowButtons(meta, []).map((b) => b.command),
+    ).toEqual(["הצג רשימת מטלות"]);
+    expect(
+      ensureSpeakerShowButtons(meta, []).every(
+        (b) =>
+          !b.label.includes("אצלך") &&
+          !b.label.includes("לתור") &&
+          !b.command.includes("מה יש לך"),
+      ),
+    ).toBe(true);
+  });
+
+  it("LIST BUTTON: appliedNav empty → no fixed nav even if metadata has remove", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "custom",
+              listName: "דברים שעלו לשרת",
+              items: [{ item_id: "2", נושא: "x" }],
+              targets: [],
+            },
+          ],
+        },
+        [{ label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" }],
+        { appliedNav: { listKeys: new Set(), filing: false } },
+      ),
+    ).toEqual([]);
+  });
+
+  it("LIST BUTTON: model plain LIST + appliedNav keep → original label, no safety-net duplicate", () => {
+    const modelList = {
+      label: "מה בקניות",
+      command: "הצג רשימת קניות",
+    };
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: [],
+            },
+          ],
+        },
+        [modelList],
+        {
+          appliedNav: {
+            listKeys: new Set(["shopping"]),
+            filing: false,
+            collabByListKey: new Map(),
+          },
+        },
+      ),
+    ).toEqual([modelList]);
   });
 
   it("LIST BUTTON: injects missing show-list after list/filing mutate; no duplicate", () => {

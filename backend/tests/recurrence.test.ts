@@ -662,6 +662,8 @@ describe("SESSION_CLOCK calendar", () => {
     expect(text).toContain("calendar");
     expect(text).toContain("2026-10-20 שלישי");
     expect(text).toContain("show_dump=tasks");
-    expect(text).toContain("FORBIDDEN inventing day-agenda");
+    expect(text).toContain("FORBIDDEN model-written agenda");
+    expect(text).toContain("RECURRING / WHEN DATE ASK");
+    expect(text).toContain("RETRIEVAL CONTRACT path 2");
   });
 });

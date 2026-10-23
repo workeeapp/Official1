@@ -1886,6 +1886,15 @@ export interface ListItemMutation {
     newlySharedCount: number;
     alreadySharedCount: number;
   };
+  /**
+   * Proven collab after apply — for LIST BUTTON shape (not ACTION targets alone).
+   * co_share: partners in visible_to on the owner's row; assign: this row lives
+   * on an assignee's book (partnerIds = assignee id(s)).
+   */
+  collabApply?: {
+    mode: "co_share" | "assign";
+    partnerIds: string[];
+  };
 }
 
 /** Share/update by id that did not apply (missing row or no permission). */
@@ -2940,7 +2949,7 @@ async function applyListAction(
 
     const listOwner = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { userId: true },
+      select: { userId: true, kind: true },
     });
     if (existing) {
       // People this update just added to visible_to hear «שיתף איתך», not «עדכן».
@@ -2986,6 +2995,16 @@ async function applyListAction(
                 : 0,
           }
         : undefined;
+      const collabApply = listCollabApplyFromSave({
+        action: "update",
+        employeeId,
+        actorId,
+        ownerKind: listOwner?.kind ?? "human",
+        visibleTo: resolvedVisibility.visibleTo,
+        addedById: resolvedVisibility.addedById,
+        shareIntent,
+        shareOutcome,
+      });
 
       if (!shareNoop) {
         await prisma.employeeListItem.update({
@@ -3059,6 +3078,7 @@ async function applyListAction(
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
         ...(shareOutcome ? { shareOutcome } : {}),
+        ...(collabApply ? { collabApply } : {}),
       });
       if (shareNoop) {
         continue;
@@ -3074,6 +3094,15 @@ async function applyListAction(
           ...fields,
         },
       });
+      const collabApply = listCollabApplyFromSave({
+        action: "add",
+        employeeId,
+        actorId,
+        ownerKind: listOwner?.kind ?? "human",
+        visibleTo: resolvedVisibility.visibleTo,
+        addedById: resolvedVisibility.addedById,
+        shareIntent,
+      });
       mutations.push({
         action: "add",
         itemId: created.id,
@@ -3088,6 +3117,7 @@ async function applyListAction(
             effectiveTitleField,
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
+        ...(collabApply ? { collabApply } : {}),
       });
       attachmentOutcome = mergeAttachmentOutcomes(
         attachmentOutcome,
@@ -3500,6 +3530,63 @@ export async function removeVisibleCustomItems(input: {
 }
 
 const ITEM_ID_KEYS = new Set(["item_id", "itemId", "id"]);
+
+/**
+ * Apply-only proof for LIST BUTTON collab shape. Bare add/update without a
+ * proven share/assign audience is not collab — even if ACTION had targets.
+ */
+function listCollabApplyFromSave(input: {
+  action: "add" | "update";
+  employeeId: string;
+  actorId: string;
+  ownerKind: string;
+  visibleTo: string[];
+  addedById: string;
+  shareIntent: boolean;
+  shareOutcome?: {
+    newlySharedCount: number;
+    alreadySharedCount: number;
+  };
+}): ListItemMutation["collabApply"] | undefined {
+  // Digital books are WATCH/involvement — never «באחריות לוסי» / share nav.
+  if (input.ownerKind === "digital") {
+    return undefined;
+  }
+  if (input.action === "update" && input.shareOutcome) {
+    const proved =
+      input.shareOutcome.newlySharedCount > 0 ||
+      input.shareOutcome.alreadySharedCount > 0;
+    if (!proved) {
+      return undefined;
+    }
+    const partnerIds = uniqueIds(input.visibleTo).filter(
+      (id) => id !== input.actorId,
+    );
+    if (partnerIds.length === 0) {
+      return undefined;
+    }
+    return { mode: "co_share", partnerIds };
+  }
+  if (input.action === "add" && input.shareIntent) {
+    // Assign fan-out: row lives on the assignee's human book.
+    if (
+      input.employeeId !== input.actorId &&
+      input.addedById === input.actorId
+    ) {
+      return { mode: "assign", partnerIds: [input.employeeId] };
+    }
+    // Co-share: row on the actor's book with at least one other in audience.
+    if (input.employeeId === input.actorId) {
+      const partnerIds = uniqueIds(input.visibleTo).filter(
+        (id) => id !== input.actorId,
+      );
+      if (partnerIds.length > 0) {
+        return { mode: "co_share", partnerIds };
+      }
+    }
+  }
+  return undefined;
+}
 
 function newlySharedIds(
   existing: { addedById?: string | null; visibleTo?: unknown },

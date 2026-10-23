@@ -317,13 +317,13 @@
                 "buttons": {
                   "type": "array",
                   "maxItems": 3,
-                  "description": "Tap buttons for THIS bubble only (max 3). Closed-choice ask → those options here; post-mutate content-aware show on the confirm bubble (short label ≤12 preferred, full ask in command; reminder+day+shopping/meeting → often TWO: YOUR day inventory + speaker domain ask; omit when no useful angle — engine does not invent הצג); POST-SAVE offer → כן+לא on the offer bubble. Empty or omit when this bubble has no taps.",
+                  "description": "Tap buttons for THIS bubble only (max 3). Closed-choice ask → those options here; post-mutate LIST/collab nav + content-aware/item-open on the confirm bubble only (short label ≤12 preferred, full ask in command; reminder+day+shopping → YOUR day «אצלך»/לך + speaker domain; same-day meeting/תור → speaker «לי» ask only — FORBIDDEN יום ד׳ אצלך + יום ד׳ לתור twin; engine validates LIST/collab vs apply and may add one plain LIST safety-net); POST-SAVE offer → כן+לא on the offer bubble (no LIST/collab/item-open). Empty or omit when this bubble has no taps.",
                   "items": {
                     "type": "object",
                     "properties": {
                       "label": {
                         "type": "string",
-                        "description": "Short button text, prefer ≤12 chars, hard max 20 (e.g. כן, לא, מה מחר, למי להתקשר, יום ג׳ אצלך, מה לקנות)."
+                        "description": "Short button text, prefer ≤12 chars, hard max 20 (e.g. כן, לא, מה מחר, למי להתקשר, יום ג׳ אצלך, מה לקנות, התור)."
                       },
                       "command": {
                         "type": "string",
@@ -1004,7 +1004,7 @@
                   "null"
                 ],
                 "maxLength": 100,
-                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full. Phone book alone → phone_book. WHEN day/week agenda → tasks (pair show_dump_from/to). Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response. null otherwise."
+                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full. Phone book alone → phone_book. FULL WHEN day/week agenda (no meaning filter) → tasks + show_dump_from/to, show_dump_ids null. Semantic/focused same-kind picks → same kind WITH show_dump_ids (required) or leave show_dump null and answer from live JSON. Cross-kind topic → show_dump null. Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response when set. null otherwise."
               },
               "show_dump_section": {
                 "type": [
@@ -1086,7 +1086,7 @@
                   "maxLength": 80
                 },
                 "maxLength": 80,
-                "description": "ITEM DUMP: opaque id(s) from THIS turn that exist in live data AND match show_dump kind (item_id / filing_id / contact_id / reminder_id). string or string[] — one or many. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows and replaces response. Ambiguous → ASK with null. Empty array or no matching ids → server no-match message (never full list). null = full category dump (existing filters still apply). Forbidden inventing ids or cross-kind ids."
+                "description": "ITEM DUMP / same-kind semantic: opaque id(s) from THIS turn that exist in live data AND match show_dump kind (item_id / filing_id / contact_id / reminder_id). string or string[] — one or many. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows (does not expand). Preserves the chosen set only — does not prove completeness of candidates. Ambiguous / ids not in JSON → ASK with null; never invent ids. Empty array or no matching ids → server no-match (never full list). null = full category dump under existing filters — use only for FULL inventory, never as a semantic answer. Forbidden inventing ids or cross-kind ids."
               },
               "weather": {
                 "type": [

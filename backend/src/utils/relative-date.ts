@@ -71,11 +71,11 @@ export function formatSessionClockContext(now = new Date()): string {
     "calendar (Sunday-first weeks; line 1 = this week, line 2 = next week, line 3 = in two weeks…):",
     ...upcomingCalendarWeeks(now),
     "For any date further than weekday_dates (בעוד שבועיים, השבוע הבא, ב-20 לחודש, עד דצמבר) read the exact date + weekday from calendar — never count days in your head.",
-    "RECURRING / WHEN DATE ASK: standing task (חוזר / next_occurrences) or repeating clock — emit metadata.show_dump=tasks + show_dump_from/to from this clock; lists=[]; server prints the day agenda. FORBIDDEN inventing day-agenda lines yourself. Bare rule («כל שלישי וחמישי») only when they ask what repeats with NO date window.",
+    "RECURRING / WHEN DATE ASK: standing task (חוזר / next_occurrences) or repeating clock — FULL date-window agenda (no meaning filter) → metadata.show_dump=tasks + show_dump_from/to from this clock; show_dump_ids=null; lists=[]; server prints the day agenda. FORBIDDEN model-written agenda for that path. Semantic/focused asks on a date window («פגישות» / «תורים») → RETRIEVAL CONTRACT path 2: show_dump + show_dump_ids from THIS turn's JSON, OR answer in responses naming only rows present in injected facts (no free-built inventory/agenda); FORBIDDEN bare show_dump without ids. Bare rule («כל שלישי וחמישי») only when they ask what repeats with NO date window.",
     "Use this clock when resolving show_dump_from/to for today, tomorrow, this week/month, in N hours/days, or similar.",
     "Compare date/time fields for the question's subject only: אני/שלי → speaker show_dump without about. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
     "מה את/ה צריך/ה ביום X / what YOU need that day → show_dump=tasks + show_dump_about=YOUR display name + from/to. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
-    "WHEN / day plan → server dump only (FORBIDDEN model-written agenda). Bare status answers without show_dump still use matching injected facts.",
+    "WHEN / FULL day plan (no meaning filter) → server dump only with show_dump_ids=null (FORBIDDEN model-written agenda). Semantic day asks («פגישות») → ids or answer in responses from rows actually in injected facts — bare dump without ids expands to every row (not a semantic filter). TIME-OF-DAY (בוקר) is not an engine from/to filter. Bare status answers without show_dump still use matching injected facts.",
     "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה) — never jargon like מטלות מתוזמנות.",
   ].join("\n");
 }

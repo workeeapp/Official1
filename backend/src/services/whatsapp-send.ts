@@ -207,6 +207,17 @@ export function whatsappButtonsBody(
   body: string,
   buttons: LlmReplyButton[],
 ): Record<string, unknown> {
+  // WhatsApp rejects duplicate reply titles in one interactive (#131009).
+  const unique: LlmReplyButton[] = [];
+  const seenTitles = new Set<string>();
+  for (const button of buttons.slice(0, REPLY_BUTTON_MAX)) {
+    const title = fitReplyButtonLabel(button);
+    if (!title || seenTitles.has(title)) {
+      continue;
+    }
+    seenTitles.add(title);
+    unique.push(button);
+  }
   return {
     messaging_product: "whatsapp",
     to: destination,
@@ -215,7 +226,7 @@ export function whatsappButtonsBody(
       type: "button",
       body: { text: toWhatsAppFormatting(body).slice(0, WHATSAPP_BUTTON_BODY_MAX) },
       action: {
-        buttons: buttons.slice(0, REPLY_BUTTON_MAX).map((button) => ({
+        buttons: unique.map((button) => ({
           type: "reply",
           reply: {
             id: button.command.slice(0, REPLY_BUTTON_COMMAND_MAX),

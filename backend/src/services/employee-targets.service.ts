@@ -19,17 +19,13 @@ import {
 import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
 import {
   builtinListHebrew,
+  builtinListTypeFromHebrew,
   isBuiltinListType,
+  SHOW_FILINGS_ALL_COMMAND,
   SHOW_FILINGS_COMMAND,
+  SHOW_LIST_PREFIX,
   SHOW_REMINDERS_COMMAND,
-  showAllListButtonCommand,
-  showAllListButtonLabel,
-  showAssigneeButtonCommand,
-  showAssigneeButtonLabel,
   showListButtonCommand,
-  showSharedWithButtonCommand,
-  showSharedWithButtonLabel,
-  type BuiltinListType,
 } from "./builtin-lists.js";
 import type {
   FilingOwnerRef,
@@ -1457,36 +1453,744 @@ function reminderMutates(metadata: LlmMetadata): boolean {
   );
 }
 
+/** Proven collab for one list nav key — names already resolved for buttons. */
+export type AppliedCollabEvidence = {
+  mode: "co_share" | "assign";
+  partnerNames: string[];
+  /** Item mutations that contributed (bulk ≥ 2). */
+  itemCount: number;
+};
+
+/** Applied list/filing work that may receive engine LIST BUTTON / collab nav. */
+export type AppliedNavFilter = {
+  /** Keys from listNavKeyFromMutation / listNavKeyFromAction. */
+  listKeys: ReadonlySet<string>;
+  filing: boolean;
+  /**
+   * When set (including empty Map), collab button shape comes only from these
+   * apply proofs — never from ACTION targets alone. Omit only in unit tests
+   * that assert the metadata→button collab contract without apply.
+   */
+  collabByListKey?: ReadonlyMap<string, AppliedCollabEvidence>;
+};
+
 /**
- * Speaker confirm taps: keep model buttons (content-aware show / כן/לא / …),
- * then enforce LIST BUTTON — after lists.add|update|remove or filing
- * add/update/remove, the matching list-show command must appear (product
- * labels). Dedupes by command so a model-emitted button is preserved.
- * Does not invent «הצג תזכורות» or item-open taps. Partner notifies stay on
- * showButtonsForNotify (unchanged).
+ * Aggregate mutation.collabApply into per-list evidence for LIST BUTTON.
+ * Rows without collabApply (personal save / failed share) contribute nothing.
+ */
+export function buildCollabByListKey(
+  mutations: ReadonlyArray<{
+    listType: string;
+    listName?: string | null;
+    listShell?: boolean;
+    collabApply?: { mode: "co_share" | "assign"; partnerIds: string[] };
+  }>,
+  nameById: ReadonlyMap<string, string>,
+): Map<string, AppliedCollabEvidence> {
+  type Acc = {
+    mode: "co_share" | "assign";
+    partnerIds: Set<string>;
+    itemCount: number;
+  };
+  const acc = new Map<string, Acc>();
+  for (const row of mutations) {
+    if (row.listShell || !row.collabApply) {
+      continue;
+    }
+    const key = listNavKeyFromMutation(row);
+    const cur = acc.get(key);
+    if (!cur) {
+      acc.set(key, {
+        mode: row.collabApply.mode,
+        partnerIds: new Set(row.collabApply.partnerIds),
+        itemCount: 1,
+      });
+      continue;
+    }
+    cur.itemCount += 1;
+    for (const id of row.collabApply.partnerIds) {
+      cur.partnerIds.add(id);
+    }
+    if (row.collabApply.mode === "co_share") {
+      cur.mode = "co_share";
+    }
+  }
+  const out = new Map<string, AppliedCollabEvidence>();
+  for (const [key, cur] of acc) {
+    const partnerNames = [...cur.partnerIds]
+      .map((id) => (nameById.get(id) ?? "").trim())
+      .filter(Boolean);
+    if (partnerNames.length === 0) {
+      continue;
+    }
+    out.set(key, {
+      mode: cur.mode,
+      partnerNames,
+      itemCount: cur.itemCount,
+    });
+  }
+  return out;
+}
+
+/** Successful list/filing row applies — used to gate model item-open taps. */
+export type AppliedItemEvidence = {
+  lists: ReadonlyArray<{
+    action: "add" | "update" | "remove";
+    itemId: string;
+    itemLabel: string;
+    listType: string;
+    listShell?: boolean;
+  }>;
+  filings: ReadonlyArray<{
+    action: "add" | "update" | "remove";
+    itemName: string;
+  }>;
+};
+
+export type SpeakerShowButtonOptions = {
+  speakerNames?: string[];
+  /**
+   * When set, model LIST/collab and the plain safety-net are gated to applied
+   * work. Omit in unit tests that assert metadata→plain-LIST safety-net only.
+   */
+  appliedNav?: AppliedNavFilter;
+  /**
+   * When set, item-open buttons for rows this turn tried to mutate are kept
+   * only if a matching apply succeeded (item_id preferred, else unique title).
+   * Item-open with no mutate intent this turn (existing row) is kept.
+   */
+  appliedItems?: AppliedItemEvidence;
+};
+
+/** Builtin list_type, or `custom:<normalized name>`. */
+export function listNavKeyFromMutation(row: {
+  listType: string;
+  listName?: string | null;
+}): string {
+  if (isBuiltinListType(row.listType)) {
+    return row.listType;
+  }
+  return `custom:${stripRepeatedReshimatPrefix((row.listName ?? "").trim())}`;
+}
+
+export function listNavKeyFromAction(list: LlmListAction): string {
+  if (isBuiltinListType(list.listType)) {
+    return list.listType;
+  }
+  return `custom:${stripRepeatedReshimatPrefix(customListDerivedName(list))}`;
+}
+
+/**
+ * Normalize show-list / collab nav commands so «הצג רשימת רשימת X» and
+ * «הצג רשימת X» share one dedupe key. Conversational commands pass through.
+ */
+export function normalizeShowNavCommand(command: string): string {
+  let cmd = command.trim().replace(/\s+/gu, " ");
+  if (!cmd) {
+    return "";
+  }
+  if (cmd === SHOW_FILINGS_COMMAND || cmd === SHOW_FILINGS_ALL_COMMAND) {
+    return cmd;
+  }
+  if (cmd === SHOW_REMINDERS_COMMAND) {
+    return cmd;
+  }
+  // «הצג רשימת <name>[ משותפות עם X| באחריות X]»
+  const listMatch = cmd.match(
+    /^(הצג רשימת) (.+?)( משותפות עם .+| באחריות .+)?$/u,
+  );
+  if (listMatch) {
+    const name = stripRepeatedReshimatPrefix(listMatch[2] ?? "");
+    const suffix = listMatch[3] ?? "";
+    return name ? `${listMatch[1]} ${name}${suffix}` : cmd;
+  }
+  return cmd;
+}
+
+/**
+ * Fixed list / filing / collab nav shape (model may emit; engine validates).
+ * Item-open, כן/לא, and content-aware taps are not this shape.
+ */
+export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
+  const cmd = button.command.trim();
+  const label = button.label.trim();
+  if (
+    /^הציגי?\s+את\s+המטלה(?:\s|$)/u.test(cmd) ||
+    /^הציגי?\s+את\s+התיוק(?:\s|$)/u.test(cmd)
+  ) {
+    return false;
+  }
+  if (
+    cmd === SHOW_FILINGS_COMMAND ||
+    cmd === SHOW_FILINGS_ALL_COMMAND ||
+    cmd.startsWith(SHOW_LIST_PREFIX)
+  ) {
+    return true;
+  }
+  if (
+    /^הצג (קניות|מטלות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
+    /^כל (הקניות|המטלות|אנשי הקשר|התיוקים)$/u.test(cmd)
+  ) {
+    return true;
+  }
+  if (
+    label === "הצג קניות" ||
+    label === "הצג מטלות" ||
+    label === "הצג אנשי קשר" ||
+    label === "הצג רשימה" ||
+    label === "הצג תיוקים" ||
+    /^משותף עם /u.test(label) ||
+    /^באחריות /u.test(label) ||
+    label === SHOW_FILINGS_ALL_COMMAND ||
+    /^כל ה/u.test(label)
+  ) {
+    return cmd.startsWith("הצג") || cmd.startsWith("כל ");
+  }
+  if (label === "הצג" && (cmd.startsWith(SHOW_LIST_PREFIX) || cmd === SHOW_FILINGS_COMMAND)) {
+    return true;
+  }
+  return false;
+}
+
+const ITEM_OPEN_TASK_COMMAND = /^הציגי?\s+את\s+המטלה\s+(.+)$/u;
+const ITEM_OPEN_FILING_COMMAND = /^הציגי?\s+את\s+התיוק\s+(.+)$/u;
+
+function normalizeItemOpenTitle(value: string): string {
+  return value.trim().replace(/\s+/gu, " ");
+}
+
+/** Parse model item-open tap → tasks|filing + title stem. */
+export function parseItemOpenButton(
+  button: LlmReplyButton,
+): { kind: "tasks" | "filing"; title: string } | null {
+  const cmd = button.command.trim();
+  const task = cmd.match(ITEM_OPEN_TASK_COMMAND);
+  if (task?.[1]) {
+    const title = normalizeItemOpenTitle(task[1]);
+    return title ? { kind: "tasks", title } : null;
+  }
+  const filing = cmd.match(ITEM_OPEN_FILING_COMMAND);
+  if (filing?.[1]) {
+    const title = normalizeItemOpenTitle(filing[1]);
+    return title ? { kind: "filing", title } : null;
+  }
+  return null;
+}
+
+/**
+ * True when this turn's ACTION tried to add/update (or remove) the titled row.
+ * Used so existing-item opens without a mutate stay; failed saves drop the tap.
+ */
+function itemOpenHasMutateIntent(
+  metadata: LlmMetadata,
+  kind: "tasks" | "filing",
+  title: string,
+): boolean {
+  const needle = normalizeItemOpenTitle(title);
+  if (!needle) {
+    return false;
+  }
+  if (kind === "filing") {
+    return (metadata.filing ?? []).some((row) => {
+      if (
+        row.action !== "add_filing" &&
+        row.action !== "update_filing" &&
+        row.action !== "remove_filing"
+      ) {
+        return false;
+      }
+      return normalizeItemOpenTitle(row.itemName) === needle;
+    });
+  }
+  return metadata.lists.some((list) => {
+    if (list.listType !== "tasks") {
+      return false;
+    }
+    if (
+      list.action !== "add" &&
+      list.action !== "update" &&
+      list.action !== "remove"
+    ) {
+      return false;
+    }
+    return (list.items ?? []).some((raw) => {
+      if (!raw || typeof raw !== "object") {
+        return false;
+      }
+      const item = raw as Record<string, unknown>;
+      return normalizeItemOpenTitle(llmItemLabel(item)) === needle;
+    });
+  });
+}
+
+function itemOpenProvenSaved(
+  evidence: AppliedItemEvidence,
+  metadata: LlmMetadata,
+  kind: "tasks" | "filing",
+  title: string,
+): boolean {
+  const needle = normalizeItemOpenTitle(title);
+  if (kind === "filing") {
+    const saved = evidence.filings.filter(
+      (row) =>
+        (row.action === "add" || row.action === "update") &&
+        normalizeItemOpenTitle(row.itemName) === needle,
+    );
+    if (saved.length === 1) {
+      return true;
+    }
+    if (saved.length > 1) {
+      return false;
+    }
+    return false;
+  }
+
+  const actionIds = new Set<string>();
+  for (const list of metadata.lists) {
+    if (list.listType !== "tasks") {
+      continue;
+    }
+    if (list.action !== "add" && list.action !== "update") {
+      continue;
+    }
+    for (const raw of list.items ?? []) {
+      if (!raw || typeof raw !== "object") {
+        continue;
+      }
+      const item = raw as Record<string, unknown>;
+      if (normalizeItemOpenTitle(llmItemLabel(item)) !== needle) {
+        continue;
+      }
+      const id = actionItemId(raw);
+      if (id) {
+        actionIds.add(id);
+      }
+    }
+  }
+
+  const live = evidence.lists.filter(
+    (row) =>
+      (row.action === "add" || row.action === "update") &&
+      row.listType === "tasks" &&
+      row.listShell !== true,
+  );
+
+  if (actionIds.size > 0) {
+    const byId = live.filter((row) => actionIds.has(row.itemId));
+    return byId.length >= 1;
+  }
+
+  const byLabel = live.filter(
+    (row) => normalizeItemOpenTitle(row.itemLabel) === needle,
+  );
+  return byLabel.length === 1;
+}
+
+function itemOpenRemovedThisTurn(
+  evidence: AppliedItemEvidence,
+  kind: "tasks" | "filing",
+  title: string,
+): boolean {
+  const needle = normalizeItemOpenTitle(title);
+  if (kind === "filing") {
+    return evidence.filings.some(
+      (row) =>
+        row.action === "remove" &&
+        normalizeItemOpenTitle(row.itemName) === needle,
+    );
+  }
+  return evidence.lists.some(
+    (row) =>
+      row.action === "remove" &&
+      row.listType === "tasks" &&
+      normalizeItemOpenTitle(row.itemLabel) === needle,
+  );
+}
+
+/**
+ * When `appliedItems` is set: drop item-open for mutate intents that did not
+ * apply; keep opens of existing rows (no mutate intent this turn).
+ */
+export function shouldKeepItemOpenButton(
+  button: LlmReplyButton,
+  metadata: LlmMetadata,
+  appliedItems: AppliedItemEvidence | undefined,
+): boolean {
+  const parsed = parseItemOpenButton(button);
+  if (!parsed) {
+    return true;
+  }
+  if (!appliedItems) {
+    return true;
+  }
+  if (itemOpenRemovedThisTurn(appliedItems, parsed.kind, parsed.title)) {
+    return false;
+  }
+  if (!itemOpenHasMutateIntent(metadata, parsed.kind, parsed.title)) {
+    // Existing-row open — no add/update/remove claim for this title this turn.
+    return true;
+  }
+  return itemOpenProvenSaved(appliedItems, metadata, parsed.kind, parsed.title);
+}
+
+/** Parsed fixed list/collab nav — used to validate model-emitted taps. */
+type ParsedFixedListNav = {
+  listKey: string;
+  kind: "plain" | "co_share" | "assign" | "all";
+  partner: string | null;
+  plainButton: LlmReplyButton;
+};
+
+function plainButtonForListKey(listKey: string): LlmReplyButton | null {
+  if (listKey === "filings") {
+    return { label: "הצג תיוקים", command: SHOW_FILINGS_COMMAND };
+  }
+  if (listKey === "shopping") {
+    return {
+      label: "הצג קניות",
+      command: showListButtonCommand("shopping"),
+    };
+  }
+  if (listKey === "tasks") {
+    return {
+      label: "הצג מטלות",
+      command: showListButtonCommand("tasks"),
+    };
+  }
+  if (listKey === "contacts") {
+    return {
+      label: "הצג אנשי קשר",
+      command: showListButtonCommand("contacts"),
+    };
+  }
+  if (listKey.startsWith("custom:")) {
+    const name = listKey.slice("custom:".length).trim();
+    if (!name) {
+      return null;
+    }
+    return {
+      label: "הצג רשימה",
+      command: showListButtonCommand(name),
+    };
+  }
+  return null;
+}
+
+function listKeyFromShowName(name: string): string | null {
+  const trimmed = stripRepeatedReshimatPrefix(name.trim());
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed === "תיוקים") {
+    return "filings";
+  }
+  const builtin = builtinListTypeFromHebrew(trimmed);
+  if (builtin) {
+    return builtin;
+  }
+  return `custom:${trimmed}`;
+}
+
+/**
+ * Parse a fixed list / collab nav button. Returns null for conversational /
+ * item-open taps.
+ */
+export function parseFixedListNavButton(
+  button: LlmReplyButton,
+): ParsedFixedListNav | null {
+  if (!isEngineOwnedListNavButton(button)) {
+    return null;
+  }
+  const cmd = normalizeShowNavCommand(button.command.trim());
+  if (!cmd) {
+    return null;
+  }
+
+  if (cmd === SHOW_FILINGS_COMMAND) {
+    const plainButton = plainButtonForListKey("filings")!;
+    return {
+      listKey: "filings",
+      kind: "plain",
+      partner: null,
+      plainButton,
+    };
+  }
+  if (cmd === SHOW_FILINGS_ALL_COMMAND) {
+    const plainButton = plainButtonForListKey("filings")!;
+    return {
+      listKey: "filings",
+      kind: "all",
+      partner: null,
+      plainButton,
+    };
+  }
+
+  const allMatch = cmd.match(
+    /^כל (הקניות|המטלות|אנשי הקשר|התיוקים)$/u,
+  );
+  if (allMatch) {
+    const noun = allMatch[1]!;
+    const listKey =
+      noun === "הקניות"
+        ? "shopping"
+        : noun === "המטלות"
+          ? "tasks"
+          : noun === "אנשי הקשר"
+            ? "contacts"
+            : "filings";
+    const plainButton = plainButtonForListKey(listKey);
+    if (!plainButton) {
+      return null;
+    }
+    return { listKey, kind: "all", partner: null, plainButton };
+  }
+
+  const builtinCollab = cmd.match(
+    /^הצג (קניות|מטלות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
+  );
+  if (builtinCollab) {
+    const listKey = listKeyFromShowName(builtinCollab[1]!);
+    const mode =
+      builtinCollab[2] === "באחריות" ? "assign" : "co_share";
+    const partner = builtinCollab[3]!.trim();
+    const plainButton = listKey ? plainButtonForListKey(listKey) : null;
+    if (!listKey || !plainButton || !partner) {
+      return null;
+    }
+    return { listKey, kind: mode, partner, plainButton };
+  }
+
+  const listMatch = cmd.match(
+    /^(הצג רשימת) (.+?)( משותפות עם (.+)| באחריות (.+))?$/u,
+  );
+  if (listMatch) {
+    const listKey = listKeyFromShowName(listMatch[2] ?? "");
+    const plainButton = listKey ? plainButtonForListKey(listKey) : null;
+    if (!listKey || !plainButton) {
+      return null;
+    }
+    const sharePartner = (listMatch[4] ?? "").trim();
+    const assignPartner = (listMatch[5] ?? "").trim();
+    if (sharePartner) {
+      return {
+        listKey,
+        kind: "co_share",
+        partner: sharePartner,
+        plainButton,
+      };
+    }
+    if (assignPartner) {
+      return {
+        listKey,
+        kind: "assign",
+        partner: assignPartner,
+        plainButton,
+      };
+    }
+    return {
+      listKey,
+      kind: "plain",
+      partner: null,
+      plainButton,
+    };
+  }
+
+  return null;
+}
+
+function listKeyNavEligible(
+  listKey: string,
+  metadata: LlmMetadata,
+  appliedNav: AppliedNavFilter | undefined,
+  skipSourceCommands: ReadonlySet<string>,
+): boolean {
+  const plain = plainButtonForListKey(listKey);
+  if (!plain) {
+    return false;
+  }
+  if (skipSourceCommands.has(plain.command)) {
+    return false;
+  }
+  if (listKey === "filings") {
+    if (appliedNav) {
+      return appliedNav.filing;
+    }
+    return (metadata.filing ?? []).some(
+      (row) =>
+        row.action === "add_filing" ||
+        row.action === "remove_filing" ||
+        row.action === "update_filing",
+    );
+  }
+  if (appliedNav) {
+    return appliedNav.listKeys.has(listKey);
+  }
+  return metadata.lists.some(
+    (list) =>
+      (list.action === "add" ||
+        list.action === "remove" ||
+        list.action === "update") &&
+      list.listType !== "reminders" &&
+      listNavKeyFromAction(list) === listKey,
+  );
+}
+
+function collabEvidenceAllows(
+  parsed: ParsedFixedListNav,
+  evidence: AppliedCollabEvidence | undefined,
+): boolean {
+  if (!evidence) {
+    return false;
+  }
+  if (parsed.kind === "all") {
+    return (
+      evidence.partnerNames.length > 1 ||
+      (evidence.mode === "co_share" && evidence.itemCount >= 2)
+    );
+  }
+  if (parsed.kind === "co_share") {
+    if (evidence.mode !== "co_share" || !parsed.partner) {
+      return false;
+    }
+    return evidence.partnerNames.includes(parsed.partner);
+  }
+  if (parsed.kind === "assign") {
+    if (evidence.mode !== "assign" || !parsed.partner) {
+      return false;
+    }
+    return evidence.partnerNames.includes(parsed.partner);
+  }
+  return true;
+}
+
+/**
+ * Keep / normalize / drop a model fixed-nav button.
+ * Unproven collab → plain LIST when the target is eligible (never a share label).
+ */
+function validateModelFixedListNav(
+  button: LlmReplyButton,
+  metadata: LlmMetadata,
+  appliedNav: AppliedNavFilter | undefined,
+  skipSourceCommands: ReadonlySet<string>,
+): { button: LlmReplyButton; listKey: string } | null {
+  const parsed = parseFixedListNavButton(button);
+  if (!parsed) {
+    return null;
+  }
+  if (
+    !listKeyNavEligible(
+      parsed.listKey,
+      metadata,
+      appliedNav,
+      skipSourceCommands,
+    )
+  ) {
+    return null;
+  }
+
+  if (parsed.kind === "plain") {
+    const command =
+      normalizeShowNavCommand(button.command) || parsed.plainButton.command;
+    const label = button.label.trim() || parsed.plainButton.label;
+    // Reject share-implying labels on a plain command.
+    if (
+      /^משותף עם /u.test(label) ||
+      /^באחריות /u.test(label) ||
+      /^כל ה/u.test(label)
+    ) {
+      return { button: parsed.plainButton, listKey: parsed.listKey };
+    }
+    return {
+      button: {
+        label: fitNavButtonLabel(label),
+        command,
+      },
+      listKey: parsed.listKey,
+    };
+  }
+
+  const evidence = appliedNav?.collabByListKey?.get(parsed.listKey);
+  if (collabEvidenceAllows(parsed, evidence)) {
+    return {
+      button: {
+        label: fitNavButtonLabel(button.label.trim() || parsed.plainButton.label),
+        command:
+          normalizeShowNavCommand(button.command) || button.command.trim(),
+      },
+      listKey: parsed.listKey,
+    };
+  }
+  // Unproven collab / כל ה… → plain LIST only (no share-implying label).
+  return { button: parsed.plainButton, listKey: parsed.listKey };
+}
+
+/**
+ * Speaker confirm taps: keep model conversational + validated LIST/collab
+ * nav; drop failed item-open; safety-net at most one plain LIST per applied
+ * (or metadata) mutate when the model omitted a matching nav. Never invents
+ * collab, item-open, or «הצג תזכורות».
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
   existing: LlmReplyButton[] = [],
-  options?: { speakerNames?: string[] },
+  options?: SpeakerShowButtonOptions,
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
+  const coveredListKeys = new Set<string>();
+  const listMutates = metadata.lists.filter(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
+  );
+  const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
+  const remember = (command: string): boolean => {
+    const key = normalizeShowNavCommand(command) || command;
+    if (!key || seen.has(key) || buttons.length >= REPLY_BUTTON_MAX) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  };
+
   for (const button of existing) {
-    if (buttons.length >= REPLY_BUTTON_MAX || seen.has(button.command)) {
+    if (isEngineOwnedListNavButton(button)) {
+      const validated = validateModelFixedListNav(
+        button,
+        metadata,
+        options?.appliedNav,
+        skipSourceCommands,
+      );
+      if (!validated) {
+        continue;
+      }
+      if (!remember(validated.button.command)) {
+        coveredListKeys.add(validated.listKey);
+        continue;
+      }
+      buttons.push(validated.button);
+      coveredListKeys.add(validated.listKey);
       continue;
     }
-    seen.add(button.command);
+    if (!shouldKeepItemOpenButton(button, metadata, options?.appliedItems)) {
+      continue;
+    }
+    if (!remember(button.command)) {
+      continue;
+    }
     buttons.push(button);
   }
-  for (const required of requiredSpeakerListShowButtons(
+
+  for (const required of plainSafetyNetListShowButtons(
     metadata,
-    options?.speakerNames ?? [],
+    options?.appliedNav,
+    skipSourceCommands,
+    coveredListKeys,
   )) {
-    if (buttons.length >= REPLY_BUTTON_MAX || seen.has(required.command)) {
+    if (!remember(required.command)) {
       continue;
     }
-    seen.add(required.command);
     buttons.push(required);
   }
   return buttons;
@@ -1494,10 +2198,6 @@ export function ensureSpeakerShowButtons(
 
 function speakerNameSet(speakerNames: string[]): Set<string> {
   return new Set(speakerNames.map((name) => name.trim()).filter(Boolean));
-}
-
-function targetNamesOf(row: { targets?: string[] }): string[] {
-  return (row.targets ?? []).map((name) => name.trim()).filter(Boolean);
 }
 
 /** co_share: speaker ∈ targets + partner; assign: partners only; else personal. */
@@ -1531,28 +2231,6 @@ function fitNavButtonLabel(label: string, max = 20): string {
   return trimmed.length <= max ? trimmed : trimmed.slice(0, max);
 }
 
-function countMutableItems(list: LlmListAction): number {
-  return (list.items ?? []).filter((item) => {
-    if (!item || typeof item !== "object") {
-      return false;
-    }
-    const record = item as Record<string, unknown>;
-    return Boolean(
-      String(record.item_id ?? record.itemId ?? "").trim() ||
-        llmItemLabel(item).trim(),
-    );
-  }).length;
-}
-
-function kindKeyForList(
-  list: LlmListAction,
-): BuiltinListType | "filings" | string {
-  if (isBuiltinListType(list.listType)) {
-    return list.listType;
-  }
-  return stripRepeatedReshimatPrefix(customListDerivedName(list));
-}
-
 function pushNavButton(
   buttons: LlmReplyButton[],
   seen: Set<string>,
@@ -1571,10 +2249,15 @@ function pushNavButton(
   });
 }
 
-/** LIST BUTTON / collab nav for speaker confirm (not partner notify). */
-function requiredSpeakerListShowButtons(
+/**
+ * Safety net only: plain LIST / filing nav after proven (or metadata) mutate.
+ * Never invents collab, כל ה…, or item-open. Skips keys the model already covered.
+ */
+function plainSafetyNetListShowButtons(
   metadata: LlmMetadata,
-  speakerNames: string[],
+  appliedNav: AppliedNavFilter | undefined,
+  skipSourceCommands: ReadonlySet<string>,
+  coveredListKeys: ReadonlySet<string>,
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
@@ -1584,87 +2267,29 @@ function requiredSpeakerListShowButtons(
       row.action === "remove" ||
       row.action === "update",
   );
-  const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
   for (const list of listMutates) {
     if (list.listType === "reminders") {
       continue;
     }
-    const name = showListCommandName(list);
-    if (!name) {
+    const listKey = listNavKeyFromAction(list);
+    if (coveredListKeys.has(listKey)) {
       continue;
     }
-    const generalCommand = showListButtonCommand(name);
-    if (skipSourceCommands.has(generalCommand)) {
+    if (
+      !listKeyNavEligible(
+        listKey,
+        metadata,
+        appliedNav,
+        skipSourceCommands,
+      )
+    ) {
       continue;
     }
-    const kind = kindKeyForList(list);
-    const targets = targetNamesOf(list);
-    const collab = classifyCollabFromTargets(targets, speakerNames);
-    const speakers = speakerNameSet(speakerNames);
-    const partners = targets.filter((target) => !speakers.has(target));
-    const isBulk = countMutableItems(list) >= 2;
-
-    if (collab === "co_share" && partners.length === 1) {
-      const person = partners[0]!;
-      pushNavButton(buttons, seen, {
-        label: showSharedWithButtonLabel(person),
-        command: showSharedWithButtonCommand(kind, person),
-      });
-      // Bulk co-share only (§0): shared-with + כל; single → shared-with alone.
-      if (isBulk) {
-        if (isBuiltinListType(kind) || kind === "filings") {
-          pushNavButton(buttons, seen, {
-            label: showAllListButtonLabel(kind),
-            command: showAllListButtonCommand(kind),
-          });
-        } else {
-          pushNavButton(buttons, seen, {
-            label: speakerListShowLabel(list),
-            command: generalCommand,
-          });
-        }
-      }
+    const plain = plainButtonForListKey(listKey);
+    if (!plain) {
       continue;
     }
-    if (collab === "co_share" && partners.length > 1) {
-      pushNavButton(buttons, seen, {
-        label:
-          isBuiltinListType(kind) || kind === "filings"
-            ? showAllListButtonLabel(kind)
-            : speakerListShowLabel(list),
-        command:
-          isBuiltinListType(kind) || kind === "filings"
-            ? showAllListButtonCommand(kind)
-            : generalCommand,
-      });
-      continue;
-    }
-    if (collab === "assign" && partners.length === 1) {
-      const person = partners[0]!;
-      pushNavButton(buttons, seen, {
-        label: showAssigneeButtonLabel(person),
-        command: showAssigneeButtonCommand(kind, person),
-      });
-      continue;
-    }
-    if (collab === "assign" && partners.length > 1) {
-      pushNavButton(buttons, seen, {
-        label:
-          isBuiltinListType(kind) || kind === "filings"
-            ? showAllListButtonLabel(kind)
-            : speakerListShowLabel(list),
-        command:
-          isBuiltinListType(kind) || kind === "filings"
-            ? showAllListButtonCommand(kind)
-            : generalCommand,
-      });
-      continue;
-    }
-
-    pushNavButton(buttons, seen, {
-      label: speakerListShowLabel(list),
-      command: generalCommand,
-    });
+    pushNavButton(buttons, seen, plain);
   }
 
   const filingMutates = (metadata.filing ?? []).filter(
@@ -1673,61 +2298,17 @@ function requiredSpeakerListShowButtons(
       row.action === "remove_filing" ||
       row.action === "update_filing",
   );
-  if (filingMutates.length > 0) {
-    const withTargets = filingMutates.find(
-      (row) => targetNamesOf(row).length > 0,
-    );
-    if (withTargets) {
-      const targets = targetNamesOf(withTargets);
-      const collab = classifyCollabFromTargets(targets, speakerNames);
-      const speakers = speakerNameSet(speakerNames);
-      const partners = targets.filter((target) => !speakers.has(target));
-      if (collab === "co_share" && partners.length === 1) {
-        const person = partners[0]!;
-        pushNavButton(buttons, seen, {
-          label: showSharedWithButtonLabel(person),
-          command: showSharedWithButtonCommand("filings", person),
-        });
-        if (filingMutates.length >= 2) {
-          pushNavButton(buttons, seen, {
-            label: showAllListButtonLabel("filings"),
-            command: showAllListButtonCommand("filings"),
-          });
-        }
-      } else if (collab === "assign" && partners.length === 1) {
-        const person = partners[0]!;
-        pushNavButton(buttons, seen, {
-          label: showAssigneeButtonLabel(person),
-          command: showAssigneeButtonCommand("filings", person),
-        });
-      } else {
-        pushNavButton(buttons, seen, {
-          label: "הצג תיוקים",
-          command: SHOW_FILINGS_COMMAND,
-        });
-      }
-    } else {
-      pushNavButton(buttons, seen, {
-        label: "הצג תיוקים",
-        command: SHOW_FILINGS_COMMAND,
-      });
-    }
+  if (
+    filingMutates.length > 0 &&
+    !coveredListKeys.has("filings") &&
+    listKeyNavEligible("filings", metadata, appliedNav, skipSourceCommands)
+  ) {
+    pushNavButton(buttons, seen, {
+      label: "הצג תיוקים",
+      command: SHOW_FILINGS_COMMAND,
+    });
   }
   return buttons;
-}
-
-/** Fixed LIST BUTTON labels by kind (custom never puts list_name on the label). */
-function speakerListShowLabel(list: LlmListAction): string {
-  if (list.listType === "shopping") {
-    return "הצג קניות";
-  }
-  if (list.listType === "tasks") {
-    return "הצג מטלות";
-  }
-  if (list.listType === "contacts") {
-    return "הצג אנשי קשר";
-  }
-  return "הצג רשימה";
 }
 
 /**

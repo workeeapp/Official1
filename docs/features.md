@@ -210,7 +210,7 @@ Speaker-only meetings with an outside party («פגישה עם אלסטיק») s
 Lucy (and engine notifies) can attach tap buttons: show list / show reminders / snooze, etc.
 
 - Model may emit reply buttons; partner notify path also builds «הצג» buttons (`showButtonsForNotify`).
-- Speaker path: `ensureSpeakerShowButtons` after any list / filing / reminder mutate appends the matching «הצג» (patched onto the reply JSON + persisted on the assistant row). Engine-derived show commands win; mismatched model show buttons are dropped. Same-turn item move (`lists.remove` + `lists.add` of the same item) → **dest list only** (not source + dest).
+- Speaker path: after **applied** list / filing mutate, `ensureSpeakerShowButtons` keeps model-emitted LIST/collab nav that matches apply proof (`appliedNav` / `collabApply`), drops unproven collab (falls back to plain LIST or omits), and may add at most one plain LIST safety-net if a matching nav was omitted — never invents collab or item-open. Dedupes by normalized command. Item-open / כן/לא / content-aware taps stay model-owned. Same-turn item move (`lists.remove` + `lists.add` of the same item) → **dest list only** (not source + dest).
 - Web chat renders them; WhatsApp sends interactive buttons when available.
 - Server-sent thread messages stay in the worker’s model memory.
 

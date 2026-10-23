@@ -3,6 +3,8 @@
  *
  * Production apply path (planTargetedActions → applyEmployeeRecords) +
  * spoken reply correction + bubble↔show-button attach.
+ * Speaker LIST/collab nav uses appliedNav + collabByListKey from mutations
+ * (same shape as chat.service) — never ACTION targets alone.
  * Stub model ACTION only — no OpenAI / LIVE / WhatsApp / reminder fire.
  *
  * Run: npm run test:eval-db -- tests/share-unified-c1c4.eval-db.test.ts
@@ -13,6 +15,7 @@ import {
   emptyLlmMetadata,
   parseLlmReply,
   type LlmMetadata,
+  type LlmReplyButton,
   type LlmSpokenBubble,
 } from "@workee/shared";
 import {
@@ -25,7 +28,10 @@ import {
   type ShareApplyMiss,
 } from "../src/services/employee-records.service.js";
 import {
+  buildCollabByListKey,
+  employeeDisplayName,
   ensureSpeakerShowButtons,
+  listNavKeyFromMutation,
   planTargetedActions,
 } from "../src/services/employee-targets.service.js";
 import { setEngineResponse } from "../src/services/whatsapp-send.js";
@@ -91,16 +97,38 @@ function spokenReply(text: string, metadata: LlmMetadata): string {
   });
 }
 
+/** Same appliedNav + collabByListKey shape as chat.service production wiring. */
+function speakerNavFromApply(
+  account: HarnessAccount,
+  mutations: ListItemMutation[],
+): {
+  listKeys: Set<string>;
+  collabByListKey: ReturnType<typeof buildCollabByListKey>;
+} {
+  const nameById = new Map(
+    account.employees.map((row) => [row.id, employeeDisplayName(row)]),
+  );
+  return {
+    listKeys: new Set(mutations.map((row) => listNavKeyFromMutation(row))),
+    collabByListKey: buildCollabByListKey(mutations, nameById),
+  };
+}
+
 function finalizeUserFacing(input: {
   claim: string;
   metadata: LlmMetadata;
   mutations: ListItemMutation[];
   shareMisses: ShareApplyMiss[];
   speakerNames: string[];
+  account: HarnessAccount;
+  /** Model-emitted taps (LIST/collab/כן…) — engine validates, does not invent collab. */
+  modelButtons?: LlmReplyButton[];
 }): {
   spoken: string;
   bubbles: LlmSpokenBubble[];
   buttons: ReturnType<typeof ensureSpeakerShowButtons>;
+  collabByListKey: ReturnType<typeof buildCollabByListKey>;
+  listKeys: Set<string>;
 } {
   let reply = spokenReply(input.claim, input.metadata);
   reply = correctShareClaimReply({
@@ -111,11 +139,24 @@ function finalizeUserFacing(input: {
     setResponse: setEngineResponse,
   });
   const spoken = parseLlmReply(reply).response.trim();
-  const buttons = ensureSpeakerShowButtons(input.metadata, [], {
-    speakerNames: input.speakerNames,
-  });
+  const { listKeys, collabByListKey } = speakerNavFromApply(
+    input.account,
+    input.mutations,
+  );
+  const buttons = ensureSpeakerShowButtons(
+    input.metadata,
+    input.modelButtons ?? [],
+    {
+      speakerNames: input.speakerNames,
+      appliedNav: {
+        listKeys,
+        filing: false,
+        collabByListKey,
+      },
+    },
+  );
   const bubbles = applyShowButtonsToBubbles([{ text: spoken }], buttons);
-  return { spoken, bubbles, buttons };
+  return { spoken, bubbles, buttons, collabByListKey, listKeys };
 }
 
 async function seedPersonalShopping(
@@ -208,6 +249,7 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       mutations,
       shareMisses,
       speakerNames: [SPEAKER, "Tal"],
+      account,
     });
     // Full new-share success keeps the model claim.
     expect(facing.spoken).toBe("שיתפתי את שני הפריטים עם עמית.");
@@ -266,6 +308,7 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       mutations,
       shareMisses,
       speakerNames: [SPEAKER, "Tal"],
+      account,
     });
     // Assign claim is not a «שיתפתי» past-tense share claim — left as-is.
     expect(facing.spoken).toContain("עמית");
@@ -374,6 +417,7 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       mutations: co.mutations,
       shareMisses: co.shareMisses,
       speakerNames: [SPEAKER, "Tal"],
+      account,
     });
     expect(facing.bubbles[0]?.text).toBe(facing.spoken);
     expect(facing.bubbles[0]?.buttons?.length ?? 0).toBeGreaterThan(0);
@@ -430,11 +474,162 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       mutations: second.mutations,
       shareMisses: second.shareMisses,
       speakerNames: [SPEAKER, "Tal"],
+      account,
     });
     expect(facing.spoken).toBe(
       "הפריטים כבר משותפים — לא נוסף שיתוף חדש.",
     );
     expect(facing.bubbles[0]?.text).toBe(facing.spoken);
     expect(facing.bubbles[0]?.buttons?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("collab nav evidence: successful share → model collab kept when collabApply proves it", async () => {
+    account = await createHarnessAccount(SPEAKER, {
+      partners: [PARTNER_A],
+    });
+    const amit = account.partners.find((p) => p.name === PARTNER_A)!;
+    const ids = await seedPersonalShopping(account, ["חלב-nav-ok"]);
+
+    const metadata: LlmMetadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "update",
+          listType: "shopping",
+          listName: "",
+          items: ids.map((id) => ({ item_id: id })),
+          targets: [SPEAKER, PARTNER_A],
+        },
+      ],
+    };
+    const { mutations, shareMisses } = await applyLikeChat(account, metadata);
+    expect(shareMisses).toEqual([]);
+    expect(mutations.length).toBeGreaterThan(0);
+    expect(
+      mutations.every(
+        (m) =>
+          m.collabApply?.mode === "co_share" &&
+          m.collabApply.partnerIds.includes(amit.id),
+      ),
+    ).toBe(true);
+    expect(
+      mutations.every((m) => m.shareOutcome?.newlySharedCount === 1),
+    ).toBe(true);
+
+    const modelCollab: LlmReplyButton[] = [
+      {
+        label: "משותף עם עמית",
+        command: "הצג קניות משותפות עם עמית",
+      },
+    ];
+    const facing = finalizeUserFacing({
+      claim: "שיתפתי חלב עם עמית.",
+      metadata,
+      mutations,
+      shareMisses,
+      speakerNames: [SPEAKER, "Tal"],
+      account,
+      modelButtons: modelCollab,
+    });
+    expect(facing.listKeys.has("shopping")).toBe(true);
+    expect(facing.collabByListKey.get("shopping")?.mode).toBe("co_share");
+    expect(facing.collabByListKey.get("shopping")?.partnerNames).toContain(
+      PARTNER_A,
+    );
+    expect(facing.buttons.map((b) => b.command)).toEqual([
+      "הצג קניות משותפות עם עמית",
+    ]);
+    expect(facing.buttons[0]?.label).toBe("משותף עם עמית");
+    // Safety net alone → plain LIST (never invents collab).
+    const safetyOnly = finalizeUserFacing({
+      claim: "שיתפתי חלב עם עמית.",
+      metadata,
+      mutations,
+      shareMisses,
+      speakerNames: [SPEAKER, "Tal"],
+      account,
+    });
+    expect(safetyOnly.buttons.map((b) => b.command)).toEqual([
+      "הצג רשימת קניות",
+    ]);
+  });
+
+  it("collab nav evidence: failed share + personal add → plain LIST BUTTON via appliedNav", async () => {
+    account = await createHarnessAccount(SPEAKER, {
+      partners: [PARTNER_A],
+    });
+    // Missing id → apply shareMiss; personal add still lands on shopping.
+    const missingId = "00000000-0000-4000-8000-00000000c011";
+    const metadata: LlmMetadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "לחם-nav-personal" }],
+          targets: [],
+        },
+        {
+          action: "update",
+          listType: "shopping",
+          listName: "",
+          items: [{ item_id: missingId }],
+          targets: [SPEAKER, PARTNER_A],
+        },
+      ],
+    };
+    // Prove ACTION still carries share targets (would falsely claim collab without appliedNav).
+    expect(metadata.lists[1]?.targets).toEqual([SPEAKER, PARTNER_A]);
+
+    const { mutations, shareMisses } = await applyLikeChat(account, metadata);
+    expect(shareMisses.some((m) => m.reason === "missing")).toBe(true);
+    const personalAdds = mutations.filter(
+      (m) => m.action === "add" && m.listType === "shopping",
+    );
+    expect(personalAdds.length).toBe(1);
+    expect(personalAdds.every((m) => !m.collabApply)).toBe(true);
+    expect(mutations.every((m) => !m.collabApply)).toBe(true);
+
+    const speakerNames = [SPEAKER, "Tal"];
+    // Without appliedNav / model collab: safety net is plain LIST only (no invent).
+    const legacyButtons = ensureSpeakerShowButtons(metadata, [], {
+      speakerNames,
+    });
+    expect(
+      legacyButtons.every(
+        (b) =>
+          !b.command.includes("משותפות") &&
+          !b.label.includes("משותף עם") &&
+          !b.command.includes("באחריות") &&
+          !b.label.includes("באחריות"),
+      ),
+    ).toBe(true);
+    expect(legacyButtons.map((b) => b.command)).toEqual(["הצג רשימת קניות"]);
+
+    const facing = finalizeUserFacing({
+      claim: "הוספתי לחם.",
+      metadata,
+      mutations,
+      shareMisses,
+      speakerNames,
+      account,
+    });
+    // New path: appliedNav present, listKeys from personal save, collab map empty.
+    expect(facing.listKeys.has("shopping")).toBe(true);
+    expect(facing.listKeys.size).toBeGreaterThan(0);
+    expect(facing.collabByListKey.size).toBe(0);
+    expect(facing.buttons.map((b) => b.command)).toEqual([
+      "הצג רשימת קניות",
+    ]);
+    expect(
+      facing.buttons.every(
+        (b) =>
+          !b.command.includes("משותפ") &&
+          !b.label.includes("משותף") &&
+          !b.command.includes("באחריות") &&
+          !b.label.includes("באחריות"),
+      ),
+    ).toBe(true);
   });
 });

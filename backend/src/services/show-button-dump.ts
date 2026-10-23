@@ -3274,14 +3274,19 @@ function hasLinkedLists(row: Record<string, unknown>): boolean {
   return Array.isArray(linked) && linked.length > 0;
 }
 
-/** Task dump marks: 📍 when כתובת set, 📞 when טלפון set (after 📎/🗂️). */
+/**
+ * Task dump place/phone: 📍/📞 plus the stored value (not icon-only).
+ * After 📎/🗂️; list dump and item-open (`show_dump_ids`) share this path.
+ */
 export function taskPlacePhoneMarks(item: Record<string, unknown>): string {
   let marks = "";
-  if (readText(item, ["כתובת", "address"])) {
-    marks += " 📍";
+  const address = readText(item, ["כתובת", "address"]);
+  if (address) {
+    marks += ` 📍 ${address}`;
   }
-  if (readText(item, ["טלפון", "phone", "telephone"])) {
-    marks += " 📞";
+  const phone = readText(item, ["טלפון", "phone", "telephone"]);
+  if (phone) {
+    marks += ` 📞 ${phone}`;
   }
   return marks;
 }

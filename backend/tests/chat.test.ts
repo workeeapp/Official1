@@ -768,6 +768,63 @@ describe("chat API", () => {
     expect(instructions).toContain("תמסרי למיכל שאני אוהב אותה");
   });
 
+  // Product rules that live in chat.service Lucy extras (not LLM.config.json).
+  // Former mega «attaches the schema» asserts — live wording, same requirements.
+  it("wires LIVE DATA / SHAREABLE STATUS / FULL DUMP extras into Lucy runtime instructions", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "היי", employeeId });
+
+    const instructions = createResponse.mock.calls[0][0].instructions as string;
+
+    expect(instructions).toContain(
+      "FORBIDDEN: listing titles from earlier assistant/user messages",
+    );
+    expect(instructions).toContain("SHAREABLE STATUS ASK");
+    expect(instructions).toContain("SHAREABLE STATUS ASK ABOUT X");
+    expect(instructions).toContain("one flat dump header + row marks");
+    expect(instructions).toContain("באחריות X · מאת Y");
+    expect(instructions).toContain("FULL DUMP / מה יש לי / הציגי הכל");
+    expect(instructions).toContain("FULL DUMP DETAIL RULE");
+    expect(instructions).toContain("COUNTS ONLY");
+    expect(instructions).toContain("ONLY מטלות enumerate");
+    expect(instructions).toContain("SHOW MY LISTS / הציגי את הרשימות שלי");
+    expect(instructions).toContain('show_dump="full"');
+    expect(instructions).toContain("לפירוט רשימה: הצג רשימת");
+    expect(instructions).toContain("OR WITHIN FIELD");
+    expect(instructions).toContain("SHOW DUMP SECTION");
+    expect(instructions).toContain("show_dump_section=shared");
+    expect(instructions).toContain("show_dump_partner=X");
+    expect(instructions).toContain("מה יש לי משותף עם X");
+    expect(instructions).toContain("FORBIDDEN model-written with-X overview");
+    expect(instructions).toContain('show_dump="phone_book"');
+    expect(instructions).toContain("USER-FACING LANGUAGE");
+    expect(instructions).toContain("FOLLOW-UP TO YOUR QUESTION");
+    expect(instructions).toContain("MULTI-INTENT CONFIRM");
+    expect(instructions).toContain("re-emit EVERY offered ACTION this turn");
+    expect(instructions).toContain("משימות לעבודה");
+    expect(instructions).toContain("WHEN / TODAY / SOON — FULL agenda only");
+    expect(instructions).toContain("RETRIEVAL CONTRACT path 2");
+    expect(instructions).toContain("TIME-OF-DAY (בוקר) is NOT an engine dump filter");
+    expect(instructions).toContain("INVENTORY");
+    expect(instructions).toContain("show_dump=tasks WITHOUT about");
+    expect(instructions).toContain("YEARLY OFFER");
+    expect(instructions).toContain("FORBIDDEN reminders-only yearly birthday");
+    expect(instructions).toContain("PLATFORM INTERNAL");
+    expect(instructions).toContain("SCHEDULED SAVED-DATA STATUS");
+    expect(instructions).toContain("REUSE EXISTING WRAPPER");
+    expect(instructions).toContain("REMINDER-ON-ITEM");
+    expect(instructions).toContain("LIST NAME MATCH");
+    expect(instructions).toContain("TOPIC-ONLY / NO LIST NAMED");
+    expect(instructions).toContain("NUMBERED which-list ask");
+    expect(instructions).toContain("PERSONAL TASK DEFAULT");
+    expect(instructions).toContain("APPOINTMENT VS PING");
+  });
+
   it("stores LLM usage for the speaker, worker, and conversation", async () => {
     const cookie = await login();
     mockOwnedEmployee();
@@ -1961,6 +2018,7 @@ describe("chat API", () => {
     );
   });
 
+  // T4: invalid / cross-kind ids → no-match (never expands to full list).
   it("ITEM DUMP: unknown show_dump_ids → no-match, not the full tasks list", async () => {
     const taskTitle = "לשיננית מחר";
     listFindMany.mockImplementation(
@@ -2027,6 +2085,7 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("הנה המטלה שביקשת");
   });
 
+  // T4 (cross-kind).
   it("ITEM DUMP: id from another list kind → no-match, no cross-kind or full dump", async () => {
     const taskTitle = "ללכת לרופא";
     const filingName = "קוד שער";
@@ -2112,5 +2171,103 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("1234");
     expect(response.body.reply).not.toContain("מטלות:");
     expect(response.body.reply).not.toContain("תיוקים:");
+  });
+
+  // T2 (chat path): show_dump + ids → REPLACE only those rows.
+  it("T2: show_dump tasks + show_dump_ids replaces with selected row only", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-t2",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-meet",
+                data: {
+                  "שם מטלה": "פגישה עם רואה חשבון",
+                  "תאריך לביצוע": "2026-10-12",
+                },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "task-pkg",
+                data: {
+                  "שם מטלה": "לאסוף חבילה",
+                  "תאריך לביצוע": "2026-10-14",
+                },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "הנה הפגישות שבחרתי" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: "task-meet",
+        },
+      }),
+      raw: { output_text: "t2 ids" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי את הפגישה", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("פגישה עם רואה חשבון");
+    expect(response.body.reply).not.toContain("לאסוף חבילה");
+    expect(response.body.reply).not.toContain("הנה הפגישות שבחרתי");
+  });
+
+  // T5: no show_dump → model responses kept (no dump REPLACE).
+  it("T5: without show_dump the spoken reply is not replaced by a dump", async () => {
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [
+          {
+            text: "לפי המידע הזמין עכשיו: יש תור לשיננית; אם יש עוד פריטים שלא הופיעו בהקשר — תגיד.",
+          },
+        ],
+        metadata: { lists: [], show_dump: null },
+      }),
+      raw: { output_text: "t5 no dump" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "מה יש לי שקשור לשיניים?", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לפי המידע הזמין עכשיו");
+    expect(response.body.reply).toContain("תור לשיננית");
+    expect(response.body.reply).not.toContain("מטלות:");
   });
 });
