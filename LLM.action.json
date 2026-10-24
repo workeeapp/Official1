@@ -1208,7 +1208,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live local search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» / «איפה יש חניון ליד הקניון» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. intent=business (default/omit) ordinary find; intent=parking dedicated parking-place search (forces included_type parking). Parking-place asks MUST set intent parking: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניון בתשלום באזור?» — NOT a regular business search. Ordinary business: «תמצא לי מסעדה ליד הקניון» → intent business|omit (NOT parking). Filters via fields (open_now / min_rating / included_type / radius_meters), not stuffed into query. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it. radius_meters is locationBias preference only (not a hard geo fence). ParkingOptions never prove public vs private ownership.",
+                "description": "Live local search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» / «איפה יש חניון ליד הקניון» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. intent=business (default/omit) ordinary find; intent=parking dedicated parking-place search (forces included_type parking). Parking-place asks MUST set intent parking: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניה חינם?» / «יש חניון בתשלום באזור?» — NOT a regular business search. Ordinary business: «תמצא לי מסעדה ליד הקניון» → intent business|omit (NOT parking). Filters via fields (open_now / min_rating / parking_cost / included_type / radius_meters), not stuffed into query. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it. radius_meters is locationBias preference only (not a hard geo fence). ParkingOptions never prove public vs private ownership.",
                 "properties": {
                   "query": {
                     "type": "string",
@@ -1225,7 +1225,19 @@
                       "parking",
                       null
                     ],
-                    "description": "business (default/omit) = ordinary local business search («תמצא לי מסעדה ליד הקניון»). parking = dedicated parking-place search — server forces Google includedType parking + parkingOptions (Atmosphere SKU). REQUIRED parking for: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניון בתשלום באזור?». Contrast: «יש חניה במסעדה?» / «האם למסעדה יש חניה» → intent business + aspects [parking] (attribute of a business), NOT intent parking."
+                    "description": "business (default/omit) = ordinary local business search («תמצא לי מסעדה ליד הקניון»). parking = dedicated parking-place search — server forces Google includedType parking + parkingOptions (Atmosphere SKU). REQUIRED parking for: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניה חינם?» / «יש חניון בתשלום באזור?». Contrast: «יש חניה במסעדה?» / «האם למסעדה יש חניה» → intent business + aspects [parking] (attribute of a business), NOT intent parking."
+                  },
+                  "parking_cost": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "free",
+                      "paid",
+                      null
+                    ],
+                    "description": "Local ParkingOptions cost filter (Google has no request-side free/paid). free = only places with known free lot/street/garage («חניה חינם» / «חניון חינם»); paid = known paid lot/street/garage or valet («חניון בתשלום»). Server drops unknowns. null/omit = no cost filter. Do NOT rely on stuffing חינם/בתשלום into query alone — set this field. With free/paid always use intent=parking."
                   },
                   "place": {
                     "type": "string",

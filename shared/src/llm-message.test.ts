@@ -2382,6 +2382,7 @@ describe("parseLlmReply", () => {
       minRating: null,
       includedType: null,
       radiusMeters: null,
+      parkingCost: null,
     });
   });
 
@@ -2415,6 +2416,7 @@ describe("parseLlmReply", () => {
       minRating: 4.1,
       includedType: "restaurant",
       radiusMeters: 2000,
+      parkingCost: null,
     });
   });
 
@@ -2446,6 +2448,7 @@ describe("parseLlmReply", () => {
       minRating: null,
       includedType: null,
       radiusMeters: null,
+      parkingCost: null,
     });
   });
 
@@ -2477,7 +2480,56 @@ describe("parseLlmReply", () => {
       minRating: null,
       includedType: "parking",
       radiusMeters: null,
+      parkingCost: null,
     });
+  });
+
+  it("reads places parking_cost free/paid and free_parking alias", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חניה",
+              place: "תל אביב",
+              intent: "parking",
+              parking_cost: "free",
+            },
+          },
+        }),
+      ).places?.parkingCost,
+    ).toBe("free");
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חניון",
+              place: "חיפה",
+              intent: "parking",
+              free_parking: true,
+            },
+          },
+        }),
+      ).places?.parkingCost,
+    ).toBe("free");
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חניון",
+              place: "חיפה",
+              intent: "parking",
+              parking_cost: "paid",
+            },
+          },
+        }),
+      ).places?.parkingCost,
+    ).toBe("paid");
   });
 
   /**
@@ -2519,12 +2571,24 @@ describe("parseLlmReply", () => {
         },
       },
       {
+        utterance: "יש חניה חינם באזור?",
+        places: {
+          query: "חניה",
+          place: "",
+          near: "speaker",
+          intent: "parking",
+          parking_cost: "free",
+          aspects: ["summary"],
+        },
+      },
+      {
         utterance: "יש חניון בתשלום באזור?",
         places: {
           query: "חניון",
           place: "",
           near: "speaker",
           intent: "parking",
+          parking_cost: "paid",
           aspects: ["summary"],
         },
       },
@@ -2539,6 +2603,11 @@ describe("parseLlmReply", () => {
       expect(parsed, row.utterance).toBeTruthy();
       expect(parsed!.intent, row.utterance).toBe("parking");
       expect(parsed!.includedType, row.utterance).toBe("parking");
+      if (row.places.parking_cost != null) {
+        expect(parsed!.parkingCost, row.utterance).toBe(
+          row.places.parking_cost,
+        );
+      }
     }
   });
 
@@ -2753,6 +2822,7 @@ describe("parseLlmReply", () => {
       minRating: null,
       includedType: null,
       radiusMeters: null,
+      parkingCost: null,
     });
   });
 

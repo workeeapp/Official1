@@ -3,11 +3,13 @@ import {
   normalizePlacesIntent,
   normalizePlacesMinRating,
   normalizePlacesOpenNow,
+  normalizePlacesParkingCost,
   normalizePlacesRadiusMeters,
   placesMinRatingProviderFloor,
   PLACES_PARKING_INCLUDED_TYPE,
   type LlmPlacesIncludedType,
   type LlmPlacesIntent,
+  type LlmPlacesParkingCost,
 } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 
@@ -90,6 +92,13 @@ export type PlacesFacts = {
    * locationBias preference only — not a verified hard fence.
    */
   radiusMeters: number | null;
+  /** Local free/paid ParkingOptions filter (null/omit = none). */
+  parkingCost?: LlmPlacesParkingCost | null;
+  /**
+   * True when parking_cost filter dropped rows with unknown cost flags
+   * (no confirming free/paid attribute from Google).
+   */
+  parkingCostUnknownDropped?: boolean;
   results: PlaceResult[];
   /** maxResultCount sent on this Text Search (for saturation checks). */
   requestedMax?: number;
@@ -126,6 +135,12 @@ export const PLACES_FILTERED_SATURATED_SPARSE_HE =
  */
 export const PLACES_MIN_RATING_UNKNOWN_DROPPED_HE =
   "(סינון דירוג מדויק: מקומות בלי דירוג בגוגל לא נכללו — אי אפשר להבטיח שלמות.)";
+
+/**
+ * parking_cost local filter dropped places without a confirming free/paid flag.
+ */
+export const PLACES_PARKING_COST_UNKNOWN_DROPPED_HE =
+  "(סינון עלות חניה: מקומות בלי סימון חינם/בתשלום בגוגל לא נכללו — אי אפשר להבטיח שלמות.)";
 
 /** Places API (New) hard max for maxResultCount. */
 export const PLACES_API_HARD_MAX = 20;
@@ -164,7 +179,8 @@ export const PLACES_ASPECT_BILLING_NOTES = {
 
 /**
  * Parking intent: ownership (public/private) is not in Google ParkingOptions.
- * Never infer from free/paid/lot/street/valet flags.
+ * Never infer from free/paid/lot/street/valet flags — and do not print a
+ * "unknown ownership" line (omit missing facts from the reply).
  */
 export const PLACES_PARKING_OWNERSHIP_UNKNOWN_HE =
   "בעלות החניה (ציבורית/פרטית): אין מידע בגוגל — לא ניתן להסיק מנתוני החניה.";
@@ -246,16 +262,44 @@ export function placesRequestMaxResults(filtersActive: boolean): number {
   return Math.min(PLACES_API_HARD_MAX, PLACES_FILTERED_PAGE_SIZE);
 }
 
-/** Google request-side filters that justify the larger filtered page. */
+/** Filters that justify the larger Text Search page (request-side or local). */
 export function hasPlacesRequestSideFilters(input: {
   openNowFilter?: boolean | null;
   minRating?: number | null;
   includedType?: string | null;
+  parkingCost?: LlmPlacesParkingCost | null;
 }): boolean {
   return (
     input.openNowFilter === true ||
     input.minRating != null ||
-    Boolean(input.includedType)
+    Boolean(input.includedType) ||
+    input.parkingCost === "free" ||
+    input.parkingCost === "paid"
+  );
+}
+
+/** Known free lot / street / garage from Google ParkingOptions. */
+export function placeOffersFreeParking(row: PlaceResult): boolean {
+  const p = row.parking;
+  if (!p) {
+    return false;
+  }
+  return (
+    p.freeLot === true || p.freeStreet === true || p.freeGarage === true
+  );
+}
+
+/** Known paid lot / street / garage / valet from Google ParkingOptions. */
+export function placeOffersPaidParking(row: PlaceResult): boolean {
+  const p = row.parking;
+  if (!p) {
+    return false;
+  }
+  return (
+    p.paidLot === true ||
+    p.paidStreet === true ||
+    p.paidGarage === true ||
+    p.valet === true
   );
 }
 
@@ -498,6 +542,11 @@ export function formatPlacesFilterSummary(facts: PlacesFacts): string {
   if (facts.includedType) {
     bits.push(`סוג: ${INCLUDED_TYPE_HE[facts.includedType] ?? facts.includedType}`);
   }
+  if (facts.parkingCost === "free") {
+    bits.push("חניה חינם");
+  } else if (facts.parkingCost === "paid") {
+    bits.push("חניה בתשלום");
+  }
   if (facts.radiusMeters != null && facts.nearSpeaker) {
     bits.push(
       `העדפת קרבה עד כ־${facts.radiusMeters} מ׳ (לא סינון גבול קשיח)`,
@@ -518,6 +567,7 @@ export async function fetchPlacesFacts(input: {
   minRating?: number | null;
   includedType?: string | null;
   radiusMeters?: number | null;
+  parkingCost?: LlmPlacesParkingCost | unknown;
   /** True when ACTION explicitly set radius_meters (vs engine default bias). */
   radiusExplicit?: boolean;
   fetchImpl?: typeof fetch;
@@ -541,6 +591,7 @@ export async function fetchPlacesFacts(input: {
   if (intent === "parking") {
     includedType = PLACES_PARKING_INCLUDED_TYPE;
   }
+  const parkingCost = normalizePlacesParkingCost(input.parkingCost);
   const radiusExplicit =
     input.radiusExplicit === true ||
     (input.radiusMeters != null &&
@@ -555,6 +606,7 @@ export async function fetchPlacesFacts(input: {
     openNowFilter,
     minRating,
     includedType,
+    parkingCost,
   });
   const requestedMax = placesRequestMaxResults(requestFiltersActive);
 
@@ -569,6 +621,7 @@ export async function fetchPlacesFacts(input: {
     minRatingProvider,
     includedType,
     radiusMeters: radiusExplicit && nearSpeaker ? biasRadius : null,
+    parkingCost,
     results: [],
     requestedMax,
   };
@@ -655,10 +708,11 @@ export async function fetchPlacesFacts(input: {
     }
   }
 
+  let working = mapped;
   let minRatingUnknownDropped = false;
   if (minRating != null) {
     const kept: PlaceResult[] = [];
-    for (const row of mapped) {
+    for (const row of working) {
       if (row.rating == null) {
         minRatingUnknownDropped = true;
         continue;
@@ -667,11 +721,32 @@ export async function fetchPlacesFacts(input: {
         kept.push(row);
       }
     }
-    facts.results = kept;
+    working = kept;
     facts.minRatingUnknownDropped = minRatingUnknownDropped;
-  } else {
-    facts.results = mapped;
   }
+
+  let parkingCostUnknownDropped = false;
+  if (parkingCost === "free" || parkingCost === "paid") {
+    const kept: PlaceResult[] = [];
+    for (const row of working) {
+      const isFree = placeOffersFreeParking(row);
+      const isPaid = placeOffersPaidParking(row);
+      const matches = parkingCost === "free" ? isFree : isPaid;
+      if (matches) {
+        kept.push(row);
+        continue;
+      }
+      // Known opposite cost is a clean reject; missing flags → unknown drop note.
+      const knownOpposite = parkingCost === "free" ? isPaid : isFree;
+      if (!knownOpposite) {
+        parkingCostUnknownDropped = true;
+      }
+    }
+    working = kept;
+    facts.parkingCostUnknownDropped = parkingCostUnknownDropped;
+  }
+
+  facts.results = working;
 
   if (providerPageSaturated) {
     facts.providerPartial = true;
@@ -689,14 +764,14 @@ function formatTriLine(label: string, value: TriState): string | null {
   return null;
 }
 
+/** Known attribute lines only — omit the whole block when Google returned nothing. */
 function formatAttrBlock(
   title: string,
   lines: Array<string | null>,
-  unknownFallback: string,
-): string {
+): string | null {
   const known = lines.filter((line): line is string => Boolean(line));
   if (known.length === 0) {
-    return `${title}: ${unknownFallback}`;
+    return null;
   }
   return [title, ...known.map((line) => `• ${line}`)].join("\n");
 }
@@ -709,51 +784,47 @@ function formatAttributeSections(
   const out: string[] = [];
   if (wantsParkingDetails(aspects, intent)) {
     const p = row.parking;
-    out.push(
-      formatAttrBlock(
-        "חניה",
-        p
-          ? [
-              formatTriLine("חניון חינם", p.freeLot),
-              formatTriLine("חניון בתשלום", p.paidLot),
-              formatTriLine("רחוב חינם", p.freeStreet),
-              formatTriLine("רחוב בתשלום", p.paidStreet),
-              formatTriLine("שירות חניה", p.valet),
-              formatTriLine("חניון מקורה חינם", p.freeGarage),
-              formatTriLine("חניון מקורה בתשלום", p.paidGarage),
-            ]
-          : [],
-        "אין מידע בגוגל",
-      ),
+    const block = formatAttrBlock(
+      "חניה",
+      p
+        ? [
+            formatTriLine("חניון חינם", p.freeLot),
+            formatTriLine("חניון בתשלום", p.paidLot),
+            formatTriLine("רחוב חינם", p.freeStreet),
+            formatTriLine("רחוב בתשלום", p.paidStreet),
+            formatTriLine("שירות חניה", p.valet),
+            formatTriLine("חניון מקורה חינם", p.freeGarage),
+            formatTriLine("חניון מקורה בתשלום", p.paidGarage),
+          ]
+        : [],
     );
-    if (intent === "parking") {
-      out.push(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
+    if (block) {
+      out.push(block);
     }
+    // Ownership is never in Google ParkingOptions — omit (do not print unknown).
   }
   if (wantsAttr(aspects, "accessibility")) {
     const a = row.accessibility;
-    out.push(
-      formatAttrBlock(
-        "נגישות",
-        a
-          ? [
-              formatTriLine("חניה לנכים", a.wheelchairParking),
-              formatTriLine("כניסה לנכים", a.wheelchairEntrance),
-              formatTriLine("שירותים לנכים", a.wheelchairRestroom),
-              formatTriLine("ישיבה לנכים", a.wheelchairSeating),
-            ]
-          : [],
-        "אין מידע בגוגל",
-      ),
+    const block = formatAttrBlock(
+      "נגישות",
+      a
+        ? [
+            formatTriLine("חניה לנכים", a.wheelchairParking),
+            formatTriLine("כניסה לנכים", a.wheelchairEntrance),
+            formatTriLine("שירותים לנכים", a.wheelchairRestroom),
+            formatTriLine("ישיבה לנכים", a.wheelchairSeating),
+          ]
+        : [],
     );
+    if (block) {
+      out.push(block);
+    }
   }
   if (wantsAttr(aspects, "outdoor")) {
     if (row.outdoorSeating === true) {
       out.push("ישיבה בחוץ: כן");
     } else if (row.outdoorSeating === false) {
       out.push("ישיבה בחוץ: לא");
-    } else {
-      out.push("ישיבה בחוץ: אין מידע בגוגל");
     }
   }
   if (wantsAttr(aspects, "children")) {
@@ -761,26 +832,24 @@ function formatAttributeSections(
       out.push("מתאים לילדים: כן");
     } else if (row.goodForChildren === false) {
       out.push("מתאים לילדים: לא");
-    } else {
-      out.push("מתאים לילדים: אין מידע בגוגל");
     }
   }
   if (wantsAttr(aspects, "payment")) {
     const p = row.payment;
-    out.push(
-      formatAttrBlock(
-        "תשלום",
-        p
-          ? [
-              formatTriLine("כרטיסי אשראי", p.creditCards),
-              formatTriLine("כרטיסי חיוב", p.debitCards),
-              formatTriLine("מזומן בלבד", p.cashOnly),
-              formatTriLine("תשלום קרבה (NFC)", p.nfc),
-            ]
-          : [],
-        "אין מידע בגוגל",
-      ),
+    const block = formatAttrBlock(
+      "תשלום",
+      p
+        ? [
+            formatTriLine("כרטיסי אשראי", p.creditCards),
+            formatTriLine("כרטיסי חיוב", p.debitCards),
+            formatTriLine("מזומן בלבד", p.cashOnly),
+            formatTriLine("תשלום קרבה (NFC)", p.nfc),
+          ]
+        : [],
     );
+    if (block) {
+      out.push(block);
+    }
   }
   return out;
 }
@@ -877,6 +946,7 @@ function hasRequestSideFiltersOnFacts(facts: PlacesFacts): boolean {
     openNowFilter: facts.openNowFilter,
     minRating: facts.minRating,
     includedType: facts.includedType,
+    parkingCost: facts.parkingCost,
   });
 }
 
@@ -899,16 +969,25 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
       if (facts.minRatingUnknownDropped) {
         notes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
       }
+      if (facts.parkingCostUnknownDropped) {
+        notes.push(PLACES_PARKING_COST_UNKNOWN_DROPPED_HE);
+      }
       return (
         `לא הוצגו תוצאות מתאימות בדף החיפוש עבור «${facts.query}» ב«${where}»${emptyBits}.\n` +
         notes.join("\n")
       );
     }
     const empty = `לא מצאתי תוצאות עבור «${facts.query}» ב«${where}»${emptyBits}.`;
+    const emptyNotes: string[] = [];
     if (facts.minRatingUnknownDropped) {
-      return `${empty}\n${PLACES_MIN_RATING_UNKNOWN_DROPPED_HE}`;
+      emptyNotes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
     }
-    return empty;
+    if (facts.parkingCostUnknownDropped) {
+      emptyNotes.push(PLACES_PARKING_COST_UNKNOWN_DROPPED_HE);
+    }
+    return emptyNotes.length > 0
+      ? `${empty}\n${emptyNotes.join("\n")}`
+      : empty;
   }
 
   const intent = facts.intent ?? "business";
@@ -934,6 +1013,9 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
   if (facts.minRatingUnknownDropped) {
     notes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
   }
+  if (facts.parkingCostUnknownDropped) {
+    notes.push(PLACES_PARKING_COST_UNKNOWN_DROPPED_HE);
+  }
   return notes.length > 0 ? `${body}\n${notes.join("\n")}` : body;
 }
 
@@ -949,6 +1031,7 @@ export async function resolvePlacesReply(input: {
   minRating?: number | null;
   includedType?: string | null;
   radiusMeters?: number | null;
+  parkingCost?: LlmPlacesParkingCost | unknown;
   radiusExplicit?: boolean;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;

@@ -604,6 +604,14 @@ export type LlmPlacesAspect =
  */
 export type LlmPlacesIntent = "business" | "parking";
 
+/**
+ * Local parking cost filter (Google has no request-side free/paid filter).
+ * - free: keep only places with a known free lot/street/garage flag.
+ * - paid: keep only places with a known paid lot/street/garage or valet flag.
+ * Engine drops unknowns (same spirit as exact min_rating).
+ */
+export type LlmPlacesParkingCost = "free" | "paid";
+
 /** Google Table A type used for dedicated parking intent. */
 export const PLACES_PARKING_INCLUDED_TYPE = "parking" as const;
 
@@ -653,6 +661,11 @@ export interface LlmPlacesAction {
    * Bias only — not a hard geographic boundary unless the engine verifies coords.
    */
   radiusMeters: number | null;
+  /**
+   * free | paid local filter on ParkingOptions (null = no cost filter).
+   * Prefer this field over stuffing «חינם» / «בתשלום» into query.
+   */
+  parkingCost: LlmPlacesParkingCost | null;
 }
 
 /** Normalize metadata.places.intent — default business. */
@@ -681,6 +694,44 @@ export function normalizePlacesIntent(raw: unknown): LlmPlacesIntent {
     return "business";
   }
   return "business";
+}
+
+/** Normalize metadata.places.parking_cost — null when absent/unknown. */
+export function normalizePlacesParkingCost(
+  raw: unknown,
+): LlmPlacesParkingCost | null {
+  if (raw === true) {
+    return "free";
+  }
+  if (raw === false) {
+    return null;
+  }
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (
+    key === "free" ||
+    key === "gratis" ||
+    key === "חינם" ||
+    key === "free_parking" ||
+    key === "free_only" ||
+    key === "parking_free"
+  ) {
+    return "free";
+  }
+  if (
+    key === "paid" ||
+    key === "pay" ||
+    key === "בתשלום" ||
+    key === "תשלום" ||
+    key === "paid_parking" ||
+    key === "paid_only" ||
+    key === "parking_paid"
+  ) {
+    return "paid";
+  }
+  return null;
 }
 
 /**
@@ -3273,6 +3324,13 @@ export function parsePlacesAction(
       row.radius ??
       row.distance_meters,
   );
+  const parkingCost = normalizePlacesParkingCost(
+    row.parking_cost ??
+      row.parkingCost ??
+      row.cost ??
+      row.free_parking ??
+      row.freeParking,
+  );
   return {
     query,
     place,
@@ -3285,6 +3343,7 @@ export function parsePlacesAction(
     minRating,
     includedType,
     radiusMeters,
+    parkingCost,
   };
 }
 

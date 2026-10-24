@@ -23,6 +23,7 @@ import {
   PLACES_FILTERED_SATURATED_EMPTY_HE,
   PLACES_FILTERED_SATURATED_SPARSE_HE,
   PLACES_MIN_RATING_UNKNOWN_DROPPED_HE,
+  PLACES_PARKING_COST_UNKNOWN_DROPPED_HE,
   PLACES_PARKING_OWNERSHIP_UNKNOWN_HE,
   PLACES_PROVIDER_PARTIAL_HE,
   type PlaceResult,
@@ -35,6 +36,7 @@ const noFilters = {
   minRating: null as number | null,
   includedType: null as PlacesFacts["includedType"],
   radiusMeters: null as number | null,
+  parkingCost: null as PlacesFacts["parkingCost"],
 };
 
 describe("parsePlacesAspects", () => {
@@ -429,7 +431,8 @@ describe("formatPlacesHebrew", () => {
     expect(text).toContain("כניסה לנכים: כן");
     expect(text).toContain("שירותים לנכים: לא");
     expect(text).toContain("ישיבה בחוץ: כן");
-    expect(text).toContain("מתאים לילדים: אין מידע בגוגל");
+    expect(text).not.toContain("מתאים לילדים");
+    expect(text).not.toContain("אין מידע בגוגל");
     expect(text).toContain("כרטיסי אשראי: כן");
     expect(text).toContain("מזומן בלבד: לא");
     expect(text).not.toContain("כרטיסי חיוב:");
@@ -1096,7 +1099,8 @@ describe("resolvePlacesReply", () => {
     expect(text).toContain("חניון בתשלום: כן");
     expect(text).toContain("חניון חינם: לא");
     expect(text).toContain("שירות חניה: כן");
-    expect(text).toContain(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
+    expect(text).not.toContain(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
+    expect(text).not.toContain("אין מידע בגוגל");
     // Missing street flags must not appear as confirmed no.
     expect(text).not.toContain("רחוב חינם:");
   });
@@ -1168,7 +1172,7 @@ describe("Phase D parking formatting", () => {
     payment: null,
   };
 
-  it("shows known/unknown parking flags and never invents ownership", () => {
+  it("shows known parking flags only and never invents ownership", () => {
     const text = formatPlacesHebrew({
       query: "חניה",
       place: "חיפה",
@@ -1185,7 +1189,8 @@ describe("Phase D parking formatting", () => {
     expect(text).toContain("רחוב חינם: לא");
     expect(text).not.toContain("חניון חינם:");
     expect(text).not.toContain("שירות חניה:");
-    expect(text).toContain(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
+    expect(text).not.toContain(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
+    expect(text).not.toContain("אין מידע בגוגל");
     expect(text).toContain("חיפוש חניה");
   });
 
@@ -1205,5 +1210,90 @@ describe("Phase D parking formatting", () => {
     expect(text).toContain("חניון בתשלום: כן");
     expect(text).not.toContain(PLACES_PARKING_OWNERSHIP_UNKNOWN_HE);
     expect(text).not.toContain("חיפוש חניה");
+  });
+});
+
+describe("parking_cost local filter", () => {
+  it("keeps only known-free lots when parking_cost=free", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          places: [
+            {
+              id: "places/free1",
+              displayName: { text: "חניון חינם", languageCode: "he" },
+              formattedAddress: "רחוב 1",
+              parkingOptions: { freeParkingLot: true, paidParkingLot: false },
+            },
+            {
+              id: "places/paid1",
+              displayName: { text: "חניון בתשלום", languageCode: "he" },
+              formattedAddress: "רחוב 2",
+              parkingOptions: { freeParkingLot: false, paidParkingLot: true },
+            },
+            {
+              id: "places/unknown1",
+              displayName: { text: "חניון לא ידוע", languageCode: "he" },
+              formattedAddress: "רחוב 3",
+            },
+          ],
+        }),
+      } as Response;
+    });
+
+    const text = await resolvePlacesReply({
+      query: "חניה",
+      place: "תל אביב",
+      intent: "parking",
+      parkingCost: "free",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("*חניון חינם*");
+    expect(text).toContain("חניה חינם");
+    expect(text).not.toContain("*חניון בתשלום*");
+    expect(text).not.toContain("*חניון לא ידוע*");
+    expect(text).toContain(PLACES_PARKING_COST_UNKNOWN_DROPPED_HE);
+  });
+
+  it("keeps only known-paid lots when parking_cost=paid", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          places: [
+            {
+              id: "places/free1",
+              displayName: { text: "חניון חינם", languageCode: "he" },
+              formattedAddress: "רחוב 1",
+              parkingOptions: { freeParkingLot: true },
+            },
+            {
+              id: "places/paid1",
+              displayName: { text: "חניון בתשלום", languageCode: "he" },
+              formattedAddress: "רחוב 2",
+              parkingOptions: { paidParkingLot: true },
+            },
+          ],
+        }),
+      } as Response;
+    });
+
+    const text = await resolvePlacesReply({
+      query: "חניון",
+      place: "תל אביב",
+      intent: "parking",
+      parkingCost: "paid",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("*חניון בתשלום*");
+    expect(text).toContain("חניה בתשלום");
+    expect(text).not.toContain("*חניון חינם*");
   });
 });
