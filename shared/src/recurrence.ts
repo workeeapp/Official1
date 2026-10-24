@@ -311,6 +311,52 @@ export function formatRecurrenceExceptionsHe(rec: Recurrence): string[] {
   });
 }
 
+/** Structured exception rows for dumps / snapshots (after pruning past days). */
+export function recurrenceExceptionEntries(
+  rec: Recurrence,
+  today: string,
+): RecurrenceException[] {
+  return pruneRecurrenceExceptions(rec, today).exceptions ?? [];
+}
+
+/**
+ * Effective reminder for one calendar day of a series clock.
+ * Uses the reminder rule's series HH:mm + that rule's exception_entries only
+ * (never task exceptions). Cancel does not fall back to the series ping.
+ */
+export type EffectiveOccurrenceReminder =
+  | { status: "none" }
+  | { status: "inherit"; hm: string }
+  | { status: "moved"; hm: string }
+  | { status: "cancelled" };
+
+export function resolveEffectiveOccurrenceReminder(input: {
+  occurrenceYmd: string;
+  seriesHm?: string | null;
+  exceptionEntries?: ReadonlyArray<RecurrenceException> | null;
+}): EffectiveOccurrenceReminder {
+  const ymd = input.occurrenceYmd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return { status: "none" };
+  }
+  const entry = (input.exceptionEntries ?? []).find((row) => row.date === ymd);
+  if (entry?.cancel) {
+    return { status: "cancelled" };
+  }
+  if (entry?.time) {
+    return { status: "moved", hm: entry.time };
+  }
+  const hm = (input.seriesHm ?? "").trim();
+  if (/^\d{1,2}:\d{2}$/.test(hm)) {
+    const [h, m] = hm.split(":");
+    return {
+      status: "inherit",
+      hm: `${String(Number(h)).padStart(2, "0")}:${m}`,
+    };
+  }
+  return { status: "none" };
+}
+
 function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }

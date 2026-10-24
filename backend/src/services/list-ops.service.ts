@@ -21,6 +21,7 @@ import {
   cancelReminderLinkedToWorkerItem,
 } from "./reminder.service.js";
 import { builtinListHebrew, isBuiltinListType } from "./builtin-lists.js";
+import { effectiveListEmoji, normalizeListEmoji } from "./list-emoji.js";
 
 export type ListOpRefusalReason =
   | "not_found"
@@ -107,7 +108,8 @@ async function applyListOp(
     op.removeColumns.length === 0 &&
     op.renameColumns.length === 0 &&
     op.addParticipants.length === 0 &&
-    op.removeParticipants.length === 0;
+    op.removeParticipants.length === 0 &&
+    op.emoji === undefined;
   if (attachmentsOnly) {
     // Anyone the list is visible to may attach files to it.
     const canSee =
@@ -254,7 +256,13 @@ async function alterList(
     op.addColumns.length > 0 ||
     op.removeColumns.length > 0 ||
     op.renameColumns.length > 0;
-  if (!structural && op.addParticipants.length === 0 && op.removeParticipants.length === 0) {
+  const emojiTouched = op.emoji !== undefined;
+  if (
+    !structural &&
+    op.addParticipants.length === 0 &&
+    op.removeParticipants.length === 0 &&
+    !emojiTouched
+  ) {
     throw new ListOpRefused("empty");
   }
   const builtin = list.listType !== "custom";
@@ -262,6 +270,7 @@ async function alterList(
     op.addParticipants.length > 0 || op.removeParticipants.length > 0;
   // Shopping/tasks builtins: never whole-list share (item-level only).
   // Contacts: allow participants-only whole-list share; still refuse structural.
+  // Emoji override is allowed on every list type (including builtins).
   if (list.listType === "shopping" || list.listType === "tasks") {
     if (structural || participantsOnly) {
       throw new ListOpRefused("builtin");
@@ -271,6 +280,10 @@ async function alterList(
   } else if (builtin && participantsOnly && list.listType !== "contacts") {
     throw new ListOpRefused("builtin");
   }
+
+  const nextEmoji = emojiTouched
+    ? normalizeListEmoji(op.emoji)
+    : undefined;
 
   // Working copy; order is fixed: column renames, removals, additions, list name, participants.
   const visible = visibleListColumns(list, list.items);
@@ -356,6 +369,7 @@ async function alterList(
         ...(renaming ? { name: newName } : {}),
         ...(structural ? { columns: visible, hiddenColumns: hidden, titleField } : {}),
         ...(participantsChanged ? { scope: nextScope, visibleTo: nextVisibleTo } : {}),
+        ...(emojiTouched ? { emoji: nextEmoji } : {}),
       },
     });
     for (const item of list.items) {
@@ -385,6 +399,9 @@ async function alterList(
     op,
     added,
     removed,
+    emojiTouched,
+    nextEmoji: nextEmoji ?? null,
+    listType: list.listType,
   });
   await recordAuditEvent({
     userId: input.userId,
@@ -400,11 +417,13 @@ async function alterList(
       renameColumns: op.renameColumns,
       addParticipants: added.map((row) => row.id),
       removeParticipants: removed.map((row) => row.id),
+      ...(emojiTouched ? { emoji: nextEmoji } : {}),
     },
   });
 
   const actorName = employeeDisplayName(input.actor);
-  const shareOnly = !structural && removed.length === 0 && added.length > 0;
+  const shareOnly =
+    !structural && !emojiTouched && removed.length === 0 && added.length > 0;
   const text = shareOnly
     ? `${actorName} שיתף את רשימת «${oldLabel}» עם ${added
         .map((row) => `«${employeeDisplayName(row)}»`)
@@ -449,8 +468,16 @@ function describeAlter(input: {
   op: LlmListOp;
   added: PublicEmployee[];
   removed: PublicEmployee[];
+  emojiTouched: boolean;
+  nextEmoji: string | null;
+  listType: string;
 }): string[] {
   const quote = (values: string[]) => values.map((value) => `«${value}»`).join(", ");
+  const emojiPart = input.emojiTouched
+    ? input.nextEmoji
+      ? `אימוג'י ${input.nextEmoji}`
+      : `אימוג'י ברירת מחדל ${effectiveListEmoji({ listType: input.listType, storedEmoji: null })}`
+    : "";
   return [
     ...input.op.renameColumns.map(
       (row) => `העמודה «${row.from}» נקראת עכשיו «${row.to}»`,
@@ -462,6 +489,7 @@ function describeAlter(input: {
     input.removed.length > 0
       ? `הוסרו מהשיתוף ${quote(input.removed.map(employeeDisplayName))}`
       : "",
+    emojiPart,
   ].filter(Boolean);
 }
 

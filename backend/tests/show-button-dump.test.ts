@@ -401,7 +401,7 @@ describe("filings flat dump", () => {
     expect(dump).toBe("");
     expect(dump).not.toContain("קוד שער");
     expect(dump).not.toContain("ללכת לרופא");
-    expect(dump).not.toContain("מטלות:");
+    expect(dump).not.toContain("✅ מטלות:");
   });
 
   describe("ITEM DUMP id filter — all kinds (1 / many / wrong / empty)", () => {
@@ -1523,7 +1523,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("קמח מלא - 2");
     expect(text).toContain('עגבניות - 1 ק"ג');
     expect(text).not.toContain("אורז");
-    expect(text).toContain("קניות:");
+    expect(text).toContain("🛒 קניות:");
     expect(text).not.toContain("קניות אישיות:");
     expect(text).not.toContain("קניות משותפות עם");
     expect(text).not.toContain("קניות של ");
@@ -1600,7 +1600,7 @@ describe("formatShowDumpFromKind", () => {
     const shopping = formatShowDumpFromKind("shopping", threeWay, {
       viewerName: "טל",
     })!;
-    expect(shopping).toMatch(/^קניות:/m);
+    expect(shopping).toMatch(/^🛒 קניות:/m);
     expect(shopping).toContain("לחם - 1");
     expect(shopping).toContain("חלב - 1 (באחריות טל · מאת עמית)");
     expect(shopping).toContain("ביצים - 1 (באחריות טל · מאת עמית)");
@@ -1618,7 +1618,7 @@ describe("formatShowDumpFromKind", () => {
     const tasks = formatShowDumpFromKind("tasks", threeWay, {
       viewerName: "טל",
     })!;
-    expect(tasks).toMatch(/^מטלות:/m);
+    expect(tasks).toMatch(/^✅ מטלות:/m);
     expect(tasks).toContain("לטפל בעמידר");
     expect(tasks).toContain("לבדוק שמן (באחריות טל · מאת עמית)");
     expect(tasks).toContain("פגישה (טל, עמית)");
@@ -1703,7 +1703,7 @@ describe("formatShowDumpFromKind", () => {
     const text = formatShowDumpFromKind("shopping", mixed, {
       viewerName: "טל",
     })!;
-    expect(text).toMatch(/^קניות:/m);
+    expect(text).toMatch(/^🛒 קניות:/m);
     expect(text).toContain("לחם - 1");
     expect(text).toContain("מלפפונים - 1 (עמית, טל)");
     expect(text).toContain("קמח מלא - 1");
@@ -1719,7 +1719,7 @@ describe("formatShowDumpFromKind", () => {
       section: "shared",
       partner: "מיכל",
     });
-    expect(text).toContain("קניות:");
+    expect(text).toContain("🛒 קניות:");
     expect(text).toContain("קמח מלא - 2");
     expect(text).not.toContain("ספוג אדום");
     expect(text).not.toContain("משותפות עם טל");
@@ -1762,7 +1762,7 @@ describe("formatShowDumpFromKind", () => {
     const custom = formatShowDumpFromKind("בעיות", withListFiles, {
       viewerName: "טל",
     });
-    expect(custom).toContain("רשימת «בעיות» 📎:");
+    expect(custom).toContain("📋 רשימת «בעיות» 📎:");
     expect(custom).toContain("1. בעיה: דליפה");
   });
 
@@ -1813,7 +1813,7 @@ describe("formatShowDumpFromKind", () => {
     const text = formatShowDumpFromKind("אני ומיכל", snapshot, {
       viewerName: "טל",
     });
-    expect(text).toContain("רשימת «אני ומיכל»:");
+    expect(text).toContain("📋 רשימת «אני ומיכל»:");
     expect(text).toContain("1. שם: טל · תיאור: נשוי למיכל");
     expect(text).toContain("2. שם: מיכל · תיאור: נשואה לטל");
     // Whole-list shared: no per-line co-share marks.
@@ -1846,7 +1846,7 @@ describe("formatShowDumpFromKind", () => {
       const text = formatShowDumpFromKind(kind, snapshot, {
         viewerName: "טל",
       });
-      expect(text).toContain("רשימת «בדיקה של שיתוף עם עמית»:");
+      expect(text).toContain("📋 רשימת «בדיקה של שיתוף עם עמית»:");
       expect(text).toContain("1. שם: בדיקה 1");
       expect(text).toContain("2. שם: בדיקה 2");
     }
@@ -1900,7 +1900,7 @@ describe("formatShowDumpFromKind", () => {
     const tal = formatShowDumpFromKind("באגים ופיתוחים", ownerView, {
       viewerName: "טל",
     })!;
-    expect(tal).toContain("רשימת «באגים ופיתוחים»:");
+    expect(tal).toContain("📋 רשימת «באגים ופיתוחים»:");
     expect(tal).not.toContain("אישיות");
     expect(tal).not.toContain("משותפות עם");
     expect(tal).toMatch(/1\. שם: תיקון לוגין$/m);
@@ -1930,7 +1930,7 @@ describe("formatShowDumpFromKind", () => {
     const michal = formatShowDumpFromKind("באגים ופיתוחים", partnerView, {
       viewerName: "מיכל",
     })!;
-    expect(michal).toContain("רשימת «באגים ופיתוחים»:");
+    expect(michal).toContain("📋 רשימת «באגים ופיתוחים»:");
     expect(michal).toContain("שם: באג בפרודקשן (טל, מיכל)");
     expect(michal).not.toMatch(/באג בפרודקשן \(טל\)$/m);
 
@@ -2050,15 +2050,15 @@ describe("formatShowDumpFromKind", () => {
     const shopping = formatShowDumpFromKind("shopping", itemOnly, {
       viewerName: "טל",
     });
-    expect(shopping).toContain("קניות:");
+    expect(shopping).toContain("🛒 קניות:");
     expect(shopping).not.toContain("קניות 📎:");
     expect(shopping).toContain("חלב - 1 📎");
 
     const custom = formatShowDumpFromKind("בעיות", itemOnly, {
       viewerName: "טל",
     });
-    expect(custom).toContain("רשימת «בעיות»:");
-    expect(custom).not.toContain("רשימת «בעיות» 📎:");
+    expect(custom).toContain("📋 רשימת «בעיות»:");
+    expect(custom).not.toContain("📋 רשימת «בעיות» 📎:");
     expect(custom).toContain("דליפה 📎");
   });
 
@@ -2073,7 +2073,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain(
       "לראות מה קורה עם הביט (תזכורת: 15.11.2026 ב־09:00)",
     );
-    expect(text).toContain("מטלות:");
+    expect(text).toContain("✅ מטלות:");
     expect(text).not.toContain("מטלות משותפות עם");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
   });
@@ -2136,10 +2136,10 @@ describe("formatShowDumpFromKind", () => {
     const full = formatShowDumpFromKind("shopping", snapshot, {
       viewerName: "טל",
     });
-    expect(personal).toContain("קניות:");
+    expect(personal).toContain("🛒 קניות:");
     expect(personal).toContain("ספוג אדום");
     expect(personal).not.toContain("קמח מלא");
-    expect(full).toContain("קניות:");
+    expect(full).toContain("🛒 קניות:");
     expect(full).toContain("קמח מלא");
     expect(personal).not.toBe(full);
   });
@@ -2149,7 +2149,7 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       section: "shared",
     });
-    expect(shared).toContain("קניות:");
+    expect(shared).toContain("🛒 קניות:");
     expect(shared).toContain("קמח מלא");
     expect(shared).not.toContain("ספוג אדום");
 
@@ -2158,7 +2158,7 @@ describe("formatShowDumpFromKind", () => {
       section: "shared",
       partner: "מיכל",
     });
-    expect(onlyMichal).toContain("קניות:");
+    expect(onlyMichal).toContain("🛒 קניות:");
     expect(onlyMichal).toContain("קמח מלא");
     expect(onlyMichal).not.toContain("ספוג אדום");
 
@@ -2434,8 +2434,8 @@ describe("formatShowDumpFromKind", () => {
     expect(tasks).toContain("פגישה בטווח");
     expect(tasks).toContain("חוזרת");
     expect(tasks).not.toContain("מחוץ לטווח");
-    // Standing under day header uses the same schedule suffix as the flat tasks dump.
-    expect(tasks).toContain("— כל יום שני (קבוע)");
+    // Day-agenda standing lines are occurrence-effective (chore HM that day), not the series suffix.
+    expect(tasks).toContain("חוזרת (באחריות טל · מאת מיכל) — 09:00");
     expect(tasks).toContain("מה־17 עד 20.10:");
 
     const shopping = formatShowDumpFromKind("shopping", snap, {
@@ -2632,7 +2632,7 @@ describe("formatShowDumpFromKind", () => {
 
     // Shopping counts only — breakdown by personal / co-share marks.
     expect(text).toMatch(
-      /קניות:\nאישיות — 1 פריט\n\(מיכל, טל\) — 1 פריט/,
+      /🛒 קניות:\nאישיות — 1 פריט\n\(מיכל, טל\) — 1 פריט/,
     );
     expect(text).not.toContain("קניות: 2 פריטים");
     expect(text).not.toContain("קניות אישיות");
@@ -2641,14 +2641,14 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toContain("לחם");
 
     // Tasks still enumerate under one header.
-    expect(text).toMatch(/מטלות:[\s\S]*לטפל בעמידר/);
+    expect(text).toMatch(/✅ מטלות:[\s\S]*לטפל בעמידר/);
 
     // Empty categories omitted (no ריק/ריקה headers).
     expect(text).not.toContain("רשימות אחרות:");
     expect(text).not.toContain("תזכורות פעילות:");
     expect(text).not.toContain("תיוקים אישיים:");
     expect(text).not.toContain("תיוקים משותפים:");
-    expect(text).not.toContain("אנשי קשר:");
+    expect(text).not.toContain("👤 אנשי קשר:");
     expect(text).not.toMatch(/ריק/);
     expect(text).toContain("ספר הטלפונים:");
     expect(text).not.toContain("ספר הטלפונים אישי:");
@@ -2678,7 +2678,7 @@ describe("formatShowDumpFromKind", () => {
     const full = formatShowDumpFromKind("contacts", snap, {
       viewerName: "טל",
     })!;
-    expect(full).toContain("אנשי קשר:");
+    expect(full).toContain("👤 אנשי קשר:");
     expect(full).toContain("דני");
     expect(full).not.toContain("אנשי קשר אישיים:");
     expect(full).not.toContain("אנשי קשר משותפים:");
@@ -2736,7 +2736,7 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       countsOnly: true,
     })!;
-    expect(counts).toMatch(/^קניות:/);
+    expect(counts).toMatch(/^🛒 קניות:/);
     expect(counts).toContain("אישיות — 1 פריט");
     expect(counts).toContain("(מיכל, טל) — 1 פריט");
     expect(counts).toContain("(באחריות טל · מאת טל) — 1 פריט");
@@ -2980,7 +2980,7 @@ describe("worker inventory tasks dump helpers", () => {
       flatLayout: true,
       now: new Date("2026-10-17T10:00:00.000Z"),
     })!;
-    expect(text).toContain("מטלות:");
+    expect(text).toContain("✅ מטלות:");
     expect(text).not.toContain("משותפות");
     expect(text).not.toContain("אישיות");
     expect(text).not.toContain("(לוסי)");
@@ -3124,7 +3124,7 @@ describe("worker inventory tasks dump helpers", () => {
         },
       ],
     })!;
-    expect(text).toContain("*באגים*");
+    expect(text).toContain("📋 *באגים*");
     expect(text).not.toContain("*פרטי* —");
     expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
     expect(text).toContain("לשאול את עמית");
@@ -3527,14 +3527,13 @@ describe("uniform standing + ping dump lines", () => {
     })!;
 
     expect(agenda).toContain("ראשון 18.10:");
+    // Occurrence-effective under the day header (not the flat series suffix).
     expect(agenda).toContain(
-      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
+      "להוריד את סקאזי לטיול — 08:45 (תזכורת ב־08:30)",
     );
     // Unlinked clock-only row still uses reminder agenda formatting.
     expect(agenda).toContain("לשלוח למיכל ברכת בוקר — 09:00 (קבוע כל יום)");
-    expect(agenda).toContain(
-      "פגישה (טל, עמית) — כל ראשון ורביעי ב־21:30 (קבוע)",
-    );
+    expect(agenda).toContain("פגישה (טל, עמית) — 21:30");
     expect(agenda).toContain("ללכת לרופא — 08:00");
     expect(agenda).toContain("(תזכורת:");
     // Linked clocks must not appear as their own numbered rows.
@@ -3545,6 +3544,7 @@ describe("uniform standing + ping dump lines", () => {
       viewerName: "טל",
       now,
     })!;
+    // Undated list dump still uses the series schedule suffix.
     expect(list).toContain(
       "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
     );
@@ -3585,7 +3585,7 @@ describe("uniform standing + ping dump lines", () => {
     expect(text).toContain("שלישי 20.10:");
     expect(
       text.match(
-        /להוריד את סקאזי לטיול — כל יום ב־08:45 \(קבוע \+ תזכורת ב־08:30\)/g,
+        /להוריד את סקאזי לטיול — 08:45 \(תזכורת ב־08:30\)/g,
       )?.length,
     ).toBe(3);
   });
@@ -3728,7 +3728,7 @@ describe("partner dump about_ids (birthday event)", () => {
       partner: "עמית",
       now,
     })!;
-    expect(text).toContain("מטלות:");
+    expect(text).toContain("✅ מטלות:");
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("כל שנה ב־13.10");
     expect(text).toMatch(/קבוע \+ תזכורת/);

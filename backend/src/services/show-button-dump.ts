@@ -8,7 +8,9 @@ import {
   addJerusalemDays,
   isValidCalendarYmd,
   normalizeShowDumpListName,
+  resolveEffectiveOccurrenceReminder,
   type LlmShowDumpSection,
+  type RecurrenceException,
 } from "@workee/shared";
 import {
   hebrewWeekdayFromYmd,
@@ -24,6 +26,7 @@ import {
   staticShowButtonDumpMap,
 } from "./builtin-lists.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import { effectiveListEmoji } from "./list-emoji.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
 export {
@@ -753,7 +756,8 @@ function formatCustomListsCountsDump(
         ? allInvolvedNames(shareNames, viewer, aliases)
         : "";
     const withMark = mark ? ` (${mark})` : "";
-    lines.push(`*${name}*${withMark} — ${hebrewItemCount(n)}`);
+    const emoji = listDumpEmoji(list);
+    lines.push(`${emoji} *${name}*${withMark} — ${hebrewItemCount(n)}`);
   }
   if (lines.length === 0) {
     return "";
@@ -1488,8 +1492,10 @@ function expandTaskAgendaSlots(
         continue;
       }
       seenDays.add(ymd);
+      // Prefer this day's slot HM (already exception-applied in next_occurrences)
+      // over the series חוזר clock so moved occurrences display correctly.
       const hm =
-        extractHmFromText(recurring) ?? hmFromDumpValue(occ) ?? "";
+        hmFromDumpValue(occ) || extractHmFromText(recurring) || "";
       const stem = row.title.trim() || "מטלה";
       const id = String(item.item_id ?? "").trim();
       slots.push({
@@ -1502,6 +1508,7 @@ function expandTaskAgendaSlots(
           formatAgendaStandingLine(n, row.title, item, hm, {
             responsibilityMark: row.responsibilityMark,
             now,
+            occurrenceYmd: ymd,
           }),
       });
     }
@@ -1650,17 +1657,22 @@ function formatShortDayMonth(ymd: string): string {
 }
 
 /**
- * Standing occurrence under a day header — same schedule suffix as the flat
- * tasks dump (`formatScheduleSuffix`), so series + exceptions stay consistent
- * («כל שני ורביעי ב־19:00 (קבוע) · 28.10 ב־18:00»). Day bucketing still uses
- * occurrence HM only for sort/filter; it is not a second display dialect.
+ * Standing occurrence under a day header.
+ * When `occurrenceYmd` is set: occurrence-effective chore time + reminder for
+ * that exact day (reminder exceptions only — never task exceptions).
+ * Without it: series overview suffix (`formatScheduleSuffix`) for flat dumps.
  */
 export function formatAgendaStandingLine(
   n: number,
   title: string,
   item: Record<string, unknown>,
-  _occurrenceHm: string,
-  opts?: { responsibilityMark?: string; now?: Date },
+  occurrenceHm: string,
+  opts?: {
+    responsibilityMark?: string;
+    now?: Date;
+    /** When set, render this day's effective schedule — not the series overview. */
+    occurrenceYmd?: string;
+  },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
@@ -1676,6 +1688,18 @@ export function formatAgendaStandingLine(
       body += ` (${mark})`;
     }
   }
+  const occurrenceYmd = opts?.occurrenceYmd?.trim().slice(0, 10) ?? "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceYmd)) {
+    const hm = occurrenceHm.trim();
+    if (hm) {
+      body += ` — ${normalizeHm(hm)}`;
+    }
+    const reminder = formatOccurrenceEffectiveReminderParen(item, occurrenceYmd);
+    if (reminder) {
+      body += ` ${reminder}`;
+    }
+    return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
+  }
   const suffix = formatScheduleSuffix(
     item,
     "tasks",
@@ -1685,6 +1709,100 @@ export function formatAgendaStandingLine(
     body += ` ${suffix}`;
   }
   return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
+}
+
+/**
+ * Linked reminder mark for one occurrence day.
+ * - Recurring series clock: series HM + that clock's `exception_entries` only
+ *   (never task exceptions). Cancelled → empty (no series fallback).
+ * - One-shot linked clock (no series-level reminder): only the fire_at day.
+ */
+export function formatOccurrenceEffectiveReminderParen(
+  item: Record<string, unknown>,
+  occurrenceYmd: string,
+): string {
+  if (!itemHasLinkedReminder(item)) {
+    return "";
+  }
+  const ymd = occurrenceYmd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return "";
+  }
+  // Soft-linked one-shot: reminder exists only for that fire day — not every occurrence.
+  if (!linkedReminderIsRecurring(item)) {
+    const fireYmd = linkedReminderYmd(item);
+    if (!fireYmd || fireYmd !== ymd) {
+      return "";
+    }
+    const hm = linkedReminderSeriesHm(item);
+    return hm ? `(תזכורת ב־${hm})` : "(תזכורת)";
+  }
+  const raw = item.reminder as Record<string, unknown>;
+  // Snapshot contract: Hebrew exception labels without structured entries mean
+  // we cannot resolve per-day overrides safely — omit rather than false inherit.
+  if (!reminderExceptionEntriesContractOk(raw)) {
+    return "";
+  }
+  const seriesHm = linkedReminderSeriesHm(item);
+  const entries = readExceptionEntries(raw.exception_entries);
+  const effective = resolveEffectiveOccurrenceReminder({
+    occurrenceYmd: ymd,
+    seriesHm,
+    exceptionEntries: entries,
+  });
+  if (effective.status === "cancelled" || effective.status === "none") {
+    return "";
+  }
+  return `(תזכורת ב־${effective.hm})`;
+}
+
+/**
+ * Live snapshots emit Hebrew `exceptions` together with `exception_entries`.
+ * Labels alone (stale / hand-built) must not drive inherit-as-series display.
+ */
+function reminderExceptionEntriesContractOk(
+  reminder: Record<string, unknown>,
+): boolean {
+  const hebrew = Array.isArray(reminder.exceptions)
+    ? reminder.exceptions.filter(
+        (row): row is string => typeof row === "string" && row.trim().length > 0,
+      )
+    : [];
+  if (hebrew.length === 0) {
+    return true;
+  }
+  return readExceptionEntries(reminder.exception_entries).length > 0;
+}
+
+function readExceptionEntries(value: unknown): RecurrenceException[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: RecurrenceException[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      continue;
+    }
+    const rec = row as Record<string, unknown>;
+    const date =
+      typeof rec.date === "string" ? rec.date.trim().slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      continue;
+    }
+    if (rec.cancel === true) {
+      out.push({ date, cancel: true });
+      continue;
+    }
+    const time = typeof rec.time === "string" ? rec.time.trim() : "";
+    if (/^\d{1,2}:\d{2}$/.test(time)) {
+      const [h, m] = time.split(":");
+      out.push({
+        date,
+        time: `${String(Number(h)).padStart(2, "0")}:${m}`,
+      });
+    }
+  }
+  return out;
 }
 
 /** One-off under a day header: chore HM + optional «(תזכורת: …)» via shared paren helper. */
@@ -1883,8 +2001,8 @@ function formatListDump(
   const builtin = builtinListTypeFromHebrew(name);
   const omitEmpty = opts?.omitEmptySentence === true;
   if (builtin === "shopping" || builtin === "tasks") {
-    const label = builtinListHebrew(builtin);
-    const body = formatThreeWayDump(builtin, label, snapshot, opts);
+    const bareLabel = builtinListHebrew(builtin);
+    const body = formatThreeWayDump(builtin, bareLabel, snapshot, opts);
     if (body.text) {
       return body;
     }
@@ -1894,7 +2012,7 @@ function formatListDump(
     if (builtin === "tasks" && hasDumpDateRange(opts)) {
       return emptyDumpResult("אין מטלות בטווח התאריכים.");
     }
-    return emptyDumpResult(emptyListDumpSentence(label, opts));
+    return emptyDumpResult(emptyListDumpSentence(bareLabel, opts));
   }
   if (builtin === "contacts") {
     const body = formatContactsOrCustomDump(
@@ -1940,6 +2058,8 @@ type DumpItem = {
   responsibilityMark?: string;
   /** List-level 📎 for this row's source list. */
   listFiles?: boolean;
+  /** Effective emoji of the source EmployeeList (for header reuse on filters). */
+  listEmoji?: string;
   /** True when row is assign / co-share / shared list / shared_items. */
   isShared?: boolean;
   /** Partner filter key (assigner, co-share partners, list owner, …). */
@@ -2077,6 +2197,7 @@ function collectListDumpRows(
 
   for (const list of lists) {
     const listFiles = listHasListLevelFiles(list);
+    const listEmoji = listDumpEmoji(list);
     for (const item of list.items) {
       const title =
         listType === "custom"
@@ -2104,6 +2225,7 @@ function collectListDumpRows(
           title,
           item,
           listFiles,
+          listEmoji,
           isShared,
           ...(partnerFilterKey ? { partnerFilterKey } : {}),
           ...(mark ? { responsibilityMark: mark } : {}),
@@ -2125,6 +2247,7 @@ function collectListDumpRows(
           title,
           item,
           listFiles,
+          listEmoji,
           ...meta,
         });
         continue;
@@ -2142,6 +2265,7 @@ function collectListDumpRows(
         title,
         item,
         listFiles,
+        listEmoji,
         ...meta,
       });
     }
@@ -2541,7 +2665,8 @@ function appendUndatedTasksExcludedNote(
 
 function formatThreeWayDump(
   listType: "shopping" | "tasks",
-  label: string,
+  /** Product Hebrew label without emoji (🛒/✅ applied from source list). */
+  bareLabel: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
 ): DumpTextResult {
@@ -2552,6 +2677,7 @@ function formatThreeWayDump(
       ? countUndatedTasksExcludedByDateRange(collected, opts)
       : 0;
   const kept = filterDumpRows(collected, listType, opts);
+  const label = withListEmoji(dumpHeaderEmoji(kept, listType, lists), bareLabel);
   const body = formatSingleHeaderDump(
     label,
     listType,
@@ -2865,8 +2991,14 @@ function formatContactsOrCustomDump(
   if (kept.length === 0) {
     return emptyDumpResult();
   }
-  const header =
-    listType === "contacts" ? emptyLabel : `רשימת «${emptyLabel}»`;
+  const bareHeader =
+    listType === "contacts"
+      ? stripLeadingListEmoji(emptyLabel) || emptyLabel
+      : `רשימת «${stripLeadingListEmoji(emptyLabel) || emptyLabel}»`;
+  const header = withListEmoji(
+    dumpHeaderEmoji(kept, listType, lists),
+    bareHeader,
+  );
   return formatSingleHeaderDump(header, listType, kept, opts);
 }
 
@@ -2882,15 +3014,75 @@ function emptyCustomListSentence(
       list.list_type === "custom" && (list.list_name ?? "").trim() === name,
   );
   const listFiles = lists.some((list) => listHasListLevelFiles(list));
+  const emoji = lists.length > 0
+    ? listDumpEmoji(lists[0]!)
+    : effectiveListEmoji({ listType: "custom", storedEmoji: null });
+  const labeled = withListEmoji(emoji, `רשימת «${name}»`);
   const section = opts?.section ?? null;
   const partnerNeedles = dumpFilterNames(opts?.partner);
   if (section === "shared" || partnerNeedles.length > 0) {
-    return `רשימת «${name}»${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
+    return `${labeled}${paperclipSuffix(listFiles)} — אין פריטים משותפים תואמים.`;
   }
   if (section === "personal") {
-    return `רשימת «${name}»${paperclipSuffix(listFiles)} — אין פריטים אישיים.`;
+    return `${labeled}${paperclipSuffix(listFiles)} — אין פריטים אישיים.`;
   }
-  return `רשימת «${name}»${paperclipSuffix(listFiles)} ריקה.`;
+  return `${labeled}${paperclipSuffix(listFiles)} ריקה.`;
+}
+
+/** Effective emoji from a snapshot list row (fallback to canonical). */
+function listDumpEmoji(
+  list: Pick<EmployeeRecordSnapshot["lists"][number], "list_type" | "emoji">,
+): string {
+  return effectiveListEmoji({
+    listType: list.list_type,
+    storedEmoji: list.emoji ?? null,
+  });
+}
+
+/**
+ * Header emoji for a dump: first kept row's source list, else first matching
+ * shell, else canonical. Filtered/item dumps reuse the source list glyph —
+ * never infer from filter partner or item text.
+ */
+function dumpHeaderEmoji(
+  rows: Array<Pick<DumpItem, "listEmoji">>,
+  listType: string,
+  lists: EmployeeRecordSnapshot["lists"],
+): string {
+  for (const row of rows) {
+    const fromRow = row.listEmoji?.trim();
+    if (fromRow) {
+      return fromRow;
+    }
+  }
+  for (const list of lists) {
+    if (list.list_type === listType) {
+      return listDumpEmoji(list);
+    }
+  }
+  return effectiveListEmoji({ listType, storedEmoji: null });
+}
+
+function withListEmoji(emoji: string, label: string): string {
+  const glyph = emoji.trim();
+  const text = label.trim();
+  if (!glyph || !text) {
+    return text || glyph;
+  }
+  if (text.startsWith(glyph)) {
+    return text;
+  }
+  return `${glyph} ${text}`;
+}
+
+/** Drop a leading emoji token so callers may pass either bare or prefixed labels. */
+function stripLeadingListEmoji(label: string): string {
+  const trimmed = label.trim();
+  // One visible emoji grapheme (incl. ZWJ / variation selectors) + space.
+  const match = trimmed.match(
+    /^(?:\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s+/u,
+  );
+  return match ? trimmed.slice(match[0].length).trim() : trimmed;
 }
 
 /**
@@ -3041,13 +3233,19 @@ export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
 /**
  * Standing + linked clock mark. Same when as the chore → «(קבוע + תזכורת)»;
  * different time → «(קבוע + תזכורת ב־20:45)»; different calendar day →
- * «(קבוע + תזכורת ב־8.5.2027 ב־13:00)». Same rule for any task (not birthday-only).
+ * «(קבוע + תזכורת ב־8.5.2027 ב־13:00)».
+ * One-shot linked clocks are NOT series-level: mark stays «(קבוע)» only;
+ * the one-off ping is appended separately via {@link formatOneShotStandingReminderSuffix}.
  */
 export function standingLinkedReminderMark(
   item: Record<string, unknown>,
   standingRuleText: string,
 ): string {
   if (!itemHasLinkedReminder(item)) {
+    return "(קבוע)";
+  }
+  // Soft-linked one-shot ≠ series-wide reminder.
+  if (!linkedReminderIsRecurring(item)) {
     return "(קבוע)";
   }
   const taskYmd = taskEventYmd(item);
@@ -3064,6 +3262,22 @@ export function standingLinkedReminderMark(
     return `(קבוע + תזכורת ב־${reminderHm})`;
   }
   return "(קבוע + תזכורת)";
+}
+
+/** « · תזכורת ב־28.10 ב־09:30» for a one-shot clock soft-linked to a standing series. */
+export function formatOneShotStandingReminderSuffix(
+  item: Record<string, unknown>,
+): string {
+  if (!itemHasLinkedReminder(item) || linkedReminderIsRecurring(item)) {
+    return "";
+  }
+  const remYmd = linkedReminderYmd(item);
+  if (!remYmd) {
+    return "";
+  }
+  const hm = linkedReminderSeriesHm(item);
+  const day = formatShortDayMonth(remYmd);
+  return hm ? ` · תזכורת ב־${day} ב־${hm}` : ` · תזכורת ב־${day}`;
 }
 
 /** HH:mm from «ב־21:00» / «ב־21:00–22:00» in product-Hebrew rule text. */
@@ -3153,7 +3367,8 @@ export function formatScheduleSuffix(
     } else {
       base = `— ${recurring} ${mark}`;
     }
-    return `${base}${extras}`;
+    const oneShot = formatOneShotStandingReminderSuffix(item);
+    return `${base}${extras}${oneShot}`;
   }
   const date = readText(item, ["תאריך לביצוע", "date"]);
   const time = readText(item, ["שעה לביצוע", "time", "שעה"]);

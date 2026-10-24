@@ -12,6 +12,7 @@ import {
   parseRecurrence,
   parseRecurrenceException,
   pruneRecurrenceExceptions,
+  recurrenceExceptionEntries,
   serializeRecurrence,
   withinUntil,
   withRecurrenceException,
@@ -363,6 +364,15 @@ export function applyOccurrenceChange(
 export function itemOccurrenceExceptions(data: unknown, now = new Date()): string[] {
   const stored = itemRecurrence(data);
   return stored ? formatRecurrenceExceptionsHe(pruneRecurrenceExceptions(stored.rule, ymd(now))) : [];
+}
+
+/** Structured task-rule exceptions for occurrence-effective display (not reminder). */
+export function itemOccurrenceExceptionEntries(
+  data: unknown,
+  now = new Date(),
+): RecurrenceException[] {
+  const stored = itemRecurrence(data);
+  return stored ? recurrenceExceptionEntries(stored.rule, ymd(now)) : [];
 }
 
 /**

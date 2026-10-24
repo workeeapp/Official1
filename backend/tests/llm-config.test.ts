@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
@@ -5,6 +6,32 @@ import { loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
 const repoRoot = resolve(import.meta.dirname, "../..");
 
 describe("LLM action schema", () => {
+  it("omits emoji from the lists[] skeleton so models do not echo null clears", () => {
+    const action = JSON.parse(
+      readFileSync(resolve(repoRoot, "LLM.action.json"), "utf8"),
+    ) as { systemMessage: string[] };
+    const system = action.systemMessage.join("\n");
+    // Skeleton field form (would be copied into alter_list and clear overrides).
+    expect(system).not.toMatch(/"emoji":\s*null/);
+    // Clear remains documented; omit = no change.
+    expect(system).toContain("emoji:null");
+    expect(system).toMatch(/OMIT emoji/i);
+    // Schema still allows string|null for intentional clear.
+    const format = loadLlmResponseFormat(repoRoot);
+    const emojiProp = (
+      format?.schema.properties as {
+        metadata?: {
+          properties?: {
+            lists?: {
+              items?: { properties?: { emoji?: { type?: unknown } } };
+            };
+          };
+        };
+      }
+    )?.metadata?.properties?.lists?.items?.properties?.emoji;
+    expect(emojiProp?.type).toEqual(["string", "null"]);
+  });
+
   it("loads Lucy json_schema from LLM.action.json", () => {
     const format = loadLlmResponseFormat(repoRoot);
 

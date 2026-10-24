@@ -37,6 +37,7 @@ import {
   extractOccurrenceDone,
   itemDoneDates,
   itemNextOccurrences,
+  itemOccurrenceExceptionEntries,
   itemOccurrenceExceptions,
   itemOccurrencesInRange,
   keepOccurrenceMarks,
@@ -57,6 +58,10 @@ import {
   toReminderSnapshotRow,
   type ReminderSnapshotRow,
 } from "./reminder.service.js";
+import {
+  effectiveListEmoji,
+  emojiForNewCustomList,
+} from "./list-emoji.js";
 
 export type ItemScope = "personal" | "shared";
 
@@ -93,6 +98,8 @@ export interface EmployeeRecordSnapshot {
     list_id?: string;
     list_type: string;
     list_name?: string;
+    /** Effective display emoji (override or canonical default). */
+    emoji?: string;
     /** Custom lists only: visible columns and the column that names each row. */
     columns?: string[];
     title_field?: string;
@@ -890,7 +897,7 @@ export function formatEmployeeContext(
     "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list/filing owner. Dump shopping/tasks/contacts/custom/filings: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign within each list shell (dump line N is global — use LAST_NUMBERED_DUMP or title stem, not array index).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
     "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למטלה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
-    "Each list has list_id (copy into lists alter_list / delete_list — never speak it). Custom lists also show columns (current column names) and title_field (the column that names each row).",
+    "Each list has list_id (copy into lists alter_list / delete_list — never speak it) and emoji (effective display glyph). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
       lists: listsForEmployeeContext(snapshot.lists),
       filing: snapshot.filing,
@@ -1692,6 +1699,7 @@ export async function getEmployeeRecordSnapshot(
         listId: list.id,
         listType: list.listType,
         listName: list.name,
+        emoji: list.emoji,
         titleField: list.titleField,
         columns: list.columns,
         hiddenColumns: list.hiddenColumns,
@@ -1728,6 +1736,7 @@ export async function getEmployeeRecordSnapshot(
         listId: list.id,
         listType: list.listType,
         listName: list.name,
+        emoji: list.emoji,
         titleField: list.titleField,
         columns: list.columns,
         hiddenColumns: list.hiddenColumns,
@@ -1755,7 +1764,13 @@ export async function getEmployeeRecordSnapshot(
     if (mine) {
       mine.items.push(...items);
     } else {
-      lists.push({ list_type: listType, owner: viewerName, scope: "personal", items });
+      lists.push({
+        list_type: listType,
+        emoji: effectiveListEmoji({ listType, storedEmoji: null }),
+        owner: viewerName,
+        scope: "personal",
+        items,
+      });
     }
   }
 
@@ -1784,6 +1799,7 @@ export async function getEmployeeRecordSnapshot(
       lists.push({
         list_type: listType,
         ...(listName ? { list_name: listName } : {}),
+        emoji: effectiveListEmoji({ listType, storedEmoji: null }),
         owner,
         scope: "shared_items",
         items,
@@ -2700,6 +2716,11 @@ async function applyListAction(
         employeeId,
         listType: resolvedAction.listType,
         name: listName,
+        ...(resolvedAction.listType === "custom"
+          ? { emoji: emojiForNewCustomList(resolvedAction.emoji) }
+          : resolvedAction.emoji
+            ? { emoji: emojiForNewCustomList(resolvedAction.emoji) }
+            : {}),
         ...(resolvedAction.listType === "custom" && resolvedAction.titleField
           ? { titleField: resolvedAction.titleField }
           : {}),
@@ -3836,6 +3857,7 @@ function toListSnapshotEntry(input: {
   listId?: string;
   listType: string;
   listName: string;
+  emoji?: string | null;
   titleField?: string;
   columns?: unknown;
   hiddenColumns?: unknown;
@@ -3917,6 +3939,10 @@ function toListSnapshotEntry(input: {
     ...(input.listId ? { list_id: input.listId } : {}),
     list_type: input.listType,
     ...(derivedName ? { list_name: derivedName } : {}),
+    emoji: effectiveListEmoji({
+      listType: input.listType,
+      storedEmoji: input.emoji,
+    }),
     ...(columns.length > 0 ? { columns } : {}),
     ...(titleField ? { title_field: titleField } : {}),
     owner: input.ownerName,
@@ -4054,6 +4080,7 @@ function withVisibility(
   const hasRule = nextOccurrences !== null;
   const doneDates = hasRule ? itemDoneDates(raw) : [];
   const exceptions = hasRule ? itemOccurrenceExceptions(raw) : [];
+  const exceptionEntries = hasRule ? itemOccurrenceExceptionEntries(raw) : [];
   return {
     ...normalized,
     ...(itemId ? { item_id: itemId } : {}),
@@ -4062,6 +4089,7 @@ function withVisibility(
     ...(hasRule ? { next_occurrences: nextOccurrences } : {}),
     ...(doneDates.length ? { done_dates: doneDates } : {}),
     ...(exceptions.length ? { exceptions } : {}),
+    ...(exceptionEntries.length ? { exception_entries: exceptionEntries } : {}),
     ...linked,
     scope,
     owner,

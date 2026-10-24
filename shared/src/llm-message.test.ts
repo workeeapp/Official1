@@ -90,6 +90,73 @@ describe("list_ops", () => {
     ]);
   });
 
+  it("parses alter_list emoji tri-state and custom create emoji", () => {
+    const set = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "alter_list",
+            list_id: "l1",
+            emoji: " 🛒 ",
+            items: [],
+          },
+          {
+            action: "alter_list",
+            list_id: "l2",
+            emoji: null,
+            items: [],
+          },
+          {
+            action: "alter_list",
+            list_id: "l3",
+            emoji: "   ",
+            items: [],
+          },
+          {
+            action: "add",
+            list_type: "custom",
+            list_name: "בעיות",
+            emoji: "🐛",
+            items: [{ שם: "באג" }],
+            targets: [],
+          },
+          {
+            action: "add",
+            list_type: "custom",
+            list_name: "כללי",
+            items: [{ שם: "שורה" }],
+            targets: [],
+          },
+        ],
+      }),
+    );
+    expect(set.listOps?.[0]?.emoji).toBe("🛒");
+    expect(set.listOps?.[1]?.emoji).toBeNull();
+    expect(set.listOps?.[2]?.emoji).toBeNull(); // empty string → clear
+    expect(set.lists?.[0]?.emoji).toBe("🐛");
+    expect(set.lists?.[1]).not.toHaveProperty("emoji"); // omit on create
+
+    // Skeleton-shaped alter (new_name only, no emoji key) must not invent a clear.
+    const skeletonShaped = parseReplyMetadata(
+      reply({
+        lists: [
+          {
+            action: "alter_list",
+            list_id: "l1",
+            new_name: "באגים",
+            add_columns: [],
+            remove_columns: [],
+            rename_columns: [],
+            add_participants: [],
+            remove_participants: [],
+            items: [],
+          },
+        ],
+      }),
+    );
+    expect(skeletonShaped.listOps?.[0]).not.toHaveProperty("emoji");
+  });
+
   it("parses shell ops and filing from unified metadata.lists", () => {
     const meta = parseReplyMetadata(
       reply({

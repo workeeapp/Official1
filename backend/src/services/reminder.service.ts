@@ -22,6 +22,7 @@ import {
   parseRecurrence,
   parseStoredRepeat,
   pruneRecurrenceExceptions,
+  recurrenceExceptionEntries,
   recurrenceFromInterval,
   serializeRecurrence,
   serializeReminderRepeat,
@@ -437,6 +438,8 @@ export function reminderRuleSnapshot(
   recurrence_text?: string;
   next_occurrences?: string[];
   remaining_times?: number;
+  exceptions?: string[];
+  exception_entries?: RecurrenceException[];
 } {
   const rule = storedReminderRule(row);
   if (!rule) {
@@ -454,14 +457,16 @@ export function reminderRuleSnapshot(
           horizon: addJerusalemDays(row.fireAt, SNAPSHOT_HORIZON_DAYS),
           firedCount: fired,
         }).map((value) => formatJerusalemDateTime(value));
-  const exceptions = formatRecurrenceExceptionsHe(
-    pruneRecurrenceExceptions(rule, formatJerusalemDateTime(new Date()).slice(0, 10)),
-  );
+  const today = formatJerusalemDateTime(new Date()).slice(0, 10);
+  const pruned = pruneRecurrenceExceptions(rule, today);
+  const exceptions = formatRecurrenceExceptionsHe(pruned);
+  const exceptionEntries = recurrenceExceptionEntries(rule, today);
   return {
     recurrence_text: formatRecurrenceHe(rule),
     next_occurrences: occurrences,
     ...(rule.count ? { remaining_times: Math.max(0, rule.count - fired) } : {}),
     ...(exceptions.length ? { exceptions } : {}),
+    ...(exceptionEntries.length ? { exception_entries: exceptionEntries } : {}),
   };
 }
 

@@ -256,12 +256,15 @@ export {
   parseRecurrence,
   parseRecurrenceException,
   pruneRecurrenceExceptions,
+  recurrenceExceptionEntries,
   recurrenceFromInterval,
+  resolveEffectiveOccurrenceReminder,
   serializeRecurrence,
   withRecurrenceException,
   withinUntil,
 } from "./recurrence";
 export type {
+  EffectiveOccurrenceReminder,
   Recurrence,
   RecurrenceException,
   RecurrenceFreq,

@@ -60,6 +60,8 @@ export interface LlmListAction {
   titleField?: string;
   /** Custom lists: declared columns; stored only when the list is created. */
   columns?: string[];
+  /** Display emoji on create (custom preferred; builtins usually omit → canonical default). */
+  emoji?: string;
   items: Record<string, unknown>[];
   targets: string[];
   /** Files attached to the list itself (lists[].list_attachment_ids). */
@@ -86,6 +88,13 @@ export interface LlmListOp {
   removeParticipants: string[];
   addAttachments?: string[];
   removeAttachments?: string[];
+  /**
+   * Display emoji override. Tri-state:
+   * - omitted (`undefined`) → no change
+   * - `null` → clear override (restore canonical default)
+   * - string → set override
+   */
+  emoji?: string | null;
 }
 
 export interface LlmFilingAction {
@@ -1755,7 +1764,29 @@ function toListOp(value: unknown): LlmListOp | null {
       "removeAttachments",
       record.remove_attachments ?? record.removeAttachments,
     ),
+    ...parseListOpEmoji(record),
   };
+}
+
+/**
+ * Tri-state emoji on alter_list: key absent → omit; null/"" → clear; string → set.
+ * Does not invent a clear when the key is missing.
+ */
+function parseListOpEmoji(
+  record: Record<string, unknown>,
+): { emoji?: string | null } {
+  if (!("emoji" in record)) {
+    return {};
+  }
+  const raw = record.emoji;
+  if (raw === null) {
+    return { emoji: null };
+  }
+  if (typeof raw !== "string") {
+    return {};
+  }
+  const trimmed = raw.trim().slice(0, SHOW_ICON_MAX).trim();
+  return { emoji: trimmed || null };
 }
 
 function optionalIds<K extends string>(
@@ -1903,12 +1934,16 @@ function toListAction(value: unknown): LlmListAction | null {
     listType === "custom" ? readText(value, ["title_field"]).slice(0, 100) : "";
   const columns = listType === "custom" ? readStringList(value.columns) : [];
 
+  const createEmojiRaw =
+    typeof value.emoji === "string" ? value.emoji.trim().slice(0, SHOW_ICON_MAX).trim() : "";
+
   return {
     action: value.action as LlmListActionName,
     listType,
     listName,
     ...(titleField ? { titleField } : {}),
     ...(columns.length > 0 ? { columns } : {}),
+    ...(createEmojiRaw ? { emoji: createEmojiRaw } : {}),
     items,
     targets: parseTargets(value),
     ...optionalIds(
@@ -5218,6 +5253,11 @@ function describeListOp(op: LlmListOp): string {
     op.addParticipants.length > 0 ? `share with ${op.addParticipants.join(", ")}` : "",
     op.removeParticipants.length > 0
       ? `unshare ${op.removeParticipants.join(", ")}`
+      : "",
+    op.emoji !== undefined
+      ? op.emoji === null
+        ? "clear emoji"
+        : `emoji ${op.emoji}`
       : "",
   ].filter(Boolean);
   return parts.length > 0 ? `Alter list: ${parts.join("; ")}` : "Alter list";

@@ -159,12 +159,13 @@
     "------------------------------------------------------------",
     "LIST MANAGEMENT (the list itself) — same metadata.lists",
     "------------------------------------------------------------",
-    "Rename a list, add/remove/rename columns, add/remove participants, or delete a whole list → metadata.lists with action alter_list or delete_list (not add/remove/update on rows).",
-    "- alter_list: ONE object per list with every requested change: list_id + new_name, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty. items=[].",
+    "Rename a list, change its emoji, add/remove/rename columns, add/remove participants, or delete a whole list → metadata.lists with action alter_list or delete_list (not add/remove/update on rows).",
+    "- alter_list: ONE object per list with every requested change: list_id + new_name, emoji, add_columns, remove_columns, rename_columns [{from,to}], add_participants, remove_participants. Leave unrequested fields empty / omit emoji. items=[].",
+    "- emoji (list glyph, not show_icon): on custom create (lists add) choose ONE fitting emoji from the list name/purpose and set emoji; if omitted the engine stores 📋. On alter_list: set a glyph to override; set emoji:null to restore the canonical default (🛒 shopping / ✅ tasks / 👤 contacts / 📋 custom). OMIT emoji to leave the stored override unchanged — never clear by omission. Word descriptions («עגלת קניות») → YOU pick the glyph in emoji (no server dictionary). Ambiguous which list → ask, lists=[]. Recommend-only («איזה אימוג'י מתאים?») → suggest in responses; lists=[] (no mutate).",
     "- delete_list: whole list with list_id. On קניות / מטלות / אנשי קשר it empties the list; on a named list it deletes it. items=[].",
     "- list_id is required — copy it from this turn's EMPLOYEE_SAVED_DATA lists[].list_id. Unsure which list → ask, lists=[].",
     "- delete_list when clear: each explicitly named list that resolves to exactly one list_id → emit delete_list NOW for each (built-in קניות/מטלות/אנשי קשר empties items; custom deletes the list). A name with several possible matches, any list not uniquely resolved, or unclear scope → ask with lists=[]; next turn emit delete_list with that list_id from THIS turn's facts. Never invent list_id. FORBIDDEN yes/no «למחוק את כל הרשימה?» when every named target is already unique.",
-    "- Only the owner can alter/delete; built-in lists allow participant changes only; the title_field column cannot be removed.",
+    "- Only the owner can alter/delete; built-in קניות/מטלות refuse rename/columns/whole-list share but allow emoji; contacts allow participants + emoji; the title_field column cannot be removed.",
     "",
     "------------------------------------------------------------",
     "MEETINGS (פגישות)",
@@ -417,6 +418,13 @@
                     "new_name": {
                       "type": "string",
                       "description": "alter_list: new list name, or empty."
+                    },
+                    "emoji": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "List display emoji (not show_icon). On custom create: choose a fitting glyph from name/purpose (omit → engine stores 📋). On alter_list: string sets override; null restores canonical default (🛒/✅/👤/📋); omit = no change. Model maps word descriptions to a glyph."
                     },
                     "add_columns": {
                       "type": "array",

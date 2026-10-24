@@ -15,6 +15,8 @@ import {
   parseRecurrence,
   parseRecurrenceException,
   pruneRecurrenceExceptions,
+  recurrenceExceptionEntries,
+  resolveEffectiveOccurrenceReminder,
   serializeRecurrence,
   withRecurrenceException,
   type Recurrence,
@@ -296,6 +298,36 @@ describe("per-occurrence exceptions", () => {
 
   it("applyRecurrenceException leaves untouched days alone", () => {
     expect(applyRecurrenceException(fridays, fri16)).toBe(fri16);
+  });
+
+  it("resolveEffectiveOccurrenceReminder: inherit / move / cancel; other days untouched", () => {
+    const rec = withRecurrenceException(
+      withRecurrenceException(fridays, { date: "2026-10-23", cancel: true }, "2026-10-12"),
+      { date: "2026-10-30", time: "11:00" },
+      "2026-10-12",
+    );
+    const entries = recurrenceExceptionEntries(rec, "2026-10-12");
+    expect(
+      resolveEffectiveOccurrenceReminder({
+        occurrenceYmd: "2026-10-16",
+        seriesHm: "12:00",
+        exceptionEntries: entries,
+      }),
+    ).toEqual({ status: "inherit", hm: "12:00" });
+    expect(
+      resolveEffectiveOccurrenceReminder({
+        occurrenceYmd: "2026-10-23",
+        seriesHm: "12:00",
+        exceptionEntries: entries,
+      }),
+    ).toEqual({ status: "cancelled" });
+    expect(
+      resolveEffectiveOccurrenceReminder({
+        occurrenceYmd: "2026-10-30",
+        seriesHm: "12:00",
+        exceptionEntries: entries,
+      }),
+    ).toEqual({ status: "moved", hm: "11:00" });
   });
 });
 
