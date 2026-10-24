@@ -18,7 +18,7 @@ import {
 import { emptyLlmMetadata } from "@workee/shared";
 
 describe("Event pack loader + E-HOST-CREATE MODEL wire (offline)", () => {
-  it("loads event-pack-suite.json with Phase A critical case", () => {
+  it("loads event-pack-suite.json with Phase A + Stage C B1 critical cases", () => {
     const path = defaultEventPackPath();
     expect(existsSync(path), path).toBe(true);
     const suite = loadEventPackSuite(path);
@@ -27,6 +27,8 @@ describe("Event pack loader + E-HOST-CREATE MODEL wire (offline)", () => {
     expect(suite.evalPath).toBe("thin");
     expect(suite.productionParity).toBe(false);
     expect(suite.criticalCaseIds).toContain("E-HOST-CREATE");
+    expect(suite.criticalCaseIds).toContain("E-HOST-MULTI-ASK");
+    expect(suite.criticalCaseIds).toContain("E-HOST-DATE-MATCH-CONTINUE");
     const host = suite.cases.find((c) => c.id === "E-HOST-CREATE");
     expect(host?.track).toBe("MODEL");
     expect(host?.turns).toHaveLength(1);
@@ -53,6 +55,41 @@ describe("Event pack loader + E-HOST-CREATE MODEL wire (offline)", () => {
     ).toBe(false);
     expect(JSON.stringify(result.metadata.lists)).toContain("ערב פוקר");
     expect(JSON.stringify(result.metadata.lists)).not.toContain("לארגן ערב פוקר");
+  });
+
+  it("E-HOST-MULTI-ASK offline stub: empty mutates + ask (B1)", () => {
+    const suite = loadEventPackSuite();
+    const row = suite.cases.find((c) => c.id === "E-HOST-MULTI-ASK")!;
+    expect(row.track).toBe("MODEL");
+    const constraints = row.turns[0]!.constraints ?? [];
+    const stub = offlineStubForConstraints(constraints);
+    const result = evaluateOfflineModelProposal({
+      constraints,
+      metadata: stub.metadata,
+      response: stub.response,
+    });
+    expect(result.ok, result.failures.join("; ")).toBe(true);
+    expect(result.metadata.lists).toEqual([]);
+    expect(result.response).toMatch(/\?|איזה|לאיזה/);
+  });
+
+  it("E-HOST-DATE-MATCH-CONTINUE offline stub: no second host add", () => {
+    const suite = loadEventPackSuite();
+    const row = suite.cases.find((c) => c.id === "E-HOST-DATE-MATCH-CONTINUE")!;
+    expect(row.track).toBe("MODEL");
+    const constraints = row.turns[0]!.constraints ?? [];
+    const stub = offlineStubForConstraints(constraints);
+    const result = evaluateOfflineModelProposal({
+      constraints,
+      metadata: stub.metadata,
+      response: stub.response,
+    });
+    expect(result.ok, result.failures.join("; ")).toBe(true);
+    expect(
+      result.metadata.lists.some(
+        (l) => l.action === "add" && l.listType === "tasks",
+      ),
+    ).toBe(false);
   });
 
   it("no_lists_add rejects premature custom domain on host turn", () => {

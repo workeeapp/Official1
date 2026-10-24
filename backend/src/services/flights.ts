@@ -5,8 +5,27 @@
  */
 import { createHash } from "node:crypto";
 import { getEnv } from "../config/env.js";
+import {
+  emptyRetrievalStats,
+  isLocallyTruncated,
+  type RetrievalStats,
+} from "./retrieval-window.js";
 
 export const DEFAULT_FLIGHT_AIRPORT = "TLV";
+
+/** Board lines shown in Hebrew (after fetch/filter/sort). */
+export const FLIGHTS_DISPLAY_CAP = 12;
+
+/** Known local display truncation — not a provider claim. */
+export const FLIGHTS_LOCAL_TRUNCATION_HE =
+  "(מוצגות עד 12 טיסות — יש עוד בתוצאות שלא הוצגו בגלל מגבלת תצוגה.)";
+
+/**
+ * Saturated AviationStack page — potential incompleteness only.
+ * Does not prove additional matching flights exist.
+ */
+export const FLIGHTS_PROVIDER_PARTIAL_HE =
+  "(ייתכן שהלוח חלקי — התקבלה תשובה בגודל מגבלת הספק, ולא ניתן לדעת אם יש עוד טיסות.)";
 
 export type FlightsDirection = "arrivals" | "departures" | "both";
 
@@ -35,6 +54,15 @@ export type FlightRow = {
   direction: "arrivals" | "departures";
 };
 
+/**
+ * Completeness for board replies. Uses shared RetrievalStats fields where they
+ * fit; undated/invalid/outOfRange stay unused (flight rows are timed events).
+ */
+export type FlightsCompleteness = Pick<
+  RetrievalStats,
+  "matched" | "truncated" | "providerPartial"
+>;
+
 export type FlightsFacts = {
   airport: string;
   direction: FlightsDirection;
@@ -45,6 +73,19 @@ export type FlightsFacts = {
   withinMinutes: number | null;
   aspects: FlightsAspect[];
   rows: FlightRow[];
+  /** Board completeness; omit for single-flight / next views. */
+  completeness?: FlightsCompleteness;
+};
+
+export type FlightsBoardResult = {
+  rows: FlightRow[];
+  /** Requested AviationStack `limit` per direction. */
+  providerLimit: number;
+  /**
+   * True when any direction's raw API page length reached `providerLimit`
+   * (before client-side date/window filters). Potential incompleteness only.
+   */
+  providerLimitSaturated: boolean;
 };
 
 export type FlightEtaWatchResult = {
@@ -422,7 +463,7 @@ export async function fetchFlightsBoard(input: {
   fetchImpl?: typeof fetch;
   /** Override env key (empty string → missing-key error). */
   apiKey?: string | null;
-}): Promise<FlightRow[]> {
+}): Promise<FlightsBoardResult> {
   const airport = normalizeAirportCode(input.airport ?? "");
   const directionRaw = String(input.direction ?? "both")
     .trim()
@@ -454,6 +495,7 @@ export async function fetchFlightsBoard(input: {
     direction === "both" ? ["departures", "arrivals"] : [direction];
 
   const rows: FlightRow[] = [];
+  let providerLimitSaturated = false;
   for (const dir of directions) {
     const params: Record<string, string> = {
       limit: String(limit),
@@ -485,6 +527,10 @@ export async function fetchFlightsBoard(input: {
       }
     }
     const data = await aviationstackGet(params, fetchImpl, apiKey);
+    // Saturating the request limit = possible more pages; not proof of more matches.
+    if (data.length >= limit) {
+      providerLimitSaturated = true;
+    }
     for (const entry of data) {
       const mapped = mapApiFlight(entry, dir);
       if (!mapped) {
@@ -530,7 +576,26 @@ export async function fetchFlightsBoard(input: {
     const right = Date.parse(b.estimatedIso || b.scheduledIso) || 0;
     return left - right;
   });
-  return filtered;
+  return {
+    rows: filtered,
+    providerLimit: limit,
+    providerLimitSaturated,
+  };
+}
+
+/** Build RetrievalStats-shaped completeness for a filtered board. */
+export function buildFlightsCompleteness(input: {
+  rows: FlightRow[];
+  providerLimitSaturated: boolean;
+  displayCap?: number;
+}): FlightsCompleteness {
+  const displayCap = input.displayCap ?? FLIGHTS_DISPLAY_CAP;
+  const base = emptyRetrievalStats();
+  return {
+    matched: input.rows.length,
+    truncated: isLocallyTruncated(base, input.rows.length, displayCap),
+    providerPartial: input.providerLimitSaturated || undefined,
+  };
 }
 
 function formatClockHe(iso: string): string {
@@ -623,8 +688,22 @@ export function formatFlightsHebrew(facts: FlightsFacts): string {
       : facts.direction === "departures"
         ? `המראות מ־${airport}${windowNote}:`
         : `טיסות ב־${airport}${windowNote}:`;
-  const lines = facts.rows.slice(0, 12).map((row, i) => `${i + 1}. ${formatOneFlightHe(row)}`);
-  return [header, ...lines].join("\n");
+  const displayCap = FLIGHTS_DISPLAY_CAP;
+  const lines = facts.rows
+    .slice(0, displayCap)
+    .map((row, i) => `${i + 1}. ${formatOneFlightHe(row)}`);
+  const notes: string[] = [];
+  const localTrunc =
+    facts.completeness?.truncated === true ||
+    isLocallyTruncated(undefined, facts.rows.length, displayCap);
+  if (localTrunc) {
+    notes.push(FLIGHTS_LOCAL_TRUNCATION_HE);
+  }
+  // Saturated provider page = uncertainty only — never claim confirmed missing rows.
+  if (facts.completeness?.providerPartial) {
+    notes.push(FLIGHTS_PROVIDER_PARTIAL_HE);
+  }
+  return [header, ...lines, ...notes].join("\n");
 }
 
 export async function resolveFlightsReply(input: {
@@ -647,7 +726,7 @@ export async function resolveFlightsReply(input: {
       Number.isFinite(input.withinMinutes)
         ? input.withinMinutes
         : null;
-    const rows = await fetchFlightsBoard({
+    const board = await fetchFlightsBoard({
       airport: input.airport,
       direction: input.direction,
       airline: input.airline,
@@ -660,6 +739,10 @@ export async function resolveFlightsReply(input: {
       apiKey: input.apiKey,
       limit: withinMinutes != null ? 100 : 40,
     });
+    const singleFlight =
+      aspects.includes("next") ||
+      Boolean(normalizeFlightCode(String(input.flight ?? "")));
+    const rows = singleFlight ? board.rows.slice(0, 1) : board.rows;
     const facts: FlightsFacts = {
       airport: normalizeAirportCode(input.airport ?? ""),
       direction: (String(input.direction ?? "both").toLowerCase() === "arrivals"
@@ -673,7 +756,16 @@ export async function resolveFlightsReply(input: {
       date: String(input.date ?? "").trim(),
       withinMinutes,
       aspects,
-      rows: aspects.includes("next") ? rows.slice(0, 1) : rows,
+      rows,
+      // Board views only — single-flight/next intentionally omit completeness notes.
+      ...(singleFlight
+        ? {}
+        : {
+            completeness: buildFlightsCompleteness({
+              rows: board.rows,
+              providerLimitSaturated: board.providerLimitSaturated,
+            }),
+          }),
     };
     return formatFlightsHebrew(facts);
   } catch (error) {
@@ -722,7 +814,7 @@ export async function fetchFlightEtaWatch(input: {
 }): Promise<FlightEtaWatchResult> {
   const now = input.now ?? new Date();
   try {
-    const rows = await fetchFlightsBoard({
+    const { rows } = await fetchFlightsBoard({
       airport: input.airport,
       direction: input.direction,
       flight: input.flight,
@@ -761,7 +853,7 @@ export async function fetchFlightChangedWatch(input: {
   fetchImpl?: typeof fetch;
 }): Promise<FlightChangedWatchResult> {
   try {
-    const rows = await fetchFlightsBoard({
+    const { rows } = await fetchFlightsBoard({
       airport: input.airport,
       direction: input.direction,
       flight: input.flight,

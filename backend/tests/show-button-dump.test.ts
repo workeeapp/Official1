@@ -23,7 +23,11 @@ import {
   formatShowDumpWithLineMap,
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
+  itemHasDumpCalendarDate,
   itemMatchesDateRange,
+  formatUndatedTasksExcludedNote,
+  countUndatedTasksExcludedByDateRange,
+  ymdFromDumpValue,
   mapShowButtonCommandToDump,
   mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
@@ -3871,5 +3875,398 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       "2026-10-22",
     ]);
     expect(lines.find((row) => row.section === "2026-10-22")?.id).toBe("d2");
+  });
+
+  describe("undated-task disclosure on dated show_dump (Phase 3)", () => {
+    it("helper: undated = no span and no next_occurrences ymd", () => {
+      expect(itemHasDumpCalendarDate({ "שם מטלה": "בלי תאריך" })).toBe(false);
+      expect(
+        itemHasDumpCalendarDate({ "תאריך לביצוע": "2026-10-18" }),
+      ).toBe(true);
+      expect(
+        itemHasDumpCalendarDate({
+          next_occurrences: ["2026-10-19 09:00"],
+        }),
+      ).toBe(true);
+      expect(formatUndatedTasksExcludedNote(0)).toBe("");
+      expect(formatUndatedTasksExcludedNote(1)).toBe(
+        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+      );
+      expect(formatUndatedTasksExcludedNote(3)).toBe(
+        "(שים לב: 3 מטלות בלי תאריך לא נכללו בטווח.)",
+      );
+    });
+
+    it("dated dump with undated tasks discloses count; undated titles stay out of the agenda", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "dated-1",
+                "שם מטלה": "פגישה בטווח",
+                "תאריך לביצוע": "2026-10-18",
+                "שעה לביצוע": "10:00",
+              },
+              {
+                item_id: "undated-1",
+                "שם מטלה": "לקנות מתנה בלי תאריך",
+              },
+              {
+                item_id: "undated-2",
+                "שם מטלה": "לסדר מגירות",
+              },
+              {
+                item_id: "out-1",
+                "שם מטלה": "מחוץ לטווח עם תאריך",
+                "תאריך לביצוע": "2026-10-25",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      })!;
+      expect(dump).toContain("פגישה בטווח");
+      expect(dump).not.toContain("לקנות מתנה בלי תאריך");
+      expect(dump).not.toContain("לסדר מגירות");
+      expect(dump).not.toContain("מחוץ לטווח עם תאריך");
+      expect(dump).toContain(
+        "(שים לב: 2 מטלות בלי תאריך לא נכללו בטווח.)",
+      );
+      // Dated-out-of-range is not undated — count stays 2.
+      expect(dump).not.toMatch(/3 מטלות בלי תאריך/);
+    });
+
+    it("dated dump with no undated tasks omits the disclosure note", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "d1",
+                "שם מטלה": "בטווח",
+                "תאריך לביצוע": "2026-10-18",
+              },
+              {
+                item_id: "d2",
+                "שם מטלה": "מחוץ לטווח",
+                "תאריך לביצוע": "2026-10-25",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      })!;
+      expect(dump).toContain("בטווח");
+      expect(dump).not.toContain("מחוץ לטווח");
+      expect(dump).not.toContain("בלי תאריך");
+    });
+
+    it("empty dated agenda still discloses undated exclusions", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "u1",
+                "שם מטלה": "בלי תאריך בכלל",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      })!;
+      expect(dump).toContain("אין מטלות בטווח התאריכים.");
+      expect(dump).toContain(
+        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+      );
+      expect(dump).not.toContain("בלי תאריך בכלל");
+    });
+
+    it("undated outside result scope (section/partner) is not counted", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "personal-dated",
+                "שם מטלה": "אישית בטווח",
+                "תאריך לביצוע": "2026-10-18",
+              },
+              {
+                item_id: "personal-undated",
+                "שם מטלה": "אישית בלי תאריך",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "shared",
+            visible_to: ["מיכל"],
+            items: [
+              {
+                item_id: "shared-undated",
+                "שם מטלה": "משותפת בלי תאריך",
+                targets: ["מיכל"],
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      // Personal section: only personal undated counts (1), not the shared undated.
+      const personal = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        section: "personal",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      })!;
+      expect(personal).toContain("אישית בטווח");
+      expect(personal).toContain(
+        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+      );
+      expect(personal).not.toContain("משותפת בלי תאריך");
+      expect(personal).not.toContain("אישית בלי תאריך");
+
+      // itemIds scopes away the undated personal row → no disclosure.
+      const idsOnly = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+        itemIds: new Set(["personal-dated"]),
+      })!;
+      expect(idsOnly).toContain("אישית בטווח");
+      expect(idsOnly).not.toContain("בלי תאריך");
+    });
+
+    it("no date bounds: undated tasks appear; no exclusion note", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "u1",
+                "שם מטלה": "בלי תאריך גלוי",
+              },
+              {
+                item_id: "d1",
+                "שם מטלה": "עם תאריך",
+                "תאריך לביצוע": "2026-10-18",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+      })!;
+      expect(dump).toContain("בלי תאריך גלוי");
+      expect(dump).toContain("עם תאריך");
+      expect(dump).not.toContain("לא נכללה בטווח");
+      expect(dump).not.toContain("לא נכללו בטווח");
+      expect(
+        countUndatedTasksExcludedByDateRange(
+          [
+            {
+              title: "בלי תאריך גלוי",
+              item: { item_id: "u1", "שם מטלה": "בלי תאריך גלוי" },
+            },
+          ],
+          { viewerName: "טל" },
+        ),
+      ).toBe(0);
+    });
+
+    it("shopping dump ignores date bounds and never discloses undated-task note", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "shopping",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "s1", "שם פריט": "חלב" },
+              {
+                item_id: "s2",
+                "שם פריט": "לחם",
+                "תאריך לביצוע": "2026-10-25",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [{ item_id: "t1", "שם מטלה": "מטלה בלי תאריך" }],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const shopping = formatShowDumpFromKind("shopping", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      })!;
+      expect(shopping).toContain("חלב");
+      expect(shopping).toContain("לחם");
+      expect(shopping).not.toContain("בלי תאריך");
+      expect(shopping).not.toContain("מטלה בלי תאריך");
+    });
+  });
+
+  describe("show_dump calendar-date validation (ymdFromDumpValue)", () => {
+    it("accepts a valid leap-day YMD", () => {
+      expect(ymdFromDumpValue("2024-02-29")).toBe("2024-02-29");
+      expect(ymdFromDumpValue("2024-02-29 09:00")).toBe("2024-02-29");
+      expect(itemHasDumpCalendarDate({ "תאריך לביצוע": "2024-02-29" })).toBe(
+        true,
+      );
+      expect(
+        itemMatchesDateRange(
+          { "תאריך לביצוע": "2024-02-29" },
+          "2024-02-28",
+          "2024-03-01",
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects an impossible leap-day such as 2025-02-29", () => {
+      expect(ymdFromDumpValue("2025-02-29")).toBeNull();
+      expect(ymdFromDumpValue("2025-02-29T10:00:00")).toBeNull();
+      expect(itemHasDumpCalendarDate({ "תאריך לביצוע": "2025-02-29" })).toBe(
+        false,
+      );
+      expect(
+        itemMatchesDateRange(
+          { "תאריך לביצוע": "2025-02-29" },
+          "2025-02-01",
+          "2025-03-01",
+        ),
+      ).toBe(false);
+    });
+
+    it("dated dump: impossible calendar day is not treated as in-range", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "valid-leap",
+                "שם מטלה": "פגישת 29 בפברואר 2024",
+                "תאריך לביצוע": "2024-02-29",
+                "שעה לביצוע": "10:00",
+              },
+              {
+                item_id: "bad-leap",
+                "שם מטלה": "תאריך בלתי אפשרי",
+                "תאריך לביצוע": "2025-02-29",
+              },
+              {
+                item_id: "plain-undated",
+                "שם מטלה": "בלי תאריך בכלל",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2024-02-28",
+        dateTo: "2024-03-01",
+      })!;
+      expect(dump).toContain("פגישת 29 בפברואר 2024");
+      expect(dump).not.toContain("תאריך בלתי אפשרי");
+      expect(dump).not.toContain("בלי תאריך בכלל");
+      // Impossible YMD counts as undated for exclusion disclosure.
+      expect(dump).toContain(
+        "(שים לב: 2 מטלות בלי תאריך לא נכללו בטווח.)",
+      );
+    });
+
+    it("no date bounds: impossible YMD still appears (not filtered as out-of-range)", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "bad-leap",
+                "שם מטלה": "תאריך בלתי אפשרי גלוי",
+                "תאריך לביצוע": "2025-02-29",
+              },
+              {
+                item_id: "ok",
+                "שם מטלה": "עם תאריך תקין",
+                "תאריך לביצוע": "2026-10-18",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+      })!;
+      expect(dump).toContain("תאריך בלתי אפשרי גלוי");
+      expect(dump).toContain("עם תאריך תקין");
+      expect(dump).not.toContain("לא נכללה בטווח");
+      expect(dump).not.toContain("לא נכללו בטווח");
+    });
   });
 });

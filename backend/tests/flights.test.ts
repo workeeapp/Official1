@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildFlightsCompleteness,
   DEFAULT_FLIGHT_AIRPORT,
+  FLIGHTS_DISPLAY_CAP,
+  FLIGHTS_LOCAL_TRUNCATION_HE,
+  FLIGHTS_PROVIDER_PARTIAL_HE,
   formatFlightsHebrew,
   flightEtaThresholdMinutes,
   normalizeAirportCode,
@@ -11,6 +15,7 @@ import {
   resolveAirlineIata,
   resolveCityIata,
   resolveFlightsReply,
+  type FlightRow,
   type FlightsFacts,
 } from "../src/services/flights.js";
 
@@ -121,6 +126,104 @@ describe("formatFlightsHebrew", () => {
     expect(text).toContain("לא מצאתי");
     expect(text).toContain("TLV");
   });
+
+  it("discloses local display truncation without claiming provider incompleteness", () => {
+    const rows: FlightRow[] = Array.from(
+      { length: FLIGHTS_DISPLAY_CAP + 3 },
+      (_, i) => ({
+        ...row,
+        flightIata: `LY${800 + i}`,
+        flightNumber: String(800 + i),
+      }),
+    );
+    const completeness = buildFlightsCompleteness({
+      rows,
+      providerLimitSaturated: false,
+    });
+    expect(completeness.truncated).toBe(true);
+    expect(completeness.providerPartial).toBeUndefined();
+    const text = formatFlightsHebrew({
+      airport: "TLV",
+      direction: "departures",
+      airline: "",
+      city: "",
+      flight: "",
+      date: "",
+      withinMinutes: null,
+      aspects: ["board"],
+      rows,
+      completeness,
+    });
+    expect(text).toContain("1. ");
+    expect(text).toContain(`${FLIGHTS_DISPLAY_CAP}. `);
+    expect(text).not.toContain(`${FLIGHTS_DISPLAY_CAP + 1}. `);
+    expect(text).toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+  });
+
+  it("discloses provider-limit saturation as potential incompleteness only", () => {
+    const text = formatFlightsHebrew({
+      airport: "TLV",
+      direction: "departures",
+      airline: "",
+      city: "",
+      flight: "",
+      date: "",
+      withinMinutes: null,
+      aspects: ["board"],
+      rows: [row],
+      completeness: buildFlightsCompleteness({
+        rows: [row],
+        providerLimitSaturated: true,
+      }),
+    });
+    expect(text).toContain("LY831");
+    expect(text).toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+    expect(text).not.toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain("חסרות בוודאות");
+  });
+
+  it("omits completeness notes for unsaturated small boards", () => {
+    const text = formatFlightsHebrew({
+      airport: "TLV",
+      direction: "departures",
+      airline: "",
+      city: "",
+      flight: "",
+      date: "",
+      withinMinutes: null,
+      aspects: ["board"],
+      rows: [row],
+      completeness: buildFlightsCompleteness({
+        rows: [row],
+        providerLimitSaturated: false,
+      }),
+    });
+    expect(text).toContain("LY831");
+    expect(text).not.toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+  });
+
+  it("does not attach completeness wording to single-flight replies", () => {
+    const text = formatFlightsHebrew({
+      airport: "TLV",
+      direction: "departures",
+      airline: "",
+      city: "",
+      flight: "LY831",
+      date: "",
+      withinMinutes: null,
+      aspects: ["next"],
+      rows: [row],
+      completeness: buildFlightsCompleteness({
+        rows: Array.from({ length: 20 }, () => row),
+        providerLimitSaturated: true,
+      }),
+    });
+    expect(text).toContain("LY831");
+    expect(text).not.toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+  });
 });
 
 describe("resolveFlightsReply", () => {
@@ -195,6 +298,8 @@ describe("resolveFlightsReply", () => {
   });
 
   it("formats mocked AviationStack payload", async () => {
+    const dep = new Date(Date.now() + 45 * 60_000).toISOString();
+    const arr = new Date(Date.now() + 4 * 60 * 60_000).toISOString();
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -206,8 +311,8 @@ describe("resolveFlightsReply", () => {
             departure: {
               iata: "TLV",
               airport: "Ben Gurion",
-              scheduled: "2026-10-22T12:00:00+00:00",
-              estimated: "2026-10-22T12:00:00+00:00",
+              scheduled: dep,
+              estimated: dep,
               gate: "C3",
               terminal: "3",
               delay: null,
@@ -215,8 +320,8 @@ describe("resolveFlightsReply", () => {
             arrival: {
               iata: "CDG",
               airport: "Paris CDG",
-              scheduled: "2026-10-22T16:00:00+00:00",
-              estimated: "2026-10-22T16:00:00+00:00",
+              scheduled: arr,
+              estimated: arr,
             },
           },
         ],
@@ -234,5 +339,44 @@ describe("resolveFlightsReply", () => {
     expect(text).toContain("LY831");
     expect(text).toContain("המראות");
     expect(fetchImpl).toHaveBeenCalled();
+    expect(text).not.toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+    expect(text).not.toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+  });
+
+  it("marks saturated provider page as potential incompleteness on board resolve", async () => {
+    const now = Date.now();
+    const data = Array.from({ length: 40 }, (_, i) => ({
+      flight_status: "scheduled",
+      airline: { name: "El Al", iata: "LY" },
+      flight: { number: String(100 + i), iata: `LY${100 + i}` },
+      departure: {
+        iata: "TLV",
+        airport: "Ben Gurion",
+        scheduled: new Date(now + (i + 1) * 60_000).toISOString(),
+        estimated: new Date(now + (i + 1) * 60_000).toISOString(),
+      },
+      arrival: {
+        iata: "CDG",
+        airport: "Paris",
+        scheduled: new Date(now + (i + 1) * 60_000 + 3_600_000).toISOString(),
+        estimated: new Date(now + (i + 1) * 60_000 + 3_600_000).toISOString(),
+      },
+    }));
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ data }),
+    }));
+    const text = await resolveFlightsReply({
+      airport: "TLV",
+      direction: "departures",
+      aspects: ["board"],
+      apiKey: "test-key",
+      now: new Date(now),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain(FLIGHTS_PROVIDER_PARTIAL_HE);
+    expect(text).toContain(FLIGHTS_LOCAL_TRUNCATION_HE);
+    expect(text).toContain(`${FLIGHTS_DISPLAY_CAP}. `);
+    expect(text).not.toContain(`${FLIGHTS_DISPLAY_CAP + 1}. `);
   });
 });

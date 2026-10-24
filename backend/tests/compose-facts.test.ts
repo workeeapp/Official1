@@ -16,10 +16,14 @@ const git = vi.hoisted(() => ({
         files: ["backend/src/services/compose-facts.ts"],
       },
     ],
+    maxCount: 50,
+    commitCapSaturated: false,
   })),
   formatGitChangelogForCompose: vi.fn(
-    (commits: Array<{ subject: string }>) =>
-      commits.map((row, i) => `${i + 1}. ${row.subject}`).join("\n"),
+    (
+      commits: Array<{ subject: string }>,
+      _opts?: { commitCapSaturated?: boolean },
+    ) => commits.map((row, i) => `${i + 1}. ${row.subject}`).join("\n"),
   ),
 }));
 
@@ -132,6 +136,10 @@ describe("loadComposeFacts", () => {
     expect(bundle.windowLabel).toBe("last 7 days");
     expect(bundle.fixedBody).toBeUndefined();
     expect(git.readGitChangelog).toHaveBeenCalledOnce();
+    expect(git.formatGitChangelogForCompose).toHaveBeenCalledWith(
+      expect.any(Array),
+      { commitCapSaturated: false },
+    );
   });
 
   it("loads saved_data from the employee snapshot", async () => {
@@ -232,5 +240,12 @@ describe("loadComposeFacts", () => {
     expect(mashov.resolveMashovReply).toHaveBeenCalledWith(
       expect.objectContaining({ child: "דניאל" }),
     );
+    // Compose/watch Mashov stays open-range — no dateFrom/dateTo on the call.
+    const call = mashov.resolveMashovReply.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(call).not.toHaveProperty("dateFrom");
+    expect(call).not.toHaveProperty("dateTo");
   });
 });

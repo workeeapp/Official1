@@ -187,14 +187,22 @@ describe("P0 multi-shell clear prompt (offline)", () => {
       speaker: "טל",
       worker,
     });
-    expect(text).toContain("נקה את הקניות");
+    // Stage B shortened bulk-clear extras to point at system A1; keep structural needles.
+    expect(text).toContain("bulk-clear");
     expect(text).toContain("≥2 shells");
-    expect(text).toContain("ASK which shell");
-    expect(text).toContain("Exactly ONE unambiguous shell");
+    expect(text).toContain("ASK which");
+    expect(text).toMatch(/Exactly ONE unambiguous(?: relevant)? shell/);
+    expect(text).toContain("FORBIDDEN expanding");
   });
 });
 
-describe("P0 multi-shell clear MODEL_APPLY (offline)", () => {
+const hasApprovedEvalDb = Boolean(
+  process.env.DATABASE_URL?.trim() &&
+    process.env.WORKEE_APPROVED_TEST_DATABASE_URL?.trim(),
+);
+
+// Stage C: skip DB harness when no approved eval URL (do not run MODEL_APPLY).
+describe.skipIf(!hasApprovedEvalDb)("P0 multi-shell clear MODEL_APPLY (offline)", () => {
   beforeAll(() => {
     const db = process.env.DATABASE_URL;
     if (!db?.trim()) throw new Error("DATABASE_URL required");

@@ -1,0 +1,644 @@
+{
+  "version": 1,
+  "purpose": "Stage A/C — offline ACTION contracts for Lucy context decisions. Separates desired ACTION shapes from known gaps. Not live-model proof. Stage C adds proofLevel labels and resolves A1/B1 pack tensions.",
+  "classification": {
+    "pass_existing": "Desired ACTION is clear and already covered by an offline suite (referenced in existingCoverage).",
+    "gap_coverage": "Desired ACTION is clear but lacked a dedicated offline ACTION contract — Stage A adds parse/contract asserts.",
+    "gap_existing": "Known tension or risk in current product/prompt/tests; documented, not locked as correct.",
+    "desired_unclear": "Desired product behavior not clear enough to assert; documented only."
+  },
+  "proofLevels": {
+    "parse_shape": "Fixture metadata parses and assert helpers hold. Does NOT prove a model selected the ACTION.",
+    "engine_apply": "Referenced offline engine/apply test (stub propose or pure engine) exercises execution. Still not live-model selection.",
+    "model_decision_contract": "Pack/MODEL constraints document the desired decision; offline stub wire only — NOT live model competence."
+  },
+  "stageCChangeLog": [
+    "S-CLEAR-ASK → S-CLEAR-NOW (A1 unique shell remove NOW); added S-CLEAR-MULTI-SHELL-ASK.",
+    "DEL-CLEAR-ALL-UNIQUE-SHELL: gap_existing → pass_existing under A1; added DEL-CLEAR-MULTI-SHELL-ASK.",
+    "EVENT-HOST-DATE-COLLISION: desired_unclear → gap_coverage under B1 ASK; added EVENT-HOST-UNIQUE-DATE-CONTINUE + event-pack E-HOST-* cases.",
+    "Every case labeled proofLevel; gap_coverage must not be read as model-decision proof.",
+    "T-CLEAR-ASK → T-CLEAR-NOW (A1 unique tasks shell remove NOW); added T-CLEAR-MULTI-SHELL-ASK — post–Stage C residual closed offline."
+  ],
+  "mappingNotes": {
+    "infra": [
+      "shared/src/llm-message.test.ts (parse)",
+      "backend/src/eval/corpus.ts + docs/qa/*-pack-suite.json",
+      "backend/tests/*pack*model-apply.offline.test.ts",
+      "backend/tests/attachment-intent-contract.offline.test.ts",
+      "backend/tests/places.test.ts (parking intent)",
+      "backend/tests/multi-shell-clear-model-apply.offline.test.ts",
+      "backend/tests/event-pack-model-apply.offline.test.ts",
+      "backend/tests/event-pack.offline.test.ts",
+      "backend/tests/show-turn-guard.test.ts / show-button-dump.test.ts",
+      "backend/tests/jobs.test.ts (engine askWhich)",
+      "backend/tests/capability-alignment.offline.test.ts"
+    ],
+    "clusters": {
+      "update_vs_add": "Partial MODEL update paths; weak idempotent; Stage A adds forbid-duplicate-add contract.",
+      "line_number_mutate": "Prompt + engine guard; Stage A adds ACTION fixture.",
+      "delete_now_vs_ask": "A1 aligned for shopping and tasks: unique shell CLEAR NOW; multi-shell ASK (S-CLEAR-* / T-CLEAR-* + Batch A L-CLEAR-TASKS).",
+      "attach_destination": "Partial attachment-intent stubs; Stage A adds existing-item attach contract.",
+      "self_nudge_reuse": "Adjacent cancel/keep only; Stage A adds reuse-wrapper ACTION shape.",
+      "event_host": "B1: multi-host same stem without unique signal → ASK; unique date → continue. Pack + Stage A contracts.",
+      "open_jobs": "Engine askWhich only; Stage A adds multi-job ASK ACTION contract.",
+      "retrieval_path2": "Prompt + dump engine; Stage A adds semantic show_dump_ids contract.",
+      "live_routing": "Places parking covered; routes lines-at-stop ASK/ACTION added as gap_coverage."
+    }
+  },
+  "cases": [
+    {
+      "id": "UPD-ADD-UNIQUE-REUSE",
+      "cluster": "update_vs_add",
+      "utterance": "תעדכני את המטלה לקנות מתנה — תשני לשם לקנות מתנה ליוסי",
+      "factsNote": "EMPLOYEE_SAVED_DATA already has unique tasks item_id=task-gift with title לקנות מתנה",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "docs/qa/tasks-pack-suite.json T-UPDATE",
+        "backend/tests/tasks-pack-model-apply.offline.test.ts T-UPDATE-MT"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "update",
+            "list_type": "tasks",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111101",
+                "שם מטלה": "לקנות מתנה ליוסי"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "show_dump": null
+      },
+      "asserts": {
+        "listsAction": "update",
+        "listsListType": "tasks",
+        "hasItemId": true,
+        "forbidListsAdd": true,
+        "showDumpNullOrEmpty": true
+      },
+      "notes": "Desired: mutate existing unique row by item_id. FORBIDDEN a second lists.add for the same work.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "UPD-ADD-ALREADY-EXISTS-NO-DUP",
+      "cluster": "update_vs_add",
+      "utterance": "תוסיפי חלב לקניות",
+      "factsNote": "Unique shopping item חלב already visible this turn",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "docs/qa/shopping-pack-suite.json S-IDEMPOTENT (weak: allows empty|update|add)"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "asserts": {
+        "forbidListsAdd": true,
+        "mutationsEmptyOrUpdateOnly": true
+      },
+      "notes": "Desired when unique match: empty mutates (say already there) OR update qty — never a duplicate add. S-IDEMPOTENT does not forbid add.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "LINE-REMOVE-3",
+      "cluster": "line_number_mutate",
+      "utterance": "תמחק את 3",
+      "factsNote": "LAST_NUMBERED_DUMP line 3 → item_id=dump-line-3 (shopping)",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/show-turn-guard.test.ts (engine strips show_dump on mutate)",
+        "backend/tests/llm-config.test.ts (prompt BY LINE NUMBER)"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "remove",
+            "list_type": "shopping",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111103"
+              }
+            ],
+            "targets": []
+          }
+        ],
+        "show_dump": null
+      },
+      "asserts": {
+        "listsAction": "remove",
+        "hasItemId": true,
+        "showDumpNullOrEmpty": true
+      },
+      "notes": "Desired ACTION uses dump line id; show_dump must be null/omit on line-index mutate.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "DEL-NOW-UNIQUE-TITLE",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "מחקתי את החלב / תמחקי חלב מהקניות",
+      "factsNote": "Exactly one shopping row matching חלב",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "docs/qa/shopping-pack-suite.json S-BOUGHT / S-BOUGHT-ONE (MODEL constraints)"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "remove",
+            "list_type": "shopping",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111104"
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "listsAction": "remove",
+        "hasItemId": true
+      },
+      "notes": "Desired DELETE NOW: unique match → remove with item_id this turn (no confirm ask).",
+      "proofLevel": "model_decision_contract"
+    },
+    {
+      "id": "DEL-ASK-AMBIGUOUS-TITLE",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "תמחקי את הפגישה",
+      "factsNote": "≥2 tasks titled/stemming פגישה this turn",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "docs/qa/shopping-pack-suite.json S-REMOVE-AMB"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "asserts": {
+        "mutationsEmpty": true,
+        "responseLooksLikeAsk": true
+      },
+      "desiredResponse": "איזו פגישה למחוק — פגישה עם עמית או פגישה עם ערן?",
+      "notes": "Desired DELETE CLARIFY: empty mutates + one ask. Not a server draft.",
+      "proofLevel": "model_decision_contract"
+    },
+    {
+      "id": "DEL-CLEAR-ALL-UNIQUE-SHELL",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "תמחקי את כל הקניות",
+      "factsNote": "Exactly one personal shopping shell visible",
+      "classification": "pass_existing",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/shopping-pack-suite.json S-CLEAR-NOW",
+        "backend/tests/multi-shell-clear-model-apply.offline.test.ts P0-SINGLE-SHELL-CLEAR-NOW (engine_apply when eval DB available)",
+        "LLM.config.json BULK CLEAR — ONE SHELL (A1)"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "remove",
+            "list_type": "shopping",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111104"
+              },
+              {
+                "item_id": "11111111-1111-4111-8111-111111111105"
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "listsAction": "remove",
+        "listsListType": "shopping",
+        "hasItemId": true
+      },
+      "notes": "Stage C: A1 product rule — unique shell → lists.remove NOW. Former S-CLEAR-ASK tension resolved. Catalog parse proves shape only; shopping-pack MODEL contract documents decision; multi-shell MODEL_APPLY proves apply when DB harness runs."
+    },
+    {
+      "id": "DEL-CLEAR-MULTI-SHELL-ASK",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "תמחקי את כל הקניות",
+      "factsNote": "Personal shopping shell + shared/named shopping shell both visible",
+      "classification": "pass_existing",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/shopping-pack-suite.json S-CLEAR-MULTI-SHELL-ASK",
+        "backend/tests/multi-shell-clear-model-apply.offline.test.ts P0-MULTI-SHELL-CLEAR-ASK-THEN-PERSONAL (engine_apply when eval DB available)",
+        "LLM.config.json MULTI-SHELL CLEAR (A1)"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "desiredResponse": "לאיזו רשימת קניות התכוונת — האישית שלך או קניות משותפת?",
+      "asserts": {
+        "mutationsEmpty": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "A1: ≥2 shells → ASK; empty mutates. Contrast to DEL-CLEAR-ALL-UNIQUE-SHELL."
+    },
+    {
+      "id": "DEL-CLEAR-TASKS-UNIQUE-SHELL",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "תמחקי את כל המטלות",
+      "factsNote": "Exactly one personal tasks shell visible",
+      "classification": "pass_existing",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/tasks-pack-suite.json T-CLEAR-NOW",
+        "docs/qa/batch-a-suite.json L-CLEAR-TASKS-canonical",
+        "LLM.config.json BULK CLEAR — ONE SHELL (A1) shopping or tasks"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "remove",
+            "list_type": "tasks",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111201"
+              },
+              {
+                "item_id": "11111111-1111-4111-8111-111111111202"
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "listsAction": "remove",
+        "listsListType": "tasks",
+        "hasItemId": true
+      },
+      "notes": "A1 tasks: unique shell → lists.remove NOW. Former T-CLEAR-ASK tension closed offline."
+    },
+    {
+      "id": "DEL-CLEAR-TASKS-MULTI-SHELL-ASK",
+      "cluster": "delete_now_vs_ask",
+      "utterance": "תמחקי את כל המטלות",
+      "factsNote": "Personal tasks shell + shared/named tasks shell both visible",
+      "classification": "pass_existing",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/tasks-pack-suite.json T-CLEAR-MULTI-SHELL-ASK",
+        "LLM.config.json MULTI-SHELL CLEAR (A1)"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "desiredResponse": "לאיזו רשימת מטלות התכוונת — האישית שלך או מטלות משותפות?",
+      "asserts": {
+        "mutationsEmpty": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "A1 tasks: ≥2 shells → ASK; empty mutates. Contrast to DEL-CLEAR-TASKS-UNIQUE-SHELL."
+    },
+    {
+      "id": "ATTACH-EXISTING-ITEM",
+      "cluster": "attach_destination",
+      "utterance": "תצרפי את התמונה למטלה לקנות מתנה",
+      "factsNote": "Unique tasks item_id=task-gift; PENDING_ATTACHMENTS has att-1",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/attachment-intent-contract.offline.test.ts (list shell / new filing / ambiguous only)"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "update",
+            "list_type": "tasks",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111101",
+                "attachment_ids": [
+                  "22222222-2222-4222-8222-222222222201"
+                ]
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "listsAction": "update",
+        "hasItemId": true,
+        "hasAttachmentIds": true,
+        "forbidListsAdd": true
+      },
+      "notes": "Desired: attach to existing id. FORBIDDEN inventing a new tasks/filing solely because a file arrived + last-mentioned latch.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "ATTACH-AMB-ASK",
+      "cluster": "attach_destination",
+      "utterance": "תתייקי",
+      "factsNote": "Files present; no clear destination",
+      "classification": "pass_existing",
+      "existingCoverage": [
+        "backend/tests/attachment-intent-contract.offline.test.ts"
+      ],
+      "desiredMetadata": {},
+      "desiredResponse": "לשמור ברשימה עצמה, בפריט מסוים, או כתיוק חדש?",
+      "asserts": {
+        "mutationsEmpty": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "Already stub-contracted; re-asserted here for catalog completeness.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "NUDGE-REUSE-WRAPPER",
+      "cluster": "self_nudge_reuse",
+      "utterance": "כן (after soft-offer reminder on existing task לקנות מתנה) / תוסיפי תזכורת למטלה הזו מחר ב-9",
+      "factsNote": "Existing speaker tasks item_id=task-gift; worker name לוסי",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/batch-a-model-apply.offline.test.ts MT3-stop-nudge-keep-item (cancel path only)"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "add",
+            "list_type": "tasks",
+            "targets": [
+              "לוסי"
+            ],
+            "items": [
+              {
+                "שם מטלה": "להזכיר לטל לקנות מתנה",
+                "תאריך לביצוע": "2026-10-25",
+                "שעה לביצוע": "09:00"
+              }
+            ]
+          },
+          {
+            "action": "add",
+            "list_type": "reminders",
+            "items": [
+              {
+                "item": "לקנות מתנה",
+                "text": "לקנות מתנה",
+                "time": "09:00",
+                "ping": [
+                  "טל"
+                ]
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "hasWorkerTaskAdd": true,
+        "hasRemindersAdd": true,
+        "forbidSpeakerTasksAdd": true
+      },
+      "notes": "Desired REUSE EXISTING WRAPPER: no second speaker shopping/tasks add for the same work; worker להזכיר + reminders only.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "EVENT-RENAME-SAME-HOST",
+      "cluster": "event_host",
+      "utterance": "תשני את שם הערב לערב פוקר אצל דני",
+      "factsNote": "One COMPLEX EVENT host tasks item_id=host-1",
+      "classification": "pass_existing",
+      "existingCoverage": [
+        "backend/tests/event-pack-model-apply.offline.test.ts E-RENAME-SAME-HOST"
+      ],
+      "desiredMetadata": {
+        "lists": [
+          {
+            "action": "update",
+            "list_type": "tasks",
+            "items": [
+              {
+                "item_id": "11111111-1111-4111-8111-111111111110",
+                "שם מטלה": "ערב פוקר אצל דני"
+              }
+            ],
+            "targets": []
+          }
+        ]
+      },
+      "asserts": {
+        "listsAction": "update",
+        "hasItemId": true,
+        "forbidListsAdd": true
+      },
+      "notes": "Desired: continue same host item_id; FORBIDDEN second host add.",
+      "proofLevel": "engine_apply"
+    },
+    {
+      "id": "EVENT-HOST-DATE-COLLISION",
+      "cluster": "event_host",
+      "utterance": "תעזרי לי לארגן ערב פוקר",
+      "factsNote": "Two hosts stem ערב פוקר on different dates already in facts; no unique date/active focus in utterance",
+      "classification": "gap_coverage",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/event-pack-suite.json E-HOST-MULTI-ASK",
+        "LLM.config.json COMPLEX EVENTS MULTI-HOST SAME STEM (B1)"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "desiredResponse": "לאיזה ערב פוקר התכוונת — 12.12.2026 או 19.12.2026?",
+      "asserts": {
+        "mutationsEmpty": true,
+        "forbidListsAdd": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "Stage C under B1: ASK + empty mutates; FORBIDDEN host create/update/remove before clarify. Was desired_unclear in Stage A (product rule not locked then) — classification updated without claiming prior runs passed."
+    },
+    {
+      "id": "EVENT-HOST-UNIQUE-DATE-CONTINUE",
+      "cluster": "event_host",
+      "utterance": "תעזרי לי עם ערב הפוקר ב־12.12.2026 — באיזו שעה?",
+      "factsNote": "Two hosts stem ערב פוקר; utterance date uniquely matches host item_id=host-poker-a",
+      "classification": "gap_coverage",
+      "proofLevel": "model_decision_contract",
+      "existingCoverage": [
+        "docs/qa/event-pack-suite.json E-HOST-DATE-MATCH-CONTINUE",
+        "LLM.config.json Host continuity / B1 unique signal"
+      ],
+      "desiredMetadata": {
+        "lists": [],
+        "show_dump": null
+      },
+      "asserts": {
+        "forbidListsAdd": true,
+        "mutationsEmptyOrUpdateOnly": true
+      },
+      "notes": "B1 contrast: unique date → continue that evening; FORBIDDEN second host lists.add. Empty mutates (axis ask) or update on that host both OK."
+    },
+    {
+      "id": "JOBS-MULTI-ASK",
+      "cluster": "open_jobs",
+      "utterance": "כן / אוקיי (ambiguous which open job)",
+      "factsNote": "OPEN_JOBS has ≥2 raisable rows for this speaker",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/jobs.test.ts (engine askWhich when job_id missing)"
+      ],
+      "desiredMetadata": {
+        "jobs": [],
+        "lists": [],
+        "messages": []
+      },
+      "desiredResponse": "על איזו משימה — לבדוק עם ערן או לתאם פגישה עם עמית?",
+      "asserts": {
+        "jobsEmpty": true,
+        "mutationsEmpty": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "Desired model decide: empty jobs + ask which OPEN_JOBS row. Engine askWhich is a safety net, not a substitute for the ACTION contract.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "RETRIEVAL-SEMANTIC-IDS",
+      "cluster": "retrieval_path2",
+      "utterance": "אילו פגישות יש לי בשבוע הבא",
+      "factsNote": "Two tasks in range with item_ids meet-1, meet-2",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/llm-config.test.ts (prompt RETRIEVAL CONTRACT)",
+        "backend/tests/show-button-dump.test.ts (engine ids filter)"
+      ],
+      "desiredMetadata": {
+        "show_dump": "tasks",
+        "show_dump_ids": [
+          "11111111-1111-4111-8111-111111111121",
+          "11111111-1111-4111-8111-111111111122"
+        ],
+        "lists": []
+      },
+      "asserts": {
+        "showDump": "tasks",
+        "showDumpIdsNonEmpty": true,
+        "mutationsEmpty": true
+      },
+      "notes": "Desired path 2: show_dump + show_dump_ids (or show_dump null + answer in responses). FORBIDDEN bare show_dump without ids for semantic filter.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "RETRIEVAL-BARE-DUMP-FORBIDDEN-SHAPE",
+      "cluster": "retrieval_path2",
+      "utterance": "(anti-contract) semantic ask must not look like bare category dump",
+      "factsNote": "n/a — documents forbidden ACTION shape",
+      "classification": "gap_coverage",
+      "existingCoverage": [],
+      "forbiddenMetadata": {
+        "show_dump": "tasks",
+        "show_dump_ids": null,
+        "lists": []
+      },
+      "notes": "Catalog marks bare show_dump without ids as forbidden for semantic asks. Test asserts the anti-shape is detectable (ids empty/null) — not that the model never emits it.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "PLACES-PARKING-NEAR-MALL",
+      "cluster": "live_routing",
+      "utterance": "איפה יש חניון ליד הקניון?",
+      "classification": "pass_existing",
+      "existingCoverage": [
+        "backend/tests/places.test.ts",
+        "shared/src/llm-message.test.ts parking contracts"
+      ],
+      "desiredMetadata": {
+        "places": {
+          "query": "חניון",
+          "place": "הקניון",
+          "intent": "parking",
+          "aspects": [
+            "summary"
+          ]
+        }
+      },
+      "asserts": {
+        "placesIntent": "parking",
+        "placesIncludedType": "parking"
+      },
+      "proofLevel": "engine_apply"
+    },
+    {
+      "id": "PLACES-BUSINESS-RESTAURANT",
+      "cluster": "live_routing",
+      "utterance": "תמצא לי מסעדה ליד הקניון",
+      "classification": "pass_existing",
+      "existingCoverage": [
+        "shared/src/llm-message.test.ts",
+        "backend/tests/places.test.ts"
+      ],
+      "desiredMetadata": {
+        "places": {
+          "query": "מסעדה",
+          "place": "הקניון",
+          "intent": "business",
+          "aspects": [
+            "summary"
+          ]
+        }
+      },
+      "asserts": {
+        "placesIntent": "business"
+      },
+      "proofLevel": "engine_apply"
+    },
+    {
+      "id": "ROUTES-LINES-AT-STOP-ASK-FIRST",
+      "cluster": "live_routing",
+      "utterance": "איזה קווים עוברים בתחנת שלום דורני?",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/routes.test.ts (engine format for aspects lines — not decide ASK)"
+      ],
+      "desiredMetadata": {
+        "routes": null,
+        "lists": []
+      },
+      "desiredResponse": "האם אתה מכוון ליעד מסוים, או פשוט רוצה לדעת אילו קווים עוברים בתחנת «שלום דורני»?",
+      "asserts": {
+        "routesNull": true,
+        "responseLooksLikeAsk": true
+      },
+      "notes": "Desired first turn: routes=null + ASK יעד vs רק קווים. Do not refuse as if destination were mandatory.",
+      "proofLevel": "parse_shape"
+    },
+    {
+      "id": "ROUTES-LINES-AT-STOP-AFTER-CLARIFY",
+      "cluster": "live_routing",
+      "utterance": "רק קווים / מה עובר בתחנה / בלי יעד",
+      "factsNote": "Follow-up after ROUTES-LINES-AT-STOP-ASK-FIRST",
+      "classification": "gap_coverage",
+      "existingCoverage": [
+        "backend/tests/routes.test.ts (aspects lines formatting)"
+      ],
+      "desiredMetadata": {
+        "routes": {
+          "origin": "שלום דורני פתח תקווה",
+          "destination": "",
+          "aspects": [
+            "lines"
+          ]
+        }
+      },
+      "asserts": {
+        "routesAspectsIncludesLines": true,
+        "routesDestinationEmpty": true
+      },
+      "notes": "Desired after clarify: routes with aspects [lines] and empty destination.",
+      "proofLevel": "parse_shape"
+    }
+  ]
+}

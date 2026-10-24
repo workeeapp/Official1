@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   boardingStopMatchesOrigin,
   formatRoutesHebrew,
+  ROUTES_STEPS_LOCAL_TRUNCATION_HE,
+  ROUTES_STEPS_SUMMARY_DISPLAY_CAP,
   parseRoutesAspects,
   resolveRoutesReply,
   toRoutesRfc3339,
@@ -132,6 +134,60 @@ describe("formatRoutesHebrew", () => {
     expect(text).toContain("מסלול בתחבורה ציבורית");
     expect(text).toContain("45 דקות");
     expect(text).toContain("קו 51");
+    expect(text).not.toContain(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
+  });
+
+  it("discloses local step truncation when steps exceed summary display cap", () => {
+    const manySteps = Array.from(
+      { length: ROUTES_STEPS_SUMMARY_DISPLAY_CAP + 3 },
+      (_, i) => ({
+        travelMode: i % 2 === 0 ? "WALK" : "TRANSIT",
+        instruction: i % 2 === 0 ? `הליכה ${i}` : "",
+        line: i % 2 === 0 ? "" : String(50 + i),
+        headsign: "",
+        fromStop: `תחנה ${i}`,
+        toStop: `תחנה ${i + 1}`,
+        departureTime: "",
+        departureIso: "",
+        arrivalTime: "",
+        durationText: "2 דק׳",
+        headwaySeconds: null as number | null,
+      }),
+    );
+    const text = formatRoutesHebrew({
+      ...base,
+      aspects: ["summary"],
+      steps: manySteps,
+    });
+    expect(text).toContain("1. הליכה");
+    expect(text).toContain(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
+    // Cap hides later steps from the numbered list body before the note.
+    expect(text).not.toMatch(
+      new RegExp(`${ROUTES_STEPS_SUMMARY_DISPLAY_CAP + 1}\\. `),
+    );
+  });
+
+  it("omits step truncation note when steps fit under the display cap", () => {
+    const text = formatRoutesHebrew({
+      ...base,
+      aspects: ["summary"],
+      steps: base.steps.slice(0, 2),
+    });
+    expect(text).toContain("קו 51");
+    expect(text).not.toContain(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
+  });
+
+  it("reuses stop-board overflow wording when lines exceed 24", () => {
+    const stopLines = Array.from({ length: 26 }, (_, i) => String(i + 1));
+    const text = formatRoutesHebrew({
+      ...base,
+      destination: "",
+      aspects: ["lines"],
+      stopDisplayName: "תחנה",
+      stopLines,
+    });
+    expect(text).toContain("ועוד 2");
+    expect(text).not.toContain(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
   });
 
   it("formats eta-only reply", () => {

@@ -1,4 +1,5 @@
 import { parseAttachmentIds, SEND_ATTACHMENTS_MAX } from "./attachments.js";
+import { isValidCalendarYmd } from "./jerusalem-time.js";
 import { parseJobUrgency, type JobUrgency } from "./job-urgency.js";
 import {
   parseRecurrence,
@@ -578,9 +579,49 @@ export interface LlmMashovAction {
    */
   dateFrom: string | null;
   dateTo: string | null;
+  /**
+   * True when ACTION had a non-empty date_from/date_to that failed calendar
+   * validation. Engine must notice — never treat as open-range.
+   */
+  dateBoundsInvalid?: boolean;
 }
 
-export type LlmPlacesAspect = "summary" | "phone" | "address" | "hours";
+export type LlmPlacesAspect =
+  | "summary"
+  | "phone"
+  | "address"
+  | "hours"
+  | "parking"
+  | "accessibility"
+  | "outdoor"
+  | "children"
+  | "payment";
+
+/**
+ * Places search intent (Phase D).
+ * - business: ordinary local business search (default; unchanged).
+ * - parking: dedicated parking-place search (Google includedType parking).
+ */
+export type LlmPlacesIntent = "business" | "parking";
+
+/** Google Table A type used for dedicated parking intent. */
+export const PLACES_PARKING_INCLUDED_TYPE = "parking" as const;
+
+/** Approved Google Table A types for metadata.places.included_type (Phase A). */
+export const PLACES_INCLUDED_TYPE_ALLOWLIST = [
+  "restaurant",
+  "cafe",
+  "bakery",
+  "supermarket",
+  "pharmacy",
+  "hair_care",
+  "parking",
+] as const;
+
+export type LlmPlacesIncludedType =
+  (typeof PLACES_INCLUDED_TYPE_ALLOWLIST)[number];
+
+const PLACES_INCLUDED_TYPE_SET = new Set<string>(PLACES_INCLUDED_TYPE_ALLOWLIST);
 
 export interface LlmPlacesAction {
   /** What to find (business name or category). */
@@ -592,6 +633,127 @@ export interface LlmPlacesAction {
   lat: number | null;
   lng: number | null;
   aspects: LlmPlacesAspect[];
+  /**
+   * business = ordinary find; parking = dedicated parking-place search.
+   * Default business — must not change ordinary business search.
+   */
+  intent: LlmPlacesIntent;
+  /** true = Google openNow filter. null = no open-now filter. */
+  openNow: boolean | null;
+  /**
+   * Exact minimum rating 0–5 (null = no filter).
+   * Provider request uses a floored 0.5 step; engine applies exact local filter
+   * when Google returns rating.
+   */
+  minRating: number | null;
+  /** Allowlisted Google includedType; null = no type filter. */
+  includedType: LlmPlacesIncludedType | null;
+  /**
+   * Preferred locationBias circle radius (meters) when a pin is used.
+   * Bias only — not a hard geographic boundary unless the engine verifies coords.
+   */
+  radiusMeters: number | null;
+}
+
+/** Normalize metadata.places.intent — default business. */
+export function normalizePlacesIntent(raw: unknown): LlmPlacesIntent {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (
+    key === "parking" ||
+    key === "park" ||
+    key === "חניה" ||
+    key === "חניון" ||
+    key === "parking_search" ||
+    key === "find_parking"
+  ) {
+    return "parking";
+  }
+  if (
+    key === "business" ||
+    key === "business_search" ||
+    key === "local" ||
+    key === "עסק" ||
+    key === "עסקים"
+  ) {
+    return "business";
+  }
+  return "business";
+}
+
+/**
+ * Exact min_rating for ACTION / local filter (0–5).
+ * Does not round upward to 0.5 — that would exclude valid matches.
+ */
+export function normalizePlacesMinRating(raw: unknown): number | null {
+  let n: number | null = null;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    n = raw;
+  } else if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number(raw.trim().replace(",", "."));
+    if (Number.isFinite(parsed)) {
+      n = parsed;
+    }
+  }
+  if (n == null || n < 0 || n > 5) {
+    return null;
+  }
+  // Keep fractional thresholds (e.g. 4.1); light precision clamp only.
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Conservative Google Text Search minRating: floor to the previous 0.5 step
+ * so the provider page is inclusive; exact threshold is applied locally.
+ */
+export function placesMinRatingProviderFloor(exact: number): number {
+  if (!Number.isFinite(exact) || exact < 0) {
+    return 0;
+  }
+  if (exact > 5) {
+    return 5;
+  }
+  return Math.floor(exact * 2 + Number.EPSILON) / 2;
+}
+
+export function normalizePlacesIncludedType(
+  raw: unknown,
+): LlmPlacesIncludedType | null {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (!key || !PLACES_INCLUDED_TYPE_SET.has(key)) {
+    return null;
+  }
+  return key as LlmPlacesIncludedType;
+}
+
+/** Bias radius meters; clamp 200–50000. Invalid → null. */
+export function normalizePlacesRadiusMeters(raw: unknown): number | null {
+  let n: number | null = null;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    n = raw;
+  } else if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed)) {
+      n = parsed;
+    }
+  }
+  if (n == null || n <= 0) {
+    return null;
+  }
+  return Math.min(50_000, Math.max(200, Math.round(n)));
+}
+
+/** Explicit true only; false/absent → null (no openNow request filter). */
+export function normalizePlacesOpenNow(raw: unknown): boolean | null {
+  if (raw === true || raw === "true" || raw === 1 || raw === "1") {
+    return true;
+  }
+  return null;
 }
 
 export type LlmJewishAspect =
@@ -2859,19 +3021,33 @@ const MASHOV_ASPECTS = new Set<LlmMashovAspect>([
   "messages",
 ]);
 
-/** metadata.mashov date_from / date_to — YYYY-MM-DD or null. */
-function parseMashovDateBound(row: Record<string, unknown>, ...keys: string[]): string | null {
+/**
+ * metadata.mashov date_from / date_to — calendar YYYY-MM-DD or absent.
+ * Non-empty invalid strings set explicitInvalid (do not silently open-range).
+ */
+function parseMashovDateBound(
+  row: Record<string, unknown>,
+  ...keys: string[]
+): { value: string | null; explicitInvalid: boolean } {
   for (const key of keys) {
     const raw = row[key];
-    if (typeof raw !== "string") {
+    if (raw === null || raw === undefined) {
       continue;
     }
-    const value = raw.trim().slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return value;
+    if (typeof raw !== "string") {
+      return { value: null, explicitInvalid: true };
     }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const value = trimmed.slice(0, 10);
+    if (isValidCalendarYmd(value)) {
+      return { value, explicitInvalid: false };
+    }
+    return { value: null, explicitInvalid: true };
   }
-  return null;
+  return { value: null, explicitInvalid: false };
 }
 
 /** metadata.mashov — live Mashov fetch from filings; never includes password. */
@@ -2924,8 +3100,12 @@ export function parseMashovAction(
       }
     }
   }
-  let dateFrom = parseMashovDateBound(row, "date_from", "dateFrom", "from");
-  let dateTo = parseMashovDateBound(row, "date_to", "dateTo", "to");
+  const fromBound = parseMashovDateBound(row, "date_from", "dateFrom", "from");
+  const toBound = parseMashovDateBound(row, "date_to", "dateTo", "to");
+  const dateBoundsInvalid =
+    fromBound.explicitInvalid || toBound.explicitInvalid;
+  let dateFrom = dateBoundsInvalid ? null : fromBound.value;
+  let dateTo = dateBoundsInvalid ? null : toBound.value;
   if (dateFrom && dateTo && dateFrom > dateTo) {
     const swap = dateFrom;
     dateFrom = dateTo;
@@ -2936,6 +3116,7 @@ export function parseMashovAction(
     aspects: aspects.length > 0 ? aspects : ["grades"],
     dateFrom,
     dateTo,
+    ...(dateBoundsInvalid ? { dateBoundsInvalid: true } : {}),
   };
 }
 
@@ -2944,6 +3125,11 @@ const PLACES_ASPECTS = new Set<LlmPlacesAspect>([
   "phone",
   "address",
   "hours",
+  "parking",
+  "accessibility",
+  "outdoor",
+  "children",
+  "payment",
 ]);
 
 function parseOptionalCoord(raw: unknown): number | null {
@@ -3019,12 +3205,74 @@ export function parsePlacesAction(
       if (key === "open" || key === "opening_hours" || key === "שעות") {
         key = "hours";
       }
+      if (key === "חניה" || key === "parking_options") {
+        key = "parking";
+      }
+      if (
+        key === "access" ||
+        key === "accessible" ||
+        key === "wheelchair" ||
+        key === "נגישות"
+      ) {
+        key = "accessibility";
+      }
+      if (
+        key === "outdoor_seating" ||
+        key === "patio" ||
+        key === "ישיבה_בחוץ" ||
+        key === "חוץ"
+      ) {
+        key = "outdoor";
+      }
+      if (
+        key === "kids" ||
+        key === "child" ||
+        key === "good_for_children" ||
+        key === "ילדים"
+      ) {
+        key = "children";
+      }
+      if (
+        key === "pay" ||
+        key === "payments" ||
+        key === "payment_options" ||
+        key === "תשלום"
+      ) {
+        key = "payment";
+      }
       const aspect = key as LlmPlacesAspect;
       if (PLACES_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
         aspects.push(aspect);
       }
     }
   }
+  const intent = normalizePlacesIntent(
+    row.intent ?? row.search_intent ?? row.searchIntent ?? row.places_intent,
+  );
+  const openNow = normalizePlacesOpenNow(
+    row.open_now ?? row.openNow ?? row.open,
+  );
+  const minRating = normalizePlacesMinRating(
+    row.min_rating ?? row.minRating ?? row.rating_min ?? row.ratingMin,
+  );
+  let includedType = normalizePlacesIncludedType(
+    row.included_type ??
+      row.includedType ??
+      row.type ??
+      row.place_type ??
+      row.placeType,
+  );
+  // Dedicated parking search always uses Google Table A type `parking`.
+  if (intent === "parking") {
+    includedType = PLACES_PARKING_INCLUDED_TYPE;
+  }
+  const radiusMeters = normalizePlacesRadiusMeters(
+    row.radius_meters ??
+      row.radiusMeters ??
+      row.radius_m ??
+      row.radius ??
+      row.distance_meters,
+  );
   return {
     query,
     place,
@@ -3032,6 +3280,11 @@ export function parsePlacesAction(
     lat,
     lng,
     aspects: aspects.length > 0 ? aspects : ["summary"],
+    intent,
+    openNow,
+    minRating,
+    includedType,
+    radiusMeters,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   hasMashovDateRange,
   isMashovPasswordTooShortError,
   loadMashovCredsFromFilings,
+  MASHOV_INVALID_DATE_BOUNDS_HE,
   MASHOV_PASSWORD_TOO_SHORT_HE,
   matchMashovSchool,
   mashovSchoolMatchScore,
@@ -16,6 +17,7 @@ import {
   parseMashovAspects,
   pickMashovChild,
   resolveMashovReply,
+  resolveMashovReplyRange,
 } from "../src/services/mashov.js";
 
 describe("parseMashovAspects", () => {
@@ -557,6 +559,95 @@ describe("mashov event dates", () => {
     expect(stats.truncated).toBe(true);
     expect(rows[0]?.id).toBe("r0");
   });
+
+  it("rejects explicit invalid bounds instead of open-range", () => {
+    expect(
+      resolveMashovReplyRange({ dateFrom: "2025-02-29", dateTo: "2025-03-01" }),
+    ).toEqual({ ok: false, notice: MASHOV_INVALID_DATE_BOUNDS_HE });
+    expect(
+      resolveMashovReplyRange({ dateBoundsInvalid: true }),
+    ).toEqual({ ok: false, notice: MASHOV_INVALID_DATE_BOUNDS_HE });
+    expect(resolveMashovReplyRange({ dateFrom: null, dateTo: null })).toEqual({
+      ok: true,
+      range: { dateFrom: null, dateTo: null },
+    });
+    expect(
+      resolveMashovReplyRange({
+        dateFrom: "2025-01-01",
+        dateTo: "2025-12-31",
+      }),
+    ).toEqual({
+      ok: true,
+      range: { dateFrom: "2025-01-01", dateTo: "2025-12-31" },
+    });
+  });
+
+  it("Hebrew discloses local truncation when stats.truncated", () => {
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["grades"],
+      grades: [
+        {
+          subject: "מתמטיקה",
+          grade: "90",
+          date: "2025-05-01",
+          type: "מבחן",
+        },
+      ],
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [],
+      messages: [],
+      missingCreds: [],
+      dateFrom: null,
+      dateTo: null,
+      dateStats: {
+        grades: {
+          matched: 50,
+          undated: 0,
+          invalid: 0,
+          outOfRange: 0,
+          truncated: true,
+        },
+      },
+    });
+    expect(text).toContain("מתמטיקה");
+    expect(text).toContain("מגבלת תצוגה");
+  });
+
+  it("Hebrew discloses truncation when display slice hides rows without normalize truncated", () => {
+    // 16 grades ≤ normalize cap 40 → stats.truncated false, but slice(0,15) hides 1.
+    const grades = Array.from({ length: 16 }, (_, i) => ({
+      subject: `מקצוע${i}`,
+      grade: "80",
+      date: `2025-05-${String(16 - i).padStart(2, "0")}`,
+      type: "מבחן",
+    }));
+    const text = formatMashovHebrew({
+      childName: "דניאל",
+      aspects: ["grades"],
+      grades,
+      homework: [],
+      behavior: [],
+      timetable: [],
+      absences: [],
+      messages: [],
+      missingCreds: [],
+      dateStats: {
+        grades: {
+          matched: 16,
+          undated: 0,
+          invalid: 0,
+          outOfRange: 0,
+          truncated: false,
+        },
+      },
+    });
+    expect(text).toContain("מקצוע0");
+    expect(text).not.toContain("מקצוע15");
+    expect(text).toContain("מגבלת תצוגה");
+  });
 });
 
 describe("defaultMashovYear", () => {
@@ -797,6 +888,103 @@ describe("resolveMashovReply", () => {
     expect(reply).toContain("היסטוריה");
     expect(reply).toContain("88");
     expect(reply).not.toContain("secret");
+  });
+
+  it("returns invalid-bounds notice without calling Mashov", async () => {
+    const fetchImpl = vi.fn();
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "03222842" },
+        { item_name: "סיסמת משוב", item_info: "secret1" },
+        { item_name: "סמל בית ספר למשוב", item_info: "999" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+      ],
+      child: "דניאל",
+      aspects: ["grades"],
+      dateFrom: "2025-02-29",
+      dateTo: "2025-03-01",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(reply).toBe(MASHOV_INVALID_DATE_BOUNDS_HE);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("filters grades by date range, sorts newest-first, and discloses truncate", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith("/login") && init?.method === "POST") {
+        return {
+          ok: true,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === "x-csrf-token" ? "csrf" : null,
+            getSetCookie: () => [
+              "MashovAuthToken=abc; Path=/",
+              "Csrf-Token=csrf; Path=/",
+            ],
+          },
+          json: async () => ({
+            accessToken: {
+              displayName: "הורה",
+              children: [
+                {
+                  childGuid: "child-1",
+                  privateName: "דניאל",
+                  familyName: "כהן",
+                },
+              ],
+            },
+          }),
+        } as unknown as Response;
+      }
+      if (href.includes("/grades")) {
+        // 42 in-range + 1 out-of-range → normalize cap 40 → truncated
+        const rows = Array.from({ length: 42 }, (_, i) => ({
+          subjectName: `מקצוע${i}`,
+          grade: String(60 + (i % 40)),
+          eventDate: `2025-06-${String((i % 28) + 1).padStart(2, "0")}`,
+          gradingEvent: "מבחן",
+        }));
+        rows.push({
+          subjectName: "מחוץ",
+          grade: "50",
+          eventDate: "2024-12-01",
+          gradingEvent: "מבחן",
+        });
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => rows,
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        headers: { get: () => null },
+        json: async () => [],
+      } as unknown as Response;
+    });
+
+    const reply = await resolveMashovReply({
+      filings: [
+        { item_name: "תעודת זהות למשוב", item_info: "03222842" },
+        { item_name: "סיסמת משוב", item_info: "secret1" },
+        { item_name: "סמל בית ספר למשוב", item_info: "999" },
+        { item_name: "שנת לימודים למשוב", item_info: "2026" },
+      ],
+      child: "דניאל",
+      aspects: ["grades"],
+      dateFrom: "2025-01-01",
+      dateTo: "2025-12-31",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(reply).toContain("בטווח 2025-01-01–2025-12-31");
+    expect(reply).toContain("מגבלת תצוגה");
+    expect(reply).not.toContain("מחוץ");
+    // Newest-first among displayed: day 28 before day 1 for same month pattern
+    const firstBullet = reply
+      .split("\n")
+      .find((line) => line.startsWith("• "));
+    expect(firstBullet).toBeTruthy();
   });
 });
 

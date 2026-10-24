@@ -115,3 +115,28 @@ export function formatJerusalemDateTime(value: Date): string {
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${p.year}-${pad(p.month)}-${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}`;
 }
+
+/**
+ * True when `ymd` is a real Gregorian calendar day as YYYY-MM-DD.
+ * Regex shape alone is not enough (rejects 2025-02-29, 2025-13-01, etc.).
+ */
+export function isValidCalendarYmd(ymd: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return false;
+  }
+  const y = Number(ymd.slice(0, 4));
+  const m = Number(ymd.slice(5, 7));
+  const d = Number(ymd.slice(8, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return false;
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31) {
+    return false;
+  }
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}

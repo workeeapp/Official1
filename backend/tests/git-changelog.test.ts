@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatGitChangelogForCompose,
+  GIT_LOG_COMMIT_CAP_NOTE,
   resolveGitDigestWindow,
   resolveRepoRoot,
 } from "../src/services/git-changelog.js";
@@ -29,6 +30,34 @@ describe("formatGitChangelogForCompose", () => {
     expect(text).toContain("Summarize git commits in English.");
     expect(text).toContain("Files: backend/src/services/reminder-compose.ts");
     expect(text).toContain("2. Hide WhatsApp guests");
+    expect(text).not.toContain(GIT_LOG_COMMIT_CAP_NOTE);
+  });
+
+  it("appends commit-cap note only when saturated", () => {
+    const commits = [
+      {
+        sha: "abc",
+        subject: "Feature A",
+        body: "",
+        files: [] as string[],
+      },
+    ];
+    const unsaturated = formatGitChangelogForCompose(commits, {
+      commitCapSaturated: false,
+    });
+    expect(unsaturated).not.toContain(GIT_LOG_COMMIT_CAP_NOTE);
+
+    const saturated = formatGitChangelogForCompose(commits, {
+      commitCapSaturated: true,
+    });
+    expect(saturated).toContain("1. Feature A");
+    expect(saturated).toContain(GIT_LOG_COMMIT_CAP_NOTE);
+  });
+
+  it("does not invent a cap note for an empty commit list", () => {
+    expect(
+      formatGitChangelogForCompose([], { commitCapSaturated: true }),
+    ).toBe("");
   });
 });
 

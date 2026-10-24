@@ -35,7 +35,34 @@ export type JewishFacts = {
   holidays: JewishTimedItem[];
   missingPlace: boolean;
   error?: string;
+  /**
+   * True when more holidays were collected than the display cap shows.
+   * Confirmed local display truncation.
+   */
+  holidaysDisplayTruncated?: boolean;
+  /**
+   * True when the 90-day holiday collect hit its hard cap.
+   * Potential incompleteness within the look-ahead window only.
+   */
+  holidaysCollectCapped?: boolean;
 };
+
+/** Display cap for holiday bullets in Hebrew (after collect). */
+export const JEWISH_HOLIDAYS_DISPLAY_CAP = 6;
+
+/** Collect cap inside the 90-day Hebcal window. */
+export const JEWISH_HOLIDAYS_COLLECT_CAP = 8;
+
+/** Confirmed local holiday display truncation. */
+export const JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE =
+  "(מוצגים חלק מהחגים — יש עוד שלא הוצגו בגלל מגבלת תצוגה.)";
+
+/**
+ * Collect hit the hard cap inside the 90-day window — potential incompleteness.
+ * Does not claim holidays exist beyond the window.
+ */
+export const JEWISH_HOLIDAYS_COLLECT_CAP_HE =
+  "(ייתכן שרשימת החגים בחלון 90 הימים חלקית — נאספו עד למגבלת האיסוף.)";
 
 const ASPECT_SET = new Set<JewishAspect>([
   "summary",
@@ -272,7 +299,7 @@ async function fetchUpcomingHolidays(
   loc: JewishLocation,
   startYmd: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<JewishTimedItem[]> {
+): Promise<{ holidays: JewishTimedItem[]; collectCapped: boolean }> {
   const start = /^\d{4}-\d{2}-\d{2}$/.test(startYmd)
     ? startYmd
     : new Date().toISOString().slice(0, 10);
@@ -301,16 +328,18 @@ async function fetchUpcomingHolidays(
   }
   const json = (await res.json()) as HebcalResponse;
   const out: JewishTimedItem[] = [];
+  let collectCapped = false;
   for (const row of json.items ?? []) {
     if (String(row.category ?? "") !== "holiday") {
       continue;
     }
     out.push(mapItem(row, "holiday"));
-    if (out.length >= 8) {
+    if (out.length >= JEWISH_HOLIDAYS_COLLECT_CAP) {
+      collectCapped = true;
       break;
     }
   }
-  return out;
+  return { holidays: out, collectCapped };
 }
 
 function pickFromShabbat(items: HebcalItem[] | undefined): {
@@ -384,12 +413,21 @@ export function formatJewishHebrew(facts: JewishFacts): string {
       lines.push("לא מצאתי חגים קרובים.");
     } else {
       lines.push("חגים קרובים:");
-      for (const h of facts.holidays.slice(0, 6)) {
+      const displayTruncated =
+        facts.holidaysDisplayTruncated === true ||
+        facts.holidays.length > JEWISH_HOLIDAYS_DISPLAY_CAP;
+      for (const h of facts.holidays.slice(0, JEWISH_HOLIDAYS_DISPLAY_CAP)) {
         const day = h.dateIso.slice(0, 10);
         const ymd = /^\d{4}-\d{2}-\d{2}$/.test(day)
           ? day.split("-").reverse().join(".")
           : day;
         lines.push(`• ${h.title}${ymd ? ` — ${ymd}` : ""}`);
+      }
+      if (displayTruncated) {
+        lines.push(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+      }
+      if (facts.holidaysCollectCapped) {
+        lines.push(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
       }
     }
   }
@@ -494,6 +532,7 @@ export async function resolveJewishReply(input: {
     let havdalah: JewishTimedItem | null = null;
     let parasha: JewishTimedItem | null = null;
     let holidays: JewishTimedItem[] = [];
+    let holidaysCollectCapped = false;
     let placeLabel = loc.label;
 
     if (needsShabbat) {
@@ -516,7 +555,9 @@ export async function resolveJewishReply(input: {
         /^\d{4}-\d{2}-\d{2}$/.test(date)
           ? date
           : (input.now ?? new Date()).toISOString().slice(0, 10);
-      holidays = await fetchUpcomingHolidays(loc, start, fetchImpl);
+      const fetched = await fetchUpcomingHolidays(loc, start, fetchImpl);
+      holidays = fetched.holidays;
+      holidaysCollectCapped = fetched.collectCapped;
     }
 
     return formatJewishHebrew({
@@ -527,6 +568,9 @@ export async function resolveJewishReply(input: {
       parasha,
       holidays,
       missingPlace: false,
+      holidaysDisplayTruncated:
+        holidays.length > JEWISH_HOLIDAYS_DISPLAY_CAP,
+      holidaysCollectCapped,
     });
   } catch {
     return "לא הצלחתי לבדוק את לוח השבת/החגים עכשיו. נסה שוב בעוד רגע.";

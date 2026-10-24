@@ -6,11 +6,13 @@
   "evalPath": "thin",
   "productionParity": false,
   "minIndependentContracts": 3,
-  "description": "COMPLEX EVENTS host / link / rename — offline MODEL + MODEL_APPLY. Not Batch A. No LIVE.",
+  "description": "COMPLEX EVENTS host / link / rename / multi-host ASK (B1) — offline MODEL + MODEL_APPLY. Not Batch A. No LIVE.",
   "criticalCaseIds": [
     "E-HOST-CREATE",
     "E-CLARIFY-THEN-LINK",
-    "E-RENAME-SAME-HOST"
+    "E-RENAME-SAME-HOST",
+    "E-HOST-MULTI-ASK",
+    "E-HOST-DATE-MATCH-CONTINUE"
   ],
   "cases": [
     {
@@ -202,6 +204,129 @@
             "factsExclude": ["ערב פוקר"],
             "listTypeCounts": { "tasks": 1 }
           }
+        }
+      ]
+    },
+    {
+      "id": "E-HOST-MULTI-ASK",
+      "track": "MODEL",
+      "contract": "E-HOST-MULTI-ASK",
+      "variant": "canonical",
+      "tag": "safety-rails",
+      "description": "B1: ≥2 same-stem hosts, organize ask with no unique date/active focus → ASK; empty mutates; FORBIDDEN create/update/remove host before clarify. Stage C.",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-poker-a",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-12-12"
+              },
+              {
+                "item_id": "eval-item-host-poker-b",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-12-19"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעזרי לי לארגן ערב פוקר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "E-HOST-DATE-MATCH-CONTINUE",
+      "track": "MODEL",
+      "contract": "E-HOST-DATE-MATCH-CONTINUE",
+      "variant": "canonical",
+      "tag": "happy",
+      "description": "B1 contrast: unique date in ask picks one of two same-stem hosts → continue that host (update OK); FORBIDDEN second host lists.add. Stage C.",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-host-poker-a",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-12-12"
+              },
+              {
+                "item_id": "eval-item-host-poker-b",
+                "שם מטלה": "ערב פוקר",
+                "תאריך לביצוע": "2026-12-19"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תעזרי לי עם ערב הפוקר ב־12.12.2026 — באיזו שעה?",
+          "constraints": [
+            {
+              "type": "no_lists_add",
+              "listType": "tasks"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "mutations_empty_or_read_only"
+                },
+                {
+                  "type": "lists_has_action",
+                  "action": "update",
+                  "listType": "tasks",
+                  "minCount": 1,
+                  "maxCount": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     }

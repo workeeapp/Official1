@@ -6,6 +6,7 @@
  */
 import {
   addJerusalemDays,
+  isValidCalendarYmd,
   normalizeShowDumpListName,
   type LlmShowDumpSection,
 } from "@workee/shared";
@@ -1165,13 +1166,20 @@ function formatRemindersDump(
   return { text, lines };
 }
 
-/** YYYY-MM-DD from a date / datetime string. */
+/**
+ * YYYY-MM-DD from a date / datetime string.
+ * Rejects impossible calendar days (e.g. 2025-02-29) via isValidCalendarYmd.
+ */
 export function ymdFromDumpValue(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
   const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1]! : null;
+  if (!match) {
+    return null;
+  }
+  const ymd = match[1]!;
+  return isValidCalendarYmd(ymd) ? ymd : null;
 }
 
 function ymdInInclusiveRange(
@@ -1186,6 +1194,40 @@ function ymdInInclusiveRange(
     return false;
   }
   return true;
+}
+
+/**
+ * True when the task has at least one usable calendar day (span or
+ * next_occurrences). Untimed rows have none — they drop out of dated dumps.
+ */
+export function itemHasDumpCalendarDate(item: Record<string, unknown>): boolean {
+  const start = ymdFromDumpValue(item["תאריך לביצוע"] ?? item.date);
+  if (start) {
+    return true;
+  }
+  if (ymdFromDumpValue(item["תאריך סיום"])) {
+    return true;
+  }
+  const next = item.next_occurrences;
+  if (Array.isArray(next)) {
+    for (const occ of next) {
+      if (ymdFromDumpValue(occ)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Concise Hebrew note when a dated dump excluded undated tasks. */
+export function formatUndatedTasksExcludedNote(count: number): string {
+  if (count <= 0) {
+    return "";
+  }
+  if (count === 1) {
+    return "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)";
+  }
+  return `(שים לב: ${count} מטלות בלי תאריך לא נכללו בטווח.)`;
 }
 
 /**
@@ -2067,6 +2109,105 @@ function collectListDumpRows(
   return rows;
 }
 
+/** Non-date dump filters shared by keep + undated-exclusion counting. */
+function dumpRowPassesNonDateFilters(
+  row: DumpItem,
+  listType: ListDumpType,
+  opts: ShowDumpOptions | undefined,
+  pureCoShare: boolean,
+  pureAssign: boolean,
+  partnerFilters: string[],
+): boolean {
+  const section = opts?.section ?? null;
+  const itemIds = opts?.itemIds ?? null;
+  if (dumpRowExcludedByItemIds(listType, row.item, itemIds)) {
+    return false;
+  }
+  const shared = row.isShared === true;
+  if (section === "personal" && shared) {
+    return false;
+  }
+  if (section === "shared" && !shared) {
+    return false;
+  }
+  if (pureCoShare && !isCoShareDumpRow(row)) {
+    return false;
+  }
+  if (pureAssign && !isAssignDumpRow(row)) {
+    return false;
+  }
+  if (partnerFilters.length > 0) {
+    const key = row.partnerFilterKey ?? "";
+    if (
+      !partnerFilters.some((needle) =>
+        partnerBucketMatches(key || "משותף", needle),
+      )
+    ) {
+      return false;
+    }
+  }
+  if (
+    !itemMatchesAssigneeFilter(
+      row.responsibilityMark,
+      opts,
+      row.assigneeName,
+    )
+  ) {
+    return false;
+  }
+  if (!itemMatchesUrgencyFilter(row.item, opts?.urgency)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Count tasks in scope (after section/partner/assignee/urgency/ids) that are
+ * excluded solely because they have no usable calendar date under a range.
+ * Does not invent counts when no date range is set.
+ */
+export function countUndatedTasksExcludedByDateRange(
+  rows: DumpItem[],
+  opts?: ShowDumpOptions,
+): number {
+  if (!hasDumpDateRange(opts)) {
+    return 0;
+  }
+  const section = opts?.section ?? null;
+  const partnerFilters = dumpFilterNames(opts?.partner);
+  const assigneeFilters = dumpFilterNames(opts?.assignee);
+  const collaboration = opts?.collaboration ?? null;
+  const pureCoShare =
+    collaboration === "co_share" ||
+    (partnerFilters.length > 0 &&
+      section === "shared" &&
+      collaboration !== "assign" &&
+      assigneeFilters.length === 0);
+  const pureAssign = collaboration === "assign";
+  let count = 0;
+  for (const row of rows) {
+    if (
+      !dumpRowPassesNonDateFilters(
+        row,
+        "tasks",
+        opts,
+        pureCoShare,
+        pureAssign,
+        partnerFilters,
+      )
+    ) {
+      continue;
+    }
+    if (itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo)) {
+      continue;
+    }
+    if (!itemHasDumpCalendarDate(row.item)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function filterDumpRows(
   rows: DumpItem[],
   listType: ListDumpType,
@@ -2075,7 +2216,6 @@ function filterDumpRows(
   const section = opts?.section ?? null;
   const partnerFilters = dumpFilterNames(opts?.partner);
   const assigneeFilters = dumpFilterNames(opts?.assignee);
-  const itemIds = opts?.itemIds ?? null;
   const collaboration = opts?.collaboration ?? null;
   // «משותף עם X» (partner + shared, no assignee) — never include assign rows.
   // Combined partner+assignee keeps legacy intersection; collaboration=assign
@@ -2089,42 +2229,16 @@ function filterDumpRows(
   const pureAssign = collaboration === "assign";
 
   let kept = rows.filter((row) => {
-    if (dumpRowExcludedByItemIds(listType, row.item, itemIds)) {
-      return false;
-    }
-    const shared = row.isShared === true;
-    if (section === "personal" && shared) {
-      return false;
-    }
-    if (section === "shared" && !shared) {
-      return false;
-    }
-    if (pureCoShare && !isCoShareDumpRow(row)) {
-      return false;
-    }
-    if (pureAssign && !isAssignDumpRow(row)) {
-      return false;
-    }
-    if (partnerFilters.length > 0) {
-      const key = row.partnerFilterKey ?? "";
-      if (
-        !partnerFilters.some((needle) =>
-          partnerBucketMatches(key || "משותף", needle),
-        )
-      ) {
-        return false;
-      }
-    }
     if (
-      !itemMatchesAssigneeFilter(
-        row.responsibilityMark,
+      !dumpRowPassesNonDateFilters(
+        row,
+        listType,
         opts,
-        row.assigneeName,
+        pureCoShare,
+        pureAssign,
+        partnerFilters,
       )
     ) {
-      return false;
-    }
-    if (!itemMatchesUrgencyFilter(row.item, opts?.urgency)) {
       return false;
     }
     if (
@@ -2370,6 +2484,21 @@ function formatSingleHeaderDump(
   return { text, lines };
 }
 
+function appendUndatedTasksExcludedNote(
+  body: DumpTextResult,
+  undatedExcluded: number,
+): DumpTextResult {
+  const note = formatUndatedTasksExcludedNote(undatedExcluded);
+  if (!note) {
+    return body;
+  }
+  const trimmed = body.text.trim();
+  if (!trimmed) {
+    return { text: note, lines: body.lines };
+  }
+  return { text: `${trimmed}\n${note}`, lines: body.lines };
+}
+
 function formatThreeWayDump(
   listType: "shopping" | "tasks",
   label: string,
@@ -2378,8 +2507,12 @@ function formatThreeWayDump(
 ): DumpTextResult {
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
   const collected = collectListDumpRows(listType, lists, opts);
+  const undatedExcluded =
+    listType === "tasks"
+      ? countUndatedTasksExcludedByDateRange(collected, opts)
+      : 0;
   const kept = filterDumpRows(collected, listType, opts);
-  return formatSingleHeaderDump(
+  const body = formatSingleHeaderDump(
     label,
     listType,
     kept,
@@ -2387,6 +2520,19 @@ function formatThreeWayDump(
     snapshot.reminders ?? [],
     linkedReminderIdsFromTasks(snapshot),
   );
+  if (
+    !body.text.trim() &&
+    undatedExcluded > 0 &&
+    listType === "tasks" &&
+    hasDumpDateRange(opts)
+  ) {
+    // Empty dated agenda + known undated exclusions — keep the empty sentence.
+    return {
+      text: `אין מטלות בטווח התאריכים.\n${formatUndatedTasksExcludedNote(undatedExcluded)}`,
+      lines: [],
+    };
+  }
+  return appendUndatedTasksExcludedNote(body, undatedExcluded);
 }
 
 /** Co-share mark: partners then viewer — e.g. «מיכל, טל». */

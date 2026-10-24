@@ -1,4 +1,13 @@
+import { isValidCalendarYmd } from "@workee/shared";
 import { jerusalemYmd } from "../utils/relative-date.js";
+import {
+  applyCalendarDateFilterSortCap,
+  emptyRetrievalStats,
+  hasCalendarDateRange,
+  isLocallyTruncated,
+  type CalendarDateRange,
+  type RetrievalStats,
+} from "./retrieval-window.js";
 
 export type MashovAspect =
   | "grades"
@@ -56,19 +65,10 @@ export type MashovSession = {
 };
 
 /** Inclusive calendar-day filter (YYYY-MM-DD). Null bounds = open on that side. */
-export type MashovDateRange = {
-  dateFrom: string | null;
-  dateTo: string | null;
-};
+export type MashovDateRange = CalendarDateRange;
 
-export type MashovDateStats = {
-  matched: number;
-  undated: number;
-  invalid: number;
-  outOfRange: number;
-  /** True when matched rows exceeded the local display cap after filter+sort. */
-  truncated: boolean;
-};
+/** Per-aspect filter/sort/cap stats (alias of shared RetrievalStats). */
+export type MashovDateStats = RetrievalStats;
 
 export type MashovFacts = {
   childName: string;
@@ -100,28 +100,7 @@ export type MashovFacts = {
 export function hasMashovDateRange(
   range?: MashovDateRange | null,
 ): boolean {
-  return Boolean(range?.dateFrom || range?.dateTo);
-}
-
-function isValidYmd(ymd: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
-    return false;
-  }
-  const y = Number(ymd.slice(0, 4));
-  const m = Number(ymd.slice(5, 7));
-  const d = Number(ymd.slice(8, 10));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
-    return false;
-  }
-  if (m < 1 || m > 12 || d < 1 || d > 31) {
-    return false;
-  }
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return (
-    dt.getUTCFullYear() === y &&
-    dt.getUTCMonth() === m - 1 &&
-    dt.getUTCDate() === d
-  );
+  return hasCalendarDateRange(range);
 }
 
 /**
@@ -136,7 +115,7 @@ export function normalizeMashovEventDate(raw: string): string | null {
   }
   const isoPrefix = s.slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoPrefix)) {
-    return isValidYmd(isoPrefix) ? isoPrefix : null;
+    return isValidCalendarYmd(isoPrefix) ? isoPrefix : null;
   }
   const dmy = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/);
   if (dmy) {
@@ -144,94 +123,36 @@ export function normalizeMashovEventDate(raw: string): string | null {
     const m = Number(dmy[2]);
     const y = Number(dmy[3]);
     const ymd = `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    return isValidYmd(ymd) ? ymd : null;
+    return isValidCalendarYmd(ymd) ? ymd : null;
   }
   return null;
 }
 
 export function emptyMashovDateStats(): MashovDateStats {
-  return {
-    matched: 0,
-    undated: 0,
-    invalid: 0,
-    outOfRange: 0,
-    truncated: false,
-  };
+  return emptyRetrievalStats();
 }
 
 /**
  * Filter by optional inclusive date range, sort newest-first, then apply cap.
+ * Delegates to shared applyCalendarDateFilterSortCap; Mashov-specific date
+ * parsing stays in normalizeMashovEventDate.
  *
- * API note: Mashov GETs used here have no page/limit query params in this
- * client — one response body per aspect. Local caps are display-only; do not
- * claim a complete newest-page when the upstream payload may already be partial.
- *
- * Undated / invalid rows are never counted as confirmed out-of-range matches.
- * With no range they stay in the result (sorted after dated rows).
+ * API note: Mashov GETs have no page/limit params here — one body per aspect.
+ * Local caps are display-only; do not claim a complete newest-page when the
+ * upstream payload may already be partial.
  */
 export function applyMashovDateFilterSortCap<T extends { date: string }>(
   rows: T[],
   opts: { range?: MashovDateRange | null; cap: number },
 ): { rows: T[]; stats: MashovDateStats } {
-  const range = opts.range ?? null;
-  const filtering = hasMashovDateRange(range);
-  const from = range?.dateFrom && isValidYmd(range.dateFrom) ? range.dateFrom : null;
-  const to = range?.dateTo && isValidYmd(range.dateTo) ? range.dateTo : null;
-
-  const stats = emptyMashovDateStats();
-  const kept: Array<{ row: T; sortKey: string }> = [];
-
-  for (const row of rows) {
-    const raw = String(row.date ?? "").trim();
-    const ymd = normalizeMashovEventDate(raw);
-    if (!raw) {
-      stats.undated += 1;
-      if (!filtering) {
-        kept.push({ row, sortKey: "" });
-      }
-      continue;
-    }
-    if (!ymd) {
-      stats.invalid += 1;
-      if (!filtering) {
-        kept.push({ row, sortKey: "" });
-      }
-      continue;
-    }
-    const normalizedRow = { ...row, date: ymd } as T;
-    if (filtering) {
-      if (from && ymd < from) {
-        stats.outOfRange += 1;
-        continue;
-      }
-      if (to && ymd > to) {
-        stats.outOfRange += 1;
-        continue;
-      }
-    }
-    stats.matched += 1;
-    kept.push({ row: normalizedRow, sortKey: ymd });
-  }
-
-  kept.sort((a, b) => {
-    if (a.sortKey && b.sortKey) {
-      return b.sortKey.localeCompare(a.sortKey);
-    }
-    if (a.sortKey && !b.sortKey) {
-      return -1;
-    }
-    if (!a.sortKey && b.sortKey) {
-      return 1;
-    }
-    return 0;
+  return applyCalendarDateFilterSortCap(rows, {
+    range: opts.range ?? null,
+    cap: opts.cap,
+    getRawDate: (row) => row.date,
+    normalizeDate: normalizeMashovEventDate,
+    withNormalizedDate: (row, ymd) => ({ ...row, date: ymd }),
+    sortDir: "desc",
   });
-
-  const cap = Math.max(0, opts.cap);
-  stats.truncated = kept.length > cap;
-  return {
-    rows: kept.slice(0, cap).map((entry) => entry.row),
-    stats,
-  };
 }
 
 const BASE = "https://web.mashov.info/api";
@@ -1366,6 +1287,38 @@ function formatUnclassifiedNote(
   return `(שים לב: ${n} רשומות נוספות בלי תאריך תקין לא סווגו לטווח.)`;
 }
 
+/**
+ * Local truncate note — covers normalize cap and Hebrew display slice.
+ * Not proof the Mashov API page was incomplete.
+ */
+export const MASHOV_LOCAL_TRUNCATION_HE =
+  "(מוצגים חלק מהרשומות — יש עוד שלא הוצגו בגלל מגבלת תצוגה.)";
+
+/** Display caps after normalize — can hide rows even when stats.truncated is false. */
+export const MASHOV_DISPLAY_CAPS = {
+  grades: 15,
+  homework: 10,
+  behavior: 10,
+  absences: 15,
+  messages: 10,
+} as const;
+
+function appendAspectNotes(
+  lines: string[],
+  stats: MashovDateStats | undefined,
+  filtering: boolean,
+  rowCount: number,
+  displayCap: number,
+): void {
+  const unclassified = formatUnclassifiedNote(stats, filtering);
+  if (unclassified) {
+    lines.push(unclassified);
+  }
+  if (isLocallyTruncated(stats, rowCount, displayCap)) {
+    lines.push(MASHOV_LOCAL_TRUNCATION_HE);
+  }
+}
+
 export function formatMashovHebrew(facts: MashovFacts): string {
   if (facts.missingCreds.length > 0) {
     if (
@@ -1406,16 +1359,14 @@ export function formatMashovHebrew(facts: MashovFacts): string {
           ? `ציונים ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
           : `ציונים ${who}:`.trim(),
       );
-      for (const g of facts.grades.slice(0, 15)) {
+      const gradeCap = MASHOV_DISPLAY_CAPS.grades;
+      for (const g of facts.grades.slice(0, gradeCap)) {
         const bits = [g.subject, g.grade, g.type, g.date.slice(0, 10)].filter(
           Boolean,
         );
         lines.push(`• ${bits.join(" — ")}`);
       }
-      const note = formatUnclassifiedNote(stats, filtering);
-      if (note) {
-        lines.push(note);
-      }
+      appendAspectNotes(lines, stats, filtering, facts.grades.length, gradeCap);
     }
   }
   if (facts.aspects.includes("homework")) {
@@ -1437,15 +1388,19 @@ export function formatMashovHebrew(facts: MashovFacts): string {
           ? `שיעורי בית ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
           : `שיעורי בית ${who}:`.trim(),
       );
-      for (const h of facts.homework.slice(0, 10)) {
+      const homeworkCap = MASHOV_DISPLAY_CAPS.homework;
+      for (const h of facts.homework.slice(0, homeworkCap)) {
         lines.push(
           `• ${[h.subject, h.text, h.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
       }
-      const note = formatUnclassifiedNote(stats, filtering);
-      if (note) {
-        lines.push(note);
-      }
+      appendAspectNotes(
+        lines,
+        stats,
+        filtering,
+        facts.homework.length,
+        homeworkCap,
+      );
     }
   }
   if (facts.aspects.includes("behavior")) {
@@ -1469,15 +1424,19 @@ export function formatMashovHebrew(facts: MashovFacts): string {
           ? `התנהגות ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
           : `התנהגות ${who}:`.trim(),
       );
-      for (const b of facts.behavior.slice(0, 10)) {
+      const behaviorCap = MASHOV_DISPLAY_CAPS.behavior;
+      for (const b of facts.behavior.slice(0, behaviorCap)) {
         lines.push(
           `• ${[b.subject, b.text, b.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
       }
-      const note = formatUnclassifiedNote(stats, filtering);
-      if (note) {
-        lines.push(note);
-      }
+      appendAspectNotes(
+        lines,
+        stats,
+        filtering,
+        facts.behavior.length,
+        behaviorCap,
+      );
     }
   }
   if (facts.aspects.includes("timetable")) {
@@ -1509,15 +1468,19 @@ export function formatMashovHebrew(facts: MashovFacts): string {
           ? `חיסורים ${who} בטווח ${rangeLabel}:`.replace(/\s+/g, " ").trim()
           : `חיסורים ${who}:`.trim(),
       );
-      for (const a of facts.absences.slice(0, 15)) {
+      const absenceCap = MASHOV_DISPLAY_CAPS.absences;
+      for (const a of facts.absences.slice(0, absenceCap)) {
         lines.push(
           `• ${[a.subject, a.text, a.date.slice(0, 10)].filter(Boolean).join(" — ")}`,
         );
       }
-      const note = formatUnclassifiedNote(stats, filtering);
-      if (note) {
-        lines.push(note);
-      }
+      appendAspectNotes(
+        lines,
+        stats,
+        filtering,
+        facts.absences.length,
+        absenceCap,
+      );
     }
   }
   if (facts.aspects.includes("messages")) {
@@ -1537,17 +1500,21 @@ export function formatMashovHebrew(facts: MashovFacts): string {
       lines.push(
         filtering ? `הודעות במשוב בטווח ${rangeLabel}:` : "הודעות במשוב:",
       );
-      for (const m of facts.messages.slice(0, 10)) {
+      const messageCap = MASHOV_DISPLAY_CAPS.messages;
+      for (const m of facts.messages.slice(0, messageCap)) {
         lines.push(
           `• ${[m.from, m.subject, m.preview, m.date.slice(0, 10)]
             .filter(Boolean)
             .join(" — ")}`,
         );
       }
-      const note = formatUnclassifiedNote(stats, filtering);
-      if (note) {
-        lines.push(note);
-      }
+      appendAspectNotes(
+        lines,
+        stats,
+        filtering,
+        facts.messages.length,
+        messageCap,
+      );
     }
   }
   if (lines.length === 0) {
@@ -1556,28 +1523,64 @@ export function formatMashovHebrew(facts: MashovFacts): string {
   return lines.join("\n");
 }
 
-function normalizeMashovReplyRange(input: {
+/** Concise notice when ACTION had explicit but invalid date bounds. */
+export const MASHOV_INVALID_DATE_BOUNDS_HE =
+  "לא הצלחתי להבין את טווח התאריכים. בדקו תאריך בפורמט YYYY-MM-DD (למשל 2025-01-31) ונסו שוב.";
+
+type MashovBoundClass =
+  | { kind: "absent" }
+  | { kind: "valid"; ymd: string }
+  | { kind: "invalid" };
+
+function classifyMashovBound(raw: string | null | undefined): MashovBoundClass {
+  if (raw === null || raw === undefined) {
+    return { kind: "absent" };
+  }
+  if (typeof raw !== "string") {
+    return { kind: "invalid" };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { kind: "absent" };
+  }
+  const ymd = trimmed.slice(0, 10);
+  if (isValidCalendarYmd(ymd)) {
+    return { kind: "valid", ymd };
+  }
+  return { kind: "invalid" };
+}
+
+export type MashovReplyRangeResult =
+  | { ok: true; range: MashovDateRange }
+  | { ok: false; notice: string };
+
+/**
+ * Resolve ACTION date_from/date_to for Mashov event filtering.
+ * Explicit non-empty invalid bounds → fail (never silent open-range).
+ * Absent/null/empty → open range (ok).
+ */
+export function resolveMashovReplyRange(input: {
   dateFrom?: string | null;
   dateTo?: string | null;
-}): MashovDateRange {
-  let dateFrom =
-    typeof input.dateFrom === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(input.dateFrom.trim()) &&
-    isValidYmd(input.dateFrom.trim())
-      ? input.dateFrom.trim()
-      : null;
-  let dateTo =
-    typeof input.dateTo === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(input.dateTo.trim()) &&
-    isValidYmd(input.dateTo.trim())
-      ? input.dateTo.trim()
-      : null;
+  /** From parse when a bound was present but calendar-invalid. */
+  dateBoundsInvalid?: boolean;
+}): MashovReplyRangeResult {
+  if (input.dateBoundsInvalid) {
+    return { ok: false, notice: MASHOV_INVALID_DATE_BOUNDS_HE };
+  }
+  const from = classifyMashovBound(input.dateFrom);
+  const to = classifyMashovBound(input.dateTo);
+  if (from.kind === "invalid" || to.kind === "invalid") {
+    return { ok: false, notice: MASHOV_INVALID_DATE_BOUNDS_HE };
+  }
+  let dateFrom = from.kind === "valid" ? from.ymd : null;
+  let dateTo = to.kind === "valid" ? to.ymd : null;
   if (dateFrom && dateTo && dateFrom > dateTo) {
     const swap = dateFrom;
     dateFrom = dateTo;
     dateTo = swap;
   }
-  return { dateFrom, dateTo };
+  return { ok: true, range: { dateFrom, dateTo } };
 }
 
 export async function resolveMashovReply(input: {
@@ -1587,14 +1590,21 @@ export async function resolveMashovReply(input: {
   /** Inclusive event-date filter (not login academic year). */
   dateFrom?: string | null;
   dateTo?: string | null;
+  /** When parse saw explicit invalid bounds — do not open-range. */
+  dateBoundsInvalid?: boolean;
   now?: Date;
   fetchImpl?: typeof fetch;
 }): Promise<string> {
   const aspects = parseMashovAspects(input.aspects);
-  const range = normalizeMashovReplyRange({
+  const rangeResult = resolveMashovReplyRange({
     dateFrom: input.dateFrom,
     dateTo: input.dateTo,
+    dateBoundsInvalid: input.dateBoundsInvalid,
   });
+  if (!rangeResult.ok) {
+    return rangeResult.notice;
+  }
+  const range = rangeResult.range;
   const loaded = loadMashovCredsFromFilings(input.filings, {
     child: input.child ?? undefined,
     now: input.now,

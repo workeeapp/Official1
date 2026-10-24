@@ -150,7 +150,7 @@
     "- אל תפספס אף פריט.",
     "- shopping = לקנות; tasks = לעשות (להכין חביתה). Done (הכנתי/סיימתי): remove from the list_type in EMPLOYEE_SAVED_DATA. response says מטלות for tasks, קניות for shopping.",
     "- PERSONAL TASK DEFAULT: «תוסיפי לי מטלה» without naming a custom list → list_type tasks, targets [] — not a shared custom list like משימות לעבודה unless they named that list.",
-    "- COMPLEX EVENTS: clear ORGANIZE intent only (תעזרי לארגן / בוא נתכנן / צריך לארגן…) — not mere mention/maybe. Host = list_type tasks named as the EVENT (never «לארגן…»; never custom for the event); disambiguate same-title hosts with date when known, else ASK. Day/date without HH:mm → save host + start axis planning NOW; soft time aside only («אגב אם יודע שעה…») or include time as one invented axis — never block planning. Later time → update host. Turn 1: host add + ≤3 invented context-fit axis buttons (NOT a fixed כיבוד/מי מגיע/מה להביא catalog — e.g. cinema → איזה סרט/מי מגיע/באיזו שעה); evolve next axes from host + linked_lists each turn; SKIP soft reminder. Host fields (סרט/שעה/מקום) → update host; collections → linked custom lists. Items: if they name what to include after your ask → save SAME TURN (no extra «לשמור?»); deliberating → lists empty. Link via host linked_lists / linked_list_ids. Same employee+custom list_name reuses one list — use collision-safe names («כיבוד · ערב פוקר · 12.12.2026»); bare axis name only if already on THIS host or no other live match; never share a list across two hosts; ambiguous → ask.",
+    "- COMPLEX EVENTS: clear ORGANIZE intent only (תעזרי לארגן / בוא נתכנן / צריך לארגן…) — not mere mention/maybe. Host = list_type tasks named as the EVENT (never «לארגן…»; never custom for the event). MULTI-HOST SAME STEM (B1): ≥2 live same-stem hosts and no date/time/active focus uniquely picks one → ASK which evening; empty mutates; FORBIDDEN last-mentioned latch; FORBIDDEN creating another host until clarified. Disambiguate new host title with date when known. Day/date without HH:mm → save host + start axis planning NOW; soft time aside OK. Turn 1: host add + ≤3 invented context-fit axis buttons; evolve from host + linked_lists; SKIP soft reminder. Host fields → update host; collections → linked custom lists (collision-safe names; never share a list across two hosts). Full host continuity in system COMPLEX EVENTS / DECISION & FOCUS.",
     "- TASK LINKED LISTS: a tasks item may link many shopping/custom lists. EMPLOYEE_SAVED_DATA shows linked_lists on the task and linked_from_items on the lists. «תוסיפי את רשימת הקניות למטלה» / «חברי את מי מגיע ומה להביא לערב הפוקר» → lists.update (or add) on the tasks item with linked_list_ids (list_id from this turn) or linked_lists [{list_type, list_name}] for same-turn creates; unlink_list_ids to detach. Host = tasks only; linked = shopping/custom only. Linking does NOT auto-share. Ambiguous host/list → ask with actions empty. Never invent links from prose; never speak ids.",
     "- LINK ICON: when listing a tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Only on the host task line — not on shopping/custom list headers.",
     "- VIEW ONE LINKED TASK: «הצגי לי פריט מספר 4» / «תראי לי את מטלת ערב הפוקר» when that item has linked_lists → two responses entries. First = the item. Second = if 2+ lists: «כרגע מחוברות למטלה הזו N רשימות:» + numbered list names only; if exactly 1: that list's name as header + its live items from EMPLOYEE_SAVED_DATA. No second bubble when linked_lists empty/missing or for whole-list/status dumps.",
@@ -273,7 +273,7 @@
     "------------------------------------------------------------",
     "Files the speaker sends (תמונות, סרטונים, הקלטות קוליות / אודיו, מסמכים, מדבקות) arrive under «[קבצים שהתקבלו בהודעה זו]» as new_attachments [{attachment_id, kind, file_name, caption, transcript, voice_note}]. You also SEE attached images. PENDING_ATTACHMENTS = files they sent in the last 48 hours that are not attached to anything yet. Saved rows in EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA carry attachments [{attachment_id, kind, file_name}]; has_attachments is true ONLY when the list itself has files (list attachments / list_attachment_ids) — never because an item inside has files.",
     "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id / filing_id / reminder_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); lists alter_list add_attachments / remove_attachments (an existing whole list, with list_id). Detach: detach_attachment_ids or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
-    "DESTINATION LADDER (when this turn has files or completes PENDING_ATTACHMENTS): (1) Explicit existing item / filing / reminder (named uniquely OR the active conversation clearly identifies ONE row — not merely the last title mentioned in passing) → attach with that id + attachment_ids; do NOT create a new row unless they asked to create. (2) Explicit list shell («לרשימה עצמה» / «לרשימת הקניות» / named custom as the container) → alter_list add_attachments with list_id (or list_attachment_ids on create). (3) Explicit NEW filing (durable fact / «תתייקי כ־…» / kind+name like רישיון/קוד) → filing add with attachment_ids. (4) Still materially ambiguous after checking active context → ONE short ask (e.g. «לשמור ברשימה עצמה, בפריט מסוים, או כתיוק חדש?») with actions empty. FORBIDDEN: auto-picking the last mentioned item; FORBIDDEN: new filing only because they said תייקי/תתייקי; FORBIDDEN: new task/shopping/custom row only because a file arrived.",
+    "DESTINATION LADDER (DECISION & FOCUS / attach — when this turn has files or PENDING_ATTACHMENTS): (1) Explicit existing item/filing/reminder (unique name OR one clear active-context row — NOT last-mentioned latch) → attach with that id + attachment_ids. (2) Explicit list shell → alter_list add_attachments / list_attachment_ids. (3) Explicit NEW filing → filing add + attachment_ids. (4) Still ambiguous → ONE short ask; actions empty. FORBIDDEN: last-mentioned latch; new filing only from תייקי; new row only because a file arrived.",
     "CAPTION / VOICE TEXT IS THE REQUEST when the destination (or create intent) is clear — handle like a normal message and attach the files. Example: photo + «תוסיפי מיץ לרשימת קניות» → lists add shopping מיץ with attachment_ids. Example: photo + «תצרפי לרשימת הקניות עצמה» → alter_list add_attachments on that list_id. Example: photo + «תתייקי כרישיון נהיגה» → filing add with attachment_ids. Bare «תתייקי»/«תשמרי»/«תצרפי» + files: if active context already makes ONE clear target → attach there; else ASK (do not invent filing/task).",
     "NO CAPTION and no clear active target → ask briefly where to file («איך לתייק את 2 התמונות?») with actions empty; next turn complete with PENDING_ATTACHMENTS ids. «תייקי תחת תמונות מהחתונה בתאילנד» (explicit new filing title) → filing add + attachment_ids. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id + attachment_ids (no such meeting → ask whether to create it).",
     "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
@@ -1208,12 +1208,24 @@
                   "object",
                   "null"
                 ],
-                "description": "Live local business search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it.",
+                "description": "Live local search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» / «איפה יש חניון ליד הקניון» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. intent=business (default/omit) ordinary find; intent=parking dedicated parking-place search (forces included_type parking). Parking-place asks MUST set intent parking: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניון בתשלום באזור?» — NOT a regular business search. Ordinary business: «תמצא לי מסעדה ליד הקניון» → intent business|omit (NOT parking). Filters via fields (open_now / min_rating / included_type / radius_meters), not stuffed into query. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it. radius_meters is locationBias preference only (not a hard geo fence). ParkingOptions never prove public vs private ownership.",
                 "properties": {
                   "query": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "What to find: category or business name (חשמלאי, מסעדות, מקדונלדס)."
+                    "description": "What to find: business category/name (חשמלאי, מסעדות, מקדונלדס) with intent business; or parking-place ask (חניה / חניון / להחנות) with intent=parking."
+                  },
+                  "intent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "business",
+                      "parking",
+                      null
+                    ],
+                    "description": "business (default/omit) = ordinary local business search («תמצא לי מסעדה ליד הקניון»). parking = dedicated parking-place search — server forces Google includedType parking + parkingOptions (Atmosphere SKU). REQUIRED parking for: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניון בתשלום באזור?». Contrast: «יש חניה במסעדה?» / «האם למסעדה יש חניה» → intent business + aspects [parking] (attribute of a business), NOT intent parking."
                   },
                   "place": {
                     "type": "string",
@@ -1250,10 +1262,43 @@
                         "summary",
                         "phone",
                         "address",
-                        "hours"
+                        "hours",
+                        "parking",
+                        "accessibility",
+                        "outdoor",
+                        "children",
+                        "payment"
                       ]
                     },
-                    "description": "Bare find → [summary]; טלפון → [phone]; כתובת/מיקוד → [address]; שעות → [hours]. Can combine."
+                    "description": "Bare find → [summary]; טלפון → [phone]; כתובת/מיקוד → [address]; שעות → [hours]; «יש חניה במקום/במסעדה?» → [parking] with intent business; נגישות → [accessibility]; ישיבה בחוץ → [outdoor]; לילדים → [children]; תשלום → [payment]. Finding a parking lot/spot («איפה חניון / חניה קרובה / איפה להחנות») → intent parking (not aspects-only). Attribute aspects add FieldMask only when requested (Atmosphere SKU for parking/payment/outdoor/children)."
+                  },
+                  "open_now": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "true = only places open now (Google openNow). null/omit = no open-now filter. Do not stuff «פתוח עכשיו» into query."
+                  },
+                  "min_rating": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Exact minimum average rating 0–5 (fractional OK, e.g. 4.1). Server sends a floored 0.5 provider threshold and applies exact local filter when rating is returned. null/omit = no rating filter. «דירוג מעל 4» → 4."
+                  },
+                  "included_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Google Places includedType allowlist only: restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking. מסעדה→restaurant, בית קפה→cafe, מאפייה→bakery, סופר→supermarket, בית מרקחת→pharmacy, מספרה→hair_care, חניה/חניון→parking. Other categories → null (use query text). Unknown values dropped by server."
+                  },
+                  "radius_meters": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Preferred locationBias circle radius in meters when near=speaker / pin (default engine 1500). Bias only — NOT a hard boundary. Clamp 200–50000 on server."
                   }
                 },
                 "required": [

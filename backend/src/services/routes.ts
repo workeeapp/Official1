@@ -103,6 +103,15 @@ export const ROUTES_API_KEY_MISSING = "routes_api_key_missing";
 export const ROUTES_API_DENIED = "routes_api_denied";
 export const ROUTES_ZERO_RESULTS = "routes_zero_results";
 
+/** Summary trip step display cap (aspects include summary, not dedicated steps). */
+export const ROUTES_STEPS_SUMMARY_DISPLAY_CAP = 8;
+/** Dedicated steps-aspect display cap. */
+export const ROUTES_STEPS_DETAIL_DISPLAY_CAP = 12;
+
+/** Confirmed local trip-step display truncation — not a provider claim. */
+export const ROUTES_STEPS_LOCAL_TRUNCATION_HE =
+  "(מוצגים חלק משלבי המסלול — יש עוד שלא הוצגו בגלל מגבלת תצוגה.)";
+
 export function parseRoutesAspects(raw: unknown): RoutesAspect[] {
   if (!Array.isArray(raw)) {
     return ["summary"];
@@ -1016,10 +1025,16 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
     wants(facts.aspects, "steps") || facts.aspects.includes("summary");
   if (showSteps && facts.steps.length > 0) {
     lines.push("");
-    const max = facts.aspects.includes("steps") ? 12 : 8;
+    const max = facts.aspects.includes("steps")
+      ? ROUTES_STEPS_DETAIL_DISPLAY_CAP
+      : ROUTES_STEPS_SUMMARY_DISPLAY_CAP;
     facts.steps.slice(0, max).forEach((step, i) => {
       lines.push(formatStepLine(step, i));
     });
+    // Confirmed local display truncation only — one Google trip is intentional.
+    if (facts.steps.length > max) {
+      lines.push(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
+    }
   }
 
   return lines.join("\n").trim();

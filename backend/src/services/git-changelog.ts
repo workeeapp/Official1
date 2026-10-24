@@ -31,6 +31,18 @@ export async function readGitHeadSha(repoRoot = resolveRepoRoot()): Promise<stri
   return stdout.trim();
 }
 
+/** Default / hard max for git_log digest commit pages (`-n`). */
+export const GIT_LOG_DEFAULT_MAX_COUNT = 50;
+export const GIT_LOG_HARD_MAX_COUNT = 80;
+
+/**
+ * Commit list reached the digest `-n` cap — potential incompleteness only.
+ * Does not prove additional commits exist in the window.
+ * English: compose facts feed the LLM (platform digests), not WhatsApp copy.
+ */
+export const GIT_LOG_COMMIT_CAP_NOTE =
+  "(Note: commit list may be incomplete — reached the digest commit cap; there may be more in the window.)";
+
 /**
  * Commits after `sinceSha` (exclusive) up to HEAD.
  * If `sinceSha` is empty, use commits since `sinceDate` when provided, else last N.
@@ -40,10 +52,22 @@ export async function readGitChangelog(input: {
   sinceSha?: string;
   sinceDate?: Date;
   maxCount?: number;
-}): Promise<{ headSha: string; commits: GitCommitSummary[] }> {
+}): Promise<{
+  headSha: string;
+  commits: GitCommitSummary[];
+  maxCount: number;
+  /**
+   * True when returned commit count reached the requested `-n` cap.
+   * Potential incompleteness only.
+   */
+  commitCapSaturated: boolean;
+}> {
   const repoRoot = input.repoRoot ?? resolveRepoRoot();
   const headSha = await readGitHeadSha(repoRoot);
-  const maxCount = Math.min(Math.max(input.maxCount ?? 50, 1), 80);
+  const maxCount = Math.min(
+    Math.max(input.maxCount ?? GIT_LOG_DEFAULT_MAX_COUNT, 1),
+    GIT_LOG_HARD_MAX_COUNT,
+  );
   const rangeArgs =
     input.sinceSha?.trim() && input.sinceSha.trim() !== headSha
       ? [`${input.sinceSha.trim()}..HEAD`]
@@ -86,23 +110,36 @@ export async function readGitChangelog(input: {
     })
     .filter((row) => row.sha && row.subject);
 
-  return { headSha, commits };
+  return {
+    headSha,
+    commits,
+    maxCount,
+    commitCapSaturated: commits.length >= maxCount,
+  };
 }
 
-export function formatGitChangelogForCompose(commits: GitCommitSummary[]): string {
+export function formatGitChangelogForCompose(
+  commits: GitCommitSummary[],
+  opts?: { commitCapSaturated?: boolean },
+): string {
   if (commits.length === 0) {
     return "";
   }
-  return commits
+  const body = commits
     .map((row, index) => {
-      const body = row.body ? `\n${row.body}` : "";
+      const bodyText = row.body ? `\n${row.body}` : "";
       const files =
         row.files.length > 0
           ? `\nFiles: ${row.files.slice(0, 8).join(", ")}`
           : "";
-      return `${index + 1}. ${row.subject}${body}${files}`;
+      return `${index + 1}. ${row.subject}${bodyText}${files}`;
     })
     .join("\n\n");
+  // Potential incompleteness only when `-n` saturated — never because few commits.
+  if (opts?.commitCapSaturated) {
+    return `${body}\n\n${GIT_LOG_COMMIT_CAP_NOTE}`;
+  }
+  return body;
 }
 
 /** How to load commits for a git_log fire, and whether to stamp last_report_sha after. */

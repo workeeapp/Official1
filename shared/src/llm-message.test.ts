@@ -2377,7 +2377,243 @@ describe("parseLlmReply", () => {
       lat: null,
       lng: null,
       aspects: ["phone"],
+      intent: "business",
+      openNow: null,
+      minRating: null,
+      includedType: null,
+      radiusMeters: null,
     });
+  });
+
+  it("reads places filters open_now min_rating included_type radius", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "מסעדות",
+              place: "תל אביב",
+              open_now: true,
+              min_rating: 4.1,
+              included_type: "restaurant",
+              radius_meters: 2000,
+              aspects: ["summary"],
+            },
+          },
+        }),
+      ).places,
+    ).toEqual({
+      query: "מסעדות",
+      place: "תל אביב",
+      near: "",
+      lat: null,
+      lng: null,
+      aspects: ["summary"],
+      intent: "business",
+      openNow: true,
+      minRating: 4.1,
+      includedType: "restaurant",
+      radiusMeters: 2000,
+    });
+  });
+
+  it("drops invalid places min_rating and unknown included_type", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "אוכל",
+              place: "חיפה",
+              min_rating: 9,
+              included_type: "gas_station",
+              open_now: false,
+            },
+          },
+        }),
+      ).places,
+    ).toEqual({
+      query: "אוכל",
+      place: "חיפה",
+      near: "",
+      lat: null,
+      lng: null,
+      aspects: ["summary"],
+      intent: "business",
+      openNow: null,
+      minRating: null,
+      includedType: null,
+      radiusMeters: null,
+    });
+  });
+
+  it("routes places intent=parking and forces included_type parking", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חניה",
+              place: "תל אביב",
+              intent: "parking",
+              included_type: "restaurant",
+              aspects: ["summary"],
+            },
+          },
+        }),
+      ).places,
+    ).toEqual({
+      query: "חניה",
+      place: "תל אביב",
+      near: "",
+      lat: null,
+      lng: null,
+      aspects: ["summary"],
+      intent: "parking",
+      openNow: null,
+      minRating: null,
+      includedType: "parking",
+      radiusMeters: null,
+    });
+  });
+
+  /**
+   * Offline ACTION contracts for natural Hebrew parking vs business asks.
+   * Understanding stays in the model; these assert parse/routing of the ACTION
+   * the prompt+schema teach the model to emit for each utterance.
+   */
+  it("parses parking-place ACTION contracts for natural Hebrew asks", () => {
+    const parkingContracts: Array<{
+      utterance: string;
+      places: Record<string, unknown>;
+    }> = [
+      {
+        utterance: "איפה יש חניון ליד הקניון?",
+        places: {
+          query: "חניון",
+          place: "הקניון",
+          intent: "parking",
+          aspects: ["summary"],
+        },
+      },
+      {
+        utterance: "תמצא לי חניה קרובה",
+        places: {
+          query: "חניה",
+          place: "",
+          near: "speaker",
+          intent: "parking",
+          aspects: ["summary"],
+        },
+      },
+      {
+        utterance: "איפה אפשר להחנות ליד המסעדה?",
+        places: {
+          query: "חניה",
+          place: "המסעדה",
+          intent: "parking",
+          aspects: ["summary"],
+        },
+      },
+      {
+        utterance: "יש חניון בתשלום באזור?",
+        places: {
+          query: "חניון",
+          place: "",
+          near: "speaker",
+          intent: "parking",
+          aspects: ["summary"],
+        },
+      },
+    ];
+    for (const row of parkingContracts) {
+      const parsed = parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: { places: row.places },
+        }),
+      ).places;
+      expect(parsed, row.utterance).toBeTruthy();
+      expect(parsed!.intent, row.utterance).toBe("parking");
+      expect(parsed!.includedType, row.utterance).toBe("parking");
+    }
+  });
+
+  it("parses ordinary business ACTION as intent business (default)", () => {
+    const withExplicit = parseReplyMetadata(
+      JSON.stringify({
+        response: "",
+        metadata: {
+          places: {
+            query: "מסעדה",
+            place: "הקניון",
+            intent: "business",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    ).places;
+    expect(withExplicit?.intent).toBe("business");
+    expect(withExplicit?.includedType).toBeNull();
+
+    const omitted = parseReplyMetadata(
+      JSON.stringify({
+        response: "",
+        metadata: {
+          places: {
+            query: "מסעדה",
+            place: "הקניון",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    ).places;
+    expect(omitted?.intent).toBe("business");
+    expect(omitted?.includedType).toBeNull();
+
+    // Attribute ask about a business — not parking-place search.
+    const attr = parseReplyMetadata(
+      JSON.stringify({
+        response: "",
+        metadata: {
+          places: {
+            query: "מסעדה",
+            place: "תל אביב",
+            intent: "business",
+            aspects: ["parking"],
+          },
+        },
+      }),
+    ).places;
+    expect(attr?.intent).toBe("business");
+    expect(attr?.aspects).toEqual(["parking"]);
+    expect(attr?.includedType).toBeNull();
+  });
+
+  it("maps places attribute aspect aliases", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "מסעדה",
+              place: "תל אביב",
+              aspects: ["חניה", "נגישות", "חוץ", "ילדים", "תשלום", "bogus"],
+            },
+          },
+        }),
+      ).places?.aspects,
+    ).toEqual([
+      "parking",
+      "accessibility",
+      "outdoor",
+      "children",
+      "payment",
+    ]);
   });
 
   it("reads metadata.jewish for Shabbat / parasha", () => {
@@ -2512,6 +2748,11 @@ describe("parseLlmReply", () => {
       lat: null,
       lng: null,
       aspects: ["summary"],
+      intent: "business",
+      openNow: null,
+      minRating: null,
+      includedType: null,
+      radiusMeters: null,
     });
   });
 
@@ -2739,6 +2980,49 @@ describe("parseLlmReply", () => {
     ).toMatchObject({
       dateFrom: "2025-01-01",
       dateTo: "2025-12-31",
+    });
+  });
+
+  it("marks mashov dateBoundsInvalid for non-calendar YYYY-MM-DD", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            mashov: {
+              aspects: ["grades"],
+              date_from: "2025-02-29",
+              date_to: "2025-03-01",
+            },
+          },
+        }),
+      ).mashov,
+    ).toEqual({
+      child: "",
+      aspects: ["grades"],
+      dateFrom: null,
+      dateTo: null,
+      dateBoundsInvalid: true,
+    });
+  });
+
+  it("marks mashov dateBoundsInvalid for garbage date_from", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            mashov: {
+              aspects: ["grades"],
+              date_from: "החודש",
+            },
+          },
+        }),
+      ).mashov,
+    ).toMatchObject({
+      dateFrom: null,
+      dateTo: null,
+      dateBoundsInvalid: true,
     });
   });
 

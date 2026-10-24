@@ -5,7 +5,12 @@ import {
   nextCandleLighting,
   parseJewishAspects,
   resolveJewishReply,
+  JEWISH_HOLIDAYS_COLLECT_CAP,
+  JEWISH_HOLIDAYS_COLLECT_CAP_HE,
+  JEWISH_HOLIDAYS_DISPLAY_CAP,
+  JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE,
   type JewishFacts,
+  type JewishTimedItem,
 } from "../src/services/jewish.js";
 
 describe("parseJewishAspects", () => {
@@ -98,6 +103,81 @@ describe("formatJewishHebrew", () => {
     expect(text).toContain("חגים קרובים");
     expect(text).toContain("חֲנֻכָּה");
     expect(text).toContain("05.12.2026");
+    expect(text).not.toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
+  });
+
+  it("discloses local display truncation when holidays exceed display cap", () => {
+    const holidays: JewishTimedItem[] = Array.from(
+      { length: JEWISH_HOLIDAYS_DISPLAY_CAP + 2 },
+      (_, i) => ({
+        category: "holiday" as const,
+        title: `חג ${i + 1}`,
+        dateIso: `2026-11-${String(i + 1).padStart(2, "0")}`,
+        clock: "",
+      }),
+    );
+    const text = formatJewishHebrew({
+      ...base,
+      aspects: ["holidays"],
+      candles: null,
+      havdalah: null,
+      parasha: null,
+      holidays,
+      holidaysDisplayTruncated: true,
+    });
+    expect(text).toContain("חג 1");
+    expect(text).toContain(`חג ${JEWISH_HOLIDAYS_DISPLAY_CAP}`);
+    expect(text).not.toContain(`חג ${JEWISH_HOLIDAYS_DISPLAY_CAP + 1}`);
+    expect(text).toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
+  });
+
+  it("discloses collect-cap saturation as potential incompleteness only", () => {
+    const holidays: JewishTimedItem[] = Array.from(
+      { length: JEWISH_HOLIDAYS_COLLECT_CAP },
+      (_, i) => ({
+        category: "holiday" as const,
+        title: `חג ${i + 1}`,
+        dateIso: `2026-11-${String(i + 1).padStart(2, "0")}`,
+        clock: "",
+      }),
+    );
+    const text = formatJewishHebrew({
+      ...base,
+      aspects: ["holidays"],
+      candles: null,
+      havdalah: null,
+      parasha: null,
+      holidays,
+      holidaysDisplayTruncated: true,
+      holidaysCollectCapped: true,
+    });
+    expect(text).toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+    expect(text).toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
+  });
+
+  it("omits holiday completeness notes for small unsaturated lists", () => {
+    const text = formatJewishHebrew({
+      ...base,
+      aspects: ["holidays"],
+      candles: null,
+      havdalah: null,
+      parasha: null,
+      holidays: [
+        {
+          category: "holiday",
+          title: "פּוּרִים",
+          dateIso: "2027-03-14",
+          clock: "",
+        },
+      ],
+      holidaysDisplayTruncated: false,
+      holidaysCollectCapped: false,
+    });
+    expect(text).toContain("פּוּרִים");
+    expect(text).not.toContain("מגבלת תצוגה");
+    expect(text).not.toContain("מגבלת האיסוף");
   });
 });
 
@@ -222,5 +302,32 @@ describe("resolveJewishReply", () => {
     });
     expect(text).toContain("חֲנֻכָּה");
     expect(text).toContain("05.12.2026");
+    expect(text).not.toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+    expect(text).not.toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
+  });
+
+  it("resolve: discloses display trunc + collect cap when Hebcal returns many holidays", async () => {
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      category: "holiday",
+      title: `Holiday ${i + 1}`,
+      hebrew: `חג ${i + 1}`,
+      date: `2026-11-${String(i + 1).padStart(2, "0")}`,
+    }));
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items }),
+    })) as unknown as typeof fetch;
+
+    const text = await resolveJewishReply({
+      place: "",
+      aspects: ["holidays"],
+      now: new Date("2026-10-20T12:00:00Z"),
+      fetchImpl,
+    });
+    expect(text).toContain("חג 1");
+    expect(text).toContain(`חג ${JEWISH_HOLIDAYS_DISPLAY_CAP}`);
+    expect(text).not.toContain(`חג ${JEWISH_HOLIDAYS_DISPLAY_CAP + 1}`);
+    expect(text).toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
+    expect(text).toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
   });
 });

@@ -112,7 +112,9 @@ export async function loadComposeFacts(input: {
       sinceSha: window.sinceSha,
       sinceDate: window.sinceDate,
     });
-    const facts = formatGitChangelogForCompose(log.commits);
+    const facts = formatGitChangelogForCompose(log.commits, {
+      commitCapSaturated: log.commitCapSaturated,
+    });
     if (!facts) {
       return {
         kind: "git_log",
@@ -269,6 +271,9 @@ export async function loadComposeFacts(input: {
     );
     try {
       const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
+      // Contract: compose/watch Mashov is intentionally open-range until
+      // reminder compose metadata carries date_from/date_to. Do not pass
+      // event-date bounds here — never pretend a chat date filter applies.
       const body = await resolveMashovReply({
         filings: snapshot.filing ?? [],
         child,

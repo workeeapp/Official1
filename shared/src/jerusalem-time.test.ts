@@ -3,6 +3,7 @@ import {
   addJerusalemDays,
   addJerusalemMonths,
   formatJerusalemDateTime,
+  isValidCalendarYmd,
   jerusalemOffsetMs,
   jerusalemParts,
   jerusalemWallTimeToDate,
@@ -54,5 +55,14 @@ describe("jerusalem time", () => {
   it("reads the Jerusalem weekday, not the UTC one", () => {
     // 23:30 UTC on Saturday is already Sunday in Jerusalem.
     expect(jerusalemParts(new Date("2026-10-03T23:30:00.000Z")).weekday).toBe(0);
+  });
+
+  it("isValidCalendarYmd rejects regex-shaped non-days", () => {
+    expect(isValidCalendarYmd("2025-01-31")).toBe(true);
+    expect(isValidCalendarYmd("2024-02-29")).toBe(true);
+    expect(isValidCalendarYmd("2025-02-29")).toBe(false);
+    expect(isValidCalendarYmd("2025-13-01")).toBe(false);
+    expect(isValidCalendarYmd("2025-01-32")).toBe(false);
+    expect(isValidCalendarYmd("25-01-01")).toBe(false);
   });
 });
