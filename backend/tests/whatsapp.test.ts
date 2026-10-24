@@ -22,6 +22,7 @@ import {
   whatsappReactionBody,
   whatsappTypingBody,
   WHATSAPP_NAVIGATE_LABEL,
+  wazeNavigateCtaBody,
 } from "../src/services/whatsapp-send.js";
 import { parseLlmReply } from "@workee/shared";
 import { EMPTY_REPLY_RETRY } from "../src/services/employee-records.service.js";
@@ -347,6 +348,36 @@ describe("WhatsApp webhook", () => {
       interactive: {
         type: "cta_url",
         body: { text: "הרצל 12, תל אביב" },
+        action: {
+          name: "cta_url",
+          parameters: { display_text: "פתח ב-Waze", url },
+        },
+      },
+    });
+  });
+
+  it("Waze CTA for bare coordinates hides lat,lng in body; URL still targets them", () => {
+    const coords = "32.099279,34.8923104";
+    expect(wazeNavigateCtaBody(coords)).toBe("מיקום שמור");
+    expect(wazeNavigateCtaBody("הרצל 12, תל אביב")).toBe("הרצל 12, תל אביב");
+    const url = wazeNavigateUrl(coords);
+    expect(url).toBe(
+      `https://waze.com/ul?q=${encodeURIComponent(coords)}&navigate=yes`,
+    );
+    expect(
+      whatsappCtaUrlBody(
+        "972501234567",
+        wazeNavigateCtaBody(coords),
+        WHATSAPP_NAVIGATE_LABEL,
+        url,
+      ),
+    ).toEqual({
+      messaging_product: "whatsapp",
+      to: "972501234567",
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        body: { text: "מיקום שמור" },
         action: {
           name: "cta_url",
           parameters: { display_text: "פתח ב-Waze", url },

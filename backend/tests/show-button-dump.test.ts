@@ -9,10 +9,15 @@ import {
   formatCustomItemBody,
   formatFilingDumpBody,
   filingHiddenDetailMark,
+  filingPlaceMark,
+  filingNavigateCoordinates,
+  parseLatLngCoordinates,
   formatLinkedReminderParen,
   formatNumberedItem,
+  formatOccurrenceEffectiveReminderParen,
   formatRelativeDayLabel,
   formatRelativeFireAt,
+  formatReminderIndicator,
   formatReminderWhen,
   formatAgendaOneOffLine,
   formatAgendaStandingLine,
@@ -221,6 +226,36 @@ describe("formatFilingDumpBody", () => {
         "list",
       ),
     ).toBe("");
+    // Address filings: item_info is the 📍 value — no 📄 unless find-helper.
+    expect(
+      filingHiddenDetailMark(
+        {
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+          item_description: "",
+        },
+        "list",
+      ),
+    ).toBe("");
+    expect(
+      filingHiddenDetailMark(
+        {
+          item_name: "מיקום הבית",
+          item_info: "32.1, 34.8",
+          item_description: "ליד הפארק",
+        },
+        "list",
+      ),
+    ).toBe(" 📄");
+  });
+
+  it("parseLatLngCoordinates accepts bare lat,lng only", () => {
+    expect(parseLatLngCoordinates("32.099279, 34.8923104")).toEqual({
+      lat: 32.099279,
+      lng: 34.8923104,
+    });
+    expect(parseLatLngCoordinates("הרצל 1, תל אביב")).toBeNull();
+    expect(parseLatLngCoordinates("https://maps.google.com/?q=1,2")).toBeNull();
   });
 });
 
@@ -251,11 +286,11 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toContain("תיוקים:");
+    expect(dump).toContain("📁 תיוקים:");
     expect(dump).not.toContain("תיוקים אישיים:");
     expect(dump).not.toContain("תיוקים משותפים:");
     expect(dump).toMatch(
-      /תיוקים:\n1\. רישיון 📄\n2\. קוד שער 📄 \(מיכל, טל\)/,
+      /📁 תיוקים:\n1\. רישיון 📄\n2\. קוד שער 📄 \(מיכל, טל\)/,
     );
     expect(dump).not.toContain("תיאור:");
     expect(dump).not.toContain("שם:");
@@ -284,7 +319,7 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toBe("תיוקים:\n1. לוח מבחנים — יואב 📎 📄");
+    expect(dump).toBe("📁 תיוקים:\n1. לוח מבחנים — יואב 📎 📄");
     expect(dump).not.toContain("מתמטיקה");
     expect(dump).not.toContain("תיאור:");
   });
@@ -306,9 +341,108 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toBe("תיוקים:\n1. מסמך ללא קובץ");
+    expect(dump).toBe("📁 תיוקים:\n1. מסמך ללא קובץ");
     expect(dump).not.toContain("📄");
     expect(dump).not.toContain("📎");
+  });
+
+  it("option A: list 📍 only; ITEM DUMP 📍 + Waze coords; no Maps/coords in text", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "home",
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "street",
+          item_name: "כתובת עבודה",
+          item_info: "הרצל 1 תל אביב",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    const list = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(list).toContain("📁 תיוקים:");
+    expect(list).toMatch(/1\. מיקום הבית 📍/);
+    expect(list).toContain("2. רישיון 📄");
+    expect(list).toMatch(/3\. כתובת עבודה 📍/);
+    expect(list).not.toContain("32.099279");
+    expect(list).not.toContain("maps.google");
+    expect(list).not.toContain("הרצל 1");
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, { viewerName: "טל" }),
+    ).toBeNull();
+
+    const filtered = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      section: "personal",
+    })!;
+    expect(filtered).toMatch(/מיקום הבית 📍/);
+    expect(filtered).not.toContain("32.099279");
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        section: "personal",
+      }),
+    ).toBeNull();
+
+    const item = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      itemIds: new Set(["home"]),
+    })!;
+    expect(item).toBe("📁 תיוקים:\n1. מיקום הבית 📍");
+    expect(item).not.toContain("32.099279");
+    expect(item).not.toContain("maps.google");
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["home"]),
+      }),
+    ).toBe("32.099279,34.8923104");
+    expect(
+      filingNavigateCoordinates(snap.filing[0]!),
+    ).toBe("32.099279,34.8923104");
+
+    // Street-only location: 📍 in text, no Waze (no valid coordinates).
+    expect(
+      formatShowDumpFromKind("filings", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["street"]),
+      }),
+    ).toBe("📁 תיוקים:\n1. כתובת עבודה 📍");
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["street"]),
+      }),
+    ).toBeNull();
+
+    expect(
+      filingPlaceMark(
+        {
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+        },
+        "full",
+      ),
+    ).toBe(" 📍");
   });
 
   it("ITEM DUMP filters filings to show_dump_ids and shows full labeled body", () => {
@@ -339,7 +473,7 @@ describe("filings flat dump", () => {
     })!;
     expect(dump).toContain("קוד שער");
     expect(dump).not.toContain("רישיון");
-    expect(dump).toMatch(/^תיוקים:\n1\. /);
+    expect(dump).toMatch(/^📁 תיוקים:\n1\. /);
     expect(dump).toContain("שם: קוד שער · תיאור: 1234 · מידע לחיפוש: שער חניה");
     expect(dump).not.toContain("📄");
   });
@@ -758,9 +892,9 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toContain("תיוקים:");
+    expect(dump).toContain("📁 תיוקים:");
     expect(dump).toContain("לשון פנייה 📄");
-    expect(dump).toContain("כתובת 📄");
+    expect(dump).toContain("כתובת 📍");
     expect(dump).not.toContain("תיאור:");
     expect(dump).not.toContain("זכר");
     expect(dump).not.toContain("רחוב שחם");
@@ -828,7 +962,7 @@ describe("filings flat dump", () => {
     expect(asMichal).not.toContain("(עם ");
   });
 
-  it("sets navigate address only when exactly one address-bearing filing is shown", () => {
+  it("sets navigate address only on ITEM DUMP with valid coordinates", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -837,6 +971,14 @@ describe("filings flat dump", () => {
           item_name: "כתובת מרב",
           item_info: "יערה אבן יהודה",
           item_description: "כתובת",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "home",
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+          item_description: "",
           owner: "טל",
           scope: "personal",
         },
@@ -850,23 +992,30 @@ describe("filings flat dump", () => {
         },
       ],
     };
-    expect(navigateAddressFromFilingsDump(snap.filing, { viewerName: "טל" })).toBe(
-      "יערה אבן יהודה",
-    );
-
-    const twoAddresses: EmployeeRecordSnapshot["filing"] = [
-      ...snap.filing,
-      {
-        filing_id: "a2",
-        item_name: "כתובת עבודה",
-        item_info: "הרצל 1 תל אביב",
-        item_description: "",
-        owner: "טל",
-        scope: "personal",
-      },
-    ];
+    // Full inventory must not attach Waze / coords under the list on WhatsApp.
     expect(
-      navigateAddressFromFilingsDump(twoAddresses, { viewerName: "טל" }),
+      navigateAddressFromFilingsDump(snap.filing, { viewerName: "טל" }),
+    ).toBeNull();
+    // Street-only → no Waze.
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["a1"]),
+      }),
+    ).toBeNull();
+    // Valid coords → Waze target.
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["home"]),
+      }),
+    ).toBe("32.099279,34.8923104");
+
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["a1", "home"]),
+      }),
     ).toBeNull();
   });
 });
@@ -1044,9 +1193,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe(
-      "1. להזכיר לטל לאסוף את מאיה — רביעי ב־15:00 (תזכורת: רביעי ב־14:20)",
-    );
+    ).toBe("1. להזכיר לטל לאסוף את מאיה — רביעי ב־15:00 🔔");
     expect(
       formatScheduleSuffix(
         { "תאריך לביצוע": "2026-10-15", "שעה לביצוע": "19:30" },
@@ -1094,19 +1241,28 @@ describe("formatShowDumpFromKind", () => {
         { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
         now,
       ),
-    ).toBe("(תזכורת: היום ב־20:30)");
+    ).toBe("🔔");
+    expect(
+      formatLinkedReminderParen(
+        { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
+        now,
+        "detail",
+      ),
+    ).toBe("🔔 תזכורת: היום ב־20:30");
     expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-10-17 09:00", repeat: "none" } },
         now,
+        "detail",
       ),
-    ).toBe("(תזכורת: מחרתיים ב־09:00)");
+    ).toBe("🔔 תזכורת: מחרתיים ב־09:00");
     expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-11-15 09:00", repeat: "none" } },
         now,
+        "detail",
       ),
-    ).toBe("(תזכורת: 15.11.2026 ב־09:00)");
+    ).toBe("🔔 תזכורת: 15.11.2026 ב־09:00");
     expect(
       formatNumberedItem(
         1,
@@ -1251,7 +1407,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         now,
       ),
-    ).toBe("— כל יומיים ב־15:00 (קבוע + תזכורת)");
+    ).toBe("— כל יומיים ב־15:00 (קבוע)");
     expect(
       formatNumberedItem(
         5,
@@ -1267,7 +1423,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("5. לקחת אקמול — כל יומיים ב־15:00 (קבוע + תזכורת)");
+    ).toBe("5. לקחת אקמול — כל יומיים ב־15:00 (קבוע) 🔔");
     expect(
       formatScheduleSuffix(
         {
@@ -1302,9 +1458,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         now,
       ),
-    ).toBe(
-      "— כל יום ראשון ב־21:00 (קבוע + תזכורת ב־20:45) · 18.10 ב־21:30",
-    );
+    ).toBe("— כל יום ראשון ב־21:00 (קבוע) · 18.10 ב־21:30");
     expect(
       formatScheduleSuffix(
         {
@@ -1318,7 +1472,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         now,
       ),
-    ).toBe("— כל יום ראשון ב־21:00 (קבוע + תזכורת)");
+    ).toBe("— כל יום ראשון ב־21:00 (קבוע)");
     expect(
       formatNumberedItem(
         6,
@@ -1336,7 +1490,7 @@ describe("formatShowDumpFromKind", () => {
         { now },
       ),
     ).toBe(
-      "6. חוג טיסנים — כל יום ראשון ב־21:00 (קבוע + תזכורת ב־20:45) · 18.10 ב־21:30",
+      "6. חוג טיסנים — כל יום ראשון ב־21:00 (קבוע) · 18.10 ב־21:30 🔔",
     );
     expect(
       formatReminderWhen(
@@ -1376,7 +1530,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).not.toContain("(תזכורת:");
+    ).not.toContain("תזכורת:");
     expect(
       formatNumberedItem(
         2,
@@ -1385,7 +1539,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("2. לבדוק באג (תזכורת: היום ב־20:30)");
+    ).toBe("2. לבדוק באג 🔔");
     expect(
       formatNumberedItem(
         3,
@@ -1400,8 +1554,8 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("3. להתקשר לאמא (תזכורת: היום ב־19:00 · קבוע כל יום)");
-    // Appointment time ≠ ping time: schedule from שעה לביצוע, paren from fire_at.
+    ).toBe("3. להתקשר לאמא 🔔");
+    // Appointment time ≠ ping time: schedule from שעה לביצוע; list shows 🔔 only.
     expect(
       formatNumberedItem(
         1,
@@ -1414,7 +1568,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. לאסוף את מאיה — מחר ב־15:00 (תזכורת: מחר ב־14:20)");
+    ).toBe("1. לאסוף את מאיה — מחר ב־15:00 🔔");
     // Title already has ב־HH:mm from sync — strip so schedule is not duplicated.
     expect(stripMatchingTitleClock("לשלוח למיכל ברכת בוקר ב־09:00", "09:00")).toBe(
       "לשלוח למיכל ברכת בוקר",
@@ -1434,8 +1588,8 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. לשלוח למיכל ברכת בוקר — 09:00 (קבוע + תזכורת)");
-    // Recurring linked + chore HM match without חוזר → fold; no nested (תזכורת:).
+    ).toBe("1. לשלוח למיכל ברכת בוקר — 09:00 (קבוע) 🔔");
+    // Recurring linked + chore HM match without חוזר → fold + 🔔; no timed תזכורת.
     expect(
       formatNumberedItem(
         1,
@@ -1451,7 +1605,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. להזכיר לטל לבדוק ביט — 20:00 (קבוע + תזכורת)");
+    ).toBe("1. להזכיר לטל לבדוק ביט — 20:00 (קבוע) 🔔");
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {
@@ -2067,12 +2221,10 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       now,
     });
-    expect(text).toContain("לבדוק את הבאג הזה (תזכורת: היום ב־20:30)");
+    expect(text).toContain("לבדוק את הבאג הזה 🔔");
     expect(text).toContain("ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
     expect(text).toContain("חתונה של תום 📎 — 12.10.2026 ב־19:30");
-    expect(text).toContain(
-      "לראות מה קורה עם הביט (תזכורת: 15.11.2026 ב־09:00)",
-    );
+    expect(text).toContain("לראות מה קורה עם הביט 🔔");
     expect(text).toContain("✅ מטלות:");
     expect(text).not.toContain("מטלות משותפות עם");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
@@ -2083,8 +2235,9 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       now,
     });
-    expect(fromKind).toContain("(תזכורת: היום ב־20:30)");
-    expect(fromKind).toContain("(תזכורת: 15.11.2026 ב־09:00)");
+    expect(fromKind).toContain("לבדוק את הבאג הזה 🔔");
+    expect(fromKind).toContain("לראות מה קורה עם הביט 🔔");
+    expect(fromKind).not.toMatch(/תזכורת:/);
   });
 
   it("dumps from show_dump kind the same as the button command", () => {
@@ -2984,8 +3137,8 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).not.toContain("משותפות");
     expect(text).not.toContain("אישיות");
     expect(text).not.toContain("(לוסי)");
-    expect(text).toContain("להזכיר לטל לבדוק את הביט");
-    expect(text).toMatch(/תזכורת:/);
+    expect(text).toContain("להזכיר לטל לבדוק את הביט 🔔");
+    expect(text).not.toMatch(/תזכורת:/);
     expect(text).toContain("לשלוח למיכל ברכת בוקר");
   });
 
@@ -3130,7 +3283,8 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("לשאול את עמית");
     // Linked rem-meet is folded into the task line — not a second תזכורות row.
     expect(text).toContain("פגישה (טל, עמית)");
-    expect(text).toMatch(/תזכורת:/);
+    expect(text).toContain("🔔");
+    expect(text).not.toMatch(/תזכורת:/);
     expect(text).not.toContain("פגישה עם עמית");
     expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
@@ -3184,9 +3338,7 @@ describe("uniform standing + ping dump lines", () => {
       formatNumberedItem(1, "להוריד את סקאזי לטיול", standingSkazi, "tasks", {
         now,
       }),
-    ).toBe(
-      "1. להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
-    );
+    ).toBe("1. להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע) 🔔");
     expect(
       formatScheduleSuffix(
         {
@@ -3200,7 +3352,7 @@ describe("uniform standing + ping dump lines", () => {
         "tasks",
         now,
       ),
-    ).toBe("— כל יום ב־18:15 (קבוע + תזכורת)");
+    ).toBe("— כל יום ב־18:15 (קבוע)");
   });
 
   it("day-agenda excludes conditional watch clocks (compose_condition)", () => {
@@ -3527,15 +3679,15 @@ describe("uniform standing + ping dump lines", () => {
     })!;
 
     expect(agenda).toContain("ראשון 18.10:");
-    // Occurrence-effective under the day header (not the flat series suffix).
-    expect(agenda).toContain(
-      "להוריד את סקאזי לטיול — 08:45 (תזכורת ב־08:30)",
-    );
+    // Occurrence-effective under the day header: chore time kept, reminder → 🔔.
+    expect(agenda).toContain("להוריד את סקאזי לטיול — 08:45 🔔");
     // Unlinked clock-only row still uses reminder agenda formatting.
     expect(agenda).toContain("לשלוח למיכל ברכת בוקר — 09:00 (קבוע כל יום)");
     expect(agenda).toContain("פגישה (טל, עמית) — 21:30");
     expect(agenda).toContain("ללכת לרופא — 08:00");
-    expect(agenda).toContain("(תזכורת:");
+    expect(agenda).toContain("🔔");
+    expect(agenda).not.toMatch(/תזכורת ב־/);
+    expect(agenda).not.toMatch(/\(תזכורת:/);
     // Linked clocks must not appear as their own numbered rows.
     expect(agenda).not.toMatch(/\d+\. להוריד את סקאזי לטיול — 08:30/);
     expect(agenda).not.toMatch(/\d+\. ללכת לרופא — 07:30/);
@@ -3544,9 +3696,9 @@ describe("uniform standing + ping dump lines", () => {
       viewerName: "טל",
       now,
     })!;
-    // Undated list dump still uses the series schedule suffix.
+    // Undated list dump: series schedule + 🔔 (no reminder times).
     expect(list).toContain(
-      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע + תזכורת ב־08:30)",
+      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע) 🔔",
     );
 
     const remOnly = formatShowDumpFromKind("reminders", snap, {
@@ -3584,9 +3736,7 @@ describe("uniform standing + ping dump lines", () => {
     expect(text).toContain("שני 19.10:");
     expect(text).toContain("שלישי 20.10:");
     expect(
-      text.match(
-        /להוריד את סקאזי לטיול — 08:45 \(תזכורת ב־08:30\)/g,
-      )?.length,
+      text.match(/להוריד את סקאזי לטיול — 08:45 🔔/g)?.length,
     ).toBe(3);
   });
 
@@ -3731,7 +3881,8 @@ describe("partner dump about_ids (birthday event)", () => {
     expect(text).toContain("✅ מטלות:");
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("כל שנה ב־13.10");
-    expect(text).toMatch(/קבוע \+ תזכורת/);
+    expect(text).toContain("(קבוע) 🔔");
+    expect(text).not.toMatch(/קבוע \+ תזכורת/);
     expect(text).not.toContain("מטלות אישיות");
     expect(text).not.toContain("מטלות משותפות עם");
     expect(text).not.toContain("מטלה פרטית");
@@ -3759,7 +3910,8 @@ describe("partner dump about_ids (birthday event)", () => {
       { now },
     );
     expect(line).toContain("כל שנה ב־9 במאי");
-    expect(line).toMatch(/קבוע \+ תזכורת ב־8\.5\.2027 ב־13:00/);
+    expect(line).toContain("(קבוע) 🔔");
+    expect(line).not.toMatch(/תזכורת ב־/);
   });
 
   it("unlinked about clock alone appears under תזכורות for partner dump", () => {
@@ -4384,5 +4536,280 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(dump).not.toContain("לא נכללה בטווח");
       expect(dump).not.toContain("לא נכללו בטווח");
     });
+  });
+});
+
+describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
+  const now = new Date("2026-10-15T10:00:00.000Z");
+  const seriesItem = {
+    item_id: "series-1",
+    "שם מטלה": "לקחת אקמול",
+    חוזר: "כל יום ב־08:45",
+    next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
+    reminder: {
+      reminder_id: "r-series",
+      fire_at: "2026-10-16 08:30",
+      repeat: "custom",
+      recurrence_text: "כל יום ב־08:30",
+      exception_entries: [
+        { date: "2026-10-16", time: "09:15" },
+        { date: "2026-10-17", cancel: true },
+      ],
+      exceptions: ["16.10 ב־09:15", "17.10 בוטל"],
+    },
+  };
+
+  it("list: one-time reminder → 🔔 only; without reminder → no bell", () => {
+    expect(
+      formatNumberedItem(
+        1,
+        "לבדוק באג",
+        { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
+        "tasks",
+        { now },
+      ),
+    ).toBe("1. לבדוק באג 🔔");
+    expect(
+      formatNumberedItem(2, "בלי תזכורת", {}, "tasks", { now }),
+    ).toBe("2. בלי תזכורת");
+  });
+
+  it("list: recurring series reminder → (קבוע) 🔔 without times", () => {
+    const line = formatNumberedItem(1, "לקחת אקמול", seriesItem, "tasks", {
+      now,
+    });
+    expect(line).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔");
+    expect(line).not.toMatch(/תזכורת/);
+  });
+
+  it("agenda: moved occurrence keeps chore time + 🔔; cancelled has no bell", () => {
+    expect(
+      formatAgendaStandingLine(1, "לקחת אקמול", seriesItem, "08:45", {
+        now,
+        occurrenceYmd: "2026-10-16",
+      }),
+    ).toBe("1. לקחת אקמול — 08:45 🔔");
+    expect(
+      formatOccurrenceEffectiveReminderParen(
+        seriesItem,
+        "2026-10-16",
+        "list",
+      ),
+    ).toBe("🔔");
+    expect(
+      formatAgendaStandingLine(2, "לקחת אקמול", seriesItem, "08:45", {
+        now,
+        occurrenceYmd: "2026-10-17",
+      }),
+    ).toBe("2. לקחת אקמול — 08:45");
+    expect(
+      formatOccurrenceEffectiveReminderParen(
+        seriesItem,
+        "2026-10-17",
+        "list",
+      ),
+    ).toBe("");
+  });
+
+  it("ITEM DUMP detail: shows effective moved time; cancelled shows nothing", () => {
+    expect(
+      formatOccurrenceEffectiveReminderParen(
+        seriesItem,
+        "2026-10-16",
+        "detail",
+      ),
+    ).toBe("🔔 תזכורת: 09:15");
+    expect(
+      formatOccurrenceEffectiveReminderParen(
+        seriesItem,
+        "2026-10-17",
+        "detail",
+      ),
+    ).toBe("");
+    // Flat ITEM DUMP: first next_occurrence is moved → show that effective time.
+    expect(
+      formatNumberedItem(1, "לקחת אקמול", seriesItem, "tasks", {
+        now,
+        itemIds: new Set(["series-1"]),
+      }),
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 09:15");
+    expect(
+      formatReminderIndicator(seriesItem, "detail", {
+        occurrenceYmd: "2026-10-16",
+      }),
+    ).toBe("🔔 תזכורת: 09:15");
+    // Never fall back to series 08:30 when the occurrence was moved.
+    expect(
+      formatReminderIndicator(seriesItem, "detail", {
+        occurrenceYmd: "2026-10-16",
+      }),
+    ).not.toContain("08:30");
+  });
+
+  it("flat ITEM DUMP: skips cancelled first occurrence for later effective reminder", () => {
+    const item = {
+      item_id: "skip-cancel",
+      "שם מטלה": "לקחת אקמול",
+      חוזר: "כל יום ב־08:45",
+      next_occurrences: [
+        "2026-10-16 08:45",
+        "2026-10-17 08:45",
+        "2026-10-18 08:45",
+      ],
+      reminder: {
+        reminder_id: "r-skip",
+        fire_at: "2026-10-16 08:30",
+        repeat: "custom",
+        recurrence_text: "כל יום ב־08:30",
+        exception_entries: [
+          { date: "2026-10-16", cancel: true },
+          { date: "2026-10-17", time: "09:45" },
+        ],
+        exceptions: ["16.10 בוטל", "17.10 ב־09:45"],
+      },
+    };
+    expect(formatReminderIndicator(item, "detail")).toBe("🔔 תזכורת: 09:45");
+    expect(
+      formatNumberedItem(1, "לקחת אקמול", item, "tasks", {
+        now,
+        itemIds: new Set(["skip-cancel"]),
+      }),
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 09:45");
+    // List mode unchanged — still a series-level 🔔.
+    expect(
+      formatNumberedItem(1, "לקחת אקמול", item, "tasks", { now }),
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔");
+  });
+
+  it("flat ITEM DUMP: first occurrence moved reminder uses that effective time", () => {
+    const item = {
+      item_id: "first-moved",
+      "שם מטלה": "לקחת אקמול",
+      חוזר: "כל יום ב־08:45",
+      next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
+      reminder: {
+        reminder_id: "r-moved",
+        fire_at: "2026-10-16 08:30",
+        repeat: "custom",
+        recurrence_text: "כל יום ב־08:30",
+        exception_entries: [{ date: "2026-10-16", time: "07:05" }],
+        exceptions: ["16.10 ב־07:05"],
+      },
+    };
+    expect(formatReminderIndicator(item, "detail")).toBe("🔔 תזכורת: 07:05");
+    expect(formatReminderIndicator(item, "detail")).not.toContain("08:30");
+    expect(
+      formatNumberedItem(1, "לקחת אקמול", item, "tasks", {
+        now,
+        itemIds: new Set(["first-moved"]),
+      }),
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 07:05");
+  });
+
+  it("flat ITEM DUMP: no upcoming effective reminder → no bell or time", () => {
+    const item = {
+      item_id: "all-cancel",
+      "שם מטלה": "לקחת אקמול",
+      חוזר: "כל יום ב־08:45",
+      next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
+      reminder: {
+        reminder_id: "r-all-cancel",
+        fire_at: "2026-10-16 08:30",
+        repeat: "custom",
+        recurrence_text: "כל יום ב־08:30",
+        exception_entries: [
+          { date: "2026-10-16", cancel: true },
+          { date: "2026-10-17", cancel: true },
+        ],
+        exceptions: ["16.10 בוטל", "17.10 בוטל"],
+      },
+    };
+    expect(formatReminderIndicator(item, "detail")).toBe("");
+    expect(
+      formatNumberedItem(1, "לקחת אקמול", item, "tasks", {
+        now,
+        itemIds: new Set(["all-cancel"]),
+      }),
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע)");
+  });
+
+  it("ITEM DUMP day-agenda detail uses occurrence-effective time", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [seriesItem],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const moved = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-16",
+      dateTo: "2026-10-16",
+      itemIds: new Set(["series-1"]),
+    })!;
+    expect(moved).toContain("לקחת אקמול — 08:45 🔔 תזכורת: 09:15");
+    expect(moved).not.toContain("08:30");
+
+    const cancelled = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-17",
+      dateTo: "2026-10-17",
+      itemIds: new Set(["series-1"]),
+    })!;
+    expect(cancelled).toContain("לקחת אקמול — 08:45");
+    expect(cancelled).not.toContain("🔔");
+    expect(cancelled).not.toMatch(/תזכורת/);
+  });
+
+  it("list/agenda paths never leak reminder times on task rows", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            seriesItem,
+            {
+              item_id: "once-1",
+              "שם מטלה": "לבדוק באג",
+              reminder: {
+                fire_at: "2026-10-15 20:30",
+                repeat: "none",
+              },
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+      reminders: [],
+    };
+    const list = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+    })!;
+    expect(list).toContain("🔔");
+    expect(list).not.toMatch(/תזכורת:/);
+    expect(list).not.toMatch(/תזכורת ב־/);
+    expect(list).not.toMatch(/קבוע \+ תזכורת/);
+
+    const agenda = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now,
+      dateFrom: "2026-10-16",
+      dateTo: "2026-10-16",
+    })!;
+    expect(agenda).toContain("לקחת אקמול — 08:45 🔔");
+    expect(agenda).not.toMatch(/תזכורת:/);
+    expect(agenda).not.toMatch(/תזכורת ב־/);
   });
 });

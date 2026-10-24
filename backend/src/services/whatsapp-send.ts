@@ -301,6 +301,21 @@ export function whatsappCtaUrlBody(
   };
 }
 
+/**
+ * CTA body for the Waze follow-up message.
+ * Street/place labels stay as-is; bare lat,lng → neutral Hebrew so coordinates
+ * are not shown again after an Option-A filing ITEM DUMP (URL still uses lat,lng).
+ */
+export function wazeNavigateCtaBody(address: string): string {
+  const trimmed = address.trim();
+  if (
+    /^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.test(trimmed)
+  ) {
+    return "מיקום שמור";
+  }
+  return trimmed;
+}
+
 /** Waze button for the reply's address; plain text with the link if the CTA send fails. */
 export async function sendWhatsAppNavigate(
   to: string,
@@ -308,9 +323,11 @@ export async function sendWhatsAppNavigate(
   options?: { ignoreSession?: boolean },
 ): Promise<WhatsAppTextResult> {
   const url = wazeNavigateUrl(address);
+  const body = wazeNavigateCtaBody(address);
   const result = await sendWhatsAppPayload(
     to,
-    (destination) => whatsappCtaUrlBody(destination, address, WHATSAPP_NAVIGATE_LABEL, url),
+    (destination) =>
+      whatsappCtaUrlBody(destination, body, WHATSAPP_NAVIGATE_LABEL, url),
     options,
   );
   if (result === "failed") {

@@ -26,7 +26,7 @@ import {
   staticShowButtonDumpMap,
 } from "./builtin-lists.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
-import { effectiveListEmoji } from "./list-emoji.js";
+import { effectiveListEmoji, FILINGS_LIST_EMOJI } from "./list-emoji.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
 export {
@@ -1024,7 +1024,8 @@ export function formatFilingDumpBody(
 
 /**
  * Inventory-only mark: longer filing text exists but is hidden on the list row
- * (shown on ITEM DUMP). Mirror of task 📍/📞 icons — after 📎.
+ * (shown on ITEM DUMP). After 📎 / 📍. Address-bearing filings use 📍 for
+ * item_info — 📄 only for leftover find-helper (or non-address detail).
  */
 export function filingHiddenDetailMark(
   item: Record<string, unknown>,
@@ -1035,22 +1036,98 @@ export function filingHiddenDetailMark(
   }
   const info = readText(item, ["item_info", "itemInfo"]);
   const findHelper = readText(item, ["item_description", "itemDescription"]);
+  const name = readText(item, ["item_name", "itemName"]);
+  if (filingNameLooksLikeAddress(name)) {
+    return findHelper ? " 📄" : "";
+  }
   return info || findHelper ? " 📄" : "";
 }
 
+/** True when the filing name encodes a place/address/location. */
+export function filingNameLooksLikeAddress(name: string): boolean {
+  return /כתובת|מגורים|address|מיקום|רחוב/i.test(name.trim());
+}
+
 /**
- * Address text from a filing row for Waze: prefer item_info, else item_name
+ * Address text from a filing row: prefer item_info, else item_name
  * when the name encodes a place (כתובת / מגורים / …).
+ * Raw stored value — never written into list rows; Waze uses coordinates only
+ * via {@link filingNavigateCoordinates}.
  */
 export function filingDumpAddressText(
   row: EmployeeRecordSnapshot["filing"][number],
 ): string | null {
   const name = row.item_name?.trim() ?? "";
   const info = row.item_info?.trim() ?? "";
-  if (!/כתובת|מגורים|address|מיקום|רחוב/i.test(name)) {
+  if (!filingNameLooksLikeAddress(name)) {
     return null;
   }
   return info || name || null;
+}
+
+/**
+ * Parse a bare `lat, lng` pair. Used to decide whether ITEM DUMP may attach
+ * a Waze button (option A: coords only — no street-only navigate).
+ */
+export function parseLatLngCoordinates(
+  raw: string,
+): { lat: number; lng: number } | null {
+  const trimmed = raw.trim();
+  const coord = trimmed.match(
+    /^(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/,
+  );
+  if (!coord) {
+    return null;
+  }
+  const lat = Number(coord[1]);
+  const lng = Number(coord[2]);
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    Math.abs(lat) > 90 ||
+    Math.abs(lng) > 180
+  ) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+/**
+ * Raw coordinate string for Waze (`navigate_address`), or null when the
+ * filing has no valid saved lat/lng.
+ */
+export function filingNavigateCoordinates(
+  row: EmployeeRecordSnapshot["filing"][number],
+): string | null {
+  const raw = filingDumpAddressText(row);
+  if (!raw) {
+    return null;
+  }
+  const parsed = parseLatLngCoordinates(raw);
+  if (!parsed) {
+    return null;
+  }
+  return `${parsed.lat},${parsed.lng}`;
+}
+
+/**
+ * Filing place mark (option A): always `📍` only — never coords / Maps URL
+ * in list or ITEM DUMP text. Navigation is the separate Waze button.
+ */
+export function filingPlaceMark(
+  item: Record<string, unknown>,
+  _mode: "icons" | "full" = "icons",
+): string {
+  const name = readText(item, ["item_name", "itemName"]);
+  if (!filingNameLooksLikeAddress(name)) {
+    return "";
+  }
+  const info = readText(item, ["item_info", "itemInfo"]);
+  const address = info || name;
+  if (!address) {
+    return "";
+  }
+  return " 📍";
 }
 
 /** Filings visible under section/partner (same set as the dump lines). */
@@ -1096,16 +1173,28 @@ export function visibleFilingsForDump(
 }
 
 /**
- * When a filings dump shows exactly one address-bearing row, that address for Waze.
+ * Waze `navigate_address` for a filings dump (option A).
+ * - Inventory / filtered multi-row dumps → null (no Waze under the list).
+ * - ITEM DUMP only, when exactly one focused row has valid saved coordinates.
+ * - Street-only locations get 📍 in text but no Waze button.
  */
 export function navigateAddressFromFilingsDump(
   rows: EmployeeRecordSnapshot["filing"],
   opts?: ShowDumpOptions,
 ): string | null {
-  const addresses = visibleFilingsForDump(rows, opts)
-    .map(filingDumpAddressText)
-    .filter((value): value is string => Boolean(value));
-  return addresses.length === 1 ? addresses[0]! : null;
+  const itemIds = opts?.itemIds ?? null;
+  if (itemIds == null || itemIds.size === 0) {
+    return null;
+  }
+  const visible = visibleFilingsForDump(rows, opts).filter((row) => {
+    const id = String(row.filing_id ?? "").trim();
+    return Boolean(id) && itemIds.has(id);
+  });
+  // Single-item detail only — never Waze under a multi-id dump.
+  if (visible.length !== 1) {
+    return null;
+  }
+  return filingNavigateCoordinates(visible[0]!);
 }
 
 /**
@@ -1124,7 +1213,19 @@ export function formatFilingsDump(
   const dumpMode: "list" | "full" =
     opts?.itemIds != null ? "full" : "list";
   const collected: DumpItem[] = rows.map((row) => {
-    const title = formatFilingDumpBody(row, dumpMode);
+    // Address filings: short name only (📍 mark added in formatNumberedItem).
+    // Never inline coords / Maps URL into the dump body (option A).
+    const address = filingDumpAddressText(row);
+    let title: string;
+    if (address) {
+      title = row.item_name?.trim() || "תיוק";
+      const findHelper = row.item_description?.trim() ?? "";
+      if (dumpMode === "full" && findHelper) {
+        title += ` · מידע לחיפוש: ${findHelper}`;
+      }
+    } else {
+      title = formatFilingDumpBody(row, dumpMode);
+    }
     const assignedBy = (row.assigned_by ?? "").trim();
     const sharedWith = (row.shared_with ?? [])
       .map((name) => name.trim())
@@ -1159,7 +1260,12 @@ export function formatFilingsDump(
     };
   });
   const kept = filterDumpRows(collected, "filings", opts);
-  return formatSingleHeaderDump("תיוקים", "filings", kept, opts);
+  return formatSingleHeaderDump(
+    withListEmoji(FILINGS_LIST_EMOJI, "תיוקים"),
+    "filings",
+    kept,
+    opts,
+  );
 }
 
 function formatRemindersDump(
@@ -1381,7 +1487,7 @@ export function formatTasksDayAgendaDump(
     if (linkedId && watchReminderIds.has(linkedId)) {
       continue;
     }
-    slots.push(...expandTaskAgendaSlots(row, from, to, now));
+    slots.push(...expandTaskAgendaSlots(row, from, to, now, opts?.itemIds));
   }
 
   const partnerNeedles = dumpFilterNames(opts?.partner);
@@ -1474,6 +1580,7 @@ function expandTaskAgendaSlots(
   from: string | null,
   to: string | null,
   now: Date,
+  itemIds?: ReadonlySet<string> | null,
 ): AgendaSlot[] {
   const item = row.item;
   const recurring = readText(item, ["חוזר", "recurrence_text"]);
@@ -1509,6 +1616,7 @@ function expandTaskAgendaSlots(
             responsibilityMark: row.responsibilityMark,
             now,
             occurrenceYmd: ymd,
+            itemIds,
           }),
       });
     }
@@ -1543,6 +1651,7 @@ function expandTaskAgendaSlots(
         formatAgendaOneOffLine(n, row.title, item, hm, {
           responsibilityMark: row.responsibilityMark,
           now,
+          itemIds,
         }),
     },
   ];
@@ -1656,11 +1765,21 @@ function formatShortDayMonth(ymd: string): string {
   return `${parts.day}.${parts.month}`;
 }
 
+/** List rows: bell only. ITEM DUMP (`itemIds` set): bell + timed text. */
+export type ReminderDisplayMode = "list" | "detail";
+
+export function reminderDisplayMode(
+  itemIds?: ReadonlySet<string> | null,
+): ReminderDisplayMode {
+  return itemIds != null ? "detail" : "list";
+}
+
 /**
  * Standing occurrence under a day header.
  * When `occurrenceYmd` is set: occurrence-effective chore time + reminder for
  * that exact day (reminder exceptions only — never task exceptions).
  * Without it: series overview suffix (`formatScheduleSuffix`) for flat dumps.
+ * Reminder times appear only in detail mode (ITEM DUMP); list/agenda show 🔔.
  */
 export function formatAgendaStandingLine(
   n: number,
@@ -1672,6 +1791,8 @@ export function formatAgendaStandingLine(
     now?: Date;
     /** When set, render this day's effective schedule — not the series overview. */
     occurrenceYmd?: string;
+    /** ITEM DUMP filter — when set, reminder mark includes the effective time. */
+    itemIds?: ReadonlySet<string> | null;
   },
 ): string {
   let body = title.trim() || "פריט";
@@ -1688,13 +1809,18 @@ export function formatAgendaStandingLine(
       body += ` (${mark})`;
     }
   }
+  const mode = reminderDisplayMode(opts?.itemIds);
   const occurrenceYmd = opts?.occurrenceYmd?.trim().slice(0, 10) ?? "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceYmd)) {
     const hm = occurrenceHm.trim();
     if (hm) {
       body += ` — ${normalizeHm(hm)}`;
     }
-    const reminder = formatOccurrenceEffectiveReminderParen(item, occurrenceYmd);
+    const reminder = formatOccurrenceEffectiveReminderParen(
+      item,
+      occurrenceYmd,
+      mode,
+    );
     if (reminder) {
       body += ` ${reminder}`;
     }
@@ -1708,18 +1834,26 @@ export function formatAgendaStandingLine(
   if (suffix) {
     body += ` ${suffix}`;
   }
+  const reminder = formatReminderIndicator(item, mode, {
+    now: opts?.now,
+  });
+  if (reminder) {
+    body += ` ${reminder}`;
+  }
   return wrapUrgencyLine(`${n}. ${body}`, item.urgency);
 }
 
 /**
  * Linked reminder mark for one occurrence day.
  * - Recurring series clock: series HM + that clock's `exception_entries` only
- *   (never task exceptions). Cancelled → empty (no series fallback).
+ *   (never task exceptions). Cancelled → empty (no series fallback / no bell).
  * - One-shot linked clock (no series-level reminder): only the fire_at day.
+ * - list → `🔔`; detail → `🔔 תזכורת: HH:mm` (effective HM, never series original when moved).
  */
 export function formatOccurrenceEffectiveReminderParen(
   item: Record<string, unknown>,
   occurrenceYmd: string,
+  mode: ReminderDisplayMode = "list",
 ): string {
   if (!itemHasLinkedReminder(item)) {
     return "";
@@ -1735,7 +1869,7 @@ export function formatOccurrenceEffectiveReminderParen(
       return "";
     }
     const hm = linkedReminderSeriesHm(item);
-    return hm ? `(תזכורת ב־${hm})` : "(תזכורת)";
+    return formatReminderMarkText(mode, hm);
   }
   const raw = item.reminder as Record<string, unknown>;
   // Snapshot contract: Hebrew exception labels without structured entries mean
@@ -1753,7 +1887,19 @@ export function formatOccurrenceEffectiveReminderParen(
   if (effective.status === "cancelled" || effective.status === "none") {
     return "";
   }
-  return `(תזכורת ב־${effective.hm})`;
+  return formatReminderMarkText(mode, effective.hm);
+}
+
+/** list → `🔔`; detail → `🔔 תזכורת: <when>` (empty when no when). */
+function formatReminderMarkText(
+  mode: ReminderDisplayMode,
+  when: string | null | undefined,
+): string {
+  const text = typeof when === "string" ? when.trim() : "";
+  if (mode === "list") {
+    return "🔔";
+  }
+  return text ? `🔔 תזכורת: ${text}` : "🔔";
 }
 
 /**
@@ -1805,13 +1951,17 @@ function readExceptionEntries(value: unknown): RecurrenceException[] {
   return out;
 }
 
-/** One-off under a day header: chore HM + optional «(תזכורת: …)» via shared paren helper. */
+/** One-off under a day header: chore HM + optional reminder mark (list 🔔 / detail timed). */
 export function formatAgendaOneOffLine(
   n: number,
   title: string,
   item: Record<string, unknown>,
   occurrenceHm: string,
-  opts?: { responsibilityMark?: string; now?: Date },
+  opts?: {
+    responsibilityMark?: string;
+    now?: Date;
+    itemIds?: ReadonlySet<string> | null;
+  },
 ): string {
   let body = title.trim() || "פריט";
   if (hasAttachments(item)) {
@@ -1831,7 +1981,11 @@ export function formatAgendaOneOffLine(
   if (hm) {
     body += ` — ${hm}`;
   }
-  const reminder = formatLinkedReminderParen(item, opts?.now);
+  const reminder = formatReminderIndicator(
+    item,
+    reminderDisplayMode(opts?.itemIds),
+    { now: opts?.now },
+  );
   if (reminder) {
     body += ` ${reminder}`;
   }
@@ -3165,6 +3319,10 @@ export function formatNumberedItem(
     );
   }
   if (listType === "filings") {
+    body += filingPlaceMark(
+      item,
+      opts?.itemIds != null ? "full" : "icons",
+    );
     body += filingHiddenDetailMark(
       item,
       opts?.itemIds != null ? "full" : "list",
@@ -3187,7 +3345,6 @@ export function formatNumberedItem(
   }
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));
-  const linkedOnStanding = standing && itemHasLinkedReminder(item);
   const reminderHm = linkedReminderSeriesHm(item);
   // Worker daily sends often have linked recurring clock + שעה לביצוע but no חוזר.
   const foldRecurringWithoutStanding =
@@ -3203,12 +3360,17 @@ export function formatNumberedItem(
       body += ` ${schedule}`;
     }
   }
-  // Standing + linked clock folds into «(קבוע + תזכורת)» on the schedule suffix.
-  // Matching chore HM + recurring linked (no חוזר) uses the same fold mark.
+  // Matching chore HM + recurring linked (no חוזר) → «(קבוע)» cadence fold.
+  // Reminder presence is a separate 🔔 / detail mark (not embedded times).
   if (foldRecurringWithoutStanding) {
     body += ` ${standingLinkedReminderMark(item, `ב־${choreHm}`)}`;
-  } else if (!linkedOnStanding) {
-    const reminder = formatLinkedReminderParen(item, opts?.now);
+  }
+  if (listType === "tasks" || listType === "shopping") {
+    const reminder = formatReminderIndicator(
+      item,
+      reminderDisplayMode(opts?.itemIds),
+      { now: opts?.now },
+    );
     if (reminder) {
       body += ` ${reminder}`;
     }
@@ -3231,53 +3393,27 @@ export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
 }
 
 /**
- * Standing + linked clock mark. Same when as the chore → «(קבוע + תזכורת)»;
- * different time → «(קבוע + תזכורת ב־20:45)»; different calendar day →
- * «(קבוע + תזכורת ב־8.5.2027 ב־13:00)».
- * One-shot linked clocks are NOT series-level: mark stays «(קבוע)» only;
- * the one-off ping is appended separately via {@link formatOneShotStandingReminderSuffix}.
+ * Standing cadence mark — always «(קבוע)».
+ * Reminder presence is a separate list/detail mark (`🔔` / `🔔 תזכורת: …`),
+ * not embedded as «+ תזכורת ב־…» on the standing paren.
  */
 export function standingLinkedReminderMark(
-  item: Record<string, unknown>,
-  standingRuleText: string,
+  _item: Record<string, unknown>,
+  _standingRuleText: string,
 ): string {
-  if (!itemHasLinkedReminder(item)) {
-    return "(קבוע)";
-  }
-  // Soft-linked one-shot ≠ series-wide reminder.
-  if (!linkedReminderIsRecurring(item)) {
-    return "(קבוע)";
-  }
-  const taskYmd = taskEventYmd(item);
-  const remYmd = linkedReminderYmd(item);
-  const taskHm = extractHmFromText(standingRuleText);
-  const reminderHm = linkedReminderSeriesHm(item);
-  if (taskYmd && remYmd && taskYmd !== remYmd) {
-    const day = formatDisplayDate(remYmd);
-    return reminderHm
-      ? `(קבוע + תזכורת ב־${day} ב־${reminderHm})`
-      : `(קבוע + תזכורת ב־${day})`;
-  }
-  if (reminderHm && reminderHm !== taskHm) {
-    return `(קבוע + תזכורת ב־${reminderHm})`;
-  }
-  return "(קבוע + תזכורת)";
+  return "(קבוע)";
 }
 
-/** « · תזכורת ב־28.10 ב־09:30» for a one-shot clock soft-linked to a standing series. */
+/**
+ * Formerly « · תזכורת ב־28.10 ב־09:30» for a one-shot clock soft-linked to a
+ * standing series. Reminder times no longer live in the schedule suffix —
+ * use {@link formatReminderIndicator} instead. Kept as an empty stub so
+ * existing call sites stay safe.
+ */
 export function formatOneShotStandingReminderSuffix(
-  item: Record<string, unknown>,
+  _item: Record<string, unknown>,
 ): string {
-  if (!itemHasLinkedReminder(item) || linkedReminderIsRecurring(item)) {
-    return "";
-  }
-  const remYmd = linkedReminderYmd(item);
-  if (!remYmd) {
-    return "";
-  }
-  const hm = linkedReminderSeriesHm(item);
-  const day = formatShortDayMonth(remYmd);
-  return hm ? ` · תזכורת ב־${day} ב־${hm}` : ` · תזכורת ב־${day}`;
+  return "";
 }
 
 /** HH:mm from «ב־21:00» / «ב־21:00–22:00» in product-Hebrew rule text. */
@@ -3345,8 +3481,9 @@ function linkedReminderSeriesHm(item: Record<string, unknown>): string | null {
 }
 
 /** Standing / dated suffix: «— שני ושלישי ב־19:00 (קבוע)» or «— מחר ב־19:30».
- * Standing + linked clock → «(קבוע + תזכורת)» / «(קבוע + תזכורת ב־20:45)» when ping ≠ chore time.
- * Live `exceptions` append « · 18.10 ב־21:30» / « · 23.10 בוטל». */
+ * Reminder times are not part of this suffix — callers append
+ * {@link formatReminderIndicator} (list 🔔 / detail timed).
+ * Live task `exceptions` append « · 18.10 ב־21:30» / « · 23.10 בוטל». */
 export function formatScheduleSuffix(
   item: Record<string, unknown>,
   listType: string,
@@ -3367,8 +3504,7 @@ export function formatScheduleSuffix(
     } else {
       base = `— ${recurring} ${mark}`;
     }
-    const oneShot = formatOneShotStandingReminderSuffix(item);
-    return `${base}${extras}${oneShot}`;
+    return `${base}${extras}`;
   }
   const date = readText(item, ["תאריך לביצוע", "date"]);
   const time = readText(item, ["שעה לביצוע", "time", "שעה"]);
@@ -3384,10 +3520,67 @@ export function formatScheduleSuffix(
   return "";
 }
 
-/** «(תזכורת: היום ב־20:30)» — flat cadence « · קבוע כל יום» (no nested paren). */
+/**
+ * Task-row reminder mark: list → `🔔`; detail → `🔔 תזכורת: <when>`.
+ * Prefer occurrence-effective time when `occurrenceYmd` is set, or (flat
+ * ITEM DUMP recurring) the nearest `next_occurrences` day that still has an
+ * effective reminder — skip cancelled/absent; never use series HM when that
+ * day was moved. No upcoming effective day → empty (no bell / no time).
+ */
+export function formatReminderIndicator(
+  item: Record<string, unknown>,
+  mode: ReminderDisplayMode = "list",
+  opts?: { now?: Date; occurrenceYmd?: string },
+): string {
+  if (!itemHasLinkedReminder(item)) {
+    return "";
+  }
+  const occurrenceYmd = opts?.occurrenceYmd?.trim().slice(0, 10) ?? "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceYmd)) {
+    return formatOccurrenceEffectiveReminderParen(item, occurrenceYmd, mode);
+  }
+  if (mode === "detail" && linkedReminderIsRecurring(item)) {
+    const raw = item.reminder as Record<string, unknown>;
+    if (reminderExceptionEntriesContractOk(raw)) {
+      for (const ymd of nextOccurrenceYmds(item)) {
+        const mark = formatOccurrenceEffectiveReminderParen(item, ymd, mode);
+        if (mark) {
+          return mark;
+        }
+      }
+      return "";
+    }
+  }
+  return formatLinkedReminderParen(item, opts?.now ?? new Date(), mode);
+}
+
+/** Chronological YYYY-MM-DD values from snapshot `next_occurrences`. */
+function nextOccurrenceYmds(item: Record<string, unknown>): string[] {
+  const next = item.next_occurrences;
+  if (!Array.isArray(next)) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const occ of next) {
+    const ymd = ymdFromDumpValue(occ);
+    if (!ymd || seen.has(ymd)) {
+      continue;
+    }
+    seen.add(ymd);
+    out.push(ymd);
+  }
+  return out;
+}
+
+/**
+ * Linked-reminder mark for non-occurrence paths.
+ * list → `🔔`; detail → `🔔 תזכורת: <formatReminderWhen>` (flat cadence).
+ */
 export function formatLinkedReminderParen(
   item: Record<string, unknown>,
   now = new Date(),
+  mode: ReminderDisplayMode = "list",
 ): string {
   const raw = item.reminder;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -3405,6 +3598,9 @@ export function formatLinkedReminderParen(
   if (!fireAt && !recurrenceText && (!repeat || repeat === "none" || repeat === "once")) {
     return "";
   }
+  if (mode === "list") {
+    return "🔔";
+  }
   const exceptions = Array.isArray(reminder.exceptions)
     ? reminder.exceptions.filter(
         (entry): entry is string => typeof entry === "string",
@@ -3420,7 +3616,7 @@ export function formatLinkedReminderParen(
     now,
     { flatCadence: true },
   );
-  return when ? `(תזכורת: ${when})` : "";
+  return formatReminderMarkText(mode, when || null);
 }
 
 /**

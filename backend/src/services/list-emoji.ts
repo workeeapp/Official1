@@ -10,6 +10,9 @@ import {
 
 export const CUSTOM_LIST_EMOJI_DEFAULT = "📋";
 
+/** Filings are not an EmployeeList shell — dump header uses this glyph. */
+export const FILINGS_LIST_EMOJI = "📁";
+
 const BUILTIN_LIST_EMOJI: Record<BuiltinListType, string> = {
   shopping: "🛒",
   tasks: "✅",
