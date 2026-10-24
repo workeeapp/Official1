@@ -3,6 +3,7 @@ import {
   conditionFromWmo,
   fetchWeatherFacts,
   formatWeatherHebrew,
+  isIsraelWideWavePlace,
   parseWeatherAspects,
   resolveWeatherMessages,
   resolveWeatherReply,
@@ -20,6 +21,14 @@ describe("parseWeatherAspects", () => {
       "wind",
       "waves",
     ]);
+  });
+});
+
+describe("isIsraelWideWavePlace", () => {
+  it("detects ישראל / חופי ישראל", () => {
+    expect(isIsraelWideWavePlace("ישראל")).toBe(true);
+    expect(isIsraelWideWavePlace("חופי ישראל")).toBe(true);
+    expect(isIsraelWideWavePlace("חיפה")).toBe(false);
   });
 });
 

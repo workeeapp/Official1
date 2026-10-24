@@ -678,6 +678,27 @@ export function boardingStopMatchesOrigin(
   return originToks.some((tok) => stopNorm.includes(tok));
 }
 
+/**
+ * Area / landmark origin (not a named transit stop). Line ETA/frequency may
+ * accept Google's line-matched boarding stop after a short walk and must cite
+ * that stop name — never fail closed just because tokens ≠ stop name.
+ */
+export function originSuggestsAreaOrLandmark(origin: string): boolean {
+  const o = String(origin ?? "").trim();
+  if (!o) return false;
+  if (/אזור|ליד|סביב|קרוב(?:ה)?\s+ל|באזור|מאיזור|מאזור/u.test(o)) {
+    return true;
+  }
+  // Landmark without an explicit «תחנה …» stop phrase.
+  if (
+    /עיריי|קניון|בי["׳']?ח|בית\s*חולים|מרכז|שוק|דיזנגוף|עזריאלי/u.test(o) &&
+    !/תחנ[הת]/u.test(o)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function fareTextFromAdvisory(route: ApiRoute): string {
   const fare = route.travelAdvisory?.transitFare;
   if (!fare) {
@@ -1376,15 +1397,24 @@ export async function fetchRoutesFacts(input: {
   let focus: RouteStepFact | undefined;
   if (filterSet) {
     if (stopMatched.length === 0) {
-      // Fail closed: never borrow another line's clock (or a walk-away stop).
-      facts.lineMatchFailed = true;
-      facts.etaMinutes = null;
-      facts.headwaySeconds = null;
-      // Keep duration/steps from primary route for summary asks, but do not
-      // set leaveBy from a non-matching transit when this was a line ETA.
-      if (lineEtaAsk) {
-        facts.leaveByText = "";
-        return facts;
+      // Named stop asked but Google boards elsewhere → fail closed.
+      // Area/landmark origin → accept line-matched board and cite that stop.
+      if (
+        lineEtaAsk &&
+        lineMatching.length > 0 &&
+        originSuggestsAreaOrLandmark(originLabel)
+      ) {
+        focus = lineMatching[0];
+      } else {
+        facts.lineMatchFailed = true;
+        facts.etaMinutes = null;
+        facts.headwaySeconds = null;
+        // Keep duration/steps from primary route for summary asks, but do not
+        // set leaveBy from a non-matching transit when this was a line ETA.
+        if (lineEtaAsk) {
+          facts.leaveByText = "";
+          return facts;
+        }
       }
     } else {
       focus = stopMatched[0];
@@ -2004,6 +2034,7 @@ async function resolveGtfsRoutesReply(input: {
     return resolveLiveArrivalsReply({
       stopCode,
       origin: input.origin,
+      destination: input.destination,
       line,
       agency,
       headsign,
@@ -2011,6 +2042,7 @@ async function resolveGtfsRoutesReply(input: {
       departure: input.departure,
       windowEnd: input.windowEnd,
       fetchImpl: input.fetchImpl,
+      apiKey: input.apiKey,
     });
   }
 
@@ -2027,6 +2059,7 @@ async function resolveGtfsRoutesReply(input: {
 async function resolveLiveArrivalsReply(input: {
   stopCode: string;
   origin: string;
+  destination?: string;
   line: string;
   agency: string;
   headsign: string;
@@ -2034,6 +2067,7 @@ async function resolveLiveArrivalsReply(input: {
   departure?: string;
   windowEnd?: string;
   fetchImpl?: typeof fetch;
+  apiKey?: string | null;
 }): Promise<{ text: string; navigateAddress: string }> {
   const rawRef = input.stopCode || String(input.origin ?? "").trim();
   if (!rawRef) {
@@ -2042,6 +2076,44 @@ async function resolveLiveArrivalsReply(input: {
       navigateAddress: "",
     };
   }
+
+  /** Google ETA labeled as estimate when MOT stop_code cannot be resolved. */
+  const googleEtaFallback = async (
+    whyHe: string,
+  ): Promise<{ text: string; navigateAddress: string } | null> => {
+    const dest =
+      String(input.destination ?? "").trim() ||
+      String(input.headsign ?? "").trim();
+    if (!input.line.trim() || !dest || /^\d{1,2}$/.test(dest)) {
+      return null;
+    }
+    try {
+      const facts = await fetchRoutesFacts({
+        origin: rawRef,
+        destination: dest,
+        line: input.line,
+        headsign: /^\d{1,2}$/.test(input.headsign) ? "" : input.headsign,
+        aspects: ["eta"],
+        departure: input.departure,
+        fetchImpl: input.fetchImpl,
+        apiKey: input.apiKey,
+      });
+      if (facts.lineMatchFailed || facts.etaMinutes == null) {
+        return null;
+      }
+      return {
+        text: [
+          whyHe,
+          "מציגה הערכת Google ליציאה הבאה (לא תחזית SIRI חיה):",
+          formatRoutesHebrew(facts),
+          "לתחזית חיה רשמית של משרד התחבורה צריך קוד תחנה (מספר).",
+        ].join("\n"),
+        navigateAddress: "",
+      };
+    } catch {
+      return null;
+    }
+  };
 
   // Prefer MOT stop_code. Spoken stop names resolve via GTFS (same as schedule)
   // before calling SIRI — never send a Hebrew name as MonitoringRef.
@@ -2061,22 +2133,25 @@ async function resolveLiveArrivalsReply(input: {
         }
         // Numeric-looking refs may still be valid SIRI MonitoringRefs without GTFS hit.
         if (!/^\d{3,}$/.test(rawRef)) {
+          const fallback = await googleEtaFallback(resolved.messageHe);
+          if (fallback) return fallback;
           return { text: resolved.messageHe, navigateAddress: "" };
         }
       } else {
         code = resolved.match.stopCode;
       }
     } else if (!/^\d{3,}$/.test(rawRef)) {
-      return {
-        text: "לתחזית חיה צריך קוד תחנה רשמי (או לוח GTFS פעיל לזיהוי שם תחנה).",
-        navigateAddress: "",
-      };
+      const why =
+        "לתחזית חיה צריך קוד תחנה רשמי (או לוח GTFS פעיל לזיהוי שם תחנה).";
+      const fallback = await googleEtaFallback(why);
+      if (fallback) return fallback;
+      return { text: why, navigateAddress: "" };
     }
   } else if (!/^\d{3,}$/.test(rawRef)) {
-    return {
-      text: "לתחזית חיה צריך קוד תחנה רשמי (מספר).",
-      navigateAddress: "",
-    };
+    const why = "לתחזית חיה צריך קוד תחנה רשמי (מספר).";
+    const fallback = await googleEtaFallback(why);
+    if (fallback) return fallback;
+    return { text: why, navigateAddress: "" };
   }
 
   // Ambiguity for line+agency is resolved via GTFS when a line filter is set

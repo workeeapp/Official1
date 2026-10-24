@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   boardingStopMatchesOrigin,
+  originSuggestsAreaOrLandmark,
   fetchRoutesFacts,
   formatOfficialBoardingDeparturesHe,
   formatRoutesHebrew,
@@ -79,6 +80,19 @@ describe("boardingStopMatchesOrigin", () => {
     expect(
       boardingStopMatchesOrigin("קניון עזריאלי", "שלום דורני פתח תקווה"),
     ).toBe(false);
+  });
+});
+
+describe("originSuggestsAreaOrLandmark", () => {
+  it("detects אזור / עירייה landmarks", () => {
+    expect(originSuggestsAreaOrLandmark("אזור עיריית פתח תקווה")).toBe(true);
+    expect(originSuggestsAreaOrLandmark("עיריית פתח תקווה")).toBe(true);
+    expect(originSuggestsAreaOrLandmark("קניון גדול בפתח תקווה")).toBe(true);
+  });
+
+  it("does not treat a named stop as an area", () => {
+    expect(originSuggestsAreaOrLandmark("שלום דורני פתח תקווה")).toBe(false);
+    expect(originSuggestsAreaOrLandmark("תחנת פינסקר גיסין")).toBe(false);
   });
 });
 
@@ -1099,6 +1113,100 @@ describe("resolveRoutesReply", () => {
     expect(text).toMatch(/יוצא|בעוד/);
   });
 
+  it("area-origin frequency accepts line match when boarding stop tokens differ", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            duration: "2400s",
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "WALK",
+                    staticDuration: "300s",
+                  },
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      stopDetails: {
+                        departureStop: { name: "פינסקר/גיסין" },
+                        departureTime: "2026-10-25T05:15:00Z",
+                      },
+                      transitLine: { nameShort: "66" },
+                      headway: "720s",
+                      localizedValues: {
+                        departureTime: { time: { text: "08:15" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    }));
+    const facts = await fetchRoutesFacts({
+      origin: "אזור עיריית פתח תקווה",
+      destination: "תל אביב-יפו",
+      line: "66",
+      aspects: ["frequency"],
+      apiKey: "test-key",
+      now: new Date("2026-10-25T05:00:00Z"),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(facts.lineMatchFailed).toBe(false);
+    expect(facts.headwaySeconds).toBe(720);
+    expect(facts.matchedFromStop).toBe("פינסקר/גיסין");
+    const text = formatRoutesHebrew(facts);
+    expect(text).toMatch(/תדירות/);
+    expect(text).toContain("פינסקר/גיסין");
+    expect(text).not.toMatch(/לא מצאתי קו 66/);
+  });
+
+  it("named-stop frequency still fails closed on walk-away boarding stop", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            duration: "2400s",
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      stopDetails: {
+                        departureStop: { name: "קניון עזריאלי" },
+                      },
+                      transitLine: { nameShort: "66" },
+                      headway: "600s",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    }));
+    const facts = await fetchRoutesFacts({
+      origin: "שלום דורני פתח תקווה",
+      destination: "תל אביב",
+      line: "66",
+      aspects: ["frequency"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(facts.lineMatchFailed).toBe(true);
+    expect(formatRoutesHebrew(facts)).toMatch(/לא מצאתי קו 66/);
+  });
+
   it("Gate 1: Routes Stage B is wired for Google boards (not GTFS/SIRI)", () => {
     const src = readFileSync(
       resolve(__dirname, "../src/services/routes.ts"),
@@ -1646,5 +1754,53 @@ describe("origin→destination trip boarding workflow", () => {
     expect(text).toMatch(/מסלול|תחבורה|קו 51/);
     expect(text).toMatch(/משוער|08:20|08:50/);
     expect(text).not.toMatch(/מתוזמנות רשמיות|SIRI|תחזית חיה/);
+  });
+
+  it("live_arrivals with stop name falls back to labeled Google ETA when GTFS off", async () => {
+    vi.spyOn(gtfsQuery, "isGtfsEnabled").mockReturnValue(false);
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            duration: "1800s",
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      stopDetails: {
+                        departureStop: { name: "פינסקר/גיסין" },
+                        departureTime: "2026-10-25T17:00:00Z",
+                      },
+                      transitLine: { nameShort: "51" },
+                      localizedValues: {
+                        departureTime: { time: { text: "20:00" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    }));
+    const { text } = await resolveRoutesReply({
+      origin: "פינסקר גיסין",
+      destination: "תל אביב",
+      line: "51",
+      aspects: ["live_arrivals"],
+      apiKey: "test-key",
+      now: new Date("2026-10-25T16:50:00Z"),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toMatch(/הערכת Google/);
+    expect(text).toMatch(/לא תחזית SIRI/);
+    expect(text).toMatch(/קוד תחנה/);
+    expect(text).toMatch(/יוצא|בעוד|קו 51/);
+    expect(text).not.toBe("לתחזית חיה צריך קוד תחנה רשמי (מספר).");
   });
 });

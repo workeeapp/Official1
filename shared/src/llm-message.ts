@@ -573,6 +573,11 @@ export interface LlmWeatherAction {
   /** YYYY-MM-DD or empty (= now/today). */
   date: string;
   aspects: LlmWeatherAspect[];
+  /**
+   * Optional minimum wave height (meters). With waves aspect + ישראל/coast scan,
+   * engine keeps cities at/above this height.
+   */
+  minWaveM?: number | null;
 }
 
 export type LlmMarketAspect = "summary" | "price" | "change" | "range";
@@ -848,6 +853,11 @@ export interface LlmJewishAction {
   /** YYYY-MM-DD or empty (= this week / now). */
   date: string;
   aspects: LlmJewishAspect[];
+  /**
+   * Named holiday filter («ערב פסח» / «חנוכה») — engine matches Hebcal titles
+   * (niqqud-insensitive) in a longer look-ahead. Empty = upcoming list window.
+   */
+  query?: string;
 }
 
 export type LlmRoutesAspect =
@@ -3305,10 +3315,22 @@ export function parseWeatherAction(
       }
     }
   }
+  const minWaveRaw =
+    row.min_wave_m ?? row.minWaveM ?? row.min_wave ?? row.minWave;
+  let minWaveM: number | null = null;
+  if (typeof minWaveRaw === "number" && Number.isFinite(minWaveRaw)) {
+    minWaveM = Math.max(0, Math.min(20, minWaveRaw));
+  } else if (typeof minWaveRaw === "string" && minWaveRaw.trim()) {
+    const n = Number(minWaveRaw.trim().replace(",", "."));
+    if (Number.isFinite(n)) {
+      minWaveM = Math.max(0, Math.min(20, n));
+    }
+  }
   return {
     place,
     date,
     aspects: aspects.length > 0 ? aspects : ["summary"],
+    ...(minWaveM != null ? { minWaveM } : {}),
   };
 }
 
@@ -3453,6 +3475,14 @@ export function parseMashovAction(
         key === "דואר"
       ) {
         key = "messages";
+      }
+      if (
+        key === "חיזוק" ||
+        key === "חיזוקים" ||
+        key === "חיזוקים חיוביים" ||
+        key === "התנהגות"
+      ) {
+        key = "behavior";
       }
       const aspect = key as LlmMashovAspect;
       if (MASHOV_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
@@ -3762,9 +3792,23 @@ export function parseJewishAction(
   if (needsPlace && !place) {
     return null;
   }
+  const query = readText(row, [
+    "query",
+    "holiday",
+    "holiday_name",
+    "holidayName",
+    "name",
+    "חג",
+    "q",
+  ]).slice(0, 80);
   // Parasha / holidays alone with empty place is OK.
   if (!needsPlace && resolved.every((a) => a === "parasha" || a === "holidays")) {
-    return { place: place || "", date, aspects: resolved };
+    return {
+      place: place || "",
+      date,
+      aspects: resolved,
+      ...(query ? { query } : {}),
+    };
   }
   if (!place && needsPlace) {
     return null;
@@ -3773,6 +3817,7 @@ export function parseJewishAction(
     place: place || "",
     date,
     aspects: resolved,
+    ...(query ? { query } : {}),
   };
 }
 

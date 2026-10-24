@@ -613,11 +613,126 @@ type WeatherTipComposer = (input: {
   } | null;
 }) => Promise<string | null>;
 
+/** Coastal cities scanned for «גלים בישראל» / nation-wide wave asks. */
+export const IL_WAVE_SCAN_CITIES = [
+  "נהריה",
+  "חיפה",
+  "נתניה",
+  "הרצליה",
+  "תל אביב",
+  "אשדוד",
+  "אשקלון",
+  "אילת",
+] as const;
+
+export function isIsraelWideWavePlace(place: string): boolean {
+  const p = String(place ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/["״']/g, "");
+  if (!p) {
+    return false;
+  }
+  return (
+    p === "ישראל" ||
+    p === "israel" ||
+    p === "הארץ" ||
+    p === "כל הארץ" ||
+    p.includes("חופי ישראל") ||
+    p.includes("כל חופי") ||
+    p === "ארץ" ||
+    /^בישראל$/.test(p)
+  );
+}
+
+function formatWaveScanHebrew(input: {
+  when: string;
+  minWaveM: number | null;
+  hits: Array<{ city: string; waveM: number }>;
+  sampled: number;
+}): string {
+  const threshold =
+    input.minWaveM != null && Number.isFinite(input.minWaveM)
+      ? input.minWaveM
+      : null;
+  if (input.hits.length === 0) {
+    return threshold != null
+      ? `לא מצאתי חוף בישראל עם גלים מעל ${threshold} מ׳ ${input.when} (נבדקו ${input.sampled} חופים מרכזיים).`
+      : `לא מצאתי נתוני גלים לחופים בישראל ${input.when}.`;
+  }
+  const header =
+    threshold != null
+      ? `חופים בישראל עם גלים מעל ${threshold} מ׳ ${input.when}:`
+      : `גובה גלים בחופים בישראל ${input.when}:`;
+  const lines = input.hits
+    .slice(0, 10)
+    .map((h) => `• ${h.city} — כ־${h.waveM} מ׳`);
+  return [header, ...lines].join("\n");
+}
+
+async function scanIsraelCoastWaves(input: {
+  date?: string | null;
+  aspects?: WeatherAspect[] | unknown;
+  minWaveM?: number | null;
+  now?: Date;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const aspects = parseWeatherAspects(input.aspects);
+  const waveAspects: WeatherAspect[] =
+    aspects.includes("waves") || aspects.includes("summary")
+      ? aspects.includes("waves")
+        ? aspects
+        : [...aspects, "waves"]
+      : ["waves"];
+  const today = jerusalemYmd(input.now);
+  const requested = String(input.date ?? "")
+    .trim()
+    .match(/^\d{4}-\d{2}-\d{2}$/)
+    ? String(input.date).trim()
+    : today;
+  const when = dateLabel(requested, today);
+  const min =
+    input.minWaveM != null && Number.isFinite(input.minWaveM)
+      ? Number(input.minWaveM)
+      : null;
+
+  const results = await Promise.all(
+    IL_WAVE_SCAN_CITIES.map(async (city) => {
+      try {
+        const facts = await fetchWeatherFacts({
+          place: city,
+          date: requested,
+          aspects: waveAspects,
+          now: input.now,
+          fetchImpl: input.fetchImpl,
+        });
+        const wave = facts?.days[0]?.waveHeightM ?? null;
+        return { city, wave };
+      } catch {
+        return { city, wave: null as number | null };
+      }
+    }),
+  );
+
+  const sampled = results.filter((r) => r.wave != null).length;
+  const hits = results
+    .filter(
+      (r): r is { city: string; wave: number } =>
+        r.wave != null && (min == null || r.wave >= min),
+    )
+    .map((r) => ({ city: r.city, waveM: r.wave }))
+    .sort((a, b) => b.waveM - a.waveM);
+
+  return formatWaveScanHebrew({ when, minWaveM: min, hits, sampled });
+}
+
 /** Resolve live weather ACTION → one or two spoken bubbles. */
 export async function resolveWeatherMessages(input: {
   place: string;
   date?: string | null;
   aspects?: WeatherAspect[] | unknown;
+  /** Minimum wave height (m) for coast / Israel scan or single-city check. */
+  minWaveM?: number | null;
   now?: Date;
   fetchImpl?: typeof fetch;
   addressGender?: "male" | "female" | null;
@@ -629,13 +744,37 @@ export async function resolveWeatherMessages(input: {
     const text = "לאיזה מקום לבדוק את מזג האוויר?";
     return { messages: [text], body: text };
   }
+  const aspects = parseWeatherAspects(input.aspects);
+  const wantsWaves =
+    aspects.includes("waves") || aspects.includes("summary");
   try {
+    if (wantsWaves && isIsraelWideWavePlace(place)) {
+      const body = await scanIsraelCoastWaves(input);
+      return { messages: [body], body };
+    }
     const facts = await fetchWeatherFacts(input);
     if (!facts) {
       const text = `לא מצאתי מקום בשם «${place}».`;
       return { messages: [text], body: text };
     }
-    const body = formatWeatherHebrew(facts, input.now);
+    let body = formatWeatherHebrew(facts, input.now);
+    const min =
+      input.minWaveM != null && Number.isFinite(input.minWaveM)
+        ? Number(input.minWaveM)
+        : null;
+    if (min != null && wantsWaves) {
+      const wave = facts.days[0]?.waveHeightM ?? null;
+      const today = jerusalemYmd(input.now);
+      const when = dateLabel(facts.days[0]?.date ?? facts.requestedDate, today);
+      if (wave == null) {
+        body = `אין נתון גלים זמין ל${facts.place.name} ${when}.`;
+      } else if (wave >= min) {
+        body = `גובה הגלים ב${facts.place.name} ${when}: כ־${wave} מ׳ — מעל ${min} מ׳.`;
+      } else {
+        body = `גובה הגלים ב${facts.place.name} ${when}: כ־${wave} מ׳ — מתחת ל־${min} מ׳.`;
+      }
+      return { messages: [body], body };
+    }
     if (isFocusedSingleAspect(facts.aspects)) {
       return { messages: [body], body };
     }
@@ -663,6 +802,7 @@ export async function resolveWeatherReply(input: {
   place: string;
   date?: string | null;
   aspects?: WeatherAspect[] | unknown;
+  minWaveM?: number | null;
   now?: Date;
   fetchImpl?: typeof fetch;
   addressGender?: "male" | "female" | null;

@@ -38,6 +38,12 @@ describe("parseMashovAspects", () => {
       "messages",
     ]);
   });
+
+  it("maps חיזוקים to behavior", () => {
+    expect(parseMashovAspects(["חיזוקים חיוביים", "חיזוק"])).toEqual([
+      "behavior",
+    ]);
+  });
 });
 
 describe("loadMashovCredsFromFilings", () => {
@@ -94,6 +100,27 @@ describe("loadMashovCredsFromFilings", () => {
     ]);
     expect(pendingSchool).toBeUndefined();
     expect(missing).toContain("שנת לימודים למשוב");
+  });
+
+  it("picks child-labeled school/password and does not steal sibling school", () => {
+    const { pendingSchool, missing } = loadMashovCredsFromFilings(
+      [
+        { item_name: "תעודת זהות למשוב", item_info: "03222842" },
+        { item_name: "סיסמת משוב של יואב", item_info: "yoavpass" },
+        { item_name: "סיסמת משוב של מאיה", item_info: "mayapass" },
+        { item_name: "שם בית ספר למשוב של יואב", item_info: "שש שנתי רמון פתח תקווה" },
+        { item_name: "שם בית ספר למשוב של מאיה", item_info: "שש שנתי משה ארנס" },
+        { item_name: "שנת לימודים למשוב", item_info: "2027" },
+      ],
+      { child: "מאיה" },
+    );
+    expect(missing).toEqual([]);
+    expect(pendingSchool).toMatchObject({
+      name: "שש שנתי משה ארנס",
+      year: 2027,
+      password: "mayapass",
+      passwordChild: "מאיה",
+    });
   });
 });
 
@@ -505,6 +532,8 @@ describe("mashov event dates", () => {
       },
     });
     expect(text).toContain("אין ציונים בטווח 2025-01-01–2025-01-31");
+    expect(text).toContain("מחוץ לטווח");
+    expect(text).toContain("שנת לימודים למשוב");
     expect(text).not.toContain("לא סווגו");
   });
 

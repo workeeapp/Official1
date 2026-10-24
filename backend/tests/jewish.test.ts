@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  filterHolidaysByQuery,
   formatJewishHebrew,
+  jewishHolidayMatchScore,
   lookupIlGeonameid,
   nextCandleLighting,
   parseJewishAspects,
   resolveJewishReply,
+  stripHebrewNiqqud,
   JEWISH_HOLIDAYS_COLLECT_CAP,
   JEWISH_HOLIDAYS_COLLECT_CAP_HE,
   JEWISH_HOLIDAYS_DISPLAY_CAP,
@@ -23,6 +26,47 @@ describe("parseJewishAspects", () => {
       "candles",
       "parasha",
     ]);
+  });
+});
+
+describe("holiday name match", () => {
+  it("strips niqqud and scores ערב פסח", () => {
+    expect(stripHebrewNiqqud("עֶרֶב פֶּסַח")).toContain("ערב");
+    expect(jewishHolidayMatchScore("עֶרֶב פֶּסַח", "ערב פסח")).toBeGreaterThan(
+      80,
+    );
+    // «פסח א׳» alone is not «ערב פסח» — require both tokens.
+    expect(jewishHolidayMatchScore("פֶּסַח א׳", "ערב פסח")).toBe(0);
+    expect(jewishHolidayMatchScore("חנוכה", "ערב פסח")).toBe(0);
+  });
+
+  it("filters and prefers better title matches", () => {
+    const rows: JewishTimedItem[] = [
+      {
+        category: "holiday",
+        title: "פֶּסַח א׳",
+        dateIso: "2027-04-22",
+        clock: "",
+      },
+      {
+        category: "holiday",
+        title: "עֶרֶב פֶּסַח",
+        dateIso: "2027-04-21",
+        clock: "",
+      },
+      {
+        category: "holiday",
+        title: "פּוּרִים",
+        dateIso: "2027-03-23",
+        clock: "",
+      },
+    ];
+    const filtered = filterHolidaysByQuery(rows, "ערב פסח");
+    expect(filtered[0]?.title).toContain("פ");
+    expect(stripHebrewNiqqud(filtered[0]!.title)).toContain("ערב");
+    expect(filtered.every((h) => jewishHolidayMatchScore(h.title, "ערב פסח") > 0)).toBe(
+      true,
+    );
   });
 });
 
@@ -223,6 +267,49 @@ describe("resolveJewishReply", () => {
     });
     expect(text).toMatch(/באיזה יישוב/);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("filters named holiday query beyond short upcoming noise", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      const href = String(url);
+      if (href.includes("hebcal.com/hebcal")) {
+        expect(href).toContain("start=");
+        return {
+          ok: true,
+          json: async () => ({
+            items: [
+              {
+                category: "holiday",
+                title: "חג הסיגד",
+                date: "2026-11-09",
+              },
+              {
+                category: "holiday",
+                title: "עֶרֶב פֶּסַח",
+                date: "2027-04-21",
+              },
+              {
+                category: "holiday",
+                title: "פֶּסַח א׳",
+                date: "2027-04-22",
+              },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ results: [] }) };
+    }) as unknown as typeof fetch;
+
+    const text = await resolveJewishReply({
+      place: "",
+      aspects: ["holidays"],
+      query: "ערב פסח",
+      now: new Date("2026-10-24T12:00:00+03:00"),
+      fetchImpl,
+    });
+    expect(text).toContain("ערב פסח");
+    expect(text).toContain("21.04.2027");
+    expect(text).not.toContain("סיגד");
   });
 
   it("formats Shabbat from mocked Hebcal", async () => {

@@ -1154,6 +1154,13 @@
                       ]
                     },
                     "description": "What they asked: bare weather → [summary]; גלים → [waves]; משב רוח / רוח → [wind]; טמפרטורה → [temp]; לחות → [humidity]. Can combine."
+                  },
+                  "min_wave_m": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Optional minimum wave height in meters. «גלים מעל מטר» → 1. With place ישראל/חופי ישראל + aspects[waves] server scans main coasts; with a city it says above/below. null/omit when no threshold."
                   }
                 },
                 "required": [
@@ -1220,7 +1227,7 @@
                         "messages"
                       ]
                     },
-                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות → [behavior]; מערכת → [timetable]; חיסורים/איחורים → [absences]; הודעות → [messages]. Can combine."
+                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות / חיזוקים חיוביים → [behavior]; מערכת → [timetable]; חיסורים/איחורים → [absences]; הודעות → [messages]. Can combine."
                   },
                   "date_from": {
                     "type": [
@@ -1366,7 +1373,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Jewish calendar / Shabbat ask («מתי מדליקים נרות בפתח תקווה» / «מה פרשת השבוע» / «מתי יוצאת שבת» / «איזה חג הבא»). Server fetches Hebcal and replaces response — FORBIDDEN inventing times. Place required for candles/havdalah/summary (Israel city); optional for parasha/holidays. Missing required place → ask; leave jewish null.",
+                "description": "Live Jewish calendar / Shabbat ask («מתי מדליקים נרות בפתח תקווה» / «מה פרשת השבוע» / «מתי יוצאת שבת» / «איזה חג הבא» / «מתי ערב פסח»). Server fetches Hebcal and replaces response — FORBIDDEN inventing times. Place required for candles/havdalah/summary (Israel city); optional for parasha/holidays. Named holiday («ערב פסח») → aspects[holidays] + query with that name (server matches beyond the short upcoming window). Missing required place → ask; leave jewish null.",
                 "properties": {
                   "place": {
                     "type": "string",
@@ -1390,7 +1397,12 @@
                         "holidays"
                       ]
                     },
-                    "description": "Bare שבת/זמני שבת → [summary]; נרות → [candles]; מוצאי/יציאת שבת/הבדלה → [havdalah]; פרשת השבוע → [parasha]; חגים → [holidays]. Can combine."
+                    "description": "Bare שבת/זמני שבת → [summary]; נרות → [candles]; מוצאי/יציאת שבת/הבדלה → [havdalah]; פרשת השבוע → [parasha]; חגים / named holiday → [holidays]. Can combine."
+                  },
+                  "query": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "description": "Named holiday filter from speech («ערב פסח» / «חנוכה» / «פורים»). Empty when listing upcoming holidays only. Server matches Hebcal titles (niqqud-insensitive) with a longer look-ahead."
                   }
                 },
                 "required": [
@@ -1486,7 +1498,7 @@
                         "live_arrivals"
                       ]
                     },
-                    "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות → [frequency]; איזה קווים בתחנה (no dest) → [lines]; לוח יציאות רשמי MOT → [schedule] + stop_code + line; תחנה קרובה לקו → [nearest_stop] + line + origin speaker; תחזית הגעה חיה MOT SIRI → [live_arrivals] + stop_code (+ line?). schedule/nearest_stop = static GTFS (never claim live); live_arrivals = SIRI predictions only — never label schedule/Google as SIRI."
+                    "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות קו ליד מקום/תחנה + חלון זמן → [schedule] (+ nearest_stop first if only an area) — not Google frequency; Google [frequency] only for A→B trip headway; איזה קווים בתחנה (no dest) → [lines]; לוח יציאות רשמי MOT → [schedule] + stop_code|stop name + line (+ departure/window_end/service_date); תחנה קרובה לקו → [nearest_stop] + line + origin speaker|place; תחזית הגעה חיה MOT SIRI → [live_arrivals] + stop_code|stop name (+ line + destination/headsign). schedule/nearest_stop = static GTFS (never claim live); live_arrivals = SIRI predictions only — never label schedule/Google as SIRI."
                   }
                 },
                 "required": [

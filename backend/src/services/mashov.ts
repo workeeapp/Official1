@@ -182,7 +182,12 @@ export function parseMashovAspects(raw: unknown): MashovAspect[] {
       .trim()
       .toLowerCase();
     const mapped: MashovAspect | string =
-      key === "behave" || key === "behaviour" || key === "התנהגות"
+      key === "behave" ||
+        key === "behaviour" ||
+        key === "התנהגות" ||
+        key === "חיזוק" ||
+        key === "חיזוקים" ||
+        key === "חיזוקים חיוביים"
         ? "behavior"
         : key === "schedule" || key === "מערכת"
           ? "timetable"
@@ -251,6 +256,48 @@ function isSchoolNameFiling(name: string): boolean {
   );
 }
 
+/** «… של מאיה» / «… של יואב» on a Mashov filing title → labeled child, else "". */
+function mashovFilingChildLabel(name: string): string {
+  const ofMatch = name.match(/של\s+(.+)$/);
+  return ofMatch ? normHe(ofMatch[1]!) : "";
+}
+
+function mashovLabelMatchesChild(labeled: string, wanted: string): boolean {
+  if (!wanted || !labeled) {
+    return false;
+  }
+  return (
+    labeled === wanted ||
+    wanted.includes(labeled) ||
+    labeled.includes(wanted)
+  );
+}
+
+/**
+ * Prefer child-labeled filing, then unlabeled. Never steal another child's
+ * school/semel/year/password when a child was requested.
+ */
+function pickMashovFiledValue(
+  candidates: Array<{ info: string; labeled: string }>,
+  childWanted: string,
+): { info: string; labeled: string } | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+  if (childWanted) {
+    const match = candidates.find((c) =>
+      mashovLabelMatchesChild(c.labeled, childWanted),
+    );
+    if (match) {
+      return match;
+    }
+    const unlabeled = candidates.find((c) => !c.labeled);
+    return unlabeled ?? null;
+  }
+  const unlabeled = candidates.find((c) => !c.labeled);
+  return unlabeled ?? candidates[0] ?? null;
+}
+
 /**
  * Read Mashov login fields from speaker filings (model-saved conventions).
  * Does not parse the user utterance — only DB filing rows.
@@ -258,6 +305,7 @@ function isSchoolNameFiling(name: string): boolean {
  * School identity: numeric `סמל בית ספר למשוב`, OR `שם בית ספר למשוב`
  * (resolved later via GET /api/schools). Academic year is always required from
  * filing `שנת לימודים למשוב` — never invent a default year.
+ * Child-labeled titles («… של מאיה») win when `opts.child` is set.
  */
 export function loadMashovCredsFromFilings(
   filings: MashovFilingRow[],
@@ -270,11 +318,10 @@ export function loadMashovCredsFromFilings(
   void opts?.now;
   const childWanted = normHe(opts?.child ?? "");
   let username = "";
-  let password = "";
-  let passwordChild = "";
-  let semelRaw = "";
-  let yearRaw = "";
-  let schoolName = "";
+  const passwords: Array<{ info: string; labeled: string }> = [];
+  const semels: Array<{ info: string; labeled: string }> = [];
+  const years: Array<{ info: string; labeled: string }> = [];
+  const schools: Array<{ info: string; labeled: string }> = [];
 
   for (const row of filings) {
     const name = filingName(row);
@@ -282,6 +329,7 @@ export function loadMashovCredsFromFilings(
     if (!info) {
       continue;
     }
+    const labeled = mashovFilingChildLabel(name);
     if (
       (name.includes("תעודת זהות") && name.includes("משוב")) ||
       name.includes("מזהה משוב") ||
@@ -295,48 +343,35 @@ export function loadMashovCredsFromFilings(
       name.includes("סמל בית ספר למשוב") ||
       name === "סמל בית ספר"
     ) {
-      semelRaw = info.replace(/\D/g, "") || info;
+      semels.push({ info: info.replace(/\D/g, "") || info, labeled });
       continue;
     }
     if (isSchoolNameFiling(name)) {
-      schoolName = info;
+      schools.push({ info, labeled });
       continue;
     }
     if (name.includes("שנת לימודים") && name.includes("משוב")) {
-      yearRaw = info.replace(/\D/g, "") || info;
+      years.push({ info: info.replace(/\D/g, "") || info, labeled });
       continue;
     }
     if (name.includes("סיסמ") && name.includes("משוב")) {
-      // «סיסמת משוב של דניאל»
-      const ofMatch = name.match(/של\s+(.+)$/);
-      const labeledChild = ofMatch ? normHe(ofMatch[1]!) : "";
-      if (childWanted && labeledChild) {
-        if (labeledChild === childWanted || childWanted.includes(labeledChild)) {
-          password = info;
-          passwordChild = labeledChild;
-        } else if (!password) {
-          // keep generic fallback later
-        }
-      } else if (!labeledChild) {
-        password = info;
-      } else if (!password) {
-        password = info;
-        passwordChild = labeledChild;
-      }
+      passwords.push({ info, labeled });
     }
   }
 
-  // If child-specific password not found, accept any mashov password filing.
-  if (!password) {
-    for (const row of filings) {
-      const name = filingName(row);
-      const info = filingInfo(row);
-      if (info && name.includes("סיסמ") && name.includes("משוב")) {
-        password = info;
-        break;
-      }
-    }
+  let passwordPick = pickMashovFiledValue(passwords, childWanted);
+  // No child-specific / unlabeled password → any Mashov password filing.
+  if (!passwordPick && passwords.length > 0) {
+    passwordPick = passwords[0]!;
   }
+  const password = passwordPick?.info ?? "";
+  const passwordChild = passwordPick?.labeled ?? "";
+  const semelPick = pickMashovFiledValue(semels, childWanted);
+  const semelRaw = semelPick?.info ?? "";
+  const yearPick = pickMashovFiledValue(years, childWanted);
+  const yearRaw = yearPick?.info ?? "";
+  const schoolPick = pickMashovFiledValue(schools, childWanted);
+  const schoolName = schoolPick?.info ?? "";
 
   const missing: string[] = [];
   if (!username) {
@@ -1403,6 +1438,12 @@ function formatAspectEmptyLine(input: {
   }
   if (unclassified > 0) {
     return `לא מצאתי ${input.label} עם תאריך תקין בטווח ${input.rangeLabel}${whoBit} — יש ${unclassified} רשומות בלי תאריך תקין שלא סווגו לטווח, ולכן זו לא תוצאה שלילית מלאה.`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const out = input.stats?.outOfRange ?? 0;
+  if (out > 0) {
+    return `אין ${input.label} בטווח ${input.rangeLabel}${whoBit} — יש ${out} רשומות מחוץ לטווח בשנת הלימודים שבתיוק. אם חיפשת את השנה הנוכחית, עדכני את «שנת לימודים למשוב» (באוקטובר–יולי לרוב זו שנת הסיום, למשל 2027).`
       .replace(/\s+/g, " ")
       .trim();
   }

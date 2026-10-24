@@ -35,13 +35,15 @@ export type JewishFacts = {
   holidays: JewishTimedItem[];
   missingPlace: boolean;
   error?: string;
+  /** Spoken holiday name filter when set (e.g. ערב פסח). */
+  holidayQuery?: string;
   /**
    * True when more holidays were collected than the display cap shows.
    * Confirmed local display truncation.
    */
   holidaysDisplayTruncated?: boolean;
   /**
-   * True when the 90-day holiday collect hit its hard cap.
+   * True when the holiday collect hit its hard cap.
    * Potential incompleteness within the look-ahead window only.
    */
   holidaysCollectCapped?: boolean;
@@ -50,8 +52,17 @@ export type JewishFacts = {
 /** Display cap for holiday bullets in Hebrew (after collect). */
 export const JEWISH_HOLIDAYS_DISPLAY_CAP = 6;
 
-/** Collect cap inside the 90-day Hebcal window. */
+/** Collect cap inside the default upcoming window (no name query). */
 export const JEWISH_HOLIDAYS_COLLECT_CAP = 8;
+
+/** Look-ahead days when listing upcoming holidays (no name query). */
+export const JEWISH_HOLIDAYS_LOOKAHEAD_DAYS = 90;
+
+/** Look-ahead when filtering a named holiday («ערב פסח») — can be next spring. */
+export const JEWISH_HOLIDAYS_NAMED_LOOKAHEAD_DAYS = 400;
+
+/** Collect cap when searching by holiday name across the named look-ahead. */
+export const JEWISH_HOLIDAYS_NAMED_COLLECT_CAP = 120;
 
 /** Confirmed local holiday display truncation. */
 export const JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE =
@@ -295,16 +306,78 @@ async function fetchShabbat(
   return (await res.json()) as ShabbatResponse;
 }
 
+/** Strip Hebrew niqqud / cantillation so «עֶרֶב פֶּסַח» matches «ערב פסח». */
+export function stripHebrewNiqqud(s: string): string {
+  return String(s ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0591-\u05C7]/g, "")
+    .replace(/["״"'׳]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Score how well a Hebcal holiday title matches a spoken query (0 = none). */
+export function jewishHolidayMatchScore(title: string, query: string): number {
+  const t = stripHebrewNiqqud(title);
+  const q = stripHebrewNiqqud(query);
+  if (!q || !t) {
+    return 0;
+  }
+  if (t === q) {
+    return 100;
+  }
+  if (t.startsWith(q) || t.includes(` ${q}`) || t.includes(`${q} `)) {
+    return 90;
+  }
+  const tokens = q.split(/\s+/).filter((tok) => tok.length >= 2);
+  if (tokens.length === 0) {
+    return 0;
+  }
+  const hit = tokens.filter((tok) => t.includes(tok)).length;
+  if (hit === tokens.length) {
+    return 70 + Math.min(hit, 20);
+  }
+  if (hit >= Math.ceil(tokens.length * 0.6)) {
+    return 40 + hit;
+  }
+  return 0;
+}
+
+export function filterHolidaysByQuery(
+  holidays: JewishTimedItem[],
+  query: string,
+): JewishTimedItem[] {
+  const q = String(query ?? "").trim();
+  if (!q) {
+    return holidays;
+  }
+  const scored = holidays
+    .map((h) => ({ h, score: jewishHolidayMatchScore(h.title, q) }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return a.h.dateIso.localeCompare(b.h.dateIso);
+    });
+  return scored.map((row) => row.h);
+}
+
 async function fetchUpcomingHolidays(
   loc: JewishLocation,
   startYmd: string,
   fetchImpl: typeof fetch = fetch,
+  opts?: { lookaheadDays?: number; collectCap?: number },
 ): Promise<{ holidays: JewishTimedItem[]; collectCapped: boolean }> {
   const start = /^\d{4}-\d{2}-\d{2}$/.test(startYmd)
     ? startYmd
     : new Date().toISOString().slice(0, 10);
+  const lookahead =
+    opts?.lookaheadDays ?? JEWISH_HOLIDAYS_LOOKAHEAD_DAYS;
+  const collectCap = opts?.collectCap ?? JEWISH_HOLIDAYS_COLLECT_CAP;
   const endDate = new Date(`${start}T12:00:00Z`);
-  endDate.setUTCDate(endDate.getUTCDate() + 90);
+  endDate.setUTCDate(endDate.getUTCDate() + lookahead);
   const end = endDate.toISOString().slice(0, 10);
 
   const url = new URL(HEBCAL_URL);
@@ -334,7 +407,7 @@ async function fetchUpcomingHolidays(
       continue;
     }
     out.push(mapItem(row, "holiday"));
-    if (out.length >= JEWISH_HOLIDAYS_COLLECT_CAP) {
+    if (out.length >= collectCap) {
       collectCapped = true;
       break;
     }
@@ -409,10 +482,15 @@ export function formatJewishHebrew(facts: JewishFacts): string {
   }
 
   if (wantsHolidays) {
+    const q = facts.holidayQuery?.trim() ?? "";
     if (facts.holidays.length === 0) {
-      lines.push("לא מצאתי חגים קרובים.");
+      lines.push(
+        q
+          ? `לא מצאתי «${q}» בלוח העברי בשנה הקרובה.`
+          : "לא מצאתי חגים קרובים.",
+      );
     } else {
-      lines.push("חגים קרובים:");
+      lines.push(q ? `«${q}»:` : "חגים קרובים:");
       const displayTruncated =
         facts.holidaysDisplayTruncated === true ||
         facts.holidays.length > JEWISH_HOLIDAYS_DISPLAY_CAP;
@@ -426,7 +504,7 @@ export function formatJewishHebrew(facts: JewishFacts): string {
       if (displayTruncated) {
         lines.push(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
       }
-      if (facts.holidaysCollectCapped) {
+      if (facts.holidaysCollectCapped && !q) {
         lines.push(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
       }
     }
@@ -491,11 +569,14 @@ export async function resolveJewishReply(input: {
   place: string;
   date?: string | null;
   aspects?: JewishAspect[] | unknown;
+  /** Named holiday filter from ACTION (ערב פסח / חנוכה). */
+  query?: string | null;
   fetchImpl?: typeof fetch;
   now?: Date;
 }): Promise<string> {
   const aspects = parseJewishAspects(input.aspects);
   const place = String(input.place ?? "").trim();
+  const holidayQuery = String(input.query ?? "").trim();
   const needsPlace =
     aspects.includes("summary") ||
     aspects.includes("candles") ||
@@ -510,6 +591,7 @@ export async function resolveJewishReply(input: {
       parasha: null,
       holidays: [],
       missingPlace: true,
+      ...(holidayQuery ? { holidayQuery } : {}),
     });
   }
 
@@ -555,9 +637,19 @@ export async function resolveJewishReply(input: {
         /^\d{4}-\d{2}-\d{2}$/.test(date)
           ? date
           : (input.now ?? new Date()).toISOString().slice(0, 10);
-      const fetched = await fetchUpcomingHolidays(loc, start, fetchImpl);
-      holidays = fetched.holidays;
-      holidaysCollectCapped = fetched.collectCapped;
+      const named = Boolean(holidayQuery);
+      const fetched = await fetchUpcomingHolidays(loc, start, fetchImpl, {
+        lookaheadDays: named
+          ? JEWISH_HOLIDAYS_NAMED_LOOKAHEAD_DAYS
+          : JEWISH_HOLIDAYS_LOOKAHEAD_DAYS,
+        collectCap: named
+          ? JEWISH_HOLIDAYS_NAMED_COLLECT_CAP
+          : JEWISH_HOLIDAYS_COLLECT_CAP,
+      });
+      holidays = named
+        ? filterHolidaysByQuery(fetched.holidays, holidayQuery)
+        : fetched.holidays;
+      holidaysCollectCapped = named ? false : fetched.collectCapped;
     }
 
     return formatJewishHebrew({
@@ -568,6 +660,7 @@ export async function resolveJewishReply(input: {
       parasha,
       holidays,
       missingPlace: false,
+      ...(holidayQuery ? { holidayQuery } : {}),
       holidaysDisplayTruncated:
         holidays.length > JEWISH_HOLIDAYS_DISPLAY_CAP,
       holidaysCollectCapped,
