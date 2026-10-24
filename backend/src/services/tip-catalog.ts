@@ -15,7 +15,8 @@ export type TipSeedDef = {
   triggerArea: TipTriggerArea | null;
   triggerOp: TipTriggerOp | null;
   tier: TipTier;
-  topic: TipTopic;
+  /** Null for general (cross-domain) tips — not part of a ladder topic. */
+  topic: TipTopic | null;
   listType: string | null;
   unlockAfterKey: string | null;
   maxShows: number;
@@ -30,6 +31,7 @@ export type TipSeedDef = {
  * Per topic: 2 basic + 2 mid + 1 adv on add, plus mid tips on update/remove.
  * Order bands: shopping 1xx, tasks 2xx, custom 3xx, filing 4xx, reminders 5xx,
  * directory 6xx, meetings 7xx (meetings trigger on tasks mutations too).
+ * General live/capability tips: 8xx (shown only when no action/model tip fired).
  */
 export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
   // —— Shopping (קניות) ——
@@ -811,6 +813,144 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     maxShows: 1,
     order: 50,
     text: "לידיעתך (תמצית): כאורח אפשר בעיקר לצפות במה ששותף איתך ולהירשם לחשבון. אחרי ההרשמה תקבל/י חשבון משלך עם לוסי. אל תשתף סיסמאות עם אחרים.",
+  },
+
+  // —— General (live / cross-domain; only when no contextual tip) ——
+  {
+    key: "general_weather",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 800,
+    text: "אגב, אפשר לשאול אותי מה מזג האוויר היום או בימים הקרובים.",
+  },
+  {
+    key: "general_market",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 801,
+    text: "אגב, אפשר לבדוק שערי חליפין — למשל דולר, אירו ושקל.",
+  },
+  {
+    key: "general_places",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 802,
+    text: "אגב, אפשר לבקש ממני למצוא מסעדה, בית קפה או מקום באזור.",
+  },
+  {
+    key: "general_routes",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 803,
+    text: "אגב, אפשר לבדוק מסלול בתחבורה ציבורית ומתי כדאי לצאת.",
+  },
+  {
+    key: "general_parking",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 804,
+    text: "אגב, אפשר לחפש חניה באזור — כולל אם יש מידע על חינם או בתשלום.",
+  },
+  {
+    key: "general_filing_media_ask",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 805,
+    // Save + ask by filing name later — not a promise of OCR / full document decode.
+    text: "אגב, אפשר לשלוח תמונה או מסמך לתייק אצלי, ואחר כך לשאול עליו לפי השם.",
+  },
+  {
+    key: "general_location_waze",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 806,
+    text: "אגב, אפשר לשמור מיקום בתיוקים ואחר כך לפתוח ניווט ב־Waze.",
+  },
+  {
+    key: "general_mashov",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 807,
+    text: "אגב, אם משו״ב מחובר — אפשר לבקש ממני לבדוק ציונים או מידע זמין משם.",
+  },
+  {
+    key: "general_watch",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 808,
+    text: "אגב, אפשר לבקש ממני לעקוב אחרי משהו ולהתריע כשמתקיים תנאי — למשל שינוי בשער מטבע או תנאי מזג אוויר מסוים.",
   },
 ];
 

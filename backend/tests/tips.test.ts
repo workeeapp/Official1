@@ -589,6 +589,76 @@ describe("tips service", () => {
     expect(allowed.texts).toEqual(["tip"]);
   });
 
+  it("falls back to a general tip when no action/model tip matches", async () => {
+    const general = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      text: "אגב, אפשר לשאול אותי מה מזג האוויר היום או בימים הקרובים.",
+    });
+    tipFindMany.mockResolvedValue([general]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: [],
+    });
+    expect(turn.texts).toEqual([general.text]);
+    expect(tipProgressCreate).toHaveBeenCalled();
+  });
+
+  it("prefers a matching action tip over general tips", async () => {
+    const action = tipRow({
+      id: "a1",
+      key: "shopping_basic_add",
+      topic: "shopping",
+      listType: "shopping",
+      triggerArea: "lists",
+      triggerOp: "add",
+      order: 100,
+      text: "action tip",
+    });
+    const general = tipRow({
+      id: "g1",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      order: 1,
+      text: "general tip",
+    });
+    tipFindMany.mockResolvedValue([general, action]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: [],
+    });
+    expect(turn.texts).toEqual(["action tip"]);
+    expect(turn.texts).not.toContain("general tip");
+  });
+
   it("emits at most one tip per turn even if several match", async () => {
     const shopping = tipRow({
       id: "s1",
