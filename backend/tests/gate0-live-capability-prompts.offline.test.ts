@@ -15,14 +15,18 @@ describe("Gate 0 live capability prompt markers", () => {
 
   it("Weather/Market/Mashov/Jewish/Routes include LIVE CAPABILITY and no Stage B", () => {
     for (const needle of [
+      "LIVE CAPABILITY GATE (generic",
       "WEATHER (live):",
       "MARKET (live):",
       "MASHOV (live):",
       "JEWISH / SHABBAT (live):",
-      "ROUTES (live Google public transit):",
+      "ROUTES:",
     ]) {
       expect(chat).toContain(needle);
     }
+    expect(chat).toMatch(
+      /LIVE CAPABILITY GATE \(generic[\s\S]*?FORBIDDEN fetching a nearby aspect/,
+    );
     expect(chat).toMatch(
       /WEATHER \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no Stage B for weather/,
     );
@@ -36,26 +40,28 @@ describe("Gate 0 live capability prompt markers", () => {
       /MASHOV \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?calendar filter ≠/,
     );
     expect(chat).toMatch(
+      /MASHOV \(live\):[\s\S]*?upcoming exam calendar[\s\S]*?mashov=null/,
+    );
+    expect(chat).toMatch(
       /JEWISH \/ SHABBAT \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no Stage B/,
     );
     expect(chat).toMatch(
-      /ROUTES \(live Google public transit\):[\s\S]*?NOT MOT GTFS\/SIRI/,
-    );
-    expect(chat).toMatch(
-      /ROUTES \(live Google public transit\):[\s\S]*?no require_live_select \/ no Stage B/,
+      /ROUTES:[\s\S]*?Google estimates OR official MOT/,
     );
     expect(chat).toMatch(
       /BUS WATCH:[\s\S]*?NOT continuous realtime monitoring/,
     );
   });
 
-  it("Gate 0 did not add requireLiveSelect to non-Places/Flights chat gates", () => {
+  it("requireLiveSelect Stage B only on Places/Flights/Routes chat gates", () => {
     const gates = [
       ...chat.matchAll(
         /requireLiveSelect:\s*(\w+)\.requireLiveSelect\s*===\s*true/g,
       ),
     ].map((m) => m[1]);
-    expect(gates).toEqual(["placesAction", "flightsAction"]);
+    expect(gates.sort()).toEqual(
+      ["flightsAction", "placesAction", "routesAction"].sort(),
+    );
   });
 
   it("LLM.action.json live_select.domain enum unchanged (no Gate 0 schema edit)", () => {

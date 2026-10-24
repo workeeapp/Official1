@@ -27,7 +27,10 @@ import {
   resolveEvalPrompt,
   type ResolvedEvalPrompt,
 } from "./eval-prompt-source.js";
-import { applyLiveModelMetadataToSnapshot } from "./live-model-snapshot-apply.js";
+import {
+  applyLiveModelMetadataToSnapshot,
+  resetLiveModelItemSeq,
+} from "./live-model-snapshot-apply.js";
 import type { EmployeeRecordSnapshot } from "../services/employee-records.service.js";
 
 export interface ModelEvalRunCaseResult extends ModelEvalCaseResult {
@@ -215,6 +218,8 @@ export async function runModelEvalMultiTurnCase(
     options?.prompt ??
     (await resolveEvalPrompt({ speaker, includeMichal: true }));
   const config = loadLlmConfig();
+  // Deterministic eval-live-item-N mints for this case (pin remove ids in corpus).
+  resetLiveModelItemSeq();
   const snapshot: EmployeeRecordSnapshot = structuredClone(
     snapshotFromSetup(corpusCase.setup, speaker),
   );
@@ -263,6 +268,10 @@ export async function runModelEvalMultiTurnCase(
     );
     // Evolve in-memory facts for the next turn only (eval harness, not product DB).
     applyLiveModelMetadataToSnapshot(snapshot, metadata, speaker);
+    const inject = turn.injectAssistantAfter?.trim();
+    if (inject) {
+      await client.appendAssistantMessage?.(conversationId, inject);
+    }
     turnResults.push({
       index: i,
       utterance: turn.utterance,

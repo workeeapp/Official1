@@ -153,7 +153,8 @@
       "tags": [
         "shopping",
         "single-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -579,11 +580,21 @@
         },
         {
           "type": "no_silent_multi_domain_wipe"
+        },
+        {
+          "type": "response_forbids_any",
+          "needles": [
+            "מחקתי",
+            "נמחקו",
+            "מחקתי הכל",
+            "הכל נמחק"
+          ]
         }
       ],
       "tags": [
         "lists-safety",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ]
     },
     {
@@ -759,7 +770,8 @@
       "tags": [
         "show",
         "single-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -778,7 +790,8 @@
       "tags": [
         "reminders",
         "single-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -1365,7 +1378,8 @@
       "tags": [
         "reminders",
         "single-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -1544,7 +1558,8 @@
       "tags": [
         "single-turn",
         "tasks",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -1971,7 +1986,8 @@
         "single-turn",
         "intent",
         "core-pack",
-        "freeze-pack"
+        "freeze-pack",
+        "decision-core"
       ],
       "description": "Considering a poker night must not create a host task",
       "utterance": "אני חושב אולי לעשות ערב פוקר",
@@ -2032,7 +2048,8 @@
         "shopping",
         "intent",
         "reminders",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "צריך לקנות חלב מחר",
       "setup": {},
@@ -2060,7 +2077,8 @@
         "tasks",
         "intent",
         "reminders",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "צריך לסיים את המצגת",
       "setup": {},
@@ -2149,7 +2167,8 @@
         "core-pack",
         "intent",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "אולי אעבור אצל רועי מחר",
       "setup": {},
@@ -2172,7 +2191,8 @@
         "core-pack",
         "intent",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "צריך לקבוע תור לרופא",
       "setup": {},
@@ -2195,7 +2215,8 @@
         "core-pack",
         "intent",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "תוסיפי מטלה להתקשר לרופא",
       "setup": {},
@@ -2215,7 +2236,8 @@
         "core-pack",
         "intent",
         "tasks",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "אולי אבקר את אמא השבוע",
       "setup": {},
@@ -2321,7 +2343,8 @@
       "tags": [
         "core-pack",
         "shopping",
-        "single-turn"
+        "single-turn",
+        "decision-core"
       ],
       "utterance": "תוסיפי חלב לקניות",
       "setup": {
@@ -2435,106 +2458,180 @@
     {
       "id": "live-weather-tlv-tomorrow",
       "tag": "happy",
-      "tags": ["live-weather", "single-turn"],
+      "tags": [
+        "live-weather",
+        "single-turn"
+      ],
       "utterance": "מה מזג האוויר מחר בתל אביב?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "weather" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "weather"
+        },
         {
           "type": "weather_action",
           "placeIncludes": "תל אביב",
-          "aspectsIncludes": ["summary"]
+          "aspectsIncludes": [
+            "summary"
+          ]
         }
       ]
     },
     {
       "id": "live-weather-waves-haifa",
       "tag": "happy",
-      "tags": ["live-weather", "single-turn"],
+      "tags": [
+        "live-weather",
+        "single-turn"
+      ],
       "utterance": "מה גובה הגלים בחיפה?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "weather" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "weather"
+        },
         {
           "type": "weather_action",
           "placeIncludes": "חיפה",
-          "aspectsIncludes": ["waves"]
+          "aspectsIncludes": [
+            "waves"
+          ]
         }
       ]
     },
     {
       "id": "live-market-aapl",
       "tag": "happy",
-      "tags": ["live-market", "single-turn"],
+      "tags": [
+        "live-market",
+        "single-turn"
+      ],
       "utterance": "מה מחיר מניית אפל?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "market" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "market"
+        },
         {
           "type": "market_action",
-          "queryIncludesAny": ["AAPL", "aapl", "Apple", "אפל"]
+          "queryIncludesAny": [
+            "AAPL",
+            "aapl",
+            "Apple",
+            "אפל"
+          ]
         }
       ]
     },
     {
       "id": "live-market-btc",
       "tag": "happy",
-      "tags": ["live-market", "single-turn"],
+      "tags": [
+        "live-market",
+        "single-turn"
+      ],
       "utterance": "כמה עולה ביטקוין עכשיו?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "market" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "market"
+        },
         {
           "type": "market_action",
-          "queryIncludesAny": ["BTC", "btc", "Bitcoin", "ביטקוין"]
+          "queryIncludesAny": [
+            "BTC",
+            "btc",
+            "Bitcoin",
+            "ביטקוין"
+          ]
         }
       ]
     },
     {
       "id": "live-jewish-candles-pt",
       "tag": "happy",
-      "tags": ["live-jewish", "single-turn"],
+      "tags": [
+        "live-jewish",
+        "single-turn"
+      ],
       "utterance": "מתי מדליקים נרות בפתח תקווה?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "jewish" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "jewish"
+        },
         {
           "type": "jewish_action",
           "placeIncludes": "פתח תקווה",
-          "aspectsIncludes": ["candles"]
+          "aspectsIncludes": [
+            "candles"
+          ]
         }
       ]
     },
     {
       "id": "live-jewish-parasha",
       "tag": "happy",
-      "tags": ["live-jewish", "single-turn"],
+      "tags": [
+        "live-jewish",
+        "single-turn"
+      ],
       "utterance": "מה פרשת השבוע?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "jewish" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "jewish"
+        },
         {
           "type": "jewish_action",
           "allowEmptyPlace": true,
-          "aspectsIncludes": ["parasha"]
+          "aspectsIncludes": [
+            "parasha"
+          ]
         }
       ]
     },
     {
       "id": "live-flights-tlv-paris-departures",
       "tag": "happy",
-      "tags": ["live-flights", "single-turn"],
+      "tags": [
+        "live-flights",
+        "single-turn"
+      ],
       "utterance": "איזה טיסות ממריאות מנתב״ג לפריז?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "flights" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "flights"
+        },
         {
           "type": "any",
           "constraints": [
@@ -2560,12 +2657,20 @@
     {
       "id": "live-flights-arrival-status",
       "tag": "happy",
-      "tags": ["live-flights", "single-turn"],
+      "tags": [
+        "live-flights",
+        "single-turn"
+      ],
       "utterance": "מתי נוחתת טיסה LY315?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "flights" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "flights"
+        },
         {
           "type": "flights_action",
           "direction": "arrivals",
@@ -2576,12 +2681,20 @@
     {
       "id": "live-places-restaurant-filters",
       "tag": "happy",
-      "tags": ["live-places", "single-turn"],
+      "tags": [
+        "live-places",
+        "single-turn"
+      ],
       "utterance": "תמצאי לי מסעדה פתוחה עכשיו עם דירוג מעל 4 בפתח תקווה",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "places" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "places"
+        },
         {
           "type": "places_action",
           "queryIncludes": "מסעדה",
@@ -2595,12 +2708,20 @@
     {
       "id": "live-places-parking-mall",
       "tag": "happy",
-      "tags": ["live-places", "single-turn"],
+      "tags": [
+        "live-places",
+        "single-turn"
+      ],
       "utterance": "איפה יש חניון ליד הקניון בפתח תקווה?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "places" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "places"
+        },
         {
           "type": "any",
           "constraints": [
@@ -2623,52 +2744,187 @@
     {
       "id": "live-routes-transit-pt-tlv",
       "tag": "happy",
-      "tags": ["live-routes", "single-turn"],
+      "tags": [
+        "live-routes",
+        "single-turn"
+      ],
       "utterance": "איך מגיעים בתחבורה ציבורית מפתח תקווה לתל אביב?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "routes"
+        },
         {
           "type": "routes_action",
           "originIncludes": "פתח תקווה",
           "destinationIncludes": "תל אביב",
-          "aspectsExcludes": ["schedule", "nearest_stop", "live_arrivals"]
+          "aspectsExcludes": [
+            "schedule",
+            "nearest_stop",
+            "live_arrivals"
+          ]
         }
       ]
     },
     {
       "id": "live-gtfs-schedule-line1",
       "tag": "happy",
-      "tags": ["live-gtfs", "single-turn"],
+      "tags": [
+        "live-gtfs",
+        "single-turn"
+      ],
       "utterance": "מה לוח הזמנים הרשמי של קו 1 בתחנה עם קוד 21224?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "routes"
+        },
         {
           "type": "routes_action",
-          "aspectsIncludes": ["schedule"],
+          "aspectsIncludes": [
+            "schedule"
+          ],
           "lineIncludes": "1",
           "requireStopCode": true,
-          "aspectsExcludes": ["nearest_stop", "live_arrivals"]
+          "aspectsExcludes": [
+            "nearest_stop",
+            "live_arrivals"
+          ]
         }
       ]
     },
     {
       "id": "live-gtfs-nearest-stop-51",
       "tag": "happy",
-      "tags": ["live-gtfs", "single-turn"],
+      "tags": [
+        "live-gtfs",
+        "single-turn"
+      ],
       "utterance": "איפה התחנה הקרובה לקו 51 ממקומי?",
       "setup": {},
       "constraints": [
-        { "type": "mutations_empty_or_read_only" },
-        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "routes"
+        },
         {
           "type": "routes_action",
-          "aspectsIncludes": ["nearest_stop"],
+          "aspectsIncludes": [
+            "nearest_stop"
+          ],
           "lineIncludes": "51",
-          "aspectsExcludes": ["schedule", "live_arrivals"]
+          "aspectsExcludes": [
+            "schedule",
+            "live_arrivals"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dm-update-existing-task",
+      "tag": "happy",
+      "tags": [
+        "decision-core",
+        "tasks",
+        "single-turn",
+        "p1-gap"
+      ],
+      "description": "P1: unique existing task → update same item_id; forbid lists.add",
+      "utterance": "תעדכני את המטלה לקנות מתנה — תשני את השם לקנות מתנה ליוסי",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-gift",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-task-gift",
+                "שם מטלה": "לקנות מתנה"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "update",
+          "listType": "tasks",
+          "itemTextIncludes": "eval-task-gift"
+        },
+        {
+          "type": "lists_has_action",
+          "action": "update",
+          "listType": "tasks",
+          "itemTextIncludes": "יוסי"
+        },
+        {
+          "type": "no_lists_add",
+          "listType": "tasks"
+        },
+        {
+          "type": "reminders_empty"
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "dm-multi-shop-and-filing",
+      "tag": "happy",
+      "tags": [
+        "decision-core",
+        "shopping",
+        "filing",
+        "single-turn",
+        "p1-gap"
+      ],
+      "description": "P1: two independent requests in one turn → shopping add + filing add",
+      "utterance": "תוסיפי יין לקניות ותתיקי שרק יין אדום",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-personal",
+            "list_type": "shopping",
+            "owner": "טל",
+            "scope": "personal",
+            "items": []
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "lists_has_action",
+          "action": "add",
+          "listType": "shopping",
+          "itemTextIncludes": "יין"
+        },
+        {
+          "type": "filing_has_action",
+          "action": "add_filing"
+        },
+        {
+          "type": "list_ops_empty"
+        },
+        {
+          "type": "reminders_empty"
         }
       ]
     }

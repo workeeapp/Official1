@@ -8,6 +8,7 @@ import {
   filterSnapshotForAboutPerson,
   formatCustomItemBody,
   formatFilingDumpBody,
+  filingHiddenDetailMark,
   formatLinkedReminderParen,
   formatNumberedItem,
   formatRelativeDayLabel,
@@ -91,6 +92,21 @@ describe("closed show button allowlist", () => {
     ).toBe(true);
   });
 
+  it("maps worker inventory «הצג מטלות של X» to tasks + about", () => {
+    expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
+      kind: "tasks",
+      about: "לוסי",
+    });
+    expect(isKnownShowButtonCommand("הצג מטלות של לוסי")).toBe(true);
+    // Collab shapes stay distinct from about.
+    expect(mapShowButtonCommandToDumpTarget("הצג מטלות באחריות לוסי")).toEqual({
+      kind: "tasks",
+      section: "shared",
+      assignee: "לוסי",
+      collaboration: "assign",
+    });
+  });
+
   it("maps custom list buttons only by exact equality to a live list_name", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
@@ -126,26 +142,45 @@ describe("closed show button allowlist", () => {
 });
 
 describe("formatFilingDumpBody", () => {
-  it("labels item_info as תיאור and appends מידע לחיפוש when set", () => {
+  it("list mode is title only; full mode labels תיאור / מידע לחיפוש", () => {
     expect(
-      formatFilingDumpBody({
-        filing_id: "f1",
-        item_name: "כתובת מרב",
-        item_info: "יערה אבן יהודה",
-        item_description: "",
-        owner: "טל",
-        scope: "personal",
-      }),
+      formatFilingDumpBody(
+        {
+          filing_id: "f1",
+          item_name: "כתובת מרב",
+          item_info: "יערה אבן יהודה",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        "list",
+      ),
+    ).toBe("כתובת מרב");
+    expect(
+      formatFilingDumpBody(
+        {
+          filing_id: "f1",
+          item_name: "כתובת מרב",
+          item_info: "יערה אבן יהודה",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        "full",
+      ),
     ).toBe("שם: כתובת מרב · תיאור: יערה אבן יהודה");
     expect(
-      formatFilingDumpBody({
-        filing_id: "f2",
-        item_name: "מספר רישיון נהיגה",
-        item_info: "423432342",
-        item_description: "רישיון הנהיגה שלי על האופנוע משנת 1998",
-        owner: "טל",
-        scope: "personal",
-      }),
+      formatFilingDumpBody(
+        {
+          filing_id: "f2",
+          item_name: "מספר רישיון נהיגה",
+          item_info: "423432342",
+          item_description: "רישיון הנהיגה שלי על האופנוע משנת 1998",
+          owner: "טל",
+          scope: "personal",
+        },
+        "full",
+      ),
     ).toBe(
       "שם: מספר רישיון נהיגה · תיאור: 423432342 · מידע לחיפוש: רישיון הנהיגה שלי על האופנוע משנת 1998",
     );
@@ -158,12 +193,39 @@ describe("formatFilingDumpBody", () => {
         owner: "טל",
         scope: "personal",
       }),
-    ).toBe("שם: שרון וטרינרית");
+    ).toBe("שרון וטרינרית");
+  });
+
+  it("filingHiddenDetailMark is list-only when info or find-helper exists", () => {
+    expect(
+      filingHiddenDetailMark(
+        { item_info: "בתוקף", item_description: "" },
+        "list",
+      ),
+    ).toBe(" 📄");
+    expect(
+      filingHiddenDetailMark(
+        { item_info: "", item_description: "אופנוע" },
+        "list",
+      ),
+    ).toBe(" 📄");
+    expect(
+      filingHiddenDetailMark(
+        { item_info: "בתוקף", item_description: "" },
+        "full",
+      ),
+    ).toBe("");
+    expect(
+      filingHiddenDetailMark(
+        { item_info: "", item_description: "" },
+        "list",
+      ),
+    ).toBe("");
   });
 });
 
 describe("filings flat dump", () => {
-  it("one header; personal then co-share (A, B) — no עם / של X", () => {
+  it("inventory: title + 📄 when detail exists; co-share mark; no inlined תיאור", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -193,14 +255,63 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("תיוקים אישיים:");
     expect(dump).not.toContain("תיוקים משותפים:");
     expect(dump).toMatch(
-      /תיוקים:\n1\. שם: רישיון · תיאור: בתוקף\n2\. שם: קוד שער · תיאור: 1234 \(מיכל, טל\)/,
+      /תיוקים:\n1\. רישיון 📄\n2\. קוד שער 📄 \(מיכל, טל\)/,
     );
+    expect(dump).not.toContain("תיאור:");
+    expect(dump).not.toContain("שם:");
+    expect(dump).not.toContain("בתוקף");
+    expect(dump).not.toContain("1234");
     expect(dump).not.toContain("מידע:");
     expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("של ");
   });
 
-  it("ITEM DUMP filters filings to show_dump_ids only", () => {
+  it("inventory: long OCR-like item_info stays hidden; 📎 when attached", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f-doc",
+          item_name: "לוח מבחנים — יואב",
+          item_info: "מתמטיקה 12/11\nאנגלית 15/11\nהיסטוריה 20/11",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+          attachments: [{ attachment_id: "a1" }],
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(dump).toBe("תיוקים:\n1. לוח מבחנים — יואב 📎 📄");
+    expect(dump).not.toContain("מתמטיקה");
+    expect(dump).not.toContain("תיאור:");
+  });
+
+  it("inventory: title only when no detail and no attachment", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f-short",
+          item_name: "מסמך ללא קובץ",
+          item_info: "",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    const dump = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(dump).toBe("תיוקים:\n1. מסמך ללא קובץ");
+    expect(dump).not.toContain("📄");
+    expect(dump).not.toContain("📎");
+  });
+
+  it("ITEM DUMP filters filings to show_dump_ids and shows full labeled body", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -216,7 +327,7 @@ describe("filings flat dump", () => {
           filing_id: "f2",
           item_name: "קוד שער",
           item_info: "1234",
-          item_description: "",
+          item_description: "שער חניה",
           owner: "טל",
           scope: "personal",
         },
@@ -229,6 +340,8 @@ describe("filings flat dump", () => {
     expect(dump).toContain("קוד שער");
     expect(dump).not.toContain("רישיון");
     expect(dump).toMatch(/^תיוקים:\n1\. /);
+    expect(dump).toContain("שם: קוד שער · תיאור: 1234 · מידע לחיפוש: שער חניה");
+    expect(dump).not.toContain("📄");
   });
 
   it("ITEM DUMP filters tasks to multiple item ids", () => {
@@ -646,8 +759,11 @@ describe("filings flat dump", () => {
       viewerName: "טל",
     })!;
     expect(dump).toContain("תיוקים:");
-    expect(dump).toContain("שם: לשון פנייה · תיאור: זכר");
-    expect(dump).toContain("שם: כתובת · תיאור: רחוב שחם");
+    expect(dump).toContain("לשון פנייה 📄");
+    expect(dump).toContain("כתובת 📄");
+    expect(dump).not.toContain("תיאור:");
+    expect(dump).not.toContain("זכר");
+    expect(dump).not.toContain("רחוב שחם");
     expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("(טל)");
   });

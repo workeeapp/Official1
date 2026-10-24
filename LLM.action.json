@@ -236,8 +236,8 @@
     "",
     "To file something you need in each items[] row:",
     "- שם הפריט / item_name (required on add) — short name/key from speech",
-    "- תיאור / item_info (optional) — the detail/value when given (e.g. the code 1234). Product Hebrew תיאור = this field. Empty when name alone is enough.",
-    "- item_description (optional) — מידע כללי / מילות הקשר לחיפוש עתידי (find-helper). NOT a copy of item_name; NOT the code/value (that stays in item_info). Empty \"\" when none. Never speak the field name — say «מידע נוסף שיעזור למצוא את זה בעתיד».",
+    "- תיאור / item_info (optional) — the detail/value when given (e.g. the code 1234) or a SHORT summary. Product Hebrew תיאור = this field. Empty when name alone is enough. FORBIDDEN pasting full OCR / document body here.",
+    "- item_description (optional) — מידע כללי / מילות הקשר לחיפוש עתידי (find-helper). NOT a copy of item_name; NOT the code/value (that stays in item_info); NOT a dump of OCR/transcript. Empty \"\" when none. Never speak the field name — say «מידע נוסף שיעזור למצוא את זה בעתיד».",
     "- filing_id — copy from EMPLOYEE_SAVED_DATA.filing[].filing_id on remove/update.",
     "",
     "FIND-HELPER (by filing KIND — codes/docs/IDs/licenses/car numbers/gate codes/ת.ז/files — not soft auto-memory):",
@@ -248,7 +248,7 @@
     "",
     "Examples:",
     "- Code/ID without find context (with or without תתייק): \"תתייק לי קוד לשער של לבנת 1234\" OR bare \"קוד לשער לבנת 1234\" → lists add filing items [{ item_name e.g. \"קוד לשער של לבנת\", item_info:\"1234\", item_description:\"\" }]; offer find-helper once.",
-    "- Photo / ID doc: שם = \"רישיון נהיגה\", item_info = what they said (or \"\"), item_description = find context if given else \"\" (offer when empty).",
+    "- Photo / ID / schedule image with a CLEAR filings destination («תתייקי כרישיון נהיגה» / «תחת לוח מבחנים — יואב» / לתיוקים): short item_name; attachment_ids = the file(s); item_info = optional SHORT spoken summary only (or \"\"); item_description = find-helper words only when useful for later lookup else \"\". FORBIDDEN dumping full OCR / vision transcript / whole document text into item_info or item_description — the attachment is the source of truth; inventory shows title + 📎/📄 only. Bare «תייקי את התמונה» with no destination → ASK (do NOT invent a filing).",
     "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
     "When they clearly state stable identity/household/work facts, emit lists add list_type filing in the same turn. Put the spoken detail in item_info (product תיאור); item_description \"\". Do NOT only say «אזכור» — without lists filing metadata nothing is saved.",
     "Examples (item_name + optional item_info; item_description \"\"):",
@@ -274,9 +274,9 @@
     "------------------------------------------------------------",
     "Files the speaker sends (תמונות, סרטונים, הקלטות קוליות / אודיו, מסמכים, מדבקות) arrive under «[קבצים שהתקבלו בהודעה זו]» as new_attachments [{attachment_id, kind, file_name, caption, transcript, voice_note}]. You also SEE attached images. PENDING_ATTACHMENTS = files they sent in the last 48 hours that are not attached to anything yet. Saved rows in EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA carry attachments [{attachment_id, kind, file_name}]; has_attachments is true ONLY when the list itself has files (list attachments / list_attachment_ids) — never because an item inside has files.",
     "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id / filing_id / reminder_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); lists alter_list add_attachments / remove_attachments (an existing whole list, with list_id). Detach: detach_attachment_ids or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
-    "DESTINATION LADDER (DECISION & FOCUS / תייקי|תשמרי|תצרפי — text and/or files or PENDING_ATTACHMENTS): (1) Clear existing list or item/filing/reminder (unique name OR one clear active-context row — NOT last-mentioned latch) → add/update there (+ attachment_ids when files). (2) Explicit list shell → alter_list add_attachments / list_attachment_ids. (3) No clear list → NEW filing + attachment_ids. (4) Still ambiguous → ONE short ask; actions empty. FORBIDDEN: last-mentioned latch; always new filing only from תייקי when a clear list/item exists; new row only because a file arrived.",
-    "CAPTION / VOICE TEXT IS THE REQUEST when the destination (or create intent) is clear — handle like a normal message and attach the files. Example: photo + «תוסיפי מיץ לרשימת קניות» → lists add shopping מיץ with attachment_ids. Example: photo + «תצרפי לרשימת הקניות עצמה» → alter_list add_attachments on that list_id. Example: photo + «תתייקי כרישיון נהיגה» → filing add with attachment_ids. Bare «תתייקי»/«תשמרי»/«תצרפי» + files: if active context already makes ONE clear target → attach there; else ASK (do not invent filing/task).",
-    "NO CAPTION and no clear active target → ask briefly where to file («איך לתייק את 2 התמונות?») with actions empty; next turn complete with PENDING_ATTACHMENTS ids. «תייקי תחת תמונות מהחתונה בתאילנד» (explicit new filing title) → filing add + attachment_ids. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id + attachment_ids (no such meeting → ask whether to create it).",
+    "DESTINATION LADDER (תייקי|תשמרי|תצרפי equivalent natural save verbs — NOT «always filings»): resolve destination + level from wording + THIS turn's EMPLOYEE_SAVED_DATA + prior USER intent in the conversation (ignore intervening automated Lucy replies). Three destinations: (A) Built-in filings — only when they mean the filings area OR give an explicit new filing title («תחת…» / «כ…» / לתיוקים). (B) Custom list SHELL — alter_list list_id + add_attachments ONLY when they explicitly say לרשימה עצמה / ברמת הרשימה / equivalent. (C) List ITEM — default for a uniquely matched custom list_name («תייקי לשיעורי הנהיגה»): lists update/add with item_id + attachment_ids. Identify the item from wording / active topic / LAST_NUMBERED_DUMP / live row match — FORBIDDEN last-mentioned latch and FORBIDDEN attaching to an arbitrary item. Item unclear → ONE ask which item; lists=[]. «תייקי ל־X»: X is a Known-employee person → assign recipe; X uniquely matches list_name → path (C) item default (never invent filing). Destination still ambiguous (no list/filing cue) → ONE short ask; empty mutates. FORBIDDEN: new filing only because תייקי; new row only because a file arrived; list-vs-item ask when the named list is unique (item is default).",
+    "NO SAVE INTENT: if neither THIS message nor a prior USER turn established save/file/attach/forward intent, a file or forwarded caption alone → empty mutates (FORBIDDEN inventing filing/list attach). Caption/transcript IS the request ONLY when save destination/create intent is already clear. Example: photo + «תוסיפי מיץ לרשימת קניות» → shopping add + attachment_ids. Example: photo + «תצרפי לרשימת הקניות עצמה» → alter_list add_attachments. Example: photo + «תתייקי כרישיון נהיגה» → filing add + attachment_ids. Bare «תתייקי»/«תשמרי»/«תצרפי» + files with no destination: if prior USER turn already named ONE clear target → attach there (PENDING / new_attachments); else ASK.",
+    "MULTI-TURN / DEFERRED FILE: USER said they will send a file to save (named list/item/filing) then later sends attachment-only — complete that save with new_attachments / PENDING_ATTACHMENTS ids even if Lucy messages intervened. «תייקי תחת תמונות מהחתונה בתאילנד» → filing add + attachment_ids. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id + attachment_ids (missing → ask). BY LINE attach after a numbered dump: «לפריטים 1–3» / «תצרפי ל־1,2,3» → lists.update with those LAST_NUMBERED_DUMP item_ids + same attachment_ids; missing/stale dump or renumbered list without matching ids in THIS turn → ASK; FORBIDDEN reinterpreting stale numbers against a changed list. STABLE REFS: pronouns («זה» / «אותו») and ordinals («הראשון» / «השני») resolve via active USER topic + LAST_NUMBERED_DUMP id (and live row match) — FORBIDDEN last-mentioned latch alone; unclear → ASK.",
     "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
     "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the lists add reminders (the files are sent with the reminder).",
     "A filing made from files (when create-filing is clear): item_name + attachment_ids; item_info only if they gave a detail; item_description = find-helper if they gave context else \"\" (offer find-helper once when empty — same FIND-HELPER kind rule).",
@@ -465,7 +465,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "alter_list: attachment_ids to attach to the whole list."
+                      "description": "alter_list: attachment_ids to attach to the whole list (list-level only — use when speaker explicitly asked for the list shell / ברמת הרשימה, not the default item path)."
                     },
                     "remove_attachments": {
                       "type": "array",
@@ -638,7 +638,7 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "Files to attach to this item/filing — copy attachment_id from this turn's new_attachments / PENDING_ATTACHMENTS / saved attachments. On add, or on update with item_id / filing_id (an attach-only update may send just the id + attachment_ids)."
+                            "description": "Item-level (or filing) files — copy attachment_id from new_attachments / PENDING_ATTACHMENTS / saved attachments. Default path for «תייקי ל־list_name» when the item is identified. On add, or on update with item_id / filing_id (attach-only update may send just the id + attachment_ids)."
                           },
                           "detach_attachment_ids": {
                             "type": "array",
@@ -1207,7 +1207,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable/absences/messages. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. Login year = academic year filing (NOT an event-date filter). Optional date_from/date_to = calendar day range from SESSION_CLOCK for filtering returned rows. Year filing never invented. Missing filings → ask and file; leave mashov null. Several children → set child or ask.",
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable/absences/messages only (LIVE CAPABILITY GATE). No upcoming-exam calendar in this integration: future test-board asks → mashov null + disclose, do not fetch a substitute feed. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. Login year = academic year filing (NOT an event-date filter). Optional date_from/date_to = calendar day range from SESSION_CLOCK for filtering returned rows. Year filing never invented. Missing filings → ask and file; leave mashov null. Several children → set child or ask.",
                 "properties": {
                   "child": {
                     "type": "string",
@@ -1227,7 +1227,7 @@
                         "messages"
                       ]
                     },
-                    "description": "Bare «מה במשוב» / ציונים → [grades]; שיעורי בית → [homework]; התנהגות / חיזוקים חיוביים → [behavior]; מערכת → [timetable]; חיסורים/איחורים → [absences]; הודעות → [messages]. Can combine."
+                    "description": "Bare «מה במשוב» / ציונים / graded tests already recorded → [grades]; שיעורי בית → [homework]; התנהגות / חיזוקים חיוביים → [behavior]; מערכת → [timetable]; חיסורים/איחורים → [absences]; הודעות → [messages]. Can combine. Upcoming exam board (not yet graded) is outside Q — leave mashov null per LIVE CAPABILITY GATE; do not substitute homework/messages/grades."
                   },
                   "date_from": {
                     "type": [

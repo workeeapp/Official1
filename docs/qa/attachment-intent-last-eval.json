@@ -1,0 +1,285 @@
+{
+  "generatedAt": "2026-10-24T20:14:32.814Z",
+  "suite": "attachment-intent-corpus",
+  "track": "LIVE_MODEL",
+  "evalPath": "model-output-constraints-only+fixture-attachment-context",
+  "productionApply": false,
+  "isolation": {
+    "prismaApply": false,
+    "whatsapp": false,
+    "reminderFire": false,
+    "lucyDbSync": false,
+    "attachmentContext": "corpus-fixtures",
+    "interveningLucy": "appendAssistantMessage"
+  },
+  "promptNotes": [
+    "Prompt = resolveEvalPrompt (lucy_eval / buildLucyModelEvalInstructions), not full Chat attachLucyEngine catalog.",
+    "new_attachments / PENDING_ATTACHMENTS / LAST_NUMBERED_DUMP are corpus fixtures (not DB).",
+    "Intervening Lucy lines use appendAssistantMessage (no model call for that bubble).",
+    "No Prisma apply / WhatsApp / reminder fire / Lucy DB sync.",
+    "Facts-only attachments (no vision imageUrls) — intent/destination scoring, not OCR."
+  ],
+  "promptSource": "config:LLM.config.json+buildLucyModelEvalInstructions",
+  "instructionsSha256": "50d99b0cb93c412925dca445e4dfac64a9174595c04521dc0ed0ee47d6869674",
+  "envelopeMode": "lucy_eval",
+  "attachLucyRuntimeEngine": true,
+  "model": "gpt-6-luna",
+  "temperature": 0,
+  "reasoningEffort": "medium",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "passRate": 1,
+  "requiredPassRate": 0.67,
+  "softOk": true,
+  "criticalOk": true,
+  "criticalFailed": [],
+  "ok": true,
+  "results": [
+    {
+      "id": "att-no-intent",
+      "tag": "safety-rails",
+      "description": "File + useful caption without save/file/attach intent → empty mutates",
+      "ok": true,
+      "failures": [],
+      "llmMs": 3855,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "הנה תמונה מהטיול",
+          "response": "איזה נוף יפה מאילת! 🌊",
+          "ok": true,
+          "failures": [],
+          "llmMs": 3855,
+          "injectedAssistantAfter": null,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"איזה נוף יפה מאילת! 🌊\",\"buttons\":[],\"navigate_address\":null}],\"metadata\":{\"lists\":[],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":\"🌊\",\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        }
+      ]
+    },
+    {
+      "id": "att-deferred-after-lucy",
+      "tag": "continuity",
+      "description": "Prior USER save intent + intervening automated Lucy + attachment-only → item attach",
+      "ok": true,
+      "failures": [],
+      "llmMs": 9705,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "אני אשלח עוד רגע קובץ — תצרפי אותו לשיעור עם דני ברשימת שיעורי הנהיגה",
+          "response": "בטח, שלחי את הקובץ ואצרף אותו לשיעור עם דני ברשימת שיעורי הנהיגה.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4235,
+          "injectedAssistantAfter": "מעולה, שלח את הקובץ כשתהיה מוכן.",
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"בטח, שלחי את הקובץ ואצרף אותו לשיעור עם דני ברשימת שיעורי הנהיגה.\",\"buttons\":[],\"navigate_address\":null}],\"metadata\":{\"lists\":[],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":null,\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        },
+        {
+          "index": 1,
+          "utterance": "הנה",
+          "response": "צירפתי את הקובץ לשיעור עם דני ברשימת שיעורי הנהיגה.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 5470,
+          "injectedAssistantAfter": null,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "update",
+                "listType": "custom",
+                "listName": "שיעורי הנהיגה",
+                "items": [
+                  {
+                    "item_id": "eval-att-item-dani",
+                    "attachment_ids": [
+                      "11111111-1111-4111-8111-111111111111"
+                    ]
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"צירפתי את הקובץ לשיעור עם דני ברשימת שיעורי הנהיגה.\",\"buttons\":[{\"label\":\"הצג רשימה\",\"command\":\"הצג רשימת שיעורי הנהיגה\"}],\"navigate_address\":null}],\"metadata\":{\"lists\":[{\"action\":\"update\",\"list_type\":\"custom\",\"list_name\":\"שיעורי הנהיגה\",\"items\":[{\"item_id\":\"eval-att-item-dani\",\"attachment_ids\":[\"11111111-1111-4111-8111-111111111111\"]}]}],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":\"📎\",\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"show_dump_ids\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        }
+      ]
+    },
+    {
+      "id": "att-item-default",
+      "tag": "happy",
+      "description": "Named custom list + uniquely identifiable item → item attach (not filing / not list shell)",
+      "ok": true,
+      "failures": [],
+      "llmMs": 4287,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תייקי את התמונה לשיעור עם דני ברשימת שיעורי הנהיגה",
+          "response": "צירפתי את התמונה ל״שיעור עם דני״ ברשימת שיעורי הנהיגה.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 4287,
+          "injectedAssistantAfter": null,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "update",
+                "listType": "custom",
+                "listName": "שיעורי הנהיגה",
+                "items": [
+                  {
+                    "item_id": "eval-att-item-dani",
+                    "attachment_ids": [
+                      "11111111-1111-4111-8111-111111111111"
+                    ]
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"צירפתי את התמונה ל״שיעור עם דני״ ברשימת שיעורי הנהיגה.\",\"buttons\":[{\"label\":\"הצג רשימה\",\"command\":\"הצג רשימת שיעורי הנהיגה\"}],\"navigate_address\":null}],\"metadata\":{\"lists\":[{\"action\":\"update\",\"list_type\":\"custom\",\"list_name\":\"שיעורי הנהיגה\",\"items\":[{\"item_id\":\"eval-att-item-dani\",\"attachment_ids\":[\"11111111-1111-4111-8111-111111111111\"]}]}],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":\"👍\",\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        }
+      ]
+    },
+    {
+      "id": "att-rishon",
+      "tag": "happy",
+      "description": "הראשון with LAST_NUMBERED_DUMP → dump line 1 item_id",
+      "ok": true,
+      "failures": [],
+      "llmMs": 5175,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תצרפי את הקובץ לראשון",
+          "response": "צירפתי את הקובץ ל״שיעור עם דני״.",
+          "ok": true,
+          "failures": [],
+          "llmMs": 5175,
+          "injectedAssistantAfter": null,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "update",
+                "listType": "custom",
+                "listName": "שיעורי הנהיגה",
+                "items": [
+                  {
+                    "item_id": "eval-att-item-dani",
+                    "attachment_ids": [
+                      "11111111-1111-4111-8111-111111111111"
+                    ]
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"צירפתי את הקובץ ל״שיעור עם דני״.\",\"buttons\":[{\"label\":\"הצג רשימה\",\"command\":\"הצג את רשימת שיעורי הנהיגה\"}],\"navigate_address\":null}],\"metadata\":{\"lists\":[{\"action\":\"update\",\"list_type\":\"custom\",\"list_name\":\"שיעורי הנהיגה\",\"items\":[{\"item_id\":\"eval-att-item-dani\",\"attachment_ids\":[\"11111111-1111-4111-8111-111111111111\"]}]}],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":\"📎\",\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        }
+      ]
+    },
+    {
+      "id": "att-ambiguous",
+      "tag": "safety-rails",
+      "description": "Bare תתייקי + file with no clear destination → ask, empty mutates",
+      "ok": true,
+      "failures": [],
+      "llmMs": 5121,
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תתייקי",
+          "response": "איך לקרוא לתמונה בתיוק?",
+          "ok": true,
+          "failures": [],
+          "llmMs": 5121,
+          "injectedAssistantAfter": null,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          },
+          "rawReply": "{\"responses\":[{\"text\":\"איך לקרוא לתמונה בתיוק?\",\"buttons\":[],\"navigate_address\":null}],\"metadata\":{\"lists\":[],\"messages\":[],\"jobs\":[],\"directory\":[],\"handoff\":null,\"register\":null,\"confirm\":null,\"buttons\":[],\"send_attachments\":[],\"navigate_address\":null,\"show_icon\":\"📎\",\"show_dump\":null,\"show_dump_section\":null,\"show_dump_partner\":null,\"show_dump_assignee\":null,\"show_dump_about\":null,\"show_dump_from\":null,\"show_dump_to\":null,\"show_dump_urgency\":null,\"weather\":null,\"market\":null,\"mashov\":null,\"places\":null,\"jewish\":null,\"routes\":null,\"flights\":null,\"tips\":null}}"
+        }
+      ]
+    }
+  ]
+}

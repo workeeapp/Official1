@@ -64,6 +64,12 @@ export function showListButtonCommand(
   return name ? `${SHOW_LIST_PREFIX}${name}` : SHOW_LIST_PREFIX.trimEnd();
 }
 
+/** Opaque UI button → digital-worker tasks inventory (show_dump_about). */
+export function showWorkerTasksButtonCommand(workerDisplayName: string): string {
+  const name = workerDisplayName.trim();
+  return name ? `הצג מטלות של ${name}` : "";
+}
+
 /** «כל ה…» alias for unfiltered dump (same kind as הצג רשימת …). */
 export function showAllListButtonCommand(
   listTypeOrFilings: BuiltinListType | "filings",

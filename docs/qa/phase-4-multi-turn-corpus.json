@@ -70,7 +70,8 @@
         "multi-turn",
         "shopping",
         "mt-clarify",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -411,7 +412,8 @@
         "multi-turn",
         "reminders",
         "mt-clarify",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -588,7 +590,8 @@
         "multi-turn",
         "shopping",
         "mt-multi-act",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ]
     },
     {
@@ -846,7 +849,8 @@
         "tasks",
         "mt-clarify",
         "multi-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ],
       "description": "Ambiguous task delete → pick doctor",
       "setup": {
@@ -1087,7 +1091,8 @@
         "shopping",
         "mt-multi-act",
         "multi-turn",
-        "core-pack"
+        "core-pack",
+        "decision-core"
       ],
       "description": "Add yogurt then immediately bought it",
       "setup": {
@@ -1117,10 +1122,14 @@
           "utterance": "קניתי יוגורט",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "remove",
+              "type": "lists_remove_item_ids",
               "listType": "shopping",
-              "itemTextIncludes": "יוגורט"
+              "itemIds": [
+                "eval-live-item-1"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
             }
           ]
         }
@@ -1471,7 +1480,8 @@
       "tags": [
         "core-pack",
         "shopping",
-        "multi-turn"
+        "multi-turn",
+        "decision-core"
       ],
       "description": "Core 1–4: add milk → add bread → delete milk → rename bread (one conversation)",
       "setup": {
@@ -1512,10 +1522,14 @@
           "utterance": "תמחקי את החלב",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "remove",
+              "type": "lists_remove_item_ids",
               "listType": "shopping",
-              "itemTextIncludes": "חלב"
+              "itemIds": [
+                "eval-live-item-1"
+              ]
+            },
+            {
+              "type": "list_ops_empty"
             }
           ]
         },
@@ -1527,6 +1541,10 @@
               "action": "update",
               "listType": "shopping",
               "itemTextIncludes": "לחם"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "shopping"
             },
             {
               "type": "reminders_empty"
@@ -1541,7 +1559,8 @@
       "tags": [
         "core-pack",
         "reminders",
-        "multi-turn"
+        "multi-turn",
+        "decision-core"
       ],
       "description": "Core 19–20–23: incomplete reminder → ask → user declines → no clock",
       "setup": {},
@@ -1647,22 +1666,39 @@
         {
           "utterance": "איזה קווים עוברים בתחנת שלום דורני בפתח תקווה?",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domains_empty" },
-            { "type": "response_looks_like_ask" }
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
           ]
         },
         {
           "utterance": "רק קווים, בלי יעד",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domain_only", "domain": "routes" },
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "routes"
+            },
             {
               "type": "routes_action",
               "originIncludes": "שלום דורני",
               "destinationEmpty": true,
-              "aspectsIncludes": ["lines"],
-              "aspectsExcludes": ["schedule", "nearest_stop", "live_arrivals"]
+              "aspectsIncludes": [
+                "lines"
+              ],
+              "aspectsExcludes": [
+                "schedule",
+                "nearest_stop",
+                "live_arrivals"
+              ]
             }
           ]
         }
@@ -1683,22 +1719,39 @@
         {
           "utterance": "מה לוח הזמנים הרשמי של קו 1?",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domains_empty" },
-            { "type": "response_looks_like_ask" }
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
           ]
         },
         {
           "utterance": "בתחנה עם קוד 21224",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domain_only", "domain": "routes" },
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "routes"
+            },
             {
               "type": "routes_action",
-              "aspectsIncludes": ["schedule"],
+              "aspectsIncludes": [
+                "schedule"
+              ],
               "lineIncludes": "1",
               "requireStopCode": true,
-              "aspectsExcludes": ["nearest_stop", "live_arrivals", "lines"]
+              "aspectsExcludes": [
+                "nearest_stop",
+                "live_arrivals",
+                "lines"
+              ]
             }
           ]
         }
@@ -1719,21 +1772,134 @@
         {
           "utterance": "מה מזג האוויר מחר?",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domains_empty" },
-            { "type": "response_looks_like_ask" }
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
           ]
         },
         {
           "utterance": "בתל אביב",
           "constraints": [
-            { "type": "mutations_empty_or_read_only" },
-            { "type": "live_domain_only", "domain": "weather" },
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "weather"
+            },
             {
               "type": "weather_action",
               "placeIncludes": "תל אביב",
-              "aspectsIncludes": ["summary"],
+              "aspectsIncludes": [
+                "summary"
+              ],
               "dateEqualsRelative": "מחר"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dm-intervening-reminder-draft",
+      "tag": "continuity",
+      "tags": [
+        "decision-core",
+        "reminders",
+        "multi-turn",
+        "p1-gap"
+      ],
+      "description": "P1: incomplete reminder → intervening automated Lucy → user gives time → complete clock",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תזכירי לי לקנות חלב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ],
+          "injectAssistantAfter": "בינתיים — קיבלתי עדכון מערכת. כשתהיה מוכן, המשך."
+        },
+        {
+          "utterance": "מחר ב־09:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב",
+              "maxCount": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dm-soft-offer-accept-mt",
+      "tag": "continuity",
+      "tags": [
+        "decision-core",
+        "reminders",
+        "tasks",
+        "multi-turn",
+        "p1-gap"
+      ],
+      "description": "P1: implicit task save (no clock) → user accepts soft reminder with time → reminders only, no second speaker task add",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "צריך לסיים את המצגת",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "מצגת"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "no_invented_reminder_add"
+            }
+          ]
+        },
+        {
+          "utterance": "כן, תזכירי לי מחר ב־09:00",
+          "constraints": [
+            {
+              "type": "reminders_has_action",
+              "action": "add"
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "shopping"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "הוספתי שוב את המצגת",
+                "הוספתי מטלה נוספת"
+              ]
             }
           ]
         }

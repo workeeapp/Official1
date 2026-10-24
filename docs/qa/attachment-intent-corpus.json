@@ -1,0 +1,382 @@
+{
+  "version": 1,
+  "passRate": 0.67,
+  "speaker": "טל",
+  "criticalCaseIds": [
+    "att-no-intent",
+    "att-item-default",
+    "att-ambiguous"
+  ],
+  "promptNotes": [
+    "Prompt = resolveEvalPrompt (lucy_eval / buildLucyModelEvalInstructions), not full Chat attachLucyEngine catalog.",
+    "new_attachments / PENDING_ATTACHMENTS / LAST_NUMBERED_DUMP are corpus fixtures (not DB).",
+    "Intervening Lucy lines use appendAssistantMessage (no model call for that bubble).",
+    "No Prisma apply / WhatsApp / reminder fire / Lucy DB sync.",
+    "Facts-only attachments (no vision imageUrls) — intent/destination scoring, not OCR."
+  ],
+  "cases": [
+    {
+      "id": "att-no-intent",
+      "tag": "safety-rails",
+      "tags": [
+        "attachment-intent",
+        "decision-core"
+      ],
+      "description": "File + useful caption without save/file/attach intent → empty mutates",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              },
+              {
+                "item_id": "eval-att-item-michal",
+                "שם פריט": "שיעור עם מיכל"
+              }
+            ]
+          }
+        ]
+      },
+      "utterance": "הנה תמונה מהטיול",
+      "newAttachments": [
+        {
+          "attachment_id": "11111111-1111-4111-8111-111111111111",
+          "kind": "image",
+          "file_name": "trip.jpg",
+          "caption": "נוף מהטיול באילת"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "att-deferred-after-lucy",
+      "tag": "continuity",
+      "tags": [
+        "attachment-intent",
+        "multi-turn",
+        "decision-core"
+      ],
+      "description": "Prior USER save intent + intervening automated Lucy + attachment-only → item attach",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              },
+              {
+                "item_id": "eval-att-item-michal",
+                "שם פריט": "שיעור עם מיכל"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "אני אשלח עוד רגע קובץ — תצרפי אותו לשיעור עם דני ברשימת שיעורי הנהיגה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "injectAssistantAfter": "מעולה, שלח את הקובץ כשתהיה מוכן."
+        },
+        {
+          "utterance": "הנה",
+          "newAttachments": [
+            {
+              "attachment_id": "11111111-1111-4111-8111-111111111111",
+              "kind": "image",
+              "file_name": "lesson.jpg"
+            }
+          ],
+          "pendingAttachments": [
+            {
+              "attachment_id": "11111111-1111-4111-8111-111111111111",
+              "kind": "image",
+              "file_name": "lesson.jpg"
+            }
+          ],
+          "constraints": [
+            {
+              "type": "lists_attach_item_ids",
+              "action": "update",
+              "listType": "custom",
+              "itemIds": [
+                "eval-att-item-dani"
+              ],
+              "attachmentIds": [
+                "11111111-1111-4111-8111-111111111111"
+              ]
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "att-item-default",
+      "tag": "happy",
+      "tags": [
+        "attachment-intent",
+        "decision-core"
+      ],
+      "description": "Named custom list + uniquely identifiable item → item attach (not filing / not list shell)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              },
+              {
+                "item_id": "eval-att-item-michal",
+                "שם פריט": "שיעור עם מיכל"
+              }
+            ]
+          }
+        ]
+      },
+      "utterance": "תייקי את התמונה לשיעור עם דני ברשימת שיעורי הנהיגה",
+      "newAttachments": [
+        {
+          "attachment_id": "11111111-1111-4111-8111-111111111111",
+          "kind": "image",
+          "file_name": "photo.jpg"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "lists_attach_item_ids",
+          "action": "update",
+          "listType": "custom",
+          "itemIds": [
+            "eval-att-item-dani"
+          ],
+          "attachmentIds": [
+            "11111111-1111-4111-8111-111111111111"
+          ]
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "att-filing",
+      "tag": "happy",
+      "tags": [
+        "attachment-intent"
+      ],
+      "description": "Explicit filing title → filing destination + attachment_ids",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              }
+            ]
+          }
+        ]
+      },
+      "utterance": "תתייקי כרישיון נהיגה",
+      "newAttachments": [
+        {
+          "attachment_id": "22222222-2222-4222-8222-222222222222",
+          "kind": "image",
+          "file_name": "license.jpg"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "filing_attach_ids",
+          "action": "add_filing",
+          "attachmentIds": [
+            "22222222-2222-4222-8222-222222222222"
+          ]
+        },
+        {
+          "type": "lists_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "att-rishon",
+      "tag": "happy",
+      "tags": [
+        "attachment-intent",
+        "stable-refs",
+        "decision-core"
+      ],
+      "description": "הראשון with LAST_NUMBERED_DUMP → dump line 1 item_id",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              },
+              {
+                "item_id": "eval-att-item-michal",
+                "שם פריט": "שיעור עם מיכל"
+              }
+            ]
+          }
+        ]
+      },
+      "utterance": "תצרפי את הקובץ לראשון",
+      "lastNumberedDump": [
+        {
+          "n": 1,
+          "id": "eval-att-item-dani",
+          "kind": "custom",
+          "title_stem": "שיעור עם דני"
+        },
+        {
+          "n": 2,
+          "id": "eval-att-item-michal",
+          "kind": "custom",
+          "title_stem": "שיעור עם מיכל"
+        }
+      ],
+      "newAttachments": [
+        {
+          "attachment_id": "11111111-1111-4111-8111-111111111111",
+          "kind": "image",
+          "file_name": "photo.jpg"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "lists_attach_item_ids",
+          "action": "update",
+          "listType": "custom",
+          "itemIds": [
+            "eval-att-item-dani"
+          ],
+          "attachmentIds": [
+            "11111111-1111-4111-8111-111111111111"
+          ]
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    },
+    {
+      "id": "att-ambiguous",
+      "tag": "safety-rails",
+      "tags": [
+        "attachment-intent",
+        "decision-core"
+      ],
+      "description": "Bare תתייקי + file with no clear destination → ask, empty mutates",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-att-list-driving",
+            "list_type": "custom",
+            "list_name": "שיעורי הנהיגה",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-att-item-dani",
+                "שם פריט": "שיעור עם דני"
+              },
+              {
+                "item_id": "eval-att-item-michal",
+                "שם פריט": "שיעור עם מיכל"
+              }
+            ]
+          }
+        ]
+      },
+      "utterance": "תתייקי",
+      "newAttachments": [
+        {
+          "attachment_id": "11111111-1111-4111-8111-111111111111",
+          "kind": "image",
+          "file_name": "photo.jpg"
+        }
+      ],
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "response_looks_like_ask"
+        },
+        {
+          "type": "filing_empty"
+        },
+        {
+          "type": "list_ops_empty"
+        }
+      ]
+    }
+  ]
+}

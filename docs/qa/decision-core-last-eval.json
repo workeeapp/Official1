@@ -1,0 +1,469 @@
+{
+  "generatedAt": "2026-10-24T21:18:52.857Z",
+  "suite": "decision-core-gate",
+  "proofKind": "actual-model",
+  "productionApply": false,
+  "evalPath": "model-output-constraints-only+multi-turn-snapshot+attachment-fixture-context",
+  "fullGate": true,
+  "expectedCaseCount": 30,
+  "executedCaseCount": 30,
+  "expectedCaseIds": [
+    "att-ambiguous",
+    "att-deferred-after-lucy",
+    "att-item-default",
+    "att-no-intent",
+    "att-rishon",
+    "core-dup-signal-existing-milk",
+    "core-intent-explicit-call-doctor",
+    "core-intent-maybe-mom",
+    "core-intent-maybe-roi",
+    "core-intent-need-doctor",
+    "core-reminder-offer-decline-mt",
+    "core-shopping-crud-mt",
+    "delete-everything",
+    "dm-intervening-reminder-draft",
+    "dm-multi-shop-and-filing",
+    "dm-soft-offer-accept-mt",
+    "dm-update-existing-task",
+    "dump-what-saved",
+    "event-maybe-no-host",
+    "freeze-f7-need-milk-no-reminder",
+    "freeze-f8-finish-presentation-offer",
+    "list-buy-milk",
+    "mt-clarify-task-which",
+    "mt-clarify-then-delete",
+    "mt-multi-add-then-buy",
+    "mt-reminder-ask-then-time",
+    "mt-show-then-bought",
+    "no-invented-clock",
+    "reminder-create-no-time",
+    "task-add-timed-no-auto-clock"
+  ],
+  "executedCaseIds": [
+    "att-ambiguous",
+    "att-deferred-after-lucy",
+    "att-item-default",
+    "att-no-intent",
+    "att-rishon",
+    "core-dup-signal-existing-milk",
+    "core-intent-explicit-call-doctor",
+    "core-intent-maybe-mom",
+    "core-intent-maybe-roi",
+    "core-intent-need-doctor",
+    "core-reminder-offer-decline-mt",
+    "core-shopping-crud-mt",
+    "delete-everything",
+    "dm-intervening-reminder-draft",
+    "dm-multi-shop-and-filing",
+    "dm-soft-offer-accept-mt",
+    "dm-update-existing-task",
+    "dump-what-saved",
+    "event-maybe-no-host",
+    "freeze-f7-need-milk-no-reminder",
+    "freeze-f8-finish-presentation-offer",
+    "list-buy-milk",
+    "mt-clarify-task-which",
+    "mt-clarify-then-delete",
+    "mt-multi-add-then-buy",
+    "mt-reminder-ask-then-time",
+    "mt-show-then-bought",
+    "no-invented-clock",
+    "reminder-create-no-time",
+    "task-add-timed-no-auto-clock"
+  ],
+  "model": "gpt-6-luna",
+  "temperature": 0,
+  "reasoningEffort": "medium",
+  "promptSource": "config:LLM.config.json+buildLucyModelEvalInstructions",
+  "instructionsSha256": "50d99b0cb93c412925dca445e4dfac64a9174595c04521dc0ed0ee47d6869674",
+  "envelopeMode": "lucy_eval",
+  "attachLucyRuntimeEngine": true,
+  "slices": [
+    {
+      "suite": "phase-4-corpus",
+      "track": "LIVE_MODEL",
+      "caseIds": [
+        "list-buy-milk",
+        "delete-everything",
+        "dump-what-saved",
+        "no-invented-clock",
+        "reminder-create-no-time",
+        "task-add-timed-no-auto-clock",
+        "event-maybe-no-host",
+        "freeze-f7-need-milk-no-reminder",
+        "freeze-f8-finish-presentation-offer",
+        "core-intent-maybe-roi",
+        "core-intent-need-doctor",
+        "core-intent-explicit-call-doctor",
+        "core-intent-maybe-mom",
+        "core-dup-signal-existing-milk",
+        "dm-update-existing-task",
+        "dm-multi-shop-and-filing"
+      ],
+      "results": [
+        {
+          "id": "list-buy-milk",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4394
+        },
+        {
+          "id": "delete-everything",
+          "ok": true,
+          "failures": [],
+          "tag": "safety-rails",
+          "llmMs": 5148
+        },
+        {
+          "id": "dump-what-saved",
+          "ok": true,
+          "failures": [],
+          "tag": "hallucination-boundaries",
+          "llmMs": 3721
+        },
+        {
+          "id": "no-invented-clock",
+          "ok": true,
+          "failures": [],
+          "tag": "hallucination-boundaries",
+          "llmMs": 3518
+        },
+        {
+          "id": "reminder-create-no-time",
+          "ok": true,
+          "failures": [],
+          "tag": "action-confusion",
+          "llmMs": 6423
+        },
+        {
+          "id": "task-add-timed-no-auto-clock",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4826
+        },
+        {
+          "id": "event-maybe-no-host",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4400
+        },
+        {
+          "id": "freeze-f7-need-milk-no-reminder",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4810
+        },
+        {
+          "id": "freeze-f8-finish-presentation-offer",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4252
+        },
+        {
+          "id": "core-intent-maybe-roi",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4459
+        },
+        {
+          "id": "core-intent-need-doctor",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 5059
+        },
+        {
+          "id": "core-intent-explicit-call-doctor",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4130
+        },
+        {
+          "id": "core-intent-maybe-mom",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4150
+        },
+        {
+          "id": "core-dup-signal-existing-milk",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4132
+        },
+        {
+          "id": "dm-update-existing-task",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4630
+        },
+        {
+          "id": "dm-multi-shop-and-filing",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 6969
+        }
+      ]
+    },
+    {
+      "suite": "phase-4-multi-turn-corpus",
+      "track": "LIVE_MODEL_MT",
+      "caseIds": [
+        "mt-clarify-then-delete",
+        "mt-reminder-ask-then-time",
+        "mt-show-then-bought",
+        "mt-clarify-task-which",
+        "mt-multi-add-then-buy",
+        "core-shopping-crud-mt",
+        "core-reminder-offer-decline-mt",
+        "dm-intervening-reminder-draft",
+        "dm-soft-offer-accept-mt"
+      ],
+      "results": [
+        {
+          "id": "mt-clarify-then-delete",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 8247,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "mt-reminder-ask-then-time",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 11923,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "mt-show-then-bought",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 7940,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "mt-clarify-task-which",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 8149,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "mt-multi-add-then-buy",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 7613,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "core-shopping-crud-mt",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 16056,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 2,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 3,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "core-reminder-offer-decline-mt",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 6904,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "dm-intervening-reminder-draft",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 11902,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        },
+        {
+          "id": "dm-soft-offer-accept-mt",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 17588,
+          "turns": [
+            {
+              "index": 0,
+              "ok": true,
+              "failures": []
+            },
+            {
+              "index": 1,
+              "ok": true,
+              "failures": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "attachment-intent-corpus",
+      "track": "LIVE_MODEL",
+      "caseIds": [
+        "att-no-intent",
+        "att-deferred-after-lucy",
+        "att-item-default",
+        "att-rishon",
+        "att-ambiguous"
+      ],
+      "results": [
+        {
+          "id": "att-no-intent",
+          "ok": true,
+          "failures": [],
+          "tag": "safety-rails",
+          "llmMs": 3824
+        },
+        {
+          "id": "att-deferred-after-lucy",
+          "ok": true,
+          "failures": [],
+          "tag": "continuity",
+          "llmMs": 7096
+        },
+        {
+          "id": "att-item-default",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 4518
+        },
+        {
+          "id": "att-rishon",
+          "ok": true,
+          "failures": [],
+          "tag": "happy",
+          "llmMs": 5193
+        },
+        {
+          "id": "att-ambiguous",
+          "ok": true,
+          "failures": [],
+          "tag": "safety-rails",
+          "llmMs": 19713
+        }
+      ]
+    }
+  ],
+  "total": 30,
+  "passed": 30,
+  "failed": 0,
+  "ok": true
+}

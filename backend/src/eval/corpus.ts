@@ -62,6 +62,11 @@ export function loadModelEvalCorpus(path = defaultCorpusPath()): ModelEvalCorpus
 export interface ModelEvalMultiTurnTurn {
   utterance: string;
   constraints: ModelEvalConstraint[];
+  /**
+   * After this turn's model reply, append assistant text into the OpenAI
+   * conversation (automated Lucy / reminder-style interrupt). No extra model call.
+   */
+  injectAssistantAfter?: string;
 }
 
 export interface ModelEvalMultiTurnCase {

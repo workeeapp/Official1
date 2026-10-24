@@ -26,6 +26,7 @@ import {
   SHOW_LIST_PREFIX,
   SHOW_REMINDERS_COMMAND,
   showListButtonCommand,
+  showWorkerTasksButtonCommand,
 } from "./builtin-lists.js";
 import type {
   FilingOwnerRef,
@@ -1550,6 +1551,12 @@ export type AppliedItemEvidence = {
 export type SpeakerShowButtonOptions = {
   speakerNames?: string[];
   /**
+   * Display names / nicknames of the chat digital worker. Used so WATCH /
+   * להזכיר / לשלוח הודעה tasks (targets = worker) get «הצג מטלות של <worker>»
+   * instead of speaker-book «הצג מטלות».
+   */
+  workerNames?: string[];
+  /**
    * When set, model LIST/collab and the plain safety-net are gated to applied
    * work. Omit in unit tests that assert metadata→plain-LIST safety-net only.
    */
@@ -2066,12 +2073,16 @@ function collabEvidenceAllows(
 /**
  * Keep / normalize / drop a model fixed-nav button.
  * Unproven collab → plain LIST when the target is eligible (never a share label).
+ * Plain «הצג מטלות» when the only tasks work was worker-only → rewrite to
+ * worker inventory («הצג מטלות של <worker>»).
  */
 function validateModelFixedListNav(
   button: LlmReplyButton,
   metadata: LlmMetadata,
   appliedNav: AppliedNavFilter | undefined,
   skipSourceCommands: ReadonlySet<string>,
+  speakerNames: string[] = [],
+  workerNames: string[] = [],
 ): { button: LlmReplyButton; listKey: string } | null {
   const parsed = parseFixedListNavButton(button);
   if (!parsed) {
@@ -2089,6 +2100,25 @@ function validateModelFixedListNav(
   }
 
   if (parsed.kind === "plain") {
+    if (
+      parsed.listKey === "tasks" &&
+      workerNames.length > 0 &&
+      !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames)
+    ) {
+      const worker = workerOnlyTasksDisplayName(
+        metadata,
+        speakerNames,
+        workerNames,
+      );
+      if (!worker) {
+        return null;
+      }
+      const rewritten = workerInventoryButton(worker);
+      return {
+        button: rewritten,
+        listKey: workerInventoryListKey(rewritten.command),
+      };
+    }
     const command =
       normalizeShowNavCommand(button.command) || parsed.plainButton.command;
     const label = button.label.trim() || parsed.plainButton.label;
@@ -2128,7 +2158,8 @@ function validateModelFixedListNav(
  * Speaker confirm taps: keep model conversational + validated LIST/collab
  * nav; drop failed item-open; safety-net at most one plain LIST per applied
  * (or metadata) mutate when the model omitted a matching nav. Never invents
- * collab, item-open, or «הצג תזכורות».
+ * collab, item-open, or «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
+ * «הצג מטלות של <worker>» instead of speaker-book «הצג מטלות».
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
@@ -2145,6 +2176,8 @@ export function ensureSpeakerShowButtons(
       row.action === "update",
   );
   const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
+  const speakerNames = options?.speakerNames ?? [];
+  const workerNames = options?.workerNames ?? [];
   const remember = (command: string): boolean => {
     const key = normalizeShowNavCommand(command) || command;
     if (!key || seen.has(key) || buttons.length >= REPLY_BUTTON_MAX) {
@@ -2161,6 +2194,8 @@ export function ensureSpeakerShowButtons(
         metadata,
         options?.appliedNav,
         skipSourceCommands,
+        speakerNames,
+        workerNames,
       );
       if (!validated) {
         continue;
@@ -2171,6 +2206,23 @@ export function ensureSpeakerShowButtons(
       }
       buttons.push(validated.button);
       coveredListKeys.add(validated.listKey);
+      continue;
+    }
+    // Model already emitted worker inventory nav — mark covered.
+    const workerCmd = workerInventoryCommandIfMatch(
+      button.command,
+      workerNames,
+    );
+    if (workerCmd) {
+      if (!remember(workerCmd)) {
+        coveredListKeys.add(workerInventoryListKey(workerCmd));
+        continue;
+      }
+      buttons.push({
+        label: fitNavButtonLabel(button.label.trim() || "המטלות שלך"),
+        command: workerCmd,
+      });
+      coveredListKeys.add(workerInventoryListKey(workerCmd));
       continue;
     }
     if (!shouldKeepItemOpenButton(button, metadata, options?.appliedItems)) {
@@ -2187,6 +2239,8 @@ export function ensureSpeakerShowButtons(
     options?.appliedNav,
     skipSourceCommands,
     coveredListKeys,
+    speakerNames,
+    workerNames,
   )) {
     if (!remember(required.command)) {
       continue;
@@ -2198,6 +2252,111 @@ export function ensureSpeakerShowButtons(
 
 function speakerNameSet(speakerNames: string[]): Set<string> {
   return new Set(speakerNames.map((name) => name.trim()).filter(Boolean));
+}
+
+function listActionTargets(list: LlmListAction): string[] {
+  return (list.targets ?? [])
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter(Boolean);
+}
+
+/**
+ * Tasks targeting only the digital worker (WATCH / להזכיר / לשלוח הודעה) —
+ * not the speaker's book.
+ */
+export function isWorkerOnlyTasksList(
+  list: LlmListAction,
+  speakerNames: string[],
+  workerNames: string[],
+): boolean {
+  if (list.listType !== "tasks") {
+    return false;
+  }
+  const targets = listActionTargets(list);
+  if (targets.length === 0) {
+    return false;
+  }
+  const workers = speakerNameSet(workerNames);
+  if (workers.size === 0) {
+    return false;
+  }
+  const speakers = speakerNameSet(speakerNames);
+  return (
+    targets.every((name) => workers.has(name)) &&
+    !targets.some((name) => speakers.has(name))
+  );
+}
+
+function hasSpeakerBookTasksMutate(
+  metadata: LlmMetadata,
+  speakerNames: string[],
+  workerNames: string[],
+): boolean {
+  return metadata.lists.some(
+    (list) =>
+      (list.action === "add" ||
+        list.action === "remove" ||
+        list.action === "update") &&
+      list.listType === "tasks" &&
+      !isWorkerOnlyTasksList(list, speakerNames, workerNames),
+  );
+}
+
+function workerOnlyTasksDisplayName(
+  metadata: LlmMetadata,
+  speakerNames: string[],
+  workerNames: string[],
+): string | null {
+  const workers = speakerNameSet(workerNames);
+  for (const list of metadata.lists) {
+    if (
+      list.action !== "add" &&
+      list.action !== "remove" &&
+      list.action !== "update"
+    ) {
+      continue;
+    }
+    if (!isWorkerOnlyTasksList(list, speakerNames, workerNames)) {
+      continue;
+    }
+    const hit = listActionTargets(list).find((name) => workers.has(name));
+    if (hit) {
+      return hit;
+    }
+  }
+  return null;
+}
+
+function workerInventoryButton(workerDisplayName: string): LlmReplyButton {
+  return {
+    label: fitNavButtonLabel("המטלות שלך"),
+    command: showWorkerTasksButtonCommand(workerDisplayName),
+  };
+}
+
+function workerInventoryListKey(command: string): string {
+  return `tasks:worker:${command}`;
+}
+
+/** Normalize model «הצג מטלות של X» / aliases to the opaque allowlist command. */
+function workerInventoryCommandIfMatch(
+  command: string,
+  workerNames: string[],
+): string | null {
+  const workers = speakerNameSet(workerNames);
+  if (workers.size === 0) {
+    return null;
+  }
+  const trimmed = command.trim().replace(/\s+/gu, " ");
+  const aboutMatch = trimmed.match(/^הצג מטלות של (.+)$/u);
+  if (!aboutMatch?.[1]) {
+    return null;
+  }
+  const person = aboutMatch[1].trim();
+  if (!workers.has(person)) {
+    return null;
+  }
+  return showWorkerTasksButtonCommand(person);
 }
 
 /** co_share: speaker ∈ targets + partner; assign: partners only; else personal. */
@@ -2252,15 +2411,24 @@ function pushNavButton(
 /**
  * Safety net only: plain LIST / filing nav after proven (or metadata) mutate.
  * Never invents collab, כל ה…, or item-open. Skips keys the model already covered.
+ * Worker-only tasks (no speaker-book tasks this turn) → worker inventory nav.
  */
 function plainSafetyNetListShowButtons(
   metadata: LlmMetadata,
   appliedNav: AppliedNavFilter | undefined,
   skipSourceCommands: ReadonlySet<string>,
   coveredListKeys: ReadonlySet<string>,
+  speakerNames: string[] = [],
+  workerNames: string[] = [],
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
+  const workerOnlyTasks =
+    workerNames.length > 0 &&
+    !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames);
+  const workerDisplay = workerOnlyTasks
+    ? workerOnlyTasksDisplayName(metadata, speakerNames, workerNames)
+    : null;
   const listMutates = metadata.lists.filter(
     (row) =>
       row.action === "add" ||
@@ -2269,6 +2437,12 @@ function plainSafetyNetListShowButtons(
   );
   for (const list of listMutates) {
     if (list.listType === "reminders") {
+      continue;
+    }
+    if (
+      workerDisplay &&
+      isWorkerOnlyTasksList(list, speakerNames, workerNames)
+    ) {
       continue;
     }
     const listKey = listNavKeyFromAction(list);
@@ -2290,6 +2464,17 @@ function plainSafetyNetListShowButtons(
       continue;
     }
     pushNavButton(buttons, seen, plain);
+  }
+
+  if (workerDisplay) {
+    const workerBtn = workerInventoryButton(workerDisplay);
+    const workerKey = workerInventoryListKey(workerBtn.command);
+    if (
+      !coveredListKeys.has(workerKey) &&
+      listKeyNavEligible("tasks", metadata, appliedNav, skipSourceCommands)
+    ) {
+      pushNavButton(buttons, seen, workerBtn);
+    }
   }
 
   const filingMutates = (metadata.filing ?? []).filter(

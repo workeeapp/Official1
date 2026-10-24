@@ -240,6 +240,224 @@ describe("attachment production apply (eval-db)", () => {
       attachRequested: false,
     });
   });
+
+  it("Case 1 item-level: custom list update + attachment_ids → listItemId link", async () => {
+    account = await createHarnessAccount("טל");
+    const att = await seedAttachment(account);
+    const list = await prisma.employeeList.create({
+      data: {
+        employeeId: account.employeeId,
+        listType: "custom",
+        name: "שיעורי הנהיגה",
+        scope: "personal",
+        visibleTo: [account.employeeId],
+        columns: ["שם"],
+        titleField: "שם",
+      },
+    });
+    const item = await prisma.employeeListItem.create({
+      data: {
+        listId: list.id,
+        itemKey: "שיעור שלישי",
+        data: { שם: "שיעור שלישי" },
+      },
+    });
+    const applied = await applyEmployeeRecords(
+      account.employeeId,
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "שיעורי הנהיגה",
+            items: [{ item_id: item.id, attachment_ids: [att.id] }],
+            targets: [],
+          },
+        ],
+      },
+      undefined,
+      account.employeeId,
+    );
+    expect(applied.attachmentOutcome.linked).toBe(1);
+    const link = await prisma.attachmentLink.findFirst({
+      where: { attachmentId: att.id, listItemId: item.id },
+    });
+    expect(link).toBeTruthy();
+    expect(
+      await prisma.attachmentLink.count({
+        where: { attachmentId: att.id, listId: list.id },
+      }),
+    ).toBe(0);
+  });
+
+  it("Case 3: same attachment on three custom items → three listItemId links", async () => {
+    account = await createHarnessAccount("טל");
+    const att = await seedAttachment(account);
+    const list = await prisma.employeeList.create({
+      data: {
+        employeeId: account.employeeId,
+        listType: "custom",
+        name: "שיעורי הנהיגה-multi",
+        scope: "personal",
+        visibleTo: [account.employeeId],
+        columns: ["שם"],
+        titleField: "שם",
+      },
+    });
+    const items = await Promise.all(
+      ["א", "ב", "ג"].map((name) =>
+        prisma.employeeListItem.create({
+          data: {
+            listId: list.id,
+            itemKey: name,
+            data: { שם: name },
+          },
+        }),
+      ),
+    );
+    const applied = await applyEmployeeRecords(
+      account.employeeId,
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "שיעורי הנהיגה-multi",
+            items: items.map((row) => ({
+              item_id: row.id,
+              attachment_ids: [att.id],
+            })),
+            targets: [],
+          },
+        ],
+      },
+      undefined,
+      account.employeeId,
+    );
+    expect(applied.attachmentOutcome.linked).toBe(3);
+    const links = await prisma.attachmentLink.findMany({
+      where: { attachmentId: att.id },
+    });
+    expect(links).toHaveLength(3);
+    expect(new Set(links.map((row) => row.listItemId))).toEqual(
+      new Set(items.map((row) => row.id)),
+    );
+  });
+
+  it("Scenario 5/7: soft-deleted item_id → no AttachmentLink (no wrong-item attach)", async () => {
+    account = await createHarnessAccount("טל");
+    const att = await seedAttachment(account);
+    const list = await prisma.employeeList.create({
+      data: {
+        employeeId: account.employeeId,
+        listType: "custom",
+        name: "שיעורי הנהיגה-deleted",
+        scope: "personal",
+        visibleTo: [account.employeeId],
+        columns: ["שם"],
+        titleField: "שם",
+      },
+    });
+    const live = await prisma.employeeListItem.create({
+      data: { listId: list.id, itemKey: "חי", data: { שם: "חי" } },
+    });
+    const gone = await prisma.employeeListItem.create({
+      data: {
+        listId: list.id,
+        itemKey: "מחוק",
+        data: { שם: "מחוק" },
+        deletedAt: new Date(),
+      },
+    });
+    const applied = await applyEmployeeRecords(
+      account.employeeId,
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "שיעורי הנהיגה-deleted",
+            items: [
+              { item_id: gone.id, attachment_ids: [att.id] },
+              { item_id: live.id, attachment_ids: [att.id] },
+            ],
+            targets: [],
+          },
+        ],
+      },
+      undefined,
+      account.employeeId,
+    );
+    expect(applied.attachmentOutcome.linked).toBe(1);
+    expect(
+      await prisma.attachmentLink.findFirst({
+        where: { attachmentId: att.id, listItemId: gone.id },
+      }),
+    ).toBeNull();
+    expect(
+      await prisma.attachmentLink.findFirst({
+        where: { attachmentId: att.id, listItemId: live.id },
+      }),
+    ).toBeTruthy();
+  });
+
+  it("Case 3 partial: two valid item_ids + one garbage → two links only", async () => {
+    account = await createHarnessAccount("טל");
+    const att = await seedAttachment(account);
+    const list = await prisma.employeeList.create({
+      data: {
+        employeeId: account.employeeId,
+        listType: "custom",
+        name: "שיעורי הנהיגה-partial",
+        scope: "personal",
+        visibleTo: [account.employeeId],
+        columns: ["שם"],
+        titleField: "שם",
+      },
+    });
+    const a = await prisma.employeeListItem.create({
+      data: { listId: list.id, itemKey: "א", data: { שם: "א" } },
+    });
+    const b = await prisma.employeeListItem.create({
+      data: { listId: list.id, itemKey: "ב", data: { שם: "ב" } },
+    });
+    const junkId = "99999999-9999-4999-8999-999999999999";
+    const applied = await applyEmployeeRecords(
+      account.employeeId,
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "custom",
+            listName: "שיעורי הנהיגה-partial",
+            items: [
+              { item_id: a.id, attachment_ids: [att.id] },
+              { item_id: b.id, attachment_ids: [att.id] },
+              { item_id: junkId, attachment_ids: [att.id] },
+            ],
+            targets: [],
+          },
+        ],
+      },
+      undefined,
+      account.employeeId,
+    );
+    expect(applied.attachmentOutcome.linked).toBe(2);
+    expect(
+      await prisma.attachmentLink.count({
+        where: { attachmentId: att.id },
+      }),
+    ).toBe(2);
+    expect(
+      await prisma.employeeListItem.count({
+        where: { listId: list.id, deletedAt: null },
+      }),
+    ).toBe(2);
+  });
 });
 
 /**

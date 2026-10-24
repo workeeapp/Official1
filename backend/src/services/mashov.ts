@@ -191,7 +191,15 @@ export function parseMashovAspects(raw: unknown): MashovAspect[] {
         ? "behavior"
         : key === "schedule" || key === "מערכת"
           ? "timetable"
-          : key === "ציונים"
+          : key === "ציונים" ||
+              key === "מבחן" ||
+              key === "מבחנים" ||
+              key === "בוחן" ||
+              key === "בוחנים" ||
+              key === "exam" ||
+              key === "exams" ||
+              key === "test" ||
+              key === "tests"
             ? "grades"
             : key === "שיעורי בית" || key === "שעורים"
               ? "homework"

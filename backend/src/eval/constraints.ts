@@ -213,6 +213,23 @@ export type ModelEvalConstraint =
       aspectsIncludes?: string[];
       aspectsExcludes?: string[];
     }
+  /**
+   * lists.update/add items must cover exactly these item_ids and each must
+   * include every listed attachment_id (attachment intent scoring).
+   */
+  | {
+      type: "lists_attach_item_ids";
+      action: "update" | "add";
+      itemIds: string[];
+      attachmentIds: string[];
+      listType?: string;
+    }
+  /** At least one filing action carries every listed attachment_id. */
+  | {
+      type: "filing_attach_ids";
+      action: string;
+      attachmentIds: string[];
+    }
   | { type: "any"; constraints: ModelEvalConstraint[] };
 
 export interface ModelEvalCaseResult {
@@ -232,6 +249,16 @@ function readItemId(item: Record<string, unknown>): string {
     }
   }
   return "";
+}
+
+function readAttachmentIds(row: Record<string, unknown>): string[] {
+  const raw = row.attachment_ids ?? row.attachmentIds;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+    .map((id) => id.trim());
 }
 
 function sortedCopy(ids: string[]): string[] {
@@ -490,6 +517,59 @@ export function checkConstraint(
         }
       }
       return null;
+    }
+    case "lists_attach_item_ids": {
+      const rows = (meta.lists ?? []).filter((row) => {
+        if (row.action !== constraint.action) {
+          return false;
+        }
+        if (constraint.listType && row.listType !== constraint.listType) {
+          return false;
+        }
+        return true;
+      });
+      const byItem = new Map<string, string[]>();
+      for (const row of rows) {
+        for (const item of row.items ?? []) {
+          const rec = item as Record<string, unknown>;
+          const id = readItemId(rec);
+          if (!id) {
+            continue;
+          }
+          byItem.set(id, readAttachmentIds(rec));
+        }
+      }
+      const actualIds = [...byItem.keys()];
+      const mismatch = sameIdMultiset(actualIds, constraint.itemIds);
+      if (mismatch) {
+        return `lists_attach_item_ids: ${mismatch}`;
+      }
+      for (const itemId of constraint.itemIds) {
+        const got = new Set(byItem.get(itemId) ?? []);
+        for (const att of constraint.attachmentIds) {
+          if (!got.has(att)) {
+            return `lists_attach_item_ids: item ${itemId} missing attachment ${att}`;
+          }
+        }
+      }
+      return null;
+    }
+    case "filing_attach_ids": {
+      const rows = (meta.filing ?? []).filter(
+        (row) => row.action === constraint.action,
+      );
+      if (rows.length === 0) {
+        return `expected filing.${constraint.action}`;
+      }
+      const hit = rows.some((row) => {
+        const got = new Set(
+          readAttachmentIds(row as unknown as Record<string, unknown>),
+        );
+        return constraint.attachmentIds.every((id) => got.has(id));
+      });
+      return hit
+        ? null
+        : `filing.${constraint.action} missing attachment_ids ${constraint.attachmentIds.join(",")}`;
     }
     case "lists_remove_item_ids": {
       const lists = meta.lists ?? [];

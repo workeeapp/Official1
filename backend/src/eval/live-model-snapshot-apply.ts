@@ -7,6 +7,11 @@ import type { EmployeeRecordSnapshot } from "../services/employee-records.servic
 
 let liveItemSeq = 0;
 
+/** Reset mint counter so MT cases can pin expected `eval-live-item-N` ids. */
+export function resetLiveModelItemSeq(): void {
+  liveItemSeq = 0;
+}
+
 function itemLabel(item: Record<string, unknown>): string {
   for (const key of ["שם פריט", "שם מטלה", "שם", "name", "item", "title"]) {
     const val = item[key];

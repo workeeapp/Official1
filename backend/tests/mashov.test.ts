@@ -44,6 +44,12 @@ describe("parseMashovAspects", () => {
       "behavior",
     ]);
   });
+
+  it("maps מבחנים / בוחן to grades", () => {
+    expect(parseMashovAspects(["מבחנים", "בוחן", "exams"])).toEqual([
+      "grades",
+    ]);
+  });
 });
 
 describe("loadMashovCredsFromFilings", () => {

@@ -47,6 +47,11 @@ export type ShowButtonDumpTarget = {
   section?: LlmShowDumpSection | null;
   partner?: string | null;
   assignee?: string | null;
+  /**
+   * Digital-worker inventory («הצג מטלות של לוסי») → show_dump_about.
+   * Not a human co-share / assign filter.
+   */
+  about?: string | null;
   /** Pure co-share vs assign — never conflate the two. */
   collaboration?: "co_share" | "assign" | null;
 };
@@ -180,6 +185,15 @@ export function mapShowButtonCommandToDumpTarget(
   const staticKind = STATIC_SHOW_BUTTON_DUMP[trimmed];
   if (staticKind) {
     return { kind: staticKind };
+  }
+
+  // Worker inventory (WATCH / להזכיר / לשלוח הודעה) — not collab משותפות/באחריות.
+  const workerTasksAbout = trimmed.match(/^הצג מטלות של (.+)$/u);
+  if (workerTasksAbout) {
+    const person = (workerTasksAbout[1] ?? "").trim();
+    if (person) {
+      return { kind: "tasks", about: person };
+    }
   }
 
   const builtinShared = trimmed.match(
@@ -976,12 +990,20 @@ export function itemReminderAboutMatchesPartner(
   );
 }
 
-/** Labeled filing line: «שם: … · תיאור: … · מידע לחיפוש: …» (תיאור = item_info; omit empty). */
+/**
+ * Filing dump body.
+ * - `list` (inventory): short title only — never inline תיאור / מידע לחיפוש.
+ * - `full` (ITEM DUMP when opts.itemIds is set): labeled «שם · תיאור · מידע לחיפוש».
+ */
 export function formatFilingDumpBody(
   row: EmployeeRecordSnapshot["filing"][number],
+  mode: "list" | "full" = "list",
 ): string {
-  const parts: string[] = [];
   const name = row.item_name?.trim() ?? "";
+  if (mode === "list") {
+    return name || "תיוק";
+  }
+  const parts: string[] = [];
   const info = row.item_info?.trim() ?? "";
   const findHelper = row.item_description?.trim() ?? "";
   if (name) {
@@ -994,6 +1016,22 @@ export function formatFilingDumpBody(
     parts.push(`מידע לחיפוש: ${findHelper}`);
   }
   return parts.length > 0 ? parts.join(" · ") : "תיוק";
+}
+
+/**
+ * Inventory-only mark: longer filing text exists but is hidden on the list row
+ * (shown on ITEM DUMP). Mirror of task 📍/📞 icons — after 📎.
+ */
+export function filingHiddenDetailMark(
+  item: Record<string, unknown>,
+  mode: "list" | "full",
+): string {
+  if (mode !== "list") {
+    return "";
+  }
+  const info = readText(item, ["item_info", "itemInfo"]);
+  const findHelper = readText(item, ["item_description", "itemDescription"]);
+  return info || findHelper ? " 📄" : "";
 }
 
 /**
@@ -1079,8 +1117,10 @@ export function formatFilingsDump(
   const viewerNames = new Set(
     [viewer, ...aliases].map((name) => name.trim()).filter(Boolean),
   );
+  const dumpMode: "list" | "full" =
+    opts?.itemIds != null ? "full" : "list";
   const collected: DumpItem[] = rows.map((row) => {
-    const title = formatFilingDumpBody(row);
+    const title = formatFilingDumpBody(row, dumpMode);
     const assignedBy = (row.assigned_by ?? "").trim();
     const sharedWith = (row.shared_with ?? [])
       .map((name) => name.trim())
@@ -2930,6 +2970,12 @@ export function formatNumberedItem(
     body += taskPlacePhoneMarks(
       item,
       opts?.itemIds != null ? "full" : "icons",
+    );
+  }
+  if (listType === "filings") {
+    body += filingHiddenDetailMark(
+      item,
+      opts?.itemIds != null ? "full" : "list",
     );
   }
   // responsibilityMark = co-share «(מיכל, טל)» or assign «(באחריות … · מאת …)».

@@ -623,45 +623,98 @@ describe("employee targets", () => {
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("WATCH tasks add still gets LIST BUTTON הצג מטלות when model omitted buttons", () => {
+  it("WATCH tasks add gets worker inventory nav (not speaker הצג מטלות)", () => {
     expect(
-      ensureSpeakerShowButtons({
-        ...emptyLlmMetadata(),
-        lists: [
-          {
-            action: "add",
-            listType: "tasks",
-            listName: "",
-            items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
-            targets: ["לוסי"],
-          },
-        ],
-        reminders: [
-          {
-            action: "add",
-            item: "מזג אוויר",
-            listType: "tasks",
-            date: "",
-            time: "",
-            repeat: "1:hours",
-            ping: [],
-            about: [],
-            targets: [],
-            text: "עדכון מזג אוויר",
-            inSeconds: null,
-            everyCount: 1,
-            everyUnit: "hours",
-            weekdays: null,
-            confirmed: false,
-            compose: true,
-            composeSource: "weather",
-            composeLookbackHours: 0,
-            composePlace: "פתח תקווה",
-            composeCondition: { type: "weather_changed" },
-            reminderId: "",
-          },
-        ],
-      }),
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
+              targets: ["לוסי"],
+            },
+          ],
+          reminders: [
+            {
+              action: "add",
+              item: "מזג אוויר",
+              listType: "tasks",
+              date: "",
+              time: "",
+              repeat: "1:hours",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "עדכון מזג אוויר",
+              inSeconds: null,
+              everyCount: 1,
+              everyUnit: "hours",
+              weekdays: null,
+              confirmed: false,
+              compose: true,
+              composeSource: "weather",
+              composeLookbackHours: 0,
+              composePlace: "פתח תקווה",
+              composeCondition: { type: "weather_changed" },
+              reminderId: "",
+            },
+          ],
+        },
+        [],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+  });
+
+  it("WATCH: model speaker LIST is rewritten to worker inventory", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לבדוק גשם בפתח תקווה" }],
+              targets: ["לוסי"],
+            },
+          ],
+        },
+        [{ label: "הצג מטלות", command: "הצג רשימת מטלות" }],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+  });
+
+  it("speaker tasks + worker להזכיר still gets speaker הצג מטלות (not worker-only rewrite)", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לשתות מים" }],
+              targets: [],
+            },
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "להזכיר לטל לשתות מים" }],
+              targets: ["לוסי"],
+            },
+          ],
+        },
+        [],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
     ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
   });
 
