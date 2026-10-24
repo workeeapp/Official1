@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.live-full-eval.example
 # Local paste draft for Lucy UI — not a runtime source (use LLM.config.json).
 lucy2_prompt_new_version.txt
 node_modules/
