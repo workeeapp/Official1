@@ -357,7 +357,17 @@ export interface LlmReminderAction {
    * "saved_data" = answer the brief from live EMPLOYEE_SAVED_DATA at fire.
    * "weather" / "market" = fixedBody plugins (city or tickers in composePlace).
    */
-  composeSource: "" | "git_log" | "saved_data" | "weather" | "market" | "mashov";
+  composeSource:
+    | ""
+    | "git_log"
+    | "saved_data"
+    | "weather"
+    | "market"
+    | "mashov"
+    | "jewish"
+    | "places"
+    | "flights"
+    | "routes";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
@@ -533,6 +543,18 @@ export interface LlmMetadata {
    */
   flights?: LlmFlightsAction | null;
   /**
+   * Same-turn post-retrieval live board selection (select-pass).
+   * Parsed null means keep_all shape; when require_live_select was true the
+   * engine treats that as incomplete filter (failure), not silent success.
+   * omit = not a select decision. Empty liveRecordIds = no-match.
+   */
+  liveSelect?: LlmLiveSelectAction | null;
+  /**
+   * True when metadata.live_select was present but could not be parsed.
+   * Engine must not treat this as keep-all when selection was required.
+   */
+  liveSelectMalformed?: boolean;
+  /**
    * Catalog tip keys the engine may append after responses (exact catalog text).
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
@@ -666,6 +688,12 @@ export interface LlmPlacesAction {
    * Prefer this field over stuffing «חינם» / «בתשלום» into query.
    */
   parkingCost: LlmPlacesParkingCost | null;
+  /**
+   * Residual semantic filter after structured fields — engine may run
+   * post-retrieval live_select. false/omit = structured filters fully express
+   * the ask (no second select call).
+   */
+  requireLiveSelect: boolean;
 }
 
 /** Normalize metadata.places.intent — default business. */
@@ -829,7 +857,15 @@ export type LlmRoutesAspect =
   | "fare"
   | "eta"
   | "frequency"
-  | "lines";
+  | "lines"
+  /** Official MOT GTFS scheduled departures (not Google). */
+  | "schedule"
+  /** Official MOT GTFS nearest stop for a line+direction (not Google). */
+  | "nearest_stop"
+  /** Official MOT SIRI-SM live stop arrivals (not Google, not static schedule). */
+  | "live_arrivals";
+
+export type LlmRoutesMode = "transit" | "drive";
 
 export interface LlmRoutesAction {
   /** Origin address / place, or "speaker" for PENDING_LOCATION. */
@@ -844,7 +880,22 @@ export interface LlmRoutesAction {
   line: string;
   /** Optional headsign / direction filter. */
   headsign: string;
+  /** MOT stop_code for official schedule (preferred over stop name). */
+  stopCode: string;
+  /** Operator / agency filter when the same line number has several. */
+  agency: string;
+  /** Service date YYYY-MM-DD for official schedule / nearest_stop (empty = today). */
+  serviceDate: string;
+  /** Optional window end YYYY-MM-DDTHH:mm or HH:mm for schedule. */
+  windowEnd: string;
+  /** transit (default) = public transport; drive = car via Google Routes. */
+  mode: LlmRoutesMode;
   aspects: LlmRoutesAspect[];
+  /**
+   * Residual V filter after Google/MOT board fetch (same Stage B as Places/Flights).
+   * true → server runs same-turn live_select on itineraries / stop lines.
+   */
+  requireLiveSelect: boolean;
 }
 
 export type LlmFlightsAspect =
@@ -864,6 +915,11 @@ export interface LlmFlightsAction {
   direction: LlmFlightsDirection | "";
   /** Airline name or IATA (אל על / LY). */
   airline: string;
+  /**
+   * Multi-airline OR filter (name/IATA). Prefer for region/group asks
+   * («חברות אירופאיות» → expand to concrete carriers). Empty = none.
+   */
+  airlines: string[];
   /** City / IATA of other end (פריז / CDG). */
   city: string;
   /** Flight code as spoken (LY831, 3242CXD, …). */
@@ -875,7 +931,200 @@ export interface LlmFlightsAction {
    * (e.g. 30 for «בחצי שעה הקרובה»). 0 / omit = no window filter.
    */
   withinMinutes: number;
+  /**
+   * Inclusive Jerusalem HH:mm lower bound on ETA/STA clock («אחרי 19:00» → 19:00).
+   * Empty = no lower bound. Combine with time_to for a range.
+   */
+  timeFrom: string;
+  /**
+   * Inclusive Jerusalem HH:mm upper bound («לפני 10:00» / «עד 22:00» → 10:00 / 22:00).
+   * Empty = no upper bound.
+   */
+  timeTo: string;
   aspects: LlmFlightsAspect[];
+  /**
+   * Residual semantic filter after structured fields — engine may run
+   * post-retrieval live_select. false/omit = structured filters fully express
+   * the ask (no second select call).
+   */
+  requireLiveSelect: boolean;
+}
+
+/**
+ * Live board domains for post-retrieval selection.
+ * `mashov` remains parseable for schema compatibility but has no Stage B path
+ * (Mashov live asks never set require_live_select).
+ */
+export type LlmLiveSelectDomain = "places" | "flights" | "routes" | "mashov";
+
+const LIVE_SELECT_DOMAINS = new Set<string>([
+  "places",
+  "flights",
+  "routes",
+  "mashov",
+]);
+
+export const LIVE_SELECT_ID_MAX = 80;
+export const LIVE_SELECT_IDS_MAX = 50;
+
+/**
+ * Post-retrieval selection ACTION (mirror of show_dump_ids for live boards).
+ * Empty liveRecordIds = no-match; never invent ids.
+ */
+export interface LlmLiveSelectAction {
+  domain: LlmLiveSelectDomain;
+  liveRecordIds: string[];
+}
+
+/**
+ * Parse result for metadata.live_select / select-pass JSON.
+ * - absent: key missing (not a select decision)
+ * - keep_all: explicit null
+ * - ids: object with domain + id list (incl. [])
+ * - malformed: present but unusable
+ */
+export type LiveSelectParseStatus =
+  | { status: "absent" }
+  | { status: "keep_all" }
+  | { status: "ids"; domain: LlmLiveSelectDomain; ids: string[] }
+  | { status: "malformed" };
+
+/** Normalize require_live_select — default false when omitted/null. */
+export function normalizeRequireLiveSelect(raw: unknown): boolean {
+  if (raw === true || raw === 1) {
+    return true;
+  }
+  if (typeof raw === "string") {
+    const key = raw.trim().toLowerCase();
+    return key === "true" || key === "1" || key === "yes";
+  }
+  return false;
+}
+
+export function normalizeLiveSelectDomain(
+  raw: unknown,
+): LlmLiveSelectDomain | null {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  if (LIVE_SELECT_DOMAINS.has(key)) {
+    return key as LlmLiveSelectDomain;
+  }
+  return null;
+}
+
+/** Parse opaque live_record_ids with the same bounds as show_dump_ids. */
+export function parseLiveRecordIds(raw: unknown): string[] {
+  const parts: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim().slice(0, LIVE_SELECT_ID_MAX);
+    if (trimmed && !parts.includes(trimmed)) {
+      parts.push(trimmed);
+    }
+  };
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      push(entry);
+      if (parts.length >= LIVE_SELECT_IDS_MAX) {
+        break;
+      }
+    }
+  } else {
+    push(raw);
+  }
+  return parts;
+}
+
+/**
+ * Parse metadata.live_select / select-pass live_select field.
+ * Explicit null → keep_all; object → ids (domain required); bad shape → malformed.
+ */
+export function parseLiveSelectField(raw: unknown): LiveSelectParseStatus {
+  if (raw === undefined) {
+    return { status: "absent" };
+  }
+  if (raw === null) {
+    return { status: "keep_all" };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { status: "malformed" };
+  }
+  const row = raw as Record<string, unknown>;
+  const domain = normalizeLiveSelectDomain(
+    row.domain ?? row.live_domain ?? row.liveDomain ?? row.kind,
+  );
+  if (!domain) {
+    return { status: "malformed" };
+  }
+  const idsRaw =
+    row.live_record_ids ??
+    row.liveRecordIds ??
+    row.ids ??
+    row.record_ids ??
+    row.recordIds;
+  // Ids key must be present as string or array (incl. []) — missing → malformed.
+  if (idsRaw === undefined || idsRaw === null) {
+    return { status: "malformed" };
+  }
+  if (typeof idsRaw !== "string" && !Array.isArray(idsRaw)) {
+    return { status: "malformed" };
+  }
+  return {
+    status: "ids",
+    domain,
+    ids: parseLiveRecordIds(idsRaw),
+  };
+}
+
+/** metadata.live_select from a full metadata object. */
+export function parseLiveSelect(
+  meta: Record<string, unknown>,
+): LiveSelectParseStatus {
+  // Do not use ?? here — explicit null means keep_all, not absent.
+  if (Object.prototype.hasOwnProperty.call(meta, "live_select")) {
+    return parseLiveSelectField(meta.live_select);
+  }
+  if (Object.prototype.hasOwnProperty.call(meta, "liveSelect")) {
+    return parseLiveSelectField(meta.liveSelect);
+  }
+  return { status: "absent" };
+}
+
+/** Parse HH:mm / H:mm to minutes-from-midnight 0–1439; null if invalid. */
+export function normalizeFlightsClockHm(raw: unknown): string | null {
+  const text = String(raw ?? "")
+    .trim()
+    .replace(/\./g, ":");
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (!m) {
+    return null;
+  }
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** Minutes from midnight for a normalized HH:mm; -1 if bad. */
+export function flightsClockHmToMinutes(hm: string): number {
+  const m = /^(\d{2}):(\d{2})$/.exec(hm.trim());
+  if (!m) {
+    return -1;
+  }
+  return Number(m[1]) * 60 + Number(m[2]);
 }
 
 export type LlmShowDumpSection = "personal" | "shared";
@@ -990,6 +1239,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const jewish = parseJewishAction(meta);
   const routes = parseRoutesAction(meta);
   const flights = parseFlightsAction(meta);
+  const liveSelectParsed = parseLiveSelect(meta);
   const tips = parseTipKeys(meta);
   return {
     messages,
@@ -1050,6 +1300,18 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(jewish ? { jewish } : {}),
     ...(routes ? { routes } : {}),
     ...(flights ? { flights } : {}),
+    ...(liveSelectParsed.status === "keep_all" ? { liveSelect: null } : {}),
+    ...(liveSelectParsed.status === "ids"
+      ? {
+          liveSelect: {
+            domain: liveSelectParsed.domain,
+            liveRecordIds: liveSelectParsed.ids,
+          },
+        }
+      : {}),
+    ...(liveSelectParsed.status === "malformed"
+      ? { liveSelectMalformed: true }
+      : {}),
     ...(tips.length > 0 ? { tips } : {}),
   };
 }
@@ -2178,7 +2440,11 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     parseComposeSource(record) === "saved_data" ||
     parseComposeSource(record) === "weather" ||
     parseComposeSource(record) === "market" ||
-    parseComposeSource(record) === "mashov";
+    parseComposeSource(record) === "mashov" ||
+    parseComposeSource(record) === "jewish" ||
+    parseComposeSource(record) === "places" ||
+    parseComposeSource(record) === "flights" ||
+    parseComposeSource(record) === "routes";
 
   return {
     action,
@@ -2250,7 +2516,17 @@ function parseComposeLookbackHours(record: Record<string, unknown>): number {
 
 function parseComposeSource(
   record: Record<string, unknown>,
-): "" | "git_log" | "saved_data" | "weather" | "market" | "mashov" {
+):
+  | ""
+  | "git_log"
+  | "saved_data"
+  | "weather"
+  | "market"
+  | "mashov"
+  | "jewish"
+  | "places"
+  | "flights"
+  | "routes" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -2303,6 +2579,39 @@ function parseComposeSource(
     raw === "משוב"
   ) {
     return "mashov";
+  }
+  if (
+    raw === "jewish" ||
+    raw === "hebcal" ||
+    raw === "shabbat" ||
+    raw === "candles" ||
+    raw === "שבת"
+  ) {
+    return "jewish";
+  }
+  if (
+    raw === "places" ||
+    raw === "place" ||
+    raw === "google_places" ||
+    raw === "business"
+  ) {
+    return "places";
+  }
+  if (
+    raw === "flights" ||
+    raw === "flight" ||
+    raw === "aviation" ||
+    raw === "aviationstack"
+  ) {
+    return "flights";
+  }
+  if (
+    raw === "routes" ||
+    raw === "transit" ||
+    raw === "directions" ||
+    raw === "google_routes"
+  ) {
+    return "routes";
   }
   return "";
 }
@@ -3331,6 +3640,14 @@ export function parsePlacesAction(
       row.free_parking ??
       row.freeParking,
   );
+  const requireLiveSelect = normalizeRequireLiveSelect(
+    row.require_live_select ??
+      row.requireLiveSelect ??
+      row.live_select_required ??
+      row.liveSelectRequired ??
+      row.semantic_select ??
+      row.semanticSelect,
+  );
   return {
     query,
     place,
@@ -3344,6 +3661,7 @@ export function parsePlacesAction(
     includedType,
     radiusMeters,
     parkingCost,
+    requireLiveSelect,
   };
 }
 
@@ -3466,9 +3784,12 @@ const ROUTES_ASPECTS = new Set<LlmRoutesAspect>([
   "eta",
   "frequency",
   "lines",
+  "schedule",
+  "nearest_stop",
+  "live_arrivals",
 ]);
 
-/** metadata.routes — live Google Routes TRANSIT (A→B / leave-by / next departure / stop board). */
+/** metadata.routes — Google TRANSIT / Places board, MOT GTFS, or SIRI live_arrivals. */
 export function parseRoutesAction(
   meta: Record<string, unknown>,
 ): LlmRoutesAction | null {
@@ -3531,6 +3852,41 @@ export function parseRoutesAction(
     "toward",
     "כיוון",
   ]).slice(0, 255);
+  const stopCode = readText(row, [
+    "stop_code",
+    "stopCode",
+    "code",
+    "קוד_תחנה",
+  ]).slice(0, 32);
+  const agency = readText(row, [
+    "agency",
+    "operator",
+    "מפעיל",
+  ]).slice(0, 128);
+  const serviceDate = readText(row, [
+    "service_date",
+    "serviceDate",
+    "date",
+    "תאריך",
+  ]).slice(0, 32);
+  const windowEnd = readText(row, [
+    "window_end",
+    "windowEnd",
+    "until",
+  ]).slice(0, 64);
+  const modeRaw = readText(row, ["mode", "travel_mode", "travelMode", "אופן"])
+    .trim()
+    .toLowerCase();
+  const mode: LlmRoutesMode =
+    modeRaw === "drive" ||
+    modeRaw === "driving" ||
+    modeRaw === "car" ||
+    modeRaw === "auto" ||
+    modeRaw === "רכב" ||
+    modeRaw === "ברכב" ||
+    modeRaw === "waze"
+      ? "drive"
+      : "transit";
   const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
   const aspects: LlmRoutesAspect[] = [];
   if (Array.isArray(aspectsRaw)) {
@@ -3557,6 +3913,30 @@ export function parseRoutesAction(
       ) {
         key = "lines";
       }
+      if (
+        key === "timetable" ||
+        key === "official_schedule" ||
+        key === "לוח"
+      ) {
+        key = "schedule";
+      }
+      if (
+        key === "nearest" ||
+        key === "nearby_stop" ||
+        key === "תחנה_קרובה"
+      ) {
+        key = "nearest_stop";
+      }
+      if (
+        key === "live" ||
+        key === "realtime" ||
+        key === "real_time" ||
+        key === "siri" ||
+        key === "חי" ||
+        key === "זמן_אמת"
+      ) {
+        key = "live_arrivals";
+      }
       const aspect = key as LlmRoutesAspect;
       if (ROUTES_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
         aspects.push(aspect);
@@ -3566,20 +3946,71 @@ export function parseRoutesAction(
   const resolvedAspects: LlmRoutesAspect[] =
     aspects.length > 0 ? aspects : ["summary"];
   const linesOnly = resolvedAspects.includes("lines");
+  const gtfsOnly =
+    resolvedAspects.includes("schedule") ||
+    resolvedAspects.includes("nearest_stop") ||
+    resolvedAspects.includes("live_arrivals");
+  if (gtfsOnly) {
+    if (resolvedAspects.includes("schedule") && !stopCode && !origin) {
+      return null;
+    }
+    if (resolvedAspects.includes("schedule") && !line) {
+      return null;
+    }
+    if (resolvedAspects.includes("nearest_stop") && !line) {
+      return null;
+    }
+    if (
+      resolvedAspects.includes("live_arrivals") &&
+      !stopCode &&
+      !origin
+    ) {
+      return null;
+    }
+    const requireLiveSelectGtfs = normalizeRequireLiveSelect(
+      row.require_live_select ?? row.requireLiveSelect ?? row.require_select,
+    );
+    return {
+      origin,
+      destination,
+      departure,
+      arrival,
+      line,
+      headsign,
+      stopCode,
+      agency,
+      serviceDate,
+      windowEnd,
+      mode: "transit",
+      aspects: resolvedAspects,
+      requireLiveSelect: requireLiveSelectGtfs,
+    };
+  }
   if (!origin) {
     return null;
   }
   if (!destination && !linesOnly) {
     return null;
   }
+  // Drive mode: no stop-board / line-ETA / GTFS aspects.
+  const driveMode = mode === "drive" && !linesOnly;
+  const requireLiveSelect = normalizeRequireLiveSelect(
+    row.require_live_select ?? row.requireLiveSelect ?? row.require_select,
+  );
   return {
     origin,
     destination,
     departure,
     arrival,
-    line,
-    headsign,
+    line: driveMode ? "" : line,
+    headsign: driveMode ? "" : headsign,
+    stopCode,
+    agency,
+    serviceDate,
+    windowEnd,
+    mode: driveMode ? "drive" : "transit",
     aspects: resolvedAspects,
+    requireLiveSelect,
   };
 }
 
@@ -3642,6 +4073,29 @@ export function parseFlightsAction(
     direction = "both";
   }
   const airline = readText(row, ["airline", "carrier", "חברה"]).slice(0, 64);
+  const airlines: string[] = [];
+  const airlinesRaw = row.airlines ?? row.carriers ?? row.airline_list;
+  if (Array.isArray(airlinesRaw)) {
+    for (const entry of airlinesRaw) {
+      const name = String(entry ?? "").trim().slice(0, 64);
+      if (name && !airlines.includes(name)) {
+        airlines.push(name);
+      }
+      if (airlines.length >= 40) {
+        break;
+      }
+    }
+  } else if (typeof airlinesRaw === "string" && airlinesRaw.trim()) {
+    for (const part of airlinesRaw.split(/[,;|]+/)) {
+      const name = part.trim().slice(0, 64);
+      if (name && !airlines.includes(name)) {
+        airlines.push(name);
+      }
+      if (airlines.length >= 40) {
+        break;
+      }
+    }
+  }
   const city = readText(row, [
     "city",
     "destination",
@@ -3673,6 +4127,23 @@ export function parseFlightsAction(
       : typeof withinRaw === "string" && /^\d+$/.test(withinRaw.trim())
         ? Number(withinRaw.trim())
         : 0;
+  const timeFrom =
+    normalizeFlightsClockHm(
+      row.time_from ??
+        row.timeFrom ??
+        row.after_time ??
+        row.afterTime ??
+        row.from_time,
+    ) ?? "";
+  const timeTo =
+    normalizeFlightsClockHm(
+      row.time_to ??
+        row.timeTo ??
+        row.before_time ??
+        row.beforeTime ??
+        row.until_time ??
+        row.to_time,
+    ) ?? "";
   const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
   const aspects: LlmFlightsAspect[] = [];
   if (Array.isArray(aspectsRaw)) {
@@ -3696,15 +4167,27 @@ export function parseFlightsAction(
   if (!airline && !city && !flight && aspects.length === 0) {
     // Still allow empty board ask — model may set only airport/direction.
   }
+  const requireLiveSelect = normalizeRequireLiveSelect(
+    row.require_live_select ??
+      row.requireLiveSelect ??
+      row.live_select_required ??
+      row.liveSelectRequired ??
+      row.semantic_select ??
+      row.semanticSelect,
+  );
   return {
     airport,
     direction,
     airline,
+    airlines,
     city,
     flight,
     date,
     withinMinutes,
+    timeFrom,
+    timeTo,
     aspects: aspects.length > 0 ? aspects : ["summary"],
+    requireLiveSelect,
   };
 }
 

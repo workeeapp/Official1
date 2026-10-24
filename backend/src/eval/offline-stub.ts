@@ -4,6 +4,7 @@
  * Does not import chat.service or Batch A runners.
  */
 import { parseLlmMetadata, type LlmMetadata } from "@workee/shared";
+import { resolveRelativeDateLabel } from "../utils/relative-date.js";
 import {
   evaluateConstraints,
   type ModelEvalConstraint,
@@ -20,6 +21,12 @@ type StubMeta = {
   show_dump?: string | null;
   hold?: Record<string, unknown> | null;
   confirm?: boolean;
+  weather?: Record<string, unknown> | null;
+  market?: Record<string, unknown> | null;
+  jewish?: Record<string, unknown> | null;
+  places?: Record<string, unknown> | null;
+  routes?: Record<string, unknown> | null;
+  flights?: Record<string, unknown> | null;
 };
 
 function emptyMeta(): StubMeta {
@@ -34,6 +41,12 @@ function emptyMeta(): StubMeta {
     show_dump: null,
     hold: null,
     confirm: false,
+    weather: null,
+    market: null,
+    jewish: null,
+    places: null,
+    routes: null,
+    flights: null,
   };
 }
 
@@ -259,6 +272,87 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       });
       return `שלחתי ל${target}`;
     }
+    case "live_domain_only":
+      // Domain object is filled by the matching *_action constraint.
+      return "";
+    case "live_domains_empty":
+      meta.weather = null;
+      meta.market = null;
+      meta.jewish = null;
+      meta.places = null;
+      meta.routes = null;
+      meta.flights = null;
+      return "";
+    case "weather_action":
+      meta.weather = {
+        place: c.placeIncludes ?? "תל אביב",
+        date: c.dateEqualsRelative?.trim()
+          ? resolveRelativeDateLabel(c.dateEqualsRelative.trim())
+          : c.requireDate
+            ? "2099-06-15"
+            : "",
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "בדקתי מזג אוויר";
+    case "market_action":
+      meta.market = {
+        queries: c.queryIncludesAny?.length
+          ? [c.queryIncludesAny[0]!]
+          : ["AAPL"],
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "בדקתי שוק";
+    case "jewish_action":
+      meta.jewish = {
+        place: c.allowEmptyPlace
+          ? ""
+          : (c.placeIncludes ?? "פתח תקווה"),
+        date: "",
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "בדקתי זמנים";
+    case "places_action":
+      meta.places = {
+        query: c.queryIncludes ?? "מסעדה",
+        place: c.placeIncludes ?? "פתח תקווה",
+        intent: c.intent ?? "business",
+        open_now: c.openNow ?? null,
+        min_rating: c.minRatingAtLeast ?? null,
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "חיפשתי מקומות";
+    case "routes_action":
+      meta.routes = {
+        origin: c.originIncludes ?? "פתח תקווה",
+        destination: c.destinationEmpty
+          ? ""
+          : (c.destinationIncludes ?? "תל אביב"),
+        line: c.lineIncludes ?? "",
+        stop_code: c.requireStopCode ? "21224" : "",
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "בדקתי מסלול";
+    case "flights_action":
+      meta.flights = {
+        airport: c.airportIncludes ?? "TLV",
+        direction: c.direction ?? "departures",
+        city: c.cityIncludes ?? "",
+        flight: c.flightIncludes ?? "",
+        aspects: c.aspectsIncludes?.length
+          ? c.aspectsIncludes
+          : ["summary"],
+      };
+      return "בדקתי טיסות";
     default:
       return "";
   }

@@ -188,7 +188,7 @@ model LlmUsage {
   totalTokens          Int              @default(0) @map("total_tokens")
   costUsd              Decimal?         @map("cost_usd") @db.Decimal(14, 8)
   priceModel           String?          @map("price_model") @db.VarChar(100)
-  /** chat | catalog_tip | weather_tip | reminder_compose */
+  /** chat | catalog_tip | weather_tip | reminder_compose | live_select */
   purpose              String           @default("chat") @db.VarChar(32)
   usage                Json?
   createdAt            DateTime         @default(now()) @map("created_at")
@@ -504,4 +504,132 @@ model Contact {
   @@index([ownerEmployeeId, name])
   @@index([scope])
   @@map("Contacts")
+}
+
+/// Static MOT GTFS generation (staging → active | failed; prior active → retired).
+/// Queries read only status=active. Incomplete staging never activates.
+model GtfsFeedGeneration {
+  id            String    @id @default(uuid()) @db.Uuid
+  status        String    @db.VarChar(16)
+  sourceLabel   String?   @map("source_label") @db.VarChar(255)
+  feedStartDate String?   @map("feed_start_date") @db.VarChar(8)
+  feedEndDate   String?   @map("feed_end_date") @db.VarChar(8)
+  errorMessage  String?   @map("error_message") @db.Text
+  activatedAt   DateTime? @map("activated_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  stops         GtfsStop[]
+  agencies      GtfsAgency[]
+  routes        GtfsRoute[]
+  routeNetworks GtfsRouteNetwork[]
+  trips         GtfsTrip[]
+  stopTimes     GtfsStopTime[]
+  calendarDates GtfsCalendarDate[]
+
+  @@index([status])
+  @@map("GtfsFeedGenerations")
+}
+
+model GtfsStop {
+  generationId     String            @map("generation_id") @db.Uuid
+  feedStopId       String            @map("feed_stop_id") @db.VarChar(64)
+  stopCode         String            @map("stop_code") @db.VarChar(32)
+  name             String            @db.VarChar(255)
+  lat              Float
+  lon              Float
+  locationType     Int               @default(0) @map("location_type")
+  parentFeedStopId String?           @map("parent_feed_stop_id") @db.VarChar(64)
+  generation       GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, feedStopId])
+  @@index([generationId, stopCode])
+  @@index([generationId, locationType])
+  @@map("GtfsStops")
+}
+
+model GtfsAgency {
+  generationId String             @map("generation_id") @db.Uuid
+  agencyId     String             @map("agency_id") @db.VarChar(32)
+  name         String             @db.VarChar(255)
+  generation   GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, agencyId])
+  @@index([generationId, name])
+  @@map("GtfsAgencies")
+}
+
+model GtfsRoute {
+  generationId String             @map("generation_id") @db.Uuid
+  feedRouteId  String             @map("feed_route_id") @db.VarChar(64)
+  agencyId     String             @map("agency_id") @db.VarChar(32)
+  shortName    String             @map("short_name") @db.VarChar(64)
+  longName     String             @default("") @map("long_name") @db.VarChar(255)
+  generation   GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, feedRouteId])
+  @@index([generationId, shortName])
+  @@index([generationId, agencyId])
+  @@map("GtfsRoutes")
+}
+
+/// MOT RouteNetworksByDate overlay (Direction / OfficeLineId / AgencyName).
+model GtfsRouteNetwork {
+  id            String             @id @default(uuid()) @db.Uuid
+  generationId  String             @map("generation_id") @db.Uuid
+  feedRouteId   String             @map("feed_route_id") @db.VarChar(64)
+  officeLineId  String             @default("") @map("office_line_id") @db.VarChar(64)
+  lineId        String             @default("") @map("line_id") @db.VarChar(64)
+  direction     String             @default("") @db.VarChar(16)
+  agencyId      String             @default("") @map("agency_id") @db.VarChar(32)
+  agencyName    String             @default("") @map("agency_name") @db.VarChar(255)
+  generation    GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@index([generationId, feedRouteId])
+  @@index([generationId, officeLineId])
+  @@index([generationId, lineId, direction])
+  @@map("GtfsRouteNetworks")
+}
+
+model GtfsTrip {
+  generationId String             @map("generation_id") @db.Uuid
+  feedTripId   String             @map("feed_trip_id") @db.VarChar(64)
+  feedRouteId  String             @map("feed_route_id") @db.VarChar(64)
+  serviceId    String             @map("service_id") @db.VarChar(32)
+  directionId  Int?               @map("direction_id")
+  headsign     String             @default("") @db.VarChar(255)
+  generation   GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, feedTripId])
+  @@index([generationId, serviceId, feedRouteId, directionId])
+  @@index([generationId, feedRouteId])
+  @@map("GtfsTrips")
+}
+
+model GtfsStopTime {
+  generationId  String             @map("generation_id") @db.Uuid
+  feedTripId    String             @map("feed_trip_id") @db.VarChar(64)
+  stopSequence  Int                @map("stop_sequence")
+  feedStopId    String             @map("feed_stop_id") @db.VarChar(64)
+  arrivalTime   String             @default("") @map("arrival_time") @db.VarChar(16)
+  departureTime String             @map("departure_time") @db.VarChar(16)
+  /// Seconds since service-day midnight; may exceed 86400 for after-midnight GTFS times.
+  depSeconds    Int                @map("dep_seconds")
+  generation    GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, feedTripId, stopSequence])
+  @@index([generationId, feedStopId, depSeconds])
+  @@index([generationId, feedTripId])
+  @@map("GtfsStopTimes")
+}
+
+model GtfsCalendarDate {
+  generationId String             @map("generation_id") @db.Uuid
+  serviceId    String             @map("service_id") @db.VarChar(32)
+  date         String             @db.VarChar(8)
+  exceptionType Int               @map("exception_type")
+  generation   GtfsFeedGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@id([generationId, serviceId, date])
+  @@index([generationId, date])
+  @@map("GtfsCalendarDates")
 }

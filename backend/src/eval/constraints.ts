@@ -1,4 +1,13 @@
 import type { LlmMetadata } from "@workee/shared";
+import {
+  parseFlightsAction,
+  parseJewishAction,
+  parseMarketAction,
+  parsePlacesAction,
+  parseRoutesAction,
+  parseWeatherAction,
+} from "@workee/shared";
+import { resolveRelativeDateLabel } from "../utils/relative-date.js";
 
 export type ModelEvalTag =
   | "happy"
@@ -6,6 +15,24 @@ export type ModelEvalTag =
   | "hallucination-boundaries"
   | "safety-rails"
   | "continuity";
+
+/** Live board domains scored by LIVE_MODEL ACTION constraints (not mutations). */
+export type LiveDomainKey =
+  | "weather"
+  | "market"
+  | "jewish"
+  | "places"
+  | "routes"
+  | "flights";
+
+const LIVE_DOMAIN_KEYS: LiveDomainKey[] = [
+  "weather",
+  "market",
+  "jewish",
+  "places",
+  "routes",
+  "flights",
+];
 
 export type ModelEvalConstraint =
   | {
@@ -117,6 +144,74 @@ export type ModelEvalConstraint =
       textIncludes?: string;
       /** When true, at least one matching message must carry a book slot. */
       requireBook?: boolean;
+    }
+  /**
+   * Exactly one live board domain may be non-null (parse*Action).
+   * Used to keep NL→ACTION cases domain-isolated without provider HTTP.
+   */
+  | { type: "live_domain_only"; domain: LiveDomainKey }
+  /** No live board domain ACTION (clarify / ASK turn before emitting). */
+  | { type: "live_domains_empty" }
+  | {
+      type: "weather_action";
+      placeIncludes?: string;
+      /** Every listed aspect must appear on the parsed weather ACTION. */
+      aspectsIncludes?: string[];
+      /** None of these aspects may appear. */
+      aspectsExcludes?: string[];
+      /** When true, parsed date must be non-empty YYYY-MM-DD. */
+      requireDate?: boolean;
+      /**
+       * Parsed weather.date must equal SESSION_CLOCK resolution of this label
+       * (היום / מחר / אתמול) via resolveRelativeDateLabel — no hardcoded YMD.
+       */
+      dateEqualsRelative?: string;
+    }
+  | {
+      type: "market_action";
+      /** At least one query must include any of these substrings (fold). */
+      queryIncludesAny?: string[];
+      aspectsIncludes?: string[];
+      aspectsExcludes?: string[];
+    }
+  | {
+      type: "jewish_action";
+      placeIncludes?: string;
+      /** When true, place may be empty (parasha / holidays alone). */
+      allowEmptyPlace?: boolean;
+      aspectsIncludes?: string[];
+      aspectsExcludes?: string[];
+    }
+  | {
+      type: "places_action";
+      queryIncludes?: string;
+      placeIncludes?: string;
+      intent?: "business" | "parking";
+      openNow?: boolean;
+      minRatingAtLeast?: number;
+      aspectsIncludes?: string[];
+      aspectsExcludes?: string[];
+    }
+  | {
+      type: "routes_action";
+      originIncludes?: string;
+      destinationIncludes?: string;
+      /** When true, parsed destination must be empty (e.g. stop-board lines). */
+      destinationEmpty?: boolean;
+      lineIncludes?: string;
+      /** When true, parsed stopCode must be non-empty. */
+      requireStopCode?: boolean;
+      aspectsIncludes?: string[];
+      aspectsExcludes?: string[];
+    }
+  | {
+      type: "flights_action";
+      airportIncludes?: string;
+      direction?: "arrivals" | "departures" | "both";
+      cityIncludes?: string;
+      flightIncludes?: string;
+      aspectsIncludes?: string[];
+      aspectsExcludes?: string[];
     }
   | { type: "any"; constraints: ModelEvalConstraint[] };
 
@@ -241,6 +336,64 @@ function hasHold(meta: LlmMetadata): boolean {
     (meta as { hold?: unknown }).hold &&
       typeof (meta as { hold?: unknown }).hold === "object",
   );
+}
+
+/** Re-parse live domains from typed metadata (same parse*Action path as production). */
+function liveMetaBag(meta: LlmMetadata): Record<string, unknown> {
+  return meta as unknown as Record<string, unknown>;
+}
+
+function aspectsIncludeAll(
+  actual: string[] | undefined,
+  want: string[] | undefined,
+  label: string,
+): string | null {
+  if (!want?.length) return null;
+  const have = actual ?? [];
+  const missing = want.filter(
+    (a) => !have.some((h) => h.toLowerCase() === a.toLowerCase()),
+  );
+  return missing.length === 0
+    ? null
+    : `${label} missing aspects: ${missing.join(",")} (got [${have.join(",")}])`;
+}
+
+function aspectsExcludeAny(
+  actual: string[] | undefined,
+  forbid: string[] | undefined,
+  label: string,
+): string | null {
+  if (!forbid?.length) return null;
+  const have = actual ?? [];
+  const hit = forbid.find((a) =>
+    have.some((h) => h.toLowerCase() === a.toLowerCase()),
+  );
+  return hit ? `${label} must not include aspect ${hit}` : null;
+}
+
+function parseLiveDomain(
+  domain: LiveDomainKey,
+  bag: Record<string, unknown>,
+): unknown {
+  switch (domain) {
+    case "weather":
+      return parseWeatherAction(bag);
+    case "market":
+      return parseMarketAction(bag);
+    case "jewish":
+      return parseJewishAction(bag);
+    case "places":
+      return parsePlacesAction(bag);
+    case "routes":
+      return parseRoutesAction(bag);
+    case "flights":
+      return parseFlightsAction(bag);
+  }
+}
+
+function activeLiveDomains(meta: LlmMetadata): LiveDomainKey[] {
+  const bag = liveMetaBag(meta);
+  return LIVE_DOMAIN_KEYS.filter((domain) => Boolean(parseLiveDomain(domain, bag)));
 }
 
 export function looksLikeAsk(response: string): boolean {
@@ -619,6 +772,184 @@ export function checkConstraint(
         }
       }
       return null;
+    }
+    case "live_domain_only": {
+      const active = activeLiveDomains(meta);
+      if (active.length === 0) {
+        return `expected live domain ${constraint.domain}, got none`;
+      }
+      if (active.length !== 1 || active[0] !== constraint.domain) {
+        return `expected only live domain ${constraint.domain}, got [${active.join(",")}]`;
+      }
+      return null;
+    }
+    case "live_domains_empty": {
+      const active = activeLiveDomains(meta);
+      return active.length === 0
+        ? null
+        : `expected no live domain ACTION, got [${active.join(",")}]`;
+    }
+    case "weather_action": {
+      const action = parseWeatherAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.weather ACTION";
+      if (
+        constraint.placeIncludes &&
+        !includesFold(action.place, constraint.placeIncludes)
+      ) {
+        return `weather.place missing ~${constraint.placeIncludes} (got ${action.place})`;
+      }
+      if (constraint.requireDate && !/^\d{4}-\d{2}-\d{2}$/.test(action.date)) {
+        return `weather.date required YYYY-MM-DD (got ${action.date || "(empty)"})`;
+      }
+      if (constraint.dateEqualsRelative?.trim()) {
+        const want = resolveRelativeDateLabel(
+          constraint.dateEqualsRelative.trim(),
+        );
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(want)) {
+          return `weather.dateEqualsRelative not a resolvable day label: ${constraint.dateEqualsRelative}`;
+        }
+        if (action.date !== want) {
+          return `weather.date want ${want} (=${constraint.dateEqualsRelative.trim()} via SESSION_CLOCK), got ${action.date || "(empty)"}`;
+        }
+      }
+      return (
+        aspectsIncludeAll(action.aspects, constraint.aspectsIncludes, "weather") ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "weather")
+      );
+    }
+    case "market_action": {
+      const action = parseMarketAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.market ACTION";
+      if (constraint.queryIncludesAny?.length) {
+        const hit = action.queries.some((q) =>
+          constraint.queryIncludesAny!.some((n) => includesFold(q, n)),
+        );
+        if (!hit) {
+          return `market.queries missing any of [${constraint.queryIncludesAny.join(",")}] (got [${action.queries.join(",")}])`;
+        }
+      }
+      return (
+        aspectsIncludeAll(action.aspects, constraint.aspectsIncludes, "market") ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "market")
+      );
+    }
+    case "jewish_action": {
+      const action = parseJewishAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.jewish ACTION";
+      if (!constraint.allowEmptyPlace && !action.place.trim()) {
+        return "jewish.place required";
+      }
+      if (
+        constraint.placeIncludes &&
+        !includesFold(action.place, constraint.placeIncludes)
+      ) {
+        return `jewish.place missing ~${constraint.placeIncludes} (got ${action.place || "(empty)"})`;
+      }
+      return (
+        aspectsIncludeAll(action.aspects, constraint.aspectsIncludes, "jewish") ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "jewish")
+      );
+    }
+    case "places_action": {
+      const action = parsePlacesAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.places ACTION";
+      if (
+        constraint.queryIncludes &&
+        !includesFold(action.query, constraint.queryIncludes)
+      ) {
+        return `places.query missing ~${constraint.queryIncludes} (got ${action.query})`;
+      }
+      if (
+        constraint.placeIncludes &&
+        !includesFold(action.place, constraint.placeIncludes)
+      ) {
+        return `places.place missing ~${constraint.placeIncludes} (got ${action.place})`;
+      }
+      if (constraint.intent && action.intent !== constraint.intent) {
+        return `places.intent want ${constraint.intent}, got ${action.intent}`;
+      }
+      if (
+        constraint.openNow !== undefined &&
+        action.openNow !== constraint.openNow
+      ) {
+        return `places.open_now want ${constraint.openNow}, got ${action.openNow}`;
+      }
+      if (
+        constraint.minRatingAtLeast !== undefined &&
+        (action.minRating == null ||
+          action.minRating + 1e-9 < constraint.minRatingAtLeast)
+      ) {
+        return `places.min_rating >= ${constraint.minRatingAtLeast} (got ${action.minRating ?? "null"})`;
+      }
+      return (
+        aspectsIncludeAll(action.aspects, constraint.aspectsIncludes, "places") ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "places")
+      );
+    }
+    case "routes_action": {
+      const action = parseRoutesAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.routes ACTION";
+      if (
+        constraint.originIncludes &&
+        !includesFold(action.origin, constraint.originIncludes)
+      ) {
+        return `routes.origin missing ~${constraint.originIncludes} (got ${action.origin || "(empty)"})`;
+      }
+      if (
+        constraint.destinationIncludes &&
+        !includesFold(action.destination, constraint.destinationIncludes)
+      ) {
+        return `routes.destination missing ~${constraint.destinationIncludes} (got ${action.destination || "(empty)"})`;
+      }
+      if (constraint.destinationEmpty && action.destination.trim()) {
+        return `routes.destination must be empty (got ${action.destination})`;
+      }
+      if (
+        constraint.lineIncludes &&
+        !includesFold(action.line, constraint.lineIncludes)
+      ) {
+        return `routes.line missing ~${constraint.lineIncludes} (got ${action.line || "(empty)"})`;
+      }
+      if (constraint.requireStopCode && !action.stopCode.trim()) {
+        return "routes.stop_code required";
+      }
+      return (
+        aspectsIncludeAll(action.aspects, constraint.aspectsIncludes, "routes") ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "routes")
+      );
+    }
+    case "flights_action": {
+      const action = parseFlightsAction(liveMetaBag(meta));
+      if (!action) return "expected metadata.flights ACTION";
+      if (
+        constraint.airportIncludes &&
+        !includesFold(action.airport, constraint.airportIncludes)
+      ) {
+        return `flights.airport missing ~${constraint.airportIncludes} (got ${action.airport || "(empty)"})`;
+      }
+      if (constraint.direction && action.direction !== constraint.direction) {
+        return `flights.direction want ${constraint.direction}, got ${action.direction || "(empty)"}`;
+      }
+      if (
+        constraint.cityIncludes &&
+        !includesFold(action.city, constraint.cityIncludes)
+      ) {
+        return `flights.city missing ~${constraint.cityIncludes} (got ${action.city || "(empty)"})`;
+      }
+      if (
+        constraint.flightIncludes &&
+        !includesFold(action.flight, constraint.flightIncludes)
+      ) {
+        return `flights.flight missing ~${constraint.flightIncludes} (got ${action.flight || "(empty)"})`;
+      }
+      return (
+        aspectsIncludeAll(
+          action.aspects,
+          constraint.aspectsIncludes,
+          "flights",
+        ) ??
+        aspectsExcludeAny(action.aspects, constraint.aspectsExcludes, "flights")
+      );
     }
     default: {
       const unknown = constraint as { type: string };

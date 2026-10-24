@@ -1631,6 +1631,113 @@
           ]
         }
       ]
+    },
+    {
+      "id": "mt-live-routes-lines-clarify",
+      "tag": "continuity",
+      "description": "Stop-board lines ask without destination → clarify → aspects lines",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "mt-clarify",
+        "live-mt",
+        "live-mt-routes"
+      ],
+      "turns": [
+        {
+          "utterance": "איזה קווים עוברים בתחנת שלום דורני בפתח תקווה?",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domains_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "רק קווים, בלי יעד",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domain_only", "domain": "routes" },
+            {
+              "type": "routes_action",
+              "originIncludes": "שלום דורני",
+              "destinationEmpty": true,
+              "aspectsIncludes": ["lines"],
+              "aspectsExcludes": ["schedule", "nearest_stop", "live_arrivals"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-live-gtfs-schedule-clarify",
+      "tag": "continuity",
+      "description": "Official GTFS schedule without stop → clarify → schedule+line+stop_code",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "mt-clarify",
+        "live-mt",
+        "live-mt-gtfs"
+      ],
+      "turns": [
+        {
+          "utterance": "מה לוח הזמנים הרשמי של קו 1?",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domains_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "בתחנה עם קוד 21224",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domain_only", "domain": "routes" },
+            {
+              "type": "routes_action",
+              "aspectsIncludes": ["schedule"],
+              "lineIncludes": "1",
+              "requireStopCode": true,
+              "aspectsExcludes": ["nearest_stop", "live_arrivals", "lines"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-live-weather-place-clarify",
+      "tag": "continuity",
+      "description": "Weather without place → clarify → weather place+summary",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "mt-clarify",
+        "live-mt",
+        "live-mt-weather"
+      ],
+      "turns": [
+        {
+          "utterance": "מה מזג האוויר מחר?",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domains_empty" },
+            { "type": "response_looks_like_ask" }
+          ]
+        },
+        {
+          "utterance": "בתל אביב",
+          "constraints": [
+            { "type": "mutations_empty_or_read_only" },
+            { "type": "live_domain_only", "domain": "weather" },
+            {
+              "type": "weather_action",
+              "placeIncludes": "תל אביב",
+              "aspectsIncludes": ["summary"],
+              "dateEqualsRelative": "מחר"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

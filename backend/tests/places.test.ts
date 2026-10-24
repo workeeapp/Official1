@@ -13,6 +13,7 @@ import {
   formatPlacesFilterSummary,
   formatPlacesHebrew,
   parsePlacesAspects,
+  fetchPlacesFacts,
   placesRequestMaxResults,
   placesUnfilteredMaxResults,
   resolvePlacesReply,
@@ -211,6 +212,7 @@ describe("places filter normalizers", () => {
 
 describe("formatPlacesHebrew", () => {
   const base: PlaceResult = {
+    id: "place-mcdonalds",
     name: "מקדונלדס קרית אונו",
     phone: "03-1234567",
     address: "רחוב הרצל 1, קרית אונו",
@@ -743,6 +745,72 @@ describe("resolvePlacesReply", () => {
     expect(text).not.toContain(PLACES_FILTERED_SATURATED_SPARSE_HE);
   });
 
+  it("exact local min_rating filter keeps ≥4.1 and drops below/null (structured facts)", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        minRating?: number;
+      };
+      expect(body.minRating).toBe(placesMinRatingProviderFloor(4.1));
+      expect(body.minRating).toBe(4);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          places: [
+            {
+              id: "places/above",
+              displayName: { text: "מעל", languageCode: "he" },
+              rating: 4.7,
+              formattedAddress: "א",
+            },
+            {
+              id: "places/exact",
+              displayName: { text: "בדיוק", languageCode: "he" },
+              rating: 4.1,
+              formattedAddress: "ב",
+            },
+            {
+              id: "places/between-floor-and-exact",
+              displayName: { text: "בין רצפה לסף", languageCode: "he" },
+              rating: 4.05,
+              formattedAddress: "ג",
+            },
+            {
+              id: "places/below-floor",
+              displayName: { text: "מתחת לרצפה", languageCode: "he" },
+              rating: 3.9,
+              formattedAddress: "ד",
+            },
+            {
+              id: "places/null-rating",
+              displayName: { text: "בלי דירוג", languageCode: "he" },
+              formattedAddress: "ה",
+            },
+          ],
+        }),
+      } as Response;
+    });
+
+    const facts = await fetchPlacesFacts({
+      query: "מסעדות",
+      place: "תל אביב",
+      aspects: ["summary"],
+      minRating: 4.1,
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(facts.minRating).toBe(4.1);
+    expect(facts.minRatingProvider).toBe(4);
+    expect(facts.minRatingUnknownDropped).toBe(true);
+    expect(facts.results.map((r) => r.name).sort()).toEqual(["בדיוק", "מעל"]);
+    expect(facts.results.every((r) => r.rating != null && r.rating >= 4.1)).toBe(
+      true,
+    );
+    expect(facts.results.some((r) => r.name === "בין רצפה לסף")).toBe(false);
+    expect(facts.results.some((r) => r.name === "בלי דירוג")).toBe(false);
+  });
+
   it("shows unknown-rating drop note on unsaturated page even when keep set is empty", async () => {
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -1149,6 +1217,7 @@ describe("resolvePlacesReply", () => {
 
 describe("Phase D parking formatting", () => {
   const lot: PlaceResult = {
+    id: "place-lot-1",
     name: "חניון בדיקה",
     phone: "",
     address: "רחוב 9",

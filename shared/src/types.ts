@@ -410,6 +410,8 @@ export interface ChatMessageRequest {
   message: string;
   employeeId: string;
   digitalEmployeeId?: string;
+  /** Attachment ids already uploaded via POST /api/attachments (web chat). */
+  attachmentIds?: string[];
 }
 
 export interface ChatReplyTiming {

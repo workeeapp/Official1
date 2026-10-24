@@ -1063,22 +1063,160 @@ export function normalizeMessagesWithStats(
   });
 }
 
+const HEB_WEEKDAY = [
+  "ראשון",
+  "שני",
+  "שלישי",
+  "רביעי",
+  "חמישי",
+  "שישי",
+  "שבת",
+] as const;
+
+function dayLabelFromUnknown(raw: unknown): string {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    const n = Math.trunc(raw);
+    // Mashov often uses 1=Sunday … 7=Saturday; also accept 0–6.
+    if (n >= 1 && n <= 7) return HEB_WEEKDAY[n - 1]!;
+    if (n >= 0 && n <= 6) return HEB_WEEKDAY[n]!;
+  }
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  if (/^\d+$/.test(s)) return dayLabelFromUnknown(Number(s));
+  return s;
+}
+
+function unwrapTimetablePayload(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== "object") return [];
+  const row = raw as Record<string, unknown>;
+  for (const key of [
+    "timeTable",
+    "timetable",
+    "table",
+    "data",
+    "lessons",
+    "days",
+    "schedule",
+  ]) {
+    const v = row[key];
+    if (Array.isArray(v)) return v;
+  }
+  // Single day object with nested lessons.
+  if (Array.isArray(row.hours) || Array.isArray(row.periods)) {
+    return [row];
+  }
+  return [];
+}
+
+function expandTimetableRow(
+  row: Record<string, unknown>,
+): Array<{ day: string; line: string }> {
+  const nested =
+    (row.timeTable && typeof row.timeTable === "object"
+      ? (row.timeTable as Record<string, unknown>)
+      : null) ||
+    (row.timetable && typeof row.timetable === "object"
+      ? (row.timetable as Record<string, unknown>)
+      : null) ||
+    null;
+  const group =
+    (row.groupDetails && typeof row.groupDetails === "object"
+      ? (row.groupDetails as Record<string, unknown>)
+      : null) ||
+    (row.group && typeof row.group === "object"
+      ? (row.group as Record<string, unknown>)
+      : null) ||
+    null;
+
+  const day =
+    dayLabelFromUnknown(
+      nested
+        ? nested.dayName ?? nested.day ?? nested.dayOfWeek ?? nested.weekday
+        : undefined,
+    ) ||
+    dayLabelFromUnknown(
+      row.dayName ?? row.day ?? row.dayOfWeek ?? row.weekday ?? row["יום"],
+    ) ||
+    "יום";
+
+  const lessonArrays = [
+    row.lessons,
+    row.hours,
+    row.periods,
+    nested?.lessons,
+    nested?.hours,
+  ].filter(Array.isArray) as unknown[][];
+
+  if (lessonArrays.length > 0) {
+    const out: Array<{ day: string; line: string }> = [];
+    for (const arr of lessonArrays) {
+      for (const lesson of arr) {
+        if (!lesson || typeof lesson !== "object" || Array.isArray(lesson)) {
+          continue;
+        }
+        const L = lesson as Record<string, unknown>;
+        const time = str(L, [
+          "timeTableTime",
+          "hour",
+          "lessonTime",
+          "from",
+          "startTime",
+          "שעה",
+        ]);
+        const subject = str(L, [
+          "subjectName",
+          "subject",
+          "groupName",
+          "name",
+          "מקצוע",
+        ]);
+        const teacher = str(L, ["teacherName", "teacher", "מורה"]);
+        const room = str(L, ["roomNum", "room", "classRoom", "כיתה"]);
+        const line = [time, subject, teacher, room].filter(Boolean).join(" · ");
+        if (line) out.push({ day, line });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+
+  const time = str(row, [
+    "timeTableTime",
+    "hour",
+    "lesson",
+    "lessonTime",
+    "startTime",
+    "שעה",
+  ]) || (nested ? str(nested, ["timeTableTime", "hour", "lesson", "startTime"]) : "");
+  const subject =
+    str(row, ["subjectName", "subject", "groupName", "מקצוע"]) ||
+    (group ? str(group, ["subjectName", "subject", "groupName", "name"]) : "") ||
+    (nested ? str(nested, ["subjectName", "subject", "groupName"]) : "");
+  const teacher =
+    str(row, ["teacherName", "teacher", "מורה"]) ||
+    (group ? str(group, ["teacherName", "teacher"]) : "");
+  const room = str(row, ["roomNum", "room", "classRoom", "כיתה"]);
+  const line = [time, subject, teacher, room].filter(Boolean).join(" · ");
+  return line ? [{ day, line }] : [];
+}
+
+/**
+ * Flatten Mashov timetable payloads (flat rows, nested timeTable/groupDetails,
+ * or day objects with lessons/hours arrays). Never invents subjects.
+ */
 export function normalizeTimetable(raw: unknown) {
-  const rows = asRecordArray(raw);
-  // Mashov timetable is often nested; flatten best-effort.
   const byDay = new Map<string, string[]>();
-  for (const row of rows) {
-    const day = str(row, ["dayName", "day", "יום"]) || "יום";
-    const time = str(row, ["timeTableTime", "hour", "lesson", "שעה"]);
-    const subject = str(row, ["subjectName", "subject", "groupName", "מקצוע"]);
-    const teacher = str(row, ["teacherName", "teacher"]);
-    const line = [time, subject, teacher].filter(Boolean).join(" · ");
-    if (!line) {
+  for (const entry of unwrapTimetablePayload(raw)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       continue;
     }
-    const list = byDay.get(day) ?? [];
-    list.push(line);
-    byDay.set(day, list);
+    for (const { day, line } of expandTimetableRow(
+      entry as Record<string, unknown>,
+    )) {
+      const list = byDay.get(day) ?? [];
+      list.push(line);
+      byDay.set(day, list);
+    }
   }
   return [...byDay.entries()]
     .map(([day, lessons]) => ({

@@ -60,7 +60,8 @@ describe("flights helpers", () => {
 });
 
 describe("formatFlightsHebrew", () => {
-  const row = {
+  const row: FlightRow = {
+    liveRecordId: "flt-ly831",
     flightIata: "LY831",
     flightNumber: "831",
     airlineName: "El Al",
@@ -73,7 +74,13 @@ describe("formatFlightsHebrew", () => {
     gate: "B7",
     terminal: "3",
     delayMinutes: 15,
-    direction: "departures" as const,
+    direction: "departures",
+  };
+
+  const emptyFilters = {
+    airlines: [] as string[],
+    timeFrom: "",
+    timeTo: "",
   };
 
   it("formats a short board", () => {
@@ -85,6 +92,7 @@ describe("formatFlightsHebrew", () => {
       flight: "",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["board"],
       rows: [row],
     };
@@ -103,6 +111,7 @@ describe("formatFlightsHebrew", () => {
       flight: "LY831",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["next"],
       rows: [{ ...row, direction: "arrivals" }],
     };
@@ -120,6 +129,7 @@ describe("formatFlightsHebrew", () => {
       flight: "",
       date: "2026-10-23",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["board"],
       rows: [],
     });
@@ -150,6 +160,7 @@ describe("formatFlightsHebrew", () => {
       flight: "",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["board"],
       rows,
       completeness,
@@ -170,6 +181,7 @@ describe("formatFlightsHebrew", () => {
       flight: "",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["board"],
       rows: [row],
       completeness: buildFlightsCompleteness({
@@ -192,6 +204,7 @@ describe("formatFlightsHebrew", () => {
       flight: "",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["board"],
       rows: [row],
       completeness: buildFlightsCompleteness({
@@ -213,6 +226,7 @@ describe("formatFlightsHebrew", () => {
       flight: "LY831",
       date: "",
       withinMinutes: null,
+      ...emptyFilters,
       aspects: ["next"],
       rows: [row],
       completeness: buildFlightsCompleteness({

@@ -1,0 +1,103 @@
+{
+  "Siri": {
+    "ServiceDelivery": {
+      "ResponseTimestamp": "2026-10-24T12:00:00.000+03:00",
+      "StopMonitoringDelivery": [
+        {
+          "ResponseTimestamp": "2026-10-24T12:00:00.000+03:00",
+          "Status": true,
+          "MonitoredStopVisit": [
+            {
+              "RecordedAtTime": "2026-10-24T12:00:00.000+03:00",
+              "ItemIdentifier": "1",
+              "MonitoringRef": "2007",
+              "MonitoredVehicleJourney": {
+                "LineRef": "R51A",
+                "DirectionRef": "1",
+                "FramedVehicleJourneyRef": {
+                  "DataFrameRef": "2026-10-24",
+                  "DatedVehicleJourneyRef": "20925867"
+                },
+                "PublishedLineName": "51",
+                "OperatorRef": "25",
+                "DestinationRef": "3001",
+                "OriginAimedDepartureTime": "2026-10-24T11:40:00.000+03:00",
+                "VehicleRef": "9030930",
+                "MonitoredCall": {
+                  "StopPointRef": "2007",
+                  "Order": 3,
+                  "ExpectedArrivalTime": "2026-10-24T12:08:00.000+03:00",
+                  "AimedArrivalTime": "2026-10-24T12:05:00.000+03:00",
+                  "ArrivalStatus": "delayed"
+                }
+              }
+            },
+            {
+              "RecordedAtTime": "2026-10-24T12:00:00.000+03:00",
+              "ItemIdentifier": "2",
+              "MonitoringRef": "2007",
+              "MonitoredVehicleJourney": {
+                "LineRef": "R1",
+                "DirectionRef": "1",
+                "FramedVehicleJourneyRef": {
+                  "DataFrameRef": "2026-10-24",
+                  "DatedVehicleJourneyRef": "111"
+                },
+                "PublishedLineName": "1",
+                "OperatorRef": "25",
+                "DestinationRef": "3001",
+                "VehicleRef": "111",
+                "MonitoredCall": {
+                  "StopPointRef": "2007",
+                  "ExpectedArrivalTime": "2026-10-24T12:15:00.000+03:00",
+                  "ArrivalStatus": "onTime"
+                }
+              }
+            },
+            {
+              "RecordedAtTime": "2026-10-24T12:00:00.000+03:00",
+              "ItemIdentifier": "dup",
+              "MonitoringRef": "2007",
+              "MonitoredVehicleJourney": {
+                "LineRef": "R51A",
+                "DirectionRef": "1",
+                "FramedVehicleJourneyRef": {
+                  "DataFrameRef": "2026-10-24",
+                  "DatedVehicleJourneyRef": "20925867"
+                },
+                "PublishedLineName": "51",
+                "OperatorRef": "25",
+                "VehicleRef": "9030930",
+                "MonitoredCall": {
+                  "StopPointRef": "2007",
+                  "ExpectedArrivalTime": "2026-10-24T12:08:00.000+03:00",
+                  "ArrivalStatus": "delayed"
+                }
+              }
+            },
+            {
+              "RecordedAtTime": "2026-10-24T12:00:00.000+03:00",
+              "ItemIdentifier": "cancel",
+              "MonitoringRef": "2007",
+              "MonitoredVehicleJourney": {
+                "LineRef": "R51B",
+                "PublishedLineName": "51",
+                "OperatorRef": "3",
+                "FramedVehicleJourneyRef": {
+                  "DataFrameRef": "2026-10-24",
+                  "DatedVehicleJourneyRef": "999"
+                },
+                "VehicleRef": "999",
+                "MonitoredCall": {
+                  "StopPointRef": "2007",
+                  "ExpectedArrivalTime": "2026-10-24T12:20:00.000+03:00",
+                  "ArrivalStatus": "cancelled"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -199,7 +199,8 @@ export type LlmUsagePurpose =
   | "chat"
   | "catalog_tip"
   | "weather_tip"
-  | "reminder_compose";
+  | "reminder_compose"
+  | "live_select";
 
 /** Billing context for ephemeral compose LLM calls (not the main chat turn). */
 export type ComposeLlmBilling = {

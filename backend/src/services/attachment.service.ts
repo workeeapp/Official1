@@ -109,6 +109,109 @@ export function attachmentAttachSucceeded(outcome: AttachmentApplyOutcome): bool
   );
 }
 
+function kindFromMime(mimeType: string, fileName: string): AttachmentKind {
+  const mime = mimeType.toLowerCase();
+  if (mime.startsWith("image/")) {
+    return mime.includes("webp") && fileName.toLowerCase().endsWith(".webp")
+      ? "sticker"
+      : "image";
+  }
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+/**
+ * Store a web/chat upload (bytes already in memory). Same Attachment row shape
+ * as WhatsApp ingest so PENDING_ATTACHMENTS / model vision work unchanged.
+ */
+export async function ingestUploadedBytes(input: {
+  userId: string;
+  uploaderId: string;
+  bytes: Buffer;
+  mimeType: string;
+  fileName: string;
+  caption?: string;
+}): Promise<Attachment | null> {
+  const mimeType = (input.mimeType || "application/octet-stream").slice(0, 127);
+  const kind = kindFromMime(mimeType, input.fileName);
+  const max = ATTACHMENT_MAX_BYTES[kind];
+  if (!input.bytes.length || input.bytes.length > max) {
+    return null;
+  }
+  try {
+    const id = randomUUID();
+    const storageKey = attachmentStorageKey(input.userId, id, mimeType);
+    await getAttachmentStorage().put(storageKey, input.bytes);
+    const transcript =
+      kind === "audio"
+        ? await transcribeAudio({ bytes: input.bytes, mimeType }).catch(() => "")
+        : "";
+    const row = await prisma.attachment.create({
+      data: {
+        id,
+        userId: input.userId,
+        uploaderId: input.uploaderId,
+        kind,
+        mimeType,
+        fileName: (input.fileName || `upload${extensionForMime(mimeType)}`).slice(
+          0,
+          255,
+        ),
+        sizeBytes: input.bytes.length,
+        sha256: createHash("sha256").update(input.bytes).digest("hex"),
+        storageKey,
+        caption: (input.caption ?? "").slice(0, 1024),
+        transcript,
+        waInboundMediaId: "",
+      },
+    });
+    await recordAuditEvent({
+      userId: input.userId,
+      actorEmployeeId: input.uploaderId,
+      action: "attachment_add",
+      entityType: "Attachment",
+      entityId: row.id,
+      summary: `add web attachment: ${kind}${row.fileName ? ` ${row.fileName}` : ""}`,
+    });
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+/** Load speaker-owned attachments by id for a chat turn (web upload → send). */
+export async function loadTurnAttachmentsByIds(
+  userId: string,
+  uploaderId: string,
+  ids: string[],
+): Promise<TurnAttachments | undefined> {
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].slice(
+    0,
+    SEND_ATTACHMENTS_MAX,
+  );
+  if (unique.length === 0) return undefined;
+  const rows = await prisma.attachment.findMany({
+    where: {
+      userId,
+      id: { in: unique },
+      OR: [{ uploaderId }, { userId }],
+    },
+  });
+  if (rows.length === 0) return undefined;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const ordered = unique
+    .map((id) => byId.get(id))
+    .filter((r): r is Attachment => Boolean(r));
+  if (ordered.length === 0) return undefined;
+  return buildTurnAttachments(
+    ordered.map((row) => ({
+      row,
+      voice: row.kind === "audio",
+    })),
+  );
+}
+
 /** Download WhatsApp media, keep our own copy, transcribe voice. Null when it cannot be stored. */
 export async function ingestInboundMedia(input: {
   userId: string;
@@ -364,6 +467,81 @@ export async function withAttachmentRefs<T extends SnapshotShape>(snapshot: T): 
       : {}),
   };
   return decorated as T;
+}
+
+/** Read attachment ids from a saved-row `attachments` array (`attachment_id` or `id`). */
+export function attachmentIdsFromSavedRefs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const id =
+      (typeof row.attachment_id === "string" && row.attachment_id.trim()) ||
+      (typeof row.id === "string" && row.id.trim()) ||
+      "";
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect file ids from ITEM DUMP target rows (items / filings / reminders).
+ * Used so showing a row with files also sends those files (max SEND_ATTACHMENTS_MAX).
+ */
+export function collectAttachmentIdsForDumpRows(
+  snapshot: SnapshotShape,
+  rowIds: ReadonlySet<string> | Iterable<string>,
+  max = SEND_ATTACHMENTS_MAX,
+): string[] {
+  const want =
+    rowIds instanceof Set
+      ? rowIds
+      : new Set([...rowIds].map((id) => String(id).trim()).filter(Boolean));
+  if (want.size === 0 || max <= 0) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const take = (raw: unknown) => {
+    for (const id of attachmentIdsFromSavedRefs(raw)) {
+      if (seen.has(id) || out.length >= max) {
+        continue;
+      }
+      seen.add(id);
+      out.push(id);
+    }
+  };
+  for (const list of snapshot.lists) {
+    for (const item of list.items) {
+      const id =
+        (typeof item.item_id === "string" && item.item_id.trim()) ||
+        (typeof item.contact_id === "string" && item.contact_id.trim()) ||
+        "";
+      if (id && want.has(id)) {
+        take(item.attachments);
+      }
+    }
+  }
+  for (const row of snapshot.filing) {
+    if (want.has(row.filing_id)) {
+      take((row as { attachments?: unknown }).attachments);
+    }
+  }
+  for (const row of snapshot.reminders ?? []) {
+    if (want.has(row.reminder_id)) {
+      take((row as { attachments?: unknown }).attachments);
+    }
+  }
+  return out;
 }
 
 /**

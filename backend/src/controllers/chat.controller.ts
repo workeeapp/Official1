@@ -6,6 +6,7 @@ import {
   resetChatConversation,
   sendChatMessage,
 } from "../services/chat.service.js";
+import { loadTurnAttachmentsByIds } from "../services/attachment.service.js";
 import { getEmployeeForUser } from "../services/employee.service.js";
 import {
   parseChatMessageBody,
@@ -31,13 +32,18 @@ export async function sendMessage(req: Request, res: Response): Promise<void> {
     throw new UnauthorizedError();
   }
 
-  const { message, employeeId, digitalEmployeeId } = parseChatMessageBody(req.body);
+  const { message, employeeId, digitalEmployeeId, attachmentIds } =
+    parseChatMessageBody(req.body);
+  const turnAttachments = attachmentIds?.length
+    ? await loadTurnAttachmentsByIds(req.user.id, employeeId, attachmentIds)
+    : undefined;
   const { reply, raw, request, notifications, timing, messageIds, outboundAttachments } =
     await sendChatMessage({
       userId: req.user.id,
       employeeId,
       digitalEmployeeId,
       message,
+      ...(turnAttachments ? { attachments: turnAttachments } : {}),
     });
 
   res.status(200).json({

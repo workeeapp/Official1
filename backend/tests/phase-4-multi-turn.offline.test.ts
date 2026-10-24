@@ -71,4 +71,38 @@ describe("Phase 4 multi-turn corpus (offline wire)", () => {
     }
     expect(failures).toEqual([]);
   });
+
+  it("live-mt tag filter selects only the new clarify→ACTION subset", () => {
+    const corpus = loadModelEvalMultiTurnCorpus();
+    const selected = filterCasesByTags(corpus.cases, ["live-mt"]);
+    expect(selected.map((c) => c.id).sort()).toEqual([
+      "mt-live-gtfs-schedule-clarify",
+      "mt-live-routes-lines-clarify",
+      "mt-live-weather-place-clarify",
+    ]);
+    expect(selected.length).toBeLessThan(corpus.cases.length);
+    const shopping = filterCasesByTags(corpus.cases, ["shopping"]);
+    expect(
+      shopping.every((c) => !(c.tags ?? []).includes("live-mt")),
+    ).toBe(true);
+    for (const row of selected) {
+      expect(row.setup).toEqual({});
+      expect(row.turns.length).toBe(2);
+      expect(row.turns[0]!.constraints.map((c) => c.type)).toEqual(
+        expect.arrayContaining([
+          "live_domains_empty",
+          "response_looks_like_ask",
+          "mutations_empty_or_read_only",
+        ]),
+      );
+      expect(
+        row.turns[1]!.constraints.some(
+          (c) =>
+            c.type === "routes_action" ||
+            c.type === "weather_action" ||
+            c.type === "live_domain_only",
+        ),
+      ).toBe(true);
+    }
+  });
 });

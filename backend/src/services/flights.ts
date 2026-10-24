@@ -4,7 +4,19 @@
  * Default hub: TLV (נתב״ג).
  */
 import { createHash } from "node:crypto";
+import {
+  flightsClockHmToMinutes,
+  normalizeFlightsClockHm,
+} from "@workee/shared";
 import { getEnv } from "../config/env.js";
+import type { ComposeLlmBilling } from "./llm-usage.service.js";
+import {
+  formatLiveSelectFailureReply,
+  LIVE_SELECT_NO_MATCH_HE,
+  runLivePostSelect,
+  type LiveRetrievalRecord,
+  type LiveSelectApplyResult,
+} from "./live-retrieval-select.js";
 import {
   emptyRetrievalStats,
   isLocallyTruncated,
@@ -38,6 +50,8 @@ export type FlightsAspect =
   | "delay";
 
 export type FlightRow = {
+  /** Opaque stable id for post-retrieval live_select (minted at map time). */
+  liveRecordId: string;
   flightIata: string;
   flightNumber: string;
   airlineName: string;
@@ -67,10 +81,15 @@ export type FlightsFacts = {
   airport: string;
   direction: FlightsDirection;
   airline: string;
+  airlines: string[];
   city: string;
   flight: string;
   date: string;
   withinMinutes: number | null;
+  /** Inclusive Jerusalem HH:mm lower bound (empty = none). */
+  timeFrom: string;
+  /** Inclusive Jerusalem HH:mm upper bound (empty = none). */
+  timeTo: string;
   aspects: FlightsAspect[];
   rows: FlightRow[];
   /** Board completeness; omit for single-flight / next views. */
@@ -114,7 +133,7 @@ const ASPECT_SET = new Set<FlightsAspect>([
 
 const FLIGHTS_URL = "https://api.aviationstack.com/v1/flights";
 
-/** Best-effort Hebrew/English city → primary IATA (POC table). */
+/** Best-effort Hebrew/English city → primary IATA (common IL routes). */
 const CITY_IATA: Record<string, string> = {
   "תל אביב": "TLV",
   "תל-אביב": "TLV",
@@ -124,6 +143,7 @@ const CITY_IATA: Record<string, string> = {
   "נתב״ג": "TLV",
   tlv: "TLV",
   "ben gurion": "TLV",
+  "בן גוריון": "TLV",
   פריז: "CDG",
   paris: "CDG",
   cdg: "CDG",
@@ -132,28 +152,118 @@ const CITY_IATA: Record<string, string> = {
   rome: "FCO",
   fco: "FCO",
   cia: "CIA",
+  מילאנו: "MXP",
+  milano: "MXP",
+  milan: "MXP",
+  mxp: "MXP",
   לונדון: "LHR",
   london: "LHR",
   lhr: "LHR",
   lgw: "LGW",
+  stn: "STN",
   ניוyork: "JFK",
   "ניו יורק": "JFK",
   "new york": "JFK",
   jfk: "JFK",
   ewr: "EWR",
+  lga: "LGA",
   ברלין: "BER",
   berlin: "BER",
+  ber: "BER",
+  מינכן: "MUC",
+  munich: "MUC",
+  muc: "MUC",
+  פרנקפורט: "FRA",
+  frankfurt: "FRA",
+  fra: "FRA",
   אמסטרדם: "AMS",
   amsterdam: "AMS",
   ams: "AMS",
   מדריד: "MAD",
   madrid: "MAD",
+  mad: "MAD",
+  ברצלונה: "BCN",
+  barcelona: "BCN",
+  bcn: "BCN",
   אתונה: "ATH",
   athens: "ATH",
+  ath: "ATH",
   איסטנבול: "IST",
   istanbul: "IST",
+  ist: "IST",
   דובאי: "DXB",
   dubai: "DXB",
+  dxb: "DXB",
+  "אבו דאבי": "AUH",
+  "abu dhabi": "AUH",
+  auh: "AUH",
+  לרנקה: "LCA",
+  larnaca: "LCA",
+  lca: "LCA",
+  פאפוס: "PFO",
+  paphos: "PFO",
+  pfo: "PFO",
+  וינה: "VIE",
+  vienna: "VIE",
+  vie: "VIE",
+  ציריך: "ZRH",
+  zurich: "ZRH",
+  zrh: "ZRH",
+  "ז'נבה": "GVA",
+  "ז׳נבה": "GVA",
+  geneva: "GVA",
+  gva: "GVA",
+  בודפשט: "BUD",
+  budapest: "BUD",
+  bud: "BUD",
+  פראג: "PRG",
+  prague: "PRG",
+  prg: "PRG",
+  ורשה: "WAW",
+  warsaw: "WAW",
+  waw: "WAW",
+  בוקרשט: "OTP",
+  bucharest: "OTP",
+  otp: "OTP",
+  סופיה: "SOF",
+  sofia: "SOF",
+  sof: "SOF",
+  בנגקוק: "BKK",
+  bangkok: "BKK",
+  bkk: "BKK",
+  "הונג קונג": "HKG",
+  "hong kong": "HKG",
+  hkg: "HKG",
+  טוקיו: "NRT",
+  tokyo: "NRT",
+  nrt: "NRT",
+  hnd: "HND",
+  "לוס אנג'לס": "LAX",
+  "לוס אנג׳לס": "LAX",
+  "los angeles": "LAX",
+  lax: "LAX",
+  מיאמי: "MIA",
+  miami: "MIA",
+  mia: "MIA",
+  טורונטו: "YYZ",
+  toronto: "YYZ",
+  yyz: "YYZ",
+  מוסקבה: "SVO",
+  moscow: "SVO",
+  svo: "SVO",
+  באטומי: "BUS",
+  batumi: "BUS",
+  bus: "BUS",
+  טביליסי: "TBS",
+  tbilisi: "TBS",
+  tbs: "TBS",
+  איילת: "ETH",
+  eilat: "ETH",
+  eth: "ETH",
+  vda: "VDA",
+  חיפה: "HFA",
+  haifa: "HFA",
+  hfa: "HFA",
 };
 
 const AIRLINE_IATA: Record<string, string> = {
@@ -301,9 +411,25 @@ function nestedNumber(
   return null;
 }
 
+export function mintFlightLiveRecordId(
+  row: Omit<FlightRow, "liveRecordId">,
+  airport: string,
+): string {
+  const raw = [
+    airport,
+    row.direction,
+    row.flightIata,
+    row.scheduledIso,
+    row.otherIata,
+    row.gate,
+  ].join("|");
+  return createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 24);
+}
+
 function mapApiFlight(
   entry: unknown,
   direction: "arrivals" | "departures",
+  airport: string,
 ): FlightRow | null {
   const row = asRecord(entry);
   if (!row) {
@@ -321,7 +447,7 @@ function mapApiFlight(
   if (!scheduled && !flightIata && !flightNumber) {
     return null;
   }
-  return {
+  const base: Omit<FlightRow, "liveRecordId"> = {
     flightIata: flightIata || flightNumber,
     flightNumber,
     airlineName: String(airline?.name ?? "").trim(),
@@ -335,6 +461,10 @@ function mapApiFlight(
     terminal: String(leg?.terminal ?? "").trim(),
     delayMinutes: nestedNumber(row, direction === "departures" ? "departure" : "arrival", "delay"),
     direction,
+  };
+  return {
+    ...base,
+    liveRecordId: mintFlightLiveRecordId(base, airport),
   };
 }
 
@@ -371,6 +501,70 @@ function flightMatchesAirline(row: FlightRow, airline: string): boolean {
     row.airlineName.toLowerCase().includes(lower) ||
     row.airlineIata.toLowerCase() === lower
   );
+}
+
+/** OR-match against airline + airlines[]; empty list → keep all. */
+export function flightMatchesAirlineSet(
+  row: FlightRow,
+  airlines: string[],
+): boolean {
+  const list = airlines.map((a) => a.trim()).filter(Boolean);
+  if (list.length === 0) {
+    return true;
+  }
+  return list.some((entry) => flightMatchesAirline(row, entry));
+}
+
+/** Jerusalem HH:mm of estimated/scheduled ISO. */
+export function flightClockHm(row: FlightRow): string {
+  const iso = row.estimatedIso || row.scheduledIso;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jerusalem",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(ms));
+}
+
+/**
+ * Inclusive Jerusalem clock window. Only from → hm >= from; only to → hm <= to;
+ * both → from <= hm <= to (no overnight wrap).
+ */
+export function flightMatchesClockWindow(
+  row: FlightRow,
+  timeFrom: string,
+  timeTo: string,
+): boolean {
+  const from = normalizeFlightsClockHm(timeFrom) ?? "";
+  const to = normalizeFlightsClockHm(timeTo) ?? "";
+  if (!from && !to) {
+    return true;
+  }
+  const hm = normalizeFlightsClockHm(flightClockHm(row)) ?? "";
+  if (!hm) {
+    return false;
+  }
+  const mins = flightsClockHmToMinutes(hm);
+  if (mins < 0) {
+    return false;
+  }
+  if (from) {
+    const fromMins = flightsClockHmToMinutes(from);
+    if (fromMins >= 0 && mins < fromMins) {
+      return false;
+    }
+  }
+  if (to) {
+    const toMins = flightsClockHmToMinutes(to);
+    if (toMins >= 0 && mins > toMins) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function flightMatchesCity(row: FlightRow, city: string): boolean {
@@ -453,11 +647,14 @@ export async function fetchFlightsBoard(input: {
   airport?: string;
   direction?: FlightsDirection | string;
   airline?: string;
+  airlines?: string[] | null;
   city?: string;
   flight?: string;
   date?: string;
   /** Keep only flights with ETA/STA within this many minutes from now. */
   withinMinutes?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
   limit?: number;
   now?: Date;
   fetchImpl?: typeof fetch;
@@ -475,6 +672,13 @@ export async function fetchFlightsBoard(input: {
         ? "departures"
         : "both";
   const airline = String(input.airline ?? "").trim();
+  const airlines = [
+    ...new Set(
+      [...(Array.isArray(input.airlines) ? input.airlines : []), airline]
+        .map((a) => String(a ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
   const city = String(input.city ?? "").trim();
   const flight = normalizeFlightCode(String(input.flight ?? ""));
   // Free AviationStack rejects flight_date — always filter client-side.
@@ -486,8 +690,17 @@ export async function fetchFlightsBoard(input: {
     input.withinMinutes > 0
       ? Math.min(Math.round(input.withinMinutes), 24 * 60)
       : null;
+  const timeFrom = normalizeFlightsClockHm(input.timeFrom) ?? "";
+  const timeTo = normalizeFlightsClockHm(input.timeTo) ?? "";
   const now = input.now ?? new Date();
-  const limit = Math.min(Math.max(input.limit ?? 40, 1), 100);
+  const wantWidePage =
+    withinMinutes != null ||
+    Boolean(timeFrom || timeTo) ||
+    airlines.length > 1;
+  const limit = Math.min(
+    Math.max(input.limit ?? (wantWidePage ? 100 : 40), 1),
+    100,
+  );
   const fetchImpl = input.fetchImpl ?? fetch;
   const apiKey = input.apiKey;
 
@@ -506,9 +719,12 @@ export async function fetchFlightsBoard(input: {
     } else {
       params.arr_iata = airport;
     }
-    const airlineIata = resolveAirlineIata(airline);
-    if (airlineIata) {
-      params.airline_iata = airlineIata;
+    // Single known IATA → provider filter; multi-airline OR → client-side only.
+    if (airlines.length === 1) {
+      const airlineIata = resolveAirlineIata(airlines[0]!);
+      if (airlineIata) {
+        params.airline_iata = airlineIata;
+      }
     }
     if (flight) {
       // Prefer iata when it looks like LY831; else search number loosely after fetch.
@@ -532,14 +748,14 @@ export async function fetchFlightsBoard(input: {
       providerLimitSaturated = true;
     }
     for (const entry of data) {
-      const mapped = mapApiFlight(entry, dir);
+      const mapped = mapApiFlight(entry, dir, airport);
       if (!mapped) {
         continue;
       }
       if (!flightMatchesCode(mapped, flight)) {
         continue;
       }
-      if (!flightMatchesAirline(mapped, airline)) {
+      if (!flightMatchesAirlineSet(mapped, airlines)) {
         continue;
       }
       if (!flightMatchesCity(mapped, city)) {
@@ -569,6 +785,11 @@ export async function fetchFlightsBoard(input: {
       const mins = minutesUntilIso(row.estimatedIso || row.scheduledIso, now);
       return mins == null || mins >= -30;
     });
+  }
+  if (timeFrom || timeTo) {
+    filtered = filtered.filter((row) =>
+      flightMatchesClockWindow(row, timeFrom, timeTo),
+    );
   }
 
   filtered.sort((a, b) => {
@@ -630,6 +851,21 @@ function statusHe(status: string): string {
   }
 }
 
+function formatFlightsClockFilterNote(timeFrom: string, timeTo: string): string {
+  const from = normalizeFlightsClockHm(timeFrom) ?? "";
+  const to = normalizeFlightsClockHm(timeTo) ?? "";
+  if (from && to) {
+    return `בין ${from} ל־${to}`;
+  }
+  if (from) {
+    return `מ־${from} ואילך`;
+  }
+  if (to) {
+    return `עד ${to}`;
+  }
+  return "";
+}
+
 export function formatOneFlightHe(row: FlightRow): string {
   const code = row.flightIata || row.flightNumber || "?";
   const airline = row.airlineName || row.airlineIata || "";
@@ -659,18 +895,31 @@ export function formatOneFlightHe(row: FlightRow): string {
 
 export function formatFlightsHebrew(facts: FlightsFacts): string {
   const airport = facts.airport || DEFAULT_FLIGHT_AIRPORT;
+  const clockNote = formatFlightsClockFilterNote(
+    facts.timeFrom ?? "",
+    facts.timeTo ?? "",
+  );
+  const airlineNote =
+    (facts.airlines?.length ?? 0) > 1
+      ? ` (סינון ${facts.airlines.length} חברות)`
+      : "";
   if (facts.rows.length === 0) {
     const who = facts.flight
       ? `טיסה ${facts.flight}`
-      : facts.airline || facts.city
-        ? [facts.airline, facts.city].filter(Boolean).join(" / ")
+      : facts.airline || facts.city || (facts.airlines?.length ?? 0) > 0
+        ? [facts.airline, ...(facts.airlines ?? []), facts.city]
+            .filter(Boolean)
+            .slice(0, 3)
+            .join(" / ")
         : "טיסות";
     const window =
       facts.withinMinutes != null
         ? ` ב־${facts.withinMinutes} הדקות הקרובות`
-        : facts.date
-          ? ` ל־${facts.date}`
-          : "";
+        : clockNote
+          ? ` ${clockNote}`
+          : facts.date
+            ? ` ל־${facts.date}`
+            : "";
     return `לא מצאתי ${who} בלוח ${airport}${window}.`;
   }
   const wantNext =
@@ -681,13 +930,17 @@ export function formatFlightsHebrew(facts: FlightsFacts): string {
     return formatOneFlightHe(row) + ".";
   }
   const windowNote =
-    facts.withinMinutes != null ? ` (ב־${facts.withinMinutes} דק׳ הקרובות)` : "";
+    facts.withinMinutes != null
+      ? ` (ב־${facts.withinMinutes} דק׳ הקרובות)`
+      : clockNote
+        ? ` (${clockNote})`
+        : "";
   const header =
     facts.direction === "arrivals"
-      ? `נחיתות ב־${airport}${windowNote}:`
+      ? `נחיתות ב־${airport}${windowNote}${airlineNote}:`
       : facts.direction === "departures"
-        ? `המראות מ־${airport}${windowNote}:`
-        : `טיסות ב־${airport}${windowNote}:`;
+        ? `המראות מ־${airport}${windowNote}${airlineNote}:`
+        : `טיסות ב־${airport}${windowNote}${airlineNote}:`;
   const displayCap = FLIGHTS_DISPLAY_CAP;
   const lines = facts.rows
     .slice(0, displayCap)
@@ -706,18 +959,109 @@ export function formatFlightsHebrew(facts: FlightsFacts): string {
   return [header, ...lines, ...notes].join("\n");
 }
 
+/** Compact rows for Stage B live_select. */
+export function flightsToLiveRetrievalRecords(
+  facts: FlightsFacts,
+): LiveRetrievalRecord[] {
+  return facts.rows.map((row) => ({
+    id: row.liveRecordId,
+    label: `${row.flightIata || row.flightNumber} ${row.airlineName || row.airlineIata}`.trim(),
+    fields: {
+      flight_iata: row.flightIata,
+      flight_number: row.flightNumber,
+      airline_name: row.airlineName,
+      airline_iata: row.airlineIata,
+      other_iata: row.otherIata,
+      other_airport: row.otherAirportName,
+      scheduled: row.scheduledIso,
+      estimated: row.estimatedIso,
+      status: row.status,
+      gate: row.gate || null,
+      terminal: row.terminal || null,
+      delay_minutes: row.delayMinutes,
+      direction: row.direction,
+    },
+  }));
+}
+
+export function filterFlightsFactsByIds(
+  facts: FlightsFacts,
+  ids: string[],
+): FlightsFacts {
+  const kept = new Set(ids);
+  const rows = facts.rows.filter((row) => kept.has(row.liveRecordId));
+  return {
+    ...facts,
+    rows,
+    ...(facts.completeness
+      ? {
+          completeness: {
+            ...facts.completeness,
+            matched: rows.length,
+            truncated: isLocallyTruncated(
+              undefined,
+              rows.length,
+              FLIGHTS_DISPLAY_CAP,
+            ),
+          },
+        }
+      : {}),
+  };
+}
+
+function flightsCompletenessNotes(facts: FlightsFacts): string[] {
+  const notes: string[] = [];
+  if (facts.completeness?.truncated) {
+    notes.push(FLIGHTS_LOCAL_TRUNCATION_HE);
+  }
+  if (facts.completeness?.providerPartial) {
+    notes.push(FLIGHTS_PROVIDER_PARTIAL_HE);
+  }
+  return notes;
+}
+
+/** Apply Stage B outcome onto Flights facts and format Hebrew. */
+export function formatFlightsAfterLiveSelect(
+  facts: FlightsFacts,
+  outcome: LiveSelectApplyResult,
+): string {
+  if (outcome.kind === "failure") {
+    const raw = formatFlightsHebrew(facts);
+    return formatLiveSelectFailureReply(raw, {
+      includeUnfiltered: outcome.mayShowUnfilteredLabeled,
+    });
+  }
+  if (outcome.kind === "no_match") {
+    const base = outcome.messageHe?.trim() || LIVE_SELECT_NO_MATCH_HE;
+    const notes = flightsCompletenessNotes(facts);
+    return notes.length > 0 ? `${base}\n${notes.join("\n")}` : base;
+  }
+  if (outcome.kind === "subset") {
+    return formatFlightsHebrew(filterFlightsFactsByIds(facts, outcome.keptIds));
+  }
+  return formatFlightsHebrew(facts);
+}
+
 export async function resolveFlightsReply(input: {
   airport?: string;
   direction?: string;
   airline?: string;
+  airlines?: string[] | null;
   city?: string;
   flight?: string;
   date?: string;
   withinMinutes?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
   aspects?: unknown;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
   now?: Date;
+  /** When true and rows exist, run same-turn live_select (Stage B). */
+  requireLiveSelect?: boolean;
+  speakerAsk?: string;
+  billing?: ComposeLlmBilling | null;
+  runSelect?: typeof runLivePostSelect;
 }): Promise<string> {
   try {
     const aspects = parseFlightsAspects(input.aspects);
@@ -726,18 +1070,32 @@ export async function resolveFlightsReply(input: {
       Number.isFinite(input.withinMinutes)
         ? input.withinMinutes
         : null;
+    const timeFrom = normalizeFlightsClockHm(input.timeFrom) ?? "";
+    const timeTo = normalizeFlightsClockHm(input.timeTo) ?? "";
+    const airlines = [
+      ...new Set(
+        [
+          ...(Array.isArray(input.airlines) ? input.airlines : []),
+          String(input.airline ?? "").trim(),
+        ]
+          .map((a) => String(a ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
     const board = await fetchFlightsBoard({
       airport: input.airport,
       direction: input.direction,
       airline: input.airline,
+      airlines,
       city: input.city,
       flight: input.flight,
       date: input.date,
       withinMinutes,
+      timeFrom,
+      timeTo,
       now: input.now,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
-      limit: withinMinutes != null ? 100 : 40,
     });
     const singleFlight =
       aspects.includes("next") ||
@@ -751,10 +1109,13 @@ export async function resolveFlightsReply(input: {
           ? "departures"
           : "both") as FlightsDirection,
       airline: String(input.airline ?? "").trim(),
+      airlines,
       city: String(input.city ?? "").trim(),
       flight: normalizeFlightCode(String(input.flight ?? "")),
       date: String(input.date ?? "").trim(),
       withinMinutes,
+      timeFrom,
+      timeTo,
       aspects,
       rows,
       // Board views only — single-flight/next intentionally omit completeness notes.
@@ -767,7 +1128,17 @@ export async function resolveFlightsReply(input: {
             }),
           }),
     };
-    return formatFlightsHebrew(facts);
+    if (!input.requireLiveSelect || facts.rows.length === 0) {
+      return formatFlightsHebrew(facts);
+    }
+    const runSelect = input.runSelect ?? runLivePostSelect;
+    const outcome = await runSelect({
+      domain: "flights",
+      records: flightsToLiveRetrievalRecords(facts),
+      speakerAsk: input.speakerAsk ?? "",
+      billing: input.billing ?? null,
+    });
+    return formatFlightsAfterLiveSelect(facts, outcome);
   } catch (error) {
     if (error instanceof FlightsApiKeyMissingError) {
       return "אין חיבור לנתוני טיסות כרגע (חסר מפתח API).";

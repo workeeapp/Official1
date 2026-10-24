@@ -180,6 +180,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       text: string;
       digitalEmployeeId?: string;
       assistantSpeaker?: string;
+      attachmentIds?: string[];
     }) => {
       if (sendingEmployeeId) {
         return;
@@ -215,6 +216,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             employeeId: input.employeeId,
             ...(input.digitalEmployeeId
               ? { digitalEmployeeId: input.digitalEmployeeId }
+              : {}),
+            ...(input.attachmentIds?.length
+              ? { attachmentIds: input.attachmentIds }
               : {}),
           },
           abort.signal,

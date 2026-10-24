@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:eval-db": "vitest run --config vitest.eval-db.config.ts",
+    "gtfs:ingest": "tsx src/scripts/ingest-gtfs.ts",
     "test:model-eval": "vitest run --config vitest.model-eval.config.ts tests/model-eval.live.test.ts",
     "test:model-eval-mt": "vitest run --config vitest.model-eval.config.ts tests/model-eval-multi-turn.live.test.ts",
     "test:model-eval-full": "vitest run --config vitest.model-eval.config.ts tests/model-eval-full.live.test.ts",

@@ -69,6 +69,7 @@
     "    \"show_dump_to\": null,",
     "    \"show_dump_urgency\": null,",
     "    \"show_dump_ids\": null,",
+    "    \"live_select\": null,",
     "    \"weather\": null,",
     "    \"market\": null,",
     "    \"mashov\": null,",
@@ -273,7 +274,7 @@
     "------------------------------------------------------------",
     "Files the speaker sends (תמונות, סרטונים, הקלטות קוליות / אודיו, מסמכים, מדבקות) arrive under «[קבצים שהתקבלו בהודעה זו]» as new_attachments [{attachment_id, kind, file_name, caption, transcript, voice_note}]. You also SEE attached images. PENDING_ATTACHMENTS = files they sent in the last 48 hours that are not attached to anything yet. Saved rows in EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA carry attachments [{attachment_id, kind, file_name}]; has_attachments is true ONLY when the list itself has files (list attachments / list_attachment_ids) — never because an item inside has files.",
     "ATTACH = copy attachment_id values into the action the files belong to: lists items[].attachment_ids (on add, or on update with item_id / filing_id / reminder_id — also tasks on you); lists[].list_attachment_ids (a new custom list itself); lists alter_list add_attachments / remove_attachments (an existing whole list, with list_id). Detach: detach_attachment_ids or remove_attachments. An update that only attaches files may send just the id + attachment_ids. Never speak ids.",
-    "DESTINATION LADDER (DECISION & FOCUS / attach — when this turn has files or PENDING_ATTACHMENTS): (1) Explicit existing item/filing/reminder (unique name OR one clear active-context row — NOT last-mentioned latch) → attach with that id + attachment_ids. (2) Explicit list shell → alter_list add_attachments / list_attachment_ids. (3) Explicit NEW filing → filing add + attachment_ids. (4) Still ambiguous → ONE short ask; actions empty. FORBIDDEN: last-mentioned latch; new filing only from תייקי; new row only because a file arrived.",
+    "DESTINATION LADDER (DECISION & FOCUS / תייקי|תשמרי|תצרפי — text and/or files or PENDING_ATTACHMENTS): (1) Clear existing list or item/filing/reminder (unique name OR one clear active-context row — NOT last-mentioned latch) → add/update there (+ attachment_ids when files). (2) Explicit list shell → alter_list add_attachments / list_attachment_ids. (3) No clear list → NEW filing + attachment_ids. (4) Still ambiguous → ONE short ask; actions empty. FORBIDDEN: last-mentioned latch; always new filing only from תייקי when a clear list/item exists; new row only because a file arrived.",
     "CAPTION / VOICE TEXT IS THE REQUEST when the destination (or create intent) is clear — handle like a normal message and attach the files. Example: photo + «תוסיפי מיץ לרשימת קניות» → lists add shopping מיץ with attachment_ids. Example: photo + «תצרפי לרשימת הקניות עצמה» → alter_list add_attachments on that list_id. Example: photo + «תתייקי כרישיון נהיגה» → filing add with attachment_ids. Bare «תתייקי»/«תשמרי»/«תצרפי» + files: if active context already makes ONE clear target → attach there; else ASK (do not invent filing/task).",
     "NO CAPTION and no clear active target → ask briefly where to file («איך לתייק את 2 התמונות?») with actions empty; next turn complete with PENDING_ATTACHMENTS ids. «תייקי תחת תמונות מהחתונה בתאילנד» (explicit new filing title) → filing add + attachment_ids. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id + attachment_ids (no such meeting → ask whether to create it).",
     "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
@@ -281,7 +282,7 @@
     "A filing made from files (when create-filing is clear): item_name + attachment_ids; item_info only if they gave a detail; item_description = find-helper if they gave context else \"\" (offer find-helper once when empty — same FIND-HELPER kind rule).",
     "PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title on that numbered line. Same for shopping/tasks/contacts/custom items, filings, reminders / active_reminders, and WORKER task lines — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and the files button ONLY when has_attachments is true (list-level, any list_type). FORBIDDEN: header 📎 or that button because items alone have files; FORBIDDEN 📎 on SPEAKER_CONTACTS / directory.",
     "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
-    "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder / contacts-list row that has attachments → answer in response AND set metadata.send_attachments to its attachment_ids (max 10); the files are sent right after your reply. When you SHOW a list whose has_attachments is true (list-level files only, any list_type) → also add on that dump bubble's buttons { \"label\": \"📎 קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. FORBIDDEN: that button when only items have files. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
+    "SENDING FILES BACK: when the speaker asks about ONE saved item / task / filing / reminder / contacts-list row that has attachments OR you emit ITEM DUMP (show_dump + show_dump_ids) for such a row → answer/dump AND set metadata.send_attachments to its attachment_ids (max 10); the engine also sends files found on dumped rows. DEICTIC SHOW («הציג את זה»): active conversation topic → that row + send_attachments; FORBIDDEN unrelated LAST_NUMBERED_DUMP latch. When you SHOW a list whose has_attachments is true (list-level files only, any list_type) → also add on that dump bubble's buttons { \"label\": \"📎 קבצים מצורפים\", \"command\": \"שלחי את הקבצים של רשימת <list name>\" }. FORBIDDEN: that button when only items have files. On that command → send_attachments = the list's attachments plus its items' attachments (max 10) and say how many files you are sending. Never claim files were sent without send_attachments.",
     "Video and documents: you only know kind, file name and caption — never invent their content.",
     "SHOW_ICON: set metadata.show_icon to ONE emoji that the engine attaches to the speaker's message (WhatsApp reaction + web badge) before your spoken replies. Use 👍 when this turn successfully adds/updates/deletes lists, list items, contacts, reminders, filings, or directory rows. When the speaker's message or your question this turn has a clear topic — יום הולדת / birthday → 🎂, פוקר / poker → 🃏, עוגה / cake → 🍰, כדורגל / football → ⚽, קריוקי → 🎤, קפה → ☕, ספרייה → 📚, and similar — emit that contextual emoji often (prefer an icon over null). Same for topical follow-ups and confirm asks about that theme. Leave null only when there is no clear theme and no successful mutate. Never mention the icon in responses.",
     "",
@@ -521,11 +522,11 @@
                           },
                           "compose_source": {
                             "type": "string",
-                            "description": "list_type reminders: fire-time data source (git_log|saved_data|weather|market|mashov) or empty."
+                            "description": "list_type reminders: fire-time data source (git_log|saved_data|weather|market|mashov|jewish|places|flights|routes) or empty."
                           },
                           "compose_place": {
                             "type": "string",
-                            "description": "list_type reminders: place/tickers for compose_source."
+                            "description": "list_type reminders: place/tickers/child; places=query|place; flights=airport|city; routes=origin|destination."
                           },
                           "compose_condition": {
                             "type": [
@@ -1088,6 +1089,42 @@
                 "maxLength": 80,
                 "description": "ITEM DUMP / same-kind semantic: opaque id(s) from THIS turn that exist in live data AND match show_dump kind (item_id / filing_id / contact_id / reminder_id). string or string[] — one or many. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows (does not expand). Preserves the chosen set only — does not prove completeness of candidates. Ambiguous / ids not in JSON → ASK with null; never invent ids. Empty array or no matching ids → server no-match (never full list). null = full category dump under existing filters — use only for FULL inventory, never as a semantic answer. Forbidden inventing ids or cross-kind ids."
               },
+              "live_select": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Same-turn post-retrieval live board selection (select-pass output after Places/Flights/Routes fetch when require_live_select was true). Pick opaque live_record_ids ONLY from that same-turn retrieved set — never invent ids or rows. There is no cross-turn live retrieval stash. On a required select pass: do NOT return null (null is treated as incomplete filter / failure); list every matching id (all ids if all match). Empty live_record_ids = no-match (never expand to full board). Omit on ordinary speaker turns that are not a select pass. Do not use for Mashov Stage B or saved-data show_dump (mashov enum value is reserved/unused).",
+                "properties": {
+                  "domain": {
+                    "type": "string",
+                    "enum": [
+                      "places",
+                      "flights",
+                      "routes",
+                      "mashov"
+                    ],
+                    "description": "Which live board the ids belong to. Must match the same-turn retrieval set domain. Engine Stage B is wired for places|flights|routes only."
+                  },
+                  "live_record_ids": {
+                    "type": [
+                      "string",
+                      "array"
+                    ],
+                    "items": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "maxLength": 80,
+                    "maxItems": 50,
+                    "description": "Opaque ids from THIS same-turn retrieval set only. string or string[]. Empty array = no match among retrieved rows. To keep every row after a required select, list every id — do not use null."
+                  }
+                },
+                "required": [
+                  "domain",
+                  "live_record_ids"
+                ]
+              },
               "weather": {
                 "type": [
                   "object",
@@ -1239,6 +1276,13 @@
                     ],
                     "description": "Local ParkingOptions cost filter (Google has no request-side free/paid). free = only places with known free lot/street/garage («חניה חינם» / «חניון חינם»); paid = known paid lot/street/garage or valet («חניון בתשלום»). Server drops unknowns. null/omit = no cost filter. Do NOT rely on stuffing חינם/בתשלום into query alone — set this field. With free/paid always use intent=parking."
                   },
+                  "require_live_select": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Capability gate (F/Q/V/U): true ONLY for residual V criteria when returned Places fields are expected to supply enough evidence for live_select (even one row). false/null/omit when F/Q fields fully express the ask (open_now, parking_cost, min_rating, included_type, intent…) OR remaining criteria are U (unverifiable — e.g. safety/ownership) — never Stage B for U; disclose the limit; continue with useful F/Q results. If U blocks any useful answer → explain before fetch (places=null). Never invent places; never claim an unsupported criterion was verified; never ask the server to NLP the utterance."
+                  },
                   "place": {
                     "type": "string",
                     "maxLength": 255,
@@ -1358,7 +1402,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live PUBLIC TRANSIT only via Google (leave-by / עוד כמה זמן קו X / איזה קווים בתחנה / explicit bus/train/transit). Trip/ETA: Routes API TRANSIT — origin+destination required. Stop board (aspects [lines], empty destination). Ambiguous «איזה קווים בתחנה X» → ASK (יעד או רק קווים?); routes=null. Bare «איך להגיע / איך מגיעים» with no mode → ASK car vs transit (routes=null, navigate_address=null) + choice buttons; car/Waze → navigate_address only (no routes); transit → set routes. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION.",
+                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin. Live SIRI: [live_arrivals] + stop_code or stop name. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION.",
                 "properties": {
                   "origin": {
                     "type": "string",
@@ -1369,6 +1413,21 @@
                     "type": "string",
                     "maxLength": 255,
                     "description": "To address/place/direction city. Empty string when aspects includes lines (stop board only)."
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "transit",
+                      "drive"
+                    ],
+                    "description": "transit (default) = public transport; drive = car duration/steps via Google Routes. Omit or transit for buses."
+                  },
+                  "require_live_select": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Capability gate (F/Q/V/U): true ONLY for residual V criteria after Google trip alternatives or stop-board lines are fetched (e.g. «הכי קצר בלי החלפות» / «רק קווים לכיוון ת״א») when returned itinerary/line fields can evidence the ask. false/null/omit when origin/destination/line/mode/aspects fully express the ask, or remaining criteria are U — never Stage B for U. Never invent itineraries; never ask the server to NLP the utterance."
                   },
                   "departure": {
                     "type": "string",
@@ -1390,6 +1449,26 @@
                     "maxLength": 255,
                     "description": "Optional direction/headsign filter."
                   },
+                  "stop_code": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "MOT stop_code for official schedule aspect. Prefer over stop name when known."
+                  },
+                  "agency": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "Operator filter when the same line number has several agencies (official GTFS)."
+                  },
+                  "service_date": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "description": "YYYY-MM-DD service day for schedule / nearest_stop (empty = today Asia/Jerusalem)."
+                  },
+                  "window_end": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Optional schedule window end (HH:mm or YYYY-MM-DDTHH:mm)."
+                  },
                   "aspects": {
                     "type": "array",
                     "items": {
@@ -1401,10 +1480,13 @@
                         "fare",
                         "eta",
                         "frequency",
-                        "lines"
+                        "lines",
+                        "schedule",
+                        "nearest_stop",
+                        "live_arrivals"
                       ]
                     },
-                    "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות → [frequency]; איזה קווים בתחנה (no dest) → [lines]."
+                    "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות → [frequency]; איזה קווים בתחנה (no dest) → [lines]; לוח יציאות רשמי MOT → [schedule] + stop_code + line; תחנה קרובה לקו → [nearest_stop] + line + origin speaker; תחזית הגעה חיה MOT SIRI → [live_arrivals] + stop_code (+ line?). schedule/nearest_stop = static GTFS (never claim live); live_arrivals = SIRI predictions only — never label schedule/Google as SIRI."
                   }
                 },
                 "required": [
@@ -1431,7 +1513,19 @@
                   "airline": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Airline name or IATA (אל על / LY). Empty when not specified."
+                    "description": "Single airline name or IATA (אל על / LY). Empty when not specified. Prefer airlines[] for multi-carrier OR groups."
+                  },
+                  "airlines": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "maxItems": 40,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "description": "OR-list of airline names/IATA for a spoken group («חברות אירופאיות» → expand from world knowledge to concrete codes). Server filters client-side. Empty/null when unused. When this fully covers the group → require_live_select false."
                   },
                   "city": {
                     "type": "string",
@@ -1451,6 +1545,29 @@
                   "within_minutes": {
                     "type": "number",
                     "description": "Optional window from now in minutes. «בחצי שעה הקרובה» → 30; «בשעה הקרובה» → 60. 0/omit = no window."
+                  },
+                  "time_from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 8,
+                    "description": "Inclusive Jerusalem HH:mm lower bound on scheduled/estimated board time («אחרי 19:00» → \"19:00\"). Empty/null = none."
+                  },
+                  "time_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 8,
+                    "description": "Inclusive Jerusalem HH:mm upper bound («לפני 22:00» → \"22:00\"; «בין 8 ל־10» → time_from+time_to). Empty/null = none."
+                  },
+                  "require_live_select": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Capability gate (F/Q/V/U): true ONLY for residual V when board fields evidence the ask. false/null/omit when F fields fully express it (airline/airlines, city, flight, date, within_minutes, time_from/time_to, direction) OR criteria are U (unverifiable) — never Stage B for U; disclose; continue if remaining results useful. Expanded airlines[] for a region/group → false. Never invent flights; never claim unverified criteria were checked; never ask the server to NLP the utterance."
                   },
                   "aspects": {
                     "type": "array",

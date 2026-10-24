@@ -2383,6 +2383,7 @@ describe("parseLlmReply", () => {
       includedType: null,
       radiusMeters: null,
       parkingCost: null,
+      requireLiveSelect: false,
     });
   });
 
@@ -2417,6 +2418,7 @@ describe("parseLlmReply", () => {
       includedType: "restaurant",
       radiusMeters: 2000,
       parkingCost: null,
+      requireLiveSelect: false,
     });
   });
 
@@ -2449,6 +2451,7 @@ describe("parseLlmReply", () => {
       includedType: null,
       radiusMeters: null,
       parkingCost: null,
+      requireLiveSelect: false,
     });
   });
 
@@ -2481,6 +2484,7 @@ describe("parseLlmReply", () => {
       includedType: "parking",
       radiusMeters: null,
       parkingCost: null,
+      requireLiveSelect: false,
     });
   });
 
@@ -2758,6 +2762,10 @@ describe("parseLlmReply", () => {
       arrival: "",
       line: "51",
       headsign: "",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
       aspects: ["eta"],
     });
   });
@@ -2796,7 +2804,101 @@ describe("parseLlmReply", () => {
       arrival: "",
       line: "",
       headsign: "",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
       aspects: ["lines"],
+    });
+  });
+
+  it("reads official GTFS schedule aspect with stop_code", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              stop_code: "2007",
+              line: "51",
+              agency: "דן",
+              service_date: "2026-10-24",
+              aspects: ["schedule"],
+            },
+          },
+        }),
+      ).routes,
+    ).toEqual({
+      origin: "",
+      destination: "",
+      departure: "",
+      arrival: "",
+      line: "51",
+      headsign: "",
+      stopCode: "2007",
+      agency: "דן",
+      serviceDate: "2026-10-24",
+      windowEnd: "",
+      aspects: ["schedule"],
+    });
+  });
+
+  it("reads nearest_stop aspect without destination", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              origin: "speaker",
+              line: "51",
+              headsign: "1",
+              aspects: ["nearest_stop"],
+            },
+          },
+        }),
+      ).routes,
+    ).toEqual({
+      origin: "speaker",
+      destination: "",
+      departure: "",
+      arrival: "",
+      line: "51",
+      headsign: "1",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
+      aspects: ["nearest_stop"],
+    });
+  });
+
+  it("reads live_arrivals aspect with stop_code", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              stop_code: "32902",
+              line: "51",
+              aspects: ["live_arrivals"],
+            },
+          },
+        }),
+      ).routes,
+    ).toEqual({
+      origin: "",
+      destination: "",
+      departure: "",
+      arrival: "",
+      line: "51",
+      headsign: "",
+      stopCode: "32902",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
+      aspects: ["live_arrivals"],
     });
   });
 
@@ -2823,6 +2925,7 @@ describe("parseLlmReply", () => {
       includedType: null,
       radiusMeters: null,
       parkingCost: null,
+      requireLiveSelect: false,
     });
   });
 
@@ -2885,11 +2988,15 @@ describe("parseLlmReply", () => {
       airport: "TLV",
       direction: "arrivals",
       airline: "אל על",
+      airlines: [],
       city: "פריז",
       flight: "3242CXD",
       date: "2026-10-23",
       withinMinutes: 0,
+      timeFrom: "",
+      timeTo: "",
       aspects: ["next", "status"],
+      requireLiveSelect: false,
     });
   });
 
@@ -2911,11 +3018,15 @@ describe("parseLlmReply", () => {
       airport: "",
       direction: "arrivals",
       airline: "",
+      airlines: [],
       city: "",
       flight: "",
       date: "",
       withinMinutes: 30,
+      timeFrom: "",
+      timeTo: "",
       aspects: ["board"],
+      requireLiveSelect: false,
     });
   });
 
@@ -3522,5 +3633,148 @@ describe("metadata.register", () => {
         register,
       }).register?.password,
     ).toBe("••••••••");
+  });
+});
+
+describe("live_select / require_live_select (parse_shape)", () => {
+  it("defaults require_live_select to false on places and flights", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: { query: "מסעדה", place: "תל אביב" },
+          },
+        }),
+      ).places?.requireLiveSelect,
+    ).toBe(false);
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            flights: { direction: "departures", aspects: ["board"] },
+          },
+        }),
+      ).flights?.requireLiveSelect,
+    ).toBe(false);
+  });
+
+  it("reads require_live_select true aliases on places and flights", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            places: {
+              query: "חניה",
+              place: "חיפה",
+              intent: "parking",
+              require_live_select: true,
+            },
+          },
+        }),
+      ).places?.requireLiveSelect,
+    ).toBe(true);
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            flights: {
+              direction: "arrivals",
+              aspects: ["board"],
+              semantic_select: "yes",
+            },
+          },
+        }),
+      ).flights?.requireLiveSelect,
+    ).toBe(true);
+  });
+
+  it("parses live_select null / ids / empty / malformed", () => {
+    const keepAll = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: { live_select: null },
+      }),
+    );
+    expect(keepAll.liveSelect).toBeNull();
+    expect(keepAll.liveSelectMalformed).toBeUndefined();
+
+    const subset = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: {
+          live_select: {
+            domain: "flights",
+            live_record_ids: [" a1 ", "a2", "a1"],
+          },
+        },
+      }),
+    );
+    expect(subset.liveSelect).toEqual({
+      domain: "flights",
+      liveRecordIds: ["a1", "a2"],
+    });
+
+    const empty = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: {
+          live_select: { domain: "places", live_record_ids: [] },
+        },
+      }),
+    );
+    expect(empty.liveSelect).toEqual({
+      domain: "places",
+      liveRecordIds: [],
+    });
+
+    const absent = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: { lists: [] },
+      }),
+    );
+    expect(absent.liveSelect).toBeUndefined();
+    expect(absent.liveSelectMalformed).toBeUndefined();
+
+    const malformed = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: { live_select: { domain: "flights" } },
+      }),
+    );
+    expect(malformed.liveSelect).toBeUndefined();
+    expect(malformed.liveSelectMalformed).toBe(true);
+
+    const badDomain = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: {
+          live_select: { domain: "weather", live_record_ids: ["x"] },
+        },
+      }),
+    );
+    expect(badDomain.liveSelectMalformed).toBe(true);
+  });
+
+  it("bounds live_record_ids length and count like show_dump_ids", () => {
+    const longId = "x".repeat(120);
+    const many = Array.from({ length: 60 }, (_, i) => `id-${i}`);
+    const parsed = parseReplyMetadata(
+      JSON.stringify({
+        responses: [],
+        metadata: {
+          live_select: {
+            domain: "places",
+            live_record_ids: [longId, ...many],
+          },
+        },
+      }),
+    );
+    expect(parsed.liveSelect?.liveRecordIds[0]?.length).toBe(80);
+    expect(parsed.liveSelect?.liveRecordIds.length).toBe(50);
   });
 });

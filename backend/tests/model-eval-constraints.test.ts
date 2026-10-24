@@ -5,13 +5,32 @@ import {
   evaluateConstraints,
   type ModelEvalConstraint,
 } from "../src/eval/constraints.js";
-import { loadModelEvalCorpus } from "../src/eval/corpus.js";
+import {
+  filterCasesByTags,
+  loadModelEvalCorpus,
+  parseModelEvalTags,
+} from "../src/eval/corpus.js";
+import {
+  evaluateOfflineModelProposal,
+  offlineStubForConstraints,
+} from "../src/eval/offline-stub.js";
 import {
   runModelEvalCase,
   summarizeModelEvalResults,
   type ModelEvalRunCaseResult,
 } from "../src/eval/run-case.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
+import { resolveRelativeDateLabel } from "../src/utils/relative-date.js";
+
+const LIVE_DOMAIN_TAGS = [
+  "live-weather",
+  "live-market",
+  "live-jewish",
+  "live-flights",
+  "live-places",
+  "live-routes",
+  "live-gtfs",
+] as const;
 
 function meta(partial: Partial<LlmMetadata> = {}): LlmMetadata {
   return {
@@ -1344,6 +1363,594 @@ describe("Phase 4 constraint checkers", () => {
       expect(summary.criticalOk).toBe(false);
       expect(summary.criticalFailed).toEqual(["crit-a"]);
       expect(summary.ok).toBe(false);
+    });
+  });
+
+  describe("live-domain ACTION constraints (parse*Action)", () => {
+    it("weather_action dateEqualsRelative matches SESSION_CLOCK מחר (no hardcoded YMD)", () => {
+      const want = resolveRelativeDateLabel("מחר");
+      expect(want).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const constraints: ModelEvalConstraint[] = [
+        {
+          type: "weather_action",
+          placeIncludes: "תל אביב",
+          aspectsIncludes: ["summary"],
+          dateEqualsRelative: "מחר",
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: want,
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: "",
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: resolveRelativeDateLabel("היום"),
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("live_domains_empty passes only when no live board ACTION is present", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "live_domains_empty" },
+        { type: "mutations_empty_or_read_only" },
+      ];
+      expect(evaluateConstraints(constraints, meta({}), "איפה?").ok).toBe(
+        true,
+      );
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: "",
+              aspects: ["summary"],
+            },
+          }),
+          "איפה?",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("routes_action destinationEmpty rejects a filled destination", () => {
+      const constraints: ModelEvalConstraint[] = [
+        {
+          type: "routes_action",
+          originIncludes: "שלום דורני",
+          destinationEmpty: true,
+          aspectsIncludes: ["lines"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            routes: {
+              origin: "שלום דורני פתח תקווה",
+              destination: "",
+              departure: "",
+              arrival: "",
+              line: "",
+              headsign: "",
+              stopCode: "",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["lines"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            routes: {
+              origin: "שלום דורני פתח תקווה",
+              destination: "תל אביב",
+              departure: "",
+              arrival: "",
+              line: "",
+              headsign: "",
+              stopCode: "",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["lines"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("weather_action passes for correct place/aspects and fails otherwise", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "weather" },
+        {
+          type: "weather_action",
+          placeIncludes: "תל אביב",
+          aspectsIncludes: ["waves"],
+          requireDate: true,
+        },
+        { type: "mutations_empty_or_read_only" },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: "2099-06-15",
+              aspects: ["waves"],
+            },
+          }),
+          "גלים",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "חיפה",
+              date: "2099-06-15",
+              aspects: ["waves"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            weather: {
+              place: "תל אביב",
+              date: "",
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            market: { queries: ["AAPL"], aspects: ["summary"] },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("market_action requires query match and rejects other live domains", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "market" },
+        {
+          type: "market_action",
+          queryIncludesAny: ["AAPL", "אפל"],
+          aspectsIncludes: ["summary"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({ market: { queries: ["AAPL"], aspects: ["summary"] } }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({ market: { queries: ["BTC-USD"], aspects: ["summary"] } }),
+          "",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            market: { queries: ["AAPL"], aspects: ["summary"] },
+            weather: {
+              place: "תל אביב",
+              date: "",
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("jewish_action allows empty place for parasha and requires place for candles", () => {
+      expect(
+        evaluateConstraints(
+          [
+            { type: "live_domain_only", domain: "jewish" },
+            {
+              type: "jewish_action",
+              allowEmptyPlace: true,
+              aspectsIncludes: ["parasha"],
+            },
+          ],
+          meta({
+            jewish: { place: "", date: "", aspects: ["parasha"] },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          [
+            { type: "live_domain_only", domain: "jewish" },
+            {
+              type: "jewish_action",
+              placeIncludes: "פתח תקווה",
+              aspectsIncludes: ["candles"],
+            },
+          ],
+          meta({
+            jewish: {
+              place: "פתח תקווה",
+              date: "",
+              aspects: ["candles"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          [
+            {
+              type: "jewish_action",
+              placeIncludes: "פתח תקווה",
+              aspectsIncludes: ["candles"],
+            },
+          ],
+          meta({
+            jewish: { place: "", date: "", aspects: ["parasha"] },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("places_action distinguishes parking intent and open_now/min_rating filters", () => {
+      expect(
+        evaluateConstraints(
+          [
+            { type: "live_domain_only", domain: "places" },
+            {
+              type: "places_action",
+              queryIncludes: "מסעדה",
+              placeIncludes: "פתח תקווה",
+              intent: "business",
+              openNow: true,
+              minRatingAtLeast: 4,
+            },
+          ],
+          meta({
+            places: {
+              query: "מסעדה",
+              place: "פתח תקווה",
+              near: "",
+              lat: null,
+              lng: null,
+              aspects: ["summary"],
+              intent: "business",
+              openNow: true,
+              minRating: 4,
+              includedType: "restaurant",
+              radiusMeters: null,
+              parkingCost: null,
+              requireLiveSelect: false,
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          [
+            {
+              type: "places_action",
+              intent: "parking",
+              queryIncludes: "חניון",
+            },
+          ],
+          meta({
+            places: {
+              query: "חניון",
+              place: "הקניון",
+              near: "",
+              lat: null,
+              lng: null,
+              aspects: ["summary"],
+              intent: "business",
+              openNow: null,
+              minRating: null,
+              includedType: null,
+              radiusMeters: null,
+              parkingCost: null,
+              requireLiveSelect: false,
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("routes_action separates Google transit from GTFS schedule/nearest_stop", () => {
+      const transit: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "routes" },
+        {
+          type: "routes_action",
+          originIncludes: "פתח תקווה",
+          destinationIncludes: "תל אביב",
+          aspectsExcludes: ["schedule", "nearest_stop", "live_arrivals"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          transit,
+          meta({
+            routes: {
+              origin: "פתח תקווה",
+              destination: "תל אביב",
+              departure: "",
+              arrival: "",
+              line: "",
+              headsign: "",
+              stopCode: "",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["summary"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          transit,
+          meta({
+            routes: {
+              origin: "פתח תקווה",
+              destination: "תל אביב",
+              departure: "",
+              arrival: "",
+              line: "1",
+              headsign: "",
+              stopCode: "21224",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["schedule"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+
+      const schedule: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "routes" },
+        {
+          type: "routes_action",
+          aspectsIncludes: ["schedule"],
+          lineIncludes: "1",
+          requireStopCode: true,
+          aspectsExcludes: ["nearest_stop", "live_arrivals"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          schedule,
+          meta({
+            routes: {
+              origin: "",
+              destination: "",
+              departure: "",
+              arrival: "",
+              line: "1",
+              headsign: "",
+              stopCode: "21224",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["schedule"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+
+      const nearest: ModelEvalConstraint[] = [
+        {
+          type: "routes_action",
+          aspectsIncludes: ["nearest_stop"],
+          lineIncludes: "51",
+          originIncludes: "speaker",
+          aspectsExcludes: ["schedule", "live_arrivals"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          nearest,
+          meta({
+            routes: {
+              origin: "speaker",
+              destination: "",
+              departure: "",
+              arrival: "",
+              line: "51",
+              headsign: "",
+              stopCode: "",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["nearest_stop"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          nearest,
+          meta({
+            routes: {
+              origin: "speaker",
+              destination: "",
+              departure: "",
+              arrival: "",
+              line: "51",
+              headsign: "",
+              stopCode: "",
+              agency: "",
+              serviceDate: "",
+              windowEnd: "",
+              aspects: ["schedule"],
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("flights_action checks direction/city and fails when missing", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "flights" },
+        {
+          type: "flights_action",
+          direction: "departures",
+          cityIncludes: "פריז",
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            flights: {
+              airport: "TLV",
+              direction: "departures",
+              airline: "",
+              airlines: [],
+              city: "פריז",
+              flight: "",
+              date: "",
+              withinMinutes: 0,
+              timeFrom: "",
+              timeTo: "",
+              aspects: ["summary"],
+              requireLiveSelect: false,
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            flights: {
+              airport: "TLV",
+              direction: "arrivals",
+              airline: "",
+              airlines: [],
+              city: "פריז",
+              flight: "",
+              date: "",
+              withinMinutes: 0,
+              timeFrom: "",
+              timeTo: "",
+              aspects: ["summary"],
+              requireLiveSelect: false,
+            },
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(constraints, meta({}), "").ok,
+      ).toBe(false);
+    });
+
+    it("live-domain corpus tags select only the tagged subset", () => {
+      const corpus = loadModelEvalCorpus();
+      const tags = parseModelEvalTags(LIVE_DOMAIN_TAGS.join(","));
+      const selected = filterCasesByTags(corpus.cases, tags);
+      expect(selected.length).toBeGreaterThanOrEqual(7);
+      expect(selected.length).toBeLessThan(corpus.cases.length);
+      for (const row of selected) {
+        expect(
+          (row.tags ?? []).some((t) =>
+            (LIVE_DOMAIN_TAGS as readonly string[]).includes(t),
+          ),
+          row.id,
+        ).toBe(true);
+      }
+      const unrelated = filterCasesByTags(corpus.cases, ["shopping"]);
+      expect(
+        unrelated.every(
+          (row) =>
+            !(row.tags ?? []).some((t) =>
+              (LIVE_DOMAIN_TAGS as readonly string[]).includes(t),
+            ),
+        ),
+      ).toBe(true);
+    });
+
+    it("offline stub satisfies every live-domain corpus case", () => {
+      const corpus = loadModelEvalCorpus();
+      const selected = filterCasesByTags(corpus.cases, [...LIVE_DOMAIN_TAGS]);
+      const failures: string[] = [];
+      for (const row of selected) {
+        const stub = offlineStubForConstraints(row.constraints);
+        const checked = evaluateOfflineModelProposal({
+          constraints: row.constraints,
+          metadata: stub.metadata,
+          response: stub.response,
+        });
+        if (!checked.ok) {
+          failures.push(`${row.id}: ${checked.failures.join("; ")}`);
+        }
+      }
+      expect(failures).toEqual([]);
     });
   });
 

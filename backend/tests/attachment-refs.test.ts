@@ -10,7 +10,10 @@ vi.mock("../src/database/prisma.js", () => ({
   },
 }));
 
-import { withAttachmentRefs } from "../src/services/attachment.service.js";
+import {
+  collectAttachmentIdsForDumpRows,
+  withAttachmentRefs,
+} from "../src/services/attachment.service.js";
 
 const listId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const itemId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -87,5 +90,60 @@ describe("withAttachmentRefs has_attachments", () => {
       attachments: [{ attachment_id: listAttId, kind: "image", file_name: "pic.jpg" }],
     });
     expect(snapshot.lists[0]?.items[0]).not.toHaveProperty("attachments");
+  });
+});
+
+describe("collectAttachmentIdsForDumpRows", () => {
+  it("collects item and filing attachment ids for ITEM DUMP targets", () => {
+    const filingId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const filingAtt = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const ids = collectAttachmentIdsForDumpRows(
+      {
+        lists: [
+          {
+            items: [
+              {
+                item_id: itemId,
+                attachments: [
+                  { attachment_id: itemAttId, kind: "image", file_name: "a.jpg" },
+                ],
+              },
+              {
+                item_id: "other",
+                attachments: [
+                  {
+                    attachment_id: listAttId,
+                    kind: "image",
+                    file_name: "skip.jpg",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        filing: [
+          {
+            filing_id: filingId,
+            attachments: [
+              { attachment_id: filingAtt, kind: "document", file_name: "b.pdf" },
+            ],
+          },
+        ],
+      },
+      [itemId, filingId],
+    );
+    expect(ids).toEqual([itemAttId, filingAtt]);
+  });
+
+  it("returns empty when dump ids have no files", () => {
+    expect(
+      collectAttachmentIdsForDumpRows(
+        {
+          lists: [{ items: [{ item_id: itemId, "שם מטלה": "x" }] }],
+          filing: [],
+        },
+        [itemId],
+      ),
+    ).toEqual([]);
   });
 });

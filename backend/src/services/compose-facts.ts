@@ -32,6 +32,14 @@ import {
   type MashovAspect,
 } from "./mashov.js";
 import {
+  parseJewishAspects,
+  resolveJewishReply,
+  type JewishAspect,
+} from "./jewish.js";
+import { resolvePlacesReply } from "./places.js";
+import { resolveFlightsReply } from "./flights.js";
+import { resolveRoutesReply } from "./routes.js";
+import {
   mashovContentFingerprint,
   weatherContentFingerprint,
   type ComposeEvalFacts,
@@ -44,14 +52,28 @@ export type ComposeSourceKind =
   | "saved_data"
   | "weather"
   | "market"
-  | "mashov";
+  | "mashov"
+  | "jewish"
+  | "places"
+  | "flights"
+  | "routes";
 
 /**
  * Fire-time facts for compose clocks. Sources differ only in how facts are
- * loaded; the outbound LLM call is shared (weather/market/mashov use fixedBody).
+ * loaded; live domains use fixedBody so the outbound copy is factual.
  */
 export type ComposeFactsBundle = {
-  kind: "git_log" | "saved_data" | "weather" | "market" | "mashov" | "creative";
+  kind:
+    | "git_log"
+    | "saved_data"
+    | "weather"
+    | "market"
+    | "mashov"
+    | "jewish"
+    | "places"
+    | "flights"
+    | "routes"
+    | "creative";
   /** Internal facts block (git commits, EMPLOYEE_SAVED_DATA, …). */
   facts: string;
   /** Short label shown above facts in the compose message. */
@@ -297,6 +319,140 @@ export async function loadComposeFacts(input: {
         factsLabel: "Mashov",
         fixedBody:
           "לא הצלחתי לשלוף עכשיו נתונים ממשוב. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "jewish") {
+    const place = String(input.composePlace ?? "").trim();
+    const aspects = parseJewishAspects(listAspects) as JewishAspect[];
+    try {
+      const body = await resolveJewishReply({
+        place,
+        aspects: aspects.length > 0 ? aspects : ["summary"],
+        now: input.now,
+      });
+      return {
+        kind: "jewish",
+        facts: body,
+        factsLabel: "Jewish calendar (Hebcal)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "jewish",
+        facts: "",
+        factsLabel: "Jewish",
+        fixedBody:
+          "לא הצלחתי לשלוף עכשיו זמני שבת/חגים. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "places") {
+    // compose_place: "query|place" or a single search string used as query+place.
+    const raw = String(input.composePlace ?? "").trim();
+    if (!raw) {
+      return {
+        kind: "places",
+        facts: "",
+        factsLabel: "Places",
+        fixedBody: "מה לחפש ואיפה?",
+      };
+    }
+    const pipe = raw.indexOf("|");
+    const query = pipe >= 0 ? raw.slice(0, pipe).trim() : raw;
+    const place = pipe >= 0 ? raw.slice(pipe + 1).trim() : raw;
+    try {
+      const body = await resolvePlacesReply({
+        query: query || place,
+        place: place || query,
+        aspects: listAspects ?? ["summary"],
+      });
+      return {
+        kind: "places",
+        facts: body,
+        factsLabel: "Places (Google)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "places",
+        facts: "",
+        factsLabel: "Places",
+        fixedBody:
+          "לא הצלחתי לחפש עסקים עכשיו. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "flights") {
+    // compose_place: optional "airport|city" or airport / city alone.
+    const raw = String(input.composePlace ?? "").trim();
+    const pipe = raw.indexOf("|");
+    const airport = pipe >= 0 ? raw.slice(0, pipe).trim() : raw;
+    const city = pipe >= 0 ? raw.slice(pipe + 1).trim() : "";
+    try {
+      const body = await resolveFlightsReply({
+        airport: airport || undefined,
+        city: city || undefined,
+        aspects: listAspects ?? ["board"],
+        now: input.now,
+      });
+      return {
+        kind: "flights",
+        facts: body,
+        factsLabel: "Flights (AviationStack)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "flights",
+        facts: "",
+        factsLabel: "Flights",
+        fixedBody:
+          "לא הצלחתי לשלוף לוח טיסות עכשיו. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "routes") {
+    // compose_place: "origin|destination" (required).
+    const raw = String(input.composePlace ?? "").trim();
+    const pipe = raw.indexOf("|");
+    const origin = pipe >= 0 ? raw.slice(0, pipe).trim() : "";
+    const destination = pipe >= 0 ? raw.slice(pipe + 1).trim() : raw;
+    if (!origin || !destination) {
+      return {
+        kind: "routes",
+        facts: "",
+        factsLabel: "Routes",
+        fixedBody: "לסיכום מסלול צריך מוצא ויעד (compose_place: מוצא|יעד).",
+      };
+    }
+    try {
+      const result = await resolveRoutesReply({
+        origin,
+        destination,
+        aspects: listAspects ?? ["summary"],
+      });
+      return {
+        kind: "routes",
+        facts: result.text,
+        factsLabel: "Routes (transit)",
+        fixedBody: result.text,
+        sessionClock: formatSessionClockContext(input.now),
+      };
+    } catch {
+      return {
+        kind: "routes",
+        facts: "",
+        factsLabel: "Routes",
+        fixedBody:
+          "לא הצלחתי לחשב מסלול עכשיו. נסה שוב בעוד רגע.",
       };
     }
   }

@@ -2431,6 +2431,246 @@
           "type": "no_invented_reminder_add"
         }
       ]
+    },
+    {
+      "id": "live-weather-tlv-tomorrow",
+      "tag": "happy",
+      "tags": ["live-weather", "single-turn"],
+      "utterance": "מה מזג האוויר מחר בתל אביב?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "weather" },
+        {
+          "type": "weather_action",
+          "placeIncludes": "תל אביב",
+          "aspectsIncludes": ["summary"]
+        }
+      ]
+    },
+    {
+      "id": "live-weather-waves-haifa",
+      "tag": "happy",
+      "tags": ["live-weather", "single-turn"],
+      "utterance": "מה גובה הגלים בחיפה?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "weather" },
+        {
+          "type": "weather_action",
+          "placeIncludes": "חיפה",
+          "aspectsIncludes": ["waves"]
+        }
+      ]
+    },
+    {
+      "id": "live-market-aapl",
+      "tag": "happy",
+      "tags": ["live-market", "single-turn"],
+      "utterance": "מה מחיר מניית אפל?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "market" },
+        {
+          "type": "market_action",
+          "queryIncludesAny": ["AAPL", "aapl", "Apple", "אפל"]
+        }
+      ]
+    },
+    {
+      "id": "live-market-btc",
+      "tag": "happy",
+      "tags": ["live-market", "single-turn"],
+      "utterance": "כמה עולה ביטקוין עכשיו?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "market" },
+        {
+          "type": "market_action",
+          "queryIncludesAny": ["BTC", "btc", "Bitcoin", "ביטקוין"]
+        }
+      ]
+    },
+    {
+      "id": "live-jewish-candles-pt",
+      "tag": "happy",
+      "tags": ["live-jewish", "single-turn"],
+      "utterance": "מתי מדליקים נרות בפתח תקווה?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "jewish" },
+        {
+          "type": "jewish_action",
+          "placeIncludes": "פתח תקווה",
+          "aspectsIncludes": ["candles"]
+        }
+      ]
+    },
+    {
+      "id": "live-jewish-parasha",
+      "tag": "happy",
+      "tags": ["live-jewish", "single-turn"],
+      "utterance": "מה פרשת השבוע?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "jewish" },
+        {
+          "type": "jewish_action",
+          "allowEmptyPlace": true,
+          "aspectsIncludes": ["parasha"]
+        }
+      ]
+    },
+    {
+      "id": "live-flights-tlv-paris-departures",
+      "tag": "happy",
+      "tags": ["live-flights", "single-turn"],
+      "utterance": "איזה טיסות ממריאות מנתב״ג לפריז?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "flights" },
+        {
+          "type": "any",
+          "constraints": [
+            {
+              "type": "flights_action",
+              "direction": "departures",
+              "cityIncludes": "פריז"
+            },
+            {
+              "type": "flights_action",
+              "direction": "departures",
+              "cityIncludes": "Paris"
+            },
+            {
+              "type": "flights_action",
+              "direction": "departures",
+              "cityIncludes": "CDG"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "live-flights-arrival-status",
+      "tag": "happy",
+      "tags": ["live-flights", "single-turn"],
+      "utterance": "מתי נוחתת טיסה LY315?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "flights" },
+        {
+          "type": "flights_action",
+          "direction": "arrivals",
+          "flightIncludes": "LY315"
+        }
+      ]
+    },
+    {
+      "id": "live-places-restaurant-filters",
+      "tag": "happy",
+      "tags": ["live-places", "single-turn"],
+      "utterance": "תמצאי לי מסעדה פתוחה עכשיו עם דירוג מעל 4 בפתח תקווה",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "places" },
+        {
+          "type": "places_action",
+          "queryIncludes": "מסעדה",
+          "placeIncludes": "פתח תקווה",
+          "intent": "business",
+          "openNow": true,
+          "minRatingAtLeast": 4
+        }
+      ]
+    },
+    {
+      "id": "live-places-parking-mall",
+      "tag": "happy",
+      "tags": ["live-places", "single-turn"],
+      "utterance": "איפה יש חניון ליד הקניון בפתח תקווה?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "places" },
+        {
+          "type": "any",
+          "constraints": [
+            {
+              "type": "places_action",
+              "queryIncludes": "חניון",
+              "placeIncludes": "פתח תקווה",
+              "intent": "parking"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "חניה",
+              "placeIncludes": "פתח תקווה",
+              "intent": "parking"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "live-routes-transit-pt-tlv",
+      "tag": "happy",
+      "tags": ["live-routes", "single-turn"],
+      "utterance": "איך מגיעים בתחבורה ציבורית מפתח תקווה לתל אביב?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "routes_action",
+          "originIncludes": "פתח תקווה",
+          "destinationIncludes": "תל אביב",
+          "aspectsExcludes": ["schedule", "nearest_stop", "live_arrivals"]
+        }
+      ]
+    },
+    {
+      "id": "live-gtfs-schedule-line1",
+      "tag": "happy",
+      "tags": ["live-gtfs", "single-turn"],
+      "utterance": "מה לוח הזמנים הרשמי של קו 1 בתחנה עם קוד 21224?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "routes_action",
+          "aspectsIncludes": ["schedule"],
+          "lineIncludes": "1",
+          "requireStopCode": true,
+          "aspectsExcludes": ["nearest_stop", "live_arrivals"]
+        }
+      ]
+    },
+    {
+      "id": "live-gtfs-nearest-stop-51",
+      "tag": "happy",
+      "tags": ["live-gtfs", "single-turn"],
+      "utterance": "איפה התחנה הקרובה לקו 51 ממקומי?",
+      "setup": {},
+      "constraints": [
+        { "type": "mutations_empty_or_read_only" },
+        { "type": "live_domain_only", "domain": "routes" },
+        {
+          "type": "routes_action",
+          "aspectsIncludes": ["nearest_stop"],
+          "lineIncludes": "51",
+          "aspectsExcludes": ["schedule", "live_arrivals"]
+        }
+      ]
     }
   ]
 }

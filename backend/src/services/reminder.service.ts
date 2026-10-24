@@ -1825,22 +1825,22 @@ export async function applyReminders(input: {
         existing && "composeSource" in existing
           ? String(existing.composeSource ?? "")
           : "";
-      const nextSource =
-        reminder.composeSource === "git_log" || existingSource === "git_log"
-          ? "git_log"
-          : reminder.composeSource === "saved_data" ||
-              existingSource === "saved_data"
-            ? "saved_data"
-            : reminder.composeSource === "weather" ||
-                existingSource === "weather"
-              ? "weather"
-              : reminder.composeSource === "market" ||
-                  existingSource === "market"
-                ? "market"
-                : reminder.composeSource === "mashov" ||
-                    existingSource === "mashov"
-                  ? "mashov"
-                  : "";
+      const COMPOSE_SOURCES = new Set([
+        "git_log",
+        "saved_data",
+        "weather",
+        "market",
+        "mashov",
+        "jewish",
+        "places",
+        "flights",
+        "routes",
+      ]);
+      const nextSource = COMPOSE_SOURCES.has(reminder.composeSource)
+        ? reminder.composeSource
+        : COMPOSE_SOURCES.has(existingSource)
+          ? existingSource
+          : "";
       const existingLookback =
         existing && "composeLookbackHours" in existing
           ? Number(
@@ -2389,25 +2389,31 @@ export function toReminderSnapshotRow(
     last_composed_text: lastComposed,
     sent_text: lastComposed || text,
     compose_at_fire: row.composeAtFire === true,
-    compose_source:
-      row.composeSource === "git_log"
-        ? "git_log"
-        : row.composeSource === "saved_data"
-          ? "saved_data"
-          : row.composeSource === "weather"
-            ? "weather"
-            : row.composeSource === "market"
-              ? "market"
-              : row.composeSource === "mashov"
-                ? "mashov"
-                : "",
+    compose_source: [
+      "git_log",
+      "saved_data",
+      "weather",
+      "market",
+      "mashov",
+      "jewish",
+      "places",
+      "flights",
+      "routes",
+    ].includes(String(row.composeSource ?? ""))
+      ? String(row.composeSource)
+      : "",
     compose_lookback_hours: lookback,
-    compose_place:
-      row.composeSource === "weather" ||
-      row.composeSource === "market" ||
-      row.composeSource === "mashov"
-        ? String(row.composePlace ?? "").trim()
-        : "",
+    compose_place: [
+      "weather",
+      "market",
+      "mashov",
+      "jewish",
+      "places",
+      "flights",
+      "routes",
+    ].includes(String(row.composeSource ?? ""))
+      ? String(row.composePlace ?? "").trim()
+      : "",
     compose_condition:
       row.composeCondition != null &&
       typeof row.composeCondition === "object" &&

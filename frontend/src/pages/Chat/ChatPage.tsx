@@ -4,6 +4,7 @@ import { Button } from "@/components/Button";
 import { WazeIcon } from "@/components/WazeIcon";
 import { useChat } from "@/hooks/useChat";
 import { useEmployees } from "@/hooks/useEmployees";
+import { attachmentApi } from "@/services/attachment.service";
 import { employeeDisplayName } from "@/services/employee.service";
 import { ChatAttachments } from "./ChatAttachments";
 import {
@@ -34,8 +35,11 @@ export function ChatPage() {
     resetting,
   } = useChat();
   const [draft, setDraft] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const keepComposerFocusRef = useRef(false);
   const pinToBottomRef = useRef(true);
 
@@ -121,27 +125,49 @@ export function ChatPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || sending || !selectedEmployee) {
+    if ((!text && pendingFiles.length === 0) || sending || !selectedEmployee) {
       return;
     }
 
     setDraft("");
-    await sendText(text);
+    const files = pendingFiles;
+    setPendingFiles([]);
+    setAttachError(null);
+    await sendText(text || "📎", files);
   }
 
-  async function sendText(text: string) {
-    if (!text || sending || !selectedEmployee) {
+  async function sendText(text: string, files: File[] = []) {
+    if ((!text && files.length === 0) || sending || !selectedEmployee) {
       return;
     }
 
     keepComposerFocusRef.current = true;
     composerRef.current?.focus();
+    let attachmentIds: string[] | undefined;
+    if (files.length > 0) {
+      try {
+        const uploaded = await Promise.all(
+          files.slice(0, 5).map((file) =>
+            attachmentApi.upload({
+              employeeId: selectedEmployee.id,
+              file,
+            }),
+          ),
+        );
+        attachmentIds = uploaded.map((row) => row.id);
+      } catch {
+        setAttachError("לא הצלחתי להעלות את הקובץ. נסה שוב.");
+        keepComposerFocusRef.current = false;
+        return;
+      }
+    }
     await send({
       employeeId: selectedEmployee.id,
       speaker: employeeDisplayName(selectedEmployee),
-      text,
+      text: text || "📎",
       digitalEmployeeId: selectedDigital?.id,
       assistantSpeaker: chatWithName,
+      ...(attachmentIds?.length ? { attachmentIds } : {}),
     });
     keepComposerFocusRef.current = false;
     composerRef.current?.focus();
@@ -429,18 +455,59 @@ export function ChatPage() {
         <label className="sr-only" htmlFor="chat-message">
           Message
         </label>
-        <textarea
-          ref={composerRef}
-          id="chat-message"
-          name="message"
-          rows={2}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleComposerKeyDown}
-          placeholder="Write a message…"
-          dir="auto"
-          className="min-h-11 w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-text-primary shadow-sm placeholder:text-text-secondary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+        <div className="flex w-full flex-col gap-2">
+          {pendingFiles.length > 0 ? (
+            <p className="text-xs text-text-secondary" data-testid="chat-pending-files">
+              {pendingFiles.map((f) => f.name).join(", ")}
+              <button
+                type="button"
+                className="ms-2 text-primary underline"
+                onClick={() => setPendingFiles([])}
+              >
+                הסר
+              </button>
+            </p>
+          ) : null}
+          {attachError ? (
+            <p role="alert" className="text-xs text-red-600">
+              {attachError}
+            </p>
+          ) : null}
+          <textarea
+            ref={composerRef}
+            id="chat-message"
+            name="message"
+            rows={2}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            placeholder="Write a message…"
+            dir="auto"
+            className="min-h-11 w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-text-primary shadow-sm placeholder:text-text-secondary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+          />
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt"
+          onChange={(event) => {
+            const list = event.target.files;
+            if (!list?.length) return;
+            setPendingFiles((prev) => [...prev, ...Array.from(list)].slice(0, 5));
+            event.target.value = "";
+          }}
         />
+        <Button
+          type="button"
+          variant="ghost"
+          className="sm:w-auto"
+          disabled={sending || !selectedEmployee}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          קובץ
+        </Button>
         {sending ? (
           <Button
             type="button"
@@ -454,7 +521,9 @@ export function ChatPage() {
           <Button
             type="submit"
             className="sm:w-auto"
-            disabled={!draft.trim() || !selectedEmployee}
+            disabled={
+              (!draft.trim() && pendingFiles.length === 0) || !selectedEmployee
+            }
           >
             Send
           </Button>

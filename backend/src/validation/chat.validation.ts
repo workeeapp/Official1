@@ -41,10 +41,25 @@ export function parseChatMessageBody(body: unknown): ChatMessageRequest {
       ? record.digitalEmployeeId.trim()
       : undefined;
 
+  const attachmentIds = Array.isArray(record.attachmentIds)
+    ? record.attachmentIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, 10)
+    : Array.isArray(record.attachment_ids)
+      ? record.attachment_ids
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => id.trim())
+          .filter(Boolean)
+          .slice(0, 10)
+      : undefined;
+
   return {
     message: String(record.message).trim(),
     employeeId: String(record.employeeId),
     ...(digitalEmployeeId ? { digitalEmployeeId } : {}),
+    ...(attachmentIds?.length ? { attachmentIds } : {}),
   };
 }
 

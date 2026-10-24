@@ -11,7 +11,16 @@ import {
   type LlmPlacesIntent,
   type LlmPlacesParkingCost,
 } from "@workee/shared";
+import { createHash } from "node:crypto";
 import { getEnv } from "../config/env.js";
+import type { ComposeLlmBilling } from "./llm-usage.service.js";
+import {
+  formatLiveSelectFailureReply,
+  LIVE_SELECT_NO_MATCH_HE,
+  runLivePostSelect,
+  type LiveRetrievalRecord,
+  type LiveSelectApplyResult,
+} from "./live-retrieval-select.js";
 
 export type PlacesAspect =
   | "summary"
@@ -54,6 +63,8 @@ export type PlacePaymentAttrs = {
 };
 
 export type PlaceResult = {
+  /** Stable id for post-retrieval live_select (Google place id, or local fallback). */
+  id: string;
   name: string;
   phone: string;
   address: string;
@@ -465,6 +476,17 @@ function mapPayment(opts: NewPaymentOptions | undefined): PlacePaymentAttrs | nu
   };
 }
 
+function mintPlaceFallbackId(parts: {
+  name: string;
+  address: string;
+  mapsUrl: string;
+}): string {
+  return createHash("sha256")
+    .update(`${parts.name}|${parts.address}|${parts.mapsUrl}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
 function mapNewPlace(row: NewPlace): PlaceResult | null {
   const name = String(row.displayName?.text ?? "").trim();
   if (!name) {
@@ -485,7 +507,11 @@ function mapNewPlace(row: NewPlace): PlaceResult | null {
     ? hours!.weekdayDescriptions!.map((line) => String(line).trim()).filter(Boolean)
     : [];
   const mapsUrl = String(row.googleMapsUri ?? "").trim();
+  const googleId = String(row.id ?? "").trim();
   return {
+    id:
+      googleId ||
+      mintPlaceFallbackId({ name, address, mapsUrl }),
     name,
     phone,
     address,
@@ -500,6 +526,134 @@ function mapNewPlace(row: NewPlace): PlaceResult | null {
     goodForChildren: triFromUnknown(row.goodForChildren),
     payment: mapPayment(row.paymentOptions),
   };
+}
+
+/** Compact rows for Stage B live_select (fields returned this turn). */
+export function placesToLiveRetrievalRecords(
+  facts: PlacesFacts,
+): LiveRetrievalRecord[] {
+  const aspects = new Set(facts.aspects);
+  const intent = facts.intent ?? "business";
+  return facts.results.map((row) => {
+    const fields: Record<string, unknown> = {
+      name: row.name,
+      address: row.address,
+      postal_code: row.postalCode || null,
+      rating: row.rating,
+      open_now: row.openNow,
+      maps_url: row.mapsUrl || null,
+    };
+    if (aspects.has("phone") || aspects.has("summary")) {
+      fields.phone = row.phone || null;
+    }
+    if (aspects.has("hours") || aspects.has("summary")) {
+      fields.weekday_hours = row.weekdayHours;
+    }
+    if (intent === "parking" || aspects.has("parking")) {
+      fields.parking = row.parking
+        ? {
+            free_lot: row.parking.freeLot,
+            paid_lot: row.parking.paidLot,
+            free_street: row.parking.freeStreet,
+            paid_street: row.parking.paidStreet,
+            valet: row.parking.valet,
+            free_garage: row.parking.freeGarage,
+            paid_garage: row.parking.paidGarage,
+          }
+        : null;
+    }
+    if (aspects.has("accessibility")) {
+      fields.accessibility = row.accessibility
+        ? {
+            wheelchair_entrance: row.accessibility.wheelchairEntrance,
+            wheelchair_parking: row.accessibility.wheelchairParking,
+            wheelchair_restroom: row.accessibility.wheelchairRestroom,
+            wheelchair_seating: row.accessibility.wheelchairSeating,
+          }
+        : null;
+    }
+    if (aspects.has("outdoor")) {
+      fields.outdoor_seating = row.outdoorSeating;
+    }
+    if (aspects.has("children")) {
+      fields.good_for_children = row.goodForChildren;
+    }
+    if (aspects.has("payment")) {
+      fields.payment = row.payment
+        ? {
+            credit_cards: row.payment.creditCards,
+            debit_cards: row.payment.debitCards,
+            cash_only: row.payment.cashOnly,
+            nfc: row.payment.nfc,
+          }
+        : null;
+    }
+    return {
+      id: row.id,
+      label: row.name,
+      fields,
+    };
+  });
+}
+
+export function filterPlacesFactsByIds(
+  facts: PlacesFacts,
+  ids: string[],
+): PlacesFacts {
+  const kept = new Set(ids);
+  return {
+    ...facts,
+    results: facts.results.filter((row) => kept.has(row.id)),
+  };
+}
+
+function placesCompletenessNotes(facts: PlacesFacts): string[] {
+  const requestFilters = hasRequestSideFiltersOnFacts(facts);
+  const saturated = facts.providerPartial === true;
+  const kept = facts.results.length;
+  const notes: string[] = [];
+  if (saturated && requestFilters && kept === 0) {
+    notes.push(PLACES_FILTERED_SATURATED_EMPTY_HE);
+  } else if (
+    saturated &&
+    requestFilters &&
+    kept > 0 &&
+    kept <= PLACES_SPARSE_RESULT_THRESHOLD
+  ) {
+    notes.push(PLACES_FILTERED_SATURATED_SPARSE_HE);
+  } else if (saturated) {
+    notes.push(PLACES_PROVIDER_PARTIAL_HE);
+  }
+  if (facts.minRatingUnknownDropped) {
+    notes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
+  }
+  if (facts.parkingCostUnknownDropped) {
+    notes.push(PLACES_PARKING_COST_UNKNOWN_DROPPED_HE);
+  }
+  return notes;
+}
+
+/** Apply Stage B outcome onto Places facts and format Hebrew. */
+export function formatPlacesAfterLiveSelect(
+  facts: PlacesFacts,
+  outcome: LiveSelectApplyResult,
+): string {
+  if (outcome.kind === "failure") {
+    const raw = formatPlacesHebrew(facts);
+    return formatLiveSelectFailureReply(raw, {
+      includeUnfiltered: outcome.mayShowUnfilteredLabeled,
+    });
+  }
+  if (outcome.kind === "no_match") {
+    const base = outcome.messageHe?.trim() || LIVE_SELECT_NO_MATCH_HE;
+    const notes = placesCompletenessNotes({ ...facts, results: [] });
+    return notes.length > 0 ? `${base}\n${notes.join("\n")}` : base;
+  }
+  if (outcome.kind === "subset") {
+    const filtered = filterPlacesFactsByIds(facts, outcome.keptIds);
+    return formatPlacesHebrew(filtered);
+  }
+  return formatPlacesHebrew(facts);
 }
 
 function isPermissionDenied(status: number, body: SearchTextResponse): boolean {
@@ -1035,6 +1189,11 @@ export async function resolvePlacesReply(input: {
   radiusExplicit?: boolean;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
+  /** When true and rows exist, run same-turn live_select (Stage B). */
+  requireLiveSelect?: boolean;
+  speakerAsk?: string;
+  billing?: ComposeLlmBilling | null;
+  runSelect?: typeof runLivePostSelect;
 }): Promise<string> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
@@ -1051,7 +1210,17 @@ export async function resolvePlacesReply(input: {
   }
   try {
     const facts = await fetchPlacesFacts(input);
-    return formatPlacesHebrew(facts);
+    if (!input.requireLiveSelect || facts.results.length === 0) {
+      return formatPlacesHebrew(facts);
+    }
+    const runSelect = input.runSelect ?? runLivePostSelect;
+    const outcome = await runSelect({
+      domain: "places",
+      records: placesToLiveRetrievalRecords(facts),
+      speakerAsk: input.speakerAsk ?? "",
+      billing: input.billing ?? null,
+    });
+    return formatPlacesAfterLiveSelect(facts, outcome);
   } catch (error) {
     if (error instanceof Error && error.message === PLACES_API_KEY_MISSING) {
       return "חיפוש עסקים לא מוגדר כרגע (חסר מפתח Google Places).";
