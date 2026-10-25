@@ -994,9 +994,13 @@ export function itemReminderAboutMatchesPartner(
   );
 }
 
+/** Soft cap for filings list preview when no sentence end is available. */
+export const FILING_LIST_PREVIEW_MAX_CHARS = 70;
+
 /**
  * Filing dump body.
- * - `list` (inventory): short title only — never inline תיאור / מידע לחיפוש.
+ * - `list` (inventory): short title only — preview line is appended separately
+ *   via {@link formatFilingListPreview} (never full תיאור / מידע לחיפוש).
  * - `full` (ITEM DUMP when opts.itemIds is set): labeled «שם · תיאור · מידע לחיפוש».
  */
 export function formatFilingDumpBody(
@@ -1022,25 +1026,234 @@ export function formatFilingDumpBody(
   return parts.length > 0 ? parts.join(" · ") : "תיוק";
 }
 
+/** Skip ids / flags / bare tokens when walking JSON for list preview. */
+function filingJsonStringLooksHuman(text: string): boolean {
+  const t = text.trim();
+  if (!t) {
+    return false;
+  }
+  if (/[\u0590-\u05FF]/.test(t)) {
+    return true;
+  }
+  if (/\s/.test(t) && /[a-zA-Z\u0590-\u05FF]{3,}/.test(t)) {
+    return true;
+  }
+  return t.length >= 16 && /[a-zA-Z]{4,}/.test(t);
+}
+
 /**
- * Inventory-only mark: longer filing text exists but is hidden on the list row
- * (shown on ITEM DUMP). After 📎 / 📍. Address-bearing filings use 📍 for
- * item_info — 📄 only for leftover find-helper (or non-address detail).
+ * Prefer human string fields; otherwise join nested prose values — never keys.
+ */
+function readableStringsFromJson(
+  value: unknown,
+  depth = 0,
+  allowAnyString = false,
+): string[] {
+  if (depth > 4 || value == null) {
+    return [];
+  }
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (!t) {
+      return [];
+    }
+    if (allowAnyString || depth === 0 || filingJsonStringLooksHuman(t)) {
+      return [t];
+    }
+    return [];
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) =>
+      readableStringsFromJson(entry, depth + 1, allowAnyString),
+    );
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const preferred = [
+      "text",
+      "summary",
+      "title",
+      "description",
+      "value",
+      "label",
+      "name",
+      "body",
+      "content",
+      "תיאור",
+      "שם",
+      "מידע",
+    ];
+    for (const key of preferred) {
+      const hit = obj[key];
+      if (typeof hit === "string" && hit.trim()) {
+        return [hit.trim()];
+      }
+    }
+    return Object.values(obj).flatMap((entry) =>
+      readableStringsFromJson(entry, depth + 1, false),
+    );
+  }
+  return [];
+}
+
+/**
+ * Readable prose from a stored filing field. Rejects bare coordinates and
+ * surfaces JSON as human strings (no raw braces / field names).
+ */
+export function extractFilingReadableText(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (parseLatLngCoordinates(trimmed)) {
+    return "";
+  }
+  if (/^[\[{]/.test(trimmed)) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const parts = readableStringsFromJson(parsed)
+        .map((part) =>
+          part
+            .replace(/\r\n/g, "\n")
+            .split("\n")
+            .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+            .filter(Boolean)
+            .join("\n"),
+        )
+        .filter(Boolean);
+      const joined = parts.join(" · ").trim();
+      if (!joined || /^[\[{]/.test(joined)) {
+        return "";
+      }
+      return joined;
+    } catch {
+      // Not valid JSON — fall through and treat as prose when possible.
+    }
+    // Broken / technical JSON-looking blob with no extractable prose.
+    if (/[{}\[\]"]/.test(trimmed) && !/[\u0590-\u05FFa-zA-Z]{3,}/.test(trimmed)) {
+      return "";
+    }
+  }
+  // Keep newlines so list preview can stop at the first line.
+  return trimmed
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * First sentence (through `.`/`!`/`?`) or first line — whichever comes first.
+ */
+export function firstFilingPreviewChunk(text: string): {
+  head: string;
+  rest: string;
+} {
+  const source = text.replace(/\r\n/g, "\n");
+  let sentenceEnd = -1;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch !== "." && ch !== "!" && ch !== "?") {
+      continue;
+    }
+    const next = source[i + 1];
+    if (next === undefined || /\s/.test(next)) {
+      sentenceEnd = i;
+      break;
+    }
+  }
+  const nl = source.indexOf("\n");
+  let endExclusive = source.length;
+  if (sentenceEnd >= 0 && nl >= 0) {
+    endExclusive = Math.min(sentenceEnd + 1, nl);
+  } else if (sentenceEnd >= 0) {
+    endExclusive = sentenceEnd + 1;
+  } else if (nl >= 0) {
+    endExclusive = nl;
+  }
+  const head = source.slice(0, endExclusive).replace(/\s+/g, " ").trim();
+  const rest = source.slice(endExclusive).replace(/\s+/g, " ").trim();
+  return { head, rest };
+}
+
+/** Soft-cap cut preferring a word boundary near `max`. */
+export function truncateFilingPreviewAtWord(
+  text: string,
+  max = FILING_LIST_PREVIEW_MAX_CHARS,
+): { text: string; truncated: boolean } {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { text: "", truncated: false };
+  }
+  if (trimmed.length <= max) {
+    return { text: trimmed, truncated: false };
+  }
+  const slice = trimmed.slice(0, max);
+  const sp = slice.lastIndexOf(" ");
+  const minKeep = Math.max(24, Math.floor(max * 0.5));
+  const cut = sp >= minKeep ? slice.slice(0, sp) : slice;
+  return { text: cut.trimEnd(), truncated: true };
+}
+
+/**
+ * List-only preview under the filing title: first sentence / ~70 chars + `…`
+ * when more remains. Address filings skip coordinate `item_info` (📍 covers it).
+ */
+export function formatFilingListPreview(
+  item: Record<string, unknown>,
+): string | null {
+  const name = readText(item, ["item_name", "itemName"]);
+  const info = readText(item, ["item_info", "itemInfo"]);
+  const findHelper = readText(item, ["item_description", "itemDescription"]);
+  const chunks: string[] = [];
+  if (filingNameLooksLikeAddress(name)) {
+    const helper = extractFilingReadableText(findHelper);
+    if (helper) {
+      chunks.push(helper);
+    }
+  } else {
+    const readableInfo = extractFilingReadableText(info);
+    const readableHelper = extractFilingReadableText(findHelper);
+    if (readableInfo) {
+      chunks.push(readableInfo);
+    }
+    if (readableHelper) {
+      chunks.push(readableHelper);
+    }
+  }
+  if (chunks.length === 0) {
+    return null;
+  }
+  const combined = chunks.join("\n");
+  const { head, rest } = firstFilingPreviewChunk(combined);
+  if (!head) {
+    return null;
+  }
+  const capped = truncateFilingPreviewAtWord(head);
+  const truncated = capped.truncated || rest.length > 0;
+  if (!capped.text) {
+    return null;
+  }
+  return truncated ? `${capped.text}…` : capped.text;
+}
+
+/**
+ * Legacy list mark for “hidden detail”. List preview / `…` now carry that
+ * signal, so 📄 is not emitted alongside them (no duplicate meaning).
  */
 export function filingHiddenDetailMark(
-  item: Record<string, unknown>,
+  _item: Record<string, unknown>,
   mode: "list" | "full",
 ): string {
   if (mode !== "list") {
     return "";
   }
-  const info = readText(item, ["item_info", "itemInfo"]);
-  const findHelper = readText(item, ["item_description", "itemDescription"]);
-  const name = readText(item, ["item_name", "itemName"]);
-  if (filingNameLooksLikeAddress(name)) {
-    return findHelper ? " 📄" : "";
-  }
-  return info || findHelper ? " 📄" : "";
+  return "";
 }
 
 /** True when the filing name encodes a place/address/location. */
@@ -3342,6 +3555,13 @@ export function formatNumberedItem(
     !titleAlreadyListsPartners(body, opts.sharedWithLabel.trim())
   ) {
     body += ` (${opts.sharedWithLabel.trim()})`;
+  }
+  // Filings inventory: short preview under the title line (ITEM DUMP stays full).
+  if (listType === "filings" && opts?.itemIds == null) {
+    const preview = formatFilingListPreview(item);
+    if (preview) {
+      body += `\n${preview}`;
+    }
   }
   const standing =
     listType === "tasks" && Boolean(readText(item, ["חוזר", "recurrence_text"]));

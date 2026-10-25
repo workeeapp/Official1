@@ -8,6 +8,10 @@ import {
   filterSnapshotForAboutPerson,
   formatCustomItemBody,
   formatFilingDumpBody,
+  formatFilingListPreview,
+  extractFilingReadableText,
+  firstFilingPreviewChunk,
+  truncateFilingPreviewAtWord,
   filingHiddenDetailMark,
   filingPlaceMark,
   filingNavigateCoordinates,
@@ -201,39 +205,16 @@ describe("formatFilingDumpBody", () => {
     ).toBe("שרון וטרינרית");
   });
 
-  it("filingHiddenDetailMark is list-only when info or find-helper exists", () => {
+  it("filingHiddenDetailMark stays empty — list preview / … replace 📄", () => {
     expect(
       filingHiddenDetailMark(
         { item_info: "בתוקף", item_description: "" },
         "list",
       ),
-    ).toBe(" 📄");
+    ).toBe("");
     expect(
       filingHiddenDetailMark(
         { item_info: "", item_description: "אופנוע" },
-        "list",
-      ),
-    ).toBe(" 📄");
-    expect(
-      filingHiddenDetailMark(
-        { item_info: "בתוקף", item_description: "" },
-        "full",
-      ),
-    ).toBe("");
-    expect(
-      filingHiddenDetailMark(
-        { item_info: "", item_description: "" },
-        "list",
-      ),
-    ).toBe("");
-    // Address filings: item_info is the 📍 value — no 📄 unless find-helper.
-    expect(
-      filingHiddenDetailMark(
-        {
-          item_name: "מיקום הבית",
-          item_info: "32.099279, 34.8923104",
-          item_description: "",
-        },
         "list",
       ),
     ).toBe("");
@@ -246,7 +227,90 @@ describe("formatFilingDumpBody", () => {
         },
         "list",
       ),
-    ).toBe(" 📄");
+    ).toBe("");
+  });
+
+  it("filing list preview: short sentence intact; multi-sentence → first only", () => {
+    expect(
+      formatFilingListPreview({
+        item_name: "רישיון",
+        item_info: "בתוקף",
+        item_description: "",
+      }),
+    ).toBe("בתוקף");
+    expect(
+      formatFilingListPreview({
+        item_name: "לוח",
+        item_info: "מבחן מתמטיקה ביום שלישי. אחר כך אנגלית. ואז היסטוריה.",
+        item_description: "",
+      }),
+    ).toBe("מבחן מתמטיקה ביום שלישי.…");
+    expect(
+      formatFilingListPreview({
+        item_name: "לוח",
+        item_info: "מבחן מתמטיקה ביום שלישי.",
+        item_description: "",
+      }),
+    ).toBe("מבחן מתמטיקה ביום שלישי.");
+  });
+
+  it("filing list preview: long unpunctuated text cuts near 70 at a word", () => {
+    const long =
+      "זה טקסט ארוך בלי נקודה בסוף כדי לוודא חיתוך בגבול מילה סביב שבעים תווים במנגנון התצוגה המקדימה של תיוקים ברשימה";
+    const preview = formatFilingListPreview({
+      item_name: "הערה",
+      item_info: long,
+      item_description: "",
+    });
+    expect(preview).toBeTruthy();
+    expect(preview!.endsWith("…")).toBe(true);
+    const body = preview!.slice(0, -1);
+    expect(body.length).toBeLessThanOrEqual(70);
+    expect(body).not.toMatch(/\s$/);
+    expect(long.startsWith(body)).toBe(true);
+    expect(firstFilingPreviewChunk(long).rest).toBe("");
+    expect(truncateFilingPreviewAtWord(long).truncated).toBe(true);
+  });
+
+  it("filing list preview: structured JSON → readable strings, not raw JSON", () => {
+    expect(
+      extractFilingReadableText(
+        JSON.stringify({ summary: "תור אצל הרופא ביום ראשון", id: "x1" }),
+      ),
+    ).toBe("תור אצל הרופא ביום ראשון");
+    expect(
+      formatFilingListPreview({
+        item_name: "תור",
+        item_info: JSON.stringify({
+          text: "יש תור אצל הרופא ביום ראשון בבוקר. להביא הפניה.",
+        }),
+        item_description: "",
+      }),
+    ).toBe("יש תור אצל הרופא ביום ראשון בבוקר.…");
+    expect(
+      formatFilingListPreview({
+        item_name: "תור",
+        item_info: '{"id":"abc","meta":true}',
+        item_description: "",
+      }),
+    ).toBeNull();
+  });
+
+  it("filing list preview: empty or unreadable → null (title only)", () => {
+    expect(
+      formatFilingListPreview({
+        item_name: "ריק",
+        item_info: "",
+        item_description: "",
+      }),
+    ).toBeNull();
+    expect(
+      formatFilingListPreview({
+        item_name: "מיקום הבית",
+        item_info: "32.099279, 34.8923104",
+        item_description: "",
+      }),
+    ).toBeNull();
   });
 
   it("parseLatLngCoordinates accepts bare lat,lng only", () => {
@@ -260,7 +324,7 @@ describe("formatFilingDumpBody", () => {
 });
 
 describe("filings flat dump", () => {
-  it("inventory: title + 📄 when detail exists; co-share mark; no inlined תיאור", () => {
+  it("inventory: title + short preview; co-share mark; no labeled תיאור / 📄", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -290,18 +354,17 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("תיוקים אישיים:");
     expect(dump).not.toContain("תיוקים משותפים:");
     expect(dump).toMatch(
-      /📁 תיוקים:\n1\. רישיון 📄\n2\. קוד שער 📄 \(מיכל, טל\)/,
+      /📁 תיוקים:\n1\. רישיון\nבתוקף\n2\. קוד שער \(מיכל, טל\)\n1234/,
     );
     expect(dump).not.toContain("תיאור:");
     expect(dump).not.toContain("שם:");
-    expect(dump).not.toContain("בתוקף");
-    expect(dump).not.toContain("1234");
+    expect(dump).not.toContain("📄");
     expect(dump).not.toContain("מידע:");
     expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("של ");
   });
 
-  it("inventory: long OCR-like item_info stays hidden; 📎 when attached", () => {
+  it("inventory: multi-line OCR preview is first line only + …; 📎 kept", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -319,9 +382,10 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toBe("📁 תיוקים:\n1. לוח מבחנים — יואב 📎 📄");
-    expect(dump).not.toContain("מתמטיקה");
+    expect(dump).toBe("📁 תיוקים:\n1. לוח מבחנים — יואב 📎\nמתמטיקה 12/11…");
+    expect(dump).not.toContain("אנגלית");
     expect(dump).not.toContain("תיאור:");
+    expect(dump).not.toContain("📄");
   });
 
   it("inventory: title only when no detail and no attachment", () => {
@@ -344,6 +408,41 @@ describe("filings flat dump", () => {
     expect(dump).toBe("📁 תיוקים:\n1. מסמך ללא קובץ");
     expect(dump).not.toContain("📄");
     expect(dump).not.toContain("📎");
+  });
+
+  it("filtered filings list uses the same preview as the full inventory", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף עד סוף השנה. אחר כך לחדש.",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f2",
+          item_name: "קוד שער",
+          item_info: "1234",
+          item_description: "",
+          owner: "טל",
+          scope: "shared",
+          shared_with: ["טל", "מיכל"],
+        },
+      ],
+    };
+    const personal = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+      section: "personal",
+    })!;
+    expect(personal).toBe(
+      "📁 תיוקים:\n1. רישיון\nבתוקף עד סוף השנה.…",
+    );
+    expect(personal).not.toContain("קוד שער");
+    expect(personal).not.toContain("📄");
+    expect(personal).not.toContain("תיאור:");
   });
 
   it("option A: list 📍 only; ITEM DUMP 📍 + Waze coords; no Maps/coords in text", () => {
@@ -381,8 +480,9 @@ describe("filings flat dump", () => {
     })!;
     expect(list).toContain("📁 תיוקים:");
     expect(list).toMatch(/1\. מיקום הבית 📍/);
-    expect(list).toContain("2. רישיון 📄");
+    expect(list).toContain("2. רישיון\nבתוקף");
     expect(list).toMatch(/3\. כתובת עבודה 📍/);
+    expect(list).not.toContain("📄");
     expect(list).not.toContain("32.099279");
     expect(list).not.toContain("maps.google");
     expect(list).not.toContain("הרצל 1");
@@ -893,10 +993,10 @@ describe("filings flat dump", () => {
       viewerName: "טל",
     })!;
     expect(dump).toContain("📁 תיוקים:");
-    expect(dump).toContain("לשון פנייה 📄");
+    expect(dump).toContain("לשון פנייה\nזכר");
     expect(dump).toContain("כתובת 📍");
+    expect(dump).not.toContain("📄");
     expect(dump).not.toContain("תיאור:");
-    expect(dump).not.toContain("זכר");
     expect(dump).not.toContain("רחוב שחם");
     expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("(טל)");

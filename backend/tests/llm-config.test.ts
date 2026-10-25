@@ -221,14 +221,19 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("show_dump_ids");
   });
 
-  it("teaches filing inventory show_dump vs semantic lookup", () => {
+  it("teaches filing inventory show_dump vs unique filing ITEM DUMP", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("FILING SHOW");
     expect(config.systemMessage).toContain("show_dump=filings");
     expect(config.systemMessage).toContain(
       "FORBIDDEN model-written numbered filing inventory",
     );
-    expect(config.systemMessage).toContain("Semantic lookup");
+    expect(config.systemMessage).toContain("Unique filing lookup");
+    expect(config.systemMessage).toContain("SAME as ITEM DUMP");
+    expect(config.systemMessage).toContain("show_dump_ids=[that filing_id]");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN model prose that restates item_info",
+    );
     expect(config.systemMessage).toContain(
       "bold only the item title with a single WhatsApp pair *title*",
     );
