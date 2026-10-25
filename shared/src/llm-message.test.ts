@@ -2833,8 +2833,44 @@ describe("parseLlmReply", () => {
       agency: "",
       serviceDate: "",
       windowEnd: "",
+      mode: "transit",
       aspects: ["eta"],
+      requireLiveSelect: false,
+      prefer: "",
     });
+  });
+
+  it("reads routes.prefer closest_board and ignores unknown prefer values", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              origin: "מיקום הבית",
+              destination: "עזריאלי",
+              prefer: "closest_board",
+              aspects: ["summary"],
+            },
+          },
+        }),
+      ).routes?.prefer,
+    ).toBe("closest_board");
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            routes: {
+              origin: "מיקום הבית",
+              destination: "עזריאלי",
+              prefer: "min_transfers",
+              aspects: ["summary"],
+            },
+          },
+        }),
+      ).routes?.prefer,
+    ).toBe("");
   });
 
   it("ignores routes missing destination", () => {
@@ -2875,7 +2911,10 @@ describe("parseLlmReply", () => {
       agency: "",
       serviceDate: "",
       windowEnd: "",
+      mode: "transit",
       aspects: ["lines"],
+      requireLiveSelect: false,
+      prefer: "",
     });
   });
 
@@ -2906,7 +2945,10 @@ describe("parseLlmReply", () => {
       agency: "דן",
       serviceDate: "2026-10-24",
       windowEnd: "",
+      mode: "transit",
       aspects: ["schedule"],
+      requireLiveSelect: false,
+      prefer: "",
     });
   });
 
@@ -2936,7 +2978,10 @@ describe("parseLlmReply", () => {
       agency: "",
       serviceDate: "",
       windowEnd: "",
+      mode: "transit",
       aspects: ["nearest_stop"],
+      requireLiveSelect: false,
+      prefer: "",
     });
   });
 
@@ -2965,7 +3010,10 @@ describe("parseLlmReply", () => {
       agency: "",
       serviceDate: "",
       windowEnd: "",
+      mode: "transit",
       aspects: ["live_arrivals"],
+      requireLiveSelect: false,
+      prefer: "",
     });
   });
 

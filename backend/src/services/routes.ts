@@ -124,7 +124,20 @@ export type RoutesFacts = {
   stopLines: string[];
   /** Display name of the matched transit station for the board. */
   stopDisplayName: string;
+  /**
+   * Trip prefer from ACTION. Only `closest_board` is honored; empty = default
+   * leave→walk ranking (unchanged).
+   */
+  prefer: RoutesPrefer;
+  /**
+   * True when prefer=closest_board but no itinerary had comparable boarding
+   * walk + line + stop — reply must disclose, not claim closest.
+   */
+  closestBoardInsufficient: boolean;
 };
+
+/** Supported routes.prefer values (omit/empty keeps default ranking). */
+export type RoutesPrefer = "" | "closest_board";
 
 const ASPECT_SET = new Set<RoutesAspect>([
   "summary",
@@ -193,6 +206,48 @@ export const ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE =
 /** Car / DRIVE estimates (traffic-aware when Google returns them). */
 export const ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE =
   "(זמני נסיעה משוערים מגוגל — תלוי בעומס בפועל.)";
+
+/** prefer=closest_board but no comparable boarding walk among Google options. */
+export const ROUTES_CLOSEST_BOARD_INSUFFICIENT_HE =
+  "אין לי מספיק נתונים מגוגל כדי לקבוע איזו תחנת עלייה הכי קרובה למוצא מבין המסלולים שחזרו — לא אנחש.";
+
+/** Narrow walk-step display note when empty/0s legs were omitted. */
+export const ROUTES_WALK_PARTIAL_NOTE_HE =
+  "(פרטי הליכה חלקיים מהמקור — חלק משלבי ההליכה לא הוצגו.)";
+
+/**
+ * Wave 1 compact multi cue — secondary itineraries are not expanded up front.
+ * Follow-up must recalculate; never claim a new fetch is the prior «אפשרות N».
+ */
+export function routesMultiAltsCueHe(extraCount: number): string {
+  const n = Math.max(0, Math.floor(extraCount));
+  if (n <= 0) {
+    return "";
+  }
+  return `עוד ${n} אפשרויות (יציאה/משך/הליכה שונים) — לפרטים בקשי לפי קו או שעת יציאה. אחרי חישוב מחדש לא אזהה אוטומטית «אפשרות» ישנה.`;
+}
+
+/** Schedule fallback intro — never label as live SIRI. */
+export const ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE =
+  "מציגה במקום לוח זמנים מתוזמן (לא תחזית חיה):";
+
+/** Google ETA when SIRI cannot run — explicitly not live MOT. */
+export const ROUTES_GOOGLE_ETA_NOT_SIRI_INTRO_HE =
+  "מציגה הערכת Google ליציאה הבאה (לא תחזית SIRI חיה):";
+
+/**
+ * Network-wide disruption / SX is not connected — prompt/capability U disclose.
+ * Not a live feed result.
+ */
+export const ROUTES_DISRUPTION_UNAVAILABLE_HE =
+  "אין לי מידע על שיבושים או ביטולים ברשת — היכולת הזו לא מחוברת. אפשר לשאול על תחזית הגעה לתחנה או לוח מתוזמן לקו.";
+
+export function parseRoutesPrefer(raw: unknown): RoutesPrefer {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return key === "closest_board" ? "closest_board" : "";
+}
 
 export type RoutesTravelMode = "transit" | "drive";
 
@@ -853,8 +908,60 @@ function parseHmToMinutes(raw: string): number | null {
 }
 
 /**
+ * Walk seconds on contiguous WALK legs before the first TRANSIT step.
+ * 0 when the itinerary starts with transit. null when walk exists but no
+ * usable duration, or when there is no transit boarding step.
+ */
+export function boardingWalkSecondsBeforeTransit(
+  steps: RouteStepFact[],
+): number | null {
+  let walk = 0;
+  let sawWalk = false;
+  let knownWalk = false;
+  for (const step of steps) {
+    const mode = String(step.travelMode ?? "").toUpperCase();
+    if (mode === "TRANSIT") {
+      if (!sawWalk) {
+        return 0;
+      }
+      return knownWalk ? walk : null;
+    }
+    if (mode === "WALK" || mode === "WALKING") {
+      sawWalk = true;
+      if (step.durationSeconds != null && step.durationSeconds >= 0) {
+        walk += step.durationSeconds;
+        knownWalk = true;
+      }
+    }
+  }
+  return null;
+}
+
+export function firstTransitBoard(
+  steps: RouteStepFact[],
+): RouteStepFact | undefined {
+  return steps.find(
+    (s) =>
+      String(s.travelMode ?? "").toUpperCase() === "TRANSIT" &&
+      Boolean(s.line?.trim()) &&
+      Boolean(s.fromStop?.trim()),
+  );
+}
+
+/** Usable for closest_board: known boarding walk + line + stop name. */
+export function itineraryClosestBoardComparable(
+  opt: RouteItineraryOption,
+): boolean {
+  if (!firstTransitBoard(opt.steps)) {
+    return false;
+  }
+  return boardingWalkSecondsBeforeTransit(opt.steps) != null;
+}
+
+/**
  * Rank Google trip alternatives by practical leave time, walk, arrive, duration.
  * Does not invent values — missing fields sort last within that key.
+ * Default ranking when prefer is omitted — do not change without regressing tests.
  */
 export function rankTripItineraries(
   options: RouteItineraryOption[],
@@ -875,15 +982,36 @@ export function rankTripItineraries(
   });
 }
 
-function firstTransitBoard(
-  steps: RouteStepFact[],
-): RouteStepFact | undefined {
-  return steps.find(
-    (s) =>
-      String(s.travelMode ?? "").toUpperCase() === "TRANSIT" &&
-      Boolean(s.line?.trim()) &&
-      Boolean(s.fromStop?.trim()),
-  );
+/**
+ * Rank by walk-to-first-board among comparable itineraries; non-comparable last.
+ * Tie-break with the default leave→walk→arrive→duration keys.
+ */
+export function rankTripItinerariesByClosestBoard(
+  options: RouteItineraryOption[],
+): RouteItineraryOption[] {
+  const score = (
+    opt: RouteItineraryOption,
+  ): [number, number, number, number, number] => {
+    const comparable = itineraryClosestBoardComparable(opt);
+    const boardWalk = comparable
+      ? (boardingWalkSecondsBeforeTransit(opt.steps) as number)
+      : Number.POSITIVE_INFINITY;
+    return [
+      boardWalk,
+      parseHmToMinutes(opt.leaveByText) ?? Number.POSITIVE_INFINITY,
+      walkSecondsFromSteps(opt.steps) ?? Number.POSITIVE_INFINITY,
+      parseHmToMinutes(opt.arriveByText) ?? Number.POSITIVE_INFINITY,
+      opt.durationSeconds ?? Number.POSITIVE_INFINITY,
+    ];
+  };
+  return [...options].sort((a, b) => {
+    const sa = score(a);
+    const sb = score(b);
+    for (let i = 0; i < sa.length; i++) {
+      if (sa[i]! !== sb[i]!) return sa[i]! - sb[i]!;
+    }
+    return 0;
+  });
 }
 
 /**
@@ -931,8 +1059,8 @@ export async function formatOfficialBoardingDeparturesHe(
       // Ambiguous / empty — keep Google journey; do not guess another stop.
       continue;
     }
-    const optLabel =
-      itineraries.length > 1 ? `אפשרות ${i + 1}` : "תחנת העלייה";
+    // Identify by stop+line only — never «אפשרות N» (conflicts with Wave 1
+    // compact multi cue: no stable option index after recalculate).
     const rows = sched.departures.slice(0, 2).map((d) => {
       const dir =
         d.headsign || d.directionLabel
@@ -941,7 +1069,7 @@ export async function formatOfficialBoardingDeparturesHe(
       return `• ${d.departureTime} קו ${d.line}${dir} [${d.stopCode}]`;
     });
     blocks.push(
-      `${optLabel} «${sched.departures[0]?.stopName || board.fromStop}» קו ${line}:\n${rows.join("\n")}`,
+      `תחנת העלייה «${sched.departures[0]?.stopName || board.fromStop}» קו ${line}:\n${rows.join("\n")}`,
     );
 
     if (!triedSiri && isSiriSmConfigured()) {
@@ -1155,6 +1283,8 @@ export async function fetchRoutesFacts(input: {
   aspects?: RoutesAspect[] | unknown;
   /** transit (default) or drive (car). */
   mode?: RoutesTravelMode | string | null;
+  /** Only closest_board is honored; omit/empty keeps default ranking. */
+  prefer?: RoutesPrefer | string | null;
   originLat?: number | null;
   originLng?: number | null;
   destinationLat?: number | null;
@@ -1184,6 +1314,8 @@ export async function fetchRoutesFacts(input: {
           .trim();
   const headsign = travelMode === "drive" ? "" : String(input.headsign ?? "").trim();
   const aspects = parseRoutesAspects(input.aspects);
+  const prefer =
+    travelMode === "drive" ? "" : parseRoutesPrefer(input.prefer);
   const now = input.now ?? new Date();
   const originLabel =
     String(input.originLabel ?? "").trim() ||
@@ -1222,6 +1354,8 @@ export async function fetchRoutesFacts(input: {
     matchedLine: "",
     stopLines: [],
     stopDisplayName: "",
+    prefer,
+    closestBoardInsufficient: false,
   };
 
   if (aspects.includes("lines") && !destination) {
@@ -1363,14 +1497,23 @@ export async function fetchRoutesFacts(input: {
   facts.fareText = primary.fareText;
   facts.steps = primary.steps;
   if (wantTripAlternatives) {
-    facts.itineraries = rankTripItineraries(
-      routes.slice(0, ROUTES_ITINERARY_DISPLAY_CAP).map((r) =>
-        summarizeApiRoute(r, {
-          arrivalRfc: arrivalRfc,
-          departureRfc: departureRfc,
-        }),
-      ),
+    const mapped = routes.slice(0, ROUTES_ITINERARY_DISPLAY_CAP).map((r) =>
+      summarizeApiRoute(r, {
+        arrivalRfc: arrivalRfc,
+        departureRfc: departureRfc,
+      }),
     );
+    if (prefer === "closest_board") {
+      const usable = mapped.filter(itineraryClosestBoardComparable);
+      if (usable.length === 0) {
+        facts.closestBoardInsufficient = true;
+        facts.itineraries = rankTripItineraries(mapped);
+      } else {
+        facts.itineraries = rankTripItinerariesByClosestBoard(mapped);
+      }
+    } else {
+      facts.itineraries = rankTripItineraries(mapped);
+    }
     // Keep primary summary fields aligned with the best ranked option.
     const best = facts.itineraries[0];
     if (best) {
@@ -1472,13 +1615,29 @@ export async function fetchRoutesFacts(input: {
   return facts;
 }
 
+/**
+ * Format one step for display. Empty string = omit this step (N2: empty/0s
+ * walk legs without a clear tip are not shown as navigation).
+ */
 function formatStepLine(step: RouteStepFact, index: number): string {
   const n = index + 1;
   if (step.travelMode === "WALK" || step.travelMode === "WALKING") {
-    const tip =
-      step.instruction ||
-      (step.toStop ? `הליכה עד ${step.toStop}` : "הליכה");
-    const dur = step.durationText ? ` (${step.durationText})` : "";
+    const instruction = String(step.instruction ?? "").trim();
+    const toStop = String(step.toStop ?? "").trim();
+    const hasTip = Boolean(instruction || toStop);
+    const zeroDur =
+      step.durationSeconds === 0 ||
+      /^0\s*דק/u.test(String(step.durationText ?? "").trim());
+    const noUsableDur =
+      step.durationSeconds == null && !String(step.durationText ?? "").trim();
+    // Omit junk walk legs: no tip and zero/missing duration.
+    if (!hasTip && (zeroDur || noUsableDur)) {
+      return "";
+    }
+    const tip = instruction || (toStop ? `הליכה עד ${toStop}` : "הליכה");
+    const dur =
+      step.durationText && !zeroDur ? ` (${step.durationText})` : "";
+    // Zero-duration with a tip: show tip without claiming 0 minutes.
     return `${n}. הליכה — ${tip}${dur}`;
   }
   if (step.travelMode === "TRANSIT") {
@@ -1501,11 +1660,80 @@ function formatStepLine(step: RouteStepFact, index: number): string {
   return `${n}. ${step.instruction || step.travelMode}`;
 }
 
+/** Push formatted steps; renumber after omissions; note partial walk once. */
+function pushFormattedSteps(
+  lines: string[],
+  steps: RouteStepFact[],
+  maxSteps: number,
+): void {
+  let displayIndex = 0;
+  let omittedWalk = false;
+  for (const step of steps.slice(0, maxSteps)) {
+    const line = formatStepLine(step, displayIndex);
+    if (!line) {
+      if (
+        step.travelMode === "WALK" ||
+        step.travelMode === "WALKING"
+      ) {
+        omittedWalk = true;
+      }
+      continue;
+    }
+    lines.push(line);
+    displayIndex += 1;
+  }
+  if (omittedWalk) {
+    lines.push(ROUTES_WALK_PARTIAL_NOTE_HE);
+  }
+  if (steps.length > maxSteps) {
+    lines.push(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
+  }
+}
+
+function closestBoardLeadHe(facts: RoutesFacts): string {
+  const opt =
+    facts.itineraries[0] ??
+    (facts.steps.length > 0
+      ? {
+          durationText: facts.durationText,
+          durationSeconds: facts.durationSeconds,
+          distanceMeters: facts.distanceMeters,
+          fareText: facts.fareText,
+          leaveByText: facts.leaveByText,
+          arriveByText: facts.arriveByText,
+          steps: facts.steps,
+        }
+      : null);
+  if (!opt || !itineraryClosestBoardComparable(opt)) {
+    return "";
+  }
+  const board = firstTransitBoard(opt.steps)!;
+  const walkSec = boardingWalkSecondsBeforeTransit(opt.steps)!;
+  const walkBit =
+    walkSec <= 0
+      ? "ללא הליכה לתחנה"
+      : `הליכה כ־${formatDurationHe(walkSec)}`;
+  return `הקו עם תחנת העלייה הקרובה ביותר למוצא (מבין המסלולים שגוגל הציע עכשיו): קו ${board.line} מ«${board.fromStop}», ${walkBit}.`;
+}
+
+/**
+ * Multi-itinerary first response (Wave 1 compact contract):
+ * - Lead = primary recommendation + decision-relevant fields only.
+ * - Cue that more alternatives exist (no full bodies for options 2..N).
+ * - Step-by-step only when aspects includes `steps`, and only for the primary.
+ *
+ * Single-itinerary answers use formatRoutesHebrew's single path and KEEP showing
+ * basic directions when aspects includes `summary` (product usefulness).
+ */
 function formatMultiItinerariesHebrew(facts: RoutesFacts): string {
   const lines: string[] = [];
   const arriveAsk = Boolean(facts.arrival.trim());
   const n = facts.itineraries.length;
   const drive = facts.mode === "drive";
+  const primary = facts.itineraries[0];
+  if (!primary) {
+    return "";
+  }
   lines.push(
     drive
       ? `מצאתי ${n} אפשרויות ברכב מ«${facts.origin}» ל«${facts.destination}» ${ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE}`
@@ -1516,48 +1744,48 @@ function formatMultiItinerariesHebrew(facts: RoutesFacts): string {
     lines.push(`יעד הגעה: עד ${arriveLabel}.`);
   }
 
-  const showSteps =
-    wants(facts.aspects, "steps") || facts.aspects.includes("summary");
-  const maxSteps = facts.aspects.includes("steps")
-    ? ROUTES_STEPS_DETAIL_DISPLAY_CAP
-    : ROUTES_STEPS_SUMMARY_DISPLAY_CAP;
+  const headBits: string[] = [];
+  if (primary.durationText) {
+    headBits.push(`משך משוער *${primary.durationText}*`);
+  }
+  if (arriveAsk && primary.leaveByText) {
+    headBits.push(`צא בסביבות *${primary.leaveByText}*`);
+  } else if (primary.leaveByText) {
+    headBits.push(`יציאה משוערת ${primary.leaveByText}`);
+  }
+  if (primary.arriveByText && !arriveAsk) {
+    headBits.push(`הגעה משוערת ${primary.arriveByText}`);
+  }
+  if (wants(facts.aspects, "fare") && primary.fareText) {
+    headBits.push(`מחיר משוער ${primary.fareText}`);
+  }
+  const lineLabel = transitLinesLabel(primary.steps);
+  if (lineLabel) {
+    headBits.push(lineLabel);
+  }
+  for (const bit of itineraryWalkTransferBits(primary.steps)) {
+    headBits.push(bit);
+  }
+  lines.push("");
+  lines.push(
+    `המלצה: ${headBits.length > 0 ? headBits.join(" · ") : "מסלול ראשי"}`,
+  );
 
-  facts.itineraries.forEach((opt, i) => {
+  // Multi: steps only on explicit steps aspect (not summary). Primary only.
+  if (facts.aspects.includes("steps") && primary.steps.length > 0) {
     lines.push("");
-    const headBits: string[] = [];
-    if (opt.durationText) {
-      headBits.push(`משך משוער *${opt.durationText}*`);
-    }
-    if (arriveAsk && opt.leaveByText) {
-      headBits.push(`צא בסביבות *${opt.leaveByText}*`);
-    } else if (opt.leaveByText) {
-      headBits.push(`יציאה משוערת ${opt.leaveByText}`);
-    }
-    if (opt.arriveByText && !arriveAsk) {
-      headBits.push(`הגעה משוערת ${opt.arriveByText}`);
-    }
-    if (wants(facts.aspects, "fare") && opt.fareText) {
-      headBits.push(`מחיר משוער ${opt.fareText}`);
-    }
-    const lineLabel = transitLinesLabel(opt.steps);
-    if (lineLabel) {
-      headBits.push(lineLabel);
-    }
-    for (const bit of itineraryWalkTransferBits(opt.steps)) {
-      headBits.push(bit);
-    }
-    lines.push(
-      `*אפשרות ${i + 1}* — ${headBits.length > 0 ? headBits.join(" · ") : "מסלול"}`,
+    pushFormattedSteps(
+      lines,
+      primary.steps,
+      ROUTES_STEPS_DETAIL_DISPLAY_CAP,
     );
-    if (showSteps && opt.steps.length > 0) {
-      opt.steps.slice(0, maxSteps).forEach((step, si) => {
-        lines.push(formatStepLine(step, si));
-      });
-      if (opt.steps.length > maxSteps) {
-        lines.push(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
-      }
-    }
-  });
+  }
+
+  const cue = routesMultiAltsCueHe(n - 1);
+  if (cue) {
+    lines.push("");
+    lines.push(cue);
+  }
 
   return lines.join("\n").trim();
 }
@@ -1770,9 +1998,19 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
     return lineRefuse();
   }
 
+  const closestPrefix =
+    facts.prefer === "closest_board"
+      ? facts.closestBoardInsufficient
+        ? `${ROUTES_CLOSEST_BOARD_INSUFFICIENT_HE}\n\n`
+        : (() => {
+            const lead = closestBoardLeadHe(facts);
+            return lead ? `${lead}\n\n` : "";
+          })()
+      : "";
+
   // Multi-option only when Google returned >1 alternatives for a trip summary.
   if (facts.itineraries.length > 1) {
-    return formatMultiItinerariesHebrew(facts);
+    return `${closestPrefix}${formatMultiItinerariesHebrew(facts)}`.trim();
   }
 
   const lines: string[] = [];
@@ -1815,6 +2053,8 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
     );
   }
 
+  // Single itinerary: keep useful basic directions on summary (Wave 1 product).
+  // Multi path above is compact and does not use this branch.
   const showSteps =
     wants(facts.aspects, "steps") || facts.aspects.includes("summary");
   if (showSteps && facts.steps.length > 0) {
@@ -1822,16 +2062,10 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
     const max = facts.aspects.includes("steps")
       ? ROUTES_STEPS_DETAIL_DISPLAY_CAP
       : ROUTES_STEPS_SUMMARY_DISPLAY_CAP;
-    facts.steps.slice(0, max).forEach((step, i) => {
-      lines.push(formatStepLine(step, i));
-    });
-    // Confirmed local display truncation only — one Google trip is intentional.
-    if (facts.steps.length > max) {
-      lines.push(ROUTES_STEPS_LOCAL_TRUNCATION_HE);
-    }
+    pushFormattedSteps(lines, facts.steps, max);
   }
 
-  return lines.join("\n").trim();
+  return `${closestPrefix}${lines.join("\n")}`.trim();
 }
 
 /** Next departure minutes + fingerprint for bus_eta watches. */
@@ -2132,7 +2366,7 @@ async function resolveLiveArrivalsReply(input: {
       return {
         text: [
           whyHe,
-          "מציגה הערכת Google ליציאה הבאה (לא תחזית SIRI חיה):",
+          ROUTES_GOOGLE_ETA_NOT_SIRI_INTRO_HE,
           formatRoutesHebrew(facts),
           "לתחזית חיה רשמית של משרד התחבורה צריך קוד תחנה (מספר).",
         ].join("\n"),
@@ -2288,7 +2522,7 @@ async function resolveLiveArrivalsReply(input: {
         return {
           text: [
             siriNote,
-            "מציגה במקום לוח זמנים מתוזמן (לא תחזית חיה):",
+            ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE,
             formatScheduleHebrew(sched),
           ].join("\n"),
           navigateAddress: "",
@@ -2335,7 +2569,7 @@ async function resolveLiveArrivalsReply(input: {
       return {
         text: [
           agencyUnresolvedNote,
-          "מציגה במקום לוח זמנים מתוזמן (לא תחזית חיה):",
+          ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE,
           formatScheduleHebrew(sched),
         ].join("\n"),
         navigateAddress: "",
@@ -2372,6 +2606,8 @@ export async function resolveRoutesReply(input: {
   windowEnd?: string;
   aspects?: RoutesAspect[] | unknown;
   mode?: RoutesTravelMode | string | null;
+  /** Only closest_board; omit keeps default leave→walk ranking. */
+  prefer?: RoutesPrefer | string | null;
   originLat?: number | null;
   originLng?: number | null;
   /** Speaker saved lists/filings — resolve named origin/destination to coords. */

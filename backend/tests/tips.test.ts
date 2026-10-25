@@ -75,13 +75,17 @@ import {
   collectAppliedTipOps,
   createTipForUser,
   ensureDefaultTips,
+  formatAvailableTipsContext,
   resolveAndRecordTipsForTurn,
   sendTipForUser,
   tipAudienceMatchesForTest,
   tipCooldownOk,
 } from "../src/services/tips.service.js";
 import { renderStaticTipText } from "../src/services/tip-compose.js";
-import { SYSTEM_TIP_SEEDS } from "../src/services/tip-catalog.js";
+import {
+  GENERAL_TIP_MIN_INTERVAL_MINUTES,
+  SYSTEM_TIP_SEEDS,
+} from "../src/services/tip-catalog.js";
 import { ValidationError } from "../src/utils/errors.js";
 
 const USER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -239,6 +243,7 @@ describe("tips service", () => {
         data: expect.objectContaining({
           text: expect.any(String),
           systemSeed: true,
+          minIntervalMinutes: 0,
         }),
       }),
     );
@@ -249,6 +254,18 @@ describe("tips service", () => {
     expect(createdKeys).toContain("reminders_adv_repeat");
     expect(createdKeys).not.toContain("shopping_basic_add");
     expect(createdKeys.length).toBe(SYSTEM_TIP_SEEDS.length - 1);
+    const generalCreate = tipCreate.mock.calls.find(
+      (call: unknown[]) =>
+        (call[0] as { data: { key: string } }).data.key === "general_weather",
+    );
+    expect(generalCreate?.[0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          key: "general_weather",
+          minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+        }),
+      }),
+    );
   });
 
   it("leaves user-edited tips alone when key matches a seed", async () => {
@@ -589,7 +606,7 @@ describe("tips service", () => {
     expect(allowed.texts).toEqual(["tip"]);
   });
 
-  it("falls back to a general tip when no action/model tip matches", async () => {
+  it("does not auto-select a general tip when modelTipKeys is empty", async () => {
     const general = tipRow({
       id: "g-weather",
       key: "general_weather",
@@ -600,7 +617,9 @@ describe("tips service", () => {
       listType: null,
       order: 800,
       maxShows: 2,
-      text: "אגב, אפשר לשאול אותי מה מזג האוויר היום או בימים הקרובים.",
+      systemSeed: true,
+      minIntervalMinutes: 360,
+      text: "לפני שיוצאים ☔ אפשר לבדוק אצלי אם צפוי גשם היום או מחר.",
     });
     tipFindMany.mockResolvedValue([general]);
     tipProgressFindMany.mockResolvedValue([]);
@@ -615,11 +634,149 @@ describe("tips service", () => {
       appliedOps: [],
       modelTipKeys: [],
     });
-    expect(turn.texts).toEqual([general.text]);
+    expect(turn.texts).toEqual([]);
+    expect(tipProgressCreate).not.toHaveBeenCalled();
+  });
+
+  it("emits a general tip only when the model selects an eligible key", async () => {
+    const general = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: 360,
+      text: "weather tip",
+    });
+    tipFindMany.mockResolvedValue([general]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["general_weather"],
+    });
+    expect(turn.texts).toEqual(["weather tip"]);
     expect(tipProgressCreate).toHaveBeenCalled();
   });
 
-  it("prefers a matching action tip over general tips", async () => {
+  it("skips seeded general when another seeded general was shown within 6h", async () => {
+    const weather = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: 360,
+      text: "weather tip",
+    });
+    const places = tipRow({
+      id: "g-places",
+      key: "general_places",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 802,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: 360,
+      text: "places tip",
+    });
+    tipFindMany.mockResolvedValue([weather, places]);
+    tipProgressFindMany.mockResolvedValue([
+      {
+        tipId: places.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(Date.now() - 30 * 60_000),
+      },
+    ]);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["general_weather"],
+    });
+    expect(turn.texts).toEqual([]);
+    expect(tipProgressCreate).not.toHaveBeenCalled();
+  });
+
+  it("cross-general cooldown ignores user-customized general tips", async () => {
+    const custom = tipRow({
+      id: "g-custom",
+      key: "my_custom_general",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 50,
+      maxShows: 5,
+      systemSeed: false,
+      minIntervalMinutes: 0,
+      text: "custom tip",
+    });
+    const weather = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: 360,
+      text: "weather tip",
+    });
+    tipFindMany.mockResolvedValue([custom, weather]);
+    tipProgressFindMany.mockResolvedValue([
+      {
+        tipId: custom.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(),
+      },
+    ]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    employeeFindMany.mockResolvedValue([]);
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["general_weather"],
+    });
+    expect(turn.texts).toEqual(["weather tip"]);
+  });
+
+  it("prefers a matching action tip over a requested general tip", async () => {
     const action = tipRow({
       id: "a1",
       key: "shopping_basic_add",
@@ -637,7 +794,10 @@ describe("tips service", () => {
       triggerArea: null,
       triggerOp: null,
       topic: null,
+      listType: null,
       order: 1,
+      systemSeed: true,
+      minIntervalMinutes: 360,
       text: "general tip",
     });
     tipFindMany.mockResolvedValue([general, action]);
@@ -653,7 +813,7 @@ describe("tips service", () => {
       appliedOps: [
         { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
       ],
-      modelTipKeys: [],
+      modelTipKeys: ["general_weather"],
     });
     expect(turn.texts).toEqual(["action tip"]);
     expect(turn.texts).not.toContain("general tip");
@@ -696,6 +856,281 @@ describe("tips service", () => {
     });
     expect(turn.texts).toHaveLength(1);
     expect(turn.texts[0]).toBe("shop tip");
+  });
+
+  it("AVAILABLE_TIPS lists eligible generals as optional and omits cross-cooled ones", async () => {
+    const weather = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      text: "weather tip",
+    });
+    const places = tipRow({
+      id: "g-places",
+      key: "general_places",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 802,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      text: "places tip",
+    });
+    tipFindMany.mockResolvedValue([weather, places]);
+    tipProgressFindMany.mockResolvedValue([]);
+    employeeFindMany.mockResolvedValue([]);
+
+    const open = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+    });
+    expect(open).toContain("optional");
+    expect(open).toContain("key=general_weather");
+    expect(open).toContain("key=general_places");
+    expect(open).toMatch(/Omit metadata\.tips|omit metadata\.tips/i);
+
+    tipProgressFindMany.mockResolvedValue([
+      {
+        tipId: places.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(Date.now() - 10 * 60_000),
+      },
+    ]);
+    const cooled = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+    });
+    expect(cooled).toBe("");
+  });
+
+  it("AVAILABLE_TIPS general keys match resolveAndRecordTipsForTurn eligibility", async () => {
+    const parseAvailableKeys = (block: string): string[] =>
+      [...block.matchAll(/\bkey=([^\s]+)/g)].map((m) => m[1]!);
+
+    const prereq = tipRow({
+      id: "prereq-shop",
+      key: "shopping_basic_add",
+      topic: "shopping",
+      listType: "shopping",
+      triggerKind: "action",
+      triggerArea: "lists",
+      triggerOp: "add",
+      order: 100,
+      text: "shop ladder",
+    });
+    const eligibleSeeded = tipRow({
+      id: "g-weather",
+      key: "general_weather",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 800,
+      maxShows: 2,
+      systemSeed: true,
+      minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      text: "weather tip",
+    });
+    const exhaustedSeeded = tipRow({
+      id: "g-market",
+      key: "general_market",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 801,
+      maxShows: 1,
+      systemSeed: true,
+      minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      text: "market tip",
+    });
+    const lockedSeeded = tipRow({
+      id: "g-locked",
+      key: "general_routes",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 803,
+      maxShows: 2,
+      systemSeed: true,
+      unlockAfterKey: "shopping_basic_add",
+      minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      text: "routes tip locked",
+    });
+    const customGeneral = tipRow({
+      id: "g-custom",
+      key: "my_custom_discovery",
+      triggerKind: "general",
+      triggerArea: null,
+      triggerOp: null,
+      topic: null,
+      listType: null,
+      order: 50,
+      maxShows: 3,
+      systemSeed: false,
+      minIntervalMinutes: 0,
+      text: "custom discovery tip",
+    });
+    const allTips = [
+      prereq,
+      eligibleSeeded,
+      exhaustedSeeded,
+      lockedSeeded,
+      customGeneral,
+    ];
+    const progressRows = [
+      {
+        tipId: exhaustedSeeded.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date("2026-01-01T00:00:00Z"),
+      },
+    ];
+
+    tipFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const where = args?.where ?? {};
+      const keyIn = (where.key as { in?: string[] } | undefined)?.in;
+      if (Array.isArray(keyIn)) {
+        return allTips
+          .filter((tip) => keyIn.includes(tip.key))
+          .map((tip) => ({
+            id: tip.id,
+            key: tip.key,
+            systemSeed: tip.systemSeed,
+          }));
+      }
+      const kindIn = (where.triggerKind as { in?: string[] } | undefined)?.in;
+      if (Array.isArray(kindIn)) {
+        return allTips.filter((tip) => kindIn.includes(tip.triggerKind));
+      }
+      return allTips;
+    });
+    tipProgressFindMany.mockResolvedValue(progressRows);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+    tipCreate.mockResolvedValue({});
+    tipUpdate.mockResolvedValue({});
+    tipDeleteMany.mockResolvedValue({ count: 0 });
+    employeeFindMany.mockResolvedValue([
+      { id: LUCY, name: "לוסי", nickname: "לוסי", isProtected: true },
+    ]);
+
+    const available = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+    });
+    const shownKeys = parseAvailableKeys(available);
+    expect(shownKeys).toEqual(
+      expect.arrayContaining(["general_weather", "my_custom_discovery"]),
+    );
+    expect(shownKeys).not.toContain("general_market");
+    expect(shownKeys).not.toContain("general_routes");
+    expect(shownKeys).not.toContain("shopping_basic_add");
+
+    const generalShown = shownKeys.filter((key) =>
+      allTips.some((tip) => tip.key === key && tip.triggerKind === "general"),
+    );
+    expect(generalShown.length).toBeGreaterThan(0);
+
+    for (const key of generalShown) {
+      tipProgressFindMany.mockResolvedValue(progressRows);
+      tipProgressFindUnique.mockResolvedValue(null);
+      tipProgressCreate.mockClear();
+      tipProgressUpdate.mockClear();
+
+      const turn = await resolveAndRecordTipsForTurn({
+        userId: USER,
+        speaker,
+        digitalEmployeeId: LUCY,
+        appliedOps: [],
+        modelTipKeys: [key],
+      });
+      const tip = allTips.find((row) => row.key === key)!;
+      expect(turn.texts).toEqual([tip.text]);
+      expect(tipProgressCreate).toHaveBeenCalled();
+    }
+
+    // Blocked keys stay blocked at record time (same progress fixture).
+    for (const blocked of ["general_market", "general_routes"] as const) {
+      tipProgressFindMany.mockResolvedValue(progressRows);
+      tipProgressCreate.mockClear();
+      const turn = await resolveAndRecordTipsForTurn({
+        userId: USER,
+        speaker,
+        digitalEmployeeId: LUCY,
+        appliedOps: [],
+        modelTipKeys: [blocked],
+      });
+      expect(turn.texts).toEqual([]);
+      expect(tipProgressCreate).not.toHaveBeenCalled();
+    }
+
+    // Action still wins over an otherwise-eligible general key.
+    tipProgressFindMany.mockResolvedValue(progressRows);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockClear();
+    const actionWins = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [
+        { area: "lists", op: "add", listType: "shopping", topic: "shopping" },
+      ],
+      modelTipKeys: ["general_weather"],
+    });
+    expect(actionWins.texts).toEqual(["shop ladder"]);
+
+    // Cross-general cooldown (seeded only) clears AVAILABLE_TIPS seeded keys;
+    // custom general remains listable and selectable.
+    tipProgressFindMany.mockResolvedValue([
+      ...progressRows,
+      {
+        tipId: eligibleSeeded.id,
+        employeeId: SPEAKER,
+        digitalEmployeeId: LUCY,
+        showCount: 1,
+        lastShownAt: new Date(Date.now() - 5 * 60_000),
+      },
+    ]);
+    const afterSeededShow = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+    });
+    const afterKeys = parseAvailableKeys(afterSeededShow);
+    expect(afterKeys).not.toContain("general_weather");
+    expect(afterKeys).toContain("my_custom_discovery");
+
+    tipProgressCreate.mockClear();
+    const customStillOk = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["my_custom_discovery"],
+    });
+    expect(customStillOk.texts).toEqual(["custom discovery tip"]);
   });
 });
 

@@ -7,6 +7,9 @@ import type {
   TipTriggerOp,
 } from "@workee/shared";
 
+/** Per-tip and cross-general cooldown for seeded `triggerKind: "general"` tips. */
+export const GENERAL_TIP_MIN_INTERVAL_MINUTES = 360;
+
 /** One catalog row before binding to Lucy / guest digital id. */
 export type TipSeedDef = {
   key: string;
@@ -24,6 +27,11 @@ export type TipSeedDef = {
   text: string;
   /** guest → לוסי-אורח; member → לוסי */
   for: "lucy" | "guestLucy";
+  /**
+   * Cooldown between shows of this tip. Omitted → 0 for action/model;
+   * general seeds default to {@link GENERAL_TIP_MIN_INTERVAL_MINUTES} on reseed.
+   */
+  minIntervalMinutes?: number;
 };
 
 /**
@@ -31,7 +39,7 @@ export type TipSeedDef = {
  * Per topic: 2 basic + 2 mid + 1 adv on add, plus mid tips on update/remove.
  * Order bands: shopping 1xx, tasks 2xx, custom 3xx, filing 4xx, reminders 5xx,
  * directory 6xx, meetings 7xx (meetings trigger on tasks mutations too).
- * General live/capability tips: 8xx (shown only when no action/model tip fired).
+ * General live/capability tips: 8xx — optional model pick only (no auto-fallback).
  */
 export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
   // —— Shopping (קניות) ——
@@ -829,7 +837,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 800,
-    text: "אגב, אפשר לשאול אותי מה מזג האוויר היום או בימים הקרובים.",
+    text: "לפני שיוצאים ☔ אפשר לבדוק אצלי אם צפוי גשם היום או מחר.",
   },
   {
     key: "general_market",
@@ -844,7 +852,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 801,
-    text: "אגב, אפשר לבדוק שערי חליפין — למשל דולר, אירו ושקל.",
+    text: "💱 אם צריך שער עדכני לדולר או לאירו מול השקל — אפשר לשאול אותי.",
   },
   {
     key: "general_places",
@@ -859,7 +867,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 802,
-    text: "אגב, אפשר לבקש ממני למצוא מסעדה, בית קפה או מקום באזור.",
+    text: "🍽️ מחפשים מסעדה או בית קפה באזור? אפשר שאשלוף כמה אפשרויות עם פרטים.",
   },
   {
     key: "general_routes",
@@ -874,7 +882,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 803,
-    text: "אגב, אפשר לבדוק מסלול בתחבורה ציבורית ומתי כדאי לצאת.",
+    text: "🚌 מתכננים נסיעה? אפשר לבדוק אילו קווי תחבורה ציבורית מתאימים ומתי כדאי לצאת.",
   },
   {
     key: "general_parking",
@@ -889,7 +897,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 804,
-    text: "אגב, אפשר לחפש חניה באזור — כולל אם יש מידע על חינם או בתשלום.",
+    text: "🅿️ לפני שמגיעים ליעד — אפשר שאבדוק חניונים באזור, כולל אם מופיע מידע על חינם או בתשלום.",
   },
   {
     key: "general_filing_media_ask",
@@ -905,7 +913,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     maxShows: 2,
     order: 805,
     // Save + ask by filing name later — not a promise of OCR / full document decode.
-    text: "אגב, אפשר לשלוח תמונה או מסמך לתייק אצלי, ואחר כך לשאול עליו לפי השם.",
+    text: "📎 תמונה או מסמך חשוב? אפשר לתייק אצלי ואחר כך לשאול עליו לפי השם שנתתם.",
   },
   {
     key: "general_location_waze",
@@ -920,7 +928,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 806,
-    text: "אגב, אפשר לשמור מיקום בתיוקים ואחר כך לפתוח ניווט ב־Waze.",
+    text: "📍 שומרים כתובת או מיקום בתיוקים — ואפשר לפתוח משם ניווט ב־Waze כשצריך.",
   },
   {
     key: "general_mashov",
@@ -935,7 +943,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 807,
-    text: "אגב, אם משו״ב מחובר — אפשר לבקש ממני לבדוק ציונים או מידע זמין משם.",
+    text: "🎓 אם משו״ב כבר מחובר אצלי — אפשר לבקש ממני ציונים או מידע זמין משם.",
   },
   {
     key: "general_watch",
@@ -950,7 +958,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 2,
     order: 808,
-    text: "אגב, אפשר לבקש ממני לעקוב אחרי משהו ולהתריע כשמתקיים תנאי — למשל שינוי בשער מטבע או תנאי מזג אוויר מסוים.",
+    text: "🔔 רוצים לדעת כששער הדולר משתנה או כשמתקיים תנאי מסוים? אפשר להגדיר מעקב, בהתאם ליכולות הזמינות.",
   },
 ];
 

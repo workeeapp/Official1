@@ -915,7 +915,16 @@ export interface LlmRoutesAction {
    * true → server runs same-turn live_select on itineraries / stop lines.
    */
   requireLiveSelect: boolean;
+  /**
+   * Trip ranking preference. Only `closest_board` is supported (shortest walk to
+   * first boarding among Google alternatives). Empty = default leave→walk rank.
+   * Residual V (e.g. fewer transfers) stays require_live_select — not prefer.
+   */
+  prefer: LlmRoutesPrefer;
 }
+
+/** Supported routes.prefer values (omit/empty = default ranking). */
+export type LlmRoutesPrefer = "" | "closest_board";
 
 export type LlmFlightsAspect =
   | "summary"
@@ -4064,6 +4073,7 @@ export function parseRoutesAction(
       mode: "transit",
       aspects: resolvedAspects,
       requireLiveSelect: requireLiveSelectGtfs,
+      prefer: "",
     };
   }
   if (!origin) {
@@ -4077,6 +4087,11 @@ export function parseRoutesAction(
   const requireLiveSelect = normalizeRequireLiveSelect(
     row.require_live_select ?? row.requireLiveSelect ?? row.require_select,
   );
+  const preferRaw = readText(row, ["prefer", "optimize", "optimize_for", "optimizeFor"])
+    .trim()
+    .toLowerCase();
+  const prefer: LlmRoutesPrefer =
+    !driveMode && preferRaw === "closest_board" ? "closest_board" : "";
   return {
     origin,
     destination,
@@ -4091,6 +4106,7 @@ export function parseRoutesAction(
     mode: driveMode ? "drive" : "transit",
     aspects: resolvedAspects,
     requireLiveSelect,
+    prefer,
   };
 }
 

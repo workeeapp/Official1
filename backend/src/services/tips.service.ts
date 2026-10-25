@@ -29,6 +29,7 @@ import {
   ValidationError,
 } from "../utils/errors.js";
 import {
+  GENERAL_TIP_MIN_INTERVAL_MINUTES,
   LEGACY_TIP_KEYS,
   SYSTEM_TIP_SEEDS,
   TIER_RANK,
@@ -203,7 +204,12 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
       unlockAfterKey: seed.unlockAfterKey,
       systemSeed: true,
       outputMode: "static",
-      minIntervalMinutes: 0,
+      minIntervalMinutes:
+        typeof seed.minIntervalMinutes === "number"
+          ? seed.minIntervalMinutes
+          : seed.triggerKind === "general"
+            ? GENERAL_TIP_MIN_INTERVAL_MINUTES
+            : 0,
       maxShows: seed.maxShows,
       order: seed.order,
       text: seed.text,
@@ -739,6 +745,7 @@ function tipEligibleByQuotaAndCooldown(
   tip: Tip,
   showCountByTip: Map<string, number>,
   lastShownByTip: Map<string, Date>,
+  now: Date = new Date(),
 ): boolean {
   if (!underQuota(showCountByTip.get(tip.id) ?? 0, tip.maxShows)) {
     return false;
@@ -746,12 +753,77 @@ function tipEligibleByQuotaAndCooldown(
   return tipCooldownOk(
     lastShownByTip.get(tip.id),
     tip.minIntervalMinutes ?? 0,
+    now,
   );
+}
+
+/** Seeded catalog general tip — not a user-customized tip. */
+function isSeededGeneralTip(tip: Tip): boolean {
+  return tip.triggerKind === "general" && tip.systemSeed === true;
+}
+
+/**
+ * Cross-general gap for seeded generals only (same speaker + digital).
+ * User-custom tips are ignored here.
+ */
+export function seededGeneralCrossCooldownOk(
+  tips: Tip[],
+  lastShownByTip: Map<string, Date>,
+  now: Date = new Date(),
+  gapMinutes: number = GENERAL_TIP_MIN_INTERVAL_MINUTES,
+): boolean {
+  for (const tip of tips) {
+    if (!isSeededGeneralTip(tip)) {
+      continue;
+    }
+    if (!tipCooldownOk(lastShownByTip.get(tip.id), gapMinutes, now)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function tipFullyEligibleForKeyPick(
+  tip: Tip,
+  eligible: Tip[],
+  showCountByTip: Map<string, number>,
+  lastShownByTip: Map<string, Date>,
+  keyToTipId: Map<string, string>,
+  now: Date,
+): boolean {
+  if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)) {
+    return false;
+  }
+  if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
+    return false;
+  }
+  if (
+    isSeededGeneralTip(tip) &&
+    !seededGeneralCrossCooldownOk(eligible, lastShownByTip, now)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function pickSortedTip(candidates: Tip[]): Tip | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => {
+    const tr = TIER_RANK[tipTier(a)] - TIER_RANK[tipTier(b)];
+    if (tr !== 0) {
+      return tr;
+    }
+    return a.order - b.order || a.createdAt.getTime() - b.createdAt.getTime();
+  });
+  return candidates[0] ?? null;
 }
 
 /**
  * Resolve which tip texts to append this turn and bump progress.
- * Action/model first (one tip); general only if none contextual.
+ * Action, then model-kind keys; seeded general only when model selects an
+ * eligible key (no automatic general fallback). At most one tip.
  * Dynamic tips: compose from tip.text + turn FACTS; fail/empty → skip (no progress).
  */
 export async function resolveAndRecordTipsForTurn(input: {
@@ -765,8 +837,11 @@ export async function resolveAndRecordTipsForTurn(input: {
   addressGender?: "male" | "female" | null;
   /** Chat conversation for catalog_tip LlmUsages (required for dynamic). */
   billing?: ComposeLlmBilling | null;
+  /** Test clock for cooldowns. */
+  now?: Date;
 }): Promise<TipTurnResult> {
   await ensureDefaultTips(input.userId);
+  const now = input.now ?? new Date();
   const speakerIsGuest = isGuestEmployee(input.speaker);
   const tips = await prisma.tip.findMany({
     where: { userId: input.userId, enabled: true },
@@ -796,12 +871,12 @@ export async function resolveAndRecordTipsForTurn(input: {
   );
   const keyToTipId = new Map(eligible.map((tip) => [tip.key, tip.id] as const));
 
-  const candidates: Tip[] = [];
+  const contextual: Tip[] = [];
   for (const tip of eligible) {
     if (tip.triggerKind !== "action") {
       continue;
     }
-    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip)) {
+    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)) {
       continue;
     }
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
@@ -810,7 +885,7 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (!input.appliedOps.some((applied) => actionTipMatches(tip, applied))) {
       continue;
     }
-    candidates.push(tip);
+    contextual.push(tip);
   }
 
   const modelKeys = new Set(
@@ -823,40 +898,40 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (!modelKeys.has(tip.key)) {
       continue;
     }
-    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip)) {
+    if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)) {
       continue;
     }
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
       continue;
     }
-    candidates.push(tip);
+    contextual.push(tip);
   }
 
-  let chosen: Tip | null = null;
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => {
-      const tr = TIER_RANK[tipTier(a)] - TIER_RANK[tipTier(b)];
-      if (tr !== 0) {
-        return tr;
-      }
-      return a.order - b.order || a.createdAt.getTime() - b.createdAt.getTime();
-    });
-    chosen = candidates[0] ?? null;
-  } else {
-    const generals = eligible.filter((tip) => {
+  let chosen = pickSortedTip(contextual);
+  if (!chosen) {
+    const generals: Tip[] = [];
+    for (const tip of eligible) {
       if (tip.triggerKind !== "general") {
-        return false;
+        continue;
       }
-      return tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip);
-    });
-    if (generals.length > 0) {
-      const minShown = Math.min(
-        ...generals.map((tip) => showCountByTip.get(tip.id) ?? 0),
-      );
-      chosen =
-        generals.find((tip) => (showCountByTip.get(tip.id) ?? 0) === minShown) ??
-        null;
+      if (!modelKeys.has(tip.key)) {
+        continue;
+      }
+      if (
+        !tipFullyEligibleForKeyPick(
+          tip,
+          eligible,
+          showCountByTip,
+          lastShownByTip,
+          keyToTipId,
+          now,
+        )
+      ) {
+        continue;
+      }
+      generals.push(tip);
     }
+    chosen = pickSortedTip(generals);
   }
 
   if (!chosen) {
@@ -894,19 +969,27 @@ export async function resolveAndRecordTipsForTurn(input: {
   return { texts: [body], tipIds: [chosen.id] };
 }
 
-/** Remaining model-kind tips the speaker may still receive (for AVAILABLE_TIPS). */
+/**
+ * Remaining tips the speaker may still receive (for AVAILABLE_TIPS).
+ * Lists model-kind and general tips that pass the same eligibility gates as
+ * recording (shared tip universe + tipFullyEligibleForKeyPick). Listing is
+ * optional — the model need not emit any key.
+ */
 export async function formatAvailableTipsContext(input: {
   userId: string;
   speaker: PublicEmployee;
   digitalEmployeeId: string;
+  now?: Date;
 }): Promise<string> {
   await ensureDefaultTips(input.userId);
+  const now = input.now ?? new Date();
   const speakerIsGuest = isGuestEmployee(input.speaker);
+  // Same tip universe as resolveAndRecordTipsForTurn so unlockAfterKey /
+  // ladder progress against action tips stay consistent with recording.
   const tips = await prisma.tip.findMany({
     where: {
       userId: input.userId,
       enabled: true,
-      triggerKind: "model",
     },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
   });
@@ -931,18 +1014,28 @@ export async function formatAvailableTipsContext(input: {
   const lastShownByTip = new Map(
     progressRows.map((row) => [row.tipId, row.lastShownAt] as const),
   );
-  const remaining = eligible.filter((tip) =>
-    tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip),
+  const keyToTipId = new Map(eligible.map((tip) => [tip.key, tip.id] as const));
+  const remaining = eligible.filter(
+    (tip) =>
+      (tip.triggerKind === "model" || tip.triggerKind === "general") &&
+      tipFullyEligibleForKeyPick(
+        tip,
+        eligible,
+        showCountByTip,
+        lastShownByTip,
+        keyToTipId,
+        now,
+      ),
   );
   if (remaining.length === 0) {
     return "";
   }
   return [
-    "AVAILABLE_TIPS (match this turn's chat to each tip's catalog text; when it fits, emit that key in metadata.tips — engine appends catalog tip text, static or FACTS-grounded; never invent keys or rewrite tip copy in responses):",
+    "AVAILABLE_TIPS (optional). Match this turn's chat to a tip's catalog text only when it naturally fits — then emit that key in metadata.tips. Omit metadata.tips / use [] when none fit. Never invent keys or rewrite tip copy in responses. Engine appends catalog tip text (static or FACTS-grounded). Listing a tip does not require emitting it:",
     ...remaining.map((tip) => {
       const body = tip.text.trim().replace(/\s+/g, " ");
       const mode = tipOutputMode(tip);
-      return `- key=${tip.key} output=${mode} text: ${body}`;
+      return `- key=${tip.key} kind=${tip.triggerKind} output=${mode} text: ${body}`;
     }),
   ].join("\n");
 }

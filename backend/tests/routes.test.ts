@@ -8,11 +8,20 @@ import {
   geocodeNamedPlaceForNearestStop,
   itineraryWalkTransferBits,
   rankTripItineraries,
+  rankTripItinerariesByClosestBoard,
+  boardingWalkSecondsBeforeTransit,
+  itineraryClosestBoardComparable,
+  ROUTES_CLOSEST_BOARD_INSUFFICIENT_HE,
+  ROUTES_WALK_PARTIAL_NOTE_HE,
   ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE,
+  ROUTES_DISRUPTION_UNAVAILABLE_HE,
+  ROUTES_GOOGLE_ETA_NOT_SIRI_INTRO_HE,
   ROUTES_ITINERARY_DISPLAY_CAP,
   ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE,
+  ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE,
   ROUTES_STEPS_LOCAL_TRUNCATION_HE,
   ROUTES_STEPS_SUMMARY_DISPLAY_CAP,
+  routesMultiAltsCueHe,
   parseRoutesAspects,
   resolveRoutesReply,
   toRoutesRfc3339,
@@ -20,6 +29,7 @@ import {
   type RoutesFacts,
 } from "../src/services/routes.js";
 import * as gtfsQuery from "../src/services/gtfs-query.js";
+import * as siriSm from "../src/services/siri-sm.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -151,6 +161,8 @@ describe("formatRoutesHebrew", () => {
     stopLines: [],
     stopDisplayName: "",
     itineraries: [],
+    prefer: "",
+    closestBoardInsufficient: false,
   };
 
   const sampleStep = (
@@ -330,7 +342,137 @@ describe("formatRoutesHebrew", () => {
     expect(text).toContain("קו 51");
   });
 
-  it("formats multiple Google itineraries with estimate disclaimer", () => {
+  const walkThenBoard = (
+    walkSec: number,
+    line: string,
+    fromStop: string,
+    leaveBy: string,
+  ): RouteItineraryOption => ({
+    durationText: "40 דקות",
+    durationSeconds: 2400,
+    distanceMeters: 9000,
+    fareText: "",
+    leaveByText: leaveBy,
+    arriveByText: "09:30",
+    steps: [
+      {
+        travelMode: "WALK",
+        instruction: walkSec > 0 ? "הליכה לתחנה" : "",
+        line: "",
+        headsign: "",
+        fromStop: "",
+        toStop: fromStop,
+        departureTime: "",
+        departureIso: "",
+        arrivalTime: "",
+        durationText: walkSec > 0 ? `${Math.round(walkSec / 60)} דקות` : "0 דקות",
+        durationSeconds: walkSec,
+        headwaySeconds: null,
+      },
+      {
+        travelMode: "TRANSIT",
+        instruction: "",
+        line,
+        headsign: "תל אביב",
+        fromStop,
+        toStop: "עזריאלי",
+        departureTime: leaveBy,
+        departureIso: "",
+        arrivalTime: "09:20",
+        durationText: "30 דקות",
+        durationSeconds: 1800,
+        headwaySeconds: null,
+      },
+    ],
+  });
+
+  it("leads with closest_board answer among options", () => {
+    const earlierFar = walkThenBoard(900, "50", "תחנה רחוקה", "08:00");
+    const laterNear = walkThenBoard(180, "238", "תחנה קרובה", "08:40");
+    const ranked = rankTripItinerariesByClosestBoard([earlierFar, laterNear]);
+    const text = formatRoutesHebrew({
+      ...base,
+      prefer: "closest_board",
+      closestBoardInsufficient: false,
+      itineraries: ranked,
+      steps: ranked[0]!.steps,
+      leaveByText: ranked[0]!.leaveByText,
+      durationText: ranked[0]!.durationText,
+    });
+    expect(text).toMatch(/קו 238/);
+    expect(text).toMatch(/תחנה קרובה/);
+    expect(text).toMatch(/הליכה כ־3 דקות/);
+    expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
+    expect(text.indexOf("238")).toBeLessThan(text.indexOf("אפשרות"));
+  });
+
+  it("discloses when closest_board has no comparable boarding walk", () => {
+    const noBoard: RouteItineraryOption = {
+      durationText: "20 דקות",
+      durationSeconds: 1200,
+      distanceMeters: 1000,
+      fareText: "",
+      leaveByText: "08:00",
+      arriveByText: "08:20",
+      steps: [
+        {
+          travelMode: "WALK",
+          instruction: "",
+          line: "",
+          headsign: "",
+          fromStop: "",
+          toStop: "",
+          departureTime: "",
+          departureIso: "",
+          arrivalTime: "",
+          durationText: "",
+          durationSeconds: null,
+          headwaySeconds: null,
+        },
+      ],
+    };
+    expect(itineraryClosestBoardComparable(noBoard)).toBe(false);
+    const text = formatRoutesHebrew({
+      ...base,
+      prefer: "closest_board",
+      closestBoardInsufficient: true,
+      itineraries: rankTripItineraries([
+        noBoard,
+        walkThenBoard(300, "1", "ס", "08:10"),
+      ]),
+      steps: noBoard.steps,
+    });
+    expect(text).toContain(ROUTES_CLOSEST_BOARD_INSUFFICIENT_HE);
+    expect(text).not.toMatch(/הקו עם תחנת העלייה הקרובה ביותר/);
+  });
+
+  it("omits empty zero-minute walk steps from display", () => {
+    const text = formatRoutesHebrew({
+      ...base,
+      steps: [
+        {
+          travelMode: "WALK",
+          instruction: "",
+          line: "",
+          headsign: "",
+          fromStop: "",
+          toStop: "",
+          departureTime: "",
+          departureIso: "",
+          arrivalTime: "",
+          durationText: "0 דקות",
+          durationSeconds: 0,
+          headwaySeconds: null,
+        },
+        sampleStep({ line: "1", fromStop: "בית", toStop: "עזריאלי" }),
+      ],
+    });
+    expect(text).not.toMatch(/הליכה — הליכה \(0 דקות\)/);
+    expect(text).toContain(ROUTES_WALK_PARTIAL_NOTE_HE);
+    expect(text).toMatch(/קו 1/);
+  });
+
+  it("formats multiple Google itineraries with compact lead (no secondary steps)", () => {
     const text = formatRoutesHebrew({
       ...base,
       itineraries: [
@@ -342,6 +484,7 @@ describe("formatRoutesHebrew", () => {
             sampleStep({
               travelMode: "WALK",
               line: "",
+              instruction: "הליכה לתחנה",
               durationSeconds: 300,
               durationText: "5 דקות",
               departureTime: "",
@@ -366,21 +509,76 @@ describe("formatRoutesHebrew", () => {
     });
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
-    expect(text).toContain("*אפשרות 1*");
-    expect(text).toContain("*אפשרות 2*");
+    expect(text).toContain("המלצה:");
     expect(text).toContain("משך משוער *45 דקות*");
-    expect(text).toContain("משך משוער *52 דקות*");
     expect(text).toContain("קו 51");
-    expect(text).toContain("קו 66");
     expect(text).toContain("הליכה משוערת 5 דקות");
     expect(text).toContain("בלי החלפה");
-    expect(text).toContain("1 החלפות");
-    expect(text).toMatch(/משוער/);
+    expect(text).toContain(routesMultiAltsCueHe(1));
+    // Secondary option not expanded (no full option-2 body / its lines).
+    expect(text).not.toContain("*אפשרות 2*");
+    expect(text).not.toContain("משך משוער *52 דקות*");
+    expect(text).not.toContain("קו 66");
+    // summary multi: no step-by-step dump for primary walk instruction line.
+    expect(text).not.toMatch(/1\. הליכה — הליכה לתחנה/);
     expect(text).not.toContain("מסלול בתחבורה ציבורית מ«");
-    // Honesty disclaimer mentions MOT/RT only as what this is *not*.
     expect(text).toContain("מגוגל");
     expect(text).not.toContain("SIRI");
-    expect(text).not.toMatch(/הגעות חזויות/);
+  });
+
+  it("multi with steps aspect shows primary steps only", () => {
+    const text = formatRoutesHebrew({
+      ...base,
+      aspects: ["summary", "steps"],
+      itineraries: [
+        sampleItinerary({
+          durationText: "45 דקות",
+          leaveByText: "08:15",
+          steps: [
+            sampleStep({
+              travelMode: "WALK",
+              line: "",
+              instruction: "הליכה לתחנה",
+              durationSeconds: 300,
+              durationText: "5 דקות",
+              departureTime: "",
+              arrivalTime: "",
+              fromStop: "",
+              toStop: "ארנס",
+            }),
+            sampleStep({ line: "51" }),
+          ],
+        }),
+        sampleItinerary({
+          durationText: "52 דקות",
+          leaveByText: "08:05",
+          steps: [
+            sampleStep({
+              travelMode: "WALK",
+              line: "",
+              instruction: "הליכה משנית",
+              durationSeconds: 600,
+              durationText: "10 דקות",
+              fromStop: "",
+              toStop: "אחר",
+            }),
+            sampleStep({ line: "66", fromStop: "שלום דורני" }),
+          ],
+        }),
+      ],
+    });
+    expect(text).toMatch(/1\. הליכה — הליכה לתחנה/);
+    expect(text).toContain("קו 51");
+    expect(text).not.toContain("הליכה משנית");
+    expect(text).not.toContain("קו 66");
+  });
+
+  it("single itinerary summary still shows basic directions", () => {
+    const text = formatRoutesHebrew(base);
+    expect(text).toContain("מסלול בתחבורה ציבורית");
+    expect(text).toContain("קו 51");
+    expect(text).toMatch(/הליכה/);
+    expect(text).not.toContain(routesMultiAltsCueHe(1));
   });
 
   it("itineraryWalkTransferBits only uses provider step fields", () => {
@@ -439,13 +637,22 @@ describe("formatRoutesHebrew", () => {
     });
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
+    expect(text).toContain("המלצה:");
     expect(text).toContain("משך משוער *40 דקות*");
     expect(text).not.toMatch(/יציאה משוערת/);
     expect(text).not.toMatch(/הגעה משוערת/);
     expect(text).not.toMatch(/מחיר משוער/);
     expect(text).not.toMatch(/→/);
     expect(text).toContain("קו 1");
-    expect(text).toContain("קו 82");
+    // Secondary line not expanded in compact first response.
+    expect(text).not.toContain("קו 82");
+    expect(text).toContain(routesMultiAltsCueHe(1));
+  });
+
+  it("exports disruption-unavailable disclose for capability U", () => {
+    expect(ROUTES_DISRUPTION_UNAVAILABLE_HE).toMatch(/שיבוש|ביטול/);
+    expect(ROUTES_DISRUPTION_UNAVAILABLE_HE).toMatch(/לא מחובר/);
+    expect(ROUTES_DISRUPTION_UNAVAILABLE_HE).not.toMatch(/תחזית חיה/);
   });
 });
 
@@ -820,10 +1027,11 @@ describe("resolveRoutesReply", () => {
     });
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
-    expect(text).toContain("קו 51");
+    expect(text).toContain("המלצה:");
+    // Compact multi: primary only (earlier leave 66 @ 08:10); secondary deferred.
     expect(text).toContain("קו 66");
-    // Ranked by earlier leave: 66 @ 08:10 before 51 @ 08:20.
-    expect(text.indexOf("קו 66")).toBeLessThan(text.indexOf("קו 51"));
+    expect(text).not.toContain("קו 51");
+    expect(text).toContain(routesMultiAltsCueHe(1));
     const body = computeRoutesBody(fetchImpl);
     expect(body.computeAlternativeRoutes).toBe(true);
     expect(body.transitPreferences).toBeUndefined();
@@ -907,11 +1115,14 @@ describe("resolveRoutesReply", () => {
     expect(facts.itineraries.every((i) => i.fareText === "")).toBe(true);
     const text = formatRoutesHebrew(facts);
     expect(text).toContain("מצאתי 2 אפשרויות");
+    expect(text).toContain("המלצה:");
     expect(text).not.toMatch(/יציאה משוערת/);
     expect(text).not.toMatch(/הגעה משוערת/);
     expect(text).not.toMatch(/מחיר משוער/);
     expect(text).toContain("קו 1");
-    expect(text).toContain("קו 82");
+    // Secondary alternative line deferred in compact first response.
+    expect(text).not.toContain("קו 82");
+    expect(text).toContain(routesMultiAltsCueHe(1));
   });
 
   it("reports zero results when Google returns no routes", async () => {
@@ -995,10 +1206,13 @@ describe("resolveRoutesReply", () => {
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
+    expect(text).toContain("המלצה:");
     expect(text).toContain("קו 51");
-    expect(text).toContain("קו 66");
+    // Compact: secondary line not expanded; still must not invent absent lines.
+    expect(text).not.toContain("קו 66");
     expect(text).not.toContain("קו 999");
     expect(text).not.toContain("קו 1");
+    expect(text).toContain(routesMultiAltsCueHe(1));
   });
 
   it(`caps displayed alternatives at ${ROUTES_ITINERARY_DISPLAY_CAP} from provider routes`, async () => {
@@ -1039,10 +1253,14 @@ describe("resolveRoutesReply", () => {
     expect(facts.itineraries).toHaveLength(ROUTES_ITINERARY_DISPLAY_CAP);
     const text = formatRoutesHebrew(facts);
     expect(text).toContain(`מצאתי ${ROUTES_ITINERARY_DISPLAY_CAP} אפשרויות`);
+    expect(text).toContain("המלצה:");
     expect(text).toContain("קו 11");
-    expect(text).toContain("קו 33");
+    // Cap still applied to itineraries[]; compact body shows primary only.
+    expect(text).not.toContain("קו 22");
+    expect(text).not.toContain("קו 33");
     expect(text).not.toContain("קו 44");
     expect(text).not.toContain("קו 55");
+    expect(text).toContain(routesMultiAltsCueHe(ROUTES_ITINERARY_DISPLAY_CAP - 1));
   });
 
   it("line-ETA path does not surface multi-option trip compare", async () => {
@@ -1486,6 +1704,50 @@ describe("origin→destination trip boarding workflow", () => {
     expect(body.routingPreference).toBe("TRAFFIC_AWARE");
   });
 
+  const walkThenBoard = (
+    walkSec: number,
+    line: string,
+    fromStop: string,
+    leaveBy: string,
+  ): RouteItineraryOption => ({
+    durationText: "40 דקות",
+    durationSeconds: 2400,
+    distanceMeters: 9000,
+    fareText: "",
+    leaveByText: leaveBy,
+    arriveByText: "09:30",
+    steps: [
+      {
+        travelMode: "WALK",
+        instruction: walkSec > 0 ? "הליכה לתחנה" : "",
+        line: "",
+        headsign: "",
+        fromStop: "",
+        toStop: fromStop,
+        departureTime: "",
+        departureIso: "",
+        arrivalTime: "",
+        durationText: walkSec > 0 ? `${Math.round(walkSec / 60)} דקות` : "0 דקות",
+        durationSeconds: walkSec,
+        headwaySeconds: null,
+      },
+      {
+        travelMode: "TRANSIT",
+        instruction: "",
+        line,
+        headsign: "תל אביב",
+        fromStop,
+        toStop: "עזריאלי",
+        departureTime: leaveBy,
+        departureIso: "",
+        arrivalTime: "09:20",
+        durationText: "30 דקות",
+        durationSeconds: 1800,
+        headwaySeconds: null,
+      },
+    ],
+  });
+
   it("rankTripItineraries prefers earlier leave then shorter walk", () => {
     const ranked = rankTripItineraries([
       {
@@ -1538,6 +1800,19 @@ describe("origin→destination trip boarding workflow", () => {
       },
     ]);
     expect(ranked[0]?.leaveByText).toBe("08:30");
+  });
+
+  it("closest_board ranks by boarding walk, not earliest leave", () => {
+    const earlierFar = walkThenBoard(900, "50", "תחנה רחוקה", "08:00");
+    const laterNear = walkThenBoard(180, "238", "תחנה קרובה", "08:40");
+    const defaultRank = rankTripItineraries([earlierFar, laterNear]);
+    expect(defaultRank[0]?.leaveByText).toBe("08:00");
+    expect(defaultRank[0]?.steps.find((s) => s.line)?.line).toBe("50");
+
+    const closest = rankTripItinerariesByClosestBoard([earlierFar, laterNear]);
+    expect(closest[0]?.steps.find((s) => s.line)?.line).toBe("238");
+    expect(boardingWalkSecondsBeforeTransit(closest[0]!.steps)).toBe(180);
+    expect(itineraryClosestBoardComparable(laterNear)).toBe(true);
   });
 
   it("asks when destination geocode is ambiguous (does not call Google)", async () => {
@@ -1689,6 +1964,8 @@ describe("origin→destination trip boarding workflow", () => {
     matchedLine: "51",
     stopLines: [],
     stopDisplayName: "",
+    prefer: "",
+    closestBoardInsufficient: false,
   });
 
   it("appends labeled GTFS boarding departures after Google journey", async () => {
@@ -1717,6 +1994,124 @@ describe("origin→destination trip boarding workflow", () => {
     expect(extra).toContain("קו 51");
     expect(extra).toContain(gtfsQuery.GTFS_OFFICIAL_SOURCE_HE);
     expect(extra).not.toMatch(/SIRI|תחזית חיה/);
+  });
+
+  it("resolve multi + MOT enrichment keeps schedule facts without אפשרות N labels", async () => {
+    vi.spyOn(gtfsQuery, "isGtfsEnabled").mockReturnValue(true);
+    vi.spyOn(siriSm, "isSiriSmConfigured").mockReturnValue(false);
+    vi.spyOn(gtfsQuery, "querySchedule").mockImplementation(
+      async (_prisma, input: { stopCode?: string; line?: string }) => {
+        const stop = String(input.stopCode ?? "");
+        const line = String(input.line ?? "");
+        const stopName =
+          stop.includes("שלום") || stop.includes("דורני")
+            ? "שלום דורני"
+            : "ארנס";
+        const dep = line === "66" ? "08:12" : "08:22";
+        return {
+          ok: true as const,
+          sourceHe: gtfsQuery.GTFS_OFFICIAL_SOURCE_HE,
+          departures: [
+            {
+              stopCode: line === "66" ? "21224" : "21566",
+              stopName,
+              line: line || "51",
+              agencyName: "דן",
+              directionLabel: "",
+              headsign: "תל אביב",
+              departureTime: dep,
+              depSeconds:
+                Number(dep.slice(0, 2)) * 3600 + Number(dep.slice(3)) * 60,
+              serviceDate: "2026-10-22",
+            },
+          ],
+        };
+      },
+    );
+
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            duration: "2700s",
+            distanceMeters: 12000,
+            localizedValues: { duration: { text: "45 דקות" } },
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      headsign: "תל אביב",
+                      stopDetails: {
+                        departureStop: { name: "ארנס" },
+                        arrivalStop: { name: "דיזנגוף" },
+                        departureTime: "2026-10-22T05:20:00Z",
+                      },
+                      transitLine: { nameShort: "51" },
+                      localizedValues: {
+                        departureTime: { time: { text: "08:20" } },
+                        arrivalTime: { time: { text: "08:55" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            duration: "3120s",
+            distanceMeters: 14000,
+            localizedValues: { duration: { text: "52 דקות" } },
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      headsign: "תל אביב",
+                      stopDetails: {
+                        departureStop: { name: "שלום דורני" },
+                        arrivalStop: { name: "השלום" },
+                        departureTime: "2026-10-22T05:10:00Z",
+                      },
+                      transitLine: { nameShort: "66" },
+                      localizedValues: {
+                        departureTime: { time: { text: "08:10" } },
+                        arrivalTime: { time: { text: "08:55" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    }));
+
+    const { text } = await resolveRoutesReply({
+      origin: "פתח תקווה",
+      destination: "תל אביב",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    // Compact multi lead + recalculation cue.
+    expect(text).toContain("מצאתי 2 אפשרויות");
+    expect(text).toContain("המלצה:");
+    expect(text).toContain(routesMultiAltsCueHe(1));
+    // MOT enrichment still present with useful schedule rows.
+    expect(text).toMatch(/מתוזמנות רשמיות/);
+    expect(text).toContain("08:12");
+    expect(text).toContain("08:22");
+    expect(text).toContain(gtfsQuery.GTFS_OFFICIAL_SOURCE_HE);
+    // Residual risk #1: enrichment must not reintroduce stable option indexes.
+    expect(text).not.toMatch(/אפשרות\s*1/);
+    expect(text).not.toMatch(/אפשרות\s*2/);
   });
 
   it("skips official boarding block when GTFS is disabled", async () => {
@@ -1847,11 +2242,145 @@ describe("origin→destination trip boarding workflow", () => {
       now: new Date("2026-10-25T16:50:00Z"),
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
+    expect(text).toContain(ROUTES_GOOGLE_ETA_NOT_SIRI_INTRO_HE);
     expect(text).toMatch(/הערכת Google/);
     expect(text).toMatch(/לא תחזית SIRI/);
     expect(text).toMatch(/קוד תחנה/);
     expect(text).toMatch(/יוצא|בעוד|קו 51/);
     expect(text).not.toBe("לתחזית חיה צריך קוד תחנה רשמי (מספר).");
+  });
+
+  it("live_arrivals unavailable SIRI with line falls back to labeled schedule-only", async () => {
+    vi.spyOn(gtfsQuery, "isGtfsEnabled").mockReturnValue(true);
+    vi.spyOn(gtfsQuery, "getActiveGenerationId").mockResolvedValue(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    vi.spyOn(gtfsQuery, "resolveScheduleStopRef").mockResolvedValue({
+      ok: true,
+      via: "stop_code",
+      match: { stopCode: "21566", stopName: "ארנס" },
+    });
+    vi.spyOn(siriSm, "fetchSiriStopArrivals").mockResolvedValue({
+      ok: false,
+      kind: "disabled",
+      messageHe: siriSm.SIRI_DISABLED_HE,
+    });
+    vi.spyOn(gtfsQuery, "querySchedule").mockResolvedValue({
+      ok: true,
+      sourceHe: gtfsQuery.GTFS_OFFICIAL_SOURCE_HE,
+      departures: [
+        {
+          stopCode: "21566",
+          stopName: "ארנס",
+          line: "51",
+          agencyName: "דן",
+          directionLabel: "",
+          headsign: "תל אביב",
+          departureTime: "08:25",
+          depSeconds: 8 * 3600 + 25 * 60,
+          serviceDate: "2026-10-25",
+        },
+      ],
+    });
+
+    const { text } = await resolveRoutesReply({
+      origin: "21566",
+      destination: "",
+      stopCode: "21566",
+      line: "51",
+      aspects: ["live_arrivals"],
+    });
+    expect(text).toContain(siriSm.SIRI_DISABLED_HE);
+    expect(text).toContain(ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE);
+    expect(text).toContain(gtfsQuery.GTFS_OFFICIAL_SOURCE_HE);
+    expect(text).toMatch(/יציאות מתוזמנות/);
+    expect(text).toMatch(/08:25/);
+    expect(text).not.toContain(siriSm.SIRI_LIVE_SOURCE_HE);
+    expect(text).not.toMatch(/תחזית חיה \(SIRI\)/);
+  });
+
+  it("live_arrivals stale SIRI falls back to labeled schedule-only", async () => {
+    vi.spyOn(gtfsQuery, "isGtfsEnabled").mockReturnValue(true);
+    vi.spyOn(gtfsQuery, "getActiveGenerationId").mockResolvedValue(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
+    vi.spyOn(gtfsQuery, "resolveScheduleStopRef").mockResolvedValue({
+      ok: true,
+      via: "stop_code",
+      match: { stopCode: "21566", stopName: "ארנס" },
+    });
+    vi.spyOn(siriSm, "fetchSiriStopArrivals").mockResolvedValue({
+      ok: false,
+      kind: "stale",
+      messageHe: siriSm.SIRI_STALE_HE,
+    });
+    vi.spyOn(gtfsQuery, "querySchedule").mockResolvedValue({
+      ok: true,
+      sourceHe: gtfsQuery.GTFS_OFFICIAL_SOURCE_HE,
+      departures: [
+        {
+          stopCode: "21566",
+          stopName: "ארנס",
+          line: "51",
+          agencyName: "דן",
+          directionLabel: "",
+          headsign: "תל אביב",
+          departureTime: "09:10",
+          depSeconds: 9 * 3600 + 10 * 60,
+          serviceDate: "2026-10-25",
+        },
+      ],
+    });
+
+    const { text } = await resolveRoutesReply({
+      origin: "21566",
+      destination: "",
+      stopCode: "21566",
+      line: "51",
+      aspects: ["live_arrivals"],
+    });
+    expect(text).toContain(siriSm.SIRI_STALE_HE);
+    expect(text).toContain(ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE);
+    expect(text).toMatch(/יציאות מתוזמנות/);
+    expect(text).toMatch(/09:10/);
+    expect(text).toContain(gtfsQuery.GTFS_OFFICIAL_SOURCE_HE);
+    expect(text).not.toContain(siriSm.SIRI_LIVE_SOURCE_HE);
+  });
+
+  it("schedule aspect labels official MOT timetable as scheduled-only (not live)", async () => {
+    vi.spyOn(gtfsQuery, "querySchedule").mockResolvedValue({
+      ok: true,
+      sourceHe: gtfsQuery.GTFS_OFFICIAL_SOURCE_HE,
+      departures: [
+        {
+          stopCode: "21566",
+          stopName: "ארנס",
+          line: "51",
+          agencyName: "דן",
+          directionLabel: "",
+          headsign: "תל אביב",
+          departureTime: "07:40",
+          depSeconds: 7 * 3600 + 40 * 60,
+          serviceDate: "2026-10-25",
+        },
+      ],
+    });
+
+    const { text } = await resolveRoutesReply({
+      origin: "21566",
+      destination: "",
+      stopCode: "21566",
+      line: "51",
+      aspects: ["schedule"],
+    });
+    expect(text).toMatch(/יציאות מתוזמנות/);
+    expect(text).toContain(gtfsQuery.GTFS_OFFICIAL_SOURCE_HE);
+    expect(text).toMatch(/07:40/);
+    expect(text).toMatch(/קו 51/);
+    expect(text).not.toContain(ROUTES_SCHEDULE_NOT_LIVE_INTRO_HE);
+    expect(text).not.toContain(siriSm.SIRI_LIVE_SOURCE_HE);
+    expect(text).not.toMatch(/תחזית חיה|SIRI/);
+    expect(text).toMatch(/מתוזמן, לא זמן אמת/);
   });
 });
 

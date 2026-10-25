@@ -1422,7 +1422,7 @@
                   "object",
                   "null"
                 ],
-                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin. Live SIRI: [live_arrivals] + stop_code or stop name. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
+                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin (line REQUIRED). Live SIRI: [live_arrivals] + stop_code or stop name. Closest boarding among trip options («איזה קו הכי קרוב לבית ליעד») → prefer:\"closest_board\" + origin + destination + aspects[summary] (NOT nearest_stop without line; NOT bare multi-compare). Closest line WITHOUT destination → routes=null + disclose U. Ordinary trip → aspects[summary]; steps aspect only for step-by-step. Follow-up for a prior option index → new ACTION + recalculate; FORBIDDEN claiming the new board is the same prior «אפשרות N» without reliable identity — say recalculated / clarify (no itinerary store). Network-wide disruptions → routes=null + disclose U (not connected). Residual V (fewer transfers / shortest among returned) → require_live_select:true — do NOT invent other prefer values. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
                 "properties": {
                   "origin": {
                     "type": "string",
@@ -1447,7 +1447,18 @@
                       "boolean",
                       "null"
                     ],
-                    "description": "Capability gate (F/Q/V/U): true ONLY for residual V criteria after Google trip alternatives or stop-board lines are fetched (e.g. «הכי קצר בלי החלפות» / «רק קווים לכיוון ת״א») when returned itinerary/line fields can evidence the ask. false/null/omit when origin/destination/line/mode/aspects fully express the ask, or remaining criteria are U — never Stage B for U. Never invent itineraries; never ask the server to NLP the utterance."
+                    "description": "Capability gate (F/Q/V/U): true ONLY for residual V criteria after Google trip alternatives or stop-board lines are fetched (e.g. «הכי קצר בלי החלפות» / «רק קווים לכיוון ת״א») when returned itinerary/line fields can evidence the ask. false/null/omit when origin/destination/line/mode/aspects/prefer fully express the ask, or remaining criteria are U — never Stage B for U. When prefer is closest_board, set require_live_select false. Never invent itineraries; never ask the server to NLP the utterance."
+                  },
+                  "prefer": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "closest_board",
+                      null
+                    ],
+                    "description": "Optional trip ranking. ONLY supported value: closest_board = shortest walk to first boarding stop among Google A→B alternatives (needs origin+destination). Omit/null = default leave-then-walk ranking. FORBIDDEN other values (min_transfers / less_walking / etc.) — use require_live_select for residual V. FORBIDDEN closest_board without destination (disclose U; routes=null). Does not change nearest_stop (still needs line)."
                   },
                   "departure": {
                     "type": "string",

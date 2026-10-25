@@ -9,9 +9,12 @@ import { describe, expect, it } from "vitest";
 const root = resolve(process.cwd(), "..");
 const chatPath = resolve(process.cwd(), "src/services/chat.service.ts");
 const actionPath = resolve(root, "LLM.action.json");
+const configPath = resolve(root, "LLM.config.json");
 
 describe("Gate 0 live capability prompt markers", () => {
   const chat = readFileSync(chatPath, "utf8");
+  const config = readFileSync(configPath, "utf8");
+  const action = readFileSync(actionPath, "utf8");
 
   it("Weather/Market/Mashov/Jewish/Routes include LIVE CAPABILITY and no Stage B", () => {
     for (const needle of [
@@ -33,11 +36,10 @@ describe("Gate 0 live capability prompt markers", () => {
     expect(chat).toMatch(
       /MARKET \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no Stage B/,
     );
+    // FX clause is Market (Hebrew tokens may be ASCII "?" placeholders in runtime).
+    expect(chat).toMatch(/MARKET \(live\):[\s\S]*?FX \(/);
     expect(chat).toMatch(
-      /MARKET \(live\):[\s\S]*?FX \(דולר\/יורו/,
-    );
-    expect(chat).toMatch(
-      /MASHOV \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?calendar filter ≠/,
+      /MASHOV \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?calendar filter/,
     );
     expect(chat).toMatch(
       /MASHOV \(live\):[\s\S]*?upcoming exam calendar[\s\S]*?mashov=null/,
@@ -47,6 +49,25 @@ describe("Gate 0 live capability prompt markers", () => {
     );
     expect(chat).toMatch(
       /ROUTES:[\s\S]*?Google estimates OR official MOT/,
+    );
+    // Wave 1 capability U: network disruptions not connected — no SX subsystem.
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?Network disruptions[\s\S]*?routes=null[\s\S]*?capability not connected/,
+    );
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?FORBIDDEN inventing SX\/alerts/,
+    );
+    // Follow-up option N must recalculate — no itinerary store claim.
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?recalculate[\s\S]*?no itinerary store/,
+    );
+    // Seed/schema prompts (Hebrew) must also refuse disruption checks.
+    expect(config).toMatch(
+      /Network-wide disruptions\/cancellations[\s\S]*?routes=null[\s\S]*?disclose U/,
+    );
+    expect(config).toMatch(/FORBIDDEN inventing alerts/);
+    expect(action).toMatch(
+      /Network-wide disruptions[\s\S]*?routes=null[\s\S]*?disclose U/,
     );
     expect(chat).toMatch(
       /BUS WATCH:[\s\S]*?NOT continuous realtime monitoring/,

@@ -175,6 +175,7 @@ export type {
   LlmJewishAspect,
   LlmRoutesAction,
   LlmRoutesAspect,
+  LlmRoutesPrefer,
   LlmFlightsAction,
   LlmFlightsAspect,
   LlmFlightsDirection,

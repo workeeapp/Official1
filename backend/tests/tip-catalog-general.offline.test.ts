@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { SYSTEM_TIP_SEEDS } from "../src/services/tip-catalog.js";
+import {
+  GENERAL_TIP_MIN_INTERVAL_MINUTES,
+  SYSTEM_TIP_SEEDS,
+} from "../src/services/tip-catalog.js";
 
 const GENERAL_LIVE_KEYS = [
   "general_weather",
@@ -22,6 +25,7 @@ describe("general live tip catalog seeds", () => {
       expect(keys).toContain(key);
     }
     expect(generals).toHaveLength(GENERAL_LIVE_KEYS.length);
+    expect(GENERAL_TIP_MIN_INTERVAL_MINUTES).toBe(360);
   });
 
   it("keeps general tips non-contextual (no area/op/list ladder)", () => {
@@ -34,8 +38,15 @@ describe("general live tip catalog seeds", () => {
       expect(tip.listType).toBeNull();
       expect(tip.unlockAfterKey).toBeNull();
       expect(tip.maxShows).toBeLessThanOrEqual(2);
-      expect(tip.text.startsWith("אגב,")).toBe(true);
+      expect(tip.text.trim().length).toBeGreaterThan(10);
+      expect(tip.text).toMatch(/[\u0590-\u05FF]/);
+      expect(tip.text).not.toMatch(/^אגב,/);
       expect(tip.text).not.toMatch(/metadata\.|show_dump|compose_condition/);
+      // Exactly one emoji mark (not a feature-catalog wall of icons).
+      expect(
+        [...tip.text].filter((ch) => /\p{Extended_Pictographic}/u.test(ch))
+          .length,
+      ).toBe(1);
     }
   });
 
@@ -49,10 +60,12 @@ describe("general live tip catalog seeds", () => {
     const media = generals.find((s) => s.key === "general_filing_media_ask");
     expect(media?.text).toContain("לתייק");
     expect(media?.text).toContain("לפי השם");
+    expect(media?.text).toContain("📎");
     expect(media?.text).not.toMatch(/פענח|OCR|מערכת שעות/);
 
     const watch = generals.find((s) => s.key === "general_watch");
     expect(watch?.text).toMatch(/תנאי/);
-    expect(watch?.text).toMatch(/שער|מזג/);
+    expect(watch?.text).toMatch(/שער/);
+    expect(watch?.text).toContain("🔔");
   });
 });
