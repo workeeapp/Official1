@@ -420,7 +420,8 @@ export async function loadComposeFacts(input: {
   }
 
   if (source === "routes") {
-    // compose_place: "origin|destination" (required).
+    // compose_place: "origin|destination" (required). Labels/ids from schedule
+    // time resolve against the subject's live snapshot (same as chat routes).
     const raw = String(input.composePlace ?? "").trim();
     const pipe = raw.indexOf("|");
     const origin = pipe >= 0 ? raw.slice(0, pipe).trim() : "";
@@ -434,10 +435,12 @@ export async function loadComposeFacts(input: {
       };
     }
     try {
+      const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
       const result = await resolveRoutesReply({
         origin,
         destination,
         aspects: listAspects ?? ["summary"],
+        snapshot,
       });
       return {
         kind: "routes",

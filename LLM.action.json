@@ -1422,17 +1422,17 @@
                   "object",
                   "null"
                 ],
-                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin. Live SIRI: [live_arrivals] + stop_code or stop name. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION.",
+                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin. Live SIRI: [live_arrivals] + stop_code or stop name. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
                 "properties": {
                   "origin": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "From address/place/stop, or \"speaker\" for the shared pin."
+                    "description": "From address/place/stop; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA (any list or filing); or \"speaker\" only for the live PENDING_LOCATION pin («מכאן»)."
                   },
                   "destination": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "To address/place/direction city. Empty string when aspects includes lines (stop board only)."
+                    "description": "To address/place; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA; or free-text place. Empty string when aspects includes lines (stop board only)."
                   },
                   "mode": {
                     "type": "string",

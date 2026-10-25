@@ -113,9 +113,17 @@ const mashov = vi.hoisted(() => ({
   resolveMashovReply: vi.fn(async () => "ציונים של דניאל:\n• מתמטיקה — 90"),
 }));
 
+const routes = vi.hoisted(() => ({
+  resolveRoutesReply: vi.fn(async () => ({
+    text: "מסלול בתחבורה ציבורית מ«מיקום הבית» ל«דיזנגוף»:",
+    navigateAddress: "דיזנגוף",
+  })),
+}));
+
 vi.mock("../src/services/weather.js", () => weather);
 vi.mock("../src/services/market.js", () => market);
 vi.mock("../src/services/mashov.js", () => mashov);
+vi.mock("../src/services/routes.js", () => routes);
 
 import { loadComposeFacts } from "../src/services/compose-facts.js";
 
@@ -247,5 +255,39 @@ describe("loadComposeFacts", () => {
     >;
     expect(call).not.toHaveProperty("dateFrom");
     expect(call).not.toHaveProperty("dateTo");
+  });
+
+  it("routes compose passes subject snapshot into resolveRoutesReply", async () => {
+    const snapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "f-home",
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+      reminders: [],
+    };
+    records.getEmployeeRecordSnapshot.mockResolvedValueOnce(snapshot);
+    const bundle = await loadComposeFacts({
+      composeSource: "routes",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "מיקום הבית|דיזנגוף סנטר",
+    });
+    expect(bundle.kind).toBe("routes");
+    expect(bundle.fixedBody).toContain("מיקום הבית");
+    expect(records.getEmployeeRecordSnapshot).toHaveBeenCalledWith("tal");
+    expect(routes.resolveRoutesReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: "מיקום הבית",
+        destination: "דיזנגוף סנטר",
+        snapshot,
+      }),
+    );
   });
 });

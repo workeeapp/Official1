@@ -3237,6 +3237,7 @@ export async function sendChatMessage(input: {
           (routesAction.destination.trim() || routesLinesBoard)))
     ) {
       const pin = getPendingLocation(input.employeeId);
+      const routesSnapshot = await getEmployeeRecordSnapshot(input.employeeId);
       const liveBilling = {
         conversationId: conversation.id,
         employeeId: employee.id,
@@ -3258,6 +3259,7 @@ export async function sendChatMessage(input: {
         requireLiveSelect: routesAction.requireLiveSelect === true,
         speakerAsk: input.message,
         billing: liveBilling,
+        snapshot: routesSnapshot,
         originLat:
           routesAction.origin.toLowerCase() === "speaker"
             ? pin?.lat ?? null

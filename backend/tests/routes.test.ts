@@ -1372,6 +1372,56 @@ describe("nearest_stop named place geocode", () => {
       expect.objectContaining({ lat: 32.09, lng: 34.85, line: "51" }),
     );
   });
+
+  it("nearest_stop with saved filing origin uses coords and skips geocode", async () => {
+    const fetchImpl = vi.fn();
+    const nearestSpy = vi.spyOn(gtfsQuery, "queryNearestStop").mockResolvedValue({
+      ok: true,
+      sourceHe: "לוח זמנים רשמי",
+      stops: [
+        {
+          stopCode: "21224",
+          stopName: "שלום דורני / ארנס",
+          distanceMeters: 90,
+          line: "31",
+          directionLabel: "1",
+          agencyName: "דן",
+        },
+      ],
+    });
+    const { text } = await resolveRoutesReply({
+      origin: "מיקום הבית",
+      destination: "",
+      line: "31",
+      aspects: ["nearest_stop"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home",
+            item_name: "מיקום הבית",
+            item_info: "32.099279, 34.8923104",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(nearestSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        lat: 32.099279,
+        lng: 34.8923104,
+        line: "31",
+      }),
+    );
+    expect(text).toMatch(/חיפוש ליד «מיקום הבית»/);
+    expect(text).toMatch(/שלום דורני/);
+  });
 });
 
 describe("origin→destination trip boarding workflow", () => {
@@ -1802,5 +1852,273 @@ describe("origin→destination trip boarding workflow", () => {
     expect(text).toMatch(/קוד תחנה/);
     expect(text).toMatch(/יוצא|בעוד|קו 51/);
     expect(text).not.toBe("לתחזית חיה צריך קוד תחנה רשמי (מספר).");
+  });
+});
+
+describe("saved location origin/destination in resolveRoutesReply", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockSavedRoutesPayload() {
+    const depIso = new Date(Date.now() + 18 * 60_000).toISOString();
+    return {
+      routes: [
+        {
+          duration: "1800s",
+          distanceMeters: 12000,
+          localizedValues: { duration: { text: "30 דקות" } },
+          legs: [
+            {
+              steps: [
+                {
+                  travelMode: "TRANSIT",
+                  staticDuration: "1200s",
+                  transitDetails: {
+                    stopDetails: {
+                      departureTime: { time: { text: "16:20" } },
+                      arrivalTime: { time: { text: "16:50" } },
+                      departureStop: { name: "שלום דורני" },
+                      arrivalStop: { name: "דיזנגוף" },
+                    },
+                    localizedValues: {
+                      departureTime: { time: { text: "16:20" } },
+                      arrivalTime: { time: { text: "16:50" } },
+                    },
+                    transitLine: {
+                      nameShort: "66",
+                      name: "קו 66",
+                    },
+                    headsign: "תל אביב",
+                    stopCount: 12,
+                  },
+                  departureTime: depIso,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  const snapshot = {
+    filing: [
+      {
+        filing_id: "f-home",
+        item_name: "מיקום הבית",
+        item_info: "32.099279, 34.8923104",
+        item_description: "מיקום הבית שנשלח בוואטסאפ",
+        owner: "טל",
+        scope: "personal" as const,
+      },
+      {
+        filing_id: "f-home-2",
+        item_name: "בית הורים",
+        item_info: "32.05, 34.75",
+        item_description: "",
+        owner: "טל",
+        scope: "personal" as const,
+      },
+    ],
+    lists: [
+      {
+        list_type: "tasks",
+        owner: "טל",
+        scope: "personal" as const,
+        items: [
+          {
+            item_id: "t-work",
+            "שם מטלה": "העבודה",
+            מקום: "32.085, 34.781",
+          },
+        ],
+      },
+      {
+        list_type: "custom",
+        list_name: "מקומות",
+        owner: "טל",
+        scope: "personal" as const,
+        columns: ["שם", "נקודה"],
+        title_field: "שם",
+        items: [
+          {
+            item_id: "c-mall",
+            שם: "הקניון הגדול",
+            נקודה: "32.08, 34.80",
+          },
+        ],
+      },
+    ],
+  };
+
+  function mockTransitFetch(opts?: {
+    destGeocode?: { lat: number; lng: number; label: string };
+  }) {
+    return vi.fn(async (url: unknown) => {
+      const u = String(url ?? "");
+      if (u.includes("places:searchText")) {
+        const g = opts?.destGeocode ?? {
+          lat: 32.074,
+          lng: 34.781,
+          label: "דיזנגוף סנטר",
+        };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            places: [
+              {
+                displayName: { text: g.label },
+                location: { latitude: g.lat, longitude: g.lng },
+              },
+            ],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => mockSavedRoutesPayload(),
+      };
+    });
+  }
+
+  it("filing saved origin uses coords (no pin) and notices", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "מיקום הבית",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("משתמש במיקום השמור «מיקום הבית»");
+    expect(text).not.toMatch(/שלח מיקום/);
+    const body = computeRoutesBody(fetchImpl);
+    const origin = body.origin as { location?: { latLng?: { latitude: number; longitude: number } } };
+    expect(origin?.location?.latLng?.latitude).toBeCloseTo(32.099279);
+    expect(origin?.location?.latLng?.longitude).toBeCloseTo(34.8923104);
+  });
+
+  it("builtin tasks item as origin", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "העבודה",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("משתמש במיקום השמור «העבודה»");
+    const body = computeRoutesBody(fetchImpl);
+    const origin = body.origin as { location?: { latLng?: { latitude: number } } };
+    expect(origin?.location?.latLng?.latitude).toBeCloseTo(32.085);
+  });
+
+  it("custom list item as destination + free-text is not required", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "מיקום הבית",
+      destination: "הקניון הגדול",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("משתמש במיקום השמור «מיקום הבית»");
+    expect(text).toContain("משתמש במיקום השמור «הקניון הגדול»");
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0] ?? ""));
+    expect(urls.some((u) => u.includes("places:searchText"))).toBe(false);
+    const body = computeRoutesBody(fetchImpl);
+    const dest = body.destination as {
+      location?: { latLng?: { latitude: number; longitude: number } };
+    };
+    expect(dest?.location?.latLng?.latitude).toBeCloseTo(32.08);
+    expect(dest?.location?.latLng?.longitude).toBeCloseTo(34.8);
+  });
+
+  it("saved origin + free-text destination geocodes only the destination", async () => {
+    const fetchImpl = mockTransitFetch({
+      destGeocode: { lat: 32.074, lng: 34.781, label: "דיזנגוף סנטר" },
+    });
+    const { text } = await resolveRoutesReply({
+      origin: "f-home",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("משתמש במיקום השמור «מיקום הבית»");
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0] ?? ""));
+    expect(urls.some((u) => u.includes("places:searchText"))).toBe(true);
+    expect(urls.some((u) => u.includes("computeRoutes"))).toBe(true);
+    const body = computeRoutesBody(fetchImpl);
+    const origin = body.origin as { location?: { latLng?: { latitude: number } } };
+    expect(origin?.location?.latLng?.latitude).toBeCloseTo(32.099279);
+  });
+
+  it("ambiguous saved places ask without calling Google Routes", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "בית",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toMatch(/כמה מיקומים שמורים/);
+    expect(text).toContain("מיקום הבית");
+    expect(text).toContain("בית הורים");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("speaker + live pin wins over saved home filing", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "speaker",
+      destination: "דיזנגוף סנטר",
+      originLat: 32.11,
+      originLng: 34.85,
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).not.toContain("מיקום הבית");
+    expect(text).not.toContain("משתמש במיקום השמור");
+    const body = computeRoutesBody(fetchImpl);
+    const origin = body.origin as { location?: { latLng?: { latitude: number; longitude: number } } };
+    expect(origin?.location?.latLng?.latitude).toBeCloseTo(32.11);
+    expect(origin?.location?.latLng?.longitude).toBeCloseTo(34.85);
+  });
+
+  it("speaker without pin asks for WhatsApp even when home filing exists", async () => {
+    const fetchImpl = mockTransitFetch();
+    const { text } = await resolveRoutesReply({
+      origin: "speaker",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      snapshot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toMatch(/שלח מיקום/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("chat.service wires snapshot into resolveRoutesReply", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../src/services/chat.service.ts"),
+      "utf8",
+    );
+    expect(src).toContain("snapshot: routesSnapshot");
+    expect(src).toMatch(
+      /getEmployeeRecordSnapshot\(input\.employeeId\)[\s\S]*resolveRoutesReply/,
+    );
   });
 });

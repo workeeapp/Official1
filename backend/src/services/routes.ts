@@ -35,6 +35,12 @@ import {
   isSiriSmConfigured,
   type SiriFetchResult,
 } from "./siri-sm.js";
+import {
+  formatSavedRouteAmbiguousAsk,
+  formatSavedRouteNotice,
+  resolveSavedRoutePoint,
+} from "./saved-route-location.js";
+import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import { geocodePlace as geocodePlaceOpenMeteo } from "./weather.js";
 
 export type RoutesAspect =
@@ -1897,6 +1903,7 @@ async function resolveGtfsRoutesReply(input: {
   originLng?: number | null;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
 }): Promise<{ text: string; navigateAddress: string }> {
   const line = String(input.line ?? "").trim();
   const stopCode = String(input.stopCode ?? "").trim();
@@ -1961,6 +1968,27 @@ async function resolveGtfsRoutesReply(input: {
     let lat = input.originLat;
     let lng = input.originLng;
     let placeLabel = "";
+    const pinOk =
+      lat != null &&
+      lng != null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng);
+
+    // Live pin wins for speaker. Saved places never replace an explicit pin.
+    if (!pinOk && !speakerOrigin && originRaw) {
+      const saved = resolveSavedRoutePoint(originRaw, input.snapshot);
+      if (saved.kind === "ambiguous") {
+        return {
+          text: formatSavedRouteAmbiguousAsk(originRaw, saved.options),
+          navigateAddress: "",
+        };
+      }
+      if (saved.kind === "hit") {
+        lat = saved.lat;
+        lng = saved.lng;
+        placeLabel = saved.label;
+      }
+    }
 
     if (
       (lat == null ||
@@ -2346,6 +2374,8 @@ export async function resolveRoutesReply(input: {
   mode?: RoutesTravelMode | string | null;
   originLat?: number | null;
   originLng?: number | null;
+  /** Speaker saved lists/filings — resolve named origin/destination to coords. */
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
   requireLiveSelect?: boolean;
@@ -2383,6 +2413,7 @@ export async function resolveRoutesReply(input: {
       aspects,
       originLat: input.originLat,
       originLng: input.originLng,
+      snapshot: input.snapshot,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
     });
@@ -2452,6 +2483,7 @@ export async function resolveRoutesReply(input: {
     };
   }
   if (speakerOrigin && !hasPin) {
+    // Explicit live-pin request — never silently fall back to a saved place.
     return {
       text: "שלח מיקום בוואטסאפ (סיכת מיקום) ואז אגיד איך להגיע מכאן.",
       navigateAddress: "",
@@ -2472,12 +2504,36 @@ export async function resolveRoutesReply(input: {
   let destinationLat: number | null | undefined;
   let destinationLng: number | null | undefined;
   let destinationLabel: string | undefined;
+  const savedNotices: string[] = [];
   const lineFocus =
     Boolean(String(input.line ?? "").trim() || String(input.headsign ?? "").trim()) &&
     (aspects.includes("eta") || aspects.includes("frequency"));
 
-  // Named origin (not speaker pin): resolve coords when possible; ask if ambiguous.
+  // Named origin (not speaker pin): saved coords first, then geocode.
+  // Speaker + pin already set originLat/Lng — never replace with saved.
   if (!speakerOrigin && origin && !hasPin) {
+    const saved = resolveSavedRoutePoint(origin, input.snapshot);
+    if (saved.kind === "ambiguous") {
+      return {
+        text: formatSavedRouteAmbiguousAsk(origin, saved.options),
+        navigateAddress: "",
+      };
+    }
+    if (saved.kind === "hit") {
+      originLat = saved.lat;
+      originLng = saved.lng;
+      originLabel = saved.label;
+      savedNotices.push(formatSavedRouteNotice(saved.label));
+    }
+  }
+
+  const originHasCoords =
+    originLat != null &&
+    originLng != null &&
+    Number.isFinite(originLat) &&
+    Number.isFinite(originLng);
+
+  if (!speakerOrigin && origin && !originHasCoords) {
     const geo = await geocodeNamedPlaceForNearestStop({
       query: origin,
       fetchImpl: input.fetchImpl,
@@ -2503,30 +2559,44 @@ export async function resolveRoutesReply(input: {
   }
 
   if (destination) {
-    const geo = await geocodeNamedPlaceForNearestStop({
-      query: destination,
-      fetchImpl: input.fetchImpl,
-      apiKey: input.apiKey,
-    });
-    if (!geo.ok && geo.kind === "ambiguous") {
+    const savedDest = resolveSavedRoutePoint(destination, input.snapshot);
+    if (savedDest.kind === "ambiguous") {
       return {
-        text: geo.options?.length
-          ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
-          : geo.messageHe,
+        text: formatSavedRouteAmbiguousAsk(destination, savedDest.options),
         navigateAddress: "",
       };
     }
-    if (geo.ok) {
-      destinationLat = geo.lat;
-      destinationLng = geo.lng;
-      destinationLabel = geo.label;
+    if (savedDest.kind === "hit") {
+      destinationLat = savedDest.lat;
+      destinationLng = savedDest.lng;
+      destinationLabel = savedDest.label;
+      savedNotices.push(formatSavedRouteNotice(savedDest.label));
+    } else {
+      const geo = await geocodeNamedPlaceForNearestStop({
+        query: destination,
+        fetchImpl: input.fetchImpl,
+        apiKey: input.apiKey,
+      });
+      if (!geo.ok && geo.kind === "ambiguous") {
+        return {
+          text: geo.options?.length
+            ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
+            : geo.messageHe,
+          navigateAddress: "",
+        };
+      }
+      if (geo.ok) {
+        destinationLat = geo.lat;
+        destinationLng = geo.lng;
+        destinationLabel = geo.label;
+      }
     }
   }
 
   try {
     const facts = await fetchRoutesFacts({
       ...input,
-      origin: origin || "speaker",
+      origin: originLabel || origin || "speaker",
       mode: travelMode,
       originLat,
       originLng,
@@ -2565,8 +2635,11 @@ export async function resolveRoutesReply(input: {
             fetchImpl: input.fetchImpl,
           })
         : "";
+    const body = `${googleText}${officialExtra}`.trim();
+    const preface =
+      savedNotices.length > 0 ? `${savedNotices.join("\n")}\n` : "";
     return {
-      text: `${googleText}${officialExtra}`.trim(),
+      text: `${preface}${body}`.trim(),
       navigateAddress: selectedFacts.navigateAddress || facts.navigateAddress,
     };
   } catch (error) {
@@ -2584,10 +2657,11 @@ export async function resolveRoutesReply(input: {
     }
     if (error instanceof Error && error.message === ROUTES_ZERO_RESULTS) {
       return {
-        text: `לא מצאתי מסלול בתחבורה ציבורית מ«${speakerOrigin ? "המיקום שלך" : origin}» ל«${destination}».`,
+        text: `לא מצאתי מסלול בתחבורה ציבורית מ«${speakerOrigin ? "המיקום שלך" : originLabel || origin}» ל«${destinationLabel || destination}».`,
         navigateAddress: "",
       };
     }
+    // Points were resolved; Google/network failed — not a missing-place ask.
     return {
       text: "לא הצלחתי לחשב מסלול עכשיו. נסה שוב בעוד רגע.",
       navigateAddress: "",
