@@ -10,6 +10,7 @@ import {
   formatCustomListDetailText,
   formatFilingDumpBody,
   formatFilingListPreview,
+  formatTruncatedListDetail,
   extractFilingReadableText,
   firstFilingPreviewChunk,
   truncateFilingPreviewAtWord,
@@ -274,6 +275,51 @@ describe("formatFilingDumpBody", () => {
     expect(long.startsWith(body)).toBe(true);
     expect(firstFilingPreviewChunk(long).rest).toBe("");
     expect(truncateFilingPreviewAtWord(long).truncated).toBe(true);
+  });
+
+  it("list detail preview is a contiguous slice of the original, not a rewrite", () => {
+    const originalFiling =
+      "הלקוח אישר את ההזמנה ביום ראשון בבוקר. צריך לשלוח חשבונית ולעדכן את המחסן לפני המשלוח.";
+    const filingPreview = formatFilingListPreview({
+      item_name: "הזמנה",
+      item_info: originalFiling,
+      item_description: "",
+    });
+    expect(filingPreview).toBeTruthy();
+    const filingBody = filingPreview!.endsWith("…")
+      ? filingPreview!.slice(0, -1)
+      : filingPreview!;
+    const filingNorm = originalFiling.replace(/\s+/g, " ").trim();
+    expect(filingNorm.startsWith(filingBody)).toBe(true);
+    expect(filingNorm.indexOf(filingBody)).toBe(0);
+    expect(filingPreview).not.toMatch(/בקצרה|לסיכום|תקציר|במילים אחרות/);
+    expect(filingBody).toBe("הלקוח אישר את ההזמנה ביום ראשון בבוקר.");
+
+    const item = {
+      שם: "הזמנה A-9",
+      תיאור: "נשלח באריזה כפולה עם מדבקת שביר",
+      "הערת לקוח":
+        "בבקשה למסור רק אחרי השעה חמש ולצלצל פעמיים אם אין מענה בדלת הראשית של הבניין",
+    };
+    const columns = ["שם", "תיאור", "הערת לקוח"];
+    const originalCustom = formatCustomListDetailText(item, "שם", columns);
+    expect(originalCustom).toContain("תיאור: נשלח באריזה כפולה עם מדבקת שביר");
+    expect(originalCustom).toContain("הערת לקוח:");
+    const customPreview = formatTruncatedListDetail(originalCustom);
+    expect(customPreview).toBeTruthy();
+    const customBody = customPreview!.text.endsWith("…")
+      ? customPreview!.text.slice(0, -1)
+      : customPreview!.text;
+    const customNorm = originalCustom.replace(/\s+/g, " ").trim();
+    expect(customNorm.startsWith(customBody)).toBe(true);
+    expect(customNorm.indexOf(customBody)).toBe(0);
+    expect(customBody).toContain("תיאור:");
+    expect(customBody).toContain("נשלח באריזה כפולה");
+    expect(customPreview!.truncated).toBe(true);
+    expect(customPreview!.text).toContain("…");
+    expect(customPreview!.text).not.toMatch(
+      /לקוח מבקש|סיכום:|בקצרה|תקציר ההזמנה/,
+    );
   });
 
   it("filing list preview: structured JSON → readable strings, not raw JSON", () => {

@@ -1220,8 +1220,11 @@ export function truncateFilingPreviewAtWord(
 }
 
 /**
- * First sentence/line then soft cap. Returns display text (with `…` when cut)
- * and whether overflow remains (for 📄).
+ * Deterministic list-detail preview from already-built original prose.
+ * Shows a contiguous prefix of that text (sentence/line end preferred, else
+ * word boundary near {@link LIST_ROW_PREVIEW_MAX_CHARS}). Appends `…` only when
+ * that prefix is shorter than the source. `truncated` (for 📄) is true whenever
+ * any remainder was omitted — never rewrites, paraphrases, or calls a model.
  */
 export function formatTruncatedListDetail(
   detailText: string,
@@ -1251,8 +1254,9 @@ export function listDetailOverflowMark(truncated: boolean): string {
 }
 
 /**
- * List-only preview under the filing title: first sentence / ~70 chars + `…`
- * when more remains. Address filings skip coordinate `item_info` (📍 covers it).
+ * List-only preview under the filing title from the original readable
+ * `item_info` / find-helper (`item_description`) strings — truncated in code,
+ * not summarized. Address filings skip coordinate `item_info` (📍 covers it).
  */
 export function formatFilingListPreviewParts(
   item: Record<string, unknown>,
@@ -4092,9 +4096,11 @@ export function resolveCustomTitleField(
 }
 
 /**
- * Inventory detail for a custom row: non-title user columns as «מפתח: ערך».
- * Prefers known detail column names when present, then remaining columns in
- * list order. Skips {@link CUSTOM_META_KEYS} and empty/non-string values.
+ * Inventory detail for a custom row: original non-title column values with
+ * their labels («מפתח: ערך»). Prefers known detail column names when present,
+ * then remaining columns in list order. No rewrite — truncation happens later
+ * via {@link formatTruncatedListDetail}. Skips {@link CUSTOM_META_KEYS} and
+ * empty/non-string values.
  */
 export function formatCustomListDetailText(
   item: Record<string, unknown>,
