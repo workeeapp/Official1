@@ -250,7 +250,12 @@ describe("LLM action schema", () => {
       "show_dump=<kind> + show_dump_ids=[all matching ids]",
     );
     expect(config.systemMessage).toContain("FORBIDDEN parallel prose inventory");
-    expect(config.systemMessage).toContain("does NOT compute next-occurrence");
+    expect(config.systemMessage).toContain(
+      "does NOT rewrite the dump with a computed next fire",
+    );
+    expect(config.systemMessage).toContain(
+      "inventing a concrete next occurrence in responses",
+    );
     expect(config.systemMessage).toContain("no free-built inventory/agenda");
     expect(config.systemMessage).toContain("CROSS-KIND SEMANTIC");
     expect(config.systemMessage).toContain("existing items only");

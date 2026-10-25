@@ -47,7 +47,13 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
       /focused single-record lookup/,
     );
     expect(config).toMatch(
-      /B-DISPLAY:[\s\S]*?focused single-record retrieval/,
+      /Wanting «next\/nearest» among same-kind rows is still dump\+ids/,
+    );
+    expect(config).toMatch(
+      /FORBIDDEN inventing a next fire time in responses when the dump path exists/,
+    );
+    expect(config).toMatch(
+      /B-DISPLAY:[\s\S]*?focused single-record \/ temporal-among-visible/,
     );
     expect(config).toMatch(
       /Do NOT route explanation \/ analysis \/ general-knowledge asks into show_dump/,
@@ -59,10 +65,16 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
       /\(2\) SAME-KIND SEMANTIC \/ focused — by intent \(broad list, focused single-record lookup/,
     );
     expect(config).toMatch(
-      /A single clear focused hit[\s\S]*?dump that one id \(ITEM DUMP\), not prose/,
+      /that id pick IS this path \(not a reason for prose\)/,
     );
     expect(config).toMatch(
-      /does NOT compute next-occurrence \/ ranking/,
+      /does NOT rewrite the dump with a computed next fire/,
+    );
+    expect(config).toMatch(
+      /inventing a concrete next occurrence in responses/,
+    );
+    expect(config).toMatch(
+      /even when you could name the answer in one sentence/,
     );
     expect(config).toMatch(
       /never claim[\s\S]*?engine resolved recurrence-next if the dump does not show it/,
@@ -101,8 +113,9 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
     expect(chat).toContain("RETRIEVAL CONTRACT (runtime):");
     expect(chat).toContain("INTENT->ACTION:");
     expect(chat).toContain(
-      "FORBIDDEN substituting easy factual prose when dump+ids exists (incl. focused single-record)",
+      "FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible)",
     );
+    expect(chat).toContain("FORBIDDEN inventing next fire in responses");
     expect(chat).toContain(
       "prose OK for explanation/analysis/general knowledge/clarify",
     );
@@ -110,11 +123,16 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
       "SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows)",
     );
     expect(chat).toContain(
-      "engine does NOT infer categories or compute next-occurrence",
+      "engine does NOT infer categories or rewrite dump with computed next fire",
+    );
+    expect(chat).toContain(
+      "that pick IS dump path, not prose",
     );
     expect(chat).toContain("FORBIDDEN parallel prose inventory");
     expect(chat).toContain("multiple clear matches are NOT ambiguity");
-    expect(chat).toContain("single focused hit -> dump that one id");
+    expect(chat).toContain(
+      "single focused/temporal hit -> dump that one id even if one-sentence prose seems enough",
+    );
     expect(chat).toContain("no matches -> no dump + short no-match");
     expect(chat).toContain("NO multi-domain dump");
     expect(chat).toContain(
