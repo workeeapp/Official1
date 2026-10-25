@@ -81,6 +81,11 @@ export type RouteItineraryOption = {
   fareText: string;
   leaveByText: string;
   arriveByText: string;
+  /**
+   * True when leaveByText is the first TRANSIT board clock (not door-to-door
+   * leave derived from arrival − duration). Affects Hebrew lead labeling.
+   */
+  leaveIsBoarding?: boolean;
   steps: RouteStepFact[];
 };
 
@@ -217,14 +222,52 @@ export const ROUTES_WALK_PARTIAL_NOTE_HE =
 
 /**
  * Wave 1 compact multi cue — secondary itineraries are not expanded up front.
- * Follow-up must recalculate; never claim a new fetch is the prior «אפשרות N».
+ * Follow-up: ask by line or departure; a new search refreshes options (no
+ * stable «אפשרות N» across fetches).
  */
-export function routesMultiAltsCueHe(extraCount: number): string {
+export function routesMultiAltsCueHe(
+  extraCount: number,
+  itineraries?: RouteItineraryOption[],
+): string {
   const n = Math.max(0, Math.floor(extraCount));
   if (n <= 0) {
     return "";
   }
-  return `עוד ${n} אפשרויות (יציאה/משך/הליכה שונים) — לפרטים בקשי לפי קו או שעת יציאה. אחרי חישוב מחדש לא אזהה אוטומטית «אפשרות» ישנה.`;
+  const diffs = itinerariesDiffBitsHe(itineraries ?? []);
+  const head = diffs
+    ? `עוד ${n} אפשרויות (${diffs})`
+    : `עוד ${n} אפשרויות`;
+  return `${head} — לפרטים בקשי לפי קו או שעת יציאה. בחיפוש חדש מתקבלות אפשרויות מעודכנות.`;
+}
+
+/** Real differences among itineraries only — never invent contrast. */
+function itinerariesDiffBitsHe(itineraries: RouteItineraryOption[]): string {
+  if (itineraries.length < 2) {
+    return "";
+  }
+  const parts: string[] = [];
+  const leaves = itineraries.map((i) => i.leaveByText.trim()).filter(Boolean);
+  if (leaves.length >= 2 && new Set(leaves).size > 1) {
+    parts.push("יציאה");
+  }
+  const durs = itineraries
+    .map((i) =>
+      i.durationText.trim() ||
+      (i.durationSeconds != null ? String(i.durationSeconds) : ""),
+    )
+    .filter(Boolean);
+  if (durs.length >= 2 && new Set(durs).size > 1) {
+    parts.push("משך");
+  }
+  const walks = itineraries.map((i) => walkSecondsFromSteps(i.steps));
+  const knownWalks = walks.filter((w): w is number => w != null);
+  if (
+    knownWalks.length >= 2 &&
+    new Set(knownWalks).size > 1
+  ) {
+    parts.push("הליכה");
+  }
+  return parts.join("/");
 }
 
 /** Schedule fallback intro — never label as live SIRI. */
@@ -529,6 +572,158 @@ function formatDurationHe(seconds: number | null): string {
   return `${h}:${String(m).padStart(2, "0")} שעות`;
 }
 
+/**
+ * Prefer engine Hebrew duration when seconds are known; otherwise sanitize
+ * Google localized text (never leave English "mins" in the spoken reply).
+ */
+export function durationTextPreferHe(
+  durationSeconds: number | null,
+  localizedText: string,
+): string {
+  if (durationSeconds != null) {
+    return formatDurationHe(durationSeconds);
+  }
+  const raw = String(localizedText ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/דק|שע/u.test(raw)) {
+    return raw;
+  }
+  const minsOnly = raw.match(/^(\d+)\s*mins?\.?$/i);
+  if (minsOnly) {
+    return formatDurationHe(Number(minsOnly[1]) * 60);
+  }
+  const hourMin = raw.match(
+    /^(\d+)\s*hours?\s*(?:(\d+)\s*mins?\.?)?$/i,
+  );
+  if (hourMin) {
+    const h = Number(hourMin[1]);
+    const m = hourMin[2] ? Number(hourMin[2]) : 0;
+    return formatDurationHe(h * 3600 + m * 60);
+  }
+  // Unknown Latin leftover — omit rather than show English units.
+  if (/[A-Za-z]/.test(raw)) {
+    return "";
+  }
+  return raw;
+}
+
+const CLOCK_RECONCILE_TOLERANCE_MIN = 12;
+
+function looksMidnightHm(raw: string): boolean {
+  return /^(0|00):00$/.test(String(raw ?? "").trim());
+}
+
+function clockSpanMinutes(leave: string, arrive: string): number | null {
+  const a = parseHmToMinutes(leave);
+  const b = parseHmToMinutes(arrive);
+  if (a == null || b == null) {
+    return null;
+  }
+  let span = b - a;
+  if (span < 0) {
+    span += 24 * 60;
+  }
+  return span;
+}
+
+function leaveLooksLikeBoarding(opt: RouteItineraryOption): boolean {
+  if (opt.leaveIsBoarding === true) {
+    return true;
+  }
+  const leave = opt.leaveByText.trim();
+  if (!leave) {
+    return false;
+  }
+  const firstTransit = opt.steps.find((s) => {
+    const mode = String(s.travelMode ?? "").toUpperCase();
+    return mode === "TRANSIT" && String(s.departureTime ?? "").trim();
+  });
+  return Boolean(
+    firstTransit && String(firstTransit.departureTime).trim() === leave,
+  );
+}
+
+function itineraryLeaveHasIsoBacking(opt: RouteItineraryOption): boolean {
+  const leave = opt.leaveByText.trim();
+  if (!leave) {
+    return false;
+  }
+  for (const step of opt.steps) {
+    const mode = String(step.travelMode ?? "").toUpperCase();
+    if (mode !== "TRANSIT") continue;
+    const iso = String(step.departureIso ?? "").trim();
+    if (!iso) continue;
+    const fromIso = formatHmJerusalem(iso);
+    if (fromIso && fromIso === leave) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Display leave/arrive for the compact multi lead. Omits unreliable clocks;
+ * never invents replacements. Boarding leave may legitimately span less than
+ * door-to-door duration (walk before board).
+ */
+export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
+  leaveByText: string;
+  arriveByText: string;
+  leaveIsBoarding: boolean;
+} {
+  let leave = opt.leaveByText.trim();
+  let arrive = opt.arriveByText.trim();
+  const boarding = leaveLooksLikeBoarding(opt);
+  const durMin =
+    opt.durationSeconds != null
+      ? Math.round(opt.durationSeconds / 60)
+      : null;
+  const span =
+    leave && arrive ? clockSpanMinutes(leave, arrive) : null;
+  const walkSec = walkSecondsFromSteps(opt.steps);
+  const walkMin = walkSec != null ? Math.round(walkSec / 60) : null;
+  const hasIso = itineraryLeaveHasIsoBacking(opt);
+
+  const within = (a: number, b: number) =>
+    Math.abs(a - b) <= CLOCK_RECONCILE_TOLERANCE_MIN;
+
+  let keep = true;
+  if (
+    leave &&
+    !hasIso &&
+    (looksMidnightHm(leave) || looksMidnightHm(arrive)) &&
+    durMin != null &&
+    durMin >= 20
+  ) {
+    // Midnight-looking clocks without ISO + substantial duration — unreliable
+    // (do not keep just because board→arrive span is shorter than door-to-door).
+    keep = false;
+  } else if (leave && arrive && durMin != null && span != null) {
+    const doorOk = within(span, durMin);
+    const boardWalkOk =
+      boarding &&
+      walkMin != null &&
+      within(span + walkMin, durMin);
+    const boardSpanPlausible =
+      boarding && span > 0 && span <= durMin + CLOCK_RECONCILE_TOLERANCE_MIN;
+    if (boarding && (boardWalkOk || boardSpanPlausible)) {
+      keep = true;
+    } else if (!boarding && doorOk) {
+      keep = true;
+    } else if (!hasIso && !doorOk && !(boarding && span < durMin)) {
+      keep = false;
+    }
+  }
+
+  if (!keep) {
+    leave = "";
+    arrive = "";
+  }
+  return { leaveByText: leave, arriveByText: arrive, leaveIsBoarding: boarding };
+}
+
 function formatHmJerusalem(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) {
@@ -624,14 +819,14 @@ function mapStep(step: ApiStep): RouteStepFact {
   const fromStop = String(td?.stopDetails?.departureStop?.name ?? "").trim();
   const toStop = String(td?.stopDetails?.arrivalStop?.name ?? "").trim();
   const departureIso = String(td?.stopDetails?.departureTime ?? "").trim();
+  const arrivalIso = String(td?.stopDetails?.arrivalTime ?? "").trim();
+  // Prefer absolute ISO → Jerusalem HH:mm over Google localized short text.
   const departureTime =
-    String(td?.localizedValues?.departureTime?.time?.text ?? "").trim() ||
-    (departureIso ? formatHmJerusalem(departureIso) : "");
+    (departureIso ? formatHmJerusalem(departureIso) : "") ||
+    String(td?.localizedValues?.departureTime?.time?.text ?? "").trim();
   const arrivalTime =
-    String(td?.localizedValues?.arrivalTime?.time?.text ?? "").trim() ||
-    (td?.stopDetails?.arrivalTime
-      ? formatHmJerusalem(td.stopDetails.arrivalTime)
-      : "");
+    (arrivalIso ? formatHmJerusalem(arrivalIso) : "") ||
+    String(td?.localizedValues?.arrivalTime?.time?.text ?? "").trim();
   const durationSeconds = parseDurationSeconds(step.staticDuration);
   return {
     travelMode,
@@ -789,28 +984,42 @@ function summarizeApiRoute(
 ): RouteItineraryOption {
   const steps = stepsFromApiRoute(route);
   const durationSeconds = parseDurationSeconds(route.duration);
-  const durationText =
-    String(route.localizedValues?.duration?.text ?? "").trim() ||
-    formatDurationHe(durationSeconds);
+  const durationText = durationTextPreferHe(
+    durationSeconds,
+    String(route.localizedValues?.duration?.text ?? "").trim(),
+  );
   const distanceMeters =
     typeof route.distanceMeters === "number" ? route.distanceMeters : null;
   const fareText = fareTextFromAdvisory(route);
 
   let leaveByText = "";
   let arriveByText = "";
-  const firstTransit = steps.find(
-    (s) => s.travelMode === "TRANSIT" && s.departureTime,
-  );
-  const lastArrival = [...steps].reverse().find((s) => s.arrivalTime);
+  let leaveIsBoarding = false;
+  const firstTransit = steps.find((s) => {
+    const mode = String(s.travelMode ?? "").toUpperCase();
+    return (
+      mode === "TRANSIT" &&
+      (String(s.departureTime ?? "").trim() ||
+        String(s.departureIso ?? "").trim())
+    );
+  });
+  const lastArrival = [...steps]
+    .reverse()
+    .find((s) => String(s.arrivalTime ?? "").trim());
   if (opts.arrivalRfc && durationSeconds != null) {
     const leaveMs =
       new Date(opts.arrivalRfc).getTime() - durationSeconds * 1000;
     leaveByText = formatHmJerusalem(new Date(leaveMs).toISOString());
-  } else if (firstTransit?.departureTime) {
-    leaveByText = firstTransit.departureTime;
+    leaveIsBoarding = false;
+  } else if (firstTransit) {
+    const iso = String(firstTransit.departureIso ?? "").trim();
+    leaveByText =
+      (iso ? formatHmJerusalem(iso) : "") ||
+      String(firstTransit.departureTime ?? "").trim();
+    leaveIsBoarding = Boolean(leaveByText);
   }
   if (lastArrival?.arrivalTime) {
-    arriveByText = lastArrival.arrivalTime;
+    arriveByText = String(lastArrival.arrivalTime).trim();
   } else if (opts.departureRfc && durationSeconds != null) {
     const arriveMs =
       new Date(opts.departureRfc).getTime() + durationSeconds * 1000;
@@ -824,6 +1033,7 @@ function summarizeApiRoute(
     fareText,
     leaveByText,
     arriveByText,
+    leaveIsBoarding,
     steps,
   };
 }
@@ -1744,17 +1954,22 @@ function formatMultiItinerariesHebrew(facts: RoutesFacts): string {
     lines.push(`יעד הגעה: עד ${arriveLabel}.`);
   }
 
+  const clocks = displayLeaveArriveForLead(primary);
   const headBits: string[] = [];
   if (primary.durationText) {
     headBits.push(`משך משוער *${primary.durationText}*`);
   }
-  if (arriveAsk && primary.leaveByText) {
-    headBits.push(`צא בסביבות *${primary.leaveByText}*`);
-  } else if (primary.leaveByText) {
-    headBits.push(`יציאה משוערת ${primary.leaveByText}`);
+  if (arriveAsk && clocks.leaveByText) {
+    headBits.push(`צא בסביבות *${clocks.leaveByText}*`);
+  } else if (clocks.leaveByText) {
+    headBits.push(
+      clocks.leaveIsBoarding
+        ? `עלייה משוערת ${clocks.leaveByText}`
+        : `יציאה משוערת ${clocks.leaveByText}`,
+    );
   }
-  if (primary.arriveByText && !arriveAsk) {
-    headBits.push(`הגעה משוערת ${primary.arriveByText}`);
+  if (clocks.arriveByText && !arriveAsk) {
+    headBits.push(`הגעה משוערת ${clocks.arriveByText}`);
   }
   if (wants(facts.aspects, "fare") && primary.fareText) {
     headBits.push(`מחיר משוער ${primary.fareText}`);
@@ -1781,7 +1996,7 @@ function formatMultiItinerariesHebrew(facts: RoutesFacts): string {
     );
   }
 
-  const cue = routesMultiAltsCueHe(n - 1);
+  const cue = routesMultiAltsCueHe(n - 1, facts.itineraries);
   if (cue) {
     lines.push("");
     lines.push(cue);

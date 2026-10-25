@@ -22,12 +22,25 @@ import {
   ROUTES_STEPS_LOCAL_TRUNCATION_HE,
   ROUTES_STEPS_SUMMARY_DISPLAY_CAP,
   routesMultiAltsCueHe,
+  displayLeaveArriveForLead,
+  durationTextPreferHe,
+  filterRoutesFactsByItineraryIds,
+  routesItinerariesToLiveRetrievalRecords,
   parseRoutesAspects,
   resolveRoutesReply,
   toRoutesRfc3339,
   type RouteItineraryOption,
   type RoutesFacts,
 } from "../src/services/routes.js";
+
+/** Compact multi cue contract (wording may include optional diff bits). */
+function expectMultiAltsCue(text: string, extraCount: number): void {
+  expect(text).toContain(`עוד ${extraCount} אפשרויות`);
+  expect(text).toContain("לפרטים בקשי לפי קו או שעת יציאה");
+  expect(text).toContain("בחיפוש חדש מתקבלות אפשרויות מעודכנות");
+  expect(text).not.toContain("לא אזהה אוטומטית");
+  expect(text).not.toContain("יציאה/משך/הליכה שונים");
+}
 import * as gtfsQuery from "../src/services/gtfs-query.js";
 import * as siriSm from "../src/services/siri-sm.js";
 import { readFileSync } from "node:fs";
@@ -403,7 +416,7 @@ describe("formatRoutesHebrew", () => {
     expect(text).toMatch(/תחנה קרובה/);
     expect(text).toMatch(/הליכה כ־3 דקות/);
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
-    expect(text.indexOf("238")).toBeLessThan(text.indexOf("אפשרות"));
+    expect(text.indexOf("238")).toBeLessThan(text.indexOf("אפשרויות"));
   });
 
   it("discloses when closest_board has no comparable boarding walk", () => {
@@ -514,7 +527,8 @@ describe("formatRoutesHebrew", () => {
     expect(text).toContain("קו 51");
     expect(text).toContain("הליכה משוערת 5 דקות");
     expect(text).toContain("בלי החלפה");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expectMultiAltsCue(text, 1);
+    expect(text).toMatch(/עוד 1 אפשרויות \([^)]*יציאה/);
     // Secondary option not expanded (no full option-2 body / its lines).
     expect(text).not.toContain("*אפשרות 2*");
     expect(text).not.toContain("משך משוער *52 דקות*");
@@ -578,7 +592,8 @@ describe("formatRoutesHebrew", () => {
     expect(text).toContain("מסלול בתחבורה ציבורית");
     expect(text).toContain("קו 51");
     expect(text).toMatch(/הליכה/);
-    expect(text).not.toContain(routesMultiAltsCueHe(1));
+    expect(text).not.toContain("עוד 1 אפשרויות");
+    expect(text).not.toContain("בחיפוש חדש מתקבלות אפשרויות מעודכנות");
   });
 
   it("itineraryWalkTransferBits only uses provider step fields", () => {
@@ -640,13 +655,14 @@ describe("formatRoutesHebrew", () => {
     expect(text).toContain("המלצה:");
     expect(text).toContain("משך משוער *40 דקות*");
     expect(text).not.toMatch(/יציאה משוערת/);
+    expect(text).not.toMatch(/עלייה משוערת/);
     expect(text).not.toMatch(/הגעה משוערת/);
     expect(text).not.toMatch(/מחיר משוער/);
     expect(text).not.toMatch(/→/);
     expect(text).toContain("קו 1");
     // Secondary line not expanded in compact first response.
     expect(text).not.toContain("קו 82");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expectMultiAltsCue(text, 1);
   });
 
   it("exports disruption-unavailable disclose for capability U", () => {
@@ -654,7 +670,335 @@ describe("formatRoutesHebrew", () => {
     expect(ROUTES_DISRUPTION_UNAVAILABLE_HE).toMatch(/לא מחובר/);
     expect(ROUTES_DISRUPTION_UNAVAILABLE_HE).not.toMatch(/תחזית חיה/);
   });
+
+  it("labels boarding leave and keeps consistent door-to-door duration", () => {
+    const text = formatRoutesHebrew({
+      ...base,
+      itineraries: [
+        sampleItinerary({
+          durationText: "40 דקות",
+          durationSeconds: 2400,
+          leaveByText: "08:20",
+          arriveByText: "08:55",
+          leaveIsBoarding: true,
+          steps: [
+            sampleStep({
+              travelMode: "WALK",
+              line: "",
+              durationSeconds: 300,
+              durationText: "5 דקות",
+              departureTime: "",
+              arrivalTime: "",
+              fromStop: "",
+              toStop: "ארנס",
+            }),
+            sampleStep({
+              line: "1",
+              departureTime: "08:20",
+              departureIso: "2026-10-22T05:20:00Z",
+              arrivalTime: "08:55",
+            }),
+          ],
+        }),
+        sampleItinerary({
+          durationText: "48 דקות",
+          durationSeconds: 2880,
+          leaveByText: "08:05",
+          arriveByText: "08:50",
+          leaveIsBoarding: true,
+          steps: [sampleStep({ line: "66", departureTime: "08:05" })],
+        }),
+      ],
+    });
+    expect(text).toContain("משך משוער *40 דקות*");
+    expect(text).toContain("עלייה משוערת 08:20");
+    expect(text).toContain("הגעה משוערת 08:55");
+    expect(text).toContain("קו 1");
+    expect(text).toContain("הליכה משוערת 5 דקות");
+    expect(text).not.toContain("קו 66");
+    expect(text).not.toMatch(/mins/i);
+    expectMultiAltsCue(text, 1);
+  });
+
+  it("omits unreliable midnight clocks without ISO when they conflict with duration", () => {
+    const opt = sampleItinerary({
+      durationText: "40 דקות",
+      durationSeconds: 2400,
+      leaveByText: "0:00",
+      arriveByText: "0:25",
+      leaveIsBoarding: true,
+      steps: [
+        sampleStep({
+          line: "1",
+          departureTime: "0:00",
+          departureIso: "",
+          arrivalTime: "0:25",
+        }),
+      ],
+    });
+    const clocks = displayLeaveArriveForLead(opt);
+    expect(clocks.leaveByText).toBe("");
+    expect(clocks.arriveByText).toBe("");
+    const text = formatRoutesHebrew({
+      ...base,
+      itineraries: [opt, sampleItinerary({ leaveByText: "08:00", arriveByText: "08:40" })],
+    });
+    expect(text).toContain("משך משוער *40 דקות*");
+    expect(text).toContain("קו 1");
+    expect(text).not.toMatch(/יציאה משוערת/);
+    expect(text).not.toMatch(/עלייה משוערת/);
+    expect(text).not.toMatch(/הגעה משוערת 0:25/);
+  });
+
+  it("cue stays neutral when alternatives are clones", () => {
+    const twin = sampleItinerary({
+      durationText: "40 דקות",
+      durationSeconds: 2400,
+      leaveByText: "08:20",
+      arriveByText: "09:00",
+      steps: [sampleStep({ line: "1", departureTime: "08:20" })],
+    });
+    const cue = routesMultiAltsCueHe(1, [twin, { ...twin }]);
+    expect(cue).toBe(
+      "עוד 1 אפשרויות — לפרטים בקשי לפי קו או שעת יציאה. בחיפוש חדש מתקבלות אפשרויות מעודכנות.",
+    );
+    expect(cue).not.toContain("יציאה/");
+    expect(cue).not.toContain("לא אזהה אוטומטית");
+  });
 });
+
+describe("durationTextPreferHe / displayLeaveArriveForLead", () => {
+  it("prefers Hebrew from seconds over English localized mins", () => {
+    expect(durationTextPreferHe(2400, "40 mins")).toBe("40 דקות");
+    expect(durationTextPreferHe(null, "40 mins")).toBe("40 דקות");
+    expect(durationTextPreferHe(null, "45 דקות")).toBe("45 דקות");
+    expect(durationTextPreferHe(null, "about an hour")).toBe("");
+  });
+
+  it("maps Google English duration text to Hebrew in multi lead", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        routes: [
+          {
+            duration: "2400s",
+            localizedValues: { duration: { text: "40 mins" } },
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "WALK",
+                    staticDuration: "300s",
+                    navigationInstruction: { instructions: "הליכה" },
+                  },
+                  {
+                    travelMode: "TRANSIT",
+                    staticDuration: "2100s",
+                    transitDetails: {
+                      stopDetails: {
+                        departureStop: { name: "בית" },
+                        arrivalStop: { name: "בורסה" },
+                        departureTime: "2026-10-22T05:20:00Z",
+                        arrivalTime: "2026-10-22T05:55:00Z",
+                      },
+                      transitLine: { nameShort: "1" },
+                      localizedValues: {
+                        departureTime: { time: { text: "0:00" } },
+                        arrivalTime: { time: { text: "0:25" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            duration: "2700s",
+            localizedValues: { duration: { text: "45 mins" } },
+            legs: [
+              {
+                steps: [
+                  {
+                    travelMode: "TRANSIT",
+                    transitDetails: {
+                      stopDetails: {
+                        departureStop: { name: "אחר" },
+                        arrivalStop: { name: "בורסה" },
+                        departureTime: "2026-10-22T05:30:00Z",
+                        arrivalTime: "2026-10-22T06:00:00Z",
+                      },
+                      transitLine: { nameShort: "50" },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    }));
+    const { text } = await resolveRoutesReply({
+      origin: "מיקום הבית",
+      destination: "בורסה",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toMatch(/משך משוער \*40 דקות\*/);
+    expect(text).not.toMatch(/mins/i);
+    // ISO wins over localized 0:00 / 0:25.
+    expect(text).toContain("עלייה משוערת");
+    expect(text).not.toMatch(/עלייה משוערת 0:00/);
+    expect(text).not.toMatch(/הגעה משוערת 0:25/);
+    expectMultiAltsCue(text, 1);
+  });
+
+  it("keeps boarding clocks when walk explains duration gap", () => {
+    const clocks = displayLeaveArriveForLead({
+      durationText: "40 דקות",
+      durationSeconds: 2400,
+      distanceMeters: null,
+      fareText: "",
+      leaveByText: "08:20",
+      arriveByText: "08:55",
+      leaveIsBoarding: true,
+      steps: [
+        {
+          travelMode: "WALK",
+          instruction: "",
+          line: "",
+          headsign: "",
+          fromStop: "",
+          toStop: "ארנס",
+          departureTime: "",
+          departureIso: "",
+          arrivalTime: "",
+          durationText: "5 דקות",
+          durationSeconds: 300,
+          headwaySeconds: null,
+        },
+        {
+          travelMode: "TRANSIT",
+          instruction: "",
+          line: "1",
+          headsign: "",
+          fromStop: "ארנס",
+          toStop: "בורסה",
+          departureTime: "08:20",
+          departureIso: "2026-10-22T05:20:00Z",
+          arrivalTime: "08:55",
+          durationText: "35 דקות",
+          durationSeconds: 2100,
+          headwaySeconds: null,
+        },
+      ],
+    });
+    expect(clocks.leaveByText).toBe("08:20");
+    expect(clocks.arriveByText).toBe("08:55");
+    expect(clocks.leaveIsBoarding).toBe(true);
+  });
+});
+
+describe("same-turn itinerary id filter (not WhatsApp buttons)", () => {
+  it("maps itin indexes and filters to the selected option", () => {
+    const facts: RoutesFacts = {
+      origin: "א",
+      destination: "ב",
+      departure: "",
+      arrival: "",
+      line: "",
+      headsign: "",
+      mode: "transit",
+      aspects: ["summary"],
+      durationText: "40 דקות",
+      durationSeconds: 2400,
+      distanceMeters: null,
+      leaveByText: "08:20",
+      arriveByText: "09:00",
+      fareText: "",
+      etaMinutes: null,
+      headwaySeconds: null,
+      steps: [],
+      navigateAddress: "",
+      lineMatchFailed: false,
+      matchedFromStop: "",
+      matchedLine: "",
+      stopLines: [],
+      stopDisplayName: "",
+      prefer: "",
+      closestBoardInsufficient: false,
+      itineraries: [
+        {
+          durationText: "40 דקות",
+          durationSeconds: 2400,
+          distanceMeters: null,
+          fareText: "",
+          leaveByText: "08:20",
+          arriveByText: "09:00",
+          leaveIsBoarding: true,
+          steps: [
+            {
+              travelMode: "TRANSIT",
+              instruction: "",
+              line: "1",
+              headsign: "",
+              fromStop: "א",
+              toStop: "ב",
+              departureTime: "08:20",
+              departureIso: "",
+              arrivalTime: "09:00",
+              durationText: "40 דקות",
+              durationSeconds: 2400,
+              headwaySeconds: null,
+            },
+          ],
+        },
+        {
+          durationText: "50 דקות",
+          durationSeconds: 3000,
+          distanceMeters: null,
+          fareText: "",
+          leaveByText: "08:05",
+          arriveByText: "08:55",
+          leaveIsBoarding: true,
+          steps: [
+            {
+              travelMode: "TRANSIT",
+              instruction: "",
+              line: "66",
+              headsign: "",
+              fromStop: "א",
+              toStop: "ב",
+              departureTime: "08:05",
+              departureIso: "",
+              arrivalTime: "08:55",
+              durationText: "50 דקות",
+              durationSeconds: 3000,
+              headwaySeconds: null,
+            },
+          ],
+        },
+      ],
+    };
+    const records = routesItinerariesToLiveRetrievalRecords(facts);
+    expect(records.map((r) => r.id)).toEqual(["itin:0", "itin:1"]);
+    const onlySecond = filterRoutesFactsByItineraryIds(facts, ["itin:1"]);
+    expect(onlySecond.itineraries).toHaveLength(1);
+    expect(onlySecond.durationText).toBe("50 דקות");
+    expect(transitLinesFromFacts(onlySecond)).toContain("66");
+    const missing = filterRoutesFactsByItineraryIds(facts, ["itin:9"]);
+    expect(missing.itineraries).toHaveLength(0);
+    expect(missing.durationText).toBe("");
+  });
+});
+
+function transitLinesFromFacts(facts: RoutesFacts): string {
+  return facts.itineraries
+    .flatMap((i) => i.steps.map((s) => s.line))
+    .filter(Boolean)
+    .join(",");
+}
 
 describe("resolveRoutesReply", () => {
   it("asks when destination missing", async () => {
@@ -682,6 +1026,16 @@ describe("resolveRoutesReply", () => {
     expect(text).toContain("לא מוגדר");
   });
 
+  function jerusalemHmFromNow(minutesFromNow: number): string {
+    const d = new Date(Date.now() + minutesFromNow * 60_000);
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jerusalem",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(d);
+  }
+
   function mockRoutesPayload(opts: {
     line: string;
     fromStop: string;
@@ -690,9 +1044,10 @@ describe("resolveRoutesReply", () => {
     altLine?: string;
     altFromStop?: string;
   }) {
-    const depIso = new Date(
-      Date.now() + (opts.departureInMinutes ?? 15) * 60_000,
-    ).toISOString();
+    const mins = opts.departureInMinutes ?? 15;
+    const depIso = new Date(Date.now() + mins * 60_000).toISOString();
+    // Keep localized text aligned with ISO (engine prefers ISO → Jerusalem HH:mm).
+    const depHm = opts.departureText ?? jerusalemHmFromNow(mins);
     const primary = {
       duration: "1800s",
       localizedValues: { duration: { text: "30 דקות" } },
@@ -712,7 +1067,7 @@ describe("resolveRoutesReply", () => {
                 transitLine: { nameShort: opts.line },
                 localizedValues: {
                   departureTime: {
-                    time: { text: opts.departureText ?? "08:30" },
+                    time: { text: depHm },
                   },
                 },
               },
@@ -743,7 +1098,7 @@ describe("resolveRoutesReply", () => {
                   transitLine: { nameShort: opts.altLine },
                   localizedValues: {
                     departureTime: {
-                      time: { text: opts.departureText ?? "08:30" },
+                      time: { text: depHm },
                     },
                   },
                 },
@@ -809,6 +1164,7 @@ describe("resolveRoutesReply", () => {
   });
 
   it("succeeds when matching line boards at asked stop", async () => {
+    const expectHm = jerusalemHmFromNow(18);
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -816,7 +1172,7 @@ describe("resolveRoutesReply", () => {
         mockRoutesPayload({
           line: "66",
           fromStop: "שלום דורני/העצמאות",
-          departureText: "16:20",
+          departureText: expectHm,
           departureInMinutes: 18,
         }),
     }));
@@ -830,7 +1186,8 @@ describe("resolveRoutesReply", () => {
     });
     expect(text).toMatch(/קו 66/);
     expect(text).toMatch(/בעוד כ־18 דקות/);
-    expect(text).toContain("16:20");
+    // Clock comes from ISO → Asia/Jerusalem (aligned with fixture minutes).
+    expect(text).toMatch(/ב־\d{2}:\d{2}/);
     expect(text).toContain("שלום דורני");
   });
 
@@ -859,6 +1216,7 @@ describe("resolveRoutesReply", () => {
   });
 
   it("finds matching line on an alternative route", async () => {
+    const expectHm = jerusalemHmFromNow(22);
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -868,7 +1226,7 @@ describe("resolveRoutesReply", () => {
           fromStop: "שלום דורני",
           altLine: "66",
           altFromStop: "שלום דורני/העצמאות",
-          departureText: "17:05",
+          departureText: expectHm,
           departureInMinutes: 22,
         }),
     }));
@@ -882,7 +1240,7 @@ describe("resolveRoutesReply", () => {
     });
     expect(text).toMatch(/קו 66/);
     expect(text).toMatch(/בעוד כ־22 דקות/);
-    expect(text).toContain("17:05");
+    expect(text).toMatch(/ב־\d{2}:\d{2}/);
   });
 
   it("lists lines from Places transitStation stop board", async () => {
@@ -1018,20 +1376,27 @@ describe("resolveRoutesReply", () => {
         ],
       }),
     }));
-    const { text } = await resolveRoutesReply({
+    const result = await resolveRoutesReply({
       origin: "פתח תקווה",
       destination: "תל אביב",
       aspects: ["summary"],
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
+    const { text } = result;
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
     expect(text).toContain("המלצה:");
     // Compact multi: primary only (earlier leave 66 @ 08:10); secondary deferred.
     expect(text).toContain("קו 66");
     expect(text).not.toContain("קו 51");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expect(text).toContain("עלייה משוערת");
+    expectMultiAltsCue(text, 1);
+    // No itinerary-selection WhatsApp buttons on multi replies.
+    expect(result).not.toHaveProperty("buttons");
+    expect(Object.keys(result).sort()).toEqual(
+      ["navigateAddress", "text"].sort(),
+    );
     const body = computeRoutesBody(fetchImpl);
     expect(body.computeAlternativeRoutes).toBe(true);
     expect(body.transitPreferences).toBeUndefined();
@@ -1117,12 +1482,13 @@ describe("resolveRoutesReply", () => {
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain("המלצה:");
     expect(text).not.toMatch(/יציאה משוערת/);
+    expect(text).not.toMatch(/עלייה משוערת/);
     expect(text).not.toMatch(/הגעה משוערת/);
     expect(text).not.toMatch(/מחיר משוער/);
     expect(text).toContain("קו 1");
     // Secondary alternative line deferred in compact first response.
     expect(text).not.toContain("קו 82");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expectMultiAltsCue(text, 1);
   });
 
   it("reports zero results when Google returns no routes", async () => {
@@ -1212,7 +1578,7 @@ describe("resolveRoutesReply", () => {
     expect(text).not.toContain("קו 66");
     expect(text).not.toContain("קו 999");
     expect(text).not.toContain("קו 1");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expectMultiAltsCue(text, 1);
   });
 
   it(`caps displayed alternatives at ${ROUTES_ITINERARY_DISPLAY_CAP} from provider routes`, async () => {
@@ -1260,7 +1626,7 @@ describe("resolveRoutesReply", () => {
     expect(text).not.toContain("קו 33");
     expect(text).not.toContain("קו 44");
     expect(text).not.toContain("קו 55");
-    expect(text).toContain(routesMultiAltsCueHe(ROUTES_ITINERARY_DISPLAY_CAP - 1));
+    expectMultiAltsCue(text, ROUTES_ITINERARY_DISPLAY_CAP - 1);
   });
 
   it("line-ETA path does not surface multi-option trip compare", async () => {
@@ -2103,7 +2469,7 @@ describe("origin→destination trip boarding workflow", () => {
     // Compact multi lead + recalculation cue.
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain("המלצה:");
-    expect(text).toContain(routesMultiAltsCueHe(1));
+    expectMultiAltsCue(text, 1);
     // MOT enrichment still present with useful schedule rows.
     expect(text).toMatch(/מתוזמנות רשמיות/);
     expect(text).toContain("08:12");
