@@ -244,10 +244,13 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("RETRIEVAL CONTRACT");
     expect(config.systemMessage).toContain("FULL INVENTORY / date-window agenda");
     expect(config.systemMessage).toContain("SAME-KIND SEMANTIC");
-    expect(config.systemMessage).toContain("show_dump_ids (required)");
+    expect(config.systemMessage).toContain("INTENT→ACTION");
+    expect(config.systemMessage).toContain("focused single-record lookup");
     expect(config.systemMessage).toContain(
-      "answer in responses naming only those existing rows",
+      "show_dump=<kind> + show_dump_ids=[all matching ids]",
     );
+    expect(config.systemMessage).toContain("FORBIDDEN parallel prose inventory");
+    expect(config.systemMessage).toContain("does NOT compute next-occurrence");
     expect(config.systemMessage).toContain("no free-built inventory/agenda");
     expect(config.systemMessage).toContain("CROSS-KIND SEMANTIC");
     expect(config.systemMessage).toContain("existing items only");
@@ -259,6 +262,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN bare show_dump without ids for a semantic/focused ask",
     );
+    expect(config.systemMessage).not.toContain("show_dump_ids (required)");
   });
 
   it("requires two-entry soft reminder offer after tasks add without explicit ping", () => {

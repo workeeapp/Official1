@@ -1,7 +1,7 @@
 /**
- * Offline prompt contract: same-kind semantic retrieval (path 2).
+ * Offline prompt contract: intent→ACTION + same-kind semantic retrieval (path 2).
  * Model selects ids; engine renders via show_dump + show_dump_ids.
- * No engine NLP / multi-domain dump implied.
+ * No engine NLP / multi-domain dump / next-occurrence computation implied.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -26,9 +26,7 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
     expect(config).toMatch(
       /\(2\) SAME-KIND SEMANTIC[\s\S]*?FORBIDDEN parallel prose inventory/,
     );
-    expect(config).toMatch(
-      /Multiple clear matches are NOT ambiguity/,
-    );
+    expect(config).toMatch(/Multiple clear matches are NOT ambiguity/);
     expect(config).toMatch(
       /\(2\) SAME-KIND SEMANTIC[\s\S]*?No matches: no dump/,
     );
@@ -36,9 +34,38 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
       /Material ambiguity \(unclear meaning\/selection criteria/,
     );
     expect(config).toMatch(/Never invent or cross-kind ids/);
-    // Closed the old OR that allowed free inventory prose for clear matches.
     expect(config).not.toMatch(
       /show_dump_ids \(required\) OR answer in responses naming only those existing rows/,
+    );
+  });
+
+  it("general INTENT→ACTION forbids prose substitute for structured retrieve/display", () => {
+    expect(config).toMatch(
+      /INTENT→ACTION:[\s\S]*?FORBIDDEN substituting factual conversational prose/,
+    );
+    expect(config).toMatch(
+      /focused single-record lookup/,
+    );
+    expect(config).toMatch(
+      /B-DISPLAY:[\s\S]*?focused single-record retrieval/,
+    );
+    expect(config).toMatch(
+      /Do NOT route explanation \/ analysis \/ general-knowledge asks into show_dump/,
+    );
+  });
+
+  it("path 2 covers broad, focused single-record, temporal/person by intent", () => {
+    expect(config).toMatch(
+      /\(2\) SAME-KIND SEMANTIC \/ focused — by intent \(broad list, focused single-record lookup/,
+    );
+    expect(config).toMatch(
+      /A single clear focused hit[\s\S]*?dump that one id \(ITEM DUMP\), not prose/,
+    );
+    expect(config).toMatch(
+      /does NOT compute next-occurrence \/ ranking/,
+    );
+    expect(config).toMatch(
+      /never claim[\s\S]*?engine resolved recurrence-next if the dump does not show it/,
     );
   });
 
@@ -51,26 +78,47 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
     );
   });
 
+  it("create/update paths remain distinct from retrieval", () => {
+    expect(config).toContain("B-IMPLICIT-SAVE:");
+    expect(config).toMatch(
+      /Practical intention without explicit save request[\s\S]*?lists\.add now/,
+    );
+    expect(config).toContain("B-CORRECT:");
+  });
+
+  it("unsupported / honesty markers remain", () => {
+    expect(config).toContain("B-UNSUPPORTED →");
+    expect(config).toMatch(/Never invent unsupported capabilities/);
+  });
+
   it("meetings example requires tasks dump + show_dump_ids", () => {
     expect(config).toMatch(
-      /אילו פגישות יש לי[\s\S]*?show_dump=tasks \+ show_dump_ids/,
+      /show_dump=tasks \+ show_dump_ids/,
     );
   });
 
   it("chat.service Lucy runtime carries the same contract", () => {
     expect(chat).toContain("RETRIEVAL CONTRACT (runtime):");
+    expect(chat).toContain("INTENT->ACTION:");
     expect(chat).toContain(
-      "SAME-KIND SEMANTIC / focused - meaning filter inside ONE supported dump domain",
+      "FORBIDDEN substituting easy factual prose when dump+ids exists (incl. focused single-record)",
+    );
+    expect(chat).toContain(
+      "prose OK for explanation/analysis/general knowledge/clarify",
+    );
+    expect(chat).toContain(
+      "SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows)",
+    );
+    expect(chat).toContain(
+      "engine does NOT infer categories or compute next-occurrence",
     );
     expect(chat).toContain("FORBIDDEN parallel prose inventory");
     expect(chat).toContain("multiple clear matches are NOT ambiguity");
+    expect(chat).toContain("single focused hit -> dump that one id");
     expect(chat).toContain("no matches -> no dump + short no-match");
     expect(chat).toContain("NO multi-domain dump");
     expect(chat).toContain(
-      "example meetings/appointments -> show_dump=tasks + show_dump_ids",
-    );
-    expect(chat).toContain(
-      "RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump+show_dump_ids for all clear matches; no parallel prose inventory; no dump on no-match/ASK)",
+      "meetings/appointments example -> show_dump=tasks + show_dump_ids",
     );
     expect(chat).not.toContain(
       "ids required or responses without bare dump",
