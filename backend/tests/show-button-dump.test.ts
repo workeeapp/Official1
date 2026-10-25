@@ -7,6 +7,7 @@ import {
   customItemCoShareMark,
   filterSnapshotForAboutPerson,
   formatCustomItemBody,
+  formatCustomListDetailText,
   formatFilingDumpBody,
   formatFilingListPreview,
   extractFilingReadableText,
@@ -205,7 +206,7 @@ describe("formatFilingDumpBody", () => {
     ).toBe("שרון וטרינרית");
   });
 
-  it("filingHiddenDetailMark stays empty — list preview / … replace 📄", () => {
+  it("filingHiddenDetailMark is 📄 only when detail preview overflows", () => {
     expect(
       filingHiddenDetailMark(
         { item_info: "בתוקף", item_description: "" },
@@ -214,10 +215,13 @@ describe("formatFilingDumpBody", () => {
     ).toBe("");
     expect(
       filingHiddenDetailMark(
-        { item_info: "", item_description: "אופנוע" },
+        {
+          item_info: "מבחן מתמטיקה ביום שלישי. אחר כך אנגלית.",
+          item_description: "",
+        },
         "list",
       ),
-    ).toBe("");
+    ).toBe(" 📄");
     expect(
       filingHiddenDetailMark(
         {
@@ -324,7 +328,7 @@ describe("formatFilingDumpBody", () => {
 });
 
 describe("filings flat dump", () => {
-  it("inventory: title + short preview; co-share mark; no labeled תיאור / 📄", () => {
+  it("inventory: title + short preview; co-share mark; no 📄 when detail fits", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -382,10 +386,11 @@ describe("filings flat dump", () => {
     const dump = formatShowDumpFromKind("filings", snap, {
       viewerName: "טל",
     })!;
-    expect(dump).toBe("📁 תיוקים:\n1. לוח מבחנים — יואב 📎\nמתמטיקה 12/11…");
+    expect(dump).toBe(
+      "📁 תיוקים:\n1. לוח מבחנים — יואב 📎 📄\nמתמטיקה 12/11…",
+    );
     expect(dump).not.toContain("אנגלית");
     expect(dump).not.toContain("תיאור:");
-    expect(dump).not.toContain("📄");
   });
 
   it("inventory: title only when no detail and no attachment", () => {
@@ -438,10 +443,9 @@ describe("filings flat dump", () => {
       section: "personal",
     })!;
     expect(personal).toBe(
-      "📁 תיוקים:\n1. רישיון\nבתוקף עד סוף השנה.…",
+      "📁 תיוקים:\n1. רישיון 📄\nבתוקף עד סוף השנה.…",
     );
     expect(personal).not.toContain("קוד שער");
-    expect(personal).not.toContain("📄");
     expect(personal).not.toContain("תיאור:");
   });
 
@@ -2017,10 +2021,18 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
     });
     expect(custom).toContain("📋 רשימת «בעיות» 📎:");
-    expect(custom).toContain("1. בעיה: דליפה");
+    expect(custom).toMatch(/^1\. דליפה$/m);
+    expect(custom).not.toContain("בעיה:");
   });
 
-  it("dumps custom list rows with every column labeled", () => {
+  it("custom inventory: title_field full + detail preview; ITEM DUMP keeps all columns", () => {
+    expect(
+      formatCustomListDetailText(
+        { שם: "טל", תיאור: "נשוי למיכל", עיר: "תל אביב" },
+        "שם",
+        ["שם", "תיאור", "עיר"],
+      ),
+    ).toBe("תיאור: נשוי למיכל · עיר: תל אביב");
     expect(
       formatCustomItemBody(
         { שם: "טל", תיאור: "נשוי למיכל" },
@@ -2028,16 +2040,6 @@ describe("formatShowDumpFromKind", () => {
         ["שם", "תיאור"],
       ),
     ).toBe("שם: טל · תיאור: נשוי למיכל");
-    expect(
-      formatCustomItemBody(
-        { שם: "טל", תיאור: "נשוי למיכל", עיר: "תל אביב" },
-        "שם",
-        ["שם", "תיאור", "עיר"],
-      ),
-    ).toBe("שם: טל · תיאור: נשוי למיכל · עיר: תל אביב");
-    expect(formatCustomItemBody({ שם: "טל" }, "שם", ["שם", "תיאור"])).toBe(
-      "שם: טל",
-    );
 
     const snapshot: EmployeeRecordSnapshot = {
       lists: [
@@ -2068,10 +2070,98 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
     });
     expect(text).toContain("📋 רשימת «אני ומיכל»:");
-    expect(text).toContain("1. שם: טל · תיאור: נשוי למיכל");
-    expect(text).toContain("2. שם: מיכל · תיאור: נשואה לטל");
-    // Whole-list shared: no per-line co-share marks.
-    expect(text).not.toMatch(/שם: טל · תיאור: נשוי למיכל \(/);
+    expect(text).toContain("1. טל\nתיאור: נשוי למיכל");
+    expect(text).toContain("2. מיכל\nתיאור: נשואה לטל");
+    expect(text).not.toContain("📄");
+    expect(text).not.toMatch(/^1\. שם: טל/m);
+
+    const itemDump = formatShowDumpFromKind("אני ומיכל", snapshot, {
+      viewerName: "טל",
+      itemIds: new Set(["1"]),
+    });
+    expect(itemDump).toContain("1. שם: טל · תיאור: נשוי למיכל");
+    expect(itemDump).not.toMatch(/^2\./m);
+    expect(itemDump).not.toContain("נשואה לטל");
+  });
+
+  it("custom inventory: unfamiliar columns still build detail in list order", () => {
+    const longNote =
+      "הלקוח ביקש משלוח עד הבית אחרי השעה שש בערב וגם לבדוק שהאריזה שלמה לפני המסירה מחר";
+    const snapshot: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "custom",
+          list_name: "הזמנות",
+          owner: "טל",
+          scope: "personal",
+          columns: ["מספר הזמנה", "ספק", "הערת לקוח"],
+          title_field: "מספר הזמנה",
+          items: [
+            {
+              item_id: "o1",
+              "מספר הזמנה": "A-100",
+              ספק: "סופרפארם",
+              "הערת לקוח": longNote,
+            },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const text = formatShowDumpFromKind("הזמנות", snapshot, {
+      viewerName: "טל",
+    })!;
+    expect(text).toContain("📋 רשימת «הזמנות»:");
+    expect(text).toMatch(/^1\. A-100 📄$/m);
+    expect(text).toContain("ספק: סופרפארם");
+    expect(text).toContain("…");
+    expect(text).not.toContain(longNote);
+    const full = formatShowDumpFromKind("הזמנות", snapshot, {
+      viewerName: "טל",
+      itemIds: new Set(["o1"]),
+    })!;
+    expect(full).toContain(`הערת לקוח: ${longNote}`);
+    expect(full).not.toContain("📄");
+  });
+
+  it("tasks and shopping keep full titles — no truncate-driven 📄", () => {
+    const longTask =
+      "לסכם עם כל הספקים את לוח הזמנים המלא לפרויקט השיפוץ של הדירה כולל חומרי גמר";
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "t1", "שם מטלה": longTask }],
+        },
+        {
+          list_type: "shopping",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "s1",
+              "שם פריט":
+                "אבקת כביסה מרוכזת במיוחד לכביסה צבעונית באריזה גדולה למשפחה",
+              כמות: 1,
+            },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const tasks = formatShowDumpFromKind("tasks", snap, { viewerName: "טל" })!;
+    expect(tasks).toContain(longTask);
+    expect(tasks).not.toContain("📄");
+    expect(tasks).not.toContain("…");
+    const shopping = formatShowDumpFromKind("shopping", snap, {
+      viewerName: "טל",
+    })!;
+    expect(shopping).toContain(
+      "אבקת כביסה מרוכזת במיוחד לכביסה צבעונית באריזה גדולה למשפחה - 1",
+    );
+    expect(shopping).not.toContain("📄");
   });
 
   it("strips wrapping quotes from custom show_dump names", () => {
@@ -2101,8 +2191,8 @@ describe("formatShowDumpFromKind", () => {
         viewerName: "טל",
       });
       expect(text).toContain("📋 רשימת «בדיקה של שיתוף עם עמית»:");
-      expect(text).toContain("1. שם: בדיקה 1");
-      expect(text).toContain("2. שם: בדיקה 2");
+      expect(text).toContain("1. בדיקה 1");
+      expect(text).toContain("2. בדיקה 2");
     }
   });
 
@@ -2157,9 +2247,9 @@ describe("formatShowDumpFromKind", () => {
     expect(tal).toContain("📋 רשימת «באגים ופיתוחים»:");
     expect(tal).not.toContain("אישיות");
     expect(tal).not.toContain("משותפות עם");
-    expect(tal).toMatch(/1\. שם: תיקון לוגין$/m);
-    expect(tal).toContain("שם: באג בפרודקשן (מיכל, טל)");
-    expect(tal).toContain("שם: שיפור API");
+    expect(tal).toMatch(/1\. תיקון לוגין$/m);
+    expect(tal).toContain("באג בפרודקשן (מיכל, טל)");
+    expect(tal).toContain("שיפור API");
 
     const partnerView: EmployeeRecordSnapshot = {
       lists: [
@@ -2185,7 +2275,7 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "מיכל",
     })!;
     expect(michal).toContain("📋 רשימת «באגים ופיתוחים»:");
-    expect(michal).toContain("שם: באג בפרודקשן (טל, מיכל)");
+    expect(michal).toContain("באג בפרודקשן (טל, מיכל)");
     expect(michal).not.toMatch(/באג בפרודקשן \(טל\)$/m);
 
     // shared_items without shared_with still synthesizes all-involved, not owner-only.

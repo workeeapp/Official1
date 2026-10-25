@@ -994,8 +994,19 @@ export function itemReminderAboutMatchesPartner(
   );
 }
 
-/** Soft cap for filings list preview when no sentence end is available. */
-export const FILING_LIST_PREVIEW_MAX_CHARS = 70;
+/** Soft cap for list-row detail preview when no sentence end is available. */
+export const LIST_ROW_PREVIEW_MAX_CHARS = 70;
+/** @deprecated Use {@link LIST_ROW_PREVIEW_MAX_CHARS}. */
+export const FILING_LIST_PREVIEW_MAX_CHARS = LIST_ROW_PREVIEW_MAX_CHARS;
+
+/** Soft-preferred custom detail column names (any user columns still work). */
+const CUSTOM_DETAIL_PREFERRED_KEYS = [
+  "תיאור",
+  "הערות",
+  "פירוט",
+  "notes",
+  "description",
+] as const;
 
 /**
  * Filing dump body.
@@ -1182,9 +1193,9 @@ export function firstFilingPreviewChunk(text: string): {
 }
 
 /** Soft-cap cut preferring a word boundary near `max`. */
-export function truncateFilingPreviewAtWord(
+export function truncateListProse(
   text: string,
-  max = FILING_LIST_PREVIEW_MAX_CHARS,
+  max = LIST_ROW_PREVIEW_MAX_CHARS,
 ): { text: string; truncated: boolean } {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -1200,13 +1211,52 @@ export function truncateFilingPreviewAtWord(
   return { text: cut.trimEnd(), truncated: true };
 }
 
+/** @deprecated Use {@link truncateListProse}. */
+export function truncateFilingPreviewAtWord(
+  text: string,
+  max = LIST_ROW_PREVIEW_MAX_CHARS,
+): { text: string; truncated: boolean } {
+  return truncateListProse(text, max);
+}
+
+/**
+ * First sentence/line then soft cap. Returns display text (with `…` when cut)
+ * and whether overflow remains (for 📄).
+ */
+export function formatTruncatedListDetail(
+  detailText: string,
+): { text: string; truncated: boolean } | null {
+  const raw = detailText.trim();
+  if (!raw) {
+    return null;
+  }
+  const { head, rest } = firstFilingPreviewChunk(raw);
+  if (!head) {
+    return null;
+  }
+  const capped = truncateListProse(head);
+  if (!capped.text) {
+    return null;
+  }
+  const truncated = capped.truncated || rest.length > 0;
+  return {
+    text: truncated ? `${capped.text}…` : capped.text,
+    truncated,
+  };
+}
+
+/** `📄` when list detail overflow exists — not for title truncation. */
+export function listDetailOverflowMark(truncated: boolean): string {
+  return truncated ? " 📄" : "";
+}
+
 /**
  * List-only preview under the filing title: first sentence / ~70 chars + `…`
  * when more remains. Address filings skip coordinate `item_info` (📍 covers it).
  */
-export function formatFilingListPreview(
+export function formatFilingListPreviewParts(
   item: Record<string, unknown>,
-): string | null {
+): { text: string; truncated: boolean } | null {
   const name = readText(item, ["item_name", "itemName"]);
   const info = readText(item, ["item_info", "itemInfo"]);
   const findHelper = readText(item, ["item_description", "itemDescription"]);
@@ -1229,31 +1279,27 @@ export function formatFilingListPreview(
   if (chunks.length === 0) {
     return null;
   }
-  const combined = chunks.join("\n");
-  const { head, rest } = firstFilingPreviewChunk(combined);
-  if (!head) {
-    return null;
-  }
-  const capped = truncateFilingPreviewAtWord(head);
-  const truncated = capped.truncated || rest.length > 0;
-  if (!capped.text) {
-    return null;
-  }
-  return truncated ? `${capped.text}…` : capped.text;
+  return formatTruncatedListDetail(chunks.join("\n"));
+}
+
+export function formatFilingListPreview(
+  item: Record<string, unknown>,
+): string | null {
+  return formatFilingListPreviewParts(item)?.text ?? null;
 }
 
 /**
- * Legacy list mark for “hidden detail”. List preview / `…` now carry that
- * signal, so 📄 is not emitted alongside them (no duplicate meaning).
+ * Inventory mark when filing detail preview overflowed (more text than shown).
  */
 export function filingHiddenDetailMark(
-  _item: Record<string, unknown>,
+  item: Record<string, unknown>,
   mode: "list" | "full",
 ): string {
   if (mode !== "list") {
     return "";
   }
-  return "";
+  const parts = formatFilingListPreviewParts(item);
+  return listDetailOverflowMark(Boolean(parts?.truncated));
 }
 
 /** True when the filing name encodes a place/address/location. */
@@ -2433,6 +2479,16 @@ type DumpItem = {
   partnerFilterKey?: string;
   /** Sole assignee when this is an assign row (for באחריות filter). */
   assigneeName?: string;
+  /**
+   * Custom lists: short title_field value for LAST_NUMBERED_DUMP stem when
+   * ITEM DUMP title is the full multi-column body.
+   */
+  titleStem?: string;
+  /**
+   * Inventory-only raw detail prose (custom non-title columns). Truncated in
+   * {@link formatNumberedItem}; ITEM DUMP leaves this unset.
+   */
+  listDetailText?: string;
 };
 
 type ListDumpType =
@@ -2562,16 +2618,21 @@ function collectListDumpRows(
   const skipMarks = opts?.flatLayout === true && (listType === "shopping" || listType === "tasks");
   const rows: DumpItem[] = [];
 
+  const itemDump = opts?.itemIds != null;
   for (const list of lists) {
     const listFiles = listHasListLevelFiles(list);
     const listEmoji = listDumpEmoji(list);
     for (const item of list.items) {
-      const title =
-        listType === "custom"
-          ? formatCustomItemBody(item, list.title_field, list.columns)
-          : itemTitle(listType, item, list.title_field);
-
       if (listType === "custom") {
+        const titleField = resolveCustomTitleField(
+          item,
+          list.title_field,
+          list.columns,
+        );
+        const nameTitle = itemTitle("custom", item, titleField);
+        const title = itemDump
+          ? formatCustomItemBody(item, list.title_field, list.columns)
+          : nameTitle;
         const mark = customItemCoShareMark(list, item, viewer, aliases);
         const isShared =
           list.scope === "shared" ||
@@ -2588,17 +2649,24 @@ function collectListDumpRows(
           : list.scope === "shared"
             ? partnersKey(list.shared_with ?? [], viewer, aliases)
             : "";
+        const listDetailText = itemDump
+          ? undefined
+          : formatCustomListDetailText(item, titleField, list.columns);
         rows.push({
           title,
           item,
           listFiles,
           listEmoji,
           isShared,
+          titleStem: nameTitle,
+          ...(listDetailText ? { listDetailText } : {}),
           ...(partnerFilterKey ? { partnerFilterKey } : {}),
           ...(mark ? { responsibilityMark: mark } : {}),
         });
         continue;
       }
+
+      const title = itemTitle(listType, item, list.title_field);
 
       if (listType === "contacts") {
         // Same assign vs co-share marks as shopping/tasks (assigned_by = assigner).
@@ -2960,7 +3028,12 @@ function dumpItemTitleStem(
     return String(item.item_name ?? "").trim() || row.title.trim() || "תיוק";
   }
   if (listType === "custom") {
-    return row.title.trim() || "פריט";
+    return (
+      row.titleStem?.trim() ||
+      itemTitle("custom", item, undefined) ||
+      row.title.trim() ||
+      "פריט"
+    );
   }
   return row.title.trim() || "פריט";
 }
@@ -3009,6 +3082,7 @@ function formatSingleHeaderDump(
         responsibilityMark: row.responsibilityMark,
         now: opts?.now,
         itemIds: opts?.itemIds,
+        listDetailText: row.listDetailText,
       });
     }),
   ].join("\n");
@@ -3508,9 +3582,15 @@ export function formatNumberedItem(
      * include stored values; list dumps omit values (icons only).
      */
     itemIds?: ReadonlySet<string> | null;
+    /**
+     * Inventory-only custom (or similar) detail prose to preview under the
+     * title — never truncates the title itself.
+     */
+    listDetailText?: string;
   },
 ): string {
   let body = title.trim() || "פריט";
+  const listMode = opts?.itemIds == null;
   const choreTimeRaw =
     listType === "tasks" || listType === "shopping"
       ? readText(item, ["שעה לביצוע", "time", "שעה"])
@@ -3556,11 +3636,17 @@ export function formatNumberedItem(
   ) {
     body += ` (${opts.sharedWithLabel.trim()})`;
   }
-  // Filings inventory: short preview under the title line (ITEM DUMP stays full).
-  if (listType === "filings" && opts?.itemIds == null) {
+  // Detail preview under the title (filings / custom). Titles stay full.
+  if (listMode && listType === "filings") {
     const preview = formatFilingListPreview(item);
     if (preview) {
       body += `\n${preview}`;
+    }
+  } else if (listMode && listType === "custom") {
+    const detail = formatTruncatedListDetail(opts?.listDetailText ?? "");
+    if (detail) {
+      body += listDetailOverflowMark(detail.truncated);
+      body += `\n${detail.text}`;
     }
   }
   const standing =
@@ -3974,9 +4060,99 @@ const CUSTOM_META_KEYS = new Set([
   "יום בשבוע סיום",
 ]);
 
+/** Title column for a custom row: list title_field, else first declared col, else first data key. */
+export function resolveCustomTitleField(
+  item: Record<string, unknown>,
+  titleField?: string,
+  columns?: string[],
+): string {
+  const fromList = (titleField ?? "").trim();
+  if (fromList) {
+    return fromList;
+  }
+  const declared = Array.isArray(columns)
+    ? columns
+        .filter((col): col is string => typeof col === "string")
+        .map((col) => col.trim())
+        .filter(Boolean)
+    : [];
+  if (declared[0]) {
+    return declared[0];
+  }
+  for (const [key, value] of Object.entries(item)) {
+    const col = key.trim();
+    if (!col || CUSTOM_META_KEYS.has(col)) {
+      continue;
+    }
+    if (typeof value === "string" && value.trim()) {
+      return col;
+    }
+  }
+  return "";
+}
+
+/**
+ * Inventory detail for a custom row: non-title user columns as «מפתח: ערך».
+ * Prefers known detail column names when present, then remaining columns in
+ * list order. Skips {@link CUSTOM_META_KEYS} and empty/non-string values.
+ */
+export function formatCustomListDetailText(
+  item: Record<string, unknown>,
+  titleField?: string,
+  columns?: string[],
+): string {
+  const titleKey = resolveCustomTitleField(item, titleField, columns);
+  const declared = Array.isArray(columns)
+    ? columns
+        .filter((col): col is string => typeof col === "string")
+        .map((col) => col.trim())
+        .filter(Boolean)
+    : [];
+  const columnOrder =
+    declared.length > 0
+      ? declared
+      : Object.keys(item)
+          .map((key) => key.trim())
+          .filter(Boolean);
+
+  const valueFor = (key: string): string => {
+    const raw = item[key];
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+
+  const usable = (key: string): boolean => {
+    if (!key || key === titleKey || CUSTOM_META_KEYS.has(key)) {
+      return false;
+    }
+    return Boolean(valueFor(key));
+  };
+
+  const orderedKeys: string[] = [];
+  const seen = new Set<string>();
+  const pushKey = (key: string) => {
+    if (!usable(key) || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    orderedKeys.push(key);
+  };
+
+  for (const preferred of CUSTOM_DETAIL_PREFERRED_KEYS) {
+    if (columnOrder.includes(preferred)) {
+      pushKey(preferred);
+    }
+  }
+  for (const key of columnOrder) {
+    pushKey(key);
+  }
+
+  return orderedKeys.map((key) => `${key}: ${valueFor(key)}`).join(" · ");
+}
+
 /**
  * Custom list line: every non-empty column as «מפתח: ערך», joined with ·.
  * Includes title_field. Example: «שם: טל · תיאור: נשוי למיכל».
+ * Used for ITEM DUMP / full body — not inventory title.
  */
 export function formatCustomItemBody(
   item: Record<string, unknown>,
