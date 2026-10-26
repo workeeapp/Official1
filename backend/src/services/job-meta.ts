@@ -58,6 +58,28 @@ export interface JobMeta {
   pendingActivation?: boolean;
   /** Ask body to send when a pending job activates (WhatsApp / chat). */
   activateText?: string;
+  /**
+   * Engine-opened overdue sweep on a new Lucy conversation: speaker task
+   * item_ids whose last day has passed. Model resolves via lists remove/update.
+   */
+  overdueItemIds?: string[];
+  /** Titles parallel to overdueItemIds for OPEN_JOBS raise copy. */
+  overdueTitles?: string[];
+  /**
+   * Overdue self-job already raised once this conversation — OPEN_JOBS sets
+   * raisable=false until the next new conversation clears it.
+   */
+  overdueOffered?: boolean;
+  /**
+   * Engine-opened stale undated sweep: speaker tasks with no date at a
+   * 7×2^n day milestone. Model resolves via lists remove/update.
+   */
+  staleUndatedItemIds?: string[];
+  staleUndatedTitles?: string[];
+  /** Ages in days parallel to staleUndatedItemIds. */
+  staleUndatedAges?: number[];
+  /** Already raised once this conversation. */
+  staleOffered?: boolean;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -129,6 +151,50 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
     ...(typeof meta.activateText === "string" && meta.activateText
       ? { activateText: meta.activateText }
       : {}),
+    ...(Array.isArray(meta.overdueItemIds) &&
+    meta.overdueItemIds.every((id) => typeof id === "string")
+      ? {
+          overdueItemIds: (meta.overdueItemIds as string[]).filter((id) =>
+            id.trim(),
+          ),
+        }
+      : {}),
+    ...(Array.isArray(meta.overdueTitles) &&
+    meta.overdueTitles.every((title) => typeof title === "string")
+      ? {
+          overdueTitles: (meta.overdueTitles as string[])
+            .map((title) => title.trim())
+            .filter(Boolean),
+        }
+      : {}),
+    ...(meta.overdueOffered === true ? { overdueOffered: true } : {}),
+    ...(Array.isArray(meta.staleUndatedItemIds) &&
+    meta.staleUndatedItemIds.every((id) => typeof id === "string")
+      ? {
+          staleUndatedItemIds: (meta.staleUndatedItemIds as string[]).filter(
+            (id) => id.trim(),
+          ),
+        }
+      : {}),
+    ...(Array.isArray(meta.staleUndatedTitles) &&
+    meta.staleUndatedTitles.every((title) => typeof title === "string")
+      ? {
+          staleUndatedTitles: (meta.staleUndatedTitles as string[])
+            .map((title) => title.trim())
+            .filter(Boolean),
+        }
+      : {}),
+    ...(Array.isArray(meta.staleUndatedAges) &&
+    meta.staleUndatedAges.every(
+      (age) => typeof age === "number" && Number.isFinite(age),
+    )
+      ? {
+          staleUndatedAges: (meta.staleUndatedAges as number[]).map((age) =>
+            Math.floor(age),
+          ),
+        }
+      : {}),
+    ...(meta.staleOffered === true ? { staleOffered: true } : {}),
   };
 }
 

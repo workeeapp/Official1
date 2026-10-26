@@ -78,6 +78,29 @@ Speaker asks Lucy to check **with them** (not with a third party).
 **Code:** `employee-targets.service.ts` (`planSelfJobDeliveries`), `jobs.service.ts`, chat runtime prompts.  
 **Tests:** `backend/tests/employee-targets.test.ts`, `backend/tests/jobs.test.ts`.
 
+### Overdue tasks on new Lucy conversation
+
+On the **first turn** of a new Lucy conversation (`needsContext` after reset / 40m idle), the engine scans the speaker’s live tasks whose **last day** has passed (Asia/Jerusalem): `תאריך סיום` if present, else `תאריך לביצוע`. Undated tasks and `__job` rows are skipped.
+
+- Engine opens (or refreshes) one self-job with `overdueItemIds` / `overdueTitles` in `__job`.
+- `OPEN_JOBS` exposes `overdue_tasks`, `overdue_item_ids`, `overdue_titles`.
+- Lucy raises with varied Hebrew + buttons: **סגירה** / **עדכן מועד להיום**; when the raise does not name every overdue title, also **הצג את המטלות** (`show_dump=tasks` + `show_dump_ids` = overdue ids; job stays open).
+- Raise **once** per conversation (first turn): after that offer the engine sets `overdueOffered` so `raisable=false` for the rest of the thread (no re-ask); buttons/commands still work if the user acts later. Next new conversation clears the flag.
+- Resolution stays Model→ACTION: `jobs.answer` + `lists.remove` or `lists.update` (`תאריך לביצוע`=`היום`) per id. Guests / non-Lucy workers unchanged.
+
+**Code:** `overdue-tasks.ts`, `listOverdueTasksForSpeaker`, `ensureOverdueTasksJob`, chat first-turn hook.  
+**Tests:** `backend/tests/overdue-tasks.test.ts`, `backend/tests/jobs.test.ts`.
+
+### Stale undated tasks (7 / 14 / 28 / 56… days)
+
+When the overdue scan is **empty**, the same first turn may open a self-job for **undated** speaker tasks whose last touch (`updatedAt`) is exactly `7 × 2^n` calendar days ago (Asia/Jerusalem).
+
+- Buttons: **סגירה** / **להוסיף תאריך**; if more than one task, also **הצג מטלות** (`show_dump` + ids).
+- Raise once via `staleOffered` (same as overdue). **להוסיף תאריך** asks for a date then `lists.update` + `jobs.answer`.
+
+**Code:** `stale-undated-tasks.ts`, `listStaleUndatedTasksForSpeaker`, `ensureStaleUndatedTasksJob`.  
+**Tests:** `backend/tests/stale-undated-tasks.test.ts`, `backend/tests/jobs.test.ts`.
+
 ---
 
 ## 3b. Deferred check-with («תבדקי איתי בעוד שעתיים…» / recurring)

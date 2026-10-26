@@ -55,6 +55,8 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  listOverdueTasksForSpeaker,
+  listStaleUndatedTasksForSpeaker,
   loadFilingOwners,
   loadListItemOwners,
   readItemId,
@@ -101,9 +103,13 @@ import {
   correctMisaddressedJobReply,
   createJobsFromRelays,
   createScheduledJobsFromRelays,
+  ensureOverdueTasksJob,
+  ensureStaleUndatedTasksJob,
   formatOpenJobsContext,
   formatOpenJobsWaitingDump,
   listOpenJobsForViewer,
+  markOverdueJobsOffered,
+  markStaleUndatedJobsOffered,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
 } from "./jobs.service.js";
@@ -424,6 +430,19 @@ function promptsEqual(
   return a.length > 0 && a === b;
 }
 
+/** Protected Lucy (or name/nickname לוסי) — not the guest onboarding worker. */
+function isLucyDigital(digital: PublicEmployee): boolean {
+  if (digital.kind !== "digital" || isGuestLucy(digital)) {
+    return false;
+  }
+  if (digital.protected) {
+    return true;
+  }
+  const name = (digital.name ?? "").trim();
+  const nickname = digital.nickname?.trim() ?? "";
+  return name === "לוסי" || nickname === "לוסי";
+}
+
 /**
  * Lucy's full runtime engine (targeting / capabilities) is only attached when this
  * worker is Lucy, or their saved prompt matches Lucy's / the file base (Inherit).
@@ -613,6 +632,8 @@ const OPEN_JOBS_RULES = [
   "DECLINE (?? ????? / ?? ???????) ? action decline + report_text, job closes. ??? ????? / ???? ??? with no hour is NOT a decline.",
   "PROGRESS (???? ???? ??? / ?? ???? with no hour) ? action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only ? never progress.",
   `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (??? / ?? ????) or switch to a new topic. A raise is ALWAYS its own entry in responses ? never inside the answer entry. The answer entry is written as if no job were open (greeting ???? ? ???, ??? ???? ???????); a normal raise is the NEXT entry and starts with ????,?. Example: ???? ???? with a raisable self-check ??? ???? ????? ? responses: ["??, ??? ???? ??????", "???, ????? ?????? ?? ???? ????"]. A meeting raise entry is the question: ????, ???? ???? ???? ???? ????? ???? ????? ?-12:00. ????? ?? ??? ?? ??? ??????? Do not stop at ???? ????? ???? ?????. Skip the raise while your own question is still unanswered ? including an open DELETE CLARIFY (which item/list/scope to delete): that turn is ONE responses entry only; FORBIDDEN a second ????? raise or any other yes/no in the same turn; the job stays raisable for a later turn after they answer. Also skip in the same reply where they just said ?? ????. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) ? that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) ? wait, do not raise early. A row with urgency=urgent ? the raise entry comes FIRST in responses, before the answer entry, and says it is urgent (no ?????) ? still FORBIDDEN in the same turn as an open DELETE CLARIFY. urgency=very_urgent ? that first raise entry appears in EVERY reply while it is open, even right after ?? ???? (one short line) ? except during an open DELETE CLARIFY.`,
+  "OVERDUE TASKS (overdue_tasks=true on an OPEN_JOBS row): the server opened this self-job on a new conversation for speaker tasks whose last day passed. Raise ONLY when raisable=true (first offer this conversation) with varied Hebrew + buttons סגירה / עדכן מועד להיום (and הצג את המטלות when raise omits some overdue_titles). On סגירה → jobs.answer (report_text \"\") + lists.remove per overdue_item_ids. On עדכן מועד להיום → jobs.answer + lists.update תאריך לביצוע=\"היום\". On הצג את המטלות → show_dump=tasks + show_dump_ids=overdue_item_ids; lists=[]; jobs=[]; do NOT close. If overdue_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN opening another overdue job via messages; FORBIDDEN inventing item ids; still skip raise during DELETE CLARIFY / inventory.",
+  "STALE UNDATED (stale_undated=true): undated speaker tasks at a 7/14/28/56… day milestone (only when no overdue_tasks). Raise ONLY when raisable=true with varied Hebrew (title + age); buttons סגירה + להוסיף תאריך; when stale_item_ids.length>1 ALSO הצג מטלות (label=command). On סגירה → jobs.answer + lists.remove per ids. On להוסיף תאריך → ask for date(s) first (jobs.progress OK); when they give a date → lists.update תאריך לביצוע + jobs.answer. On הצג מטלות → show_dump=tasks + show_dump_ids=stale_item_ids; do NOT close. If stale_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer.",
   "SNOOZE: ??????? ?? ???? 10 ????? / ?????? about a raised OPEN_JOBS raise ? ONLY metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server moves that job's nudge clock (or creates one if none) ? FORBIDDEN lists add reminders / lists three-action self-nudge / a second ?????? for that job. ??? ????? / ???? ??? with no time ? snooze with no time (deferred, still raisable); asker not told. Vague hour ? ask.",
   "CANCEL / STOP THE CHECK: ??? ????? ????? / ???????? / ?????? ?? ??? / ?????? ???? on a raised OPEN_JOBS row ? jobs.close or decline with job_id + report_text (ends chat raises AND the nudge clock). response short ack that you will update the asker (?????, ?????? ? ????? ?? ????.?). No regret turn, no ??? ???? ??????. FORBIDDEN lists remove reminders or clear_clock alone when they mean stop the whole check. ????? ?? ???????? only (clearly the WhatsApp ping, not the check) ? clear_clock: asker closes the job + subject is told; subject only drops the clock and the job stays (asker not told). Silent full-cancel does not exist: ???? ??? ?? ???? ??? ? do NOT close yet; explain ending the check always updates the asker; ask cancel+notify or leave open. A report you deliver is the end of that job ? never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a ?<worker> ????: ?? line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (??? ????? / ??? ????? / ???) and the speaker now gives them (3 ????? / ????'???), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details (????? ???? ??????? ???? ?????: ?????? 3 ??????), ask_summary with the full topic. Never answer it yourself, never ??? ??????, and never ask the speaker what the details are for.",
@@ -1688,6 +1709,32 @@ export async function sendChatMessage(input: {
         userId: input.userId,
         employeeId: input.employeeId,
       });
+  if (
+    conversation.needsContext &&
+    !guestSpeaker &&
+    !consultFrom &&
+    isLucyDigital(digital)
+  ) {
+    await withoutFailingTurn("overdue_job_failed", async () => {
+      const overdue = await listOverdueTasksForSpeaker(input.employeeId);
+      if (overdue.length > 0) {
+        await ensureOverdueTasksJob({
+          userId: input.userId,
+          digitalEmployeeId: digital.id,
+          speaker: { id: input.employeeId, name: speaker },
+          overdue,
+        });
+        return;
+      }
+      const stale = await listStaleUndatedTasksForSpeaker(input.employeeId);
+      await ensureStaleUndatedTasksJob({
+        userId: input.userId,
+        digitalEmployeeId: digital.id,
+        speaker: { id: input.employeeId, name: speaker },
+        stale,
+      });
+    });
+  }
   const openJobs = guestSpeaker
     ? []
     : ((await withoutFailingTurn("job_list_failed", () =>
@@ -3487,6 +3534,20 @@ export async function sendChatMessage(input: {
 
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
+      if (!guestSpeaker && !consultFrom && isLucyDigital(digital)) {
+        await withoutFailingTurn("overdue_offered_failed", () =>
+          markOverdueJobsOffered({
+            digitalEmployeeId: digital.id,
+            speakerId: input.employeeId,
+          }),
+        );
+        await withoutFailingTurn("stale_offered_failed", () =>
+          markStaleUndatedJobsOffered({
+            digitalEmployeeId: digital.id,
+            speakerId: input.employeeId,
+          }),
+        );
+      }
     }
     if (!input.skipHandoffFollow && !consultFrom) {
       const next = matchHandoffWorker(

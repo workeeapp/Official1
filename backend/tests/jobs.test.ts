@@ -59,9 +59,13 @@ import {
   correctMisaddressedJobReply,
   createJobsFromRelays,
   createScheduledJobsFromRelays,
+  ensureOverdueTasksJob,
+  ensureStaleUndatedTasksJob,
   formatOpenJobsContext,
   formatOpenJobsWaitingDump,
   listOpenJobsForViewer,
+  markOverdueJobsOffered,
+  markStaleUndatedJobsOffered,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
   type OpenJobRow,
@@ -91,6 +95,26 @@ function jobRow(overrides: Partial<OpenJobRow["meta"]> = {}): OpenJobRow {
 }
 
 describe("job metadata", () => {
+  it("parses overdueItemIds and overdueTitles", () => {
+    const meta = jobMetaFrom({
+      "שם מטלה": "לבדוק עם עמית: מטלות",
+      [JOB_META_KEY]: {
+        kind: "job",
+        askerId: AMIT,
+        askerName: "עמית",
+        subjectId: AMIT,
+        subjectName: "עמית",
+        ask: "2 משימות",
+        state: "open",
+        createdAt: "2026-10-26T00:00:00.000Z",
+        overdueItemIds: ["t1", "t2"],
+        overdueTitles: ["חלב", "דוח"],
+      },
+    });
+    expect(meta?.overdueItemIds).toEqual(["t1", "t2"]);
+    expect(meta?.overdueTitles).toEqual(["חלב", "דוח"]);
+  });
+
   it("reads a job row and hides the reserved key from saved data", () => {
     const data = {
       "שם מטלה": "לבדוק עם ערן אם קנה חלב",
@@ -263,6 +287,94 @@ describe("open jobs context", () => {
     expect(block).toContain("Inventory asks");
     expect(block).toContain("scheduled=true");
     expect(block).toMatch(/do NOT RAISE/i);
+  });
+
+  it("exposes overdue_tasks fields for the engine-opened sweep job", () => {
+    const block = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          subjectId: AMIT,
+          askerName: "עמית",
+          subjectName: "עמית",
+          overdueItemIds: ["t1", "t2"],
+          overdueTitles: ["חלב", "דוח"],
+        }),
+      ],
+      AMIT,
+    );
+    expect(block).toContain("overdue_tasks=true");
+    expect(block).toContain("הצג את המטלות");
+    expect(block).toContain("show_dump_ids");
+    const [row] = JSON.parse(block.split("\n").at(-1) ?? "[]");
+    expect(row.overdue_tasks).toBe(true);
+    expect(row.overdue_item_ids).toEqual(["t1", "t2"]);
+    expect(row.overdue_titles).toEqual(["חלב", "דוח"]);
+    expect(row.raisable).toBe(true);
+  });
+
+  it("marks overdue offered jobs not raisable", () => {
+    const block = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          subjectId: AMIT,
+          askerName: "עמית",
+          subjectName: "עמית",
+          overdueItemIds: ["t1"],
+          overdueTitles: ["חלב"],
+          overdueOffered: true,
+        }),
+      ],
+      AMIT,
+    );
+    const [row] = JSON.parse(block.split("\n").at(-1) ?? "[]");
+    expect(row.overdue_tasks).toBe(true);
+    expect(row.overdue_offered).toBe(true);
+    expect(row.raisable).toBe(false);
+  });
+
+  it("exposes stale_undated fields and gates raisable on staleOffered", () => {
+    const open = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          subjectId: AMIT,
+          askerName: "עמית",
+          subjectName: "עמית",
+          staleUndatedItemIds: ["t1"],
+          staleUndatedTitles: ["בנק"],
+          staleUndatedAges: [7],
+        }),
+      ],
+      AMIT,
+    );
+    expect(open).toContain("stale_undated=true");
+    expect(open).toContain("להוסיף תאריך");
+    const [row] = JSON.parse(open.split("\n").at(-1) ?? "[]");
+    expect(row.stale_undated).toBe(true);
+    expect(row.stale_item_ids).toEqual(["t1"]);
+    expect(row.stale_ages).toEqual([7]);
+    expect(row.raisable).toBe(true);
+
+    const offered = formatOpenJobsContext(
+      [
+        jobRow({
+          askerId: AMIT,
+          subjectId: AMIT,
+          askerName: "עמית",
+          subjectName: "עמית",
+          staleUndatedItemIds: ["t1"],
+          staleUndatedTitles: ["בנק"],
+          staleUndatedAges: [7],
+          staleOffered: true,
+        }),
+      ],
+      AMIT,
+    );
+    const [offeredRow] = JSON.parse(offered.split("\n").at(-1) ?? "[]");
+    expect(offeredRow.stale_offered).toBe(true);
+    expect(offeredRow.raisable).toBe(false);
   });
 });
 
@@ -700,6 +812,322 @@ describe("createJobsFromRelays", () => {
     const clock = reminderCreate.mock.calls[0][0].data;
     expect(clock.pingIds).toEqual([AMIT]);
     expect(clock.messageText).toContain("אם קנית שוקו?");
+  });
+});
+
+describe("ensureOverdueTasksJob", () => {
+  beforeEach(() => {
+    listFindFirst.mockReset();
+    listCreate.mockReset();
+    itemCreate.mockReset();
+    itemUpdate.mockReset();
+    itemFindMany.mockReset();
+    auditCreate.mockReset();
+    listFindFirst.mockResolvedValue({ id: "tasks-list" });
+    itemFindMany.mockResolvedValue([]);
+    itemCreate.mockResolvedValue({ id: "overdue-job-1" });
+    auditCreate.mockResolvedValue({});
+  });
+
+  it("returns null when there are no overdue tasks", async () => {
+    const created = await ensureOverdueTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      overdue: [],
+    });
+    expect(created).toBeNull();
+    expect(itemCreate).not.toHaveBeenCalled();
+  });
+
+  it("opens one self-job with overdueItemIds", async () => {
+    const created = await ensureOverdueTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      overdue: [
+        { itemId: "t1", title: "חלב", lastDay: "2026-10-20" },
+        { itemId: "t2", title: "דוח", lastDay: "2026-10-01" },
+      ],
+    });
+    expect(created?.id).toBe("overdue-job-1");
+    expect(created?.meta.askerId).toBe(AMIT);
+    expect(created?.meta.subjectId).toBe(AMIT);
+    expect(created?.meta.overdueItemIds).toEqual(["t1", "t2"]);
+    expect(created?.meta.overdueTitles).toEqual(["חלב", "דוח"]);
+    const data = itemCreate.mock.calls[0][0].data;
+    expect(data.visibleTo).toEqual([AMIT]);
+    expect(data.urgency).toBe("normal");
+    expect(data.data[JOB_META_KEY].overdueItemIds).toEqual(["t1", "t2"]);
+  });
+
+  it("skips create when an identical overdue job is already open", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: …",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "2 משימות שטרם נסגרו שעבר זמנן — חלב, דוח",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            overdueItemIds: ["t1", "t2"],
+            overdueTitles: ["חלב", "דוח"],
+          },
+        },
+      },
+    ]);
+    const created = await ensureOverdueTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      overdue: [
+        { itemId: "t1", title: "חלב", lastDay: "2026-10-20" },
+        { itemId: "t2", title: "דוח", lastDay: "2026-10-01" },
+      ],
+    });
+    expect(created?.id).toBe("existing");
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refreshes ids when the overdue set changed", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: ישן",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "מטלה אחת שטרם נסגרה שעבר זמנה — חלב",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            overdueItemIds: ["t1"],
+            overdueTitles: ["חלב"],
+          },
+        },
+      },
+    ]);
+    itemUpdate.mockResolvedValue({});
+    const created = await ensureOverdueTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      overdue: [
+        { itemId: "t1", title: "חלב", lastDay: "2026-10-20" },
+        { itemId: "t3", title: "דוח", lastDay: "2026-10-01" },
+      ],
+    });
+    expect(created?.id).toBe("existing");
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(itemUpdate).toHaveBeenCalled();
+    expect(created?.meta.overdueItemIds).toEqual(["t1", "t3"]);
+  });
+
+  it("clears overdueOffered on a new conversation ensure", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: …",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "2 משימות שטרם נסגרו שעבר זמנן — חלב, דוח",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            overdueItemIds: ["t1", "t2"],
+            overdueTitles: ["חלב", "דוח"],
+            overdueOffered: true,
+          },
+        },
+      },
+    ]);
+    itemUpdate.mockResolvedValue({});
+    const created = await ensureOverdueTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      overdue: [
+        { itemId: "t1", title: "חלב", lastDay: "2026-10-20" },
+        { itemId: "t2", title: "דוח", lastDay: "2026-10-01" },
+      ],
+    });
+    expect(created?.id).toBe("existing");
+    expect(created?.meta.overdueOffered).toBeUndefined();
+    expect(itemUpdate).toHaveBeenCalled();
+    const saved = itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY];
+    expect(saved.overdueOffered).toBeUndefined();
+  });
+
+  it("markOverdueJobsOffered sets overdueOffered on open overdue jobs", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: …",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "מטלה אחת",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            overdueItemIds: ["t1"],
+            overdueTitles: ["חלב"],
+          },
+        },
+      },
+    ]);
+    itemUpdate.mockResolvedValue({});
+    await markOverdueJobsOffered({
+      digitalEmployeeId: LUCY,
+      speakerId: AMIT,
+    });
+    expect(itemUpdate).toHaveBeenCalled();
+    expect(
+      itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY].overdueOffered,
+    ).toBe(true);
+  });
+});
+
+describe("ensureStaleUndatedTasksJob", () => {
+  beforeEach(() => {
+    listFindFirst.mockReset();
+    listCreate.mockReset();
+    itemCreate.mockReset();
+    itemUpdate.mockReset();
+    itemFindMany.mockReset();
+    auditCreate.mockReset();
+    listFindFirst.mockResolvedValue({ id: "tasks-list" });
+    itemFindMany.mockResolvedValue([]);
+    itemCreate.mockResolvedValue({ id: "stale-job-1" });
+    auditCreate.mockResolvedValue({});
+  });
+
+  it("returns null when there are no stale tasks", async () => {
+    const created = await ensureStaleUndatedTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      stale: [],
+    });
+    expect(created).toBeNull();
+    expect(itemCreate).not.toHaveBeenCalled();
+  });
+
+  it("opens one self-job with staleUndatedItemIds", async () => {
+    const created = await ensureStaleUndatedTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      stale: [
+        {
+          itemId: "t1",
+          title: "בנק",
+          ageDays: 7,
+          updatedAt: new Date("2026-10-19T12:00:00.000Z"),
+        },
+      ],
+    });
+    expect(created?.id).toBe("stale-job-1");
+    expect(created?.meta.staleUndatedItemIds).toEqual(["t1"]);
+    expect(created?.meta.staleUndatedAges).toEqual([7]);
+    const data = itemCreate.mock.calls[0][0].data;
+    expect(data.data[JOB_META_KEY].staleUndatedTitles).toEqual(["בנק"]);
+  });
+
+  it("clears staleOffered on a new conversation ensure", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: …",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "מטלה בלי תאריך",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            staleUndatedItemIds: ["t1"],
+            staleUndatedTitles: ["בנק"],
+            staleUndatedAges: [7],
+            staleOffered: true,
+          },
+        },
+      },
+    ]);
+    itemUpdate.mockResolvedValue({});
+    const created = await ensureStaleUndatedTasksJob({
+      userId: "u1",
+      digitalEmployeeId: LUCY,
+      speaker: { id: AMIT, name: "עמית" },
+      stale: [
+        {
+          itemId: "t1",
+          title: "בנק",
+          ageDays: 7,
+          updatedAt: new Date("2026-10-19T12:00:00.000Z"),
+        },
+      ],
+    });
+    expect(created?.meta.staleOffered).toBeUndefined();
+    expect(itemUpdate).toHaveBeenCalled();
+  });
+
+  it("markStaleUndatedJobsOffered sets staleOffered", async () => {
+    itemFindMany.mockResolvedValue([
+      {
+        id: "existing",
+        urgency: "normal",
+        data: {
+          "שם מטלה": "לבדוק עם עמית: …",
+          [JOB_META_KEY]: {
+            kind: "job",
+            askerId: AMIT,
+            askerName: "עמית",
+            subjectId: AMIT,
+            subjectName: "עמית",
+            ask: "מטלה",
+            state: "open",
+            createdAt: "2026-10-26T00:00:00.000Z",
+            staleUndatedItemIds: ["t1"],
+            staleUndatedTitles: ["בנק"],
+            staleUndatedAges: [7],
+          },
+        },
+      },
+    ]);
+    itemUpdate.mockResolvedValue({});
+    await markStaleUndatedJobsOffered({
+      digitalEmployeeId: LUCY,
+      speakerId: AMIT,
+    });
+    expect(
+      itemUpdate.mock.calls[0][0].data.data[JOB_META_KEY].staleOffered,
+    ).toBe(true);
   });
 });
 

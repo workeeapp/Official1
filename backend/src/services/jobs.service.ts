@@ -16,6 +16,14 @@ import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import { JOB_META_KEY, jobMetaFrom, type JobMeta } from "./job-meta.js";
 import { toPlainJson } from "./llm-client.js";
+import {
+  overdueTasksAsk,
+  type OverdueTaskRow,
+} from "./overdue-tasks.js";
+import {
+  staleUndatedTasksAsk,
+  type StaleUndatedTaskRow,
+} from "./stale-undated-tasks.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import {
   formatJerusalemDateTime,
@@ -263,6 +271,360 @@ export async function createJobsFromRelays(input: {
     }
   }
   return created;
+}
+
+function sameIdSet(a: string[] | undefined, b: string[]): boolean {
+  const left = [...(a ?? [])].sort();
+  const right = [...b].sort();
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((id, i) => id === right[i]);
+}
+
+function sameNumberList(a: number[] | undefined, b: number[]): boolean {
+  if ((a?.length ?? 0) !== b.length) {
+    return false;
+  }
+  return (a ?? []).every((n, i) => n === b[i]);
+}
+
+/**
+ * On a new Lucy conversation: open (or refresh) one self-job listing overdue
+ * speaker tasks. Idempotent while that overdue job stays open.
+ */
+export async function ensureOverdueTasksJob(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  speaker: { id: string; name: string };
+  overdue: OverdueTaskRow[];
+}): Promise<OpenJobRow | null> {
+  if (input.overdue.length === 0) {
+    return null;
+  }
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return null;
+  }
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  const itemIds = input.overdue.map((row) => row.itemId);
+  const titles = input.overdue.map((row) => row.title);
+  const ask = overdueTasksAsk(titles);
+  const label = `לבדוק עם ${input.speaker.name}: ${ask}`.trim();
+
+  for (const row of live) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (
+      meta?.kind !== "job" ||
+      !meta.overdueItemIds ||
+      meta.askerId !== input.speaker.id ||
+      meta.subjectId !== input.speaker.id
+    ) {
+      continue;
+    }
+    const { overdueOffered: _offered, ...metaWithoutOffered } = meta;
+    const nextMeta: JobMeta = {
+      ...metaWithoutOffered,
+      ask,
+      overdueItemIds: itemIds,
+      overdueTitles: titles,
+    };
+    const unchanged =
+      sameIdSet(meta.overdueItemIds, itemIds) &&
+      sameIdSet(meta.overdueTitles ?? [], titles) &&
+      !meta.overdueOffered;
+    if (unchanged) {
+      return {
+        id: row.id,
+        label: readLabel(row.data) || label,
+        meta: nextMeta,
+        urgency: parseJobUrgency(row.urgency),
+      };
+    }
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: row.id },
+        data: {
+          itemKey: normalizeKey(label),
+          data: toJsonValue({
+            ...data,
+            [TASK_NAME_KEY]: label,
+            [JOB_META_KEY]: nextMeta,
+          }),
+        },
+      });
+    } catch {
+      return {
+        id: row.id,
+        label: readLabel(row.data) || label,
+        meta,
+        urgency: parseJobUrgency(row.urgency),
+      };
+    }
+    return {
+      id: row.id,
+      label,
+      meta: nextMeta,
+      urgency: parseJobUrgency(row.urgency),
+    };
+  }
+
+  const meta: JobMeta = {
+    kind: "job",
+    askerId: input.speaker.id,
+    askerName: input.speaker.name,
+    subjectId: input.speaker.id,
+    subjectName: input.speaker.name,
+    ask,
+    state: "open",
+    createdAt: new Date().toISOString(),
+    overdueItemIds: itemIds,
+    overdueTitles: titles,
+  };
+  try {
+    const row = await prisma.employeeListItem.create({
+      data: {
+        listId,
+        itemKey: normalizeKey(label),
+        data: toJsonValue({ [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta }),
+        scope: "shared",
+        addedById: input.speaker.id,
+        visibleTo: toJsonValue([input.speaker.id]),
+        urgency: "normal",
+      },
+    });
+    if (!row?.id) {
+      return null;
+    }
+    await recordAuditEvent({
+      userId: input.userId,
+      actorEmployeeId: input.speaker.id,
+      action: "job_open",
+      entityType: "EmployeeListItem",
+      entityId: row.id,
+      summary: `open overdue tasks job: ${label}`,
+      detail: { overdueItemIds: itemIds },
+    });
+    return { id: row.id, label, meta, urgency: "normal" };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * After the first turn of a new conversation offered the overdue ask, mark it
+ * so later turns get raisable=false (no re-raise).
+ */
+export async function markOverdueJobsOffered(input: {
+  digitalEmployeeId: string;
+  speakerId: string;
+}): Promise<void> {
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return;
+  }
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  for (const row of live) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (
+      meta?.kind !== "job" ||
+      !meta.overdueItemIds?.length ||
+      meta.askerId !== input.speakerId ||
+      meta.subjectId !== input.speakerId ||
+      meta.overdueOffered
+    ) {
+      continue;
+    }
+    const nextMeta: JobMeta = { ...meta, overdueOffered: true };
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: row.id },
+        data: {
+          data: toJsonValue({
+            ...data,
+            [JOB_META_KEY]: nextMeta,
+          }),
+        },
+      });
+    } catch {
+      /* leave the row; next turn may still raise once */
+    }
+  }
+}
+
+/**
+ * On a new Lucy conversation when overdue is empty: open (or refresh) one
+ * self-job for undated tasks at a 7×2^n day milestone.
+ */
+export async function ensureStaleUndatedTasksJob(input: {
+  userId: string;
+  digitalEmployeeId: string;
+  speaker: { id: string; name: string };
+  stale: StaleUndatedTaskRow[];
+}): Promise<OpenJobRow | null> {
+  if (input.stale.length === 0) {
+    return null;
+  }
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return null;
+  }
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  const itemIds = input.stale.map((row) => row.itemId);
+  const titles = input.stale.map((row) => row.title);
+  const ages = input.stale.map((row) => row.ageDays);
+  const ask = staleUndatedTasksAsk(input.stale);
+  const label = `לבדוק עם ${input.speaker.name}: ${ask}`.trim();
+
+  for (const row of live) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (
+      meta?.kind !== "job" ||
+      !meta.staleUndatedItemIds ||
+      meta.askerId !== input.speaker.id ||
+      meta.subjectId !== input.speaker.id
+    ) {
+      continue;
+    }
+    const { staleOffered: _offered, ...metaWithoutOffered } = meta;
+    const nextMeta: JobMeta = {
+      ...metaWithoutOffered,
+      ask,
+      staleUndatedItemIds: itemIds,
+      staleUndatedTitles: titles,
+      staleUndatedAges: ages,
+    };
+    const unchanged =
+      sameIdSet(meta.staleUndatedItemIds, itemIds) &&
+      sameIdSet(meta.staleUndatedTitles ?? [], titles) &&
+      sameNumberList(meta.staleUndatedAges, ages) &&
+      !meta.staleOffered;
+    if (unchanged) {
+      return {
+        id: row.id,
+        label: readLabel(row.data) || label,
+        meta: nextMeta,
+        urgency: parseJobUrgency(row.urgency),
+      };
+    }
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: row.id },
+        data: {
+          itemKey: normalizeKey(label),
+          data: toJsonValue({
+            ...data,
+            [TASK_NAME_KEY]: label,
+            [JOB_META_KEY]: nextMeta,
+          }),
+        },
+      });
+    } catch {
+      return {
+        id: row.id,
+        label: readLabel(row.data) || label,
+        meta,
+        urgency: parseJobUrgency(row.urgency),
+      };
+    }
+    return {
+      id: row.id,
+      label,
+      meta: nextMeta,
+      urgency: parseJobUrgency(row.urgency),
+    };
+  }
+
+  const meta: JobMeta = {
+    kind: "job",
+    askerId: input.speaker.id,
+    askerName: input.speaker.name,
+    subjectId: input.speaker.id,
+    subjectName: input.speaker.name,
+    ask,
+    state: "open",
+    createdAt: new Date().toISOString(),
+    staleUndatedItemIds: itemIds,
+    staleUndatedTitles: titles,
+    staleUndatedAges: ages,
+  };
+  try {
+    const row = await prisma.employeeListItem.create({
+      data: {
+        listId,
+        itemKey: normalizeKey(label),
+        data: toJsonValue({ [TASK_NAME_KEY]: label, [JOB_META_KEY]: meta }),
+        scope: "shared",
+        addedById: input.speaker.id,
+        visibleTo: toJsonValue([input.speaker.id]),
+        urgency: "normal",
+      },
+    });
+    if (!row?.id) {
+      return null;
+    }
+    await recordAuditEvent({
+      userId: input.userId,
+      actorEmployeeId: input.speaker.id,
+      action: "job_open",
+      entityType: "EmployeeListItem",
+      entityId: row.id,
+      summary: `open stale undated tasks job: ${label}`,
+      detail: { staleUndatedItemIds: itemIds, staleUndatedAges: ages },
+    });
+    return { id: row.id, label, meta, urgency: "normal" };
+  } catch {
+    return null;
+  }
+}
+
+export async function markStaleUndatedJobsOffered(input: {
+  digitalEmployeeId: string;
+  speakerId: string;
+}): Promise<void> {
+  const listId = await tasksListIdFor(input.digitalEmployeeId);
+  if (!listId) {
+    return;
+  }
+  const live = await prisma.employeeListItem.findMany({
+    where: { listId, deletedAt: null },
+  });
+  for (const row of live) {
+    const data = asRecord(row.data);
+    const meta = jobMetaFrom(data);
+    if (
+      meta?.kind !== "job" ||
+      !meta.staleUndatedItemIds?.length ||
+      meta.askerId !== input.speakerId ||
+      meta.subjectId !== input.speakerId ||
+      meta.staleOffered
+    ) {
+      continue;
+    }
+    const nextMeta: JobMeta = { ...meta, staleOffered: true };
+    try {
+      await prisma.employeeListItem.update({
+        where: { id: row.id },
+        data: {
+          data: toJsonValue({
+            ...data,
+            [JOB_META_KEY]: nextMeta,
+          }),
+        },
+      });
+    } catch {
+      /* leave the row */
+    }
+  }
 }
 
 function jerusalemDateAndTime(fireAt: Date): { date: string; time: string } {
@@ -757,7 +1119,18 @@ export function formatOpenJobsContext(
           ? { reminder_at: clock, raisable: false }
           : {
               ...(job.meta.deferredAt ? { deferred: true } : {}),
-              raisable: job.meta.subjectId === viewerId,
+              raisable:
+                job.meta.subjectId === viewerId &&
+                !(
+                  job.meta.overdueItemIds &&
+                  job.meta.overdueItemIds.length > 0 &&
+                  job.meta.overdueOffered
+                ) &&
+                !(
+                  job.meta.staleUndatedItemIds &&
+                  job.meta.staleUndatedItemIds.length > 0 &&
+                  job.meta.staleOffered
+                ),
             }),
       ...(job.meta.needsBook
         ? {
@@ -767,6 +1140,24 @@ export function formatOpenJobsContext(
             ...(job.meta.bookEndTime ? { book_end_time: job.meta.bookEndTime } : {}),
             ...(job.meta.bookWindow ? { book_window: true } : {}),
             ...(job.meta.bookTitle ? { book_title: job.meta.bookTitle } : {}),
+          }
+        : {}),
+      ...(job.meta.overdueItemIds && job.meta.overdueItemIds.length > 0
+        ? {
+            overdue_tasks: true,
+            overdue_item_ids: job.meta.overdueItemIds,
+            overdue_titles: job.meta.overdueTitles ?? [],
+            ...(job.meta.overdueOffered ? { overdue_offered: true } : {}),
+          }
+        : {}),
+      ...(job.meta.staleUndatedItemIds &&
+      job.meta.staleUndatedItemIds.length > 0
+        ? {
+            stale_undated: true,
+            stale_item_ids: job.meta.staleUndatedItemIds,
+            stale_titles: job.meta.staleUndatedTitles ?? [],
+            stale_ages: job.meta.staleUndatedAges ?? [],
+            ...(job.meta.staleOffered ? { stale_offered: true } : {}),
           }
         : {}),
       opened_at: job.meta.createdAt,
@@ -782,6 +1173,8 @@ export function formatOpenJobsContext(
     "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…») — still FORBIDDEN in the same turn as DELETE CONFIRM («האם מאשר?»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent — except during DELETE CONFIRM. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
     "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time (plus שעת סיום=book_end_time when present). book_window=true → the slot is a window: a reply naming one time inside it is a counter (time + end_time only if they said an end), not an answer. The server also saves that meeting from these fields when you forget the list.",
+    "overdue_tasks=true: engine-opened self-job for speaker tasks whose last day passed. Raise ONLY when raisable=true (first offer this conversation) with varied Hebrew + buttons סגירה / עדכן מועד להיום (and הצג את המטלות when raise omits some overdue_titles). On סגירה → jobs.answer (report_text \"\") + lists.remove per overdue_item_ids. On עדכן מועד להיום → jobs.answer + lists.update תאריך לביצוע=\"היום\". On הצג את המטלות → show_dump=tasks + show_dump_ids=overdue_item_ids; lists=[]; jobs=[]; do NOT close. If overdue_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN opening another overdue job via messages; FORBIDDEN inventing item ids.",
+    "stale_undated=true: engine-opened self-job for undated speaker tasks at a 7/14/28/56… day milestone (only when no overdue_tasks job). Raise ONLY when raisable=true with varied Hebrew (title + age from stale_ages/stale_titles); ask what to do. Buttons always: {label:\"סגירה\",command:\"סגירה\"} and {label:\"להוסיף תאריך\",command:\"להוסיף תאריך\"}. When stale_item_ids.length>1 ALSO {label:\"הצג מטלות\",command:\"הצג מטלות\"}. On סגירה → jobs.answer + lists.remove per stale_item_ids. On להוסיף תאריך → do NOT close yet: ask for the date(s) (jobs.progress OK); when they give a date → lists.update תאריך לביצוע + jobs.answer. On הצג מטלות → show_dump=tasks + show_dump_ids=stale_item_ids; lists=[]; jobs=[]; do NOT close. If stale_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN inventing ids.",
     JSON.stringify(rows),
   ].join("\n");
 }

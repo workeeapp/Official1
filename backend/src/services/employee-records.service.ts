@@ -13,10 +13,21 @@ import {
   type LlmMetadata,
 } from "@workee/shared";
 import { NotFoundError, ValidationError } from "../utils/errors.js";
-import { normalizeRelativeDatesInRecord } from "../utils/relative-date.js";
-import { hebrewWeekdayFromYmd } from "../utils/relative-date.js";
+import {
+  hebrewWeekdayFromYmd,
+  jerusalemYmd,
+  normalizeRelativeDatesInRecord,
+} from "../utils/relative-date.js";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
+import {
+  collectOverdueFromItems,
+  type OverdueTaskRow,
+} from "./overdue-tasks.js";
+import {
+  collectStaleUndatedFromItems,
+  type StaleUndatedTaskRow,
+} from "./stale-undated-tasks.js";
 import {
   applyAttachmentLinks,
   emptyAttachmentOutcome,
@@ -1216,6 +1227,132 @@ export async function getTeamSchedules(
   }
 
   return entries;
+}
+
+/**
+ * Live tasks visible to the speaker (same gate as EMPLOYEE_SAVED_DATA / TEAM_SCHEDULES)
+ * whose last day is before today Asia/Jerusalem. Used to open the overdue self-job.
+ */
+export async function listOverdueTasksForSpeaker(
+  employeeId: string,
+  now: Date = new Date(),
+): Promise<OverdueTaskRow[]> {
+  const todayYmd = jerusalemYmd(now);
+  const { speaker, guestMode, seeAll, listWhere } =
+    await resolveRecordVisibility(employeeId);
+  if (!speaker || guestMode) {
+    return [];
+  }
+
+  const [lists, sharedItems] = await Promise.all([
+    prisma.employeeList.findMany({
+      where: {
+        listType: "tasks",
+        deletedAt: null,
+        ...listWhere,
+      },
+      include: {
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+      },
+    }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeListItem.findMany({
+          where: {
+            scope: "shared",
+            deletedAt: null,
+            list: {
+              listType: "tasks",
+              deletedAt: null,
+              employeeId: { not: employeeId },
+              employee: { kind: "human" },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        }),
+  ]);
+
+  const items: Array<{ id: string; itemKey?: string; data: unknown }> = [];
+  for (const list of lists) {
+    for (const item of list.items) {
+      items.push(item);
+    }
+  }
+  for (const item of sharedItems ?? []) {
+    if (
+      visibleToIncludes(item.visibleTo, employeeId) &&
+      item.addedById !== employeeId
+    ) {
+      items.push(item);
+    }
+  }
+
+  return collectOverdueFromItems(items, todayYmd);
+}
+
+/**
+ * Live undated tasks visible to the speaker whose last touch (updatedAt) falls
+ * on a 7×2^n day milestone. Used when the overdue scan is empty.
+ */
+export async function listStaleUndatedTasksForSpeaker(
+  employeeId: string,
+  now: Date = new Date(),
+): Promise<StaleUndatedTaskRow[]> {
+  const { speaker, guestMode, seeAll, listWhere } =
+    await resolveRecordVisibility(employeeId);
+  if (!speaker || guestMode) {
+    return [];
+  }
+
+  const [lists, sharedItems] = await Promise.all([
+    prisma.employeeList.findMany({
+      where: {
+        listType: "tasks",
+        deletedAt: null,
+        ...listWhere,
+      },
+      include: {
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+      },
+    }),
+    seeAll
+      ? Promise.resolve([])
+      : prisma.employeeListItem.findMany({
+          where: {
+            scope: "shared",
+            deletedAt: null,
+            list: {
+              listType: "tasks",
+              deletedAt: null,
+              employeeId: { not: employeeId },
+              employee: { kind: "human" },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        }),
+  ]);
+
+  const items: Array<{
+    id: string;
+    itemKey?: string;
+    data: unknown;
+    updatedAt: Date;
+  }> = [];
+  for (const list of lists) {
+    for (const item of list.items) {
+      items.push(item);
+    }
+  }
+  for (const item of sharedItems ?? []) {
+    if (
+      visibleToIncludes(item.visibleTo, employeeId) &&
+      item.addedById !== employeeId
+    ) {
+      items.push(item);
+    }
+  }
+
+  return collectStaleUndatedFromItems(items, now);
 }
 
 const LIST_TYPE_TITLES: Record<string, string> = {

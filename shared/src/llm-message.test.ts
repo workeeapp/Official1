@@ -873,6 +873,38 @@ describe("parseLlmReply", () => {
         command: "באיזו שעה",
       }),
     ).toBe(false);
+    // Overdue raise closed choice — not LIST confirm chrome.
+    expect(
+      isShowListReplyButton({
+        label: "הצג את המטלות",
+        command: "הצג את המטלות",
+      }),
+    ).toBe(false);
+    expect(
+      isClosedChoiceReplyButton({
+        label: "הצג את המטלות",
+        command: "הצג את המטלות",
+      }),
+    ).toBe(true);
+    expect(
+      isShowListReplyButton({
+        label: "הצג מטלות",
+        command: "הצג רשימת מטלות",
+      }),
+    ).toBe(true);
+    // Stale undated raise: label===command stays on the raise bubble.
+    expect(
+      isShowListReplyButton({
+        label: "הצג מטלות",
+        command: "הצג מטלות",
+      }),
+    ).toBe(false);
+    expect(
+      isClosedChoiceReplyButton({
+        label: "להוסיף תאריך",
+        command: "להוסיף תאריך",
+      }),
+    ).toBe(true);
   });
 
   it("distributes show buttons to first bubble and choices to last", () => {
@@ -992,6 +1024,26 @@ describe("parseLlmReply", () => {
       { label: "לא", command: "לא" },
     ]);
     expect(bubbles[2]?.buttons).toBeUndefined();
+  });
+
+  it("keeps overdue raise buttons on the raise bubble, not the greeting", () => {
+    const overdueButtons = [
+      { label: "סגירה", command: "סגירה" },
+      { label: "עדכן מועד להיום", command: "עדכן מועד להיום" },
+      { label: "הצג את המטלות", command: "הצג את המטלות" },
+    ];
+    const bubbles = applyShowButtonsToBubbles(
+      [
+        { text: "הי, איך אפשר לעזור?" },
+        {
+          text: "אגב, יש לך 3 משימות שטרם סגרת שעבר זמנן — מה לעשות איתן?",
+          buttons: overdueButtons,
+        },
+      ],
+      overdueButtons,
+    );
+    expect(bubbles[0]?.buttons).toBeUndefined();
+    expect(bubbles[1]?.buttons).toEqual(overdueButtons);
   });
 
   it("collab nav commands stay on confirm; כן/לא on offer; not all on first only", () => {
