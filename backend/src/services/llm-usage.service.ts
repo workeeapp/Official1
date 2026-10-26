@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 import {
   digitalEmployees,
+  humanEmployees,
+  isGuestEmployee,
   jerusalemParts,
   workspaceHumans,
   type EmployeeUsageSummary,
   type PublicEmployee,
+  type TeamUsagePurposeBreakdown,
   type TeamUsageSummary,
 } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
@@ -147,23 +150,76 @@ function jerusalemMonthKey(at: Date): string {
   return `${year}-${String(month).padStart(2, "0")}`;
 }
 
+const EMPTY_PURPOSES = (): TeamUsagePurposeBreakdown => ({
+  chatUsd: 0,
+  catalogTipUsd: 0,
+  weatherTipUsd: 0,
+  reminderComposeUsd: 0,
+  liveSelectUsd: 0,
+});
+
+function addPurposeCost(
+  purposes: TeamUsagePurposeBreakdown,
+  purpose: string,
+  cost: number,
+): void {
+  switch (purpose) {
+    case "catalog_tip":
+      purposes.catalogTipUsd += cost;
+      break;
+    case "weather_tip":
+      purposes.weatherTipUsd += cost;
+      break;
+    case "reminder_compose":
+      purposes.reminderComposeUsd += cost;
+      break;
+    case "live_select":
+      purposes.liveSelectUsd += cost;
+      break;
+    case "chat":
+    default:
+      purposes.chatUsd += cost;
+      break;
+  }
+}
+
 /**
  * Each chat's cost appears on both its human speaker and its digital worker, so
  * `allEmployeesUsd` (sum over every visible employee) counts it twice by design.
+ * `guestsUsd` / `purposes` count each LlmUsages row once.
  */
 export async function getTeamUsageSummary(
   userId: string,
-  employees: Array<Pick<PublicEmployee, "id" | "kind" | "name" | "nickname">>,
+  employees: Array<
+    Pick<PublicEmployee, "id" | "kind" | "name" | "nickname" | "isGuest">
+  >,
 ): Promise<TeamUsageSummary> {
   const humanIds = new Set(workspaceHumans(employees).map((employee) => employee.id));
   const digitalIds = new Set(digitalEmployees(employees).map((employee) => employee.id));
+  const guestIds = new Set(
+    humanEmployees(employees)
+      .filter((employee) => isGuestEmployee(employee))
+      .map((employee) => employee.id),
+  );
   const rows = await prisma.llmUsage.findMany({
     where: { conversation: { userId } },
-    select: { employeeId: true, digitalEmployeeId: true, costUsd: true, createdAt: true },
+    select: {
+      employeeId: true,
+      digitalEmployeeId: true,
+      costUsd: true,
+      createdAt: true,
+      purpose: true,
+    },
   });
 
   const perEmployee = new Map<string, number>();
   const perMonth = new Map<string, Map<string, number>>();
+  const purposes = EMPTY_PURPOSES();
+  let totalUsd = 0;
+  let guestsUsd = 0;
+  const perMonthPurposes = new Map<string, TeamUsagePurposeBreakdown>();
+  const perMonthGuests = new Map<string, number>();
+  const perMonthTotal = new Map<string, number>();
   const add = (bucket: Map<string, number>, id: string, cost: number) => {
     bucket.set(id, (bucket.get(id) ?? 0) + cost);
   };
@@ -179,6 +235,20 @@ export async function getTeamUsageSummary(
       add(bucket, row.employeeId, cost);
       add(bucket, row.digitalEmployeeId, cost);
     }
+    totalUsd += cost;
+    perMonthTotal.set(key, (perMonthTotal.get(key) ?? 0) + cost);
+    const purpose = row.purpose ?? "chat";
+    addPurposeCost(purposes, purpose, cost);
+    let monthPurposes = perMonthPurposes.get(key);
+    if (!monthPurposes) {
+      monthPurposes = EMPTY_PURPOSES();
+      perMonthPurposes.set(key, monthPurposes);
+    }
+    addPurposeCost(monthPurposes, purpose, cost);
+    if (guestIds.has(row.employeeId)) {
+      guestsUsd += cost;
+      perMonthGuests.set(key, (perMonthGuests.get(key) ?? 0) + cost);
+    }
   }
 
   const totals = (bucket: Map<string, number>) => {
@@ -187,11 +257,37 @@ export async function getTeamUsageSummary(
     const humanEmployeesUsd = sum(humanIds);
     return { allEmployeesUsd: humanEmployeesUsd + sum(digitalIds), humanEmployeesUsd };
   };
-  const months = [...perMonth.entries()]
-    .map(([month, bucket]) => ({ month, ...totals(bucket) }))
-    .filter((row) => row.allEmployeesUsd !== 0 || row.humanEmployeesUsd !== 0)
+  const monthKeys = new Set([
+    ...perMonth.keys(),
+    ...perMonthPurposes.keys(),
+    ...perMonthGuests.keys(),
+    ...perMonthTotal.keys(),
+  ]);
+  const months = [...monthKeys]
+    .map((month) => {
+      const employeeTotals = totals(perMonth.get(month) ?? new Map());
+      return {
+        month,
+        totalUsd: perMonthTotal.get(month) ?? 0,
+        ...employeeTotals,
+        guestsUsd: perMonthGuests.get(month) ?? 0,
+        purposes: perMonthPurposes.get(month) ?? EMPTY_PURPOSES(),
+      };
+    })
+    .filter(
+      (row) =>
+        row.totalUsd !== 0 ||
+        row.allEmployeesUsd !== 0 ||
+        row.humanEmployeesUsd !== 0 ||
+        row.guestsUsd !== 0 ||
+        row.purposes.chatUsd !== 0 ||
+        row.purposes.catalogTipUsd !== 0 ||
+        row.purposes.weatherTipUsd !== 0 ||
+        row.purposes.reminderComposeUsd !== 0 ||
+        row.purposes.liveSelectUsd !== 0,
+    )
     .sort((a, b) => b.month.localeCompare(a.month));
-  return { ...totals(perEmployee), months };
+  return { totalUsd, ...totals(perEmployee), guestsUsd, purposes, months };
 }
 
 /** Why this LlmUsages row was written (analytics / cost filters). */

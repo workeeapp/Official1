@@ -88,12 +88,14 @@ export function employeeDisplayName(employee: PublicEmployee): string {
   return employee.nickname?.trim() || employee.name;
 }
 
-/** Per-turn LLM costs are fractions of a cent, so small totals keep up to 4 decimals. */
+/** Per-turn LLM costs are tiny; sub-$0.0001 keep 6 decimals, else under $1 keep 4. */
 export function formatUsd(amount: number): string {
+  const maxFractionDigits =
+    amount > 0 && amount < 0.0001 ? 6 : amount > 0 && amount < 1 ? 4 : 2;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
-    maximumFractionDigits: amount > 0 && amount < 1 ? 4 : 2,
+    maximumFractionDigits: maxFractionDigits,
   }).format(amount);
 }

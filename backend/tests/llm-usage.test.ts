@@ -36,11 +36,17 @@ describe("getTeamUsageSummary", () => {
     { id: "guest", kind: "human" as const, name: "אורח", nickname: "אורח" },
     { id: "lucy", kind: "digital" as const, name: "לוסי", nickname: "לוסי" },
   ];
-  const row = (employeeId: string, cost: string | null, createdAt: string) => ({
+  const row = (
+    employeeId: string,
+    cost: string | null,
+    createdAt: string,
+    purpose = "chat",
+  ) => ({
     employeeId,
     digitalEmployeeId: "lucy",
     costUsd: cost === null ? null : new Prisma.Decimal(cost),
     createdAt: new Date(createdAt),
+    purpose,
   });
 
   it("sums every visible employee's amount and the humans-only amount", async () => {
@@ -54,7 +60,44 @@ describe("getTeamUsageSummary", () => {
 
     expect(summary.humanEmployeesUsd).toBeCloseTo(0.008);
     expect(summary.allEmployeesUsd).toBeCloseTo(0.516);
+    expect(summary.totalUsd).toBeCloseTo(0.508);
+    expect(summary.guestsUsd).toBeCloseTo(0.5);
+    expect(summary.purposes.chatUsd).toBeCloseTo(0.508);
     expect(usageFindMany.mock.calls[0][0].where).toEqual({ conversation: { userId: "u1" } });
+  });
+
+  it("breaks down cost once per row by purpose", async () => {
+    usageFindMany.mockReset().mockResolvedValue([
+      row("amit", "0.01", "2026-10-05T10:00:00Z", "chat"),
+      row("amit", "0.02", "2026-10-05T11:00:00Z", "catalog_tip"),
+      row("tal", "0.03", "2026-10-05T12:00:00Z", "weather_tip"),
+      row("amit", "0.04", "2026-10-05T13:00:00Z", "reminder_compose"),
+      row("guest", "0.05", "2026-10-05T14:00:00Z", "live_select"),
+      row("amit", "0.06", "2026-09-05T10:00:00Z", "catalog_tip"),
+      row("guest", "0.07", "2026-09-06T10:00:00Z", "chat"),
+    ]);
+
+    const summary = await getTeamUsageSummary("u1", team);
+
+    expect(summary.purposes).toEqual({
+      chatUsd: 0.08,
+      catalogTipUsd: 0.08,
+      weatherTipUsd: 0.03,
+      reminderComposeUsd: 0.04,
+      liveSelectUsd: 0.05,
+    });
+    expect(summary.totalUsd).toBeCloseTo(0.28);
+    expect(summary.guestsUsd).toBeCloseTo(0.12);
+    const [oct, sep] = summary.months;
+    expect(oct.month).toBe("2026-10");
+    expect(oct.totalUsd).toBeCloseTo(0.15);
+    expect(oct.purposes.catalogTipUsd).toBeCloseTo(0.02);
+    expect(oct.guestsUsd).toBeCloseTo(0.05);
+    expect(sep.month).toBe("2026-09");
+    expect(sep.totalUsd).toBeCloseTo(0.13);
+    expect(sep.purposes.catalogTipUsd).toBeCloseTo(0.06);
+    expect(sep.purposes.chatUsd).toBeCloseTo(0.07);
+    expect(sep.guestsUsd).toBeCloseTo(0.07);
   });
 
   it("splits the amounts by Jerusalem month, newest first", async () => {
@@ -70,12 +113,20 @@ describe("getTeamUsageSummary", () => {
 
     expect(summary.months.map((m) => m.month)).toEqual(["2026-10", "2026-09", "2026-08"]);
     const [oct, sep, aug] = summary.months;
+    expect(oct.totalUsd).toBeCloseTo(0.002);
     expect(oct.humanEmployeesUsd).toBeCloseTo(0.002);
     expect(oct.allEmployeesUsd).toBeCloseTo(0.004);
+    expect(oct.guestsUsd).toBe(0);
+    expect(oct.purposes.chatUsd).toBeCloseTo(0.002);
+    expect(sep.totalUsd).toBeCloseTo(0.004);
     expect(sep.humanEmployeesUsd).toBeCloseTo(0.004);
     expect(sep.allEmployeesUsd).toBeCloseTo(0.008);
+    expect(sep.purposes.chatUsd).toBeCloseTo(0.004);
+    expect(aug.totalUsd).toBeCloseTo(0.001);
     expect(aug.humanEmployeesUsd).toBeCloseTo(0.001);
     expect(aug.allEmployeesUsd).toBeCloseTo(0.002);
+    expect(aug.purposes.chatUsd).toBeCloseTo(0.001);
+    expect(summary.totalUsd).toBeCloseTo(0.007);
     expect(summary.humanEmployeesUsd).toBeCloseTo(0.007);
     expect(summary.allEmployeesUsd).toBeCloseTo(0.014);
   });

@@ -28,6 +28,8 @@ const {
   findUnique,
   findFirst,
   findMany,
+  teamFindUnique,
+  teamCreate,
   conversationFindUnique,
   conversationFindUniqueOrThrow,
   conversationCreate,
@@ -57,6 +59,8 @@ const {
   findUnique: vi.fn(),
   findFirst: vi.fn(),
   findMany: vi.fn(),
+  teamFindUnique: vi.fn(),
+  teamCreate: vi.fn(),
   conversationFindUnique: vi.fn(),
   conversationFindUniqueOrThrow: vi.fn(),
   conversationCreate: vi.fn(),
@@ -133,6 +137,10 @@ vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     user: {
       findUnique,
+    },
+    team: {
+      findUnique: teamFindUnique,
+      create: teamCreate,
     },
     employee: {
       findFirst,
@@ -280,6 +288,7 @@ import { setLlmClientForTests } from "../src/services/llm-client.js";
 
 const PASSWORD = "ChangeMe123!";
 const userId = "11111111-1111-4111-8111-111111111111";
+const teamId = "22222222-2222-4222-8222-222222222222";
 const employeeId = "415ff13e-38d0-4dee-98b5-71e5dd11a38d";
 const otherEmployeeId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
 const lucyId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -350,55 +359,96 @@ function tableEmployees() {
   ];
 }
 
+const guestLucyId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
 function mockOwnedEmployee() {
   findMany.mockResolvedValue(tableEmployees());
-  findFirst.mockImplementation(async ({ where }: { where: { id?: string; isProtected?: boolean } }) => {
-    if (where.isProtected || where.id === lucyId) {
-      return {
-        id: lucyId,
-        userId,
-        kind: "digital",
-        isProtected: true,
-        name: "לוסי",
-        surname: "",
-        nickname: "לוסי",
-        email: null,
-        phone: null,
-        model: "gpt-4.1-mini",
-        temperature: 0,
-        instructions: "You manage lists and filings.",
-        createdAt: new Date(),
+  findFirst.mockImplementation(
+    async ({
+      where,
+    }: {
+      where: {
+        id?: string;
+        isProtected?: boolean;
+        OR?: Array<{ name?: string; nickname?: string }>;
       };
-    }
+    }) => {
+      const orNames = (where.OR ?? [])
+        .flatMap((row) => [row.name, row.nickname])
+        .filter(Boolean);
+      if (orNames.includes("לוסי-אורח")) {
+        return {
+          id: guestLucyId,
+          userId,
+          teamId,
+          kind: "digital",
+          isProtected: false,
+          isGuest: false,
+          name: "לוסי-אורח",
+          surname: "",
+          nickname: "לוסי-אורח",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "guest lucy",
+          createdAt: new Date(),
+        };
+      }
 
-    if (where.id === employeeId) {
-      return {
-        id: employeeId,
-        userId,
-        name: "עמית",
-        surname: "חתן",
-        nickname: "עמית",
-        email: null,
-        phone: null,
-        createdAt: new Date(),
-      };
-    }
+      if (where.isProtected || where.id === lucyId) {
+        return {
+          id: lucyId,
+          userId,
+          teamId,
+          kind: "digital",
+          isProtected: true,
+          isGuest: false,
+          name: "לוסי",
+          surname: "",
+          nickname: "לוסי",
+          email: null,
+          phone: null,
+          model: "gpt-4.1-mini",
+          temperature: 0,
+          instructions: "You manage lists and filings.",
+          createdAt: new Date(),
+        };
+      }
 
-    if (where.id === otherEmployeeId) {
-      return {
-        id: otherEmployeeId,
-        userId,
-        name: "טל",
-        surname: "דור",
-        nickname: "טל",
-        email: null,
-        phone: null,
-        createdAt: new Date(),
-      };
-    }
+      if (where.id === employeeId) {
+        return {
+          id: employeeId,
+          userId,
+          teamId,
+          isGuest: false,
+          name: "עמית",
+          surname: "חתן",
+          nickname: "עמית",
+          email: null,
+          phone: null,
+          createdAt: new Date(),
+        };
+      }
 
-    return null;
-  });
+      if (where.id === otherEmployeeId) {
+        return {
+          id: otherEmployeeId,
+          userId,
+          teamId,
+          isGuest: false,
+          name: "טל",
+          surname: "דור",
+          nickname: "טל",
+          email: null,
+          phone: null,
+          createdAt: new Date(),
+        };
+      }
+
+      return null;
+    },
+  );
 }
 
 describe("chat API", () => {
@@ -407,6 +457,14 @@ describe("chat API", () => {
     findUnique.mockReset();
     findFirst.mockReset();
     findMany.mockReset().mockResolvedValue([]);
+    teamFindUnique.mockReset().mockResolvedValue({
+      id: teamId,
+      userId,
+      name: "Amit",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    teamCreate.mockReset();
     createConversation.mockReset().mockResolvedValue("conv_test_1");
     createResponse.mockReset().mockResolvedValue({
       reply: "Hello from the model",

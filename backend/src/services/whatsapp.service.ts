@@ -641,14 +641,18 @@ async function resolveWhatsAppSpeaker(from: string): Promise<{
     throw new ServiceUnavailableError();
   }
 
-  const created = await createEmployeeForUser(fallbackUser.id, {
-    kind: "human",
-    name: "אורח",
-    surname: "",
-    nickname: maskPhoneName(from),
-    email: null,
-    phone: from,
-  });
+  const created = await createEmployeeForUser(
+    fallbackUser.id,
+    {
+      kind: "human",
+      name: "אורח",
+      surname: "",
+      nickname: maskPhoneName(from),
+      email: null,
+      phone: from,
+    },
+    { isGuest: true },
+  );
   return { userId: fallbackUser.id, employeeId: created.id };
 }
 

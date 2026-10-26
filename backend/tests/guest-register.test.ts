@@ -4,6 +4,9 @@ import { GUEST_LUCY_NAME } from "@workee/shared";
 
 const {
   userCreate,
+  userFindUnique,
+  teamFindUnique,
+  teamCreate,
   employeeCreate,
   employeeUpdate,
   employeeFindFirst,
@@ -11,6 +14,9 @@ const {
   clearSticky,
 } = vi.hoisted(() => ({
   userCreate: vi.fn(),
+  userFindUnique: vi.fn(),
+  teamFindUnique: vi.fn(),
+  teamCreate: vi.fn(),
   employeeCreate: vi.fn(),
   employeeUpdate: vi.fn(),
   employeeFindFirst: vi.fn(),
@@ -20,7 +26,8 @@ const {
 
 vi.mock("../src/database/prisma.js", () => ({
   prisma: {
-    user: { create: userCreate },
+    user: { create: userCreate, findUnique: userFindUnique },
+    team: { findUnique: teamFindUnique, create: teamCreate },
     employee: {
       create: employeeCreate,
       update: employeeUpdate,
@@ -41,6 +48,7 @@ const guestId = "22222222-2222-4222-8222-222222222222";
 const guestLucyId = "33333333-3333-4333-8333-333333333333";
 const newUserId = "44444444-4444-4444-8444-444444444444";
 const newEmployeeId = "55555555-5555-4555-8555-555555555555";
+const newTeamId = "66666666-6666-4666-8666-666666666666";
 
 const guest = {
   id: guestId,
@@ -52,6 +60,8 @@ const guest = {
   phone: "972501234567",
   protected: false,
   isOwner: false,
+  isGuest: true,
+  teamId: null,
 };
 
 const guestLucy = {
@@ -69,19 +79,29 @@ const guestLucy = {
 describe("registerGuestMember", () => {
   beforeEach(() => {
     userCreate.mockReset();
+    userFindUnique.mockReset();
+    teamFindUnique.mockReset();
+    teamCreate.mockReset();
     employeeCreate.mockReset();
     employeeUpdate.mockReset();
     employeeFindFirst.mockReset();
     employeeFindMany.mockReset();
     clearSticky.mockReset();
 
+    teamFindUnique.mockResolvedValue({
+      id: newTeamId,
+      userId: newUserId,
+      name: "michal",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     // ensureProtectedLucy / ensureGuestLucy find existing; phone unique check finds none.
     employeeFindFirst.mockImplementation(
       async ({ where }: { where?: { phone?: string } }) => {
         if (where && "phone" in where) {
           return null;
         }
-        return { id: "lucy" };
+        return { id: "lucy", teamId: newTeamId, isGuest: false };
       },
     );
     employeeFindMany.mockResolvedValue([]);
@@ -95,6 +115,7 @@ describe("registerGuestMember", () => {
     employeeCreate.mockResolvedValue({
       id: newEmployeeId,
       userId: newUserId,
+      teamId: newTeamId,
       kind: "human",
       name: "מיכל",
       surname: "כהן",
@@ -103,6 +124,7 @@ describe("registerGuestMember", () => {
       phone: "972501234567",
       isProtected: false,
       isOwner: true,
+      isGuest: false,
       addressGender: null,
       shareMirrorEmployeeId: null,
       model: null,
@@ -142,7 +164,17 @@ describe("registerGuestMember", () => {
         surname: "כהן",
         nickname: "מיכל",
         phone: null,
+        isGuest: true,
+        teamId: null,
       },
+    });
+    expect(employeeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: newUserId,
+        teamId: newTeamId,
+        isGuest: false,
+        isOwner: true,
+      }),
     });
     expect(employeeUpdate).toHaveBeenCalledWith({
       where: { id: newEmployeeId },
@@ -155,7 +187,7 @@ describe("registerGuestMember", () => {
   it("rejects non-guest speakers", async () => {
     const result = await registerGuestMember({
       hostUserId,
-      guest: { ...guest, name: "טל", nickname: "טל" },
+      guest: { ...guest, name: "טל", nickname: "טל", isGuest: false },
       digital: guestLucy,
       register: {
         name: "טל",

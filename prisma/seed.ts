@@ -34,6 +34,13 @@ async function main(): Promise<void> {
     console.log(`Seeded user "${user.username}" (${user.id})`);
   }
 
+  const team =
+    (await prisma.team.findUnique({ where: { userId: user.id } })) ??
+    (await prisma.team.create({
+      data: { userId: user.id, name: user.username },
+    }));
+  console.log(`Team "${team.name}" (${team.id})`);
+
   const employeeSeeds = [
     {
       name: "עמית",
@@ -69,6 +76,8 @@ async function main(): Promise<void> {
     const created = await prisma.employee.create({
       data: {
         userId: user.id,
+        teamId: team.id,
+        isGuest: false,
         ...employee,
       },
     });
@@ -79,14 +88,22 @@ async function main(): Promise<void> {
     where: { userId: user.id, isProtected: true },
   });
   if (lucy) {
+    if (!lucy.teamId) {
+      await prisma.employee.update({
+        where: { id: lucy.id },
+        data: { teamId: team.id, isGuest: false },
+      });
+    }
     console.log(`Protected employee "${lucy.name}" already exists.`);
   } else {
     const config = loadLlmConfig();
     const createdLucy = await prisma.employee.create({
       data: {
         userId: user.id,
+        teamId: team.id,
         kind: "digital",
         isProtected: true,
+        isGuest: false,
         name: "לוסי",
         surname: "",
         nickname: "לוסי",

@@ -40,6 +40,13 @@ export function parseReasoningEffort(value: unknown): ReasoningEffort | null {
 /** How Lucy addresses a human speaker in Hebrew second person. */
 export type AddressGender = "male" | "female";
 
+/** Account's sole team (1 User → 1 Team). Guests are not members. */
+export interface PublicTeam {
+  id: string;
+  userId: string;
+  name: string;
+}
+
 export interface PublicEmployee {
   id: string;
   kind?: EmployeeKind;
@@ -54,6 +61,10 @@ export interface PublicEmployee {
   instructions?: string | null;
   protected?: boolean;
   isOwner?: boolean;
+  /** WhatsApp outsider shell — not a team member. Digitals are never guests. */
+  isGuest?: boolean;
+  /** Account team id; null for guests. */
+  teamId?: string | null;
   /** Humans only: male | female | null/undefined when unknown. */
   addressGender?: AddressGender | null;
   /**
@@ -128,17 +139,38 @@ export interface EmployeeUsageSummary {
   months: EmployeeUsageMonth[];
 }
 
+/** One-cost-per-row USD by LlmUsages.purpose (not double-counted). */
+export interface TeamUsagePurposeBreakdown {
+  chatUsd: number;
+  catalogTipUsd: number;
+  weatherTipUsd: number;
+  reminderComposeUsd: number;
+  liveSelectUsd: number;
+}
+
 export interface TeamUsageMonth {
   /** `YYYY-MM` in Asia/Jerusalem time. */
   month: string;
+  /** True LLM spend this month (once per LlmUsages row). */
+  totalUsd: number;
   allEmployeesUsd: number;
   humanEmployeesUsd: number;
+  /** Guest-speaker cost once per row this month. */
+  guestsUsd: number;
+  /** Purpose costs once per row this month. */
+  purposes: TeamUsagePurposeBreakdown;
 }
 
 /** Sums of the per-employee amounts shown on the Employees screen. */
 export interface TeamUsageSummary {
+  /** True LLM spend for the account (once per LlmUsages row). */
+  totalUsd: number;
   allEmployeesUsd: number;
   humanEmployeesUsd: number;
+  /** Cost of rows whose speaker is a WhatsApp guest (once per row). */
+  guestsUsd: number;
+  /** Cost by purpose once per LlmUsages row. */
+  purposes: TeamUsagePurposeBreakdown;
   /** Newest first; months with no cost are omitted. */
   months: TeamUsageMonth[];
 }
@@ -356,11 +388,15 @@ export function digitalEmployees<T extends Pick<PublicEmployee, "kind">>(
 
 /** WhatsApp inbound auto-created outsider — not a real team member. */
 export function isGuestEmployee(
-  employee: Pick<PublicEmployee, "kind" | "name" | "nickname">,
+  employee: Pick<PublicEmployee, "kind" | "name" | "nickname" | "isGuest">,
 ): boolean {
   if (employee.kind === "digital") {
     return false;
   }
+  if (typeof employee.isGuest === "boolean") {
+    return employee.isGuest;
+  }
+  // Fallback for partial fixtures that omit the DB flag.
   const name = (employee.name ?? "").trim();
   const nickname = employee.nickname?.trim() ?? "";
   return name === "אורח" || nickname === "אורח" || nickname.startsWith("אורח ");
@@ -368,7 +404,7 @@ export function isGuestEmployee(
 
 /** Humans shown in Employees / Chat-as (excludes WhatsApp guest shells). */
 export function workspaceHumans<
-  T extends Pick<PublicEmployee, "kind" | "name" | "nickname">,
+  T extends Pick<PublicEmployee, "kind" | "name" | "nickname" | "isGuest">,
 >(employees: T[]): T[] {
   return humanEmployees(employees).filter((employee) => !isGuestEmployee(employee));
 }

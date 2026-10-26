@@ -9,6 +9,8 @@ const {
   findFirst,
   update,
   remove,
+  teamFindUnique,
+  teamCreate,
   listFindMany,
   filingFindMany,
   tipDeleteMany,
@@ -23,6 +25,8 @@ const {
   findFirst: vi.fn(),
   update: vi.fn(),
   remove: vi.fn(),
+  teamFindUnique: vi.fn(),
+  teamCreate: vi.fn(),
   listFindMany: vi.fn(),
   filingFindMany: vi.fn(),
   tipDeleteMany: vi.fn(),
@@ -36,6 +40,10 @@ vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     user: {
       findUnique,
+    },
+    team: {
+      findUnique: teamFindUnique,
+      create: teamCreate,
     },
     employee: {
       findMany,
@@ -66,6 +74,7 @@ import { createApp } from "../src/app.js";
 
 const PASSWORD = "ChangeMe123!";
 const userId = "11111111-1111-4111-8111-111111111111";
+const teamId = "22222222-2222-4222-8222-222222222222";
 
 let passwordHash: string;
 let app: ReturnType<typeof createApp>;
@@ -85,6 +94,14 @@ describe("employees API", () => {
     findFirst.mockReset();
     update.mockReset();
     remove.mockReset();
+    teamFindUnique.mockReset().mockResolvedValue({
+      id: teamId,
+      userId,
+      name: "Amit",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    teamCreate.mockReset();
     listFindMany.mockReset().mockResolvedValue([]);
     filingFindMany.mockReset().mockResolvedValue([]);
     tipDeleteMany.mockReset().mockResolvedValue({ count: 0 });
@@ -146,6 +163,7 @@ describe("employees API", () => {
     create.mockResolvedValue({
       id: "55555555-5555-4555-8555-555555555555",
       userId,
+      teamId,
       kind: "human",
       name: "Dana",
       surname: "Levi",
@@ -154,6 +172,7 @@ describe("employees API", () => {
       phone: "972501111111",
       isProtected: false,
       isOwner: false,
+      isGuest: false,
       createdAt: new Date(),
     });
 
@@ -176,9 +195,13 @@ describe("employees API", () => {
     expect(response.body.employee.nickname).toBe("Dana");
     expect(response.body.employee.email).toBe("dana@example.com");
     expect(response.body.employee.phone).toBe("972501111111");
+    expect(response.body.employee.isGuest).toBe(false);
+    expect(response.body.employee.teamId).toBe(teamId);
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         phone: "972501111111",
+        teamId,
+        isGuest: false,
       }),
     });
   });
@@ -260,6 +283,8 @@ describe("employees API", () => {
         temperature: 0.4,
         reasoningEffort: "medium",
         instructions: "Diana custom system prompt",
+        teamId,
+        isGuest: false,
       }),
     });
   });

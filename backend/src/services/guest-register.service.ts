@@ -74,6 +74,7 @@ export async function registerGuestMember(input: {
     await listEmployeesForUser(newUser.id);
 
     // Clear host phone first so the global unique index allows the new member.
+    // Keep isGuest + no team: renamed share-mirror stays a guest shell on the host.
     await prisma.employee.update({
       where: { id: input.guest.id },
       data: {
@@ -81,6 +82,8 @@ export async function registerGuestMember(input: {
         surname,
         nickname: name,
         phone: null,
+        isGuest: true,
+        teamId: null,
       },
     });
 

@@ -1,9 +1,10 @@
-import type { Employee } from "@prisma/client";
+import type { Employee, Team } from "@prisma/client";
 import type {
   AddressGender,
   DigitalEmployeeDefaults,
   EmployeeInput,
   PublicEmployee,
+  PublicTeam,
 } from "@workee/shared";
 import {
   GUEST_LUCY_NAME,
@@ -24,6 +25,58 @@ import { ensureDefaultTips } from "./tips.service.js";
 const PHONE_IN_USE = "Phone number is already in use";
 
 const LUCY_NAME = "לוסי";
+
+export type CreateEmployeeOptions = {
+  /** WhatsApp outsider shell — no team. Digitals ignore this and are never guests. */
+  isGuest?: boolean;
+};
+
+export function toPublicTeam(team: Team): PublicTeam {
+  return {
+    id: team.id,
+    userId: team.userId,
+    name: team.name,
+  };
+}
+
+/** Ensure the account's sole team exists (1 User → 1 Team). */
+export async function ensureTeamForUser(userId: string): Promise<Team> {
+  const existing = await prisma.team.findUnique({
+    where: { userId },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true },
+  });
+  if (!user) {
+    throw new NotFoundError("User not found");
+  }
+
+  try {
+    return await prisma.team.create({
+      data: {
+        userId,
+        name: user.username,
+      },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const raced = await prisma.team.findUnique({ where: { userId } });
+      if (raced) {
+        return raced;
+      }
+    }
+    throw error;
+  }
+}
+
+export async function getTeamForUser(userId: string): Promise<PublicTeam> {
+  return toPublicTeam(await ensureTeamForUser(userId));
+}
 
 /** Short custom prompt for WhatsApp guest onboarding (no Lucy capability catalog). */
 const GUEST_LUCY_INSTRUCTIONS = [
@@ -50,6 +103,7 @@ function publicAddressGender(
 
 export function toPublicEmployee(employee: Employee): PublicEmployee {
   const kind = employee.kind === "digital" ? "digital" : "human";
+  const isGuest = kind === "human" ? employee.isGuest === true : false;
   return {
     id: employee.id,
     kind,
@@ -64,6 +118,8 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     instructions: employee.instructions,
     protected: employee.isProtected,
     isOwner: kind === "human" ? employee.isOwner : false,
+    isGuest,
+    teamId: isGuest ? null : (employee.teamId ?? null),
     addressGender: publicAddressGender(kind, employee.addressGender),
     shareMirrorEmployeeId:
       kind === "human" ? (employee.shareMirrorEmployeeId ?? null) : null,
@@ -118,6 +174,13 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
     where: { userId, isProtected: true },
   });
   if (existing) {
+    if (!existing.teamId) {
+      const team = await ensureTeamForUser(userId);
+      await prisma.employee.update({
+        where: { id: existing.id },
+        data: { teamId: team.id, isGuest: false },
+      });
+    }
     return;
   }
 
@@ -129,19 +192,29 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
     },
   });
   if (namedLucy) {
+    const team = namedLucy.teamId
+      ? null
+      : await ensureTeamForUser(userId);
     await prisma.employee.update({
       where: { id: namedLucy.id },
-      data: { isProtected: true },
+      data: {
+        isProtected: true,
+        isGuest: false,
+        ...(team ? { teamId: team.id } : {}),
+      },
     });
     return;
   }
 
+  const team = await ensureTeamForUser(userId);
   const defaults = getDigitalEmployeeDefaults();
   await prisma.employee.create({
     data: {
       userId,
+      teamId: team.id,
       kind: "digital",
       isProtected: true,
+      isGuest: false,
       name: LUCY_NAME,
       surname: "",
       nickname: LUCY_NAME,
@@ -164,21 +237,34 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
   });
   if (existing) {
     // Keep product prompt in sync (incl. tip keys); לוסי-אורח is not user-edited.
+    const patch: { instructions?: string; teamId?: string; isGuest?: boolean } =
+      {};
     if (existing.instructions !== GUEST_LUCY_INSTRUCTIONS) {
+      patch.instructions = GUEST_LUCY_INSTRUCTIONS;
+    }
+    if (!existing.teamId) {
+      const team = await ensureTeamForUser(userId);
+      patch.teamId = team.id;
+      patch.isGuest = false;
+    }
+    if (Object.keys(patch).length > 0) {
       await prisma.employee.update({
         where: { id: existing.id },
-        data: { instructions: GUEST_LUCY_INSTRUCTIONS },
+        data: patch,
       });
     }
     return;
   }
 
+  const team = await ensureTeamForUser(userId);
   const defaults = getDigitalEmployeeDefaults();
   await prisma.employee.create({
     data: {
       userId,
+      teamId: team.id,
       kind: "digital",
       isProtected: false,
+      isGuest: false,
       name: GUEST_LUCY_NAME,
       surname: "",
       nickname: GUEST_LUCY_NAME,
@@ -191,6 +277,7 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
 }
 
 export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
+  await ensureTeamForUser(userId);
   await ensureProtectedLucy(userId);
   await ensureGuestLucy(userId);
   // Tip catalog sync must not block listing employees (Employees UI / chat-as).
@@ -319,14 +406,19 @@ function rethrowPhoneConflict(error: unknown): never {
 export async function createEmployeeForUser(
   userId: string,
   input: EmployeeInput,
+  options?: CreateEmployeeOptions,
 ): Promise<PublicEmployee> {
   const kind = input.kind === "digital" ? "digital" : "human";
   const data = persistEmployeeData(input, kind);
+  const isGuest = kind === "human" && options?.isGuest === true;
+  const team = isGuest ? null : await ensureTeamForUser(userId);
   await assertPhoneAvailable(data.phone);
   try {
     const employee = await prisma.employee.create({
       data: {
         userId,
+        teamId: team?.id ?? null,
+        isGuest,
         isProtected: false,
         ...data,
       },
@@ -346,10 +438,21 @@ export async function updateEmployeeForUser(
   const kind = existing.kind === "digital" ? "digital" : "human";
   const data = persistEmployeeData(input, kind);
   await assertPhoneAvailable(data.phone, employeeId);
+  // Preserve guest/team membership; UI updates do not promote or demote guests.
+  const membership =
+    existing.isGuest && kind === "human"
+      ? { isGuest: true as const, teamId: null }
+      : {
+          isGuest: false as const,
+          teamId: existing.teamId ?? (await ensureTeamForUser(userId)).id,
+        };
   try {
     const employee = await prisma.employee.update({
       where: { id: employeeId },
-      data,
+      data: {
+        ...data,
+        ...membership,
+      },
     });
     return toPublicEmployee(employee);
   } catch (error) {

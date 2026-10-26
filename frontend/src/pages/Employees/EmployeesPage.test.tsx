@@ -128,11 +128,46 @@ describe("Employees page", () => {
       ],
     });
     teamUsageMock.mockReset().mockResolvedValue({
+      totalUsd: 0.0098,
       allEmployeesUsd: 0.0196,
       humanEmployeesUsd: 0.0098,
+      guestsUsd: 0,
+      purposes: {
+        chatUsd: 0.0098,
+        catalogTipUsd: 0,
+        weatherTipUsd: 0,
+        reminderComposeUsd: 0,
+        liveSelectUsd: 0,
+      },
       months: [
-        { month: "2026-10", allEmployeesUsd: 0.0126, humanEmployeesUsd: 0.0063 },
-        { month: "2026-09", allEmployeesUsd: 0.007, humanEmployeesUsd: 0.0035 },
+        {
+          month: "2026-10",
+          totalUsd: 0.0063,
+          allEmployeesUsd: 0.0126,
+          humanEmployeesUsd: 0.0063,
+          guestsUsd: 0,
+          purposes: {
+            chatUsd: 0.0063,
+            catalogTipUsd: 0,
+            weatherTipUsd: 0,
+            reminderComposeUsd: 0,
+            liveSelectUsd: 0,
+          },
+        },
+        {
+          month: "2026-09",
+          totalUsd: 0.0035,
+          allEmployeesUsd: 0.007,
+          humanEmployeesUsd: 0.0035,
+          guestsUsd: 0,
+          purposes: {
+            chatUsd: 0.0035,
+            catalogTipUsd: 0,
+            weatherTipUsd: 0,
+            reminderComposeUsd: 0,
+            liveSelectUsd: 0,
+          },
+        },
       ],
     });
     updateRecordMock.mockReset();

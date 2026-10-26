@@ -13,6 +13,7 @@ model User {
   passwordHash String     @map("password_hash") @db.VarChar(255)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
+  team              Team?
   employees         Employee[]
   chatConversations ChatConversation[]
   contacts          Contact[]
@@ -22,9 +23,24 @@ model User {
   @@map("Users")
 }
 
+/** One team per User. Non-guest employees belong to it; guests have no team. */
+model Team {
+  id        String     @id @default(uuid()) @db.Uuid
+  userId    String     @unique @map("user_id") @db.Uuid
+  name      String     @db.VarChar(100)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employees Employee[]
+
+  @@map("Teams")
+}
+
 model Employee {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @map("user_id") @db.Uuid
+  /** Null for WhatsApp guest shells (`isGuest`); otherwise the account's sole team. */
+  teamId       String?  @map("team_id") @db.Uuid
   kind         String   @default("human") @db.VarChar(16)
   name         String   @db.VarChar(100)
   surname      String   @db.VarChar(100)
@@ -38,6 +54,8 @@ model Employee {
   instructions String?  @db.Text
   isProtected  Boolean  @default(false) @map("is_protected")
   isOwner      Boolean  @default(false) @map("is_owner")
+  /** WhatsApp outsider shell — not a team member. Digitals are never guests. */
+  isGuest      Boolean  @default(false) @map("is_guest")
   /** How Lucy addresses this human in Hebrew: male | female | null (ask once). */
   addressGender String?  @map("address_gender") @db.VarChar(16)
   /**
@@ -47,6 +65,7 @@ model Employee {
   shareMirrorEmployeeId String?  @map("share_mirror_employee_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  team                     Team?              @relation(fields: [teamId], references: [id], onDelete: Restrict)
   shareMirrorEmployee      Employee?          @relation("ShareMirror", fields: [shareMirrorEmployeeId], references: [id], onDelete: SetNull)
   mirroredBy               Employee[]         @relation("ShareMirror")
   chatConversations        ChatConversation[] @relation("ConversationSpeaker")
@@ -63,6 +82,7 @@ model Employee {
   tipProgressAsDigital     TipProgress[]      @relation("TipProgressDigital")
 
   @@index([userId])
+  @@index([teamId])
   @@index([shareMirrorEmployeeId])
   @@map("Employees")
 }
