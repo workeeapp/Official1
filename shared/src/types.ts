@@ -45,7 +45,8 @@ export type AddressGender = "male" | "female";
 export interface PublicTeam {
   id: string;
   userId: string;
-  name: string;
+  /** Null for WhatsApp-only accounts with no username. */
+  name: string | null;
 }
 
 export interface PublicEmployee {

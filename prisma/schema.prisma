@@ -29,7 +29,8 @@ model User {
 model Team {
   id        String     @id @default(uuid()) @db.Uuid
   userId    String     @unique @map("user_id") @db.Uuid
-  name      String     @db.VarChar(100)
+  /** Null when the account has no username (WhatsApp-only). */
+  name      String?    @db.VarChar(100)
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)

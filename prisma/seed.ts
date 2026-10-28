@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   const team =
     (await prisma.team.findUnique({ where: { userId: user.id } })) ??
     (await prisma.team.create({
-      data: { userId: user.id, name: user.username },
+      data: { userId: user.id, name: user.username?.trim() || null },
     }));
   console.log(`Team "${team.name}" (${team.id})`);
 

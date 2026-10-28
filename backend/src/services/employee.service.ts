@@ -56,11 +56,14 @@ export async function ensureTeamForUser(userId: string): Promise<Team> {
     throw new NotFoundError("User not found");
   }
 
+  // WhatsApp-only users have username null; Team.name is nullable to match.
+  const teamName = user.username?.trim() || null;
+
   try {
     return await prisma.team.create({
       data: {
         userId,
-        name: user.username,
+        name: teamName,
       },
     });
   } catch (error) {

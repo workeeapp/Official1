@@ -108,6 +108,34 @@ describe("team API and membership", () => {
     });
   });
 
+  it("creates a team with null name when username is null (WhatsApp-only)", async () => {
+    const { ensureTeamForUser } = await import(
+      "../src/services/employee.service.js"
+    );
+    userFindUnique.mockResolvedValue({
+      id: userId,
+      username: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    teamFindUnique.mockResolvedValue(null);
+    teamCreate.mockResolvedValue({
+      id: teamId,
+      userId,
+      name: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const team = await ensureTeamForUser(userId);
+
+    expect(team.name).toBeNull();
+    expect(teamCreate).toHaveBeenCalledWith({
+      data: { userId, name: null },
+    });
+  });
+
   it("assigns non-guest creates to the team", async () => {
     teamFindUnique.mockResolvedValue({
       id: teamId,

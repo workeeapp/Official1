@@ -26,12 +26,15 @@ Set-Location $root
 # workee_test:5436 over this checkout's .env (live must stay on workee:5435).
 # Also drop LIVE_FULL / Studio isolation flags so refresh never starts the live
 # API with WhatsApp outbound or reminder fire disabled / eval .env locked.
+# Drop NODE_ENV=test inherited from Cursor/vitest shells — otherwise inbound
+# WhatsApp and Meta sends no-op (handleInbound / whatsapp-send gate on test).
 foreach ($name in @(
   "DATABASE_URL",
   "DIRECT_URL",
   "WORKEE_DISABLE_WHATSAPP_OUTBOUND",
   "WORKEE_DISABLE_REMINDER_FIRE",
-  "WORKEE_EVAL_ENV_LOCKED"
+  "WORKEE_EVAL_ENV_LOCKED",
+  "NODE_ENV"
 )) {
   if (Test-Path "Env:$name") {
     Remove-Item "Env:$name"
