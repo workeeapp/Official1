@@ -627,7 +627,15 @@ export function formatFullDump(
       countsOnly: itemDump ? false : true,
     }),
   );
-  pushBlock(formatThreeWayDump("tasks", "מטלות", snapshot, opts), "tasks");
+  pushBlock(
+    formatThreeWayDump(
+      "tasks",
+      opts?.flatLayout ? "מעקבים של לוסי" : "מטלות",
+      snapshot,
+      opts,
+    ),
+    "tasks",
+  );
   if (itemDump) {
     for (const list of snapshot.lists) {
       if (list.list_type !== "custom") {
@@ -1062,8 +1070,12 @@ export function itemReminderAboutMatchesPartner(
   );
 }
 
-/** Soft cap for list-row detail preview when no sentence end is available. */
-export const LIST_ROW_PREVIEW_MAX_CHARS = 70;
+/**
+ * Soft cap for list-row detail preview when no sentence/line end is available.
+ * Short prose under this limit stays complete; longer unpunctuated text cuts at
+ * a word boundary. Prefer sentence/paragraph via {@link firstFilingPreviewChunk}.
+ */
+export const LIST_ROW_PREVIEW_MAX_CHARS = 160;
 /** @deprecated Use {@link LIST_ROW_PREVIEW_MAX_CHARS}. */
 export const FILING_LIST_PREVIEW_MAX_CHARS = LIST_ROW_PREVIEW_MAX_CHARS;
 
@@ -1255,7 +1267,13 @@ export function firstFilingPreviewChunk(text: string): {
   } else if (nl >= 0) {
     endExclusive = nl;
   }
-  const head = source.slice(0, endExclusive).replace(/\s+/g, " ").trim();
+  // Preserve newlines in the kept head (multi-line previews); collapse only
+  // horizontal runs. Rest is normalized for overflow detection.
+  const head = source
+    .slice(0, endExclusive)
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   const rest = source.slice(endExclusive).replace(/\s+/g, " ").trim();
   return { head, rest };
 }
@@ -2096,7 +2114,11 @@ function formatShortDayMonth(ymd: string): string {
   return `${parts.day}.${parts.month}`;
 }
 
-/** List rows: bell only. ITEM DUMP (`itemIds` set): bell + timed text. */
+/**
+ * list = inventory/agenda rows; detail = ITEM DUMP.
+ * Both modes show `🔔 תזכורת: <when>` when a when-string is known; bare `🔔`
+ * only when a linked reminder exists but no displayable when.
+ */
 export type ReminderDisplayMode = "list" | "detail";
 
 export function reminderDisplayMode(
@@ -2110,7 +2132,7 @@ export function reminderDisplayMode(
  * When `occurrenceYmd` is set: occurrence-effective chore time + reminder for
  * that exact day (reminder exceptions only — never task exceptions).
  * Without it: series overview suffix (`formatScheduleSuffix`) for flat dumps.
- * Reminder times appear only in detail mode (ITEM DUMP); list/agenda show 🔔.
+ * Reminder mark uses linked reminder when-text in both list and detail modes.
  */
 export function formatAgendaStandingLine(
   n: number,
@@ -2179,7 +2201,7 @@ export function formatAgendaStandingLine(
  * - Recurring series clock: series HM + that clock's `exception_entries` only
  *   (never task exceptions). Cancelled → empty (no series fallback / no bell).
  * - One-shot linked clock (no series-level reminder): only the fire_at day.
- * - list → `🔔`; detail → `🔔 תזכורת: HH:mm` (effective HM, never series original when moved).
+ * - Both modes → `🔔 תזכורת: HH:mm` when effective HM is known; else `🔔`.
  */
 export function formatOccurrenceEffectiveReminderParen(
   item: Record<string, unknown>,
@@ -2221,15 +2243,12 @@ export function formatOccurrenceEffectiveReminderParen(
   return formatReminderMarkText(mode, effective.hm);
 }
 
-/** list → `🔔`; detail → `🔔 תזכורת: <when>` (empty when no when). */
+/** `🔔 תזכורת: <when>` when when is known; bare `🔔` otherwise (list + detail). */
 function formatReminderMarkText(
-  mode: ReminderDisplayMode,
+  _mode: ReminderDisplayMode,
   when: string | null | undefined,
 ): string {
   const text = typeof when === "string" ? when.trim() : "";
-  if (mode === "list") {
-    return "🔔";
-  }
   return text ? `🔔 תזכורת: ${text}` : "🔔";
 }
 
@@ -2486,7 +2505,10 @@ function formatListDump(
   const builtin = builtinListTypeFromHebrew(name);
   const omitEmpty = opts?.omitEmptySentence === true;
   if (builtin === "shopping" || builtin === "tasks") {
-    const bareLabel = builtinListHebrew(builtin);
+    const bareLabel =
+      builtin === "tasks" && opts?.flatLayout
+        ? "מעקבים של לוסי"
+        : builtinListHebrew(builtin);
     const body = formatThreeWayDump(builtin, bareLabel, snapshot, opts);
     if (body.text) {
       return body;
@@ -3899,10 +3921,10 @@ export function formatScheduleSuffix(
 }
 
 /**
- * Task-row reminder mark: list → `🔔`; detail → `🔔 תזכורת: <when>`.
+ * Task-row reminder mark: `🔔 תזכורת: <when>` when when is known (list + detail).
  * Prefer occurrence-effective time when `occurrenceYmd` is set, or (flat
- * ITEM DUMP recurring) the nearest `next_occurrences` day that still has an
- * effective reminder — skip cancelled/absent; never use series HM when that
+ * ITEM DUMP / list recurring) the nearest `next_occurrences` day that still has
+ * an effective reminder — skip cancelled/absent; never use series HM when that
  * day was moved. No upcoming effective day → empty (no bell / no time).
  */
 export function formatReminderIndicator(
@@ -3917,16 +3939,23 @@ export function formatReminderIndicator(
   if (/^\d{4}-\d{2}-\d{2}$/.test(occurrenceYmd)) {
     return formatOccurrenceEffectiveReminderParen(item, occurrenceYmd, mode);
   }
-  if (mode === "detail" && linkedReminderIsRecurring(item)) {
+  if (linkedReminderIsRecurring(item)) {
     const raw = item.reminder as Record<string, unknown>;
     if (reminderExceptionEntriesContractOk(raw)) {
-      for (const ymd of nextOccurrenceYmds(item)) {
-        const mark = formatOccurrenceEffectiveReminderParen(item, ymd, mode);
-        if (mark) {
-          return mark;
+      const ymds = nextOccurrenceYmds(item);
+      if (ymds.length > 0) {
+        for (const ymd of ymds) {
+          const mark = formatOccurrenceEffectiveReminderParen(item, ymd, mode);
+          if (mark) {
+            return mark;
+          }
         }
+        // Snapshot listed upcoming days but every effective reminder is
+        // cancelled/absent — no bell (do not fall back to series fire_at).
+        return "";
       }
-      return "";
+      // No occurrence slots in the snapshot — fall through to flat fire_at /
+      // cadence mark (still show 🔔 when a linked clock exists).
     }
   }
   return formatLinkedReminderParen(item, opts?.now ?? new Date(), mode);
@@ -3953,7 +3982,7 @@ function nextOccurrenceYmds(item: Record<string, unknown>): string[] {
 
 /**
  * Linked-reminder mark for non-occurrence paths.
- * list → `🔔`; detail → `🔔 תזכורת: <formatReminderWhen>` (flat cadence).
+ * Both modes → `🔔 תזכורת: <formatReminderWhen>` (flat cadence) when when known.
  */
 export function formatLinkedReminderParen(
   item: Record<string, unknown>,
@@ -3975,9 +4004,6 @@ export function formatLinkedReminderParen(
     typeof reminder.repeat === "string" ? reminder.repeat.trim() : "";
   if (!fireAt && !recurrenceText && (!repeat || repeat === "none" || repeat === "once")) {
     return "";
-  }
-  if (mode === "list") {
-    return "🔔";
   }
   const exceptions = Array.isArray(reminder.exceptions)
     ? reminder.exceptions.filter(

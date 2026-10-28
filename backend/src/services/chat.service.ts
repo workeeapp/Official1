@@ -2844,6 +2844,11 @@ export async function sendChatMessage(input: {
     let turnLastNumberedDump: LastNumberedDumpLine[] = [];
     /** ITEM DUMP rows with files ? engine sends them (model may omit send_attachments). */
     let itemDumpAttachmentIds: string[] = [];
+    /**
+     * Engine ITEM DUMP of exactly one tasks row — סמן כבוצע + reminder twin.
+     * Kept aside because the show_dump freeze clears model choice taps.
+     */
+    let itemDumpShowButtons: Array<{ label: string; command: string }> = [];
     const showDumpKind = metadata.showDump?.trim() ?? "";
     if (showDumpKind) {
       const speakerAliases = [
@@ -2996,7 +3001,7 @@ export async function sendChatMessage(input: {
           }
           if (
             validIds.length === 1 &&
-            resolved?.kind === "tasks" &&
+            isTasksShowDumpKind(showDumpKind) &&
             lines.length === 1
           ) {
             const title =
@@ -3008,6 +3013,7 @@ export async function sendChatMessage(input: {
               hasLinkedReminder: hasLinked,
             });
             if (itemButtons.length > 0) {
+              itemDumpShowButtons = itemButtons;
               workingReply = setEngineButtons(workingReply, itemButtons);
             }
           }
@@ -3030,6 +3036,12 @@ export async function sendChatMessage(input: {
             })
           | null = null;
         let filingDumpCount = 0;
+        /** Single-about ITEM DUMP of one tasks row — attach סמן כבוצע like speaker path. */
+        let soleTaskItemDump: {
+          snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>;
+          validId: string;
+          titleStem: string;
+        } | null = null;
 
         for (const aboutRaw of aboutNames) {
           const aboutPerson = matchEmployee(aboutRaw, employees);
@@ -3139,10 +3151,23 @@ export async function sendChatMessage(input: {
                 ]),
               ].slice(0, 10);
             }
-            if (resolveShowDumpKind(showDumpKind)?.kind === "filings") {
+            const resolvedAbout = resolveShowDumpKind(showDumpKind);
+            if (resolvedAbout?.kind === "filings") {
               filingDumpCount += 1;
               soleFilingSnapshot = snapshot;
               soleFilingOpts = opts;
+            }
+            if (
+              aboutNames.length === 1 &&
+              validIds.length === 1 &&
+              isTasksShowDumpKind(showDumpKind) &&
+              subjectLines.length === 1
+            ) {
+              soleTaskItemDump = {
+                snapshot,
+                validId: validIds[0]!,
+                titleStem: subjectLines[0]!.title_stem.trim(),
+              };
             }
           }
         }
@@ -3192,6 +3217,26 @@ export async function sendChatMessage(input: {
                   workingReply,
                   dumpAddress,
                 );
+              }
+            }
+            if (soleTaskItemDump) {
+              const title =
+                soleTaskItemDump.titleStem ||
+                taskTitleFromSnapshot(
+                  soleTaskItemDump.snapshot,
+                  soleTaskItemDump.validId,
+                );
+              const hasLinked = taskHasLinkedReminder(
+                soleTaskItemDump.snapshot,
+                soleTaskItemDump.validId,
+              );
+              const itemButtons = singleTaskShowButtons({
+                title,
+                hasLinkedReminder: hasLinked,
+              });
+              if (itemButtons.length > 0) {
+                itemDumpShowButtons = itemButtons;
+                workingReply = setEngineButtons(workingReply, itemButtons);
               }
             }
           }
@@ -3507,8 +3552,15 @@ export async function sendChatMessage(input: {
       const preTip = parseLlmReply(workingReply);
       let bubbles = preTip.responseBubbles;
       if (metadata.showDump) {
-        // show_dump is display-only ? never attach choice taps on a bare dump.
+        // show_dump is display-only — strip model choice taps on a bare dump.
+        // Re-attach engine single-task ITEM DUMP taps (סמן כבוצע / reminder twin).
         bubbles = clearBubbleButtons(bubbles);
+        if (itemDumpShowButtons.length > 0 && bubbles[0]) {
+          bubbles = [
+            { ...bubbles[0], buttons: [...itemDumpShowButtons] },
+            ...bubbles.slice(1),
+          ];
+        }
       } else if (!guestSpeaker) {
         bubbles = applyShowButtonsToBubbles(
           bubbles,

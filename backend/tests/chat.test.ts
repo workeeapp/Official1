@@ -2299,6 +2299,84 @@ describe("chat API", () => {
     expect(response.body.reply).toContain("פגישה עם רואה חשבון");
     expect(response.body.reply).not.toContain("לאסוף חבילה");
     expect(response.body.reply).not.toContain("הנה הפגישות שבחרתי");
+    const { prisma: prismaMock } = await import("../src/database/prisma.js");
+    const updateCalls = (prismaMock.chatMessage.update as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const updatedButtons = updateCalls.flatMap((call) => {
+      const data = (call[0] as { data?: { buttons?: unknown } } | undefined)?.data;
+      return data?.buttons ? [data.buttons] : [];
+    });
+    expect(JSON.stringify(updatedButtons)).toMatch(/סמן כבוצע/);
+  });
+
+  it("ITEM DUMP about-path single task attaches סמן כבוצע + reminder twin", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-about",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-about-1",
+                data: { "שם מטלה": "ללכת לספר" },
+                reminderId: "r-about-1",
+                linkedReminderId: "r-about-1",
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "הנה המטלה" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_about: "עמית",
+          show_dump_ids: "task-about-1",
+        },
+      }),
+      raw: { output_text: "about item dump" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי את המטלה של עמית", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("ללכת לספר");
+    const { prisma: prismaMock } = await import("../src/database/prisma.js");
+    const updateCalls = (prismaMock.chatMessage.update as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const buttonsJson = JSON.stringify(
+      updateCalls.flatMap((call) => {
+        const data = (call[0] as { data?: { buttons?: unknown } } | undefined)?.data;
+        return data?.buttons ? [data.buttons] : [];
+      }),
+    );
+    expect(buttonsJson).toMatch(/סמן כבוצע:\s*ללכת לספר/);
+    // Linked reminder id on the row → עדכן תזכורת twin (same as speaker ITEM DUMP).
+    expect(buttonsJson).toMatch(/עדכן תזכורת:\s*ללכת לספר|הוסף תזכורת:\s*ללכת לספר/);
   });
 
   it("TOPIC DUMP: show_dump=full + mixed show_dump_ids keeps only matching rows", async () => {

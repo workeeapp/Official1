@@ -261,9 +261,20 @@ describe("formatFilingDumpBody", () => {
     ).toBe("מבחן מתמטיקה ביום שלישי.");
   });
 
-  it("filing list preview: long unpunctuated text cuts near 70 at a word", () => {
+  it("filing list preview: short text stays complete under the soft cap", () => {
+    const short = "הערה קצרה על התור.";
+    expect(
+      formatFilingListPreview({
+        item_name: "הערה",
+        item_info: short,
+        item_description: "",
+      }),
+    ).toBe(short);
+  });
+
+  it("filing list preview: long unpunctuated text cuts near soft cap at a word", () => {
     const long =
-      "זה טקסט ארוך בלי נקודה בסוף כדי לוודא חיתוך בגבול מילה סביב שבעים תווים במנגנון התצוגה המקדימה של תיוקים ברשימה";
+      "זה טקסט ארוך בלי נקודה בסוף כדי לוודא חיתוך בגבול מילה סביב מאה שישים תווים במנגנון התצוגה המקדימה של תיוקים ברשימה עם עוד מילים כדי לעבור את הסף החדש בבירור ולהישאר קריא";
     const preview = formatFilingListPreview({
       item_name: "הערה",
       item_info: long,
@@ -272,11 +283,25 @@ describe("formatFilingDumpBody", () => {
     expect(preview).toBeTruthy();
     expect(preview!.endsWith("…")).toBe(true);
     const body = preview!.slice(0, -1);
-    expect(body.length).toBeLessThanOrEqual(70);
+    expect(body.length).toBeLessThanOrEqual(160);
+    expect(body.length).toBeGreaterThan(70);
     expect(body).not.toMatch(/\s$/);
     expect(long.startsWith(body)).toBe(true);
     expect(firstFilingPreviewChunk(long).rest).toBe("");
     expect(truncateFilingPreviewAtWord(long).truncated).toBe(true);
+  });
+
+  it("filing list preview: multi-line keeps first line then marks overflow", () => {
+    const multi = "שורה ראשונה של התיאור\nשורה שנייה עם עוד פרטים\nשורה שלישית";
+    const preview = formatFilingListPreview({
+      item_name: "הערה",
+      item_info: multi,
+      item_description: "",
+    });
+    expect(preview).toBeTruthy();
+    expect(preview!.startsWith("שורה ראשונה של התיאור")).toBe(true);
+    expect(preview).toContain("…");
+    expect(preview).not.toContain("שורה שלישית");
   });
 
   it("list detail preview is a contiguous slice of the original, not a rewrite", () => {
@@ -301,7 +326,7 @@ describe("formatFilingDumpBody", () => {
       שם: "הזמנה A-9",
       תיאור: "נשלח באריזה כפולה עם מדבקת שביר",
       "הערת לקוח":
-        "בבקשה למסור רק אחרי השעה חמש ולצלצל פעמיים אם אין מענה בדלת הראשית של הבניין",
+        "בבקשה למסור רק אחרי השעה חמש ולצלצל פעמיים אם אין מענה בדלת הראשית של הבניין ואז להשאיר הודעה אצל השכן עם מספר הטלפון של השליח ועם הערות נוספות על שעות המסירה המבוקשות למחרת בבוקר",
     };
     const columns = ["שם", "תיאור", "הערת לקוח"];
     const originalCustom = formatCustomListDetailText(item, "שם", columns);
@@ -1516,7 +1541,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. להזכיר לטל לאסוף את מאיה — רביעי ב־15:00 🔔");
+    ).toMatch(/^1\. להזכיר לטל לאסוף את מאיה — רביעי ב־15:00 🔔 תזכורת:/);
     expect(
       formatScheduleSuffix(
         { "תאריך לביצוע": "2026-10-15", "שעה לביצוע": "19:30" },
@@ -1564,7 +1589,7 @@ describe("formatShowDumpFromKind", () => {
         { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
         now,
       ),
-    ).toBe("🔔");
+    ).toBe("🔔 תזכורת: היום ב־20:30");
     expect(
       formatLinkedReminderParen(
         { reminder: { fire_at: "2026-10-15 20:30", repeat: "none" } },
@@ -1746,7 +1771,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("5. לקחת אקמול — כל יומיים ב־15:00 (קבוע) 🔔");
+    ).toMatch(/^5\. לקחת אקמול — כל יומיים ב־15:00 \(קבוע\) 🔔 תזכורת:/);
     expect(
       formatScheduleSuffix(
         {
@@ -1812,8 +1837,8 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe(
-      "6. חוג טיסנים — כל יום ראשון ב־21:00 (קבוע) · 18.10 ב־21:30 🔔",
+    ).toMatch(
+      /^6\. חוג טיסנים — כל יום ראשון ב־21:00 \(קבוע\) · 18\.10 ב־21:30 🔔 תזכורת:/,
     );
     expect(
       formatReminderWhen(
@@ -1853,7 +1878,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).not.toContain("תזכורת:");
+    ).toMatch(/🔔 תזכורת:/);
     expect(
       formatNumberedItem(
         2,
@@ -1862,7 +1887,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("2. לבדוק באג 🔔");
+    ).toBe("2. לבדוק באג 🔔 תזכורת: היום ב־20:30");
     expect(
       formatNumberedItem(
         3,
@@ -1877,8 +1902,8 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("3. להתקשר לאמא 🔔");
-    // Appointment time ≠ ping time: schedule from שעה לביצוע; list shows 🔔 only.
+    ).toMatch(/^3\. להתקשר לאמא 🔔 תזכורת:/);
+    // Appointment time ≠ ping time: schedule from שעה לביצוע; list shows timed 🔔.
     expect(
       formatNumberedItem(
         1,
@@ -1891,7 +1916,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. לאסוף את מאיה — מחר ב־15:00 🔔");
+    ).toBe("1. לאסוף את מאיה — מחר ב־15:00 🔔 תזכורת: מחר ב־14:20");
     // Title already has ב־HH:mm from sync — strip so schedule is not duplicated.
     expect(stripMatchingTitleClock("לשלוח למיכל ברכת בוקר ב־09:00", "09:00")).toBe(
       "לשלוח למיכל ברכת בוקר",
@@ -1911,8 +1936,8 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. לשלוח למיכל ברכת בוקר — 09:00 (קבוע) 🔔");
-    // Recurring linked + chore HM match without חוזר → fold + 🔔; no timed תזכורת.
+    ).toMatch(/^1\. לשלוח למיכל ברכת בוקר — 09:00 \(קבוע\) 🔔 תזכורת:/);
+    // Recurring linked + chore HM match without חוזר → fold + timed 🔔.
     expect(
       formatNumberedItem(
         1,
@@ -1928,7 +1953,7 @@ describe("formatShowDumpFromKind", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. להזכיר לטל לבדוק ביט — 20:00 (קבוע) 🔔");
+    ).toMatch(/^1\. להזכיר לטל לבדוק ביט — 20:00 \(קבוע\) 🔔 תזכורת:/);
   });
 
   it("formats reminder dump lines like מה התזכורות שלי", () => {
@@ -2305,7 +2330,7 @@ describe("formatShowDumpFromKind", () => {
 
   it("custom inventory: unfamiliar columns still build detail in list order", () => {
     const longNote =
-      "הלקוח ביקש משלוח עד הבית אחרי השעה שש בערב וגם לבדוק שהאריזה שלמה לפני המסירה מחר";
+      "הלקוח ביקש משלוח עד הבית אחרי השעה שש בערב וגם לבדוק שהאריזה שלמה לפני המסירה מחר בבוקר ואז לצלצל לשליח אם אין מענה ולתעד את כל הפרטים ביומן השליחויות של החנות";
     const snapshot: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -2644,9 +2669,8 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       now,
     });
-    expect(fromKind).toContain("לבדוק את הבאג הזה 🔔");
-    expect(fromKind).toContain("לראות מה קורה עם הביט 🔔");
-    expect(fromKind).not.toMatch(/תזכורת:/);
+    expect(fromKind).toMatch(/לבדוק את הבאג הזה 🔔 תזכורת:/);
+    expect(fromKind).toMatch(/לראות מה קורה עם הביט 🔔 תזכורת:/);
   });
 
   it("dumps from show_dump kind the same as the button command", () => {
@@ -3542,13 +3566,19 @@ describe("worker inventory tasks dump helpers", () => {
       flatLayout: true,
       now: new Date("2026-10-17T10:00:00.000Z"),
     })!;
-    expect(text).toContain("✅ מטלות:");
+    expect(text).toContain("✅ מעקבים של לוסי:");
+    expect(text).not.toContain("✅ מטלות:");
     expect(text).not.toContain("משותפות");
     expect(text).not.toContain("אישיות");
     expect(text).not.toContain("(לוסי)");
-    expect(text).toContain("להזכיר לטל לבדוק את הביט 🔔");
-    expect(text).not.toMatch(/תזכורת:/);
+    expect(text).toMatch(/להזכיר לטל לבדוק את הביט 🔔 תזכורת:/);
     expect(text).toContain("לשלוח למיכל ברכת בוקר");
+    const speaker = formatShowDumpFromKind("tasks", snap, {
+      viewerName: "טל",
+      now: new Date("2026-10-17T10:00:00.000Z"),
+    })!;
+    expect(speaker).toContain("✅ מטלות:");
+    expect(speaker).not.toContain("מעקבים של לוסי");
   });
 
   it("full dump with partner filters reminders, contacts, phone book like filings", () => {
@@ -3692,8 +3722,7 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("לשאול את עמית");
     // Linked rem-meet is folded into the task line — not a second תזכורות row.
     expect(text).toContain("פגישה (טל, עמית)");
-    expect(text).toContain("🔔");
-    expect(text).not.toMatch(/תזכורת:/);
+    expect(text).toMatch(/🔔 תזכורת:/);
     expect(text).not.toContain("פגישה עם עמית");
     expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
@@ -3747,7 +3776,7 @@ describe("uniform standing + ping dump lines", () => {
       formatNumberedItem(1, "להוריד את סקאזי לטיול", standingSkazi, "tasks", {
         now,
       }),
-    ).toBe("1. להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע) 🔔");
+    ).toMatch(/^1\. להוריד את סקאזי לטיול — כל יום ב־08:45 \(קבוע\) 🔔 תזכורת:/);
     expect(
       formatScheduleSuffix(
         {
@@ -4088,13 +4117,13 @@ describe("uniform standing + ping dump lines", () => {
     })!;
 
     expect(agenda).toContain("ראשון 18.10:");
-    // Occurrence-effective under the day header: chore time kept, reminder → 🔔.
-    expect(agenda).toContain("להוריד את סקאזי לטיול — 08:45 🔔");
+    // Occurrence-effective under the day header: chore time kept, timed 🔔.
+    expect(agenda).toMatch(/להוריד את סקאזי לטיול — 08:45 🔔 תזכורת:/);
     // Unlinked clock-only row still uses reminder agenda formatting.
     expect(agenda).toContain("לשלוח למיכל ברכת בוקר — 09:00 (קבוע כל יום)");
     expect(agenda).toContain("פגישה (טל, עמית) — 21:30");
     expect(agenda).toContain("ללכת לרופא — 08:00");
-    expect(agenda).toContain("🔔");
+    expect(agenda).toMatch(/🔔 תזכורת:/);
     expect(agenda).not.toMatch(/תזכורת ב־/);
     expect(agenda).not.toMatch(/\(תזכורת:/);
     // Linked clocks must not appear as their own numbered rows.
@@ -4105,9 +4134,9 @@ describe("uniform standing + ping dump lines", () => {
       viewerName: "טל",
       now,
     })!;
-    // Undated list dump: series schedule + 🔔 (no reminder times).
-    expect(list).toContain(
-      "להוריד את סקאזי לטיול — כל יום ב־08:45 (קבוע) 🔔",
+    // Undated list dump: series schedule + timed 🔔 from linked reminder.
+    expect(list).toMatch(
+      /להוריד את סקאזי לטיול — כל יום ב־08:45 \(קבוע\) 🔔 תזכורת:/,
     );
 
     const remOnly = formatShowDumpFromKind("reminders", snap, {
@@ -4145,7 +4174,7 @@ describe("uniform standing + ping dump lines", () => {
     expect(text).toContain("שני 19.10:");
     expect(text).toContain("שלישי 20.10:");
     expect(
-      text.match(/להוריד את סקאזי לטיול — 08:45 🔔/g)?.length,
+      text.match(/להוריד את סקאזי לטיול — 08:45 🔔 תזכורת:/g)?.length,
     ).toBe(3);
   });
 
@@ -4290,7 +4319,7 @@ describe("partner dump about_ids (birthday event)", () => {
     expect(text).toContain("✅ מטלות:");
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("כל שנה ב־13.10");
-    expect(text).toContain("(קבוע) 🔔");
+    expect(text).toMatch(/\(קבוע\) 🔔 תזכורת:/);
     expect(text).not.toMatch(/קבוע \+ תזכורת/);
     expect(text).not.toContain("מטלות אישיות");
     expect(text).not.toContain("מטלות משותפות עם");
@@ -4319,7 +4348,8 @@ describe("partner dump about_ids (birthday event)", () => {
       { now },
     );
     expect(line).toContain("כל שנה ב־9 במאי");
-    expect(line).toContain("(קבוע) 🔔");
+    expect(line).toMatch(/\(קבוע\) 🔔/);
+    expect(line).toMatch(/🔔 תזכורת:/);
     expect(line).not.toMatch(/תזכורת ב־/);
   });
 
@@ -4948,7 +4978,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
   });
 });
 
-describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
+describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
   const now = new Date("2026-10-15T10:00:00.000Z");
   const seriesItem = {
     item_id: "series-1",
@@ -4968,7 +4998,7 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
     },
   };
 
-  it("list: one-time reminder → 🔔 only; without reminder → no bell", () => {
+  it("list: one-time reminder → 🔔 + when; without reminder → no bell", () => {
     expect(
       formatNumberedItem(
         1,
@@ -4977,34 +5007,35 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
         "tasks",
         { now },
       ),
-    ).toBe("1. לבדוק באג 🔔");
+    ).toBe("1. לבדוק באג 🔔 תזכורת: היום ב־20:30");
     expect(
       formatNumberedItem(2, "בלי תזכורת", {}, "tasks", { now }),
     ).toBe("2. בלי תזכורת");
   });
 
-  it("list: recurring series reminder → (קבוע) 🔔 without times", () => {
+  it("list: recurring series reminder shows next effective when beside 🔔", () => {
     const line = formatNumberedItem(1, "לקחת אקמול", seriesItem, "tasks", {
       now,
     });
-    expect(line).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔");
-    expect(line).not.toMatch(/תזכורת/);
+    expect(line).toBe(
+      "1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 09:15",
+    );
   });
 
-  it("agenda: moved occurrence keeps chore time + 🔔; cancelled has no bell", () => {
+  it("agenda: moved occurrence keeps chore time + timed 🔔; cancelled has no bell", () => {
     expect(
       formatAgendaStandingLine(1, "לקחת אקמול", seriesItem, "08:45", {
         now,
         occurrenceYmd: "2026-10-16",
       }),
-    ).toBe("1. לקחת אקמול — 08:45 🔔");
+    ).toBe("1. לקחת אקמול — 08:45 🔔 תזכורת: 09:15");
     expect(
       formatOccurrenceEffectiveReminderParen(
         seriesItem,
         "2026-10-16",
         "list",
       ),
-    ).toBe("🔔");
+    ).toBe("🔔 תזכורת: 09:15");
     expect(
       formatAgendaStandingLine(2, "לקחת אקמול", seriesItem, "08:45", {
         now,
@@ -5084,10 +5115,10 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
         itemIds: new Set(["skip-cancel"]),
       }),
     ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 09:45");
-    // List mode unchanged — still a series-level 🔔.
+    // List mode also shows the next effective reminder when.
     expect(
       formatNumberedItem(1, "לקחת אקמול", item, "tasks", { now }),
-    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔");
+    ).toBe("1. לקחת אקמול — כל יום ב־08:45 (קבוע) 🔔 תזכורת: 09:45");
   });
 
   it("flat ITEM DUMP: first occurrence moved reminder uses that effective time", () => {
@@ -5178,7 +5209,7 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
     expect(cancelled).not.toMatch(/תזכורת/);
   });
 
-  it("list/agenda paths never leak reminder times on task rows", () => {
+  it("list/agenda paths show reminder when beside 🔔 from linked data", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -5206,9 +5237,8 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
       viewerName: "טל",
       now,
     })!;
-    expect(list).toContain("🔔");
-    expect(list).not.toMatch(/תזכורת:/);
-    expect(list).not.toMatch(/תזכורת ב־/);
+    expect(list).toContain("🔔 תזכורת: היום ב־20:30");
+    expect(list).toContain("🔔 תזכורת: 09:15");
     expect(list).not.toMatch(/קבוע \+ תזכורת/);
 
     const agenda = formatShowDumpFromKind("tasks", snap, {
@@ -5217,8 +5247,6 @@ describe("reminder display UX — list 🔔 vs ITEM DUMP timed", () => {
       dateFrom: "2026-10-16",
       dateTo: "2026-10-16",
     })!;
-    expect(agenda).toContain("לקחת אקמול — 08:45 🔔");
-    expect(agenda).not.toMatch(/תזכורת:/);
-    expect(agenda).not.toMatch(/תזכורת ב־/);
+    expect(agenda).toContain("לקחת אקמול — 08:45 🔔 תזכורת: 09:15");
   });
 });

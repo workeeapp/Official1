@@ -782,6 +782,9 @@ export function correctAttachmentClaimReply(input: {
  * Also corrects «מחקתי…» when no remove was requested/applied (bad ACTION shape).
  * Successful list_ops (delete_list / alter_list) skip item-level LIST_FIND_MISS
  * so a parallel failed lists.remove does not overwrite a real list delete.
+ * Successful item update (e.g. unshare) is never wiped by a parallel failed
+ * lists.remove — keep success text and append LIST_FIND_MISS only when remove
+ * was actually requested and missed.
  */
 export function correctListMutationClaimReply(input: {
   reply: string;
@@ -815,10 +818,13 @@ export function correctListMutationClaimReply(input: {
     appliedFilingUpdate,
   } = input;
   const filingApplied = Boolean(appliedFilingRemove || appliedFilingUpdate);
+  const fallback = appliedFallback.trim();
+  const spoken = (input.spoken ?? "").trim();
+  const successBase = () => fallback || spoken;
   if (appliedListOps) {
     if (requestedAdd && !appliedAdd) {
-      if (appliedRemove || appliedUpdate || appliedFallback.trim()) {
-        const parts = [appliedFallback.trim(), LIST_ADD_MISS].filter(Boolean);
+      if (appliedRemove || appliedUpdate || fallback) {
+        const parts = [fallback, LIST_ADD_MISS].filter(Boolean);
         return setResponse(input.reply, parts.join("\n"));
       }
       return setResponse(input.reply, LIST_ADD_MISS);
@@ -829,15 +835,34 @@ export function correctListMutationClaimReply(input: {
   if (filingApplied) {
     return input.reply;
   }
-  if (
-    (requestedRemove && !appliedRemove) ||
-    (requestedUpdate && !appliedUpdate)
-  ) {
-    return setResponse(input.reply, LIST_FIND_MISS);
+  const removeMiss = requestedRemove && !appliedRemove;
+  const updateMiss = requestedUpdate && !appliedUpdate;
+  const anyItemApplied =
+    appliedRemove || appliedUpdate || appliedAdd || Boolean(fallback);
+  if (removeMiss || updateMiss) {
+    if (!anyItemApplied) {
+      return setResponse(input.reply, LIST_FIND_MISS);
+    }
+    // Parallel failed remove must not wipe a successful update/unshare (or add).
+    if (removeMiss && (appliedUpdate || appliedAdd || Boolean(fallback))) {
+      const base = successBase();
+      if (base) {
+        return setResponse(input.reply, `${base}\n${LIST_FIND_MISS}`);
+      }
+      return input.reply;
+    }
+    // Update missed but another item mutate applied — keep success + find miss.
+    if (updateMiss && (appliedRemove || appliedAdd || Boolean(fallback))) {
+      const base = successBase();
+      return base
+        ? setResponse(input.reply, `${base}\n${LIST_FIND_MISS}`)
+        : input.reply;
+    }
+    return input.reply;
   }
   if (requestedAdd && !appliedAdd) {
     if (appliedRemove || appliedUpdate) {
-      const parts = [appliedFallback.trim(), LIST_ADD_MISS].filter(Boolean);
+      const parts = [fallback, LIST_ADD_MISS].filter(Boolean);
       return setResponse(input.reply, parts.join("\n"));
     }
     return setResponse(input.reply, LIST_ADD_MISS);
@@ -845,6 +870,8 @@ export function correctListMutationClaimReply(input: {
   if (
     !appliedRemove &&
     !requestedRemove &&
+    !appliedUpdate &&
+    !appliedAdd &&
     looksLikeListDeleteClaim(input.spoken ?? "")
   ) {
     return setResponse(input.reply, LIST_FIND_MISS);

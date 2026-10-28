@@ -660,6 +660,60 @@ describe("employee records", () => {
     ).toBe(reply);
   });
 
+  it("keeps successful unshare update when parallel lists.remove missed", () => {
+    const spoken = "הפסקתי לשתף את החלב עם עמית. רוצה שאראה את הרשימה?";
+    const fallback = 'עדכנתי את «חלב» ברשימת «קניות».';
+    expect(
+      correctListMutationClaimReply({
+        reply: spoken,
+        requestedRemove: true,
+        requestedUpdate: true,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: true,
+        appliedAdd: false,
+        appliedFallback: fallback,
+        setResponse: (_r, response) => response,
+        spoken,
+      }),
+    ).toBe(`${fallback}\n${LIST_FIND_MISS}`);
+  });
+
+  it("does not treat הסרתי את השיתוף as a false delete when update applied", () => {
+    const spoken = "הסרתי את השיתוף של החלב עם עמית.";
+    expect(
+      correctListMutationClaimReply({
+        reply: spoken,
+        requestedRemove: false,
+        requestedUpdate: true,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: true,
+        appliedAdd: false,
+        appliedFallback: 'עדכנתי את «חלב» ברשימת «קניות».',
+        setResponse: (_r, response) => response,
+        spoken,
+      }),
+    ).toBe(spoken);
+  });
+
+  it("still reports LIST_FIND_MISS when unshare update and remove both missed", () => {
+    expect(
+      correctListMutationClaimReply({
+        reply: "הפסקתי לשתף.",
+        requestedRemove: true,
+        requestedUpdate: true,
+        requestedAdd: false,
+        appliedRemove: false,
+        appliedUpdate: false,
+        appliedAdd: false,
+        appliedFallback: "",
+        setResponse: (_r, response) => response,
+        spoken: "הפסקתי לשתף.",
+      }),
+    ).toBe(LIST_FIND_MISS);
+  });
+
   it("detects past-tense share claims in spoken reply", () => {
     expect(looksLikeShareClaim("שיתפתי את הקניות עם טל.")).toBe(true);
     expect(looksLikeShareClaim("הוספתי חלב לקניות.")).toBe(false);

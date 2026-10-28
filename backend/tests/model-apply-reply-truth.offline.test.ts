@@ -149,6 +149,77 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
     expect(out).toBe(reply);
   });
 
+  it("unshare update applied + parallel remove miss keeps success, appends find miss", () => {
+    const spoken = "הסרתי את השיתוף של החלב עם עמית.";
+    const out = correctModelApplyTurnResponse({
+      response: spoken,
+      metadata: meta({
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "milk-1", unshare_with: ["עמית"] }],
+            targets: [],
+          },
+          {
+            action: "remove",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "milk-1" }],
+            targets: [],
+          },
+        ],
+      }),
+      mutations: [
+        {
+          action: "update",
+          itemId: "milk-1",
+          employeeId: "emp-1",
+          listType: "shopping",
+          itemKey: "חלב",
+          itemLabel: "חלב",
+          listName: "קניות",
+        },
+      ],
+      filingMutations: [],
+    });
+    expect(out).toContain("חלב");
+    expect(out).toContain(LIST_FIND_MISS);
+    expect(out).not.toBe(LIST_FIND_MISS);
+  });
+
+  it("הסרתי את השיתוף with only update applied is not wiped to LIST_FIND_MISS", () => {
+    const spoken = "הסרתי את השיתוף של החלב עם עמית.";
+    const out = correctModelApplyTurnResponse({
+      response: spoken,
+      metadata: meta({
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: "milk-1", unshare_with: ["עמית"] }],
+            targets: [],
+          },
+        ],
+      }),
+      mutations: [
+        {
+          action: "update",
+          itemId: "milk-1",
+          employeeId: "emp-1",
+          listType: "shopping",
+          itemKey: "חלב",
+          itemLabel: "חלב",
+          listName: "קניות",
+        },
+      ],
+      filingMutations: [],
+    });
+    expect(out).toBe(spoken);
+  });
+
   it("successful filing add keeps תייקתי reply", () => {
     const reply = "תייקתי את הכתובת שלך.";
     const out = correctModelApplyTurnResponse({
