@@ -117,9 +117,13 @@ vi.mock("../src/services/jobs.service.js", () => ({
   continueJobAfterNudge: (...args: unknown[]) => continueJobAfterNudge(...args),
 }));
 
-vi.mock("../src/services/routes.js", () => ({
-  fetchBusEtaWatch: (...args: unknown[]) => fetchBusEtaWatch(...args),
-}));
+vi.mock("../src/services/routes.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/routes.js")>();
+  return {
+    ...actual,
+    fetchBusEtaWatch: (...args: unknown[]) => fetchBusEtaWatch(...args),
+  };
+});
 
 vi.mock("../src/services/flights.js", () => ({
   fetchFlightEtaWatch: (...args: unknown[]) => fetchFlightEtaWatch(...args),
@@ -321,6 +325,204 @@ describe("fireDueReminders compose honesty", () => {
       },
     });
   });
+
+describe("bus_eta poll failure honesty (fireDueReminders path)", () => {
+  function busEtaReminder(overrides: Record<string, unknown> = {}) {
+    return baseReminder({
+      id: "clock-bus-eta-1",
+      messageText: "התראה על אוטובוס — אל תשלח את זה",
+      itemLabel: "יציאה לקו 5",
+      composeAtFire: true,
+      composeSource: "",
+      composeCondition: {
+        type: "bus_eta",
+        origin: "תחנה",
+        destination: "יעד",
+        line: "5",
+        minutes_before: 10,
+      },
+      watchOnce: false,
+      recurrence: {
+        freq: "interval",
+        interval: 2,
+        unit: "minutes",
+      },
+      repeat: "interval",
+      lastReportSha: "",
+      ...overrides,
+    });
+  }
+
+  it("successful ETA within threshold: sends Google-estimate body (not SIRI)", async () => {
+    reminderFindMany.mockResolvedValue([busEtaReminder()]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    composeScheduledOutbound.mockResolvedValue(null);
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: true,
+      minutes: 3,
+      fingerprint: "5|08:10|3|iso",
+      leaveByText: "08:10",
+    });
+    chatConversationFindUnique.mockResolvedValue({
+      id: "conv-bus-1",
+      openaiConversationId: "oai-bus-1",
+    });
+    chatMessageCreate.mockResolvedValue({
+      id: "msg-1",
+      speaker: "לוסי",
+      text: "x",
+      createdAt: new Date("2026-10-28T08:01:00.000Z"),
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:01:00.000Z"));
+
+    expect(fetchBusEtaWatch).toHaveBeenCalled();
+    expect(chatMessageCreate).toHaveBeenCalled();
+    const createdText = String(
+      chatMessageCreate.mock.calls[0]?.[0]?.data?.text ?? "",
+    );
+    expect(createdText).toMatch(/משוער בעוד כ־3 דקות/);
+    expect(createdText).toMatch(/הערכת Google/);
+    expect(createdText).not.toMatch(/מגיע בעוד/);
+    expect(createdText).not.toContain("אל תשלח");
+  });
+
+  it("transient poll failure: quiet-skip, no user message, streak stamped", async () => {
+    reminderFindMany.mockResolvedValue([
+      busEtaReminder({ lastReportSha: "" }),
+    ]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: false,
+      minutes: null,
+      fingerprint: "",
+      leaveByText: "",
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:01:00.000Z"));
+
+    expect(chatMessageCreate).not.toHaveBeenCalled();
+    expect(sendWhatsAppButtons).not.toHaveBeenCalled();
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-bus-eta-1" },
+      data: { lastReportSha: "bus_eta:poll_fail:1" },
+    });
+  });
+
+  it("transient then recovery: successful poll after fail streak clears path to ETA body", async () => {
+    reminderFindMany.mockResolvedValue([
+      busEtaReminder({ lastReportSha: "bus_eta:poll_fail:2" }),
+    ]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    composeScheduledOutbound.mockResolvedValue(null);
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: true,
+      minutes: 4,
+      fingerprint: "5|08:12|4|iso",
+      leaveByText: "08:12",
+    });
+    chatConversationFindUnique.mockResolvedValue({
+      id: "conv-bus-1",
+      openaiConversationId: "oai-bus-1",
+    });
+    chatMessageCreate.mockResolvedValue({
+      id: "msg-2",
+      speaker: "לוסי",
+      text: "x",
+      createdAt: new Date("2026-10-28T08:05:00.000Z"),
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:05:00.000Z"));
+
+    const createdText = String(
+      chatMessageCreate.mock.calls[0]?.[0]?.data?.text ?? "",
+    );
+    expect(createdText).toMatch(/משוער בעוד כ־4 דקות/);
+    expect(createdText).not.toMatch(/לא הצלחתי לעדכן/);
+  });
+
+  it("persistent poll failures: one honesty notify, no invented ETA", async () => {
+    reminderFindMany.mockResolvedValue([
+      busEtaReminder({ lastReportSha: "bus_eta:poll_fail:2" }),
+    ]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    composeScheduledOutbound.mockResolvedValue("should not win");
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: false,
+      minutes: null,
+      fingerprint: "",
+      leaveByText: "",
+    });
+    chatConversationFindUnique.mockResolvedValue({
+      id: "conv-bus-1",
+      openaiConversationId: "oai-bus-1",
+    });
+    chatMessageCreate.mockResolvedValue({
+      id: "msg-3",
+      speaker: "לוסי",
+      text: "x",
+      createdAt: new Date("2026-10-28T08:09:00.000Z"),
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:09:00.000Z"));
+
+    expect(chatMessageCreate).toHaveBeenCalled();
+    const createdText = String(
+      chatMessageCreate.mock.calls[0]?.[0]?.data?.text ?? "",
+    );
+    expect(createdText).toMatch(/לא הצלחתי לעדכן/);
+    expect(createdText).toMatch(/גוגל|Google/i);
+    expect(createdText).not.toMatch(/משוער בעוד כ־\d+/);
+    expect(createdText).not.toContain("should not win");
+    expect(createdText).not.toContain("אל תשלח");
+    const shaWrites = reminderUpdate.mock.calls
+      .map((call: [{ data?: { lastReportSha?: string } }]) => call[0]?.data?.lastReportSha)
+      .filter(Boolean);
+    expect(shaWrites.some((s: string) => String(s).startsWith("bus_eta:poll_fail_notified"))).toBe(
+      true,
+    );
+  });
+
+  it("after honesty notify, further poll failures stay quiet", async () => {
+    reminderFindMany.mockResolvedValue([
+      busEtaReminder({
+        lastReportSha: "bus_eta:poll_fail_notified:2026-10-28T08:09:00.000Z",
+      }),
+    ]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: false,
+      minutes: null,
+      fingerprint: "",
+      leaveByText: "",
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:11:00.000Z"));
+
+    expect(chatMessageCreate).not.toHaveBeenCalled();
+  });
+
+  it("usable poll with ETA above threshold: quiet-skip (not a poll failure)", async () => {
+    reminderFindMany.mockResolvedValue([busEtaReminder()]);
+    loadComposeFacts.mockResolvedValue({ kind: "", facts: "", eval: {} });
+    fetchBusEtaWatch.mockResolvedValue({
+      ok: true,
+      minutes: 25,
+      fingerprint: "5|08:40|25|iso",
+      leaveByText: "08:40",
+    });
+
+    await fireDueReminders(new Date("2026-10-28T08:01:00.000Z"));
+
+    expect(chatMessageCreate).not.toHaveBeenCalled();
+    const shaWrites = reminderUpdate.mock.calls
+      .map((call: [{ data?: { lastReportSha?: string } }]) => call[0]?.data?.lastReportSha)
+      .filter(Boolean);
+    expect(shaWrites.some((s: string) => String(s).startsWith("bus_eta:poll_fail"))).toBe(
+      false,
+    );
+  });
+});
 });
 
 describe("bus/flight condition-default must not regress to the brief", () => {
@@ -334,8 +536,9 @@ describe("bus/flight condition-default must not regress to the brief", () => {
     });
     expect(resolved.outcome).toBe("fail");
 
+    // Mirror reminder-fire bus_eta honesty (Google estimate, not SIRI live).
     const conditionDefaultBody =
-      "קו 5 מגיע בעוד כ־3 דקות מ«תחנה» לכיוון «יעד» — זמן לצאת.";
+      "קו 5 משוער בעוד כ־3 דקות מ«תחנה» לכיוון «יעד» (הערכת Google, לא תחזית SIRI חיה) — זמן לצאת.";
     const preferConditionDefault =
       Boolean(conditionDefaultBody) &&
       (!resolved.body.trim() ||
@@ -351,5 +554,7 @@ describe("bus/flight condition-default must not regress to the brief", () => {
     expect(preferConditionDefault).toBe(true);
     expect(outboundBody).toBe(conditionDefaultBody);
     expect(outboundBody).not.toContain("אל תשלח");
+    expect(outboundBody).toContain("הערכת Google");
+    expect(outboundBody).not.toMatch(/מגיע בעוד/);
   });
 });

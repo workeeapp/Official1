@@ -24,11 +24,13 @@ import {
   correctDurableSaveClaimReply,
   correctListMutationClaimReply,
   correctShareClaimReply,
+  correctUnshareClaimReply,
   formatAppliedMutationFallback,
   formatEmployeeContext,
   getEmployeeRecordSnapshot,
   loadFilingOwners,
   loadListItemOwners,
+  summarizeUnshareApply,
   type EmployeeRecordSnapshot,
   type FilingMutation,
   type ListItemMutation,
@@ -260,6 +262,8 @@ export function correctModelApplyTurnResponse(input: {
   shareMisses?: ShareApplyMiss[];
   attachmentOutcome?: AttachmentApplyOutcome;
   listOpResults?: ListOpResult[];
+  /** Post-apply live snapshot — used to detect incomplete shopping/tasks unshare. */
+  snapshotAfter?: EmployeeRecordSnapshot | null;
 }): string {
   const mutations = input.mutations ?? [];
   const filingMutations = input.filingMutations ?? [];
@@ -332,6 +336,16 @@ export function correctModelApplyTurnResponse(input: {
     spoken: spoken(),
     mutations,
     misses: shareMisses,
+    setResponse,
+  });
+  working = correctUnshareClaimReply({
+    reply: working,
+    spoken: spoken(),
+    summary: summarizeUnshareApply({
+      metadata,
+      mutations,
+      snapshotAfter: input.snapshotAfter ?? null,
+    }),
     setResponse,
   });
   working = correctAttachmentClaimReply({
@@ -604,16 +618,17 @@ export async function runModelApplyCase(
           listOpResults: applied.listOpResults,
         };
       }
+      // Snapshot after apply first — unshare remainder uses live shared_with.
+      const enriched = await enrichSnapshot(account.employeeId);
+      snapshot = enriched.snapshot;
+      facts = enriched.facts;
       // Align spoken reply with apply evidence even when apply was skipped.
       const response = correctModelApplyTurnResponse({
         response: rawResponse,
         metadata,
         ...applyResult,
+        snapshotAfter: snapshot,
       });
-
-      const enriched = await enrichSnapshot(account.employeeId);
-      snapshot = enriched.snapshot;
-      facts = enriched.facts;
       const contactNames = (
         await listContactsForEmployee(account.employeeId)
       ).map((row) => row.name);

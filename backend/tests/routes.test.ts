@@ -29,15 +29,27 @@ import {
   parseRoutesAspects,
   resolveRoutesReply,
   toRoutesRfc3339,
+  buildLastRoutesBoard,
+  buildRoutesChoiceButtons,
+  mapRoutesOpenCommand,
+  formatOpenItineraryFromBoard,
+  formatRecommendedItineraryHebrew,
+  formatAllItinerariesCompareHebrew,
+  parseLastRoutesBoard,
+  ROUTES_NO_SAVED_BOARD_HE,
+  ROUTES_OPEN_INDEX_MISS_HE,
   type RouteItineraryOption,
   type RoutesFacts,
 } from "../src/services/routes.js";
+import { parseRoutesAction, parseRoutesOpenItinerary } from "@workee/shared";
 
 /** Compact multi cue contract (wording may include optional diff bits). */
 function expectMultiAltsCue(text: string, extraCount: number): void {
   expect(text).toContain(`עוד ${extraCount} אפשרויות`);
-  expect(text).toContain("לפרטים בקשי לפי קו או שעת יציאה");
-  expect(text).toContain("בחיפוש חדש מתקבלות אפשרויות מעודכנות");
+  expect(text).toContain("המסלול המומלץ");
+  expect(text).toContain("כל המסלולים");
+  expect(text).toContain("מסלול 2");
+  expect(text).not.toContain("בחיפוש חדש מתקבלות אפשרויות מעודכנות");
   expect(text).not.toContain("לא אזהה אוטומטית");
   expect(text).not.toContain("יציאה/משך/הליכה שונים");
 }
@@ -351,7 +363,8 @@ describe("formatRoutesHebrew", () => {
     });
     expect(text).toContain("מסלול בתחבורה ציבורית");
     expect(text).not.toContain("אפשרויות");
-    expect(text).not.toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
+    // Single path is still a Google estimate — same honesty as multi.
+    expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
     expect(text).toContain("קו 51");
   });
 
@@ -839,7 +852,7 @@ describe("formatRoutesHebrew", () => {
     });
     const cue = routesMultiAltsCueHe(1, [twin, { ...twin }]);
     expect(cue).toBe(
-      "עוד 1 אפשרויות — לפרטים בקשי לפי קו או שעת יציאה. בחיפוש חדש מתקבלות אפשרויות מעודכנות.",
+      "עוד 1 אפשרויות — לפרטים: «המסלול המומלץ», «כל המסלולים», או «מסלול 2».",
     );
     expect(cue).not.toContain("יציאה/");
     expect(cue).not.toContain("לא אזהה אוטומטית");
@@ -1471,10 +1484,13 @@ describe("resolveRoutesReply", () => {
     expect(text).not.toContain("קו 51");
     expect(text).toContain("עלייה משוערת");
     expectMultiAltsCue(text, 1);
-    // No itinerary-selection WhatsApp buttons on multi replies.
-    expect(result).not.toHaveProperty("buttons");
+    expect(result.choiceButtons?.map((b) => b.command)).toEqual([
+      "המסלול המומלץ",
+      "כל המסלולים (2)",
+    ]);
+    expect(result.board?.itineraries.length).toBeGreaterThanOrEqual(2);
     expect(Object.keys(result).sort()).toEqual(
-      ["navigateAddress", "text"].sort(),
+      ["board", "choiceButtons", "navigateAddress", "text"].sort(),
     );
     const body = computeRoutesBody(fetchImpl);
     expect(body.computeAlternativeRoutes).toBe(true);
@@ -2580,7 +2596,10 @@ describe("origin→destination trip boarding workflow", () => {
       },
     });
     const extra = await formatOfficialBoardingDeparturesHe(boardFacts());
-    expect(extra).toBe("");
+    // Honesty: do not silently omit — say MOT match failed; journey stays Google-only.
+    expect(extra).toMatch(/לא הצלחתי לשייך יציאות רשמיות/);
+    expect(extra).toMatch(/הערכת Google בלבד/);
+    expect(extra).not.toMatch(/מתוזמנות רשמיות/);
   });
 
   it("trip reply still returns Google estimates when GTFS enrichment is empty", async () => {
@@ -3094,5 +3113,334 @@ describe("saved location origin/destination in resolveRoutesReply", () => {
     expect(src).toMatch(
       /getEmployeeRecordSnapshot\(input\.employeeId\)[\s\S]*resolveRoutesReply/,
     );
+  });
+});
+
+describe("Transit UX board open / persist helpers", () => {
+  const stepA = {
+    travelMode: "TRANSIT",
+    instruction: "Board bus 51",
+    line: "51",
+    headsign: "ת״א",
+    fromStop: "זאב ברנדה",
+    toStop: "עזריאלי",
+    departureTime: "08:10",
+    departureIso: "2026-10-28T05:10:00Z",
+    arrivalTime: "08:40",
+    durationText: "30 דקות",
+    durationSeconds: 1800,
+    headwaySeconds: null as number | null,
+  };
+  const stepB = {
+    ...stepA,
+    line: "66",
+    fromStop: "שלום דורני",
+    toStop: "דיזנגוף",
+    departureTime: "08:20",
+    arrivalTime: "08:55",
+  };
+  const itin1: RouteItineraryOption = {
+    durationText: "45 דקות",
+    durationSeconds: 2700,
+    distanceMeters: 12000,
+    fareText: "₪6",
+    leaveByText: "08:10",
+    arriveByText: "08:55",
+    leaveIsBoarding: true,
+    steps: [stepA],
+  };
+  const itin2: RouteItineraryOption = {
+    durationText: "55 דקות",
+    durationSeconds: 3300,
+    distanceMeters: 14000,
+    fareText: "₪6",
+    leaveByText: "08:20",
+    arriveByText: "09:15",
+    leaveIsBoarding: true,
+    steps: [stepB],
+  };
+
+  it("parseRoutesOpenItinerary is strict (no coerce to recommended)", () => {
+    expect(parseRoutesOpenItinerary(null)).toBeNull();
+    expect(parseRoutesOpenItinerary(undefined)).toBeNull();
+    expect(parseRoutesOpenItinerary("recommended")).toBe("recommended");
+    expect(parseRoutesOpenItinerary("all")).toBe("all");
+    expect(parseRoutesOpenItinerary(2)).toBe(2);
+    expect(parseRoutesOpenItinerary(true)).toBeNull();
+    expect(parseRoutesOpenItinerary(false)).toBeNull();
+    expect(parseRoutesOpenItinerary("2")).toBeNull();
+    expect(parseRoutesOpenItinerary(2.5)).toBeNull();
+    expect(parseRoutesOpenItinerary(0)).toBeNull();
+    expect(parseRoutesOpenItinerary(4)).toBeNull();
+  });
+
+  it("parseRoutesAction open-only and keeps open with full O/D", () => {
+    const openOnly = parseRoutesAction({
+      routes: { open_itinerary: "recommended" },
+    });
+    expect(openOnly).toMatchObject({
+      origin: "",
+      destination: "",
+      openItinerary: "recommended",
+    });
+    const withOd = parseRoutesAction({
+      routes: {
+        origin: "A",
+        destination: "B",
+        open_itinerary: "all",
+        aspects: ["summary"],
+      },
+    });
+    expect(withOd?.origin).toBe("A");
+    expect(withOd?.destination).toBe("B");
+    expect(withOd?.openItinerary).toBe("all");
+    expect(
+      parseRoutesAction({ routes: { open_itinerary: "2" } }),
+    ).toBeNull();
+  });
+
+  it("mapRoutesOpenCommand is exact; rejects mixed trip-change intent", () => {
+    expect(mapRoutesOpenCommand("המסלול המומלץ")).toBe("recommended");
+    expect(mapRoutesOpenCommand("כל המסלולים")).toBe("all");
+    expect(mapRoutesOpenCommand("כל המסלולים (3)")).toBe("all");
+    expect(mapRoutesOpenCommand("מסלול 2")).toBe(2);
+    expect(mapRoutesOpenCommand("המסלול המומלץ לדיזנגוף")).toBeNull();
+    expect(mapRoutesOpenCommand("מסלול 2 ואז לבית אחר")).toBeNull();
+    expect(mapRoutesOpenCommand("מסלול 9")).toBeNull();
+    // Exact open paraphrases (closed choice) — still reject mixed intent.
+    expect(mapRoutesOpenCommand("תראה את המסלול המומלץ")).toBe("recommended");
+    expect(mapRoutesOpenCommand("הציגי את ההמלצה")).toBe("recommended");
+    expect(mapRoutesOpenCommand("תראי את כל המסלולים")).toBe("all");
+    expect(mapRoutesOpenCommand("הראה את כל המסלולים")).toBe("all");
+    expect(mapRoutesOpenCommand("ההמלצה לדיזנגוף")).toBeNull();
+    expect(mapRoutesOpenCommand("תראי את ההמלצה ואז לבית")).toBeNull();
+  });
+
+  it("buildRoutesChoiceButtons only when ≥2 itineraries", () => {
+    expect(buildRoutesChoiceButtons(1)).toEqual([]);
+    expect(buildRoutesChoiceButtons(3)).toEqual([
+      { label: "המסלול המומלץ", command: "המסלול המומלץ" },
+      { label: "כל המסלולים (3)", command: "כל המסלולים (3)" },
+    ]);
+  });
+  it("mapRoutesOpenCommand accepts button label כל המסלולים (N)", () => {
+    expect(mapRoutesOpenCommand("כל המסלולים (3)")).toBe("all");
+  });
+
+  it("format recommended / all / index from board without inventing", () => {
+    const board = buildLastRoutesBoard({
+      origin: "ברנדה",
+      destination: "דיזנגוף",
+      mode: "transit",
+      itineraries: [itin1, itin2],
+    })!;
+    const rec = formatOpenItineraryFromBoard(board, "recommended");
+    expect(rec.text).toContain("קו 51");
+    expect(rec.text).toContain("זאב ברנדה");
+    expect(rec.text).not.toContain("קו 66");
+
+    const all = formatOpenItineraryFromBoard(board, "all");
+    expect(all.text).toContain("1.");
+    expect(all.text).toContain("2.");
+    expect(all.text).toContain("קו 51");
+    expect(all.text).toContain("קו 66");
+
+    const second = formatOpenItineraryFromBoard(board, 2);
+    expect(second.text).toContain("קו 66");
+    expect(second.text).toContain("שלום דורני");
+    expect(second.text).not.toContain("זאב ברנדה");
+
+    const miss = formatOpenItineraryFromBoard(board, 3);
+    expect(miss.text).toContain(ROUTES_OPEN_INDEX_MISS_HE);
+    expect(miss.navigateAddress).toBe("");
+  });
+
+  it("parseLastRoutesBoard stays compact and round-trips mapped fields", () => {
+    const board = buildLastRoutesBoard({
+      origin: "A",
+      destination: "B",
+      mode: "transit",
+      itineraries: [itin1, itin2, itin1, itin2],
+    })!;
+    expect(board.itineraries).toHaveLength(ROUTES_ITINERARY_DISPLAY_CAP);
+    const parsed = parseLastRoutesBoard(board);
+    expect(parsed?.itineraries[0]?.steps[0]?.line).toBe("51");
+    expect(parseLastRoutesBoard({ origin: "x", itineraries: [] })).toBeNull();
+    expect(parseLastRoutesBoard(null)).toBeNull();
+  });
+
+  it("newest-first board scan skips intervening assistant raw without a board", () => {
+    const board = buildLastRoutesBoard({
+      origin: "ברנדה",
+      destination: "דיזנגוף",
+      mode: "transit",
+      itineraries: [itin1, itin2],
+    })!;
+    // Simulates loadLastRoutesBoardForConversation: newest first; skip empty.
+    const recentRaws = [
+      { workeeOpenAiRequest: {}, workeeOpenAiResponse: {} }, // intervening tip/ack
+      {
+        workeeOpenAiRequest: {},
+        workeeOpenAiResponse: {},
+        lastRoutesBoard: board,
+      },
+    ];
+    let found = null as ReturnType<typeof parseLastRoutesBoard>;
+    for (const raw of recentRaws) {
+      const candidate = parseLastRoutesBoard(
+        (raw as { lastRoutesBoard?: unknown }).lastRoutesBoard,
+      );
+      if (candidate) {
+        found = candidate;
+        break;
+      }
+    }
+    expect(found?.origin).toBe("ברנדה");
+    expect(found?.itineraries[1]?.steps[0]?.line).toBe("66");
+    const opened = formatOpenItineraryFromBoard(found!, 2);
+    expect(opened.text).toContain("קו 66");
+  });
+
+  it("multi resolveRoutesReply returns board + choice buttons; failed search does not", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("computeRoutes")) {
+        return {
+          ok: true,
+          json: async () => ({
+            routes: [
+              {
+                duration: "2700s",
+                localizedValues: { duration: { text: "45 mins" } },
+                distanceMeters: 12000,
+                legs: [
+                  {
+                    steps: [
+                      {
+                        travelMode: "TRANSIT",
+                        staticDuration: "1800s",
+                        transitDetails: {
+                          stopDetails: {
+                            departureStop: { name: "זאב ברנדה" },
+                            arrivalStop: { name: "עזריאלי" },
+                            departureTime: "2026-10-28T05:10:00Z",
+                            arrivalTime: "2026-10-28T05:40:00Z",
+                          },
+                          transitLine: {
+                            nameShort: "51",
+                            vehicle: { type: "BUS" },
+                          },
+                          headsign: "ת״א",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                duration: "3300s",
+                localizedValues: { duration: { text: "55 mins" } },
+                distanceMeters: 14000,
+                legs: [
+                  {
+                    steps: [
+                      {
+                        travelMode: "TRANSIT",
+                        staticDuration: "2100s",
+                        transitDetails: {
+                          stopDetails: {
+                            departureStop: { name: "שלום דורני" },
+                            arrivalStop: { name: "דיזנגוף" },
+                            departureTime: "2026-10-28T05:20:00Z",
+                            arrivalTime: "2026-10-28T05:55:00Z",
+                          },
+                          transitLine: {
+                            nameShort: "66",
+                            vehicle: { type: "BUS" },
+                          },
+                          headsign: "צפון",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        };
+      }
+      // Geocode soft-fail → keep address strings
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    const ok = await resolveRoutesReply({
+      origin: "ברנדה פתח תקווה",
+      destination: "דיזנגוף סנטר",
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(ok.text).toContain("מצאתי 2 אפשרויות");
+    expectMultiAltsCue(ok.text, 1);
+    expect(ok.choiceButtons?.map((b) => b.command)).toEqual([
+      "המסלול המומלץ",
+      "כל המסלולים (2)",
+    ]);
+    expect(ok.board?.itineraries).toHaveLength(2);
+    expect(ok.board?.itineraries[0]?.steps[0]?.line).toBe("51");
+
+    const fail = await resolveRoutesReply({
+      origin: "A",
+      destination: "B",
+      aspects: ["summary"],
+      apiKey: null,
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    });
+    expect(fail.board).toBeUndefined();
+    expect(fail.choiceButtons).toBeUndefined();
+  });
+
+  it("chat.service wires open_itinerary path and board pack key", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../src/services/chat.service.ts"),
+      "utf8",
+    );
+    expect(src).toContain("lastRoutesBoard");
+    expect(src).toContain("mapRoutesOpenCommand");
+    expect(src).toContain("formatOpenItineraryFromBoard");
+    expect(src).toContain("loadLastRoutesBoardForConversation");
+    expect(src).toContain("routesOpenOnly");
+    expect(src).toContain("routesOpenUnauthorized");
+    expect(src).toContain("ROUTES_NO_SAVED_BOARD_HE");
+    expect(src).toContain("ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE");
+  });
+
+  it("bus_eta fire default body discloses Google estimate (not SIRI live)", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../src/services/reminder-fire.ts"),
+      "utf8",
+    );
+    expect(src).toMatch(/busEtaDefaultBody[\s\S]*משוער בעוד/);
+    expect(src).toMatch(/הערכת Google, לא תחזית SIRI חיה/);
+    expect(src).not.toMatch(
+      /busEtaDefaultBody\s*=\s*`קו \$\{condition\.line\} מגיע בעוד/,
+    );
+  });
+
+  it("formatters expose sparse-steps limitation without fabricating", () => {
+    const emptySteps: RouteItineraryOption = {
+      durationText: "40 דקות",
+      durationSeconds: 2400,
+      distanceMeters: null,
+      fareText: "",
+      leaveByText: "09:00",
+      arriveByText: "09:40",
+      steps: [],
+    };
+    const text = formatRecommendedItineraryHebrew(emptySteps, {
+      origin: "A",
+      destination: "B",
+      mode: "transit",
+    });
+    expect(text).toContain("אין מספיק פרטי שלבים");
+    expect(formatAllItinerariesCompareHebrew([])).toBe(ROUTES_NO_SAVED_BOARD_HE);
   });
 });

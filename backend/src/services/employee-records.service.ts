@@ -547,14 +547,200 @@ export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.
 export const EMPTY_REPLY_RETRY =
   "לא הצלחתי לבצע את זה — נסי שוב.";
 
+/**
+ * Model past-tense unshare claim in the spoken reply (not user utterance).
+ * Checked before delete-claim so «הסרתי את השיתוף…» is not treated as a delete.
+ */
+export function looksLikeUnshareClaim(spoken: string): boolean {
+  const text = spoken.trim();
+  if (!text) {
+    return false;
+  }
+  return /(?:הסרתי|הפסקתי|ביטלתי|הורדתי)\s+את\s+השיתוף|הפסקתי\s+לשתף/.test(
+    text,
+  );
+}
+
 /** Model past-tense delete claim in the spoken reply (not user utterance). */
 export function looksLikeListDeleteClaim(spoken: string): boolean {
+  if (looksLikeUnshareClaim(spoken)) {
+    return false;
+  }
   return /מחקתי|הסרתי/.test(spoken);
 }
 
 /** Model past-tense share claim in the spoken reply (not user utterance). */
 export function looksLikeShareClaim(spoken: string): boolean {
   return /שיתפתי|שיתפנו|שיתפתי את|שיתפתי עם/.test(spoken);
+}
+
+export type UnshareApplySummary = {
+  /** Shopping/tasks item updates that requested unshare_with and applied. */
+  appliedUnshareCount: number;
+  /** Live shopping/tasks rows that still list any of this turn's unshare partners. */
+  remainingSharedCount: number;
+  partnerLabels: string[];
+};
+
+function readItemUnshareNames(item: Record<string, unknown>): string[] {
+  const raw = item.unshare_with ?? item.unshareWith;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((row) => (typeof row === "string" ? row.trim() : ""))
+    .filter(Boolean);
+}
+
+/**
+ * Count live shopping/tasks rows whose shared_with still includes any partner
+ * named in this turn's unshare_with (post-apply snapshot).
+ */
+export function countRemainingSharedWithPartners(
+  snapshot: EmployeeRecordSnapshot,
+  listTypes: ReadonlySet<string>,
+  partnerLabels: readonly string[],
+): number {
+  const needles = new Set(
+    partnerLabels.map((name) => name.trim()).filter(Boolean),
+  );
+  if (needles.size === 0 || listTypes.size === 0) {
+    return 0;
+  }
+  let count = 0;
+  for (const list of snapshot.lists) {
+    if (!listTypes.has(list.list_type)) {
+      continue;
+    }
+    for (const item of list.items) {
+      const shared = Array.isArray(item.shared_with) ? item.shared_with : [];
+      if (
+        shared.some(
+          (name) =>
+            typeof name === "string" && needles.has(name.trim()),
+        )
+      ) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * From the model ACTION (pre-planner metadata) + applied mutations + post-apply
+ * snapshot: how many shopping/tasks unshares applied vs how many matching
+ * shares remain. Empty partners → no unshare intent this turn.
+ */
+export function summarizeUnshareApply(input: {
+  metadata: LlmMetadata;
+  mutations: ListItemMutation[];
+  snapshotAfter?: EmployeeRecordSnapshot | null;
+}): UnshareApplySummary {
+  const partnerLabels = new Set<string>();
+  const listTypes = new Set<string>();
+  const requestedIds = new Set<string>();
+  for (const list of input.metadata.lists ?? []) {
+    if (list.action !== "update") {
+      continue;
+    }
+    if (list.listType !== "shopping" && list.listType !== "tasks") {
+      continue;
+    }
+    for (const raw of list.items ?? []) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        continue;
+      }
+      const item = raw as Record<string, unknown>;
+      const names = readItemUnshareNames(item);
+      if (names.length === 0) {
+        continue;
+      }
+      listTypes.add(list.listType);
+      for (const name of names) {
+        partnerLabels.add(name);
+      }
+      const id = readItemId(item);
+      if (id) {
+        requestedIds.add(id);
+      }
+    }
+  }
+  const partners = [...partnerLabels];
+  if (partners.length === 0) {
+    return {
+      appliedUnshareCount: 0,
+      remainingSharedCount: 0,
+      partnerLabels: [],
+    };
+  }
+  const appliedUnshareCount = input.mutations.filter(
+    (row) =>
+      row.action === "update" &&
+      !row.listShell &&
+      (row.listType === "shopping" || row.listType === "tasks") &&
+      requestedIds.has(row.itemId),
+  ).length;
+  const remainingSharedCount = input.snapshotAfter
+    ? countRemainingSharedWithPartners(
+        input.snapshotAfter,
+        listTypes,
+        partners,
+      )
+    : 0;
+  return {
+    appliedUnshareCount,
+    remainingSharedCount,
+    partnerLabels: partners,
+  };
+}
+
+/** Hebrew when an unshare claim diverges from post-apply live shares. */
+export function formatUnshareOutcomeReply(
+  summary: UnshareApplySummary,
+): string {
+  const { appliedUnshareCount, remainingSharedCount, partnerLabels } =
+    summary;
+  if (appliedUnshareCount <= 0 && remainingSharedCount <= 0) {
+    return "";
+  }
+  const who = partnerLabels.filter(Boolean).join(" ו");
+  if (appliedUnshareCount > 0 && remainingSharedCount > 0) {
+    return who
+      ? `הסרתי את השיתוף מ-${appliedUnshareCount} פריטים; ${remainingSharedCount} עדיין משותפים עם ${who}.`
+      : `הסרתי את השיתוף מ-${appliedUnshareCount} פריטים; ${remainingSharedCount} עדיין משותפים.`;
+  }
+  if (appliedUnshareCount === 0 && remainingSharedCount > 0) {
+    return "לא הצלחתי להסיר את השיתוף.";
+  }
+  return "";
+}
+
+/**
+ * When the model claimed a completed unshare, align the spoken reply with
+ * post-apply evidence: remaining shopping/tasks shares with the same partners
+ * mean the claim was incomplete (model omitted item_ids or some updates missed).
+ */
+export function correctUnshareClaimReply(input: {
+  reply: string;
+  spoken: string;
+  summary: UnshareApplySummary;
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  if (!looksLikeUnshareClaim(input.spoken)) {
+    return input.reply;
+  }
+  if (
+    input.summary.partnerLabels.length === 0 &&
+    input.summary.appliedUnshareCount === 0
+  ) {
+    return input.reply;
+  }
+  const corrected = formatUnshareOutcomeReply(input.summary);
+  if (corrected) {
+    return input.setResponse(input.reply, corrected);
+  }
+  return input.reply;
 }
 
 export type ShareApplySummary = {

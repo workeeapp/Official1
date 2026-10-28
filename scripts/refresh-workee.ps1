@@ -24,7 +24,15 @@ Set-Location $root
 
 # Drop inherited DB URLs so prisma/npm never prefer an agent/eval shell's
 # workee_test:5436 over this checkout's .env (live must stay on workee:5435).
-foreach ($name in @("DATABASE_URL", "DIRECT_URL", "WORKEE_DISABLE_WHATSAPP_OUTBOUND")) {
+# Also drop LIVE_FULL / Studio isolation flags so refresh never starts the live
+# API with WhatsApp outbound or reminder fire disabled / eval .env locked.
+foreach ($name in @(
+  "DATABASE_URL",
+  "DIRECT_URL",
+  "WORKEE_DISABLE_WHATSAPP_OUTBOUND",
+  "WORKEE_DISABLE_REMINDER_FIRE",
+  "WORKEE_EVAL_ENV_LOCKED"
+)) {
   if (Test-Path "Env:$name") {
     Remove-Item "Env:$name"
   }

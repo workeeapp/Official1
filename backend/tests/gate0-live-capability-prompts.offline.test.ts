@@ -57,19 +57,25 @@ describe("Gate 0 live capability prompt markers", () => {
     expect(chat).toMatch(
       /ROUTES:[\s\S]*?FORBIDDEN inventing SX\/alerts/,
     );
-    // Follow-up option N must recalculate — no itinerary store claim.
+    // Follow-up uses open_itinerary on the saved board (not recalculate / no-store).
     expect(chat).toMatch(
-      /ROUTES:[\s\S]*?recalculate[\s\S]*?no itinerary store/,
+      /ROUTES:[\s\S]*?open_itinerary[\s\S]*?empty origin\+destination/,
     );
-    // Capability #7: missed-bus → fresh routes now/ASAP, not sticky prior option.
+    expect(config).toMatch(/open_itinerary/);
+    expect(action).toMatch(/"open_itinerary"/);
+    // Capability #7: missed-bus → recalculate:true, now/ASAP, not sticky open_itinerary.
     expect(chat).toMatch(
-      /ROUTES:[\s\S]*?Missed bus\/departure[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+      /ROUTES:[\s\S]*?Missed bus\/departure[\s\S]*?recalculate:true[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
     );
     expect(config).toMatch(
-      /Missed bus[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+      /Missed bus[\s\S]*?recalculate:true[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
     );
     expect(action).toMatch(
-      /Missed bus\/departure[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+      /Missed bus\/departure[\s\S]*?recalculate:true[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+    );
+    expect(action).toMatch(/"recalculate"/);
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?FORBIDDEN open_itinerary for missed-bus/,
     );
     // Seed/schema prompts (Hebrew) must also refuse disruption checks.
     expect(config).toMatch(
@@ -78,6 +84,10 @@ describe("Gate 0 live capability prompt markers", () => {
     expect(config).toMatch(/FORBIDDEN inventing alerts/);
     expect(action).toMatch(
       /Network-wide disruptions[\s\S]*?routes=null[\s\S]*?disclose U/,
+    );
+    expect(action).toMatch(/"disclose_network_disruption"/);
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?disclose_network_disruption:true[\s\S]*?do not block the route/,
     );
     expect(chat).toMatch(
       /BUS WATCH:[\s\S]*?NOT continuous realtime monitoring/,

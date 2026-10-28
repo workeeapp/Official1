@@ -1605,6 +1605,158 @@ describe("employee records", () => {
       expect(result.mutations[0]?.collabApply).toBeUndefined();
     });
 
+    it("unshare fan-out: every listed item drops Michal; Tal co-shares preserved", async () => {
+      const byId = new Map([
+        [milkId, row(milkId, "חלב", [employeeId, michalId])],
+        [breadId, row(breadId, "לחם", [employeeId, michalId, talId])],
+        [eggsId, row(eggsId, "ביצים", [employeeId, michalId])],
+        [yogurtId, row(yogurtId, "יוגורט", [employeeId, talId])],
+      ]);
+      itemFindFirst.mockImplementation(({ where }: { where: { id?: string } }) =>
+        Promise.resolve(byId.get(where.id ?? "") ?? null),
+      );
+
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [
+                { item_id: milkId },
+                { item_id: breadId },
+                { item_id: eggsId },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "personal",
+          addedById: employeeId,
+          visibleTo: [employeeId],
+          removeIds: [michalId],
+          itemOnly: true,
+        },
+        employeeId,
+      );
+
+      expect(itemUpdate).toHaveBeenCalledTimes(3);
+      const updates = itemUpdate.mock.calls.map(
+        (call: [{ where: { id: string }; data: { visibleTo: string[] } }]) =>
+          call[0],
+      );
+      expect(
+        updates.find((c) => c.where.id === milkId)?.data.visibleTo.sort(),
+      ).toEqual([employeeId].sort());
+      expect(
+        updates.find((c) => c.where.id === breadId)?.data.visibleTo.sort(),
+      ).toEqual([employeeId, talId].sort());
+      expect(
+        updates.find((c) => c.where.id === eggsId)?.data.visibleTo.sort(),
+      ).toEqual([employeeId].sort());
+      expect(updates.find((c) => c.where.id === yogurtId)).toBeUndefined();
+      expect(result.events.filter((e) => e.unshared)).toHaveLength(3);
+      expect(result.shareMisses).toEqual([]);
+    });
+
+    it("unshare fan-out mixed: only Michal-shared rows are updated when listed", async () => {
+      const byId = new Map([
+        [milkId, row(milkId, "חלב", [employeeId, michalId])],
+        [breadId, row(breadId, "לחם", [employeeId])],
+        [eggsId, row(eggsId, "ביצים", [employeeId, talId])],
+      ]);
+      itemFindFirst.mockImplementation(({ where }: { where: { id?: string } }) =>
+        Promise.resolve(byId.get(where.id ?? "") ?? null),
+      );
+
+      await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: milkId }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "personal",
+          addedById: employeeId,
+          visibleTo: [employeeId],
+          removeIds: [michalId],
+          itemOnly: true,
+        },
+        employeeId,
+      );
+
+      expect(itemUpdate).toHaveBeenCalledTimes(1);
+      expect(itemUpdate.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          where: { id: milkId },
+          data: expect.objectContaining({
+            visibleTo: [employeeId],
+          }),
+        }),
+      );
+    });
+
+    it("unshare fan-out covers many live rows when all item_ids are in the ACTION", async () => {
+      // More rows than a typical dump preview — engine still applies every listed id.
+      const ids = Array.from({ length: 12 }, (_, i) =>
+        `11111111-1111-4111-8111-1111111111${String(i).padStart(2, "0")}`,
+      );
+      const byId = new Map(
+        ids.map((id, i) => [
+          id,
+          row(id, `פריט${i + 1}`, [employeeId, michalId]),
+        ]),
+      );
+      itemFindFirst.mockImplementation(({ where }: { where: { id?: string } }) =>
+        Promise.resolve(byId.get(where.id ?? "") ?? null),
+      );
+
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: ids.map((item_id) => ({ item_id })),
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "personal",
+          addedById: employeeId,
+          visibleTo: [employeeId],
+          removeIds: [michalId],
+          itemOnly: true,
+        },
+        employeeId,
+      );
+
+      expect(itemUpdate).toHaveBeenCalledTimes(12);
+      for (const id of ids) {
+        const update = itemUpdate.mock.calls
+          .map((call: [{ where: { id: string }; data: { visibleTo: string[] } }]) => call[0])
+          .find((c) => c.where.id === id);
+        expect(update?.data.visibleTo).toEqual([employeeId]);
+      }
+      expect(result.events.filter((e) => e.unshared)).toHaveLength(12);
+    });
+
     it("new shopping add with speaker+partner targets is co-shared explicitly", async () => {
       itemFindFirst.mockResolvedValue(null);
       const result = await applyEmployeeRecords(

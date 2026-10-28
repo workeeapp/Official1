@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLlmReply } from "@workee/shared";
 import { resetEnvCache } from "../src/config/env.js";
+import { prisma } from "../src/database/prisma.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
 import {
@@ -22,8 +23,12 @@ import {
   LIVE_SELECT_UNFILTERED_LABEL_HE,
 } from "../src/services/live-retrieval-select.js";
 import {
+  mapRoutesOpenCommand,
+  parseLastRoutesBoard,
   ROUTES_DISRUPTION_UNAVAILABLE_HE,
   ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE,
+  ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE,
+  type LastRoutesBoard,
 } from "../src/services/routes.js";
 import * as whatsappSend from "../src/services/whatsapp-send.js";
 import * as reminderFire from "../src/services/reminder-fire.js";
@@ -36,12 +41,30 @@ import {
   type HarnessAccount,
 } from "./helpers/eval-live-provider-harness.js";
 
+async function readPersistedRoutesBoard(
+  assistantMessageId: string,
+): Promise<LastRoutesBoard | null> {
+  const row = await prisma.chatMessage.findUnique({
+    where: { id: assistantMessageId },
+    select: { raw: true },
+  });
+  if (!row?.raw || typeof row.raw !== "object" || Array.isArray(row.raw)) {
+    return null;
+  }
+  return parseLastRoutesBoard(
+    (row.raw as Record<string, unknown>).lastRoutesBoard,
+  );
+}
+
 const ORIGIN = "תחנה מרכזית פתח תקווה";
 const DESTINATION = "תחנה מרכזית תל אביב";
 
 /** Named-origin geocode — must not equal the stale pending pin. */
 const ORIGIN_COORDS = { lat: 32.0945, lng: 34.8862 };
 const DEST_COORDS = { lat: 32.0557, lng: 34.7794 };
+/** Fresh-dest regression («…אבל לחיפה»). */
+const HAIFA_COORDS = { lat: 32.8303, lng: 34.9742 };
+const MIXED_OPEN_PLUS_HAIFA = "המסלול המומלץ אבל לחיפה";
 
 const STALE_PIN = {
   lat: 32.087,
@@ -338,6 +361,13 @@ function installMockGoogleRoutesFetch(
           status: 200,
           json: async () =>
             placesGeocodeHit(q, DEST_COORDS, "תחנה מרכזית תל אביב"),
+        } as Response;
+      }
+      if (q.includes("חיפה")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => placesGeocodeHit(q, HAIFA_COORDS, "חיפה מרכז"),
         } as Response;
       }
       return {
@@ -820,4 +850,684 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
     expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
     mock.restore();
   });
+
+  it(
+    "sendChat: multi board persists, survives intervening assistant, opens with zero Google fetches, fresh O/D refetches",
+    async () => {
+      const before = await assertEvalDbAndGtfsUntouched();
+      const mock = installMockGoogleRoutesFetch(mockTwoTransitAlternativesPayload);
+      account = await createHarnessAccount("טל");
+      const lucyId = await ensureLucy(
+        account,
+        "You answer transit routes in Hebrew.",
+      );
+      installOutboundGuards();
+
+      // 1) Successful multi-route search → board on assistant raw + choice buttons.
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "בודקת מסלול.", buttons: [] }],
+          metadata: {
+            routes: {
+              origin: ORIGIN,
+              destination: DESTINATION,
+              aspects: ["summary"],
+            },
+          },
+        }),
+      );
+      const search = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "איך מגיעים מפתח תקווה לתל אביב בתחבורה ציבורית?",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(1);
+      const searchSpoken = parseLlmReply(search.reply);
+      expect(searchSpoken.response).toContain("מצאתי 2 אפשרויות");
+      expect(searchSpoken.response).toContain("קו 50");
+      const searchButtons = searchSpoken.responseBubbles
+        .flatMap((b) => b.buttons ?? [])
+        .map((b) => b.command);
+      expect(searchButtons).toEqual(
+        expect.arrayContaining(["המסלול המומלץ", "כל המסלולים (2)"]),
+      );
+      const boardAfterSearch = await readPersistedRoutesBoard(
+        search.messageIds.assistant,
+      );
+      expect(boardAfterSearch?.itineraries).toHaveLength(2);
+      expect(boardAfterSearch?.itineraries[0]?.steps.some((s) => s.line === "50")).toBe(
+        true,
+      );
+      expect(boardAfterSearch?.itineraries[1]?.steps.some((s) => s.line === "238")).toBe(
+        true,
+      );
+
+      // 2) Intervening assistant turn without a board (must not wipe recoverability).
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "בשמחה.", buttons: [] }],
+          metadata: {},
+        }),
+      );
+      const intervening = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "תודה",
+      });
+      assertNoOutbound();
+      expect(await readPersistedRoutesBoard(intervening.messageIds.assistant)).toBeNull();
+      // Prior board row still intact.
+      expect(
+        (await readPersistedRoutesBoard(search.messageIds.assistant))?.itineraries
+          .length,
+      ).toBe(2);
+      const computesAfterIntervening = mock.computeCallCount();
+      expect(computesAfterIntervening).toBe(1);
+
+      // 3) Closed commands open saved board — zero additional Google route fetches.
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "" }],
+          metadata: { routes: null },
+        }),
+      );
+      const recommended = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "המסלול המומלץ",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterIntervening);
+      const recommendedText = parseLlmReply(recommended.reply).response;
+      expect(recommendedText).toContain("קו 50");
+      expect(recommendedText).toContain("תחנה רחוקה");
+      expect(recommendedText).not.toContain("קו 238");
+
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "" }],
+          metadata: { routes: null },
+        }),
+      );
+      const allRoutes = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "כל המסלולים",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterIntervening);
+      const allText = parseLlmReply(allRoutes.reply).response;
+      expect(allText).toMatch(/1\./);
+      expect(allText).toMatch(/2\./);
+      expect(allText).toContain("קו 50");
+      expect(allText).toContain("קו 238");
+
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "" }],
+          metadata: { routes: null },
+        }),
+      );
+      const indexed = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "מסלול 2",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterIntervening);
+      const indexedText = parseLlmReply(indexed.reply).response;
+      expect(indexedText).toContain("קו 238");
+      expect(indexedText).toContain("תחנה קרובה");
+      expect(indexedText).not.toContain("תחנה רחוקה");
+
+      // 4) Genuinely changed O/D → fresh Google Routes search.
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "בודקת מסלול חדש.", buttons: [] }],
+          metadata: {
+            routes: {
+              origin: "חיפה מרכז",
+              destination: "ירושלים מרכז",
+              aspects: ["summary"],
+            },
+          },
+        }),
+      );
+      const fresh = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "איך מגיעים מחיפה לירושלים בתחבורה ציבורית?",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterIntervening + 1);
+      const freshBody = mock.computeBodies[mock.computeBodies.length - 1]!;
+      expect(freshBody.travelMode).toBe("TRANSIT");
+      const freshSpoken = parseLlmReply(fresh.reply).response;
+      expect(freshSpoken.length).toBeGreaterThan(0);
+      const boardAfterFresh = await readPersistedRoutesBoard(
+        fresh.messageIds.assistant,
+      );
+      expect(boardAfterFresh?.itineraries.length).toBeGreaterThanOrEqual(1);
+
+      expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+      mock.restore();
+    },
+    90_000,
+  );
+
+  it("missed-bus recalculate: empty O/D reuses board, fresh Google, not open_itinerary", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const mock = installMockGoogleRoutesFetch(mockTwoTransitAlternativesPayload);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "בודקת מסלול.", buttons: [] }],
+        metadata: {
+          routes: {
+            origin: ORIGIN,
+            destination: DESTINATION,
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    const search = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "איך מגיעים מפתח תקווה לתל אביב בתחבורה ציבורית?",
+    });
+    assertNoOutbound();
+    expect(mock.computeCallCount()).toBe(1);
+    expect(
+      (await readPersistedRoutesBoard(search.messageIds.assistant))?.itineraries
+        .length,
+    ).toBe(2);
+
+    // Intervening assistant (reminder-like) without a board.
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "תזכורת: לצאת בקרוב.", buttons: [] }],
+        metadata: {},
+      }),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "אוקיי",
+    });
+    assertNoOutbound();
+    expect(mock.computeCallCount()).toBe(1);
+
+    // Missed-bus: model emits recalculate (semantic), empty O/D → board O/D + fresh fetch.
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "מחשבת מחדש.", buttons: [] }],
+        metadata: {
+          routes: {
+            recalculate: true,
+            origin: "",
+            destination: "",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    const recalc = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "פספסתי את האוטובוס, מה עכשיו?",
+    });
+    assertNoOutbound();
+    expect(mock.computeCallCount()).toBe(2);
+    const spoken = parseLlmReply(recalc.reply).response;
+    expect(spoken).toMatch(/מצאתי|מסלול|אפשרויות|קו/);
+    expect(spoken).not.toBe(ROUTES_DISRUPTION_UNAVAILABLE_HE);
+    // Must not be a stale board-open of a single prior option without refetch.
+    expect(spoken.length).toBeGreaterThan(20);
+
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    mock.restore();
+  }, 90_000);
+
+  it("missed-bus recalculate with changed destination uses new O/D", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const mock = installMockGoogleRoutesFetch(mockSingleTransitPayload);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "בודקת.", buttons: [] }],
+        metadata: {
+          routes: {
+            origin: ORIGIN,
+            destination: DESTINATION,
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "איך מגיעים מפתח תקווה לתל אביב?",
+    });
+    expect(mock.computeCallCount()).toBe(1);
+
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "מחשבת ליעד חדש.", buttons: [] }],
+        metadata: {
+          routes: {
+            recalculate: true,
+            origin: ORIGIN,
+            destination: "חיפה מרכז",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "פספסתי — תחשבי מחדש אבל לחיפה",
+    });
+    assertNoOutbound();
+    expect(mock.computeCallCount()).toBe(2);
+    // Geocode should have been asked for the new destination label.
+    expect(mock.placesCallCount()).toBeGreaterThan(0);
+
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    mock.restore();
+  }, 60_000);
+
+  it("missed-bus recalculate with no board asks for O/D (no Google fetch)", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "", buttons: [] }],
+        metadata: {
+          routes: {
+            recalculate: true,
+            origin: "",
+            destination: "",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    const result = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "פספסתי את האוטובוס מה עכשיו?",
+    });
+    assertNoOutbound();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const spoken = parseLlmReply(result.reply).response;
+    expect(spoken).toMatch(/מוצא|יעד|מאיפה|לאן/);
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    vi.unstubAllGlobals();
+  });
+
+  it("disclose_network_disruption alone: no provider fetch", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "", buttons: [] }],
+        metadata: {
+          routes: { disclose_network_disruption: true },
+        },
+      }),
+    );
+    const result = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "יש שיבושים ברשת היום?",
+    });
+    assertNoOutbound();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const spoken = parseLlmReply(result.reply).response;
+    expect(spoken).toBe(ROUTES_DISRUPTION_UNAVAILABLE_HE);
+    expect(spoken).not.toMatch(/אין שיבושים|בדקתי את הרשת/);
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    vi.unstubAllGlobals();
+  });
+
+  it("mixed disruption + trip: fetches route and appends U disclose", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const mock = installMockGoogleRoutesFetch(mockSingleTransitPayload);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "בודקת מסלול.", buttons: [] }],
+        metadata: {
+          routes: {
+            origin: ORIGIN,
+            destination: DESTINATION,
+            aspects: ["summary"],
+            disclose_network_disruption: true,
+          },
+        },
+      }),
+    );
+    const result = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "איך מגיעים לתל אביב ויש שיבושים ברשת?",
+    });
+    assertNoOutbound();
+    expect(mock.computeCallCount()).toBe(1);
+    const spoken = parseLlmReply(result.reply).response;
+    expect(spoken).toMatch(/מסלול|קו|דקות/);
+    expect(spoken).toContain(ROUTES_DISRUPTION_UNAVAILABLE_HE);
+    expect(spoken).not.toMatch(/אין שיבושים|בדקתי את הרשת/);
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    mock.restore();
+  }, 60_000);
+
+  it("provider failure on recalculate: honest empty/unavailable, no invented itinerary", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const mock = installMockGoogleRoutesFetch(mockTwoTransitAlternativesPayload);
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(
+      account,
+      "You answer transit routes in Hebrew.",
+    );
+    installOutboundGuards();
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "בודקת.", buttons: [] }],
+        metadata: {
+          routes: {
+            origin: ORIGIN,
+            destination: DESTINATION,
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "איך מגיעים מפתח תקווה לתל אביב?",
+    });
+    expect(mock.computeCallCount()).toBe(1);
+    mock.restore();
+
+    // Next turn: provider fails.
+    const failSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(input);
+      if (href.includes("places.googleapis.com")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          textQuery?: string;
+        };
+        const q = String(body.textQuery ?? "").trim();
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            placesGeocodeHit(
+              q,
+              q.includes("תל אביב") ? DEST_COORDS : ORIGIN_COORDS,
+              q,
+            ),
+        } as Response;
+      }
+      if (href.includes("computeRoutes")) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: { message: "unavailable" } }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", failSpy);
+
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "מחשבת מחדש.", buttons: [] }],
+        metadata: {
+          routes: {
+            recalculate: true,
+            origin: "",
+            destination: "",
+            aspects: ["summary"],
+          },
+        },
+      }),
+    );
+    const result = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "החמצתי את האוטובוס — מה האלטרנטיבות עכשיו?",
+    });
+    assertNoOutbound();
+    const spoken = parseLlmReply(result.reply).response;
+    expect(spoken).not.toMatch(/קו 50|קו 238/);
+    expect(spoken).toMatch(/לא מצאתי|לא הצלחתי|אין|מפתח|זמין|שגיאה|כרגע/i);
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+    vi.unstubAllGlobals();
+  }, 60_000);
+
+  /**
+   * Fail-closed open auth: mixed «המסלול המומלץ אבל לחיפה».
+   * - Exact closed-choice guard must not treat the utterance as board-open.
+   * - Model open_itinerary + empty O/D alone must NOT expand the board → Hebrew clarify.
+   * - Full O/D fresh ACTION still refetches (even with conflicting open_itinerary).
+   * - Exact «המסלול המומלץ» + routes=null still opens stored board (zero Google).
+   */
+  it(
+    "mixed «המסלול המומלץ אבל לחיפה»: unauthorized open clarifies; fresh when ACTION has dest",
+    async () => {
+      const before = await assertEvalDbAndGtfsUntouched();
+      expect(mapRoutesOpenCommand(MIXED_OPEN_PLUS_HAIFA)).toBeNull();
+      expect(mapRoutesOpenCommand("המסלול המומלץ")).toBe("recommended");
+
+      const mock = installMockGoogleRoutesFetch(mockTwoTransitAlternativesPayload);
+      account = await createHarnessAccount("טל");
+      const lucyId = await ensureLucy(
+        account,
+        "You answer transit routes in Hebrew.",
+      );
+      installOutboundGuards();
+
+      // Seed lastRoutesBoard (קו 50 recommended / תחנה רחוקה).
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "בודקת מסלול.", buttons: [] }],
+          metadata: {
+            routes: {
+              origin: ORIGIN,
+              destination: DESTINATION,
+              aspects: ["summary"],
+            },
+          },
+        }),
+      );
+      const search = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "איך מגיעים מפתח תקווה לתל אביב בתחבורה ציבורית?",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(1);
+      expect(
+        (await readPersistedRoutesBoard(search.messageIds.assistant))
+          ?.itineraries.length,
+      ).toBe(2);
+      const computesAfterBoard = mock.computeCallCount();
+
+      // --- A) Guard isolation: model supplies no routes ACTION ---------------
+      // Exact «המסלול המומלץ» + routes=null would open the board via the guard.
+      // Mixed utterance + routes=null must NOT open (pass through model text).
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "רק טקסט בלי מסלול.", buttons: [] }],
+          metadata: { routes: null },
+        }),
+      );
+      const guardOnly = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: MIXED_OPEN_PLUS_HAIFA,
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterBoard);
+      const guardSpoken = parseLlmReply(guardOnly.reply).response;
+      expect(guardSpoken).toBe("רק טקסט בלי מסלול.");
+      expect(guardSpoken).not.toContain("תחנה רחוקה");
+      expect(guardSpoken).not.toContain("קו 50");
+      expect(guardSpoken).not.toMatch(/^המסלול המומלץ בתחבורה/);
+
+      // Control: exact closed choice with routes=null → board open, zero Google.
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "" }],
+          metadata: { routes: null },
+        }),
+      );
+      const exactOpen = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "המסלול המומלץ",
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterBoard);
+      const exactSpoken = parseLlmReply(exactOpen.reply).response;
+      expect(exactSpoken).toContain("קו 50");
+      expect(exactSpoken).toContain("תחנה רחוקה");
+
+      // --- B) Conflicting model: open_itinerary, empty O/D → fail-closed clarify
+      // Utterance is not an exact closed choice; model open alone must not expand.
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "" }],
+          metadata: {
+            routes: {
+              open_itinerary: "recommended",
+              origin: "",
+              destination: "",
+            },
+          },
+        }),
+      );
+      const conflicting = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: MIXED_OPEN_PLUS_HAIFA,
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterBoard);
+      const conflictSpoken = parseLlmReply(conflicting.reply).response;
+      expect(conflictSpoken).toBe(ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE);
+      expect(conflictSpoken).not.toContain("קו 50");
+      expect(conflictSpoken).not.toContain("תחנה רחוקה");
+      expect(conflictSpoken).not.toMatch(/חיפה/);
+      expect(
+        mock.computeBodies.some((b) =>
+          JSON.stringify(b).includes("חיפה"),
+        ),
+      ).toBe(false);
+
+      // --- C) Correct fresh ACTION: new destination supplied ------------------
+      setLlmClientForTests(
+        stubLlmReply({
+          responses: [{ text: "מחשבת לחיפה.", buttons: [] }],
+          metadata: {
+            routes: {
+              // Conflicting open_itinerary present but full O/D → fresh wins.
+              open_itinerary: "recommended",
+              origin: ORIGIN,
+              destination: "חיפה מרכז",
+              aspects: ["summary"],
+            },
+          },
+        }),
+      );
+      const fresh = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: MIXED_OPEN_PLUS_HAIFA,
+      });
+      assertNoOutbound();
+      expect(mock.computeCallCount()).toBe(computesAfterBoard + 1);
+      const freshBody = mock.computeBodies[mock.computeBodies.length - 1]!;
+      expect(freshBody.travelMode).toBe("TRANSIT");
+      expect(freshBody.destination?.location?.latLng?.latitude).toBe(
+        HAIFA_COORDS.lat,
+      );
+      expect(freshBody.destination?.location?.latLng?.longitude).toBe(
+        HAIFA_COORDS.lng,
+      );
+      expect(freshBody.origin?.location?.latLng?.latitude).toBe(
+        ORIGIN_COORDS.lat,
+      );
+      const freshSpoken = parseLlmReply(fresh.reply).response;
+      expect(freshSpoken.length).toBeGreaterThan(0);
+      // Fresh search result — not a silent replay of open-only board expand.
+      expect(freshSpoken).not.toMatch(/^המסלול המומלץ בתחבורה/);
+
+      expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+      mock.restore();
+    },
+    90_000,
+  );
 });

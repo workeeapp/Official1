@@ -940,6 +940,52 @@ export type LlmRoutesAspect =
 
 export type LlmRoutesMode = "transit" | "drive";
 
+/**
+ * Open a previously returned trip board without a new Google fetch.
+ * null/absent = normal search. Index is 1-based within the display cap (3).
+ */
+export type LlmRoutesOpenItinerary = "recommended" | "all" | number;
+
+/** Max 1-based open_itinerary index (matches engine ROUTES_ITINERARY_DISPLAY_CAP). */
+export const ROUTES_OPEN_ITINERARY_MAX = 3;
+
+/**
+ * Strict parse for routes.open_itinerary. Accepts only null/absent → null,
+ * "recommended" | "all", or an integer in 1..ROUTES_OPEN_ITINERARY_MAX.
+ * Rejects booleans, numeric strings, fractions, and out-of-range values
+ * (never coerces to recommended).
+ */
+export function parseRoutesOpenItinerary(
+  raw: unknown,
+): LlmRoutesOpenItinerary | null {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (typeof raw === "boolean") {
+    return null;
+  }
+  if (typeof raw === "number") {
+    if (!Number.isInteger(raw)) {
+      return null;
+    }
+    if (raw < 1 || raw > ROUTES_OPEN_ITINERARY_MAX) {
+      return null;
+    }
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const t = raw.trim().toLowerCase();
+    if (t === "recommended") {
+      return "recommended";
+    }
+    if (t === "all") {
+      return "all";
+    }
+    return null;
+  }
+  return null;
+}
+
 export interface LlmRoutesAction {
   /** Origin address / place, or "speaker" for PENDING_LOCATION. */
   origin: string;
@@ -975,6 +1021,23 @@ export interface LlmRoutesAction {
    * Residual V (e.g. fewer transfers) stays require_live_select — not prefer.
    */
   prefer: LlmRoutesPrefer;
+  /**
+   * Expand the last saved trip board without fetching. When set with empty
+   * origin/destination, engine opens the board. When set together with a full
+   * new O/D trip, chat treats it as a fresh search (open ignored).
+   */
+  openItinerary: LlmRoutesOpenItinerary | null;
+  /**
+   * Missed-bus / situation-changed: force a fresh Google A→B search (not board
+   * open). Empty O/D → engine reuses lastRoutesBoard origin/destination only.
+   */
+  recalculate: boolean;
+  /**
+   * Network-wide disruption U: engine discloses capability-not-connected.
+   * Alone (no O/D) → disclose only, no provider fetch. With a trip → append
+   * after the route facts. Never invents SX/alerts.
+   */
+  discloseNetworkDisruption: boolean;
 }
 
 /** Supported routes.prefer values (omit/empty = default ranking). */
@@ -4225,6 +4288,17 @@ export function parseRoutesAction(
   }
   const resolvedAspects: LlmRoutesAspect[] =
     aspects.length > 0 ? aspects : ["summary"];
+  const openItinerary = parseRoutesOpenItinerary(
+    row.open_itinerary ?? row.openItinerary,
+  );
+  const recalculate = normalizeRequireLiveSelect(
+    row.recalculate ?? row.fresh ?? row.recalc,
+  );
+  const discloseNetworkDisruption = normalizeRequireLiveSelect(
+    row.disclose_network_disruption ??
+      row.discloseNetworkDisruption ??
+      row.network_disruption_u,
+  );
   const linesOnly = resolvedAspects.includes("lines");
   const gtfsOnly =
     resolvedAspects.includes("schedule") ||
@@ -4265,6 +4339,90 @@ export function parseRoutesAction(
       aspects: resolvedAspects,
       requireLiveSelect: requireLiveSelectGtfs,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption,
+    };
+  }
+  // Disruption U alone: no O/D fetch — engine discloses capability gap.
+  if (
+    discloseNetworkDisruption &&
+    !origin &&
+    !destination &&
+    !linesOnly &&
+    openItinerary == null &&
+    !recalculate
+  ) {
+    return {
+      origin: "",
+      destination: "",
+      departure: "",
+      arrival: "",
+      line: "",
+      headsign: "",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
+      mode: "transit",
+      aspects: resolvedAspects,
+      requireLiveSelect: false,
+      prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: true,
+    };
+  }
+  // Missed-bus recalculate: O/D may be empty (engine fills from lastRoutesBoard).
+  if (recalculate && !origin && !destination && !linesOnly) {
+    return {
+      origin: "",
+      destination: "",
+      departure,
+      arrival,
+      line: "",
+      headsign: "",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
+      mode,
+      aspects: resolvedAspects.length > 0 ? resolvedAspects : ["summary"],
+      requireLiveSelect: false,
+      prefer: "",
+      // Recalculate never opens a stale board.
+      openItinerary: null,
+      recalculate: true,
+      discloseNetworkDisruption,
+    };
+  }
+  // Board expand: origin/destination may be empty when open_itinerary is set.
+  // Recalculate wins over open when both appear (fresh search, not stale board).
+  if (
+    openItinerary != null &&
+    !recalculate &&
+    !origin &&
+    !destination &&
+    !linesOnly
+  ) {
+    return {
+      origin: "",
+      destination: "",
+      departure,
+      arrival,
+      line: "",
+      headsign: "",
+      stopCode: "",
+      agency: "",
+      serviceDate: "",
+      windowEnd: "",
+      mode,
+      aspects: resolvedAspects,
+      requireLiveSelect: false,
+      prefer: "",
+      openItinerary,
+      recalculate: false,
+      discloseNetworkDisruption,
     };
   }
   if (!origin) {
@@ -4298,6 +4456,11 @@ export function parseRoutesAction(
     aspects: resolvedAspects,
     requireLiveSelect,
     prefer,
+    // Full O/D trip: keep openItinerary for chat to decide (ignore when new search).
+    // Recalculate clears open so a stale board cannot win.
+    openItinerary: recalculate ? null : openItinerary,
+    recalculate,
+    discloseNetworkDisruption,
   };
 }
 

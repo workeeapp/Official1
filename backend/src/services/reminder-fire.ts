@@ -33,7 +33,15 @@ import {
   evaluateComposeCondition,
 } from "./compose-condition.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
-import { fetchBusEtaWatch } from "./routes.js";
+import {
+  BUS_ETA_POLL_FAIL_NOTIFY_AFTER,
+  busEtaPollFailNotifiedSha,
+  busEtaPollFailSha,
+  fetchBusEtaWatch,
+  isBusEtaPollFailNotified,
+  parseBusEtaPollFailCount,
+  ROUTES_BUS_ETA_POLL_UNAVAILABLE_HE,
+} from "./routes.js";
 import {
   fetchFlightChangedWatch,
   fetchFlightEtaWatch,
@@ -493,6 +501,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     let flightDefaultBody: string | null = null;
     let skipSend = false;
     let conditionShaAfterSend: string | undefined;
+    /** Persistent bus_eta poll failure: send honesty once; skip condition gate. */
+    let forceBusEtaPollFailNotify = false;
     if (reminder.composeAtFire) {
       const firstDest = dests[0] ?? "";
       const firstTarget =
@@ -559,17 +569,45 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             headsign: condition.headsign,
             now,
           });
-          evalFacts = {
-            ...evalFacts,
-            busEtaMinutes: eta.minutes,
-            busEtaFingerprint: eta.fingerprint,
-          };
-          if (
-            eta.minutes != null &&
-            eta.minutes <= condition.minutesBefore &&
-            eta.fingerprint
-          ) {
-            busEtaDefaultBody = `קו ${condition.line} מגיע בעוד כ־${eta.minutes} דקות מ«${condition.origin}» לכיוון «${condition.destination}» — זמן לצאת.`;
+          if (!eta.ok) {
+            // Provider/network failure — not “ETA still above threshold”.
+            // Transient: quiet-skip. Persistent: one honesty notify (no invented ETA).
+            const prevFail = parseBusEtaPollFailCount(reminder.lastReportSha);
+            const nextFail = prevFail + 1;
+            if (
+              nextFail < BUS_ETA_POLL_FAIL_NOTIFY_AFTER ||
+              isBusEtaPollFailNotified(reminder.lastReportSha)
+            ) {
+              await prisma.reminder.update({
+                where: { id: reminder.id },
+                data: {
+                  lastReportSha: isBusEtaPollFailNotified(
+                    reminder.lastReportSha,
+                  )
+                    ? reminder.lastReportSha
+                    : busEtaPollFailSha(nextFail),
+                },
+              });
+              await settleFiredReminder(reminder, now, "sent");
+              continue;
+            }
+            busEtaDefaultBody = ROUTES_BUS_ETA_POLL_UNAVAILABLE_HE;
+            conditionShaAfterSend = busEtaPollFailNotifiedSha(now);
+            forceBusEtaPollFailNotify = true;
+          } else {
+            evalFacts = {
+              ...evalFacts,
+              busEtaMinutes: eta.minutes,
+              busEtaFingerprint: eta.fingerprint,
+            };
+            if (
+              eta.minutes != null &&
+              eta.minutes <= condition.minutesBefore &&
+              eta.fingerprint
+            ) {
+              // Google Routes ETA estimate — never claim MOT SIRI live.
+              busEtaDefaultBody = `קו ${condition.line} משוער בעוד כ־${eta.minutes} דקות מ«${condition.origin}» לכיוון «${condition.destination}» (הערכת Google, לא תחזית SIRI חיה) — זמן לצאת.`;
+            }
           }
         }
         if (condition.type === "flight_eta") {
@@ -633,27 +671,31 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
           evalFacts = enriched.evalFacts;
           factsBundle = enriched.factsBundle;
         }
-        const gate = evaluateComposeCondition({
-          condition,
-          facts: evalFacts,
-          lastReportSha: reminder.lastReportSha,
-          // Explicit watch_once:false → level (alert every poll while holding).
-          // true (default one-shot) → edge (false→true only).
-          alertWhileHolding:
-            "watchOnce" in reminder && reminder.watchOnce === false,
-        });
-        if (gate.immediateSha) {
-          await prisma.reminder.update({
-            where: { id: reminder.id },
-            data: { lastReportSha: gate.immediateSha },
+        if (forceBusEtaPollFailNotify) {
+          // Honesty path already set busEtaDefaultBody + conditionShaAfterSend.
+        } else {
+          const gate = evaluateComposeCondition({
+            condition,
+            facts: evalFacts,
+            lastReportSha: reminder.lastReportSha,
+            // Explicit watch_once:false → level (alert every poll while holding).
+            // true (default one-shot) → edge (false→true only).
+            alertWhileHolding:
+              "watchOnce" in reminder && reminder.watchOnce === false,
           });
+          if (gate.immediateSha) {
+            await prisma.reminder.update({
+              where: { id: reminder.id },
+              data: { lastReportSha: gate.immediateSha },
+            });
+          }
+          if (gate.skipSend) {
+            // Quiet skip — clock advances; never send «עדיין לא».
+            await settleFiredReminder(reminder, now, "sent");
+            continue;
+          }
+          conditionShaAfterSend = gate.shaAfterSend;
         }
-        if (gate.skipSend) {
-          // Quiet skip — clock advances; never send «עדיין לא».
-          await settleFiredReminder(reminder, now, "sent");
-          continue;
-        }
-        conditionShaAfterSend = gate.shaAfterSend;
       }
 
       const recipientGender =
@@ -706,7 +748,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       const conditionDefaultBody = busEtaDefaultBody || flightDefaultBody;
       const preferConditionDefault =
         Boolean(conditionDefaultBody) &&
-        (!resolved.body.trim() ||
+        (forceBusEtaPollFailNotify ||
+          !resolved.body.trim() ||
           resolved.body.trim() === String(reminder.messageText ?? "").trim() ||
           resolved.outcome === "fail");
       if (preferConditionDefault && conditionDefaultBody) {

@@ -106,7 +106,15 @@ if (Test-ApiPort) {
 }
 
 # Prefer this checkout's .env over a polluted parent DATABASE_URL (eval :5436).
-foreach ($name in @("DATABASE_URL", "DIRECT_URL", "WORKEE_DISABLE_WHATSAPP_OUTBOUND")) {
+# Also drop LIVE_FULL / Studio isolation flags so a Cursor agent shell cannot
+# leave WhatsApp outbound or reminder fire disabled on the live API.
+foreach ($name in @(
+  "DATABASE_URL",
+  "DIRECT_URL",
+  "WORKEE_DISABLE_WHATSAPP_OUTBOUND",
+  "WORKEE_DISABLE_REMINDER_FIRE",
+  "WORKEE_EVAL_ENV_LOCKED"
+)) {
   if (Test-Path "Env:$name") {
     Remove-Item "Env:$name"
   }

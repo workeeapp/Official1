@@ -1488,17 +1488,25 @@
                   "object",
                   "null"
                 ],
-                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin (line REQUIRED). Live SIRI: [live_arrivals] + stop_code or stop name. Closest boarding among trip options («איזה קו הכי קרוב לבית ליעד») → prefer:\"closest_board\" + origin + destination + aspects[summary] (NOT nearest_stop without line; NOT bare multi-compare). Closest line WITHOUT destination → routes=null + disclose U. Ordinary trip → aspects[summary]; steps aspect only for step-by-step. Follow-up for a prior option index → new ACTION + recalculate; FORBIDDEN claiming the new board is the same prior «אפשרות N» without reliable identity — say recalculated / clarify (no itinerary store). Missed bus/departure («פספסתי את האוטובוס» / «מה עכשיו?» after a prior transit plan) → new routes ACTION: same origin+destination from history when both are reliably known; departure≈SESSION_CLOCK now/ASAP (not the missed time); aspects:[summary] (Google TRANSIT); present as newly calculated (not continued tracking / not continuous monitoring). FORBIDDEN claiming prior «אפשרות N» still available without reliable identity+current validity. Unreliable O/D → ASK only for the missing field (routes=null); FORBIDDEN inventing places. Not bus_eta unless they asked for a reminder. Network-wide disruptions → routes=null + disclose U (not connected). Residual V (fewer transfers / shortest among returned) → require_live_select:true — do NOT invent other prefer values. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
+                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin (line REQUIRED). Live SIRI: [live_arrivals] + stop_code or stop name. Closest boarding among trip options («איזה קו הכי קרוב לבית ליעד») → prefer:\"closest_board\" + origin + destination + aspects[summary] (NOT nearest_stop without line; NOT bare multi-compare). Closest line WITHOUT destination → routes=null + disclose U. Ordinary trip → aspects[summary]; steps aspect only for step-by-step. Follow-up for the saved board («המסלול המומלץ» / «כל המסלולים» / «מסלול N») → open_itinerary \"recommended\"|\"all\"|1..3 with empty origin+destination (engine expands last board; zero Google fetch). New origin/destination or material trip change (incl. open-choice wording plus a new place) → fresh O/D search (open_itinerary ignored when full O/D present). Exact typed «המסלול המומלץ» / «כל המסלולים» / «מסלול N» alone → open_itinerary. FORBIDDEN pretending expand works with no saved board; FORBIDDEN forcing a choice when the initial ask can be answered directly. Missed bus/departure («פספסתי את האוטובוס» / «לא הספקתי לאוטובוס» / «החמצתי» / «מה עכשיו?» after a prior transit plan, including after an intervening assistant message) → routes { recalculate:true, origin+destination from history when reliably known OR empty O/D so engine reuses last saved board O/D only, departure empty|SESSION_CLOCK now/ASAP, aspects:[summary] }; FORBIDDEN open_itinerary for missed-bus (stale board expand). Present as newly calculated (not continued tracking / not continuous monitoring). FORBIDDEN claiming prior «אפשרות N» still available without reliable identity+current validity. Unreliable O/D and no saved board → ASK only for the missing field (routes=null); FORBIDDEN inventing places. Material O/D change → put new places in origin/destination. Not bus_eta unless they asked for a reminder. Network-wide disruptions/cancellations → disclose_network_disruption:true with empty O/D (engine discloses capability not connected; no fetch) OR routes=null + disclose U; FORBIDDEN inventing SX/alerts; FORBIDDEN inventing alerts; FORBIDDEN claiming you checked the network and found no disruptions. Mixed disruption + trip → full O/D + disclose_network_disruption:true (do not block the route). Residual V (fewer transfers / shortest among returned) → require_live_select:true — do NOT invent other prefer values. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
                 "properties": {
+                  "open_itinerary": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Expand the last saved trip board without Google fetch. \"recommended\" = primary itinerary; \"all\" = compare capped alternatives; integer 1..3 = that board index (1-based). Omit/null for a normal search. With empty origin+destination → open path. With a full new O/D trip → ignored (fresh search). Invalid values are rejected (never coerced to recommended). Ignored when recalculate:true."
+                  },
                   "origin": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "From address/place/stop; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA (any list or filing); or \"speaker\" only for the live PENDING_LOCATION pin («מכאן»)."
+                    "description": "From address/place/stop; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA (any list or filing); or \"speaker\" only for the live PENDING_LOCATION pin («מכאן»). Empty when open_itinerary expands a saved board, when recalculate:true reuses lastRoutesBoard O/D, or when disclose_network_disruption alone (no trip fetch)."
                   },
                   "destination": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "To address/place; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA; or free-text place. Empty string when aspects includes lines (stop board only)."
+                    "description": "To address/place; exact saved item_name/title or item_id/filing_id from EMPLOYEE_SAVED_DATA; or free-text place. Empty string when aspects includes lines (stop board only), when open_itinerary / recalculate reuses the saved board, or when disclose_network_disruption alone."
                   },
                   "mode": {
                     "type": "string",
@@ -1584,6 +1592,20 @@
                       ]
                     },
                     "description": "Trip → [summary]; כמה זמן → [duration]; מסלול → [steps]; עוד כמה זמן קו → [eta]; תדירות קו ליד מקום/תחנה + חלון זמן → [schedule] (+ nearest_stop first if only an area) — not Google frequency; Google [frequency] only for A→B trip headway; איזה קווים בתחנה (no dest) → [lines]; לוח יציאות רשמי MOT → [schedule] + stop_code|stop name + line (+ departure/window_end/service_date); תחנה קרובה לקו → [nearest_stop] + line + origin speaker|place; תחזית הגעה חיה MOT SIRI → [live_arrivals] + stop_code|stop name (+ line + destination/headsign). schedule/nearest_stop = static GTFS (never claim live); live_arrivals = SIRI predictions only — never label schedule/Google as SIRI."
+                  },
+                  "recalculate": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Missed-bus / situation-changed («פספסתי» / «לא הספקתי» / «החמצתי» / «מה עכשיו?» after a prior transit plan, including after intervening assistant messages): true → fresh Google A→B search (never open_itinerary). Empty origin+destination → engine reuses lastRoutesBoard O/D only. departure empty = now/ASAP."
+                  },
+                  "disclose_network_disruption": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Network-wide disruption U (no SX feed). true alone (empty O/D) → engine discloses capability not connected (no fetch). true with a trip → append disclose after route facts. FORBIDDEN inventing alerts or claiming a network check found none."
                   }
                 },
                 "required": [

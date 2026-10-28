@@ -222,8 +222,7 @@ export const ROUTES_WALK_PARTIAL_NOTE_HE =
 
 /**
  * Wave 1 compact multi cue — secondary itineraries are not expanded up front.
- * Follow-up: ask by line or departure; a new search refreshes options (no
- * stable «אפשרות N» across fetches).
+ * Follow-up: use saved-board open (recommended / all / מסלול N), not a new search.
  */
 export function routesMultiAltsCueHe(
   extraCount: number,
@@ -237,7 +236,273 @@ export function routesMultiAltsCueHe(
   const head = diffs
     ? `עוד ${n} אפשרויות (${diffs})`
     : `עוד ${n} אפשרויות`;
-  return `${head} — לפרטים בקשי לפי קו או שעת יציאה. בחיפוש חדש מתקבלות אפשרויות מעודכנות.`;
+  return `${head} — לפרטים: «המסלול המומלץ», «כל המסלולים», או «מסלול 2».`;
+}
+
+/** Compact board persisted on assistant raw after a successful A→B trip. */
+export type LastRoutesBoard = {
+  origin: string;
+  destination: string;
+  mode: RoutesTravelMode;
+  itineraries: RouteItineraryOption[];
+  fetchedAt: string;
+};
+
+export const ROUTES_NO_SAVED_BOARD_HE =
+  "אין לי מסלול שמור מהחיפוש הקודם — חפשי שוב איך להגיע.";
+
+export const ROUTES_OPEN_INDEX_MISS_HE =
+  "המסלול שבחרת לא זמין מהחיפוש האחרון.";
+
+/**
+ * Model emitted open_itinerary with empty O/D, but the speaker message is not
+ * an exact closed-choice board command — fail closed (no board expand, no fetch).
+ */
+export const ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE =
+  "לא ברור אם לפתוח את המסלול השמור או לחפש מסלול חדש — כתבי «המסלול המומלץ» / «כל המסלולים» / «מסלול N», או צייני מוצא ויעד לחיפוש מחדש.";
+
+export type RoutesOpenItinerary = "recommended" | "all" | number;
+
+export type ResolveRoutesResult = {
+  text: string;
+  navigateAddress: string;
+  /** Set only after a successful Google A→B trip with ≥1 itinerary. */
+  board?: LastRoutesBoard | null;
+  /** Multi summary choice buttons (≥2 itineraries). */
+  choiceButtons?: Array<{ label: string; command: string }>;
+};
+
+export function buildRoutesChoiceButtons(
+  itineraryCount: number,
+): Array<{ label: string; command: string }> {
+  const n = Math.max(0, Math.floor(itineraryCount));
+  if (n < 2) {
+    return [];
+  }
+  // label === command so applyShowButtonsToBubbles keeps these as closed
+  // choices on the routes facts bubble (not stripped as show/LIST chrome).
+  const allLabel = `כל המסלולים (${n})`.slice(0, 20);
+  return [
+    { label: "המסלול המומלץ", command: "המסלול המומלץ" },
+    { label: allLabel, command: allLabel },
+  ];
+}
+
+export function buildLastRoutesBoard(input: {
+  origin: string;
+  destination: string;
+  mode: RoutesTravelMode;
+  itineraries: RouteItineraryOption[];
+  fetchedAt?: string;
+}): LastRoutesBoard | null {
+  const itineraries = input.itineraries.slice(0, ROUTES_ITINERARY_DISPLAY_CAP);
+  if (itineraries.length === 0) {
+    return null;
+  }
+  return {
+    origin: input.origin.trim(),
+    destination: input.destination.trim(),
+    mode: input.mode,
+    itineraries,
+    fetchedAt: input.fetchedAt ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Exact closed-choice commands for opening a saved board. Returns null when the
+ * message has extra trip-change content (do not intercept mixed intent).
+ */
+export function mapRoutesOpenCommand(raw: string): RoutesOpenItinerary | null {
+  const t = raw.trim().replace(/\s+/gu, " ");
+  if (!t) {
+    return null;
+  }
+  // Exact phrases only — never substring/mixed-intent (e.g. «המלצה לדיזנגוף»).
+  const exactRecommended = new Set([
+    "המסלול המומלץ",
+    "הציגי את המסלול המומלץ",
+    "הצג את המסלול המומלץ",
+    "הראה את המסלול המומלץ",
+    "הראי את המסלול המומלץ",
+    "תראי את המסלול המומלץ",
+    "תראה את המסלול המומלץ",
+    "הציגי את ההמלצה",
+    "הצג את ההמלצה",
+    "תראי את ההמלצה",
+    "תראה את ההמלצה",
+  ]);
+  if (exactRecommended.has(t)) {
+    return "recommended";
+  }
+  if (
+    t === "כל המסלולים" ||
+    /^כל המסלולים \(\d+\)$/u.test(t) ||
+    t === "הציגי את כל המסלולים" ||
+    t === "הצג את כל המסלולים" ||
+    t === "הראה את כל המסלולים" ||
+    t === "הראי את כל המסלולים" ||
+    t === "תראי את כל המסלולים" ||
+    t === "תראה את כל המסלולים"
+  ) {
+    return "all";
+  }
+  const indexed = t.match(/^מסלול\s+(\d+)$/u);
+  if (indexed) {
+    const n = Number(indexed[1]);
+    if (
+      Number.isInteger(n) &&
+      n >= 1 &&
+      n <= ROUTES_ITINERARY_DISPLAY_CAP
+    ) {
+      return n;
+    }
+    return null;
+  }
+  return null;
+}
+
+function itineraryLeadBitsHe(option: RouteItineraryOption): string {
+  const clocks = displayLeaveArriveForLead(option);
+  const headBits: string[] = [];
+  if (option.durationText) {
+    headBits.push(`משך משוער *${option.durationText}*`);
+  }
+  if (clocks.leaveByText) {
+    headBits.push(
+      clocks.leaveIsBoarding
+        ? `עלייה משוערת ${clocks.leaveByText}`
+        : `יציאה משוערת ${clocks.leaveByText}`,
+    );
+  }
+  if (clocks.arriveByText) {
+    headBits.push(`הגעה משוערת ${clocks.arriveByText}`);
+  }
+  if (option.fareText) {
+    headBits.push(`מחיר משוער ${option.fareText}`);
+  }
+  const lineLabel = transitLinesLabel(option.steps);
+  if (lineLabel) {
+    headBits.push(lineLabel);
+  }
+  for (const bit of itineraryWalkTransferBits(option.steps)) {
+    headBits.push(bit);
+  }
+  return headBits.length > 0 ? headBits.join(" · ") : "";
+}
+
+/** Step-by-step for one saved itinerary (verified fields only). */
+export function formatRecommendedItineraryHebrew(
+  option: RouteItineraryOption,
+  meta?: { origin?: string; destination?: string; mode?: RoutesTravelMode },
+): string {
+  const lines: string[] = [];
+  const drive = meta?.mode === "drive";
+  const od =
+    meta?.origin && meta?.destination
+      ? ` מ«${meta.origin}» ל«${meta.destination}»`
+      : "";
+  lines.push(
+    drive
+      ? `המסלול המומלץ ברכב${od} ${ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE}`
+      : `המסלול המומלץ בתחבורה ציבורית${od} ${ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE}`,
+  );
+  const lead = itineraryLeadBitsHe(option);
+  if (lead) {
+    lines.push("");
+    lines.push(lead);
+  }
+  if (option.steps.length > 0) {
+    lines.push("");
+    const before = lines.length;
+    pushFormattedSteps(
+      lines,
+      option.steps,
+      ROUTES_STEPS_DETAIL_DISPLAY_CAP,
+    );
+    if (lines.length === before) {
+      lines.push("אין מספיק פרטי שלבים מהמקור כדי להציג מסלול מפורט.");
+    }
+  } else {
+    lines.push("");
+    lines.push("אין מספיק פרטי שלבים מהמקור כדי להציג מסלול מפורט.");
+  }
+  return lines.join("\n").trim();
+}
+
+/** Compact comparable list of saved alternatives (stable 1..N). */
+export function formatAllItinerariesCompareHebrew(
+  itineraries: RouteItineraryOption[],
+  meta?: { origin?: string; destination?: string; mode?: RoutesTravelMode },
+): string {
+  const options = itineraries.slice(0, ROUTES_ITINERARY_DISPLAY_CAP);
+  if (options.length === 0) {
+    return ROUTES_NO_SAVED_BOARD_HE;
+  }
+  const lines: string[] = [];
+  const drive = meta?.mode === "drive";
+  const od =
+    meta?.origin && meta?.destination
+      ? ` מ«${meta.origin}» ל«${meta.destination}»`
+      : "";
+  lines.push(
+    drive
+      ? `כל המסלולים ברכב (${options.length})${od} ${ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE}`
+      : `כל המסלולים בתחבורה ציבורית (${options.length})${od} ${ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE}`,
+  );
+  options.forEach((opt, i) => {
+    const lead = itineraryLeadBitsHe(opt) || "מסלול";
+    lines.push(`${i + 1}. ${lead}`);
+  });
+  lines.push("");
+  lines.push("לבחירה: «מסלול 1» / «מסלול 2» או «המסלול המומלץ».");
+  return lines.join("\n").trim();
+}
+
+/** Expand a saved board without a provider fetch. */
+export function formatOpenItineraryFromBoard(
+  board: LastRoutesBoard,
+  open: RoutesOpenItinerary,
+): { text: string; navigateAddress: string } {
+  const options = board.itineraries.slice(0, ROUTES_ITINERARY_DISPLAY_CAP);
+  if (options.length === 0) {
+    return { text: ROUTES_NO_SAVED_BOARD_HE, navigateAddress: "" };
+  }
+  const meta = {
+    origin: board.origin,
+    destination: board.destination,
+    mode: board.mode,
+  };
+  if (open === "all") {
+    return {
+      text: formatAllItinerariesCompareHebrew(options, meta),
+      navigateAddress: board.destination || "",
+    };
+  }
+  let index = 0;
+  if (open === "recommended") {
+    index = 0;
+  } else if (typeof open === "number") {
+    if (open < 1 || open > options.length) {
+      const valid = options.map((_, i) => `מסלול ${i + 1}`).join(" / ");
+      return {
+        text: `${ROUTES_OPEN_INDEX_MISS_HE} זמינים: ${valid} או «המסלול המומלץ» / «כל המסלולים».`,
+        navigateAddress: "",
+      };
+    }
+    index = open - 1;
+  }
+  const option = options[index]!;
+  const title =
+    open === "recommended" || index === 0
+      ? formatRecommendedItineraryHebrew(option, meta)
+      : formatRecommendedItineraryHebrew(option, meta).replace(
+          /^המסלול המומלץ/u,
+          `מסלול ${index + 1}`,
+        );
+  return {
+    text: title,
+    navigateAddress: board.destination || "",
+  };
 }
 
 /** Real differences among itineraries only — never invent contrast. */
@@ -280,10 +545,70 @@ export const ROUTES_GOOGLE_ETA_NOT_SIRI_INTRO_HE =
 
 /**
  * Network-wide disruption / SX is not connected — prompt/capability U disclose.
- * Not a live feed result.
+ * Not a live feed result. Engine injects when routes.disclose_network_disruption.
  */
 export const ROUTES_DISRUPTION_UNAVAILABLE_HE =
   "אין לי מידע על שיבושים או ביטולים ברשת — היכולת הזו לא מחוברת. אפשר לשאול על תחזית הגעה לתחנה או לוח מתוזמן לקו.";
+
+/** Missed-bus recalculate with no recoverable O/D from history/board. */
+export const ROUTES_RECALCULATE_NO_CONTEXT_HE =
+  "אין לי מוצא ויעד מהמסלול הקודם — מאיפה ולאן לחשב עכשיו?";
+
+/**
+ * Persistent Google Routes ETA poll failures for bus_eta watches.
+ * Not SIRI; does not invent an ETA.
+ */
+export const ROUTES_BUS_ETA_POLL_UNAVAILABLE_HE =
+  "לא הצלחתי לעדכן את הערכת זמן היציאה מגוגל לקו המבוקש — ההתראה לא מבוססת על תחזית SIRI חיה. אבדוק שוב בסיבוב הבא; אם זה נמשך, כדאי לבקש חיפוש מסלול מחדש.";
+
+/** Consecutive Google ETA poll failures before one honesty notify. */
+export const BUS_ETA_POLL_FAIL_NOTIFY_AFTER = 3;
+
+const BUS_ETA_POLL_FAIL_PREFIX = "bus_eta:poll_fail:";
+const BUS_ETA_POLL_FAIL_NOTIFIED = "bus_eta:poll_fail_notified";
+
+export function parseBusEtaPollFailCount(lastReportSha: string): number {
+  const s = String(lastReportSha ?? "").trim();
+  if (!s.startsWith(BUS_ETA_POLL_FAIL_PREFIX)) {
+    return 0;
+  }
+  const n = Number(s.slice(BUS_ETA_POLL_FAIL_PREFIX.length));
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+export function busEtaPollFailSha(count: number): string {
+  return `${BUS_ETA_POLL_FAIL_PREFIX}${Math.max(1, Math.floor(count))}`;
+}
+
+export function isBusEtaPollFailNotified(lastReportSha: string): boolean {
+  return String(lastReportSha ?? "")
+    .trim()
+    .startsWith(BUS_ETA_POLL_FAIL_NOTIFIED);
+}
+
+export function busEtaPollFailNotifiedSha(now = new Date()): string {
+  return `${BUS_ETA_POLL_FAIL_NOTIFIED}:${now.toISOString()}`;
+}
+
+/** Fill missing O/D from a saved board for recalculate (never invents places). */
+export function fillRoutesOdFromBoard(
+  origin: string,
+  destination: string,
+  board: LastRoutesBoard | null | undefined,
+): { origin: string; destination: string } {
+  const o = origin.trim();
+  const d = destination.trim();
+  if (o && d) {
+    return { origin: o, destination: d };
+  }
+  if (!board) {
+    return { origin: o, destination: d };
+  }
+  return {
+    origin: o || board.origin.trim(),
+    destination: d || board.destination.trim(),
+  };
+}
 
 export function parseRoutesPrefer(raw: unknown): RoutesPrefer {
   const key = String(raw ?? "")
@@ -1271,9 +1596,11 @@ export async function formatOfficialBoardingDeparturesHe(
 
   const blocks: string[] = [];
   let triedSiri = false;
+  let attemptedOfficialBoard = false;
   for (let i = 0; i < itineraries.length; i++) {
     const board = firstTransitBoard(itineraries[i]!.steps);
     if (!board) continue;
+    attemptedOfficialBoard = true;
     const line = board.line.replace(/^קו\s+/u, "").trim();
     const sched = await querySchedule(prisma, {
       stopCode: board.fromStop,
@@ -1332,6 +1659,14 @@ export async function formatOfficialBoardingDeparturesHe(
   }
 
   if (blocks.length === 0) {
+    // Honesty: we tried MOT match from Google boarding names but got nothing —
+    // do not silently look like “no official times exist” without saying why.
+    if (attemptedOfficialBoard) {
+      return [
+        "",
+        "לא הצלחתי לשייך יציאות רשמיות מתחנות העלייה במסלול (שם תחנה מגוגל לא תמיד תואם לקוד MOT) — המסלול למעלה הוא הערכת Google בלבד.",
+      ].join("\n");
+    }
     return "";
   }
   return [
@@ -2257,7 +2592,7 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
     lines.push(
       driveTrip
         ? `מסלול ברכב מ«${facts.origin}» ל«${facts.destination}» ${ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE}:`
-        : `מסלול בתחבורה ציבורית מ«${facts.origin}» ל«${facts.destination}»:`,
+        : `מסלול בתחבורה ציבורית מ«${facts.origin}» ל«${facts.destination}» ${ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE}:`,
     );
   }
 
@@ -2301,7 +2636,15 @@ export function formatRoutesHebrew(facts: RoutesFacts): string {
   return `${closestPrefix}${lines.join("\n")}`.trim();
 }
 
-/** Next departure minutes + fingerprint for bus_eta watches. */
+export type BusEtaWatchResult = {
+  /** false = provider/network error (not “ETA still above threshold”). */
+  ok: boolean;
+  minutes: number | null;
+  fingerprint: string;
+  leaveByText: string;
+};
+
+/** Next departure minutes + fingerprint for bus_eta watches (Google ETA, not SIRI). */
 export async function fetchBusEtaWatch(input: {
   origin: string;
   destination: string;
@@ -2310,7 +2653,7 @@ export async function fetchBusEtaWatch(input: {
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
   now?: Date;
-}): Promise<{ minutes: number | null; fingerprint: string; leaveByText: string }> {
+}): Promise<BusEtaWatchResult> {
   try {
     const facts = await fetchRoutesFacts({
       origin: input.origin,
@@ -2329,12 +2672,13 @@ export async function fetchBusEtaWatch(input: {
       facts.steps.find((s) => s.departureIso)?.departureIso ?? "",
     ].join("|");
     return {
+      ok: true,
       minutes: facts.etaMinutes,
       fingerprint: fp,
       leaveByText: facts.leaveByText,
     };
   } catch {
-    return { minutes: null, fingerprint: "", leaveByText: "" };
+    return { ok: false, minutes: null, fingerprint: "", leaveByText: "" };
   }
 }
 
@@ -2851,7 +3195,7 @@ export async function resolveRoutesReply(input: {
   speakerAsk?: string;
   billing?: ComposeLlmBilling | null;
   runSelect?: typeof runLivePostSelect;
-}): Promise<{ text: string; navigateAddress: string }> {
+}): Promise<ResolveRoutesResult> {
   const origin = String(input.origin ?? "").trim();
   const destination = String(input.destination ?? "").trim();
   const aspects = parseRoutesAspects(input.aspects);
@@ -2869,6 +3213,7 @@ export async function resolveRoutesReply(input: {
     aspects.includes("live_arrivals")
   ) {
     // MOT schedule / nearest / SIRI: structured filters only — no Stage B.
+    // Do not attach/replace lastRoutesBoard (trip board is Google A→B only).
     return resolveGtfsRoutesReply({
       origin,
       destination,
@@ -3107,9 +3452,36 @@ export async function resolveRoutesReply(input: {
     const body = `${googleText}${officialExtra}`.trim();
     const preface =
       savedNotices.length > 0 ? `${savedNotices.join("\n")}\n` : "";
+    const boardItineraries =
+      selectedFacts.itineraries.length > 0
+        ? selectedFacts.itineraries
+        : selectedFacts.steps.length > 0
+          ? [
+              {
+                durationText: selectedFacts.durationText,
+                durationSeconds: selectedFacts.durationSeconds,
+                distanceMeters: selectedFacts.distanceMeters,
+                fareText: selectedFacts.fareText,
+                leaveByText: selectedFacts.leaveByText,
+                arriveByText: selectedFacts.arriveByText,
+                steps: selectedFacts.steps,
+              },
+            ]
+          : [];
+    const board = buildLastRoutesBoard({
+      origin: String(originLabel || origin || "").trim(),
+      destination: String(destinationLabel || destination || "").trim(),
+      mode: travelMode,
+      itineraries: boardItineraries,
+    });
+    const choiceButtons = buildRoutesChoiceButtons(
+      board?.itineraries.length ?? 0,
+    );
     return {
       text: `${preface}${body}`.trim(),
       navigateAddress: selectedFacts.navigateAddress || facts.navigateAddress,
+      ...(board ? { board } : {}),
+      ...(choiceButtons.length > 0 ? { choiceButtons } : {}),
     };
   } catch (error) {
     if (error instanceof Error && error.message === ROUTES_API_KEY_MISSING) {
@@ -3131,9 +3503,106 @@ export async function resolveRoutesReply(input: {
       };
     }
     // Points were resolved; Google/network failed — not a missing-place ask.
+    // Failed search must not overwrite a prior lastRoutesBoard.
     return {
       text: "לא הצלחתי לחשב מסלול עכשיו. נסה שוב בעוד רגע.",
       navigateAddress: "",
     };
   }
+}
+
+/** Compact parse of a persisted board (ignore junk / oversized provider blobs). */
+export function parseLastRoutesBoard(raw: unknown): LastRoutesBoard | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const origin = typeof row.origin === "string" ? row.origin.trim() : "";
+  const destination =
+    typeof row.destination === "string" ? row.destination.trim() : "";
+  const modeRaw = String(row.mode ?? "")
+    .trim()
+    .toLowerCase();
+  const mode: RoutesTravelMode = modeRaw === "drive" ? "drive" : "transit";
+  const fetchedAt =
+    typeof row.fetchedAt === "string" && row.fetchedAt.trim()
+      ? row.fetchedAt.trim()
+      : typeof row.fetched_at === "string" && row.fetched_at.trim()
+        ? row.fetched_at.trim()
+        : "";
+  if (!Array.isArray(row.itineraries)) {
+    return null;
+  }
+  const itineraries: RouteItineraryOption[] = [];
+  for (const entry of row.itineraries.slice(0, ROUTES_ITINERARY_DISPLAY_CAP)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const opt = entry as Record<string, unknown>;
+    const stepsRaw = Array.isArray(opt.steps) ? opt.steps : [];
+    const steps: RouteStepFact[] = [];
+    for (const stepEntry of stepsRaw.slice(0, ROUTES_STEPS_DETAIL_DISPLAY_CAP)) {
+      if (
+        !stepEntry ||
+        typeof stepEntry !== "object" ||
+        Array.isArray(stepEntry)
+      ) {
+        continue;
+      }
+      const s = stepEntry as Record<string, unknown>;
+      steps.push({
+        travelMode: typeof s.travelMode === "string" ? s.travelMode : "",
+        instruction: typeof s.instruction === "string" ? s.instruction : "",
+        line: typeof s.line === "string" ? s.line : "",
+        headsign: typeof s.headsign === "string" ? s.headsign : "",
+        fromStop: typeof s.fromStop === "string" ? s.fromStop : "",
+        toStop: typeof s.toStop === "string" ? s.toStop : "",
+        departureTime:
+          typeof s.departureTime === "string" ? s.departureTime : "",
+        departureIso:
+          typeof s.departureIso === "string" ? s.departureIso : "",
+        arrivalTime: typeof s.arrivalTime === "string" ? s.arrivalTime : "",
+        durationText:
+          typeof s.durationText === "string" ? s.durationText : "",
+        durationSeconds:
+          typeof s.durationSeconds === "number" &&
+          Number.isFinite(s.durationSeconds)
+            ? s.durationSeconds
+            : null,
+        headwaySeconds:
+          typeof s.headwaySeconds === "number" &&
+          Number.isFinite(s.headwaySeconds)
+            ? s.headwaySeconds
+            : null,
+      });
+    }
+    itineraries.push({
+      durationText: typeof opt.durationText === "string" ? opt.durationText : "",
+      durationSeconds:
+        typeof opt.durationSeconds === "number" &&
+        Number.isFinite(opt.durationSeconds)
+          ? opt.durationSeconds
+          : null,
+      distanceMeters:
+        typeof opt.distanceMeters === "number" &&
+        Number.isFinite(opt.distanceMeters)
+          ? opt.distanceMeters
+          : null,
+      fareText: typeof opt.fareText === "string" ? opt.fareText : "",
+      leaveByText: typeof opt.leaveByText === "string" ? opt.leaveByText : "",
+      arriveByText: typeof opt.arriveByText === "string" ? opt.arriveByText : "",
+      ...(opt.leaveIsBoarding === true ? { leaveIsBoarding: true } : {}),
+      steps,
+    });
+  }
+  if (itineraries.length === 0) {
+    return null;
+  }
+  return {
+    origin,
+    destination,
+    mode,
+    itineraries,
+    fetchedAt: fetchedAt || new Date(0).toISOString(),
+  };
 }

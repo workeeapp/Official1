@@ -49,6 +49,8 @@ import {
   correctDurableSaveClaimReply,
   correctListMutationClaimReply,
   correctShareClaimReply,
+  correctUnshareClaimReply,
+  summarizeUnshareApply,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
   formatAppliedMutationFallback,
@@ -195,7 +197,18 @@ import { resolveMashovReply } from "./mashov.js";
 import { resolveSmartschoolReply } from "./smartschool.js";
 import { resolvePlacesReplyDetailed } from "./places.js";
 import { resolveJewishReply } from "./jewish.js";
-import { resolveRoutesReply } from "./routes.js";
+import {
+  fillRoutesOdFromBoard,
+  formatOpenItineraryFromBoard,
+  mapRoutesOpenCommand,
+  parseLastRoutesBoard,
+  resolveRoutesReply,
+  ROUTES_DISRUPTION_UNAVAILABLE_HE,
+  ROUTES_NO_SAVED_BOARD_HE,
+  ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE,
+  ROUTES_RECALCULATE_NO_CONTEXT_HE,
+  type LastRoutesBoard,
+} from "./routes.js";
 import { resolveFlightsReply } from "./flights.js";
 import {
   clearPendingLocation,
@@ -296,6 +309,7 @@ function toHistoryResponse(
 const STORED_LLM_REQUEST = "workeeOpenAiRequest";
 const STORED_LLM_RESPONSE = "workeeOpenAiResponse";
 const STORED_LAST_NUMBERED_DUMP = "lastNumberedDump";
+const STORED_LAST_ROUTES_BOARD = "lastRoutesBoard";
 
 function buildOpenAiRequest(input: {
   conversationId: string;
@@ -313,12 +327,16 @@ function packStoredLlmRaw(
   request: unknown,
   response: unknown,
   lastNumberedDump?: LastNumberedDumpLine[],
+  lastRoutesBoard?: LastRoutesBoard | null,
 ): unknown {
   return {
     [STORED_LLM_REQUEST]: request,
     [STORED_LLM_RESPONSE]: response,
     ...(lastNumberedDump && lastNumberedDump.length > 0
       ? { [STORED_LAST_NUMBERED_DUMP]: lastNumberedDump }
+      : {}),
+    ...(lastRoutesBoard
+      ? { [STORED_LAST_ROUTES_BOARD]: lastRoutesBoard }
       : {}),
   };
 }
@@ -327,6 +345,7 @@ function unpackStoredLlmRaw(raw: unknown): {
   request: unknown;
   response: unknown;
   lastNumberedDump: LastNumberedDumpLine[];
+  lastRoutesBoard: LastRoutesBoard | null;
 } {
   if (
     raw &&
@@ -339,12 +358,21 @@ function unpackStoredLlmRaw(raw: unknown): {
       request: packed[STORED_LLM_REQUEST] ?? null,
       response: packed[STORED_LLM_RESPONSE] ?? null,
       lastNumberedDump: parseLastNumberedDump(packed[STORED_LAST_NUMBERED_DUMP]),
+      lastRoutesBoard: parseLastRoutesBoard(packed[STORED_LAST_ROUTES_BOARD]),
     };
   }
+  // Legacy / unpacked response-only raw: still try board if present on object.
+  const board =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? parseLastRoutesBoard(
+          (raw as Record<string, unknown>)[STORED_LAST_ROUTES_BOARD],
+        )
+      : null;
   return {
     request: null,
     response: raw ?? null,
     lastNumberedDump: [],
+    lastRoutesBoard: board,
   };
 }
 
@@ -399,6 +427,28 @@ async function loadLastNumberedDumpForConversation(
     }
   }
   return [];
+}
+
+/**
+ * Newest-first scan for a saved trip board. Intervening assistant rows without
+ * a board must not hide an earlier board (same pattern as dump loader).
+ */
+export async function loadLastRoutesBoardForConversation(
+  conversationId: string,
+): Promise<LastRoutesBoard | null> {
+  const recent = await prisma.chatMessage.findMany({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+    take: 12,
+    select: { raw: true },
+  });
+  for (const row of recent) {
+    const board = unpackStoredLlmRaw(row.raw).lastRoutesBoard;
+    if (board) {
+      return board;
+    }
+  }
+  return null;
 }
 
 function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
@@ -856,8 +906,8 @@ function workerTargetingInstructions(
     "PLACES (live local): ?????? ?? ?????? ???? ?????? / ??? ?????? ?? ???????? ????? ????? / ????? ?? ????? ??? ??????? / ????? ???? ?????? ? metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (????? ???? / ???? ?????) ? geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Inside-region (????? ?????? / ???? ??? ??) ? geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me ? near=speaker. Parking examples: ????? ?? ????? ??? ???????? / ????? ?? ???? ?????? / ????? ???? ?????? ??? ???????? / ??? ????? ?????? ???????; ordinary business ????? ?? ????? ??? ???????. Parking-place asks ? intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): ????? ?? ????? ??? ???????? ? { query:\"?????\", place:\"??????\"|area, intent:\"parking\" }; ????? ?? ???? ?????? ? { query:\"????\", near:\"speaker\"|place, intent:\"parking\" }; ????? ???? ?????? ??? ???????? ? { query:\"????\", place:\"??????\"|area, intent:\"parking\" }; ??? ???? ???? ??????? ? { query:\"????\", place|near, intent:\"parking\", parking_cost:\"free\" }; ??? ????? ?????? ??????? ? { query:\"?????\", place|near, intent:\"parking\", parking_cost:\"paid\" }. ??? ??????? ????? ???? + PENDING_LOCATION ? places { query:\"??????\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for ???? ?????; min_rating 0?5 exact (e.g. 4.1) for ????? ??? X; parking_cost free|paid for ???? ????/?????? (server local-filters ParkingOptions; FORBIDDEN stuffing ????/?????? only into query); included_type ? restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). ??? ???? ???????? / attribute of a named business ? intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/?) are expected to evidence the ask ? require_live_select:true; U = cannot verify (e.g. ??????/ownership) ? NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. ?????? ???? ?????? ? parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer ? explain BEFORE fetch (places=null). Distinguish ??? ????? ?????? ??????? vs ??? ???? ???? ?? ??????????. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query ? ask; places=null. Near-me without pin ? ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): ???? ??????? ???? ???? ?????? / ???? ????? ??? ??? ????? / ??? ???? ?????? / ????? ?? ???? / ???? ??? ???? ? metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. NAMED HOLIDAY (???? ???? / ????? / ?????) ? aspects:[holidays] + query with that name (NOT bare upcoming list ? server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts ? no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal ? disclose; never invent times. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare ???? ???? ? [summary]; ??? ???? ? [candles]; ?????/????? ??? ? [havdalah]; ???? ? [parasha]; ???? ? [holidays]. FORBIDDEN jewish when they asked ?????? ?? ?????? ???? ? use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: ??????? ?? ?????? ???? 10 ???? ???? ????? ??? ???? ?????? ? Self-nudge + lists add reminders { item:\"?????? ????\", text:\"?????? ????\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"??? ?????\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal ? FORBIDDEN inventing time/in. Missing city ? ask; no reminders clock jewish=null. ??? ???? / ?? ????? ? same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot ?????? ???????; weekly ???? ?????? ? not live candle times.",
-    "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up option N ? new routes ACTION (recalculate); FORBIDDEN claiming a new fetch is the same prior option index ? say recalculated and show current options or ask to clarify (no itinerary store). Missed bus/departure (speaker says they missed the bus / asks what now after a prior transit plan) ? new routes ACTION: reuse the same origin+destination from conversation history ONLY when both are reliably known; departure = SESSION_CLOCK now/ASAP (do NOT keep the missed departure time); aspects:[summary] via existing Google TRANSIT path; present as a newly calculated itinerary (NOT continued tracking of the prior trip; NOT continuous monitoring). FORBIDDEN claiming prior option N is still available without reliable identity and current validity. Origin or destination not recoverable ? ASK only for the missing field (routes=null); FORBIDDEN inventing O/D. Not a bus_eta watch unless they asked to be reminded. Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected); FORBIDDEN inventing SX/alerts. Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
-    "BUS WATCH: ??????? ?? 10 ???? ???? ??? 51 ???? ????? X ?????? Y? ? Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination ? ask; no clock. Server polls Routes periodically; quiet-skip until ETA ? N ? NOT continuous realtime monitoring; FORBIDDEN claiming live stream tracking. Sub-hour refuse does NOT apply to bus_eta.",
+    "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up for the saved board (?????? ?????? / ?? ???????? / ????? N) ? routes { open_itinerary:\"recommended\"|\"all\"|1..3 } with empty origin+destination (engine expands the last board; zero Google fetch). New origin/destination or material trip change ? fresh routes ACTION with full O/D (open_itinerary ignored). FORBIDDEN pretending expand works with no saved board; FORBIDDEN forcing a choice when the initial ask can be answered directly. Missed bus/departure (speaker says they missed the bus / did not catch it / asks what now after a prior transit plan ? paraphrases OK ? including after an intervening assistant reminder) ? routes { recalculate:true, origin+destination from history when reliably known OR empty O/D so the engine reuses the last saved board's O/D only, departure empty|SESSION_CLOCK now/ASAP, aspects:[summary] }; FORBIDDEN open_itinerary for missed-bus (that expands a stale board without Google refetch). Present as newly calculated (NOT continued tracking / NOT continuous monitoring). FORBIDDEN claiming prior option N is still available without reliable identity and current validity. Origin or destination not recoverable and no saved board ? ASK only for the missing field (routes=null); FORBIDDEN inventing O/D. Material O/D change in the same ask ? put the new places in origin/destination (recalculate still fresh-fetches). Exact typed board commands alone (??????? ??????? / ??? ????????? / ?????? N?) ? open_itinerary; board wording plus a new place ? fresh O/D (not open). Not a bus_eta watch unless they asked to be reminded. Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected) OR disclose_network_disruption:true with empty O/D (engine discloses; no provider fetch); FORBIDDEN inventing SX/alerts; FORBIDDEN claiming you checked the network and found no disruptions. Mixed disruption + trip ask ? full O/D routes ACTION + disclose_network_disruption:true (fetch the trip; append U disclose; do not block the route). Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
+    "BUS WATCH: ??????? ?? 10 ???? ???? ??? 51 ???? ????? X ?????? Y? ? Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination ? ask; no clock. Server polls Google Routes ETA periodically (NOT MOT SIRI live); quiet-skip until ETA ? N and on transient poll failures; after repeated poll failures the server sends one honesty notice (no invented ETA) then quiet again ? NOT continuous realtime monitoring; FORBIDDEN claiming live stream tracking. Sub-hour refuse does NOT apply to bus_eta.",
     "FLIGHTS (live AviationStack, default TLV/?????): ????? ????? ?? ?? ????? ???? ? metadata.flights { airport:\"\"|TLV, direction:\"departures\", airline:\"?? ??\", city:\"????\", date:YYYY-MM-DD, aspects:[board] }. ???? ????? ?????? ?????? ? flights { direction:\"arrivals\", city:\"????\", aspects:[next] }. ????? ????? ?????? ???? ???? ? flights { direction:\"arrivals\", within_minutes:30, aspects:[board] }. ??????? ???? 19:00? ? { direction:\"arrivals\", time_from:\"19:00\", aspects:[board] }; ???? 8 ??10? ? time_from+time_to HH:mm Jerusalem; ????? 22:00? ? time_to. ??????? ?? ????? ?????????? ? direction arrivals + airlines:[concrete IATA/names from world knowledge] (e.g. LH,AF,BA,KL,LX,OS,AZ,IB,SN,TP,AY,SK,DY,EW,U2,FR,W6,A3,RO,BT,JU,?) ? FORBIDDEN asking ????? ????? when the region/group is clear; server ORs airlines client-side; require_live_select:false when airlines[] fully expresses the group. LIVE CAPABILITY (F/Q/V/U): F ? airline/airlines/city/flight/date/within_minutes/time_from/time_to/direction; Q ? only AviationStack-supported search params (date is client-side filter); V ? residual semantic when board fields (airline/status/gate/times/city) evidence the ask ? require_live_select:true; U ? cannot verify from API (e.g. ????? ????? / seat comfort) ? disclose, never Stage B for U alone; continue with useful F/Q/V or explain before fetch if blocked. Distinguish no-match vs unable-to-verify. ???? ????? ???? ???? 3242CXD? ? flights { flight:\"3242CXD\", direction:\"arrivals\", aspects:[summary] } ? flight AS SPOKEN. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends board as 2nd message. FORBIDDEN inventing times/gates/status. Missing needed filter ? ask; flights=null.",
     "FLIGHT ETA WATCH: ??????? ?? 30 ???? ???? ?????? ?? LY831? ? Self-nudge + reminders { compose:true, compose_condition:{type:\"flight_eta\",airport:\"TLV\",direction:\"departures\",flight:\"LY831\",minutes_before:30,hours_before:0}, every_count:2?5, every_unit:\"minutes\", watch_once:true }. ?30 ???? ???? ?????? ?????? ? direction:\"arrivals\", hours_before:30 (or minutes_before:1800), interval 15 minutes. Missing flight (and no airline+city) ? ask; no clock. Server quiet-skips until ETA ? threshold. Sub-hour refuse waived for flight_eta.",
     "FLIGHT CHANGED WATCH: ??????? ?? ?? ??????? ????? ??? LY831? ? Self-nudge + reminders { compose:true, compose_condition:{type:\"flight_changed\",airport:\"TLV\",direction:\"arrivals\"|\"departures\",flight:\"LY831\"}, recurrence:{freq:\"interval\",interval:5,unit:\"minutes\"}, watch_once:false } + same-turn flights sample + ack. Server fingerprints status/delay/gate/times; baseline on create; send when fp changes. Sub-hour refuse waived.",
@@ -892,7 +942,7 @@ function workerTargetingInstructions(
     "PERSONAL TASK DEFAULT: ??????? ?? ????? / ????? ??? / ????? ??? without naming a custom list ? list_type tasks, list_name empty, targets [] (built-in personal ?????). Detail/????? stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like ?????? ?????? just because it exists or sounds work-related ? only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
     "NAMED LIST MUTATE: when they name a list (?????? X / ??????? ??????), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA ? personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in ?????/?????/???? ??? ? fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL: exactly ONE list_name equals what they said ? mutate NOW, no ask. Spoken token in TWO OR MORE titles (????? / ????? ???? / ?) ? NOT unique ? treat as (3). (2) VERY SIMILAR but not identical (exactly one near-miss) ? lists=[] and ASK once ???????? ?????? ?X??? ? never mutate until confirm. (3) Several close candidates, OR spoken token in ?2 list_name titles, OR none ? lists=[] and ASK which as NUMBERED 1. 2. 3. (exact list_name; personal vs ?????? ?? X); never pick first/shared/looks-like. Example: ?????? ????? ????????? then ?1. ?????? / ?2. ????? ???? (?????? ?? ????)?. After they answer with the title OR a line index (?2? / ??2?) ? map to the LAST list-pick ask line ? exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index ? re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone (??????? ???? ? a ?????* list). Server will not fix a wrong list_name.",
-    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» when the turn needs address conjugation and there is no complete durable filing/save this turn; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. FORBIDDEN: empty actions or deferring a complete same-turn durable filing/save (e.g. «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב») until gender is answered — emit that filing ACTION this turn. Never ignore SPEAKER_ADDRESS.",
+    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown ? ask once ?????? ???? ????? ??? ?? ?????? when the turn needs address conjugation and there is no complete durable filing/save this turn; on answer ? filing add ????? ?????? (item_info ???/????) ? the server stores address gender for next turns. FORBIDDEN: empty actions or deferring a complete same-turn durable filing/save (e.g. ?????? ??????? ??? ??? ???? ???? 1 ?? ?????) until gender is answered ? emit that filing ACTION this turn. Never ignore SPEAKER_ADDRESS.",
     "Durable personal memory ? file with lists add list_type filing in the same turn (do not only say ?????): ???? ?????/????, ?????, ?????/??? (street+city without the word ????? still counts ? ???? ??? ??? ????), ??? ??????, ?????, ?????, ???? ?????, pets/school/diet/allergies. SAVE VERB (?????/?????/????? ? text and/or files): follow ATTACHMENTS DESTINATION LADDER ? unique custom list_name defaults to ITEM attach (ask which item if unclear; list shell only when explicitly ???? ??????/?????? ????); filings only when ???????/????/??; FORBIDDEN filing only because ?????. LIST NAME MATCH on named lists. TOPIC-ONLY / NO LIST NAMED (??????? ???: ?? / ?????? ?? ?????): lists=[] ? if ?2 list_names contain ???/????? ? ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a ?????* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product ?????); item_description = optional find-helper (???? ??????) after ANY code/ID/doc/car-number/gate-code/?.?/file filing when description empty (bare ????? ???? 703?? counts ? not only ?????); never after soft auto-memory (???? ?????/?????/??????). Find filings by name+info+description. ?? ??????? ??? ? explicit saves; ?? ?? ????? ??? ? memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
@@ -1085,6 +1135,8 @@ async function syncTurnReplies(input: {
   showIcon?: string;
   /** Line map from this turn's show_dump REPLACE (for next-turn BY LINE). */
   lastNumberedDump?: LastNumberedDumpLine[];
+  /** Successful Google A?B trip board (omit to preserve prior on dump-only writes). */
+  lastRoutesBoard?: LastRoutesBoard;
 }): Promise<ChatTurnMessageIds> {
   const bubbles =
     input.bubbles.length > 0 ? input.bubbles : [{ text: "" }];
@@ -1103,11 +1155,25 @@ async function syncTurnReplies(input: {
     select: { raw: true },
   });
   const unpacked = unpackStoredLlmRaw(existingAssistant?.raw);
-  const dumpLines = input.lastNumberedDump ?? [];
-  const nextRaw =
-    dumpLines.length > 0
-      ? packStoredLlmRaw(unpacked.request, unpacked.response, dumpLines)
-      : existingAssistant?.raw;
+  const dumpLines =
+    input.lastNumberedDump && input.lastNumberedDump.length > 0
+      ? input.lastNumberedDump
+      : unpacked.lastNumberedDump;
+  const boardToStore =
+    input.lastRoutesBoard !== undefined
+      ? input.lastRoutesBoard
+      : unpacked.lastRoutesBoard;
+  const shouldRewriteRaw =
+    (input.lastNumberedDump && input.lastNumberedDump.length > 0) ||
+    input.lastRoutesBoard != null;
+  const nextRaw = shouldRewriteRaw
+    ? packStoredLlmRaw(
+        unpacked.request,
+        unpacked.response,
+        dumpLines,
+        boardToStore,
+      )
+    : existingAssistant?.raw;
   await prisma.chatMessage.update({
     where: { id: input.saved.assistant },
     data: {
@@ -1119,7 +1185,7 @@ async function syncTurnReplies(input: {
       ...(input.attachments?.length
         ? { attachments: toJsonValue(input.attachments) }
         : {}),
-      ...(dumpLines.length > 0 ? { raw: toJsonValue(nextRaw) } : {}),
+      ...(shouldRewriteRaw ? { raw: toJsonValue(nextRaw) } : {}),
     },
   });
   const extra = rest.map((bubble, index) => {
@@ -2114,6 +2180,38 @@ export async function sendChatMessage(input: {
         };
       }
     }
+    // Exact transit board open commands (recommended / all / ????? N) ? deterministic
+    // even if the model omitted open_itinerary or emitted an incompatible full search.
+    // Mixed-intent free text does not match mapRoutesOpenCommand (model-driven).
+    if (!guestSpeaker) {
+      const routesOpenCmd = mapRoutesOpenCommand(
+        stripWhatsAppReplyPrefix(input.message),
+      );
+      if (routesOpenCmd != null) {
+        metadata = {
+          ...metadata,
+          routes: {
+            origin: "",
+            destination: "",
+            departure: "",
+            arrival: "",
+            line: "",
+            headsign: "",
+            stopCode: "",
+            agency: "",
+            serviceDate: "",
+            windowEnd: "",
+            mode: "transit",
+            aspects: ["summary"],
+            requireLiveSelect: false,
+            prefer: "",
+            openItinerary: routesOpenCmd,
+            recalculate: false,
+            discloseNetworkDisruption: false,
+          },
+        };
+      }
+    }
     // show_dump: display-only ? drop spurious removes; mutates win over accidental show_dump.
     metadata = stripShowTurnMutates(metadata);
     // Same-turn blank custom create + unambiguous host linked_lists name ? fill listName.
@@ -2828,6 +2926,31 @@ export async function sendChatMessage(input: {
       misses: shareMisses,
       setResponse: setEngineResponse,
     });
+    {
+      const unshareSummary = summarizeUnshareApply({
+        metadata,
+        mutations: listMutations,
+      });
+      if (
+        unshareSummary.partnerLabels.length > 0 ||
+        unshareSummary.appliedUnshareCount > 0
+      ) {
+        const afterUnshare = await withoutFailingTurn(
+          "unshare_remainder_failed",
+          () => getEmployeeRecordSnapshot(employee.id),
+        );
+        workingReply = correctUnshareClaimReply({
+          reply: workingReply,
+          spoken: parseLlmReply(workingReply).response,
+          summary: summarizeUnshareApply({
+            metadata,
+            mutations: listMutations,
+            snapshotAfter: afterUnshare ?? null,
+          }),
+          setResponse: setEngineResponse,
+        });
+      }
+    }
     workingReply = correctAttachmentClaimReply({
       reply: workingReply,
       spoken: parseLlmReply(workingReply).response,
@@ -2887,7 +3010,7 @@ export async function sendChatMessage(input: {
     /** ITEM DUMP rows with files ? engine sends them (model may omit send_attachments). */
     let itemDumpAttachmentIds: string[] = [];
     /**
-     * Engine ITEM DUMP of exactly one tasks row — סמן כבוצע + reminder twin.
+     * Engine ITEM DUMP of exactly one tasks row ? ??? ????? + reminder twin.
      * Kept aside because the show_dump freeze clears model choice taps.
      */
     let itemDumpShowButtons: Array<{ label: string; command: string }> = [];
@@ -3078,7 +3201,7 @@ export async function sendChatMessage(input: {
             })
           | null = null;
         let filingDumpCount = 0;
-        /** Single-about ITEM DUMP of one tasks row — attach סמן כבוצע like speaker path. */
+        /** Single-about ITEM DUMP of one tasks row ? attach ??? ????? like speaker path. */
         let soleTaskItemDump: {
           snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>;
           validId: string;
@@ -3470,7 +3593,29 @@ export async function sendChatMessage(input: {
       });
     }
     // Live routes ACTION ? Google TRANSIT / Places board, MOT GTFS, or SIRI live_arrivals; guests skip.
-    const routesAction = guestSpeaker ? null : metadata.routes ?? null;
+    let routesAction = guestSpeaker ? null : metadata.routes ?? null;
+    // Missed-bus / situation change: model sets recalculate ? fresh Google
+    // search; O/D may be filled from lastRoutesBoard (never open stale board).
+    if (routesAction?.recalculate) {
+      const boardForRecalc = await loadLastRoutesBoardForConversation(
+        conversation.id,
+      );
+      const filled = fillRoutesOdFromBoard(
+        routesAction.origin,
+        routesAction.destination,
+        boardForRecalc,
+      );
+      routesAction = {
+        ...routesAction,
+        origin: filled.origin,
+        destination: filled.destination,
+        openItinerary: null,
+        // Empty departure = provider "now" (do not keep missed leave-by).
+        departure: routesAction.departure.trim() ? routesAction.departure : "",
+        arrival: "",
+      };
+      metadata = { ...metadata, routes: routesAction };
+    }
     const routesLinesBoard = Boolean(
       routesAction?.aspects?.includes("lines"),
     );
@@ -3479,64 +3624,182 @@ export async function sendChatMessage(input: {
         routesAction?.aspects?.includes("nearest_stop") ||
         routesAction?.aspects?.includes("live_arrivals"),
     );
+    const routesDisruptionOnly = Boolean(
+      routesAction?.discloseNetworkDisruption &&
+        !routesAction.origin.trim() &&
+        !routesAction.destination.trim() &&
+        !routesLinesBoard &&
+        !routesGtfs &&
+        routesAction.openItinerary == null &&
+        !routesAction.recalculate,
+    );
+    // Board open is authorized only by an exact closed-choice utterance
+    // (mapRoutesOpenCommand). Model-emitted open_itinerary alone never opens.
+    const routesUtteranceOpen = guestSpeaker
+      ? null
+      : mapRoutesOpenCommand(stripWhatsAppReplyPrefix(input.message));
+    const routesOpenCandidate = Boolean(
+      routesAction?.openItinerary != null &&
+        !routesAction.recalculate &&
+        !routesAction.origin.trim() &&
+        !routesAction.destination.trim() &&
+        !routesLinesBoard &&
+        !routesGtfs,
+    );
+    const routesOpenOnly = Boolean(
+      routesOpenCandidate && routesUtteranceOpen != null,
+    );
+    const routesOpenUnauthorized = Boolean(
+      routesOpenCandidate && routesUtteranceOpen == null,
+    );
+    /** Full new O/D trip ? ignore open_itinerary (fresh search). */
+    const routesFreshTrip = Boolean(
+      routesAction &&
+        routesAction.origin.trim() &&
+        (routesAction.destination.trim() || routesLinesBoard),
+    );
+    const routesRecalculateMissingOd = Boolean(
+      routesAction?.recalculate &&
+        (!routesAction.origin.trim() || !routesAction.destination.trim()),
+    );
+    let turnLastRoutesBoard: LastRoutesBoard | undefined;
     if (
       routesAction &&
-      (routesGtfs ||
-        (routesAction.origin.trim() &&
-          (routesAction.destination.trim() || routesLinesBoard)))
+      (routesOpenOnly ||
+        routesOpenUnauthorized ||
+        routesGtfs ||
+        routesFreshTrip ||
+        routesDisruptionOnly ||
+        routesRecalculateMissingOd)
     ) {
-      const pin = fromPendingLocation(getPendingLocation(input.employeeId));
-      const speakerOrigin =
-        routesAction.origin.toLowerCase() === "speaker";
-      const routesSnapshot = await getEmployeeRecordSnapshot(input.employeeId);
-      const liveBilling = {
-        conversationId: conversation.id,
-        employeeId: employee.id,
-        digitalEmployeeId: digital.id,
-      };
-      const routesResult = await resolveRoutesReply({
-        origin: routesAction.origin,
-        destination: routesAction.destination,
-        departure: routesAction.departure,
-        arrival: routesAction.arrival,
-        line: routesAction.line,
-        headsign: routesAction.headsign,
-        stopCode: routesAction.stopCode,
-        agency: routesAction.agency,
-        serviceDate: routesAction.serviceDate,
-        windowEnd: routesAction.windowEnd,
-        aspects: routesAction.aspects,
-        mode: routesAction.mode,
-        prefer: routesAction.prefer,
-        requireLiveSelect: routesAction.requireLiveSelect === true,
-        speakerAsk: input.message,
-        billing: liveBilling,
-        snapshot: routesSnapshot,
-        originLat: speakerOrigin ? pin?.lat ?? null : null,
-        originLng: speakerOrigin ? pin?.lng ?? null : null,
-      });
-      workingReply = applyLiveDomainReply(workingReply, routesResult.text, {
-        watchSample: watchSampleTurn,
-      });
-      if (
-        routesResult.navigateAddress &&
-        !parseLlmReply(workingReply).navigateAddress
-      ) {
-        workingReply = setEngineNavigateAddress(
+      if (routesDisruptionOnly) {
+        workingReply = applyLiveDomainReply(
           workingReply,
-          routesResult.navigateAddress,
+          ROUTES_DISRUPTION_UNAVAILABLE_HE,
+          { watchSample: watchSampleTurn },
         );
-      }
-      const routesNeedsLocation = replyAsksForWhatsAppPin(routesResult.text);
-      if (
-        shouldClearPendingAfterSpeakerPinUse({
-          usedPendingPin:
-            speakerOrigin && pin != null && !routesNeedsLocation,
-          needsLocation: routesNeedsLocation,
-          replyText: routesResult.text,
-        })
-      ) {
-        clearPendingLocation(input.employeeId);
+      } else if (routesRecalculateMissingOd) {
+        workingReply = applyLiveDomainReply(
+          workingReply,
+          ROUTES_RECALCULATE_NO_CONTEXT_HE,
+          { watchSample: watchSampleTurn },
+        );
+      } else if (routesOpenUnauthorized) {
+        workingReply = applyLiveDomainReply(
+          workingReply,
+          ROUTES_OPEN_UNAUTHORIZED_CLARIFY_HE,
+          { watchSample: watchSampleTurn },
+        );
+      } else if (routesOpenOnly && routesUtteranceOpen != null) {
+        const board = await loadLastRoutesBoardForConversation(
+          conversation.id,
+        );
+        if (!board) {
+          workingReply = applyLiveDomainReply(
+            workingReply,
+            ROUTES_NO_SAVED_BOARD_HE,
+            { watchSample: watchSampleTurn },
+          );
+        } else {
+          // Expand using the authorized closed-choice command (not a conflicting model value).
+          const opened = formatOpenItineraryFromBoard(
+            board,
+            routesUtteranceOpen,
+          );
+          workingReply = applyLiveDomainReply(workingReply, opened.text, {
+            watchSample: watchSampleTurn,
+          });
+          if (
+            opened.navigateAddress &&
+            !parseLlmReply(workingReply).navigateAddress
+          ) {
+            workingReply = setEngineNavigateAddress(
+              workingReply,
+              opened.navigateAddress,
+            );
+          }
+        }
+      } else {
+        const pin = fromPendingLocation(getPendingLocation(input.employeeId));
+        const speakerOrigin =
+          routesAction.origin.toLowerCase() === "speaker";
+        const routesSnapshot = await getEmployeeRecordSnapshot(input.employeeId);
+        const liveBilling = {
+          conversationId: conversation.id,
+          employeeId: employee.id,
+          digitalEmployeeId: digital.id,
+        };
+        const routesResult = await resolveRoutesReply({
+          origin: routesAction.origin,
+          destination: routesAction.destination,
+          departure: routesAction.departure,
+          arrival: routesAction.arrival,
+          line: routesAction.line,
+          headsign: routesAction.headsign,
+          stopCode: routesAction.stopCode,
+          agency: routesAction.agency,
+          serviceDate: routesAction.serviceDate,
+          windowEnd: routesAction.windowEnd,
+          aspects: routesAction.aspects,
+          mode: routesAction.mode,
+          prefer: routesAction.prefer,
+          requireLiveSelect: routesAction.requireLiveSelect === true,
+          speakerAsk: input.message,
+          billing: liveBilling,
+          snapshot: routesSnapshot,
+          originLat: speakerOrigin ? pin?.lat ?? null : null,
+          originLng: speakerOrigin ? pin?.lng ?? null : null,
+        });
+        let routesText = routesResult.text;
+        if (routesAction.discloseNetworkDisruption) {
+          // Mixed trip + disruption U: keep route facts; append honest gap.
+          routesText = `${routesText}\n\n${ROUTES_DISRUPTION_UNAVAILABLE_HE}`;
+        }
+        workingReply = applyLiveDomainReply(workingReply, routesText, {
+          watchSample: watchSampleTurn,
+        });
+        if (
+          routesResult.choiceButtons &&
+          routesResult.choiceButtons.length > 0
+        ) {
+          const spoken = parseLlmReply(workingReply).responseBubbles;
+          if (spoken.length > 0) {
+            const next = spoken.map((bubble, index) =>
+              index === spoken.length - 1
+                ? { ...bubble, buttons: routesResult.choiceButtons }
+                : bubble,
+            );
+            workingReply = setEngineSpokenBubbles(workingReply, next);
+          } else {
+            workingReply = setEngineButtons(
+              workingReply,
+              routesResult.choiceButtons,
+            );
+          }
+        }
+        if (
+          routesResult.navigateAddress &&
+          !parseLlmReply(workingReply).navigateAddress
+        ) {
+          workingReply = setEngineNavigateAddress(
+            workingReply,
+            routesResult.navigateAddress,
+          );
+        }
+        if (routesResult.board) {
+          turnLastRoutesBoard = routesResult.board;
+        }
+        const routesNeedsLocation = replyAsksForWhatsAppPin(routesResult.text);
+        if (
+          shouldClearPendingAfterSpeakerPinUse({
+            usedPendingPin:
+              speakerOrigin && pin != null && !routesNeedsLocation,
+            needsLocation: routesNeedsLocation,
+            replyText: routesResult.text,
+          })
+        ) {
+          clearPendingLocation(input.employeeId);
+        }
       }
     }
     // Live flights ACTION ? AviationStack board / status; guests skip.
@@ -3614,8 +3877,8 @@ export async function sendChatMessage(input: {
       const preTip = parseLlmReply(workingReply);
       let bubbles = preTip.responseBubbles;
       if (metadata.showDump) {
-        // show_dump is display-only — strip model choice taps on a bare dump.
-        // Re-attach engine single-task ITEM DUMP taps (סמן כבוצע / reminder twin).
+        // show_dump is display-only ? strip model choice taps on a bare dump.
+        // Re-attach engine single-task ITEM DUMP taps (??? ????? / reminder twin).
         bubbles = clearBubbleButtons(bubbles);
         if (itemDumpShowButtons.length > 0 && bubbles[0]) {
           bubbles = [
@@ -3738,6 +4001,9 @@ export async function sendChatMessage(input: {
       ...(finalParsed.showIcon ? { showIcon: finalParsed.showIcon } : {}),
       ...(turnLastNumberedDump.length > 0
         ? { lastNumberedDump: turnLastNumberedDump }
+        : {}),
+      ...(turnLastRoutesBoard
+        ? { lastRoutesBoard: turnLastRoutesBoard }
         : {}),
     });
 
