@@ -24,6 +24,7 @@ const LIVE_DOMAIN_KEYS = [
   "weather",
   "market",
   "mashov",
+  "smartschool",
   "places",
   "jewish",
   "routes",
@@ -113,6 +114,7 @@ describe("Capability alignment (offline structural)", () => {
       weather: { place: "תל אביב", aspects: ["summary"] },
       market: { queries: ["דולר"], aspects: ["summary"] },
       mashov: { aspects: ["grades"] },
+      smartschool: { aspects: ["homework"] },
       places: {
         query: "חניון",
         place: "הקניון",
@@ -135,6 +137,7 @@ describe("Capability alignment (offline structural)", () => {
     expect(meta.weather?.place).toBe("תל אביב");
     expect(meta.market?.queries?.[0]).toBe("דולר");
     expect(meta.mashov?.aspects).toContain("grades");
+    expect(meta.smartschool?.aspects).toContain("homework");
     expect(meta.places?.intent).toBe("parking");
     expect(meta.places?.includedType).toBe("parking");
     expect(meta.places?.geoMode).toBe("soft_place");
@@ -150,6 +153,7 @@ describe("Capability alignment (offline structural)", () => {
       weather: /resolveWeatherMessages/,
       market: /resolveMarketReply/,
       mashov: /resolveMashovReply/,
+      smartschool: /resolveSmartschoolReply/,
       places: /resolvePlacesReply/,
       jewish: /resolveJewishReply/,
       routes: /resolveRoutesReply/,

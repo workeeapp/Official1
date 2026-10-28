@@ -16,6 +16,8 @@ export type ComposeEvalFacts = {
   weatherFingerprint?: string;
   /** Stable hash of mashov body content (sha256 hex). */
   mashovFingerprint?: string;
+  /** Stable hash of smartschool body content (sha256 hex). */
+  smartschoolFingerprint?: string;
   /** Left/right daily change % for market_change_compare. */
   marketLeftChangePct?: number | null;
   marketRightChangePct?: number | null;
@@ -213,6 +215,20 @@ export function evaluateComposeCondition(input: {
     };
   }
 
+  if (input.condition.type === "smartschool_new") {
+    const fp = String(input.facts.smartschoolFingerprint ?? "").trim();
+    if (!fp) {
+      return { skipSend: true };
+    }
+    if (fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp,
+    };
+  }
+
   if (input.condition.type === "bus_eta") {
     const minutes = input.facts.busEtaMinutes;
     const fp = String(input.facts.busEtaFingerprint ?? "").trim();
@@ -355,6 +371,10 @@ export function baselineShaForWatch(input: {
   }
   if (input.condition.type === "mashov_new") {
     const fp = String(input.facts.mashovFingerprint ?? "").trim();
+    return fp || null;
+  }
+  if (input.condition.type === "smartschool_new") {
+    const fp = String(input.facts.smartschoolFingerprint ?? "").trim();
     return fp || null;
   }
   if (input.condition.type === "bus_eta") {

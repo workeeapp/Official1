@@ -77,7 +77,7 @@ export interface ReminderSnapshotRow {
   compose_source: string;
   /** Git digest content window in hours (0 = since-last-report for recurring). */
   compose_lookback_hours: number;
-  /** Place/symbols/child for compose_source weather|market|mashov. */
+  /** Place/symbols/child for compose_source weather|market|mashov|smartschool. */
   compose_place?: string;
   /** Conditional watch gate (null when unconditional). */
   compose_condition?: unknown;
@@ -1836,6 +1836,7 @@ export async function applyReminders(input: {
         "weather",
         "market",
         "mashov",
+        "smartschool",
         "jewish",
         "places",
         "flights",
@@ -1872,6 +1873,7 @@ export async function applyReminders(input: {
         nextSource === "weather" ||
         nextSource === "market" ||
         nextSource === "mashov" ||
+        nextSource === "smartschool" ||
         scheduleAnchor === "jewish_candles"
           ? (schedulePlace ||
               reminder.composePlace.trim() ||
@@ -1955,6 +1957,7 @@ export async function applyReminders(input: {
         nextSource === "weather" ||
         nextSource === "market" ||
         nextSource === "mashov" ||
+        nextSource === "smartschool" ||
         nextCondition !== Prisma.DbNull;
       const row = existing
         ? await prisma.reminder.update({
@@ -2400,6 +2403,7 @@ export function toReminderSnapshotRow(
       "weather",
       "market",
       "mashov",
+      "smartschool",
       "jewish",
       "places",
       "flights",
@@ -2412,6 +2416,7 @@ export function toReminderSnapshotRow(
       "weather",
       "market",
       "mashov",
+      "smartschool",
       "jewish",
       "places",
       "flights",

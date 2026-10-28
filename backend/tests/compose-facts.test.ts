@@ -113,6 +113,13 @@ const mashov = vi.hoisted(() => ({
   resolveMashovReply: vi.fn(async () => "ציונים של דניאל:\n• מתמטיקה — 90"),
 }));
 
+const smartschool = vi.hoisted(() => ({
+  parseSmartschoolAspects: vi.fn(() => ["homework"]),
+  resolveSmartschoolReply: vi.fn(
+    async () => "שיעורי בית של דניאל:\n• עברית — לקרוא",
+  ),
+}));
+
 const routes = vi.hoisted(() => ({
   resolveRoutesReply: vi.fn(async () => ({
     text: "מסלול בתחבורה ציבורית מ«מיקום הבית» ל«דיזנגוף»:",
@@ -123,6 +130,7 @@ const routes = vi.hoisted(() => ({
 vi.mock("../src/services/weather.js", () => weather);
 vi.mock("../src/services/market.js", () => market);
 vi.mock("../src/services/mashov.js", () => mashov);
+vi.mock("../src/services/smartschool.js", () => smartschool);
 vi.mock("../src/services/routes.js", () => routes);
 
 import { loadComposeFacts } from "../src/services/compose-facts.js";
@@ -255,6 +263,28 @@ describe("loadComposeFacts", () => {
     >;
     expect(call).not.toHaveProperty("dateFrom");
     expect(call).not.toHaveProperty("dateTo");
+  });
+
+  it("loads smartschool with fixedBody from filings snapshot", async () => {
+    records.getEmployeeRecordSnapshot.mockResolvedValueOnce({
+      lists: [],
+      filing: [
+        { item_name: "שם משתמש לסמארט סקול", item_info: "u" },
+      ],
+      reminders: [],
+    });
+    const bundle = await loadComposeFacts({
+      composeSource: "smartschool",
+      subjectEmployeeId: "tal",
+      repeat: "once",
+      composePlace: "דניאל",
+    });
+    expect(bundle.kind).toBe("smartschool");
+    expect(bundle.fixedBody).toContain("דניאל");
+    expect(smartschool.resolveSmartschoolReply).toHaveBeenCalledWith(
+      expect.objectContaining({ child: "דניאל" }),
+    );
+    expect(bundle.eval?.smartschoolFingerprint).toBeTruthy();
   });
 
   it("routes compose passes subject snapshot into resolveRoutesReply", async () => {

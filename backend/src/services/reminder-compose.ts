@@ -253,6 +253,12 @@ function composeKindHints(
       ...watchExtra,
     ];
   }
+  if (kind === "smartschool") {
+    return [
+      "SmartSchool: use ONLY homework/behavior/timetable/messages from FACTS; never invent grades/absences or repeat passwords.",
+      ...watchExtra,
+    ];
+  }
   return [
     "Creative/fixed-brief send: second person when messaging them; for a joke to the speaker, just tell the joke.",
     "Every run must be NEW. Never repeat a previous joke or the same punchline.",

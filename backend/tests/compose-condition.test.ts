@@ -274,6 +274,28 @@ describe("evaluateComposeCondition", () => {
     expect(gate.shaAfterSend).toBe(fp);
   });
 
+  it("smartschool_new: skips when fingerprint matches lastReportSha", () => {
+    const fp = mashovContentFingerprint("שיעורי בית…");
+    expect(
+      evaluateComposeCondition({
+        condition: { type: "smartschool_new" },
+        facts: { smartschoolFingerprint: fp },
+        lastReportSha: fp,
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("smartschool_new: sends and schedules shaAfterSend when content is new", () => {
+    const fp = mashovContentFingerprint("שיעורי בית חדשים");
+    const gate = evaluateComposeCondition({
+      condition: { type: "smartschool_new" },
+      facts: { smartschoolFingerprint: fp },
+      lastReportSha: "",
+    });
+    expect(gate.skipSend).toBe(false);
+    expect(gate.shaAfterSend).toBe(fp);
+  });
+
   it("bus_eta: skips when ETA above threshold", () => {
     expect(
       evaluateComposeCondition({

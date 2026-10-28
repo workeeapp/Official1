@@ -268,6 +268,7 @@ export type LlmComposeCondition =
       dayOffset?: number;
     }
   | { type: "mashov_new" }
+  | { type: "smartschool_new" }
   | {
       /** Compare daily % change of two tickers (optionally on different day offsets). */
       type: "market_change_compare";
@@ -530,6 +531,11 @@ export interface LlmMetadata {
    */
   mashov?: LlmMashovAction | null;
   /**
+   * Live SmartSchool (Webtop Israel) ask — engine logs in from filings and
+   * replaces response. Never includes password. Missing filings → model asks.
+   */
+  smartschool?: LlmSmartschoolAction | null;
+  /**
    * Live local business / places ask — engine fetches Google Places and replaces
    * response. Missing query or place → model asks; leave unset.
    */
@@ -625,6 +631,22 @@ export interface LlmMashovAction {
    * True when ACTION had a non-empty date_from/date_to that failed calendar
    * validation. Engine must notice — never treat as open-range.
    */
+  dateBoundsInvalid?: boolean;
+}
+
+/** Supported SmartSchool (Webtop) aspects — no grades/absences endpoint yet. */
+export type LlmSmartschoolAspect =
+  | "homework"
+  | "behavior"
+  | "timetable"
+  | "messages";
+
+export interface LlmSmartschoolAction {
+  /** Child first name; empty = only child / ask. */
+  child: string;
+  aspects: LlmSmartschoolAspect[];
+  dateFrom: string | null;
+  dateTo: string | null;
   dateBoundsInvalid?: boolean;
 }
 
@@ -1295,6 +1317,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const weather = parseWeatherAction(meta);
   const market = parseMarketAction(meta);
   const mashov = parseMashovAction(meta);
+  const smartschool = parseSmartschoolAction(meta);
   const places = parsePlacesAction(meta);
   const jewish = parseJewishAction(meta);
   const routes = parseRoutesAction(meta);
@@ -1356,6 +1379,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(weather ? { weather } : {}),
     ...(market ? { market } : {}),
     ...(mashov ? { mashov } : {}),
+    ...(smartschool ? { smartschool } : {}),
     ...(places ? { places } : {}),
     ...(jewish ? { jewish } : {}),
     ...(routes ? { routes } : {}),
@@ -2537,6 +2561,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     parseComposeSource(record) === "weather" ||
     parseComposeSource(record) === "market" ||
     parseComposeSource(record) === "mashov" ||
+    parseComposeSource(record) === "smartschool" ||
     parseComposeSource(record) === "jewish" ||
     parseComposeSource(record) === "places" ||
     parseComposeSource(record) === "flights" ||
@@ -2619,6 +2644,7 @@ function parseComposeSource(
   | "weather"
   | "market"
   | "mashov"
+  | "smartschool"
   | "jewish"
   | "places"
   | "flights"
@@ -2668,13 +2694,18 @@ function parseComposeSource(
   ) {
     return "market";
   }
-  if (
-    raw === "mashov" ||
-    raw === "smart_school" ||
-    raw === "smartschool" ||
-    raw === "משוב"
-  ) {
+  if (raw === "mashov" || raw === "משוב") {
     return "mashov";
+  }
+  if (
+    raw === "smartschool" ||
+    raw === "smart_school" ||
+    raw === "smart-school" ||
+    raw === "סמארט סקול" ||
+    raw === "סמארטסקול" ||
+    raw === "webtop"
+  ) {
+    return "smartschool";
   }
   if (
     raw === "jewish" ||
@@ -2875,6 +2906,14 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
   }
   if (type === "mashov_new" || type === "mashov") {
     return { type: "mashov_new" };
+  }
+  if (
+    type === "smartschool_new" ||
+    type === "smartschool" ||
+    type === "smart_school_new" ||
+    type === "smart_school"
+  ) {
+    return { type: "smartschool_new" };
   }
   if (
     type === "market_change_compare" ||
@@ -3535,7 +3574,7 @@ function parseMashovDateBound(
 export function parseMashovAction(
   meta: Record<string, unknown>,
 ): LlmMashovAction | null {
-  const raw = meta.mashov ?? meta.smart_school ?? meta.smartSchool;
+  const raw = meta.mashov;
   if (raw === null || raw === undefined) {
     return null;
   }
@@ -3603,6 +3642,88 @@ export function parseMashovAction(
   return {
     child,
     aspects: aspects.length > 0 ? aspects : ["grades"],
+    dateFrom,
+    dateTo,
+    ...(dateBoundsInvalid ? { dateBoundsInvalid: true } : {}),
+  };
+}
+
+const SMARTSCHOOL_ASPECTS = new Set<LlmSmartschoolAspect>([
+  "homework",
+  "behavior",
+  "timetable",
+  "messages",
+]);
+
+/** metadata.smartschool — live Webtop fetch from filings; never includes password. */
+export function parseSmartschoolAction(
+  meta: Record<string, unknown>,
+): LlmSmartschoolAction | null {
+  const raw = meta.smartschool ?? meta.smart_school ?? meta.smartSchool;
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (raw === true || raw === "true") {
+    return { child: "", aspects: ["homework"], dateFrom: null, dateTo: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const child = readText(row, ["child", "student", "name", "ילד"]).slice(0, 80);
+  const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;
+  const aspects: LlmSmartschoolAspect[] = [];
+  if (Array.isArray(aspectsRaw)) {
+    for (const entry of aspectsRaw) {
+      let key = String(entry ?? "")
+        .trim()
+        .toLowerCase();
+      if (key === "behave" || key === "behaviour" || key === "discipline") {
+        key = "behavior";
+      }
+      if (key === "schedule" || key === "מערכת") {
+        key = "timetable";
+      }
+      if (
+        key === "mail" ||
+        key === "inbox" ||
+        key === "הודעות" ||
+        key === "דואר" ||
+        key === "notifications"
+      ) {
+        key = "messages";
+      }
+      if (
+        key === "חיזוק" ||
+        key === "חיזוקים" ||
+        key === "חיזוקים חיוביים" ||
+        key === "התנהגות"
+      ) {
+        key = "behavior";
+      }
+      if (key === "שיעורי בית" || key === "שעורים") {
+        key = "homework";
+      }
+      const aspect = key as LlmSmartschoolAspect;
+      if (SMARTSCHOOL_ASPECTS.has(aspect) && !aspects.includes(aspect)) {
+        aspects.push(aspect);
+      }
+    }
+  }
+  const fromBound = parseMashovDateBound(row, "date_from", "dateFrom", "from");
+  const toBound = parseMashovDateBound(row, "date_to", "dateTo", "to");
+  const dateBoundsInvalid =
+    fromBound.explicitInvalid || toBound.explicitInvalid;
+  let dateFrom = dateBoundsInvalid ? null : fromBound.value;
+  let dateTo = dateBoundsInvalid ? null : toBound.value;
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    const swap = dateFrom;
+    dateFrom = dateTo;
+    dateTo = swap;
+  }
+  return {
+    child,
+    aspects: aspects.length > 0 ? aspects : ["homework"],
     dateFrom,
     dateTo,
     ...(dateBoundsInvalid ? { dateBoundsInvalid: true } : {}),

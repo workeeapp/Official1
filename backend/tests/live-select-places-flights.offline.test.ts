@@ -529,13 +529,13 @@ describe("same-turn live_select schema wording", () => {
 });
 
 describe("Stage B isolation (source contract)", () => {
-  it("Weather/Market/Routes/Mashov/Jewish resolvers do not call runLivePostSelect", () => {
+  it("Weather/Market/Routes/Mashov/SmartSchool/Jewish resolvers do not call runLivePostSelect", () => {
     const root = resolve(process.cwd(), "src/services");
     for (const file of [
       "weather.ts",
       "market.ts",
-      "routes.ts",
       "mashov.ts",
+      "smartschool.ts",
       "jewish.ts",
     ]) {
       const src = readFileSync(resolve(root, file), "utf8");
@@ -544,7 +544,7 @@ describe("Stage B isolation (source contract)", () => {
     }
   });
 
-  it("chat wires requireLiveSelect only into places and flights resolves", () => {
+  it("chat wires requireLiveSelect into places/flights/routes resolves only", () => {
     const chat = readFileSync(
       resolve(process.cwd(), "src/services/chat.service.ts"),
       "utf8",
@@ -554,9 +554,11 @@ describe("Stage B isolation (source contract)", () => {
         /requireLiveSelect:\s*(\w+)\.requireLiveSelect\s*===\s*true/g,
       ),
     ].map((m) => m[1]);
-    expect(gates).toEqual(["placesAction", "flightsAction"]);
+    expect(gates.sort()).toEqual(
+      ["flightsAction", "placesAction", "routesAction"].sort(),
+    );
     expect(chat).not.toMatch(
-      /requireLiveSelect:\s*(weather|market|routes|mashov|jewish)/i,
+      /requireLiveSelect:\s*(weather|market|mashov|smartschool|jewish)/i,
     );
   });
 });

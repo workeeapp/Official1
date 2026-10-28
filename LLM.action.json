@@ -73,6 +73,7 @@
     "    \"weather\": null,",
     "    \"market\": null,",
     "    \"mashov\": null,",
+    "    \"smartschool\": null,",
     "    \"tips\": null",
     "  }",
     "}",
@@ -530,7 +531,7 @@
                           },
                           "compose_source": {
                             "type": "string",
-                            "description": "list_type reminders: fire-time data source (git_log|saved_data|weather|market|mashov|jewish|places|flights|routes) or empty."
+                            "description": "list_type reminders: fire-time data source (git_log|saved_data|weather|market|mashov|smartschool|jewish|places|flights|routes) or empty."
                           },
                           "compose_place": {
                             "type": "string",
@@ -541,7 +542,7 @@
                               "object",
                               "null"
                             ],
-                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / market_change_compare / expr / field_changed / bus_eta / flight_eta / flight_changed)."
+                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / smartschool_new / market_change_compare / expr / field_changed / bus_eta / flight_eta / flight_changed)."
                           },
                           "watch_once": {
                             "type": "boolean",
@@ -552,7 +553,7 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "list_type reminders: plugin aspects at fire (e.g. mashov grades/behavior/homework/absences/messages)."
+                            "description": "list_type reminders: plugin aspects at fire (e.g. mashov grades/…; smartschool homework/behavior/timetable/messages)."
                           },
                           "schedule_anchor": {
                             "type": "string",
@@ -1225,7 +1226,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable/absences/messages only (LIVE CAPABILITY GATE). No upcoming-exam calendar in this integration: future test-board asks → mashov null + disclose, do not fetch a substitute feed. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. Login year = academic year filing (NOT an event-date filter). Optional date_from/date_to = calendar day range from SESSION_CLOCK for filtering returned rows. Year filing never invented. Missing filings → ask and file; leave mashov null. Several children → set child or ask.",
+                "description": "Live Mashov (משוב) ask — grades/homework/behavior/timetable/absences/messages only (LIVE CAPABILITY GATE). No upcoming-exam calendar in this integration: future test-board asks → mashov null + disclose, do not fetch a substitute feed. Server logs in using speaker filings (תעודת זהות למשוב / סיסמת משוב or סיסמת משוב של {ילד} / שם בית ספר למשוב + required שנת לימודים למשוב, or סמל בית ספר למשוב + year) — the password MUST be stored in a filing item_info, never in this object. Login year = academic year filing (NOT an event-date filter). Optional date_from/date_to = calendar day range from SESSION_CLOCK for filtering returned rows. Year filing never invented. Missing filings → ask and file; leave mashov null. Several children → set child or ask. Distinct from smartschool (Webtop).",
                 "properties": {
                   "child": {
                     "type": "string",
@@ -1262,6 +1263,49 @@
                     ],
                     "maxLength": 10,
                     "description": "Inclusive YYYY-MM-DD end of range. null when no calendar range. Swap-safe with date_from on the server."
+                  }
+                }
+              },
+              "smartschool": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Live SmartSchool Israel (Webtop) ask — homework/behavior/timetable/messages only (LIVE CAPABILITY GATE). grades and absences are U (no endpoint) → smartschool null + disclose; do not fetch a substitute feed. Distinct from mashov (משוב). Server logs in using speaker filings (שם משתמש לסמארט סקול / סיסמת סמארט סקול or סיסמת סמארט סקול של {ילד} / שנת לימודים לסמארט סקול required for timetable) — password MUST be in filing item_info, never in this object. Optional date_from/date_to = calendar day range from SESSION_CLOCK. Missing filings → ask and file; leave smartschool null. Several children → set child or ask.",
+                "properties": {
+                  "child": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "description": "Child first name from speech (דניאל). Empty when only one child or unknown yet."
+                  },
+                  "aspects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "homework",
+                        "behavior",
+                        "timetable",
+                        "messages"
+                      ]
+                    },
+                    "description": "Bare «מה בסמארט סקול» / שיעורי בית → [homework]; התנהגות → [behavior]; מערכת → [timetable]; הודעות → [messages]. Can combine. ציונים / חיסורים → leave smartschool null + disclose (U)."
+                  },
+                  "date_from": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 10,
+                    "description": "Inclusive YYYY-MM-DD from SESSION_CLOCK. null when no calendar range. Never invent."
+                  },
+                  "date_to": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 10,
+                    "description": "Inclusive YYYY-MM-DD end of range. null when no calendar range."
                   }
                 }
               },

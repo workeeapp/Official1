@@ -13,13 +13,14 @@ const GENERAL_LIVE_KEYS = [
   "general_filing_media_ask",
   "general_location_waze",
   "general_mashov",
+  "general_smartschool",
   "general_watch",
 ] as const;
 
 describe("general live tip catalog seeds", () => {
   const generals = SYSTEM_TIP_SEEDS.filter((s) => s.triggerKind === "general");
 
-  it("includes the nine live/capability general tips with stable keys", () => {
+  it("includes the live/capability general tips with stable keys", () => {
     const keys = generals.map((s) => s.key);
     for (const key of GENERAL_LIVE_KEYS) {
       expect(keys).toContain(key);

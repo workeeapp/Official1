@@ -32,6 +32,11 @@ import {
   type MashovAspect,
 } from "./mashov.js";
 import {
+  parseSmartschoolAspects,
+  resolveSmartschoolReply,
+  type SmartschoolAspect,
+} from "./smartschool.js";
+import {
   parseJewishAspects,
   resolveJewishReply,
   type JewishAspect,
@@ -53,6 +58,7 @@ export type ComposeSourceKind =
   | "weather"
   | "market"
   | "mashov"
+  | "smartschool"
   | "jewish"
   | "places"
   | "flights"
@@ -69,6 +75,7 @@ export type ComposeFactsBundle = {
     | "weather"
     | "market"
     | "mashov"
+    | "smartschool"
     | "jewish"
     | "places"
     | "flights"
@@ -110,6 +117,8 @@ export async function loadComposeFacts(input: {
   marketAspects?: MarketAspect[] | unknown;
   /** Optional mashov aspects; default grades. */
   mashovAspects?: MashovAspect[] | unknown;
+  /** Optional smartschool aspects; default homework. */
+  smartschoolAspects?: SmartschoolAspect[] | unknown;
   /** Unified aspects list from Reminder.composeAspects. */
   composeAspects?: string[] | unknown;
   /** Day index for weather_rain / weather_changed (0=today). */
@@ -319,6 +328,39 @@ export async function loadComposeFacts(input: {
         factsLabel: "Mashov",
         fixedBody:
           "לא הצלחתי לשלוף עכשיו נתונים ממשוב. נסה שוב בעוד רגע.",
+      };
+    }
+  }
+
+  if (source === "smartschool") {
+    const child = String(input.composePlace ?? "").trim();
+    const aspects = parseSmartschoolAspects(
+      input.smartschoolAspects ?? listAspects,
+    );
+    try {
+      const snapshot = await getEmployeeRecordSnapshot(input.subjectEmployeeId);
+      const body = await resolveSmartschoolReply({
+        filings: snapshot.filing ?? [],
+        child,
+        aspects,
+      });
+      return {
+        kind: "smartschool",
+        facts: body,
+        factsLabel: "SmartSchool (סמארט סקול)",
+        fixedBody: body,
+        sessionClock: formatSessionClockContext(input.now),
+        eval: {
+          smartschoolFingerprint: mashovContentFingerprint(body),
+        },
+      };
+    } catch {
+      return {
+        kind: "smartschool",
+        facts: "",
+        factsLabel: "SmartSchool",
+        fixedBody:
+          "לא הצלחתי לשלוף עכשיו נתונים מסמארט סקול. נסה שוב בעוד רגע.",
       };
     }
   }

@@ -3358,6 +3358,75 @@ describe("parseLlmReply", () => {
     });
   });
 
+  it("reads metadata.smartschool (and smart_school alias) without password", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            smartschool: {
+              child: "דניאל",
+              aspects: ["homework", "behavior", "grades"],
+            },
+          },
+        }),
+      ).smartschool,
+    ).toEqual({
+      child: "דניאל",
+      aspects: ["homework", "behavior"],
+      dateFrom: null,
+      dateTo: null,
+    });
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "",
+          metadata: {
+            smart_school: {
+              child: "מאיה",
+              aspects: ["messages"],
+            },
+          },
+        }),
+      ).smartschool,
+    ).toMatchObject({
+      child: "מאיה",
+      aspects: ["messages"],
+    });
+  });
+
+  it("maps compose_source smartschool and smartschool_new", () => {
+    expect(
+      parseReplyMetadata(
+        JSON.stringify({
+          response: "אשלח",
+          metadata: {
+            reminders: [
+              {
+                action: "add",
+                item: "לשלוח מסמארט סקול",
+                compose: true,
+                compose_source: "smartschool",
+                compose_place: "דניאל",
+                compose_condition: { type: "smartschool_new" },
+                text: "שיעורי בית",
+                in: 60,
+                ping: ["עמית"],
+              },
+            ],
+          },
+        }),
+      ).reminders,
+    ).toMatchObject([
+      {
+        compose: true,
+        composeSource: "smartschool",
+        composePlace: "דניאל",
+        composeCondition: { type: "smartschool_new" },
+      },
+    ]);
+  });
+
   it("reads mashov absences/messages and date range", () => {
     expect(
       parseReplyMetadata(
