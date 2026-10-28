@@ -14,7 +14,7 @@ import {
 } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { prisma } from "../database/prisma.js";
-import { normalizeEmployeePhone } from "../utils/phone.js";
+import { normalizeEmployeePhone, normalizePhoneDigits } from "../utils/phone.js";
 import {
   ConflictError,
   isUniqueConstraintError,
@@ -292,6 +292,71 @@ export async function listEmployeesForUser(userId: string): Promise<PublicEmploy
   });
 
   return employees.map(toPublicEmployee);
+}
+
+/**
+ * Registered non-guest humans whose phone matches any of the given numbers
+ * (any account). Used so Contacts can address cross-account share partners.
+ */
+export async function listRegisteredHumansByPhones(
+  phones: string[],
+): Promise<PublicEmployee[]> {
+  const canonical = [
+    ...new Set(
+      phones
+        .map((phone) => normalizeEmployeePhone(phone) ?? normalizePhoneDigits(phone))
+        .filter((phone): phone is string => Boolean(phone)),
+    ),
+  ];
+  if (canonical.length === 0) {
+    return [];
+  }
+  const variants = new Set<string>(canonical);
+  for (const phone of canonical) {
+    if (phone.startsWith("972") && phone.length >= 12) {
+      variants.add(`0${phone.slice(3)}`);
+    }
+  }
+  const rows = await prisma.employee.findMany({
+    where: {
+      kind: "human",
+      isGuest: false,
+      phone: { in: [...variants] },
+    },
+  });
+  return rows.map(toPublicEmployee);
+}
+
+/** Protected Lucy id for an account (creates Lucy if missing). */
+export async function getProtectedLucyIdForUser(
+  userId: string,
+): Promise<string | null> {
+  await ensureProtectedLucy(userId);
+  const lucy = await prisma.employee.findFirst({
+    where: {
+      userId,
+      kind: "digital",
+      OR: [
+        { isProtected: true },
+        { name: LUCY_NAME },
+        { nickname: LUCY_NAME },
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return lucy?.id ?? null;
+}
+
+/** Account userId for an employee row (any team). */
+export async function getEmployeeUserId(
+  employeeId: string,
+): Promise<string | null> {
+  const row = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    select: { userId: true },
+  });
+  return row?.userId ?? null;
 }
 
 export async function resolveActingEmployee(userId: string): Promise<PublicEmployee> {

@@ -1747,6 +1747,41 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
+  // Cross-account share partners appear in visible_to but not on this User —
+  // load their display names so shared_with / assigned_by resolve.
+  const missingNameIds = new Set<string>();
+  const collectVisibleIds = (visibleTo: unknown) => {
+    for (const id of idList(visibleTo)) {
+      missingNameIds.add(id);
+    }
+  };
+  for (const item of sharedItems) {
+    collectVisibleIds(item.visibleTo);
+    collectVisibleIds(item.list.visibleTo);
+    if (item.addedById) {
+      missingNameIds.add(item.addedById);
+    }
+    missingNameIds.add(item.list.employee.id);
+  }
+  for (const list of partnerLists) {
+    collectVisibleIds(list.visibleTo);
+    missingNameIds.add(list.employee.id);
+  }
+  for (const filing of partnerFilings) {
+    collectVisibleIds(filing.visibleTo);
+  }
+  for (const person of people) {
+    missingNameIds.delete(person.id);
+  }
+  const extraPeople =
+    missingNameIds.size > 0
+      ? await prisma.employee.findMany({
+          where: { id: { in: [...missingNameIds] } },
+          select: { id: true, name: true, nickname: true, surname: true },
+        })
+      : [];
+  const allPeople = [...people, ...extraPeople];
+
   const workerViewerId = viewerScope ? options?.scopeItemsToViewerId : undefined;
   const workerReminderLinks = workerViewerId
     ? await loadWorkerReminderLinks(ownListsRaw.flatMap((list) => list.items))
@@ -1765,7 +1800,10 @@ export async function getEmployeeRecordSnapshot(
       ? ownListsScoped.filter((list) => list.items.length > 0)
       : ownListsScoped;
   const names = new Map(
-    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
+    allPeople.map((person) => [
+      person.id,
+      person.nickname?.trim() || person.name,
+    ]),
   );
   const activeReminderRows = reminderRows.filter(
     (row) => row.status === "active",
@@ -3638,10 +3676,15 @@ async function resolveListActionAgainstSaved(
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Owner list of each live row addressed by item_id, limited to this account. */
+/**
+ * Owner list of each live row addressed by item_id.
+ * Same-account rows always qualify; cross-account rows qualify when the actor
+ * owns them or appears in list/item visible_to (non-guest share partners).
+ */
 export async function loadListItemOwners(
   userId: string,
   itemIds: string[],
+  actorId?: string,
 ): Promise<Map<string, ListItemOwnerRef>> {
   const owners = new Map<string, ListItemOwnerRef>();
   const ids = itemIds.filter((id) => UUID_RE.test(id));
@@ -3652,7 +3695,7 @@ export async function loadListItemOwners(
     where: {
       id: { in: ids },
       deletedAt: null,
-      list: { deletedAt: null, employee: { userId } },
+      list: { deletedAt: null },
     },
     select: {
       id: true,
@@ -3664,27 +3707,43 @@ export async function loadListItemOwners(
           name: true,
           scope: true,
           visibleTo: true,
+          employee: { select: { userId: true } },
         },
       },
     },
   });
   for (const row of rows) {
+    const itemVisibleTo = idList(row.visibleTo);
+    const listVisibleTo = idList(row.list.visibleTo);
+    const sameAccount = row.list.employee.userId === userId;
+    const actorAllowed =
+      Boolean(actorId) &&
+      (row.list.employeeId === actorId ||
+        itemVisibleTo.includes(actorId!) ||
+        listVisibleTo.includes(actorId!));
+    if (!sameAccount && !actorAllowed) {
+      continue;
+    }
     owners.set(row.id, {
       ownerId: row.list.employeeId,
       listType: row.list.listType,
       listName: row.list.name,
       listScope: row.list.scope === "shared" ? "shared" : "personal",
-      listVisibleTo: idList(row.list.visibleTo),
-      itemVisibleTo: idList(row.visibleTo),
+      listVisibleTo,
+      itemVisibleTo,
     });
   }
   return owners;
 }
 
-/** Owner of each live filing addressed by filing_id, limited to this account. */
+/**
+ * Owner of each live filing addressed by filing_id.
+ * Same-account always; cross-account when actor owns or is in visible_to.
+ */
 export async function loadFilingOwners(
   userId: string,
   filingIds: string[],
+  actorId?: string,
 ): Promise<Map<string, FilingOwnerRef>> {
   const owners = new Map<string, FilingOwnerRef>();
   const ids = filingIds.filter((id) => UUID_RE.test(id));
@@ -3695,19 +3754,27 @@ export async function loadFilingOwners(
     where: {
       id: { in: ids },
       deletedAt: null,
-      employee: { userId },
     },
     select: {
       id: true,
       employeeId: true,
       visibleTo: true,
       scope: true,
+      employee: { select: { userId: true } },
     },
   });
   for (const row of rows) {
+    const visibleTo = idList(row.visibleTo);
+    const sameAccount = row.employee.userId === userId;
+    const actorAllowed =
+      Boolean(actorId) &&
+      (row.employeeId === actorId || visibleTo.includes(actorId!));
+    if (!sameAccount && !actorAllowed) {
+      continue;
+    }
     owners.set(row.id, {
       ownerId: row.employeeId,
-      visibleTo: idList(row.visibleTo),
+      visibleTo,
       scope: row.scope === "shared" ? "shared" : "personal",
     });
   }
@@ -3760,7 +3827,11 @@ export async function removeVisibleCustomItems(input: {
     where: {
       listType: "custom",
       deletedAt: null,
-      employee: { userId: input.userId, kind: "human" },
+      employee: { kind: "human" },
+      OR: [
+        { employee: { userId: input.userId } },
+        { scope: "shared" },
+      ],
     },
     include: {
       items: { where: { deletedAt: null } },
@@ -3776,6 +3847,13 @@ export async function removeVisibleCustomItems(input: {
         continue;
       }
       for (const list of lists) {
+        if (
+          list.employee.userId !== input.userId &&
+          !idList(list.visibleTo).includes(input.actorId) &&
+          !list.items.some((row) => idList(row.visibleTo).includes(input.actorId))
+        ) {
+          continue;
+        }
         const visibleTo = idList(list.visibleTo);
         const existing = list.items.find((row) => row.id === itemId);
         if (!existing) {

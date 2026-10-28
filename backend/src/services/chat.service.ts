@@ -68,7 +68,12 @@ import {
   type ShareApplyMiss,
   type SharedItemEvent,
 } from "./employee-records.service.js";
-import { getEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
+import {
+  getEmployeeForUser,
+  getEmployeeUserId,
+  getProtectedLucyIdForUser,
+  listEmployeesForUser,
+} from "./employee.service.js";
 import {
   applyListOps,
   formatListOpFallback,
@@ -146,6 +151,7 @@ import {
   formatSpeakerContacts,
   getContactBookShare,
   listContactsForEmployee,
+  resolveExternalSharePartners,
 } from "./contact.service.js";
 import { registerGuestMember } from "./guest-register.service.js";
 import {
@@ -745,7 +751,7 @@ export function buildLucyModelEvalInstructions(input: {
     "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently. Do not claim you lack a fact that appears there.",
     "FILING REMOVE: ???/???? a filing under EMPLOYEE_SAVED_DATA.filing (*??????*) or line N after a ?????? dump ? remove_filing with filing_id from THIS turn (LAST_NUMBERED_DUMP id for that n, or the row's filing_id). lists=[]. Never lists.remove for filings. Never invent ids.",
     "FILING UPDATE: ???/????? a filing ? update_filing with filing_id from THIS turn + new fields. lists=[]. Never lists.update for filings.",
-    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
     "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks.",
     "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
   ]
@@ -801,7 +807,7 @@ function workerTargetingInstructions(
     "Do not turn a send/check/tell request into a list or task unless they also asked to add one ? except the worker task required for a scheduled send above. After tell-to-buy/task/meeting/filing: send first; offer ONLY a shared/partnered save with the people you messaged (never the speaker's private shopping/tasks alone). On yes ? lists/filing with targets including those people (+ speaker for shared). After a speaker timed task without ????? ??: save the task and offer a reminder in response ? do not auto-add reminders.",
     "messages.targets and reminders.ping may be employee names, SPEAKER_CONTACTS names, or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
-    "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping. NEVER ask for their number again.",
+    "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping / lists.targets / filing.targets / directory.targets. NEVER ask for their number again. Registered Workee members in the phone book share and assign the same way as Known employees (any team) — guests stay view-only.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
     "After they give digits for an unknown person, ASK ????? ?? ?name? ???? ???????? ???? Empty directory and empty messages/reminders while asking.",
     "Yes ? same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER ? do not ask again what to send. No ? directory []; still emit messages or reminders using the phone digits if the words were already given.",
@@ -1200,10 +1206,17 @@ async function pushRelayMessage(input: {
   speaker: string;
   text: string;
 }): Promise<ChatThreadNotification> {
+  const targetUserId =
+    (await getEmployeeUserId(input.employeeId)) ?? input.userId;
+  const digitalEmployeeId =
+    targetUserId === input.userId
+      ? input.digitalEmployeeId
+      : ((await getProtectedLucyIdForUser(targetUserId)) ??
+        input.digitalEmployeeId);
   const conversation = await getOrCreateConversation(
-    input.userId,
+    targetUserId,
     input.employeeId,
-    input.digitalEmployeeId,
+    digitalEmployeeId,
   );
   const raw = { relay: true };
   const message = await saveAssistantMessage({
@@ -1221,14 +1234,14 @@ async function pushRelayMessage(input: {
 
   const notification = {
     employeeId: input.employeeId,
-    digitalEmployeeId: input.digitalEmployeeId,
+    digitalEmployeeId,
     message,
     raw,
   };
   publishChatEvent(
-    input.userId,
+    targetUserId,
     input.employeeId,
-    input.digitalEmployeeId,
+    digitalEmployeeId,
     notification,
   );
   return notification;
@@ -1316,10 +1329,18 @@ async function pushTargetNotification(input: {
   notification: ChatThreadNotification;
   whatsappSkips: WhatsAppDeliverySkip[];
 }> {
+  // Cross-account partners get the notice on their own User + Lucy thread.
+  const targetUserId =
+    (await getEmployeeUserId(input.target.id)) ?? input.userId;
+  const digitalEmployeeId =
+    targetUserId === input.userId
+      ? input.digitalEmployeeId
+      : ((await getProtectedLucyIdForUser(targetUserId)) ??
+        input.digitalEmployeeId);
   const conversation = await getOrCreateConversation(
-    input.userId,
+    targetUserId,
     input.target.id,
-    input.digitalEmployeeId,
+    digitalEmployeeId,
   );
   const labeled = withSavedItemLabels(input.metadata, input.savedLabels);
   const text = fallbackNotificationText(input.actor, labeled, {
@@ -1349,11 +1370,16 @@ async function pushTargetNotification(input: {
 
   const notification = {
     employeeId: input.target.id,
-    digitalEmployeeId: input.digitalEmployeeId,
+    digitalEmployeeId,
     message,
     raw,
   };
-  publishChatEvent(input.userId, input.target.id, input.digitalEmployeeId, notification);
+  publishChatEvent(
+    targetUserId,
+    input.target.id,
+    digitalEmployeeId,
+    notification,
+  );
   const whatsappDelivery = await deliverWhatsAppRelays(
     [{ target: input.target, text, buttons }],
     input.actor.id,
@@ -1717,6 +1743,13 @@ export async function sendChatMessage(input: {
   const speakerContacts = guestSpeaker
     ? []
     : await listContactsForEmployee(input.employeeId);
+  const externalPartners = guestSpeaker
+    ? []
+    : await resolveExternalSharePartners(
+        speakerContacts,
+        new Set(humans.map((row) => row.id)),
+      );
+  const humansForPlan = [...humans, ...externalPartners];
   const contactBookShare = guestSpeaker
     ? null
     : await getContactBookShare(input.employeeId);
@@ -1852,7 +1885,7 @@ export async function sendChatMessage(input: {
           : "SPEAKER_ADDRESS is how to address this speaker (male/female/unknown). Always follow it for second-person Hebrew. filing is durable memory + explicit saves ? use family/job silently; address gender prefers SPEAKER_ADDRESS. ?? ??????? ??? ? prefer codes/docs/explicit ?????; ?? ?? ????? ??? ? memory rows. Do not claim you lack a fact that appears there.",
         guestSpeaker
           ? ""
-          : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number.",
+          : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
         guestSpeaker
           ? ""
           : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker. If they ask about ?? ????? / ?????? / ?????? ??????? / ???? ??????? about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent ???? (or any other person) as who to ask/send ? example names are not real; only message someone the speaker named this turn. Snooze / ????? ?? ??? / ?? ?? / ???? X about that block ? NEW self-nudge for this speaker from RECENT_OUTBOUND.item/text (three ACTIONS). Bare ????? ???? right after that outbound = snooze the same item. Do not revive the old done clock ? add a new one. Missing delay ? ASK ????",
@@ -2098,7 +2131,7 @@ export async function sendChatMessage(input: {
       : await applyListOps({
             userId: input.userId,
             actor: employee,
-            employees: humans,
+            employees: humansForPlan,
             ops: metadata.listOps ?? [],
           });
     const sharedLists = await listSharedCustomListsForActor(
@@ -2110,17 +2143,20 @@ export async function sendChatMessage(input: {
       : await loadListItemOwners(
           input.userId,
           listActionItemIds(metadataForApply.lists),
+          employee.id,
         );
     const filingOwners = guestSpeaker
       ? undefined
       : await loadFilingOwners(
           input.userId,
           filingActionIds(metadataForApply.filing ?? []),
+          employee.id,
         );
     const plan = planTargetedActions({
       actor: employee,
       employees: humans,
       workers: digitalEmployees(employees),
+      externalPartners,
       metadata: metadataForApply,
       sharedLists,
       itemOwners,
@@ -2129,7 +2165,7 @@ export async function sendChatMessage(input: {
     const relays = planRelayDeliveries({
       actor: employee,
       sender: digital,
-      employees,
+      employees: [...employees, ...externalPartners],
       messages: guestSpeaker ? [] : resolveRelayMessages(metadata.messages ?? []),
     });
 
@@ -2250,7 +2286,7 @@ export async function sendChatMessage(input: {
     const reminderResult = await applyReminders({
       userId: input.userId,
       actor: employee,
-      employees: humans,
+      employees: humansForPlan,
       reminders: reminderWrites,
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
@@ -2282,7 +2318,7 @@ export async function sendChatMessage(input: {
           userId: input.userId,
           ownerEmployeeId: employee.id,
           actions: metadata.directory ?? [],
-          employees: humans,
+          employees: humansForPlan,
         });
     const refreshedContacts =
       directoryResult.saved.length > 0 || directoryResult.removed.length > 0
@@ -2360,7 +2396,7 @@ export async function sendChatMessage(input: {
       )) ?? [];
     const phoneRelays = planPhoneRelays(
       guestSpeaker ? [] : metadata.messages ?? [],
-      employees,
+      [...employees, ...externalPartners],
       employee.id,
       refreshedContacts,
     );
@@ -2407,7 +2443,7 @@ export async function sendChatMessage(input: {
       if (notified.has(notice.employeeId) || notice.employeeId === employee.id) {
         continue;
       }
-      const target = humans.find((row) => row.id === notice.employeeId);
+      const target = humansForPlan.find((row) => row.id === notice.employeeId);
       if (!target) {
         continue;
       }
@@ -2430,7 +2466,7 @@ export async function sendChatMessage(input: {
     const sharedNotify = await notifySharedItemEvents({
       userId: input.userId,
       actor: employee,
-      employees: humans,
+      employees: humansForPlan,
       events: collectedEvents,
       assistantSpeaker,
       digitalEmployeeId: digital.id,
@@ -2448,7 +2484,7 @@ export async function sendChatMessage(input: {
 
     const listOpRelays = listOpResults.flatMap((result) =>
       result.notices.flatMap((notice) => {
-        const target = humans.find((row) => row.id === notice.employeeId);
+        const target = humansForPlan.find((row) => row.id === notice.employeeId);
         return target ? [{ target, text: notice.text }] : [];
       }),
     );
@@ -3767,14 +3803,14 @@ export async function sendChatMessage(input: {
 }
 
 async function listSharedCustomListsForActor(
-  userId: string,
+  _userId: string,
   actorId: string,
 ): Promise<SharedListRef[]> {
   const rows = await prisma.employeeList.findMany({
     where: {
       listType: "custom",
       deletedAt: null,
-      employee: { userId, kind: "human" },
+      employee: { kind: "human" },
       OR: [{ employeeId: actorId }, { scope: "shared" }],
     },
     select: {

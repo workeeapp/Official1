@@ -611,18 +611,21 @@ export function planPhoneRelays(
 function resolveNamedRelayTargets(
   rawTargets: string[],
   employees: PublicEmployee[],
+  extras: PublicEmployee[] = [],
 ): PublicEmployee[] {
   if (rawTargets.length === 0) {
     return [];
   }
 
   if (rawTargets.some((target) => ALL_TARGET_TOKENS.test(target.trim()))) {
+    // «כולם» stays team-scoped — never fan out to cross-account Contacts.
     return employees;
   }
 
+  const pool = extras.length > 0 ? [...employees, ...extras] : employees;
   const matched = new Map<string, PublicEmployee>();
   for (const raw of rawTargets) {
-    const employee = matchEmployee(raw, employees);
+    const employee = matchEmployee(raw, pool);
     if (employee) {
       matched.set(employee.id, employee);
     }
@@ -780,6 +783,11 @@ export function planTargetedActions(input: {
   actor: PublicEmployee;
   employees: PublicEmployee[];
   workers?: PublicEmployee[];
+  /**
+   * Registered non-guest humans on other accounts, resolved from SPEAKER_CONTACTS
+   * phones. Named targets may match them; «כולם» does not include them.
+   */
+  externalPartners?: PublicEmployee[];
   metadata: LlmMetadata;
   /** Shared custom lists visible to the actor (owned by anyone on the account). */
   sharedLists?: SharedListRef[];
@@ -810,6 +818,8 @@ export function planTargetedActions(input: {
     string,
     { metadata: LlmMetadata; partnerNames: string[] }
   >();
+  const externalPartners = input.externalPartners ?? [];
+  const resolvePool = [...input.employees, ...externalPartners];
 
   const wantsMutation =
     input.metadata.lists.length > 0 || input.metadata.filing.length > 0;
@@ -834,7 +844,7 @@ export function planTargetedActions(input: {
     ids
       .filter((id) => id !== input.actor.id && id !== recipientId)
       .map((id) => {
-        const employee = input.employees.find((row) => row.id === id);
+        const employee = resolvePool.find((row) => row.id === id);
         return employee ? employeeDisplayName(employee) : "";
       })
       .filter(Boolean);
@@ -867,11 +877,17 @@ export function planTargetedActions(input: {
     workers: input.workers,
   });
 
-  const humanOwnerIds = new Set(
-    input.employees
+  const humanOwnerIds = new Set([
+    ...input.employees
       .filter((employee) => !isDigitalEmployee(employee))
       .map((employee) => employee.id),
-  );
+    ...externalPartners.map((employee) => employee.id),
+    ...[...(input.itemOwners?.values() ?? [])].map((ref) => ref.ownerId),
+    ...[...(input.filingOwners?.values() ?? [])].map((ref) => ref.ownerId),
+  ]);
+
+  const namedTargets = (raw: string[]) =>
+    resolveNamedRelayTargets(raw, input.employees, externalPartners);
 
   for (const rawList of lists) {
     let list = rawList;
@@ -882,7 +898,7 @@ export function planTargetedActions(input: {
     ) {
       // A shared shopping/tasks row lives once on its owner's list — mutate it there.
       // A custom-list row being shared/unshared by item_id is the same item-level share.
-      const named = resolveNamedRelayTargets(list.targets, input.employees).filter(
+      const named = namedTargets(list.targets).filter(
         (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
       );
       const byOwner = new Map<
@@ -927,7 +943,7 @@ export function planTargetedActions(input: {
           const unshareNames = bucket.items.flatMap(itemUnshareNames);
           const removeIds =
             list.action === "update"
-              ? resolveNamedRelayTargets(unshareNames, input.employees)
+              ? namedTargets(unshareNames)
                   .map((target) => target.id)
                   .filter((id) => id !== ownerId)
               : [];
@@ -1048,7 +1064,7 @@ export function planTargetedActions(input: {
       normalizedList.targets,
       input.employees,
       input.actor.id,
-      input.workers,
+      [...(input.workers ?? []), ...externalPartners],
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
     const sharedCollection = isSharedCollectionAction(
@@ -1147,16 +1163,10 @@ export function planTargetedActions(input: {
       const ref = input.filingOwners.get(filing.filingId.trim());
       if (ref && humanOwnerIds.has(ref.ownerId)) {
         const unshareNames = filing.unshareWith ?? [];
-        const removeIds = resolveNamedRelayTargets(
-          unshareNames,
-          input.employees,
-        )
+        const removeIds = namedTargets(unshareNames)
           .map((target) => target.id)
           .filter((id) => id !== ref.ownerId);
-        const named = resolveNamedRelayTargets(
-          filing.targets,
-          input.employees,
-        ).filter(
+        const named = namedTargets(filing.targets).filter(
           (target) =>
             !isDigitalEmployee(target) && !isGuestEmployee(target),
         );
@@ -1210,7 +1220,7 @@ export function planTargetedActions(input: {
       filing.targets,
       input.employees,
       input.actor.id,
-      input.workers,
+      [...(input.workers ?? []), ...externalPartners],
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
     const humanTargets = targets.filter(
@@ -1261,7 +1271,7 @@ export function planTargetedActions(input: {
     applications,
     notifications: [...notificationBuckets.entries()].flatMap(
       ([employeeId, bucket]) => {
-        const employee = input.employees.find((item) => item.id === employeeId);
+        const employee = resolvePool.find((item) => item.id === employeeId);
         if (!employee) {
           return [];
         }

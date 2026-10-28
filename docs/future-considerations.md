@@ -20,7 +20,8 @@ Ideas to consider later — not committed work. Captured from product discussion
    Account setting: shared-list Q&A only (today) vs allow limited chitchat vs block chat entirely (cost control).
 5. **Audit “who is this guest”**  
    UI to see guest shells, which shared lists they see, and last WhatsApp activity — without listing them in the main Employees / Chat-as pickers.
-6. **Cross-account mutate** of host shared lists from the new member’s workspace (today: view-only via mirror).
+
+**Shipped:** Cross-account share/assign/mutate for registered non-guests via SPEAKER_CONTACTS phone → global Employee (guests stay view-only). Share-mirror after guest registration remains a continuity link for host shared data.
 
 ## Related cleanup (done ad hoc when needed)
 

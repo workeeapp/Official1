@@ -3819,6 +3819,7 @@ describe("employee targets", () => {
       phone: "0509999999",
       protected: false,
       isOwner: false,
+      isGuest: true,
     };
     const plan = planTargetedActions({
       actor: guest,
@@ -3839,5 +3840,141 @@ describe("employee targets", () => {
     expect(plan.guestMutationBlocked).toBe(true);
     expect(plan.applications).toEqual([]);
     expect(plan.notifications).toEqual([]);
+  });
+
+  it("resolves cross-account partners from extras without expanding כולם", () => {
+    const foreign: PublicEmployee = {
+      id: "foreign-michal-1",
+      kind: "human",
+      name: "Michal",
+      surname: "Cohen",
+      nickname: "מיכל",
+      email: null,
+      phone: "972501111111",
+      isGuest: false,
+    };
+    expect(
+      resolveActionTargets(["מיכל"], employees, amit.id, [foreign]),
+    ).toEqual([foreign]);
+    expect(resolveActionTargets(["כולם"], employees, amit.id, [foreign])).toEqual(
+      employees,
+    );
+  });
+
+  it("co-shares onto the speaker book with a cross-account external partner", () => {
+    const foreign: PublicEmployee = {
+      id: "foreign-michal-2",
+      kind: "human",
+      name: "Michal",
+      surname: "Cohen",
+      nickname: "מיכל",
+      email: null,
+      phone: "972502222222",
+      isGuest: false,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      externalPartners: [foreign],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "לחם" }],
+            targets: ["עמית", "מיכל"],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toEqual([
+      expect.objectContaining({
+        employeeId: amit.id,
+        visibility: expect.objectContaining({
+          scope: "shared",
+          visibleTo: expect.arrayContaining([amit.id, foreign.id]),
+        }),
+      }),
+    ]);
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([
+      foreign.id,
+    ]);
+  });
+
+  it("assigns shopping onto a cross-account partner book", () => {
+    const foreign: PublicEmployee = {
+      id: "foreign-eran-1",
+      kind: "human",
+      name: "Eran",
+      surname: "Levy",
+      nickname: "ערן",
+      email: null,
+      phone: "972503333333",
+      isGuest: false,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      externalPartners: [foreign],
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: ["ערן"],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toEqual([
+      expect.objectContaining({
+        employeeId: foreign.id,
+      }),
+    ]);
+    expect(
+      plan.applications.some((row) => row.employeeId === amit.id),
+    ).toBe(false);
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([
+      foreign.id,
+    ]);
+  });
+
+  it("mutates a foreign-owned item_id when the owner is only in itemOwners", () => {
+    const foreignOwnerId = "foreign-owner-item-1";
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      itemOwners: new Map([
+        [
+          itemId,
+          ownerRef(foreignOwnerId, "shopping", {
+            itemVisibleTo: [foreignOwnerId, amit.id],
+          }),
+        ],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            items: [{ item_id: itemId, "שם פריט": "חלב", כמות: "2" }],
+            targets: [],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toEqual([
+      expect.objectContaining({
+        employeeId: foreignOwnerId,
+      }),
+    ]);
   });
 });

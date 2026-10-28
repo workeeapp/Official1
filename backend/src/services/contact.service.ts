@@ -4,8 +4,10 @@ import { prisma } from "../database/prisma.js";
 import {
   looksLikePhone,
   normalizePhoneDigits,
+  phonesMatch,
   toWhatsAppAddress,
 } from "../utils/phone.js";
+import { listRegisteredHumansByPhones } from "./employee.service.js";
 
 export interface SpeakerContact {
   id: string;
@@ -44,23 +46,15 @@ export async function listContactsForEmployee(
     return [];
   }
 
-  const people = await prisma.employee.findMany({
-    where: { userId: owner.userId },
-    select: { id: true, name: true, nickname: true },
-  });
-  const names = new Map(
-    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
-  );
-
   const [owned, sharedCandidates, myBook, booksSharedWithMe] =
     await Promise.all([
       prisma.contact.findMany({
         where: { ownerEmployeeId },
         orderBy: [{ name: "asc" }, { createdAt: "asc" }],
       }),
+      // Same-account + cross-account rows shared with this viewer (visible_to filter below).
       prisma.contact.findMany({
         where: {
-          userId: owner.userId,
           ownerEmployeeId: { not: ownerEmployeeId },
           scope: "shared",
         },
@@ -71,21 +65,50 @@ export async function listContactsForEmployee(
       }),
       prisma.contactBook.findMany({
         where: {
-          userId: owner.userId,
           ownerEmployeeId: { not: ownerEmployeeId },
           scope: "shared",
         },
       }),
     ]);
 
+  const sharedIn = sharedCandidates.filter((row) =>
+    visibleToIncludes(row.visibleTo, ownerEmployeeId),
+  );
+  const bookOwners = (booksSharedWithMe ?? []).filter((book) =>
+    visibleToIncludes(book.visibleTo, ownerEmployeeId),
+  );
+
+  const nameIds = new Set<string>([ownerEmployeeId]);
+  for (const row of [...owned, ...sharedIn]) {
+    nameIds.add(row.ownerEmployeeId);
+    for (const id of idList(row.visibleTo)) {
+      nameIds.add(id);
+    }
+    if (row.addedById) {
+      nameIds.add(row.addedById);
+    }
+  }
+  for (const book of [myBook, ...bookOwners].filter(Boolean)) {
+    if (!book) {
+      continue;
+    }
+    nameIds.add(book.ownerEmployeeId);
+    for (const id of idList(book.visibleTo)) {
+      nameIds.add(id);
+    }
+  }
+  const people = await prisma.employee.findMany({
+    where: { id: { in: [...nameIds] } },
+    select: { id: true, name: true, nickname: true },
+  });
+  const names = new Map(
+    people.map((person) => [person.id, person.nickname?.trim() || person.name]),
+  );
+
   const myBookPartners =
     myBook?.scope === "shared"
       ? sharedWithNames(ownerEmployeeId, myBook.visibleTo, names)
       : [];
-
-  const sharedIn = sharedCandidates.filter((row) =>
-    visibleToIncludes(row.visibleTo, ownerEmployeeId),
-  );
 
   const seen = new Set<string>();
   const out: SpeakerContact[] = [];
@@ -104,9 +127,6 @@ export async function listContactsForEmployee(
     out.push(toSpeakerContact(row, ownerEmployeeId, names));
   }
 
-  const bookOwners = (booksSharedWithMe ?? []).filter((book) =>
-    visibleToIncludes(book.visibleTo, ownerEmployeeId),
-  );
   for (const book of bookOwners) {
     const bookPartners = sharedWithNames(
       book.ownerEmployeeId,
@@ -289,6 +309,63 @@ export function formatSpeakerContacts(
       })),
     ),
   ].join("\n");
+}
+
+/**
+ * Contacts whose phone belongs to a registered non-guest human on any account.
+ * Returned as PublicEmployee rows (nickname = contact name) for target matching.
+ * Same-account teammates in `excludeIds` are skipped — callers already have them.
+ */
+export async function resolveExternalSharePartners(
+  contacts: SpeakerContact[],
+  excludeIds: ReadonlySet<string> = new Set(),
+): Promise<PublicEmployee[]> {
+  if (contacts.length === 0) {
+    return [];
+  }
+  const phones = contacts
+    .map((row) => row.phone.trim())
+    .filter((phone) => looksLikePhone(phone));
+  const registered = await listRegisteredHumansByPhones(phones);
+  if (registered.length === 0) {
+    return [];
+  }
+
+  const byId = new Map<string, PublicEmployee>();
+  for (const contact of contacts) {
+    const phone = contact.phone.trim();
+    if (!looksLikePhone(phone)) {
+      continue;
+    }
+    const match = registered.find(
+      (employee) => employee.phone && phonesMatch(employee.phone, phone),
+    );
+    if (!match || match.isGuest || excludeIds.has(match.id)) {
+      continue;
+    }
+    const contactName = contact.name.trim();
+    const existing = byId.get(match.id);
+    if (existing) {
+      // Keep an alias nickname so either contact label matches.
+      if (
+        contactName &&
+        contactName.toLowerCase() !== (existing.nickname ?? "").toLowerCase() &&
+        contactName.toLowerCase() !== existing.name.toLowerCase()
+      ) {
+        byId.set(match.id, {
+          ...existing,
+          nickname: contactName,
+        });
+      }
+      continue;
+    }
+    byId.set(match.id, {
+      ...match,
+      // Prefer contact book label for spoken-name matching.
+      nickname: contactName || match.nickname,
+    });
+  }
+  return [...byId.values()];
 }
 
 export function matchContact(
@@ -529,7 +606,18 @@ export async function applyDirectoryActions(input: {
         ...emptyLlmMetadata(),
         directory: [{ ...action, targets: rawTargets }],
       };
+      const partnerAccounts = await prisma.employee.findMany({
+        where: { id: { in: partnerIds }, kind: "human", isGuest: false },
+        select: { id: true, userId: true },
+      });
+      const partnerUserId = new Map(
+        partnerAccounts.map((row) => [row.id, row.userId]),
+      );
       for (const partnerId of partnerIds) {
+        const assigneeUserId = partnerUserId.get(partnerId);
+        if (!assigneeUserId) {
+          continue;
+        }
         const visibleTo = uniqueIds([input.ownerEmployeeId, partnerId]);
         const row = await prisma.contact.upsert({
           where: {
@@ -539,7 +627,7 @@ export async function applyDirectoryActions(input: {
             },
           },
           create: {
-            userId: input.userId,
+            userId: assigneeUserId,
             ownerEmployeeId: partnerId,
             name,
             phone,
