@@ -38,6 +38,7 @@ import {
   extractInboundTexts,
   formatSharedContactsMessage,
   phonesMatch,
+  readInboundContacts,
   SHARED_CONTACTS_MARKER,
 } from "../src/services/whatsapp.service.js";
 import {
@@ -191,7 +192,10 @@ describe("WhatsApp webhook", () => {
   });
 
   it("turns a shared contact card into a structured shared_contacts turn", () => {
-    const contactsMessage = (contacts: unknown, extra: Record<string, unknown> = {}) => ({
+    const contactsMessage = (
+      contacts: unknown,
+      extra: Record<string, unknown> = {},
+    ) => ({
       entry: [
         {
           changes: [
@@ -213,54 +217,151 @@ describe("WhatsApp webhook", () => {
       ],
     });
 
-    expect(
-      extractInboundTexts(
-        contactsMessage([
-          {
-            name: { formatted_name: "דני כהן", first_name: "דני" },
-            phones: [
-              { phone: "+972 52-123-4567", wa_id: "972521234567", type: "CELL" },
-            ],
-          },
-        ]),
-      ),
-    ).toEqual([
-      {
-        from: "972501234567",
-        messageId: "wamid.card",
-        text: `${SHARED_CONTACTS_MARKER}\n{"shared_contacts":[{"name":"דני כהן","phones":["972521234567"]}]}`,
-      },
-    ]);
+    const parseShared = (text: string) => {
+      expect(text.startsWith(`${SHARED_CONTACTS_MARKER}\n`)).toBe(true);
+      return JSON.parse(text.slice(SHARED_CONTACTS_MARKER.length + 1)) as {
+        shared_contacts: Array<Record<string, unknown>>;
+      };
+    };
 
-    expect(
-      formatSharedContactsMessage([
+    // --- Single contact (backward-compatible extract path) ---
+    const single = extractInboundTexts(
+      contactsMessage([
+        {
+          name: { formatted_name: "דני כהן", first_name: "דני" },
+          phones: [
+            { phone: "+972 52-123-4567", wa_id: "972521234567", type: "CELL" },
+          ],
+        },
+      ]),
+    );
+    expect(single).toHaveLength(1);
+    expect(single[0]?.from).toBe("972501234567");
+    expect(single[0]?.messageId).toBe("wamid.card");
+    const singlePayload = parseShared(single[0]!.text);
+    expect(singlePayload.shared_contacts).toHaveLength(1);
+    expect(singlePayload.shared_contacts[0]).toMatchObject({
+      name: "דני כהן",
+      phones: ["972521234567"],
+      phone_entries: [
+        { phone: "+972 52-123-4567", wa_id: "972521234567", type: "CELL" },
+      ],
+      name_parts: { formatted_name: "דני כהן", first_name: "דני" },
+    });
+
+    // --- Multi contacts in one message via extractInboundTexts ---
+    const multi = extractInboundTexts(
+      contactsMessage([
         {
           name: { first_name: "מיכל", last_name: "לוי" },
           phones: [{ phone: "052-111-2222" }, { phone: "03-555-6666" }],
+          emails: [{ email: "michal@example.com", type: "WORK" }],
+          org: { company: "Acme", title: "Eng" },
         },
-        { name: { formatted_name: "יוסי" }, phones: [{ wa_id: "972533333333" }] },
+        {
+          name: { formatted_name: "יוסי" },
+          phones: [{ wa_id: "972533333333" }],
+          birthday: "1990-01-02",
+          urls: [{ url: "https://yossi.example", type: "HOME" }],
+        },
       ]),
-    ).toBe(
-      `${SHARED_CONTACTS_MARKER}\n${JSON.stringify({
-        shared_contacts: [
-          { name: "מיכל לוי", phones: ["052-111-2222", "03-555-6666"] },
-          { name: "יוסי", phones: ["972533333333"] },
-        ],
-      })}`,
     );
+    expect(multi).toHaveLength(1);
+    const multiPayload = parseShared(multi[0]!.text);
+    expect(multiPayload.shared_contacts).toHaveLength(2);
+    expect(multiPayload.shared_contacts[0]).toMatchObject({
+      name: "מיכל לוי",
+      phones: ["052-111-2222", "03-555-6666"],
+      emails: [{ email: "michal@example.com", type: "WORK" }],
+      org: { company: "Acme", title: "Eng" },
+    });
+    expect(multiPayload.shared_contacts[1]).toMatchObject({
+      name: "יוסי",
+      phones: ["972533333333"],
+      birthday: "1990-01-02",
+      urls: [{ url: "https://yossi.example", type: "HOME" }],
+    });
+
+    // Formatter still accepts raw Meta array (compat).
+    expect(
+      parseShared(
+        formatSharedContactsMessage([
+          {
+            name: { first_name: "מיכל", last_name: "לוי" },
+            phones: [{ phone: "052-111-2222" }, { phone: "03-555-6666" }],
+          },
+          {
+            name: { formatted_name: "יוסי" },
+            phones: [{ wa_id: "972533333333" }],
+          },
+        ]),
+      ).shared_contacts.map((c) => ({ name: c.name, phones: c.phones })),
+    ).toEqual([
+      { name: "מיכל לוי", phones: ["052-111-2222", "03-555-6666"] },
+      { name: "יוסי", phones: ["972533333333"] },
+    ]);
 
     expect(
-      formatSharedContactsMessage([{ name: { formatted_name: "ללא מספר" } }]),
-    ).toBe(
-      `${SHARED_CONTACTS_MARKER}\n{"shared_contacts":[{"name":"ללא מספר","phones":[]}]}`,
-    );
+      parseShared(
+        formatSharedContactsMessage([
+          { name: { formatted_name: "ללא מספר" } },
+        ]),
+      ).shared_contacts,
+    ).toEqual([expect.objectContaining({ name: "ללא מספר", phones: [] })]);
     expect(formatSharedContactsMessage(undefined)).toBe("");
     expect(formatSharedContactsMessage([{}])).toBe("");
+
+    // Bad / empty cards beside valid ones — keep usable siblings only.
+    expect(
+      readInboundContacts({
+        type: "contacts",
+        contacts: [
+          null,
+          {},
+          {
+            name: { formatted_name: "תקין" },
+            phones: [{ wa_id: "972511111111" }],
+          },
+          "not-an-object",
+          { phones: [{ phone: "not-enough" }] },
+          { phones: [{ phone: "0501234567" }] },
+        ],
+      }).map((c) => ({ name: c.name, phones: c.phones })),
+    ).toEqual([
+      { name: "תקין", phones: ["972511111111"] },
+      { name: "", phones: ["0501234567"] },
+    ]);
+
+    // Single object (not array) normalized.
+    expect(
+      readInboundContacts({
+        type: "contacts",
+        contacts: {
+          name: { formatted_name: "יחיד" },
+          phones: [{ wa_id: "972522222222" }],
+        },
+      }).map((c) => ({ name: c.name, phones: c.phones })),
+    ).toEqual([{ name: "יחיד", phones: ["972522222222"] }]);
+
+    // Wrong type → empty (do not scrape value.contacts sender profile).
+    expect(
+      readInboundContacts({
+        type: "text",
+        contacts: [
+          { name: { formatted_name: "לא" }, phones: [{ wa_id: "1" }] },
+        ],
+      }),
+    ).toEqual([]);
 
     expect(
       extractInboundTexts(
         contactsMessage(
-          [{ name: { formatted_name: "דני" }, phones: [{ wa_id: "972521234567" }] }],
+          [
+            {
+              name: { formatted_name: "דני" },
+              phones: [{ wa_id: "972521234567" }],
+            },
+          ],
           { id: undefined },
         ),
       ),

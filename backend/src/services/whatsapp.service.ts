@@ -182,6 +182,9 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const location = readInboundLocation(
           message as Record<string, unknown>,
         );
+        const sharedContacts = readInboundContacts(
+          message as Record<string, unknown>,
+        );
         const body = media
           ? media.caption
           : location
@@ -190,7 +193,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
               ? record.text.body
               : typeof buttonCommand === "string"
                 ? buttonCommand
-                : formatSharedContactsMessage(record.contacts);
+                : formatSharedContactsMessage(sharedContacts);
         const text = body.trim();
         const from = typeof record.from === "string" ? record.from : "";
         const messageId = typeof record.id === "string" ? record.id : "";
@@ -271,62 +274,332 @@ export function formatSharedLocationMessage(loc: InboundLocation): string {
 
 export const SHARED_CONTACTS_MARKER = "[כרטיס איש קשר שותף בוואטסאפ]";
 
-/** WhatsApp `contacts` payload → structured block for the model. Formatting only. */
-export function formatSharedContactsMessage(contacts: unknown): string {
-  if (!Array.isArray(contacts)) {
-    return "";
-  }
-  const cards: Array<{ name: string; phones: string[] }> = [];
-  for (const card of contacts) {
-    if (!card || typeof card !== "object") {
-      continue;
-    }
-    const record = card as {
-      name?: { formatted_name?: unknown; first_name?: unknown; last_name?: unknown };
-      phones?: unknown;
-    };
-    const formatted = asTrimmed(record.name?.formatted_name);
-    const name =
-      formatted ||
-      [asTrimmed(record.name?.first_name), asTrimmed(record.name?.last_name)]
-        .filter(Boolean)
-        .join(" ");
-    const phones: string[] = [];
-    if (Array.isArray(record.phones)) {
-      const waIds: string[] = [];
-      const raw: string[] = [];
-      for (const entry of record.phones) {
-        if (!entry || typeof entry !== "object") {
-          continue;
-        }
-        const phone = entry as { phone?: unknown; wa_id?: unknown };
-        const waId = asTrimmed(phone.wa_id);
-        const number = asTrimmed(phone.phone);
-        if (waId) {
-          waIds.push(waId);
-        }
-        if (number) {
-          raw.push(number);
-        }
-      }
-      const seenDigits = new Set<string>();
-      for (const value of [...waIds, ...raw]) {
-        const digits = value.replace(/\D/g, "");
-        if (!digits || seenDigits.has(digits)) {
-          continue;
-        }
-        seenDigits.add(digits);
-        phones.push(value);
-      }
-    }
-    if (name || phones.length > 0) {
-      cards.push({ name, phones });
+/** One shared contact card after inbound normalize (model-facing). */
+export type InboundSharedContact = {
+  name: string;
+  /** Deduped phone values; wa_id preferred over raw phone when both share digits. */
+  phones: string[];
+  emails?: Array<{ email: string; type?: string }>;
+  urls?: Array<{ url: string; type?: string }>;
+  addresses?: Array<{
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    country?: string;
+    country_code?: string;
+    type?: string;
+  }>;
+  org?: { company?: string; department?: string; title?: string };
+  birthday?: string;
+  name_parts?: {
+    formatted_name?: string;
+    first_name?: string;
+    last_name?: string;
+    middle_name?: string;
+    prefix?: string;
+    suffix?: string;
+  };
+  phone_entries?: Array<{ phone?: string; wa_id?: string; type?: string }>;
+};
+
+/**
+ * Normalize Meta Cloud API `contacts` array (or a single contact object) into
+ * InboundSharedContact[]. Skips malformed cards; keeps valid siblings.
+ */
+export function normalizeInboundContactsPayload(
+  contacts: unknown,
+): InboundSharedContact[] {
+  const list = Array.isArray(contacts)
+    ? contacts
+    : contacts && typeof contacts === "object"
+      ? [contacts]
+      : [];
+  const cards: InboundSharedContact[] = [];
+  for (const entry of list) {
+    const card = parseOneInboundContactCard(entry);
+    if (card) {
+      cards.push(card);
     }
   }
+  return cards;
+}
+
+/**
+ * WhatsApp `type: "contacts"` message → normalized shared contact cards.
+ * Empty when type is not contacts or no usable cards remain.
+ */
+export function readInboundContacts(
+  record: Record<string, unknown>,
+): InboundSharedContact[] {
+  if (String(record.type ?? "") !== "contacts") {
+    return [];
+  }
+  return normalizeInboundContactsPayload(record.contacts);
+}
+
+/**
+ * Shared contacts → structured block for the model. Formatting only.
+ * Accepts already-normalized cards or raw Meta `contacts` array / single object.
+ */
+export function formatSharedContactsMessage(
+  contacts: InboundSharedContact[] | unknown,
+): string {
+  const cards = Array.isArray(contacts)
+    ? contacts.every(isNormalizedSharedContact)
+      ? (contacts as InboundSharedContact[])
+      : normalizeInboundContactsPayload(contacts)
+    : normalizeInboundContactsPayload(contacts);
   if (cards.length === 0) {
     return "";
   }
-  return `${SHARED_CONTACTS_MARKER}\n${JSON.stringify({ shared_contacts: cards })}`;
+  return `${SHARED_CONTACTS_MARKER}\n${JSON.stringify({
+    shared_contacts: cards.map(serializeSharedContactForModel),
+  })}`;
+}
+
+function isNormalizedSharedContact(value: unknown): value is InboundSharedContact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.name === "string" &&
+    Array.isArray(row.phones) &&
+    row.phones.every((p) => typeof p === "string")
+  );
+}
+
+function serializeSharedContactForModel(
+  card: InboundSharedContact,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    name: card.name,
+    phones: card.phones,
+  };
+  if (card.emails?.length) {
+    out.emails = card.emails;
+  }
+  if (card.urls?.length) {
+    out.urls = card.urls;
+  }
+  if (card.addresses?.length) {
+    out.addresses = card.addresses;
+  }
+  if (card.org && Object.values(card.org).some((v) => Boolean(v))) {
+    out.org = card.org;
+  }
+  if (card.birthday) {
+    out.birthday = card.birthday;
+  }
+  if (card.name_parts && Object.values(card.name_parts).some((v) => Boolean(v))) {
+    out.name_parts = card.name_parts;
+  }
+  if (card.phone_entries?.length) {
+    out.phone_entries = card.phone_entries;
+  }
+  return out;
+}
+
+function parseOneInboundContactCard(card: unknown): InboundSharedContact | null {
+  if (!card || typeof card !== "object" || Array.isArray(card)) {
+    return null;
+  }
+  if (isNormalizedSharedContact(card)) {
+    return card;
+  }
+  const record = card as Record<string, unknown>;
+  const nameObj =
+    record.name && typeof record.name === "object" && !Array.isArray(record.name)
+      ? (record.name as Record<string, unknown>)
+      : null;
+  const formatted = asTrimmed(nameObj?.formatted_name);
+  const first = asTrimmed(nameObj?.first_name);
+  const last = asTrimmed(nameObj?.last_name);
+  const middle = asTrimmed(nameObj?.middle_name);
+  const prefix = asTrimmed(nameObj?.prefix);
+  const suffix = asTrimmed(nameObj?.suffix);
+  const name =
+    formatted || [first, last].filter(Boolean).join(" ") || asTrimmed(record.name);
+
+  const phoneEntries: Array<{ phone?: string; wa_id?: string; type?: string }> =
+    [];
+  const phones: string[] = [];
+  if (Array.isArray(record.phones)) {
+    const waIds: string[] = [];
+    const raw: string[] = [];
+    for (const entry of record.phones) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        continue;
+      }
+      const phone = entry as Record<string, unknown>;
+      const waId = asTrimmed(phone.wa_id);
+      const number = asTrimmed(phone.phone);
+      const type = asTrimmed(phone.type);
+      if (!waId && !number) {
+        continue;
+      }
+      const detail: { phone?: string; wa_id?: string; type?: string } = {};
+      if (number) {
+        detail.phone = number;
+      }
+      if (waId) {
+        detail.wa_id = waId;
+      }
+      if (type) {
+        detail.type = type;
+      }
+      phoneEntries.push(detail);
+      if (waId) {
+        waIds.push(waId);
+      }
+      if (number) {
+        raw.push(number);
+      }
+    }
+    const seenDigits = new Set<string>();
+    for (const value of [...waIds, ...raw]) {
+      const digits = value.replace(/\D/g, "");
+      if (!digits || seenDigits.has(digits)) {
+        continue;
+      }
+      seenDigits.add(digits);
+      phones.push(value);
+    }
+  }
+
+  if (!name && phones.length === 0) {
+    return null;
+  }
+
+  const emails = parseTypedStringList(record.emails, "email");
+  const urls = parseTypedStringList(record.urls, "url");
+  const addresses = parseContactAddresses(record.addresses);
+  const org = parseContactOrg(record.org);
+  const birthday = asTrimmed(record.birthday);
+  const name_parts: InboundSharedContact["name_parts"] = {};
+  if (formatted) {
+    name_parts.formatted_name = formatted;
+  }
+  if (first) {
+    name_parts.first_name = first;
+  }
+  if (last) {
+    name_parts.last_name = last;
+  }
+  if (middle) {
+    name_parts.middle_name = middle;
+  }
+  if (prefix) {
+    name_parts.prefix = prefix;
+  }
+  if (suffix) {
+    name_parts.suffix = suffix;
+  }
+
+  const out: InboundSharedContact = { name, phones };
+  if (emails.length) {
+    out.emails = emails;
+  }
+  if (urls.length) {
+    out.urls = urls;
+  }
+  if (addresses.length) {
+    out.addresses = addresses;
+  }
+  if (org) {
+    out.org = org;
+  }
+  if (birthday) {
+    out.birthday = birthday;
+  }
+  if (Object.keys(name_parts).length > 0) {
+    out.name_parts = name_parts;
+  }
+  if (phoneEntries.length > 0) {
+    out.phone_entries = phoneEntries;
+  }
+  return out;
+}
+
+function parseTypedStringList(
+  raw: unknown,
+  valueKey: "email" | "url",
+): Array<{ email: string; type?: string } | { url: string; type?: string }> {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: Array<
+    { email: string; type?: string } | { url: string; type?: string }
+  > = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const value = asTrimmed(row[valueKey]);
+    if (!value) {
+      continue;
+    }
+    const type = asTrimmed(row.type);
+    if (valueKey === "email") {
+      out.push(type ? { email: value, type } : { email: value });
+    } else {
+      out.push(type ? { url: value, type } : { url: value });
+    }
+  }
+  return out;
+}
+
+function parseContactAddresses(
+  raw: unknown,
+): NonNullable<InboundSharedContact["addresses"]> {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: NonNullable<InboundSharedContact["addresses"]> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const row = entry as Record<string, unknown>;
+    const address: NonNullable<InboundSharedContact["addresses"]>[number] = {};
+    for (const key of [
+      "street",
+      "city",
+      "state",
+      "zip",
+      "country",
+      "country_code",
+      "type",
+    ] as const) {
+      const value = asTrimmed(row[key]);
+      if (value) {
+        address[key] = value;
+      }
+    }
+    if (Object.keys(address).length > 0) {
+      out.push(address);
+    }
+  }
+  return out;
+}
+
+function parseContactOrg(
+  raw: unknown,
+): InboundSharedContact["org"] | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const row = raw as Record<string, unknown>;
+  const org: NonNullable<InboundSharedContact["org"]> = {};
+  for (const key of ["company", "department", "title"] as const) {
+    const value = asTrimmed(row[key]);
+    if (value) {
+      org[key] = value;
+    }
+  }
+  return Object.keys(org).length > 0 ? org : undefined;
 }
 
 function asTrimmed(value: unknown): string {
