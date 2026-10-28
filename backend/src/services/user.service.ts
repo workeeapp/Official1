@@ -7,7 +7,7 @@ import { ConflictError, isUniqueConstraintError } from "../utils/errors.js";
 export function toPublicUser(user: User): PublicUser {
   return {
     id: user.id,
-    username: user.username,
+    username: user.username ?? null,
   };
 }
 
@@ -42,4 +42,14 @@ export async function createUser(
     }
     throw error;
   }
+}
+
+/** WhatsApp guest registration — no web login credentials. */
+export async function createWhatsAppOnlyUser(): Promise<User> {
+  return prisma.user.create({
+    data: {
+      username: null,
+      passwordHash: null,
+    },
+  });
 }

@@ -18,10 +18,10 @@ export function Header({ user, onLogout }: HeaderProps) {
               aria-hidden="true"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-light text-sm font-semibold text-primary"
             >
-              {user.username.slice(0, 1).toUpperCase()}
+              {(user.username ?? "?").slice(0, 1).toUpperCase()}
             </span>
             <span className="hidden max-w-40 truncate text-sm font-medium text-text-primary sm:inline">
-              {user.username}
+              {user.username ?? "User"}
             </span>
           </div>
           <Button variant="ghost" onClick={onLogout} className="px-3">

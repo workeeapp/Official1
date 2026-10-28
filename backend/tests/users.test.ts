@@ -17,6 +17,7 @@ vi.mock("../src/database/prisma.js", () => ({
 
 import {
   createUser,
+  createWhatsAppOnlyUser,
   findUserById,
   findUserByUsername,
   toPublicUser,
@@ -26,8 +27,8 @@ import { verifyPassword } from "../src/auth/password.js";
 
 const sampleUser = {
   id: "11111111-1111-4111-8111-111111111111",
-  username: "Amit",
-  passwordHash: "hashed",
+  username: "Amit" as string | null,
+  passwordHash: "hashed" as string | null,
   createdAt: new Date("2026-01-01"),
   updatedAt: new Date("2026-01-01"),
 };
@@ -39,18 +40,43 @@ describe("user service", () => {
   });
 
   it("creates a user with a hashed password", async () => {
-    create.mockImplementation(async ({ data }: { data: { username: string; passwordHash: string } }) => ({
-      ...sampleUser,
-      username: data.username,
-      passwordHash: data.passwordHash,
-    }));
+    create.mockImplementation(
+      async ({
+        data,
+      }: {
+        data: { username: string | null; passwordHash: string | null };
+      }) => ({
+        ...sampleUser,
+        username: data.username,
+        passwordHash: data.passwordHash,
+      }),
+    );
 
     const user = await createUser("Amit", "ChangeMe123!");
 
     expect(create).toHaveBeenCalledOnce();
     expect(user.username).toBe("Amit");
     expect(user.passwordHash).not.toBe("ChangeMe123!");
-    expect(await verifyPassword(user.passwordHash, "ChangeMe123!")).toBe(true);
+    expect(user.passwordHash).toBeTruthy();
+    expect(await verifyPassword(user.passwordHash!, "ChangeMe123!")).toBe(true);
+  });
+
+  it("creates a WhatsApp-only user without credentials", async () => {
+    create.mockResolvedValue({
+      ...sampleUser,
+      username: null,
+      passwordHash: null,
+    });
+
+    const user = await createWhatsAppOnlyUser();
+
+    expect(create).toHaveBeenCalledWith({
+      data: { username: null, passwordHash: null },
+    });
+    expect(toPublicUser(user)).toEqual({
+      id: sampleUser.id,
+      username: null,
+    });
   });
 
   it("prevents duplicate usernames", async () => {

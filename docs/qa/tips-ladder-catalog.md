@@ -56,6 +56,6 @@ Engine fires **one tip per turn**; mid unlocks after any basic in the topic was 
 | 604 | directory_adv_share | directory | advanced | add | אני ממליצה: אפשר לשתף איש קשר או את ספר הטלפונים עם מישהו מהצוות, כשזה מתאים. |
 | 605 | directory_mid_edit_op | directory | intermediate | update | אפשר גם לתקן פרטים שכבר שמורים — «תעדכני את הטלפון של מיכל ל…» — ואחליף במקום. |
 | 606 | directory_mid_delete | directory | intermediate | remove | כדאי לנסות למחוק איש קשר שלא צריך — «תמחקי את מיכל מאנשי הקשר» — ואסיר אותו מהספר. |
-| 50 | guest_terms | guest | basic | — | לידיעתך (תמצית): כאורח אפשר בעיקר לצפות במה ששותף איתך ולהירשם לחשבון. אחרי ההרשמה תקבל/י חשבון משלך עם לוסי. אל תשתף סיסמאות עם אחרים. |
+| 50 | guest_terms | guest | basic | — | לידיעתך (תמצית): כאורח אפשר בעיקר לצפות במה ששותף איתך ולהירשם בוואטסאפ עם שם ולשון פנייה (זכר/נקבה). אחרי ההרשמה תקבל/י חשבון משלך עם לוסי — בלי שם משתמש או סיסמה. |
 
 Source: `backend/src/services/tip-catalog.ts`.

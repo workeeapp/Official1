@@ -86,6 +86,23 @@ describe("authentication API", () => {
     expect(response.body.error.message).toBe("Invalid username or password");
   });
 
+  it("rejects WhatsApp-only users with null passwordHash", async () => {
+    findUnique.mockResolvedValue({
+      id: userId,
+      username: null,
+      passwordHash: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "wa-only", password: PASSWORD });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.message).toBe("Invalid username or password");
+  });
+
   it("rejects a missing username", async () => {
     const response = await request(app)
       .post("/api/auth/login")

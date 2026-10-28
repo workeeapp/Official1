@@ -930,7 +930,7 @@
                   "object",
                   "null"
                 ],
-                "description": "לוסי-אורח only: when the WhatsApp guest gave first name, surname, username, and password, emit all four to create their User login + own Lucy. null when not registering this turn or fields are still missing (ask in responses; keep register null).",
+                "description": "לוסי-אורח only: when the WhatsApp guest gave first name and address gender (male|female), emit register to create their WhatsApp-only account + own Lucy. surname optional. null when not registering this turn or name/gender still missing (ask in responses; keep register null). Never collect username or password.",
                 "properties": {
                   "name": {
                     "type": "string",
@@ -938,22 +938,20 @@
                   },
                   "surname": {
                     "type": "string",
-                    "description": "Guest surname."
+                    "description": "Guest surname when they gave one; empty or omit when unknown."
                   },
-                  "username": {
+                  "gender": {
                     "type": "string",
-                    "description": "Login username for their new Workee account."
-                  },
-                  "password": {
-                    "type": "string",
-                    "description": "Login password for their new Workee account."
+                    "enum": [
+                      "male",
+                      "female"
+                    ],
+                    "description": "How Lucy should address them in Hebrew: male (זכר) or female (נקבה)."
                   }
                 },
                 "required": [
                   "name",
-                  "surname",
-                  "username",
-                  "password"
+                  "gender"
                 ]
               },
               "confirm": {

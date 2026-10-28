@@ -3883,7 +3883,7 @@ describe("parseLlmReply", () => {
 });
 
 describe("metadata.register", () => {
-  it("parses a complete register action", () => {
+  it("parses name + gender with optional surname", () => {
     const meta = parseReplyMetadata(
       JSON.stringify({
         responses: ["נרשמת"],
@@ -3891,8 +3891,7 @@ describe("metadata.register", () => {
           register: {
             name: "מיכל",
             surname: "כהן",
-            username: "michal",
-            password: "SecretPass1",
+            gender: "female",
           },
         },
       }),
@@ -3900,21 +3899,36 @@ describe("metadata.register", () => {
     expect(meta.register).toEqual({
       name: "מיכל",
       surname: "כהן",
-      username: "michal",
-      password: "SecretPass1",
+      gender: "female",
     });
   });
 
-  it("returns null when register fields are incomplete", () => {
+  it("parses Hebrew gender aliases and omits empty surname", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["נרשמת"],
+        metadata: {
+          register: {
+            name: "טל",
+            gender: "זכר",
+          },
+        },
+      }),
+    );
+    expect(meta.register).toEqual({
+      name: "טל",
+      gender: "male",
+    });
+  });
+
+  it("returns null when gender is missing", () => {
     const meta = parseReplyMetadata(
       JSON.stringify({
         responses: ["?"],
         metadata: {
           register: {
             name: "מיכל",
-            surname: "",
-            username: "michal",
-            password: "SecretPass1",
+            surname: "כהן",
           },
         },
       }),
@@ -3922,23 +3936,22 @@ describe("metadata.register", () => {
     expect(meta.register).toBeNull();
   });
 
-  it("redacts passwords from text and metadata", () => {
+  it("redact helpers are no-ops without passwords", () => {
     const register = {
       name: "מיכל",
       surname: "כהן",
-      username: "michal",
-      password: "SecretPass1",
+      gender: "female" as const,
     };
     expect(redactRegisterSecrets("הסיסמה שלי SecretPass1 תודה", register)).toBe(
-      "הסיסמה שלי •••••••• תודה",
+      "הסיסמה שלי SecretPass1 תודה",
     );
     expect(
       redactMetadataSecrets({
         lists: [],
         filing: [],
         register,
-      }).register?.password,
-    ).toBe("••••••••");
+      }).register,
+    ).toEqual(register);
   });
 });
 

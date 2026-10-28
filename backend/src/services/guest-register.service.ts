@@ -1,17 +1,12 @@
 import type { LlmRegisterAction, PublicEmployee } from "@workee/shared";
-import {
-  isGuestEmployee,
-  isGuestLucy,
-  validatePassword,
-  validateUsername,
-} from "@workee/shared";
+import { isGuestEmployee, isGuestLucy } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { ConflictError, isUniqueConstraintError } from "../utils/errors.js";
 import {
   createEmployeeForUser,
   listEmployeesForUser,
 } from "./employee.service.js";
-import { createUser } from "./user.service.js";
+import { createWhatsAppOnlyUser } from "./user.service.js";
 import { normalizeEmployeePhone } from "../utils/phone.js";
 import { clearWhatsAppWorkerSticky } from "./whatsapp-worker-sticky.js";
 
@@ -21,7 +16,6 @@ export type GuestRegisterResult =
       newUserId: string;
       newEmployeeId: string;
       mirrorEmployeeId: string;
-      username: string;
       displayName: string;
     }
   | {
@@ -30,7 +24,6 @@ export type GuestRegisterResult =
         | "not_guest"
         | "not_guest_lucy"
         | "invalid_fields"
-        | "username_taken"
         | "failed";
       detail?: string;
     };
@@ -38,6 +31,7 @@ export type GuestRegisterResult =
 /**
  * Convert a WhatsApp guest into a registered member with their own User + Lucy.
  * Keeps the host employee row (renamed, phone cleared) as the share mirror.
+ * WhatsApp-only: no username/password on the new User.
  */
 export async function registerGuestMember(input: {
   hostUserId: string;
@@ -53,23 +47,20 @@ export async function registerGuestMember(input: {
   }
 
   const name = input.register.name.trim();
-  const surname = input.register.surname.trim();
-  const username = input.register.username.trim();
-  const password = input.register.password;
-  const usernameError = validateUsername(username);
-  const passwordError = validatePassword(password);
-  if (!name || !surname || usernameError || passwordError) {
+  const surname = (input.register.surname ?? "").trim();
+  const gender = input.register.gender;
+  if (!name || (gender !== "male" && gender !== "female")) {
     return {
       ok: false,
       reason: "invalid_fields",
-      detail: usernameError ?? passwordError ?? "Missing name or surname",
+      detail: "Missing name or gender",
     };
   }
 
   const phone = normalizeEmployeePhone(input.guest.phone);
 
   try {
-    const newUser = await createUser(username, password);
+    const newUser = await createWhatsAppOnlyUser();
     // Seeds protected Lucy (and לוסי-אורח) on the new account.
     await listEmployeesForUser(newUser.id);
 
@@ -84,6 +75,7 @@ export async function registerGuestMember(input: {
         phone: null,
         isGuest: true,
         teamId: null,
+        addressGender: gender,
       },
     });
 
@@ -95,6 +87,7 @@ export async function registerGuestMember(input: {
       email: null,
       phone,
       isOwner: true,
+      addressGender: gender,
     });
 
     await prisma.employee.update({
@@ -111,19 +104,14 @@ export async function registerGuestMember(input: {
       newUserId: newUser.id,
       newEmployeeId: member.id,
       mirrorEmployeeId: input.guest.id,
-      username,
       displayName: name,
     };
   } catch (error) {
     if (error instanceof ConflictError) {
-      const message = error.message.toLowerCase();
-      if (message.includes("phone")) {
-        return { ok: false, reason: "failed", detail: error.message };
-      }
-      return { ok: false, reason: "username_taken" };
+      return { ok: false, reason: "failed", detail: error.message };
     }
     if (isUniqueConstraintError(error)) {
-      return { ok: false, reason: "username_taken" };
+      return { ok: false, reason: "failed", detail: "unique constraint" };
     }
     return {
       ok: false,

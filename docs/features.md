@@ -359,12 +359,13 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 
 | Piece | Behavior |
 |-------|----------|
-| ACTION | `metadata.register` `{ name, surname, username, password }` — לוסי-אורח only; null until all four are known |
-| Engine | `createUser` + protected Lucy + human (`isOwner`) on the new account; host guest renamed, phone cleared, kept as share mirror; new human gets `share_mirror_employee_id` |
+| ACTION | `metadata.register` `{ name, gender }` (+ optional `surname`) — לוסי-אורח only; `gender` = `male` \| `female`; null until name+gender known. No username/password |
+| Engine | `createWhatsAppOnlyUser` (nullable credentials) + protected Lucy + human (`isOwner`, `addressGender` from register) on the new account; host guest renamed, phone cleared, kept as share mirror (also gets `addressGender`); new human gets `share_mirror_employee_id` |
 | After | Next WhatsApp turn resolves to the new member (non-guest preferred on phone match) and protected Lucy; host shared data still appears in `EMPLOYEE_SAVED_DATA` via the mirror; the member may mutate shared rows by id like any other non-guest partner |
-| Safety | Password redacted from stored chat messages / LLM raw; לוסי-אורח hidden from Chat-with |
+| Login | WhatsApp-only until a later set-password flow; web login rejects null `passwordHash` |
+| Safety | לוסי-אורח hidden from Chat-with |
 
-**Code:** `guest-register.service.ts`, `whatsapp.service.ts`, `employee.service.ts` (`ensureGuestLucy`), `employee-records.service.ts` (mirror merge), `LLM.action.json`, `shared/src/llm-message.ts`.  
+**Code:** `guest-register.service.ts`, `whatsapp.service.ts`, `employee.service.ts` (`ensureGuestLucy`), `employee-records.service.ts` (mirror merge), `LLM.action.json`, `shared/src/llm-message.ts`.
 **Tests:** `backend/tests/guest-register.test.ts`, `shared/src/types.test.ts`, `shared/src/llm-message.test.ts`.
 
 ---

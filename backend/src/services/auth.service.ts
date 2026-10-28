@@ -13,7 +13,7 @@ export async function authenticate(
 ): Promise<{ user: PublicUser; token: string }> {
   const user = await findUserByUsername(username);
 
-  if (!user) {
+  if (!user || !user.passwordHash) {
     await verifyAgainstDummyHash(password);
     throw new InvalidCredentialsError();
   }

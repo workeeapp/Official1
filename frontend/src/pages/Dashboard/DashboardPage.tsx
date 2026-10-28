@@ -203,7 +203,7 @@ export function DashboardPage() {
         data-testid="dashboard-greeting"
         className="mt-2 text-2xl font-semibold tracking-tight text-text-primary sm:text-3xl"
       >
-        Hello, {user.username}
+        Hello, {user.username ?? "User"}
       </h1>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary sm:text-base">
         Welcome back to your dashboard.

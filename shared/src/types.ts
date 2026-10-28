@@ -4,7 +4,8 @@ import type { LlmReplyButton } from "./llm-message.js";
 
 export interface PublicUser {
   id: string;
-  username: string;
+  /** Null for WhatsApp-only accounts (no web login yet). */
+  username: string | null;
 }
 
 export interface AuthUserResponse {

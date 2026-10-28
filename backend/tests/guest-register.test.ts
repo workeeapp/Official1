@@ -91,7 +91,7 @@ describe("registerGuestMember", () => {
     teamFindUnique.mockResolvedValue({
       id: newTeamId,
       userId: newUserId,
-      name: "michal",
+      name: "Team",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -107,8 +107,8 @@ describe("registerGuestMember", () => {
     employeeFindMany.mockResolvedValue([]);
     userCreate.mockResolvedValue({
       id: newUserId,
-      username: "michal",
-      passwordHash: "hash",
+      username: null,
+      passwordHash: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -125,7 +125,7 @@ describe("registerGuestMember", () => {
       isProtected: false,
       isOwner: true,
       isGuest: false,
-      addressGender: null,
+      addressGender: "female",
       shareMirrorEmployeeId: null,
       model: null,
       temperature: null,
@@ -136,7 +136,7 @@ describe("registerGuestMember", () => {
     employeeUpdate.mockResolvedValue({});
   });
 
-  it("creates a User, member, share mirror link, and clears WhatsApp sticky", async () => {
+  it("creates a WhatsApp-only User, member with gender, share mirror, and clears sticky", async () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
@@ -144,8 +144,7 @@ describe("registerGuestMember", () => {
       register: {
         name: "מיכל",
         surname: "כהן",
-        username: "michal",
-        password: "SecretPass1",
+        gender: "female",
       },
     });
 
@@ -154,8 +153,10 @@ describe("registerGuestMember", () => {
       newUserId,
       newEmployeeId,
       mirrorEmployeeId: guestId,
-      username: "michal",
       displayName: "מיכל",
+    });
+    expect(userCreate).toHaveBeenCalledWith({
+      data: { username: null, passwordHash: null },
     });
     expect(employeeUpdate).toHaveBeenCalledWith({
       where: { id: guestId },
@@ -166,6 +167,7 @@ describe("registerGuestMember", () => {
         phone: null,
         isGuest: true,
         teamId: null,
+        addressGender: "female",
       },
     });
     expect(employeeCreate).toHaveBeenCalledWith({
@@ -174,14 +176,58 @@ describe("registerGuestMember", () => {
         teamId: newTeamId,
         isGuest: false,
         isOwner: true,
+        addressGender: "female",
       }),
     });
     expect(employeeUpdate).toHaveBeenCalledWith({
       where: { id: newEmployeeId },
       data: { shareMirrorEmployeeId: guestId },
     });
-    // Guest phone is normalized to WhatsApp digits before sticky clear.
     expect(clearSticky).toHaveBeenCalledWith("972501234567");
+  });
+
+  it("allows missing surname", async () => {
+    employeeCreate.mockResolvedValue({
+      id: newEmployeeId,
+      userId: newUserId,
+      teamId: newTeamId,
+      kind: "human",
+      name: "טל",
+      surname: "",
+      nickname: "טל",
+      email: null,
+      phone: "972501234567",
+      isProtected: false,
+      isOwner: true,
+      isGuest: false,
+      addressGender: "male",
+      shareMirrorEmployeeId: null,
+      model: null,
+      temperature: null,
+      reasoningEffort: null,
+      instructions: null,
+      createdAt: new Date(),
+    });
+
+    const result = await registerGuestMember({
+      hostUserId,
+      guest,
+      digital: guestLucy,
+      register: {
+        name: "טל",
+        gender: "male",
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(employeeUpdate).toHaveBeenCalledWith({
+      where: { id: guestId },
+      data: expect.objectContaining({
+        name: "טל",
+        surname: "",
+        addressGender: "male",
+      }),
+    });
   });
 
   it("rejects non-guest speakers", async () => {
@@ -191,9 +237,7 @@ describe("registerGuestMember", () => {
       digital: guestLucy,
       register: {
         name: "טל",
-        surname: "כהן",
-        username: "taluser",
-        password: "SecretPass1",
+        gender: "male",
       },
     });
     expect(result).toEqual({ ok: false, reason: "not_guest" });
@@ -207,15 +251,31 @@ describe("registerGuestMember", () => {
       digital: { ...guestLucy, name: "לוסי", nickname: "לוסי" },
       register: {
         name: "מיכל",
-        surname: "כהן",
-        username: "michal",
-        password: "SecretPass1",
+        gender: "female",
       },
     });
     expect(result).toEqual({ ok: false, reason: "not_guest_lucy" });
   });
 
-  it("rejects taken usernames", async () => {
+  it("rejects missing name", async () => {
+    const result = await registerGuestMember({
+      hostUserId,
+      guest,
+      digital: guestLucy,
+      register: {
+        name: "   ",
+        gender: "female",
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid_fields",
+      detail: "Missing name or gender",
+    });
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("maps phone conflicts to failed", async () => {
     userCreate.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
         code: "P2002",
@@ -228,29 +288,12 @@ describe("registerGuestMember", () => {
       digital: guestLucy,
       register: {
         name: "מיכל",
-        surname: "כהן",
-        username: "taken",
-        password: "SecretPass1",
-      },
-    });
-    expect(result).toEqual({ ok: false, reason: "username_taken" });
-  });
-
-  it("rejects invalid password", async () => {
-    const result = await registerGuestMember({
-      hostUserId,
-      guest,
-      digital: guestLucy,
-      register: {
-        name: "מיכל",
-        surname: "כהן",
-        username: "michal",
-        password: "short",
+        gender: "female",
       },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toBe("invalid_fields");
+      expect(result.reason).toBe("failed");
     }
   });
 });

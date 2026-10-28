@@ -22,7 +22,7 @@ export function sessionCookieOptions(): CookieOptions {
 }
 
 export async function createSessionToken(user: PublicUser): Promise<string> {
-  return new SignJWT({ username: user.username })
+  return new SignJWT({ username: user.username ?? null })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt()
@@ -46,11 +46,23 @@ export async function readSessionToken(token: string): Promise<SessionPayload> {
     const username = payload.username;
     const sessionId = payload.jti;
 
-    if (!id || typeof username !== "string" || !sessionId) {
+    if (
+      !id ||
+      !sessionId ||
+      (username !== null &&
+        username !== undefined &&
+        typeof username !== "string")
+    ) {
       throw new Error("Invalid session payload");
     }
 
-    return { user: { id, username }, sessionId };
+    return {
+      user: {
+        id,
+        username: typeof username === "string" ? username : null,
+      },
+      sessionId,
+    };
   } catch (error) {
     if (error instanceof joseErrors.JOSEError) {
       throw new Error("Invalid session");

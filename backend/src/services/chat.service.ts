@@ -1050,20 +1050,9 @@ async function getOrCreateConversation(
 
 function redactStoredJson(
   value: unknown,
-  register: LlmMetadata["register"],
+  _register?: LlmMetadata["register"],
 ): unknown {
-  if (!register?.password || value == null) {
-    return value;
-  }
-  try {
-    const json = JSON.stringify(value);
-    if (!json.includes(register.password)) {
-      return value;
-    }
-    return JSON.parse(redactRegisterSecrets(json, register));
-  } catch {
-    return value;
-  }
+  return value;
 }
 
 async function saveTurn(input: {
@@ -1919,9 +1908,9 @@ export async function sendChatMessage(input: {
   );
   const guestModeInstructions = guestSpeaker
     ? [
-        "GUEST MODE: The SPEAKER is a WhatsApp guest (????) ? not you. You are ????-????.",
-        "Never say ??? ????? / ??? ?? ????? / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
-        "Your purpose: help them register as a Workee member (their own account + ????). Collect first name, surname, username, password; when all four are known emit metadata.register with those fields. Until then register=null and ask for what is missing.",
+        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
+        "Never say אני אורח / אני גם אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
+        "Your purpose: help them register as a Workee member (their own account + לוסי). Collect first name and address gender (זכר/נקבה → gender male|female); surname only if they give it. Never ask for username or password. When name+gender are known emit metadata.register {name, gender} (optional surname). Until then register=null and ask for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
         "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
         "Off-topic outside shared lists or registration ? guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
@@ -1939,7 +1928,7 @@ export async function sendChatMessage(input: {
         guestSpeaker ? "" : OPEN_JOBS_RULES,
         consultEnvelope,
         guestSpeaker
-          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are ????-????."
+          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
           : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
         "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
         "LIVE DATA ONLY (lists / status / clocks / jobs): answer ???? ???????, ?? ??????/?????? ???, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected ? absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous ???????? / ??????? ???????? reply if they are not in this turn's JSON ? including after a delete when they tap ???. Empty section ? one empty sentence; never re-show chat-history-only titles. Exact button commands ???? ????? X? / ???? ????????: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER ? after a numbered dump, spoken indices map dump titles ? ids in THIS turn's JSON, then any supported ACTION (???? / ???? / ???? ?????? / ????? ?? N?); FORBIDDEN show_dump on that turn.",
@@ -2336,25 +2325,22 @@ export async function sendChatMessage(input: {
           register: metadata.register,
         });
         if (registerResult.ok) {
-          registerNotice = `????? ?????? ??${registerResult.displayName}. ?????? ????? ?? ???? ?????? ??? (?? ?????: ${registerResult.username}).`;
+          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}. מההודעה הבאה אפשר לדבר עם לוסי בחשבון שלך.`;
           recordWhatsAppEvent(
             "guest_register",
             `ok user=${registerResult.newUserId.slice(0, 8)} mirror=${registerResult.mirrorEmployeeId.slice(0, 8)}`,
           );
-        } else if (registerResult.reason === "username_taken") {
-          registerNotice = "?? ?????? ??? ???? ? ???? ?? ???.";
         } else if (registerResult.reason === "invalid_fields") {
           registerNotice =
-            "?? ?????? ????? ? ???? ?? ????, ?? ?????, ?? ????? ?????? ??????.";
+            "חסר שם או מגדר (זכר/נקבה) להשלמת ההרשמה — אשלים כשיהיו לי שניהם.";
         } else {
-          registerNotice = "?? ?????? ?????? ?? ?????? ????. ??? ??? ???? ???.";
+          registerNotice = "לא הצלחתי להשלים את ההרשמה כרגע. ננסה שוב בעוד רגע.";
           recordWhatsAppEvent(
             "guest_register",
             `fail reason=${registerResult.reason}`,
           );
         }
       }
-      // Never leave plaintext password in in-memory metadata used later.
       metadata = redactMetadataSecrets(metadata);
     }
     const incomingReminders = guestSpeaker ? [] : metadata.reminders ?? [];

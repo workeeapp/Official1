@@ -8,6 +8,7 @@ import {
   type RecurrenceException,
 } from "./recurrence.js";
 import { parseReminderInterval } from "./reminder-interval.js";
+import { parseAddressGender } from "./validation.js";
 
 export interface LlmReplyButton {
   label: string;
@@ -444,9 +445,10 @@ export type ReportHistoryKind = "add" | "update" | "remove" | "fire";
 /** Guest onboarding: create a User login + own Lucy; keep host share mirror. */
 export interface LlmRegisterAction {
   name: string;
-  surname: string;
-  username: string;
-  password: string;
+  /** Optional; empty when the guest did not give a surname. */
+  surname?: string;
+  /** How Lucy should address them: male | female. */
+  gender: "male" | "female";
 }
 
 export interface LlmMetadata {
@@ -2388,51 +2390,33 @@ function parseRegister(meta: Record<string, unknown>): LlmRegisterAction | null 
         : typeof record.lastName === "string"
           ? record.lastName.trim()
           : "";
-  const username =
-    typeof record.username === "string"
-      ? record.username.trim()
-      : typeof record.user_name === "string"
-        ? record.user_name.trim()
-        : "";
-  const password =
-    typeof record.password === "string"
-      ? record.password
-      : typeof record.pass === "string"
-        ? record.pass
-        : "";
-  if (!name || !surname || !username || !password) {
+  const genderRaw =
+    record.gender ??
+    record.address_gender ??
+    record.addressGender ??
+    record.sex;
+  const gender = parseAddressGender(genderRaw);
+  if (!name || (gender !== "male" && gender !== "female")) {
     return null;
   }
-  return { name, surname, username, password };
+  return {
+    name,
+    ...(surname ? { surname } : {}),
+    gender,
+  };
 }
 
-/** Replace plaintext password in stored chat / audit text. */
+/** Legacy no-op: register no longer carries a password. */
 export function redactRegisterSecrets(
   text: string,
-  register: LlmRegisterAction | null | undefined,
+  _register?: LlmRegisterAction | null,
 ): string {
-  if (!register?.password || !text) {
-    return text;
-  }
-  const password = register.password;
-  if (!password) {
-    return text;
-  }
-  return text.split(password).join("••••••••");
+  return text;
 }
 
-/** Strip password from metadata before persisting LLM raw / audit. */
+/** Legacy no-op: register no longer carries a password. */
 export function redactMetadataSecrets(metadata: LlmMetadata): LlmMetadata {
-  if (!metadata.register?.password) {
-    return metadata;
-  }
-  return {
-    ...metadata,
-    register: {
-      ...metadata.register,
-      password: "••••••••",
-    },
-  };
+  return metadata;
 }
 
 function parseMessageActions(meta: Record<string, unknown>): LlmMessageAction[] {
