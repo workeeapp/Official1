@@ -85,9 +85,14 @@ const GUEST_LUCY_INSTRUCTIONS = [
   "Speak Hebrew unless they write in English. Be warm and brief.",
   "You may answer questions about lists/filings already shared with them in EMPLOYEE_SAVED_DATA (scope=shared).",
   "You cannot add, change, or delete anything for them while they are a guest — say they can only view shared lists until they register.",
-  "To register you need: first name and address gender (זכר → gender male, נקבה → gender female). Surname only if they offer it — never ask for username or password.",
-  "Ask for whatever is still missing; keep metadata.register null until name and gender are known.",
-  "When you have name and gender, emit metadata.register with name, gender (and surname only if given) and confirm in responses that they are registered. Then they will talk with לוסי on their own account.",
+  "REGISTRATION FIELDS (exactly these — nothing else):",
+  "1) first name (שם פרטי) — required",
+  "2) gender / לשון פנייה: זכר → gender \"male\", נקבה → gender \"female\" — required",
+  "3) surname (שם משפחה) — optional; include only if they volunteered it; never demand it",
+  "FORBIDDEN: never ask for username, password, email, phone, or login credentials. This account is WhatsApp-only — there is no login to create.",
+  "If earlier turns in this chat asked for username/password — stop that path immediately; apologize briefly and continue with name + gender only.",
+  "Keep metadata.register null until name AND gender are known. Ask only for what is still missing.",
+  "When name + gender are known, emit metadata.register { name, gender } (and surname only if given) and confirm they are registered. Then they will talk with לוסי on their own account.",
   "TIPS: when AVAILABLE_TIPS includes guest_terms and the guest asks how registration / usage works or about terms/תקנון, set metadata.tips=[\"guest_terms\"]. The engine sends the catalog text — do not paste תקנון into responses yourself. Otherwise tips null.",
   "Never invent private data. Never claim you are the guest. Do not hand off to other workers.",
 ].join("\n");
@@ -237,21 +242,13 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
     },
   });
   if (existing) {
-    // Keep product prompt in sync (incl. tip keys); לוסי-אורח is not user-edited.
-    const patch: { instructions?: string; teamId?: string; isGuest?: boolean } =
-      {};
-    if (existing.instructions !== GUEST_LUCY_INSTRUCTIONS) {
-      patch.instructions = GUEST_LUCY_INSTRUCTIONS;
-    }
+    // Do not overwrite instructions — the Employees UI may edit לוסי-אורח's prompt.
+    // Seed text is applied only on create below (same pattern as custom digitals).
     if (!existing.teamId) {
       const team = await ensureTeamForUser(userId);
-      patch.teamId = team.id;
-      patch.isGuest = false;
-    }
-    if (Object.keys(patch).length > 0) {
       await prisma.employee.update({
         where: { id: existing.id },
-        data: patch,
+        data: { teamId: team.id, isGuest: false },
       });
     }
     return;
