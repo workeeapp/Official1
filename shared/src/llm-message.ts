@@ -374,6 +374,7 @@ export interface LlmReminderAction {
     | "weather"
     | "market"
     | "mashov"
+    | "smartschool"
     | "jewish"
     | "places"
     | "flights"
