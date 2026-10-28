@@ -52,8 +52,9 @@ export function formatSpeakerAddressContext(
     "SPEAKER_ADDRESS:",
     "gender: unknown",
     "You do not yet know how to address this speaker.",
-    "Ask once «לפנות אליך בלשון זכר או נקבה?» with empty actions (lists/filing/reminders/messages=[]).",
-    "On their answer → filing add item_name «לשון פנייה», item_info «זכר — לפנות בלשון זכר» or «נקבה — לפנות בלשון נקבה», item_description \"\"; then use that gender for the rest of the chat.",
+    "Ask once «לפנות אליך בלשון זכר או נקבה?» when the turn needs second-person Hebrew and there is no complete durable filing/save to apply this turn.",
+    "FORBIDDEN: empty actions / deferring a complete same-turn durable filing or save (e.g. «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב») until gender is answered — emit the filing/save ACTION this turn; gender ask may wait or follow, never block it.",
+    "On their gender answer → filing add item_name «לשון פנייה», item_info «זכר — לפנות בלשון זכר» or «נקבה — לפנות בלשון נקבה», item_description \"\"; then use that gender for the rest of the chat.",
   ].join("\n");
 }
 

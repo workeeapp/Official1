@@ -12,21 +12,41 @@ import {
   parseLlmMetadata,
   type LlmMetadata,
 } from "@workee/shared";
-import { withAttachmentRefs } from "../services/attachment.service.js";
+import {
+  emptyAttachmentOutcome,
+  mergeAttachmentOutcomes,
+  withAttachmentRefs,
+  type AttachmentApplyOutcome,
+} from "../services/attachment.service.js";
 import {
   applyEmployeeRecords,
+  correctAttachmentClaimReply,
+  correctDurableSaveClaimReply,
+  correctListMutationClaimReply,
+  correctShareClaimReply,
+  formatAppliedMutationFallback,
   formatEmployeeContext,
   getEmployeeRecordSnapshot,
   loadFilingOwners,
   loadListItemOwners,
   type EmployeeRecordSnapshot,
+  type FilingMutation,
+  type ListItemMutation,
+  type ShareApplyMiss,
 } from "../services/employee-records.service.js";
-import { withLinkedListRefs } from "../services/list-item-list-link.service.js";
+import {
+  fillBlankCustomListNameFromSameTurnLinks,
+  withLinkedListRefs,
+} from "../services/list-item-list-link.service.js";
+import type { EvalRawActionDiagnostic } from "./raw-action-diagnostic.js";
 import {
   applyDirectoryActions,
   listContactsForEmployee,
 } from "../services/contact.service.js";
-import { applyListOps } from "../services/list-ops.service.js";
+import {
+  applyListOps,
+  type ListOpResult,
+} from "../services/list-ops.service.js";
 import { applyReminders } from "../services/reminder.service.js";
 import {
   filingActionIds,
@@ -81,13 +101,17 @@ export interface ModelApplyProposeResult {
   /** Model-proposed ACTION (decision source). */
   metadata: LlmMetadata | unknown;
   response?: string;
+  /**
+   * Eval-only: raw lists/filing before parse/normalize (LIVE_FULL diagnostics).
+   * Distinguishes empty model emission from silent parse drops.
+   */
+  rawActionDiagnostic?: EvalRawActionDiagnostic;
 }
 
 /**
- * Harness-only bridge until shared `toListAction` accepts camelCase `listType`
- * (server fix pending). LIVE propose returns already-normalized `LlmMetadata`
- * with `listType`; a second `parseLlmMetadata` would otherwise default missing
- * snake `list_type` to `"custom"` and hide real product failures.
+ * Harness-only bridge for raw propose shapes that already use camelCase
+ * `listType` without snake `list_type`. Prefer skipping re-parse via
+ * {@link metadataFromModelApplyPropose} when the value is already normalized.
  *
  * Copies `listType` → `list_type` on lists[] when snake is absent. Does not
  * invent shopping/tasks from Hebrew or change apply semantics.
@@ -120,6 +144,86 @@ export function bridgeListTypeAliasesForParse(value: unknown): unknown {
 }
 
 /**
+ * True when `value` is already parseLlmMetadata / parseReplyMetadata output
+ * (camelCase listType / itemName), so a second parse would only risk drops.
+ * Raw snake stubs (`list_type` / `item_name` only) return false.
+ */
+export function isNormalizedLlmMetadata(value: unknown): value is LlmMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const meta = value as Record<string, unknown>;
+
+  if (Array.isArray(meta.lists)) {
+    for (const entry of meta.lists) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        continue;
+      }
+      const row = entry as Record<string, unknown>;
+      if (typeof row.listType === "string") {
+        return true;
+      }
+      if (typeof row.list_type === "string" && row.listType === undefined) {
+        return false;
+      }
+    }
+  }
+
+  if (Array.isArray(meta.filing)) {
+    for (const entry of meta.filing) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        continue;
+      }
+      const row = entry as Record<string, unknown>;
+      if (typeof row.itemName === "string") {
+        return true;
+      }
+      if (typeof row.item_name === "string" && row.itemName === undefined) {
+        return false;
+      }
+      if (
+        (row.action === "add_filing" ||
+          row.action === "remove_filing" ||
+          row.action === "update_filing") &&
+        ("filingId" in row || "itemName" in row)
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Empty already-parsed envelope (LIVE ask-only / emptyLlmMetadata).
+  if (
+    Array.isArray(meta.lists) &&
+    Array.isArray(meta.filing) &&
+    Array.isArray(meta.reminders) &&
+    Array.isArray(meta.messages) &&
+    meta.lists.length === 0 &&
+    meta.filing.length === 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Prepare propose metadata for constraints + apply: rewrite symbolic ids, then
+ * parse only when still raw. LIVE_FULL propose already returns parseReplyMetadata
+ * output — re-parsing that object used to drop camelCase filing/list fields.
+ */
+export function metadataFromModelApplyPropose(
+  proposedMetadata: unknown,
+  idMap: Map<string, string> = new Map(),
+): LlmMetadata {
+  const rewritten = rewriteAliases(proposedMetadata, idMap);
+  if (isNormalizedLlmMetadata(rewritten)) {
+    return rewritten;
+  }
+  return parseLlmMetadata(bridgeListTypeAliasesForParse(rewritten));
+}
+
+/**
  * Fail closed before any Prisma use. Never logs URL/credentials.
  */
 export function assertModelApplyDatabaseApproved(): void {
@@ -135,34 +239,164 @@ function metadataHasMutations(metadata: LlmMetadata): boolean {
   return lists + listOps + filing + directory + reminders > 0;
 }
 
+export type ModelApplyTurnApplyResult = {
+  mutations: ListItemMutation[];
+  filingMutations: FilingMutation[];
+  shareMisses: ShareApplyMiss[];
+  attachmentOutcome: AttachmentApplyOutcome;
+  listOpResults: ListOpResult[];
+};
+
+/**
+ * Align spoken reply with apply evidence (same correctors / order as chat.service).
+ * Pure: used after apply, and when apply is skipped (empty outcomes).
+ * Does not invent success from requested ACTION or appliedViaProduction alone.
+ */
+export function correctModelApplyTurnResponse(input: {
+  response: string;
+  metadata: LlmMetadata;
+  mutations?: ListItemMutation[];
+  filingMutations?: FilingMutation[];
+  shareMisses?: ShareApplyMiss[];
+  attachmentOutcome?: AttachmentApplyOutcome;
+  listOpResults?: ListOpResult[];
+}): string {
+  const mutations = input.mutations ?? [];
+  const filingMutations = input.filingMutations ?? [];
+  const shareMisses = input.shareMisses ?? [];
+  const attachmentOutcome =
+    input.attachmentOutcome ?? emptyAttachmentOutcome();
+  const listOpResults = input.listOpResults ?? [];
+  const metadata = input.metadata;
+
+  const setResponse = (_reply: string, next: string) => next;
+  let working = input.response;
+  const spoken = () => working;
+
+  const requestedListRemove = (metadata.lists ?? []).some(
+    (row) => row.action === "remove",
+  );
+  const requestedListUpdate = (metadata.lists ?? []).some(
+    (row) => row.action === "update",
+  );
+  const requestedListAdd = (metadata.lists ?? []).some(
+    (row) => row.action === "add",
+  );
+  const requestedFilingAdd = (metadata.filing ?? []).some(
+    (row) => row.action === "add_filing",
+  );
+  const requestedFilingUpdate = (metadata.filing ?? []).some(
+    (row) => row.action === "update_filing",
+  );
+  const appliedListRemove = mutations.some(
+    (row) => row.action === "remove" && !row.listShell,
+  );
+  const appliedListUpdate = mutations.some(
+    (row) => row.action === "update" && !row.listShell,
+  );
+  const appliedListAdd = mutations.some(
+    (row) => row.action === "add" && !row.listShell,
+  );
+  const appliedListOps = listOpResults.some((row) => row.applied);
+  const appliedFilingRemove = filingMutations.some(
+    (row) => row.action === "remove",
+  );
+  const appliedFilingUpdate = filingMutations.some(
+    (row) => row.action === "update",
+  );
+  const appliedFilingAdd = filingMutations.some(
+    (row) => row.action === "add",
+  );
+  const appliedFallback = formatAppliedMutationFallback(
+    mutations,
+    filingMutations,
+  );
+
+  working = correctListMutationClaimReply({
+    reply: working,
+    requestedRemove: requestedListRemove,
+    requestedUpdate: requestedListUpdate,
+    requestedAdd: requestedListAdd,
+    appliedRemove: appliedListRemove,
+    appliedUpdate: appliedListUpdate,
+    appliedAdd: appliedListAdd,
+    appliedFallback,
+    setResponse,
+    spoken: spoken(),
+    appliedListOps,
+    appliedFilingRemove,
+    appliedFilingUpdate,
+  });
+  working = correctShareClaimReply({
+    reply: working,
+    spoken: spoken(),
+    mutations,
+    misses: shareMisses,
+    setResponse,
+  });
+  working = correctAttachmentClaimReply({
+    reply: working,
+    spoken: spoken(),
+    outcome: attachmentOutcome,
+    setResponse,
+  });
+  working = correctDurableSaveClaimReply({
+    reply: working,
+    spoken: spoken(),
+    requestedListAdd,
+    requestedListUpdate,
+    requestedFilingAdd,
+    requestedFilingUpdate,
+    appliedListAdd,
+    appliedListUpdate,
+    appliedFilingAdd,
+    appliedFilingUpdate,
+    setResponse,
+  });
+  return working;
+}
+
 /**
  * Apply a model-proposed ACTION through production paths (no symbolic rewrite).
  *
  * Mirrors chat.service list/filing targeting: planTargetedActions →
  * applyEmployeeRecords per application (co-share vs assign visibility).
- * Still skips full sendChatMessage (no reply correction, dumps, tips, WA).
+ * Still skips full sendChatMessage (dumps, tips, WA); reply correction is
+ * applied by the caller via correctModelApplyTurnResponse.
  */
 export async function applyModelMetadataTurn(input: {
   account: HarnessAccount;
   metadata: LlmMetadata;
-}): Promise<{
-  metadata: LlmMetadata;
-  appliedViaProduction: true;
-  mutations: Awaited<ReturnType<typeof applyEmployeeRecords>>["mutations"];
-}> {
+}): Promise<
+  ModelApplyTurnApplyResult & {
+    metadata: LlmMetadata;
+    appliedViaProduction: true;
+  }
+> {
   // Fail closed before any production apply / Prisma side effect.
   assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
 
-  const { metadata, account } = input;
+  const account = input.account;
+  const metadata = fillBlankCustomListNameFromSameTurnLinks(input.metadata);
   const humans = account.employees.filter((row) => row.kind !== "digital");
 
+  let listOpResults: ListOpResult[] = [];
+  let attachmentOutcome = emptyAttachmentOutcome();
   if ((metadata.listOps?.length ?? 0) > 0) {
-    await applyListOps({
+    listOpResults = await applyListOps({
       userId: account.userId,
       actor: account.actor,
       employees: humans,
       ops: metadata.listOps ?? [],
     });
+    for (const row of listOpResults) {
+      if (row.attachmentOutcome) {
+        attachmentOutcome = mergeAttachmentOutcomes(
+          attachmentOutcome,
+          row.attachmentOutcome,
+        );
+      }
+    }
   }
 
   const metadataForApply = {
@@ -188,9 +422,9 @@ export async function applyModelMetadataTurn(input: {
     filingOwners,
   });
 
-  const mutations: Awaited<
-    ReturnType<typeof applyEmployeeRecords>
-  >["mutations"] = [];
+  const mutations: ListItemMutation[] = [];
+  const filingMutations: FilingMutation[] = [];
+  const shareMisses: ShareApplyMiss[] = [];
   for (const application of plan.applications) {
     const applied = await applyEmployeeRecords(
       application.employeeId,
@@ -199,6 +433,12 @@ export async function applyModelMetadataTurn(input: {
       account.actor.id,
     );
     mutations.push(...applied.mutations);
+    filingMutations.push(...applied.filingMutations);
+    shareMisses.push(...applied.shareMisses);
+    attachmentOutcome = mergeAttachmentOutcomes(
+      attachmentOutcome,
+      applied.attachmentOutcome,
+    );
   }
 
   // Production path (chat.service): clocks go through applyReminders, not records alone.
@@ -228,6 +468,10 @@ export async function applyModelMetadataTurn(input: {
     metadata,
     appliedViaProduction: true,
     mutations,
+    filingMutations,
+    shareMisses,
+    attachmentOutcome,
+    listOpResults,
   };
 }
 
@@ -327,12 +571,10 @@ export async function runModelApplyCase(
         priorMetadata: [...priorMetadata],
       });
 
-      const metadata = parseLlmMetadata(
-        bridgeListTypeAliasesForParse(
-          rewriteAliases(proposed.metadata, idMap),
-        ),
+      const metadata = fillBlankCustomListNameFromSameTurnLinks(
+        metadataFromModelApplyPropose(proposed.metadata, idMap),
       );
-      const response = proposed.response ?? turn.response ?? "";
+      const rawResponse = proposed.response ?? turn.response ?? "";
       priorMetadata.push(metadata);
 
       // Map authored symbolic ids in constraints → real UUIDs from seed.
@@ -340,13 +582,34 @@ export async function runModelApplyCase(
         turn.constraints ?? [],
         idMap,
       ) ?? []) as ModelEvalConstraint[];
-      const checked = evaluateConstraints(constraints, metadata, response);
+      // Score ACTION against the model's raw spoken text (constraints stay score-only).
+      const checked = evaluateConstraints(constraints, metadata, rawResponse);
 
       let appliedViaProduction = false;
+      let applyResult: ModelApplyTurnApplyResult = {
+        mutations: [],
+        filingMutations: [],
+        shareMisses: [],
+        attachmentOutcome: emptyAttachmentOutcome(),
+        listOpResults: [],
+      };
       if (metadataHasMutations(metadata)) {
-        await applyModelMetadataTurn({ account, metadata });
+        const applied = await applyModelMetadataTurn({ account, metadata });
         appliedViaProduction = true;
+        applyResult = {
+          mutations: applied.mutations,
+          filingMutations: applied.filingMutations,
+          shareMisses: applied.shareMisses,
+          attachmentOutcome: applied.attachmentOutcome,
+          listOpResults: applied.listOpResults,
+        };
       }
+      // Align spoken reply with apply evidence even when apply was skipped.
+      const response = correctModelApplyTurnResponse({
+        response: rawResponse,
+        metadata,
+        ...applyResult,
+      });
 
       const enriched = await enrichSnapshot(account.employeeId);
       snapshot = enriched.snapshot;
@@ -384,6 +647,9 @@ export async function runModelApplyCase(
         snapshot,
         appliedViaProduction,
         ok: turnOk,
+        ...(proposed.rawActionDiagnostic
+          ? { rawActionDiagnostic: proposed.rawActionDiagnostic }
+          : {}),
       });
     }
   } catch (err) {

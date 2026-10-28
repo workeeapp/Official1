@@ -117,6 +117,7 @@ describe("Capability alignment (offline structural)", () => {
         query: "חניון",
         place: "הקניון",
         intent: "parking",
+        geo_mode: "soft_place",
         aspects: ["summary"],
       },
       jewish: { place: "תל אביב", aspects: ["candles"] },
@@ -136,6 +137,7 @@ describe("Capability alignment (offline structural)", () => {
     expect(meta.mashov?.aspects).toContain("grades");
     expect(meta.places?.intent).toBe("parking");
     expect(meta.places?.includedType).toBe("parking");
+    expect(meta.places?.geoMode).toBe("soft_place");
     expect(meta.jewish?.place).toBe("תל אביב");
     expect(meta.routes?.aspects).toContain("summary");
     expect(meta.flights?.airport).toBe("TLV");

@@ -588,6 +588,10 @@ function emptyFullDumpSentence(opts?: ShowDumpOptions): string {
  * Bare overview («מה יש לי» / הציגי הכל): stitch Stage-2 category dumps.
  * Shopping = counts only; tasks = full item lines; custom = counts; then
  * reminders / filings / contacts / phone book.
+ *
+ * Topic / ITEM multi-section (`opts.itemIds` set): only matching row ids;
+ * shopping as item lines (not counts); custom lists as filtered item dumps;
+ * omit empty sections and the inventory hint; phone book omitted (no opaque ids).
  */
 export function formatFullDump(
   snapshot: EmployeeRecordSnapshot,
@@ -595,6 +599,7 @@ export function formatFullDump(
 ): DumpTextResult {
   const sections: string[] = [];
   const lines: LastNumberedDumpLine[] = [];
+  const itemDump = opts?.itemIds != null;
 
   const pushBlock = (block: DumpTextResult | string, section?: string) => {
     if (typeof block === "string") {
@@ -618,11 +623,34 @@ export function formatFullDump(
   pushBlock(
     formatThreeWayDump("shopping", "קניות", snapshot, {
       ...opts,
-      countsOnly: true,
+      // Topic dump: filtered item lines. Bare full inventory: counts only.
+      countsOnly: itemDump ? false : true,
     }),
   );
   pushBlock(formatThreeWayDump("tasks", "מטלות", snapshot, opts), "tasks");
-  pushBlock(formatCustomListsCountsDump(snapshot, opts));
+  if (itemDump) {
+    for (const list of snapshot.lists) {
+      if (list.list_type !== "custom") {
+        continue;
+      }
+      const name = (list.list_name ?? "").trim();
+      if (!name) {
+        continue;
+      }
+      const customBody = formatContactsOrCustomDump(
+        "custom",
+        name,
+        snapshot,
+        name,
+        opts,
+      );
+      if (customBody?.text.trim()) {
+        pushBlock(customBody, "custom");
+      }
+    }
+  } else {
+    pushBlock(formatCustomListsCountsDump(snapshot, opts));
+  }
 
   const partnerNeedles = dumpFilterNames(opts?.partner);
   const partnerOnly =
@@ -666,14 +694,54 @@ export function formatFullDump(
     }
   }
 
-  pushBlock(formatPhoneBookDump(opts?.phoneBook, opts), "phone_book");
+  // Phone-book SPEAKER_CONTACTS rows lack dump opaque ids — skip on id filter.
+  if (!itemDump) {
+    pushBlock(formatPhoneBookDump(opts?.phoneBook, opts), "phone_book");
+  }
 
   if (sections.length === 0) {
+    if (opts?.omitEmptySentence === true) {
+      return emptyDumpResult("");
+    }
     return emptyDumpResult(emptyFullDumpSentence(opts));
   }
 
-  sections.push("לפירוט רשימה: הצג רשימת …");
+  if (!itemDump) {
+    sections.push("לפירוט רשימה: הצג רשימת …");
+  }
   return { text: sections.join("\n\n"), lines };
+}
+
+/**
+ * Opaque dump row ids present in this live snapshot (item_id / filing_id /
+ * contact_id / reminder_id). Used to validate show_dump_ids before format.
+ */
+export function liveDumpRowIdsFromSnapshot(
+  snapshot: EmployeeRecordSnapshot,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const list of snapshot.lists ?? []) {
+    const listType = list.list_type as ListDumpType;
+    for (const item of list.items ?? []) {
+      const id = dumpItemId(listType, item as Record<string, unknown>);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  for (const row of snapshot.filing ?? []) {
+    const id = String(row.filing_id ?? "").trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  for (const row of snapshot.reminders ?? []) {
+    const id = String(row.reminder_id ?? "").trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return ids;
 }
 
 function hebrewItemCount(n: number): string {

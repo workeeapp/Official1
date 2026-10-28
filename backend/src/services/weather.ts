@@ -386,6 +386,9 @@ function buildDayFacts(
 
 export async function fetchWeatherFacts(input: {
   place: string;
+  /** When both valid, skip geocode and forecast at these coords. */
+  latitude?: number | null;
+  longitude?: number | null;
   date?: string | null;
   aspects?: WeatherAspect[] | unknown;
   now?: Date;
@@ -393,7 +396,25 @@ export async function fetchWeatherFacts(input: {
 }): Promise<WeatherFacts | null> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const aspects = parseWeatherAspects(input.aspects);
-  const geo = await geocodePlace(input.place, fetchImpl);
+
+  let geo: WeatherPlace | null = null;
+  const lat = input.latitude;
+  const lng = input.longitude;
+  if (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  ) {
+    const label = String(input.place ?? "").trim() || "המיקום שלך";
+    geo = { name: label, latitude: lat, longitude: lng };
+  } else {
+    geo = await geocodePlace(input.place, fetchImpl);
+  }
   if (!geo) {
     return null;
   }
@@ -601,6 +622,10 @@ export type WeatherMessagesResult = {
   messages: string[];
   /** Facts body only (for WATCH sample wrap — no tip). */
   body: string;
+  /** True when forecast used PENDING_LOCATION / speaker pin coords (no geocode). */
+  usedPendingPin: boolean;
+  /** True when reply only asks for a pin or place (no provider forecast). */
+  needsLocation: boolean;
 };
 
 type WeatherTipComposer = (input: {
@@ -729,6 +754,10 @@ async function scanIsraelCoastWaves(input: {
 /** Resolve live weather ACTION → one or two spoken bubbles. */
 export async function resolveWeatherMessages(input: {
   place: string;
+  /** When true, use latitude/longitude (PENDING_LOCATION) and skip geocode. */
+  nearSpeaker?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
   date?: string | null;
   aspects?: WeatherAspect[] | unknown;
   /** Minimum wave height (m) for coast / Israel scan or single-city check. */
@@ -740,28 +769,83 @@ export async function resolveWeatherMessages(input: {
   composeTip?: WeatherTipComposer;
 }): Promise<WeatherMessagesResult> {
   const place = input.place.trim();
-  if (!place) {
-    const text = "לאיזה מקום לבדוק את מזג האוויר?";
-    return { messages: [text], body: text };
+  const nearSpeaker = input.nearSpeaker === true;
+  const hasPin =
+    typeof input.latitude === "number" &&
+    typeof input.longitude === "number" &&
+    Number.isFinite(input.latitude) &&
+    Number.isFinite(input.longitude) &&
+    input.latitude >= -90 &&
+    input.latitude <= 90 &&
+    input.longitude >= -180 &&
+    input.longitude <= 180;
+
+  // Caller must set nearSpeaker only for the pin path (named city → nearSpeaker false).
+  // Display label in `place` is OK while using pin coords.
+  const usePin = nearSpeaker && hasPin;
+  const emptyResult = (
+    text: string,
+    flags: { usedPendingPin?: boolean; needsLocation?: boolean } = {},
+  ): WeatherMessagesResult => ({
+    messages: [text],
+    body: text,
+    usedPendingPin: flags.usedPendingPin === true,
+    needsLocation: flags.needsLocation === true,
+  });
+
+  if (nearSpeaker && !hasPin) {
+    return emptyResult(
+      "שלח מיקום בוואטסאפ (סיכת מיקום) ואז אבדוק את מזג האוויר שם.",
+      { needsLocation: true },
+    );
   }
+  if (!place && !usePin) {
+    return emptyResult("לאיזה מקום לבדוק את מזג האוויר?", {
+      needsLocation: true,
+    });
+  }
+
   const aspects = parseWeatherAspects(input.aspects);
   const wantsWaves =
     aspects.includes("waves") || aspects.includes("summary");
+  const displayPlace = usePin
+    ? place || "המיקום שלך"
+    : place;
   try {
-    if (wantsWaves && isIsraelWideWavePlace(place)) {
+    if (!usePin && wantsWaves && isIsraelWideWavePlace(place)) {
       const body = await scanIsraelCoastWaves(input);
-      return { messages: [body], body };
+      return {
+        messages: [body],
+        body,
+        usedPendingPin: false,
+        needsLocation: false,
+      };
     }
-    const facts = await fetchWeatherFacts(input);
+    const facts = await fetchWeatherFacts({
+      place: displayPlace,
+      date: input.date,
+      aspects: input.aspects,
+      now: input.now,
+      fetchImpl: input.fetchImpl,
+      ...(usePin
+        ? { latitude: input.latitude, longitude: input.longitude }
+        : {}),
+    });
     if (!facts) {
-      const text = `לא מצאתי מקום בשם «${place}».`;
-      return { messages: [text], body: text };
+      const text = usePin
+        ? "לא הצלחתי לשלוף עכשיו את מזג האוויר למיקום ששלחת."
+        : `לא מצאתי מקום בשם «${place}».`;
+      return emptyResult(text);
     }
     let body = formatWeatherHebrew(facts, input.now);
     const min =
       input.minWaveM != null && Number.isFinite(input.minWaveM)
         ? Number(input.minWaveM)
         : null;
+    const okFlags = {
+      usedPendingPin: usePin,
+      needsLocation: false,
+    };
     if (min != null && wantsWaves) {
       const wave = facts.days[0]?.waveHeightM ?? null;
       const today = jerusalemYmd(input.now);
@@ -773,10 +857,10 @@ export async function resolveWeatherMessages(input: {
       } else {
         body = `גובה הגלים ב${facts.place.name} ${when}: כ־${wave} מ׳ — מתחת ל־${min} מ׳.`;
       }
-      return { messages: [body], body };
+      return { messages: [body], body, ...okFlags };
     }
     if (isFocusedSingleAspect(facts.aspects)) {
-      return { messages: [body], body };
+      return { messages: [body], body, ...okFlags };
     }
     const composeTip =
       input.composeTip ??
@@ -787,13 +871,13 @@ export async function resolveWeatherMessages(input: {
     });
     const trimmedTip = tip?.trim() || null;
     if (trimmedTip) {
-      return { messages: [trimmedTip, body], body };
+      return { messages: [trimmedTip, body], body, ...okFlags };
     }
-    return { messages: [body], body };
+    return { messages: [body], body, ...okFlags };
   } catch {
-    const text =
-      "לא הצלחתי לשלוף עכשיו את מזג האוויר. נסה שוב בעוד רגע.";
-    return { messages: [text], body: text };
+    return emptyResult(
+      "לא הצלחתי לשלוף עכשיו את מזג האוויר. נסה שוב בעוד רגע.",
+    );
   }
 }
 

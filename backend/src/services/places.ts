@@ -21,6 +21,8 @@ import {
   type LiveRetrievalRecord,
   type LiveSelectApplyResult,
 } from "./live-retrieval-select.js";
+import { resolvePlaceViewport } from "./geocode-viewport.js";
+import type { ResolvedViewport } from "./resolved-location.js";
 
 export type PlacesAspect =
   | "summary"
@@ -717,11 +719,16 @@ export async function fetchPlacesFacts(input: {
   lat?: number | null;
   lng?: number | null;
   nearSpeaker?: boolean;
+  /**
+   * Hard inside-area search (B2a). When set with a valid viewport, sends
+   * locationRestriction only — never locationBias / DISTANCE / pending pin.
+   */
+  areaRestrict?: boolean;
+  areaViewport?: ResolvedViewport | null;
   openNow?: boolean | null;
   minRating?: number | null;
   includedType?: string | null;
   radiusMeters?: number | null;
-  parkingCost?: LlmPlacesParkingCost | unknown;
   /** True when ACTION explicitly set radius_meters (vs engine default bias). */
   radiusExplicit?: boolean;
   fetchImpl?: typeof fetch;
@@ -731,12 +738,29 @@ export async function fetchPlacesFacts(input: {
   const place = String(input.place ?? "").trim();
   const aspects = parsePlacesAspects(input.aspects);
   const intent = normalizePlacesIntent(input.intent);
-  const lat =
+  const areaRestrict =
+    input.areaRestrict === true && input.areaViewport != null;
+  const latRaw =
     input.lat != null && Number.isFinite(input.lat) ? input.lat : null;
-  const lng =
+  const lngRaw =
     input.lng != null && Number.isFinite(input.lng) ? input.lng : null;
-  const nearSpeaker =
-    Boolean(input.nearSpeaker) || (lat != null && lng != null && !place);
+  // Area restrict never uses pin coords.
+  const lat = areaRestrict
+    ? null
+    : latRaw != null && latRaw >= -90 && latRaw <= 90
+      ? latRaw
+      : null;
+  const lng = areaRestrict
+    ? null
+    : lngRaw != null && lngRaw >= -180 && lngRaw <= 180
+      ? lngRaw
+      : null;
+  // near=speaker OR explicit coords with empty place (pin-style ACTION).
+  // Named place + leftover coords must NOT become nearSpeaker / locationBias.
+  // area_restrict never becomes nearSpeaker.
+  const nearSpeaker = areaRestrict
+    ? false
+    : Boolean(input.nearSpeaker) || (lat != null && lng != null && !place);
   const openNowFilter = normalizePlacesOpenNow(input.openNow);
   const minRating = normalizePlacesMinRating(input.minRating);
   const minRatingProvider =
@@ -750,8 +774,9 @@ export async function fetchPlacesFacts(input: {
     input.radiusExplicit === true ||
     (input.radiusMeters != null &&
       normalizePlacesRadiusMeters(input.radiusMeters) != null);
+  // Bias only for intentional speaker/pin searches — never with area_restrict.
   const biasRadius =
-    lat != null && lng != null
+    !areaRestrict && nearSpeaker && lat != null && lng != null
       ? normalizePlacesRadiusMeters(input.radiusMeters) ??
         PLACES_DEFAULT_BIAS_RADIUS_METERS
       : null;
@@ -766,7 +791,11 @@ export async function fetchPlacesFacts(input: {
 
   const facts: PlacesFacts = {
     query,
-    place: nearSpeaker ? place || "האזור שלך" : place,
+    place: nearSpeaker
+      ? place || "האזור שלך"
+      : areaRestrict
+        ? input.areaViewport!.label || place
+        : place,
     nearSpeaker,
     aspects,
     intent,
@@ -779,7 +808,12 @@ export async function fetchPlacesFacts(input: {
     results: [],
     requestedMax,
   };
-  if (!query || (!place && (lat == null || lng == null))) {
+  if (
+    !query ||
+    (areaRestrict
+      ? !place
+      : !place && (lat == null || lng == null))
+  ) {
     return facts;
   }
 
@@ -790,8 +824,15 @@ export async function fetchPlacesFacts(input: {
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
+  // Hard area: category query only — region enforced by locationRestriction.
+  // Soft named place: keep query+place text preference.
   const body: Record<string, unknown> = {
-    textQuery: place && !nearSpeaker ? `${query} ${place}` : query,
+    textQuery:
+      areaRestrict
+        ? query
+        : place && !nearSpeaker
+          ? `${query} ${place}`
+          : query,
     languageCode: "he",
     regionCode: "IL",
     maxResultCount: requestedMax,
@@ -806,7 +847,16 @@ export async function fetchPlacesFacts(input: {
     body.includedType = includedType;
     body.strictTypeFiltering = true;
   }
-  if (lat != null && lng != null && biasRadius != null) {
+  if (areaRestrict && input.areaViewport) {
+    const vp = input.areaViewport;
+    body.locationRestriction = {
+      rectangle: {
+        low: { latitude: vp.low.lat, longitude: vp.low.lng },
+        high: { latitude: vp.high.lat, longitude: vp.high.lng },
+      },
+    };
+    // Never pair with locationBias or DISTANCE.
+  } else if (nearSpeaker && lat != null && lng != null && biasRadius != null) {
     body.locationBias = {
       circle: {
         center: { latitude: lat, longitude: lng },
@@ -1173,7 +1223,15 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
   return notes.length > 0 ? `${body}\n${notes.join("\n")}` : body;
 }
 
-export async function resolvePlacesReply(input: {
+export type PlacesReplyResult = {
+  text: string;
+  /** True when a near=speaker search successfully used pin/ACTION coords. */
+  usedPendingPin: boolean;
+  /** True when reply only asks for a WhatsApp pin / place (no provider call). */
+  needsLocation: boolean;
+};
+
+export async function resolvePlacesReplyDetailed(input: {
   query: string;
   place: string;
   aspects?: PlacesAspect[] | unknown;
@@ -1181,6 +1239,8 @@ export async function resolvePlacesReply(input: {
   lat?: number | null;
   lng?: number | null;
   nearSpeaker?: boolean;
+  /** Hard inside-area mode (ACTION geo_mode=area_restrict). */
+  areaRestrict?: boolean;
   openNow?: boolean | null;
   minRating?: number | null;
   includedType?: string | null;
@@ -1194,40 +1254,135 @@ export async function resolvePlacesReply(input: {
   speakerAsk?: string;
   billing?: ComposeLlmBilling | null;
   runSelect?: typeof runLivePostSelect;
-}): Promise<string> {
+  /** Injected for tests — default resolvePlaceViewport. */
+  resolveViewport?: typeof resolvePlaceViewport;
+}): Promise<PlacesReplyResult> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
+  const areaRestrict = input.areaRestrict === true;
   const hasPin =
+    !areaRestrict &&
     input.lat != null &&
     input.lng != null &&
     Number.isFinite(input.lat) &&
-    Number.isFinite(input.lng);
-  if (!query || (!place && !hasPin && !input.nearSpeaker)) {
-    return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)";
+    Number.isFinite(input.lng) &&
+    (input.lat as number) >= -90 &&
+    (input.lat as number) <= 90 &&
+    (input.lng as number) >= -180 &&
+    (input.lng as number) <= 180;
+  const nearSpeaker = areaRestrict ? false : Boolean(input.nearSpeaker);
+  if (!query || (!place && !hasPin && !nearSpeaker)) {
+    return {
+      text: "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)",
+      usedPendingPin: false,
+      needsLocation: true,
+    };
   }
-  if ((input.nearSpeaker || !place) && !hasPin) {
-    return "שלח מיקום בוואטסאפ (סיכת מיקום) ואחפש באזור שלך.";
+  if (areaRestrict && !place) {
+    return {
+      text: "לאיזה אזור לחפש? (למשל השרון / גוש דן)",
+      usedPendingPin: false,
+      needsLocation: true,
+    };
   }
-  try {
-    const facts = await fetchPlacesFacts(input);
-    if (!input.requireLiveSelect || facts.results.length === 0) {
-      return formatPlacesHebrew(facts);
-    }
-    const runSelect = input.runSelect ?? runLivePostSelect;
-    const outcome = await runSelect({
-      domain: "places",
-      records: placesToLiveRetrievalRecords(facts),
-      speakerAsk: input.speakerAsk ?? "",
-      billing: input.billing ?? null,
+  if ((nearSpeaker || !place) && !hasPin) {
+    return {
+      text: "שלח מיקום בוואטסאפ (סיכת מיקום) ואחפש באזור שלך.",
+      usedPendingPin: false,
+      needsLocation: true,
+    };
+  }
+
+  let areaViewport: ResolvedViewport | null = null;
+  if (areaRestrict) {
+    const resolveVp = input.resolveViewport ?? resolvePlaceViewport;
+    const vp = await resolveVp({
+      place,
+      fetchImpl: input.fetchImpl,
+      apiKey: input.apiKey,
     });
-    return formatPlacesAfterLiveSelect(facts, outcome);
+    if (!vp.ok) {
+      return {
+        text: vp.messageHe,
+        usedPendingPin: false,
+        needsLocation: true,
+      };
+    }
+    areaViewport = vp.viewport;
+  }
+
+  try {
+    const facts = await fetchPlacesFacts({
+      ...input,
+      nearSpeaker,
+      lat: areaRestrict ? null : input.lat,
+      lng: areaRestrict ? null : input.lng,
+      areaRestrict,
+      areaViewport,
+    });
+    const text =
+      !input.requireLiveSelect || facts.results.length === 0
+        ? formatPlacesHebrew(facts)
+        : formatPlacesAfterLiveSelect(
+            facts,
+            await (input.runSelect ?? runLivePostSelect)({
+              domain: "places",
+              records: placesToLiveRetrievalRecords(facts),
+              speakerAsk: input.speakerAsk ?? "",
+              billing: input.billing ?? null,
+            }),
+          );
+    return {
+      text,
+      usedPendingPin: nearSpeaker && hasPin,
+      needsLocation: false,
+    };
   } catch (error) {
     if (error instanceof Error && error.message === PLACES_API_KEY_MISSING) {
-      return "חיפוש עסקים לא מוגדר כרגע (חסר מפתח Google Places).";
+      return {
+        text: "חיפוש עסקים לא מוגדר כרגע (חסר מפתח Google Places).",
+        usedPendingPin: false,
+        needsLocation: false,
+      };
     }
     if (error instanceof Error && error.message === PLACES_API_DENIED) {
-      return "חיפוש עסקים בגוגל לא מופעל למפתח הזה (צריך Places API New).";
+      return {
+        text: "חיפוש עסקים בגוגל לא מופעל למפתח הזה (צריך Places API New).",
+        usedPendingPin: false,
+        needsLocation: false,
+      };
     }
-    return "לא הצלחתי לחפש עכשיו בגוגל. נסה שוב בעוד רגע.";
+    return {
+      text: "לא הצלחתי לחפש עכשיו בגוגל. נסה שוב בעוד רגע.",
+      usedPendingPin: false,
+      needsLocation: false,
+    };
   }
+}
+
+export async function resolvePlacesReply(input: {
+  query: string;
+  place: string;
+  aspects?: PlacesAspect[] | unknown;
+  intent?: PlacesIntent | unknown;
+  lat?: number | null;
+  lng?: number | null;
+  nearSpeaker?: boolean;
+  areaRestrict?: boolean;
+  openNow?: boolean | null;
+  minRating?: number | null;
+  includedType?: string | null;
+  radiusMeters?: number | null;
+  parkingCost?: LlmPlacesParkingCost | unknown;
+  radiusExplicit?: boolean;
+  fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  /** When true and rows exist, run same-turn live_select (Stage B). */
+  requireLiveSelect?: boolean;
+  speakerAsk?: string;
+  billing?: ComposeLlmBilling | null;
+  runSelect?: typeof runLivePostSelect;
+  resolveViewport?: typeof resolvePlaceViewport;
+}): Promise<string> {
+  return (await resolvePlacesReplyDetailed(input)).text;
 }

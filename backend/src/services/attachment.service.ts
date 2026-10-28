@@ -20,6 +20,7 @@ import {
   imageDataUrl,
   isVisionMime,
   transcribeAudio,
+  type TranscriptStatus,
 } from "./attachment-understanding.js";
 import { downloadWhatsAppMedia, uploadWhatsAppMedia } from "./whatsapp-media.js";
 import { sendWhatsAppMedia, type WhatsAppTextResult } from "./whatsapp-send.js";
@@ -42,6 +43,11 @@ export interface AttachmentFact {
   file_name?: string;
   caption?: string;
   transcript?: string;
+  /**
+   * Audio/voice only. ok | empty | unavailable | error.
+   * Omitted for non-audio and for legacy rows with null transcriptStatus.
+   */
+  transcript_status?: TranscriptStatus;
   voice_note?: boolean;
 }
 
@@ -143,10 +149,10 @@ export async function ingestUploadedBytes(input: {
     const id = randomUUID();
     const storageKey = attachmentStorageKey(input.userId, id, mimeType);
     await getAttachmentStorage().put(storageKey, input.bytes);
-    const transcript =
+    const stt =
       kind === "audio"
-        ? await transcribeAudio({ bytes: input.bytes, mimeType }).catch(() => "")
-        : "";
+        ? await transcribeAudio({ bytes: input.bytes, mimeType })
+        : null;
     const row = await prisma.attachment.create({
       data: {
         id,
@@ -162,7 +168,8 @@ export async function ingestUploadedBytes(input: {
         sha256: createHash("sha256").update(input.bytes).digest("hex"),
         storageKey,
         caption: (input.caption ?? "").slice(0, 1024),
-        transcript,
+        transcript: stt?.text ?? "",
+        transcriptStatus: stt?.status ?? null,
         waInboundMediaId: "",
       },
     });
@@ -228,10 +235,10 @@ export async function ingestInboundMedia(input: {
     const id = randomUUID();
     const storageKey = attachmentStorageKey(input.userId, id, mimeType);
     await getAttachmentStorage().put(storageKey, downloaded.bytes);
-    const transcript =
+    const stt =
       media.kind === "audio"
-        ? await transcribeAudio({ bytes: downloaded.bytes, mimeType }).catch(() => "")
-        : "";
+        ? await transcribeAudio({ bytes: downloaded.bytes, mimeType })
+        : null;
     const row = await prisma.attachment.create({
       data: {
         id,
@@ -244,7 +251,8 @@ export async function ingestInboundMedia(input: {
         sha256: createHash("sha256").update(downloaded.bytes).digest("hex"),
         storageKey,
         caption: media.caption,
-        transcript,
+        transcript: stt?.text ?? "",
+        transcriptStatus: stt?.status ?? null,
         waInboundMediaId: media.mediaId.slice(0, 128),
       },
     });
@@ -266,14 +274,37 @@ export async function ingestInboundMedia(input: {
   }
 }
 
+const TRANSCRIPT_STATUSES = new Set<TranscriptStatus>([
+  "ok",
+  "empty",
+  "unavailable",
+  "error",
+]);
+
+function parseTranscriptStatus(
+  raw: string | null | undefined,
+): TranscriptStatus | undefined {
+  const value = String(raw ?? "").trim();
+  return TRANSCRIPT_STATUSES.has(value as TranscriptStatus)
+    ? (value as TranscriptStatus)
+    : undefined;
+}
+
 export function toAttachmentFact(row: Attachment, voice = false): AttachmentFact {
   const kind = parseAttachmentKind(row.kind) ?? "document";
+  const status = parseTranscriptStatus(
+    "transcriptStatus" in row
+      ? (row as { transcriptStatus?: string | null }).transcriptStatus
+      : null,
+  );
   return {
     attachment_id: row.id,
     kind,
     ...(row.fileName ? { file_name: row.fileName } : {}),
     ...(row.caption ? { caption: row.caption } : {}),
     ...(row.transcript ? { transcript: row.transcript } : {}),
+    // Status only for audio/voice; omit for images and for legacy null rows.
+    ...(kind === "audio" && status ? { transcript_status: status } : {}),
     ...(voice ? { voice_note: true } : {}),
   };
 }

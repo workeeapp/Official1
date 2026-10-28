@@ -1,0 +1,169 @@
+{
+  "generatedAt": "2026-10-28T15:55:51.715Z",
+  "suite": "live-full-corpus",
+  "track": "LIVE_FULL",
+  "promptSource": "config:LLM.config.json+buildLucyModelEvalInstructions",
+  "instructionsSha256": "9d94bafe28465900bfc01da625067967c6f7989222301d1dc7be0cc4e341c76b",
+  "envelopeMode": "lucy_eval",
+  "attachLucyRuntimeEngine": true,
+  "model": "gpt-6-luna",
+  "temperature": 0,
+  "reasoningEffort": "medium",
+  "workerName": "לוסי",
+  "workerProtected": true,
+  "employeeId": null,
+  "instructionsFile": null,
+  "evalPath": "model-then-production-apply",
+  "productionApply": true,
+  "total": 2,
+  "passed": 0,
+  "failed": 2,
+  "passRate": 0,
+  "requiredPassRate": 0.7,
+  "softOk": false,
+  "criticalOk": false,
+  "criticalFailed": [
+    "full-filing-add-simple",
+    "full-mt-event-clarify-then-link"
+  ],
+  "ok": false,
+  "results": [
+    {
+      "id": "full-filing-add-simple",
+      "ok": false,
+      "failures": [
+        "turn 0 constraints: expected filing.add_filing",
+        "turn 0 facts: expected to include \"הרצל\""
+      ],
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב",
+          "response": "לא הצלחתי לשמור את זה.",
+          "ok": false,
+          "constraintFailures": [
+            "expected filing.add_filing"
+          ],
+          "stateFailures": [
+            "facts: expected to include \"הרצל\""
+          ],
+          "appliedViaProduction": false,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-event-clarify-then-link",
+      "ok": false,
+      "failures": [
+        "turn 1 constraints: lists_custom_create_and_link: custom lists.add with items requires non-empty list_name",
+        "turn 1 facts: expected to include \"כיבוד\"",
+        "turn 1 facts: expected to include \"עוגה\""
+      ],
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תוסיפי רשימת כיבוד?",
+          "response": "מה תרצה לכלול ברשימת הכיבוד לערב יום ההולדת?",
+          "ok": true,
+          "constraintFailures": [],
+          "stateFailures": [],
+          "appliedViaProduction": false,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "עוגה ושתיה",
+          "response": "עדכנתי את «ערב יום הולדת» ברשימת «הרשימה».\nלא הצלחתי להוסיף את הפריט.",
+          "ok": false,
+          "constraintFailures": [
+            "lists_custom_create_and_link: custom lists.add with items requires non-empty list_name"
+          ],
+          "stateFailures": [
+            "facts: expected to include \"כיבוד\"",
+            "facts: expected to include \"עוגה\""
+          ],
+          "appliedViaProduction": true,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "add",
+                "listType": "custom",
+                "listName": "",
+                "columns": [
+                  "שם"
+                ],
+                "items": [
+                  {
+                    "שם": "עוגה"
+                  },
+                  {
+                    "שם": "שתייה"
+                  }
+                ],
+                "targets": []
+              },
+              {
+                "action": "update",
+                "listType": "tasks",
+                "listName": "",
+                "items": [
+                  {
+                    "item_id": "dd284ad7-3441-4db8-a50a-c2ecbbe4a57c",
+                    "linked_lists": [
+                      {
+                        "list_type": "custom",
+                        "list_name": "כיבוד · ערב יום הולדת"
+                      }
+                    ]
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          }
+        }
+      ]
+    }
+  ]
+}

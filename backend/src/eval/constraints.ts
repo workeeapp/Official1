@@ -6,6 +6,7 @@ import {
   parsePlacesAction,
   parseRoutesAction,
   parseWeatherAction,
+  showDumpIdList,
 } from "@workee/shared";
 import { resolveRelativeDateLabel } from "../utils/relative-date.js";
 
@@ -52,8 +53,27 @@ export type ModelEvalConstraint =
       listType?: string;
       minCount?: number;
       maxCount?: number;
-      /** At least one item JSON must contain this substring (e.g. phone digits). */
+      /**
+       * At least one item blob must contain this substring (e.g. phone digits).
+       * Searches item fields only — excludes linked_lists / linked_list_ids so a
+       * link name cannot fake item text.
+       */
       itemTextIncludes?: string;
+      /** When true, matching rows must have a non-empty listName (custom shells). */
+      requireNonEmptyListName?: boolean;
+    }
+  /**
+   * Same-turn custom create + host link: custom lists.add must carry a non-empty
+   * list_name that structurally matches linked_lists[].list_name on a host update.
+   */
+  | {
+      type: "lists_custom_create_and_link";
+      /** Substring required in both the custom list_name and linked_lists[].list_name. */
+      listNameIncludes: string;
+      /** Optional item text on the custom add (item fields only). */
+      itemTextIncludes?: string;
+      /** Host list_type that must carry the link (default tasks). */
+      hostListType?: string;
     }
   | {
       type: "lists_remove_item_ids";
@@ -127,6 +147,16 @@ export type ModelEvalConstraint =
   | { type: "no_silent_multi_domain_wipe" }
   /** metadata.show_dump must equal this value (e.g. "full"). */
   | { type: "show_dump"; value: string }
+  /** Every listed opaque id must appear in metadata.show_dump_ids. */
+  | { type: "show_dump_ids_includes"; ids: string[] }
+  /** None of the listed opaque ids may appear in metadata.show_dump_ids. */
+  | { type: "show_dump_ids_excludes"; ids: string[] }
+  /**
+   * Topic no-match: no unfiltered category/overview dump and no selected ids.
+   * Passes when show_dump is absent/empty, or show_dump_ids was set and parses empty.
+   * Fails on bare show_dump without ids, or any non-empty show_dump_ids.
+   */
+  | { type: "topic_no_match_dump" }
   | { type: "response_mentions_any"; needles: string[] }
   /** Every needle must appear in the response (AND). */
   | { type: "response_mentions_all"; needles: string[] }
@@ -239,6 +269,47 @@ export interface ModelEvalCaseResult {
 
 function includesFold(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+/** Item text blob for itemTextIncludes — omit link refs so link names cannot fake item text. */
+function itemTextSearchBlob(item: Record<string, unknown>): string {
+  const {
+    linked_lists: _ll,
+    linked_list_ids: _lli,
+    linkedLists: _llC,
+    linkedListIds: _lliC,
+    unlink_list_ids: _ul,
+    unlinkListIds: _ulC,
+    ...rest
+  } = item;
+  return JSON.stringify(rest);
+}
+
+function readLinkedListNames(item: Record<string, unknown>): string[] {
+  const raw = item.linked_lists ?? item.linkedLists;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      continue;
+    }
+    const rec = row as Record<string, unknown>;
+    const name = rec.list_name ?? rec.listName;
+    if (typeof name === "string" && name.trim()) {
+      names.push(name.trim());
+    }
+  }
+  return names;
+}
+
+function readListActionName(row: {
+  listName?: string;
+  list_name?: string;
+}): string {
+  const raw = row.listName ?? row.list_name;
+  return typeof raw === "string" ? raw.trim() : "";
 }
 
 function readItemId(item: Record<string, unknown>): string {
@@ -505,16 +576,75 @@ export function checkConstraint(
       if (rows.length === 0) {
         return `expected lists.${constraint.action}${constraint.listType ? `/${constraint.listType}` : ""}`;
       }
+      if (constraint.requireNonEmptyListName) {
+        const named = rows.some((row) => readListActionName(row).length > 0);
+        if (!named) {
+          return `lists.${constraint.action}${constraint.listType ? `/${constraint.listType}` : ""} requires non-empty list_name`;
+        }
+      }
       if (constraint.itemTextIncludes) {
         const needle = constraint.itemTextIncludes;
         const hit = rows.some((row) =>
           (row.items ?? []).some((item) =>
-            includesFold(JSON.stringify(item), needle),
+            includesFold(itemTextSearchBlob(item as Record<string, unknown>), needle),
           ),
         );
         if (!hit) {
           return `lists.${constraint.action} missing item text ${needle}`;
         }
+      }
+      return null;
+    }
+    case "lists_custom_create_and_link": {
+      const hostType = constraint.hostListType ?? "tasks";
+      const needle = constraint.listNameIncludes;
+      const customAdds = (meta.lists ?? []).filter(
+        (row) =>
+          row.action === "add" &&
+          row.listType === "custom" &&
+          (row.items?.length ?? 0) > 0,
+      );
+      if (customAdds.length === 0) {
+        return "lists_custom_create_and_link: expected custom lists.add with items";
+      }
+      const unnamed = customAdds.filter((row) => !readListActionName(row));
+      if (unnamed.length > 0) {
+        return "lists_custom_create_and_link: custom lists.add with items requires non-empty list_name";
+      }
+      const matchingAdds = customAdds.filter((row) =>
+        includesFold(readListActionName(row), needle),
+      );
+      if (matchingAdds.length === 0) {
+        return `lists_custom_create_and_link: custom list_name missing ${needle}`;
+      }
+      if (constraint.itemTextIncludes) {
+        const itemNeedle = constraint.itemTextIncludes;
+        const hit = matchingAdds.some((row) =>
+          (row.items ?? []).some((item) =>
+            includesFold(
+              itemTextSearchBlob(item as Record<string, unknown>),
+              itemNeedle,
+            ),
+          ),
+        );
+        if (!hit) {
+          return `lists_custom_create_and_link: missing item text ${itemNeedle}`;
+        }
+      }
+      const createdNames = matchingAdds.map((row) => readListActionName(row));
+      const hostUpdates = (meta.lists ?? []).filter(
+        (row) => row.action === "update" && row.listType === hostType,
+      );
+      const linkedHit = hostUpdates.some((row) =>
+        (row.items ?? []).some((item) => {
+          const names = readLinkedListNames(item as Record<string, unknown>);
+          return createdNames.some((created) =>
+            names.some((linked) => linked === created),
+          );
+        }),
+      );
+      if (!linkedHit) {
+        return `lists_custom_create_and_link: host ${hostType} update must linked_lists[].list_name match created custom list_name`;
       }
       return null;
     }
@@ -776,6 +906,36 @@ export function checkConstraint(
       return actual === constraint.value
         ? null
         : `expected show_dump=${constraint.value}, got ${actual || "(empty)"}`;
+    }
+    case "show_dump_ids_includes": {
+      const actual = new Set(showDumpIdList(meta.showDumpIds));
+      const missing = constraint.ids.filter((id) => !actual.has(id));
+      return missing.length === 0
+        ? null
+        : `show_dump_ids missing required: ${missing.join(", ")} (got ${[...actual].join(", ") || "(empty)"})`;
+    }
+    case "show_dump_ids_excludes": {
+      const actual = new Set(showDumpIdList(meta.showDumpIds));
+      const hit = constraint.ids.filter((id) => actual.has(id));
+      return hit.length === 0
+        ? null
+        : `show_dump_ids must not include: ${hit.join(", ")}`;
+    }
+    case "topic_no_match_dump": {
+      const dump = (meta.showDump ?? "").trim();
+      const idsRequested = meta.showDumpIds !== undefined;
+      const ids = showDumpIdList(meta.showDumpIds);
+      if (!dump) {
+        return ids.length === 0
+          ? null
+          : `topic no-match must not select ids without show_dump (got ${ids.join(", ")})`;
+      }
+      if (!idsRequested) {
+        return `topic no-match must not use bare show_dump=${dump} (unfiltered)`;
+      }
+      return ids.length === 0
+        ? null
+        : `topic no-match must not select ids: ${ids.join(", ")}`;
     }
     case "mutations_empty_or_read_only": {
       const counts = domainMutationCount(meta);

@@ -125,8 +125,10 @@ import {
   deleteEmployeeRecord,
   deriveCustomListName,
   correctAttachmentClaimReply,
+  correctDurableSaveClaimReply,
   correctListMutationClaimReply,
   correctShareClaimReply,
+  DURABLE_SAVE_CLAIM_MISS,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
   SHARE_CLAIM_MISS,
@@ -705,6 +707,81 @@ describe("employee records", () => {
     ).toBe("הפריטים כבר משותפים — לא נוסף שיתוף חדש.");
   });
 
+  it("correctDurableSaveClaimReply: false תייקתי when no filing/list mutate applied", () => {
+    expect(
+      correctDurableSaveClaimReply({
+        reply: "תייקתי את הכתובת שלך.",
+        spoken: "תייקתי את הכתובת שלך.",
+        requestedListAdd: false,
+        requestedListUpdate: false,
+        requestedFilingAdd: false,
+        requestedFilingUpdate: false,
+        appliedListAdd: false,
+        appliedListUpdate: false,
+        appliedFilingAdd: false,
+        appliedFilingUpdate: false,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(DURABLE_SAVE_CLAIM_MISS);
+  });
+
+  it("correctDurableSaveClaimReply: keeps תייקתי when filing add requested and applied", () => {
+    const reply = "תייקתי את הכתובת שלך.";
+    expect(
+      correctDurableSaveClaimReply({
+        reply,
+        spoken: reply,
+        requestedListAdd: false,
+        requestedListUpdate: false,
+        requestedFilingAdd: true,
+        requestedFilingUpdate: false,
+        appliedListAdd: false,
+        appliedListUpdate: false,
+        appliedFilingAdd: true,
+        appliedFilingUpdate: false,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
+  it("correctDurableSaveClaimReply: keeps שמרתי when list add requested and applied", () => {
+    const reply = "שמרתי חלב בקניות.";
+    expect(
+      correctDurableSaveClaimReply({
+        reply,
+        spoken: reply,
+        requestedListAdd: true,
+        requestedListUpdate: false,
+        requestedFilingAdd: false,
+        requestedFilingUpdate: false,
+        appliedListAdd: true,
+        appliedListUpdate: false,
+        appliedFilingAdd: false,
+        appliedFilingUpdate: false,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
+  it("correctDurableSaveClaimReply: defers attach-worded תייקתי קובץ to attach path", () => {
+    const reply = "תייקתי את הקובץ.";
+    expect(
+      correctDurableSaveClaimReply({
+        reply,
+        spoken: reply,
+        requestedListAdd: false,
+        requestedListUpdate: false,
+        requestedFilingAdd: false,
+        requestedFilingUpdate: false,
+        appliedListAdd: false,
+        appliedListUpdate: false,
+        appliedFilingAdd: false,
+        appliedFilingUpdate: false,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
   it("correctAttachmentClaimReply: false attach claim when linked+alreadyLinked=0", () => {
     expect(
       correctAttachmentClaimReply({
@@ -1269,6 +1346,246 @@ describe("employee records", () => {
       const result = await removeAs(shareeId);
       expect(itemUpdate).not.toHaveBeenCalled();
       expect(result.mutations).toEqual([]);
+    });
+  });
+
+  describe("whole shopping list share via item fan-out (merge visible_to)", () => {
+    const michalId = "a11ce000-0000-4000-8000-000000000011";
+    const milkId = "11111111-1111-4111-8111-111111111101";
+    const breadId = "11111111-1111-4111-8111-111111111102";
+    const eggsId = "11111111-1111-4111-8111-111111111103";
+    const yogurtId = "11111111-1111-4111-8111-111111111104";
+    const shopping = {
+      id: "tal-shop",
+      employeeId,
+      listType: "shopping",
+      name: "",
+      scope: "personal",
+      visibleTo: [],
+      titleField: "",
+    };
+    const row = (
+      id: string,
+      title: string,
+      visibleTo: string[],
+    ) => ({
+      id,
+      listId: shopping.id,
+      itemKey: title,
+      data: { "שם פריט": title },
+      scope: visibleTo.length > 1 ? "shared" : "personal",
+      addedById: employeeId,
+      visibleTo,
+      deletedAt: null,
+      reminderId: null,
+      list: shopping,
+    });
+
+    beforeEach(() => {
+      listFindFirst.mockResolvedValue(shopping);
+      itemFindMany.mockResolvedValue([]);
+      itemUpdate.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve({ id: where.id }),
+      );
+      itemCreate.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({
+          id: "new-item-id",
+          listId: shopping.id,
+          itemKey: data.itemKey,
+          ...data,
+        }),
+      );
+      reminderFindMany.mockResolvedValue([]);
+      employeeFindUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+        Promise.resolve({
+          userId: "user-1",
+          kind: "human",
+          isOwner: false,
+          id: where.id,
+        }),
+      );
+    });
+
+    it("fan-out update: personal + already-shared-with-other + already-with-new-person", async () => {
+      // milk personal; bread shared with Tal; eggs already shared with Michal (new person).
+      const byId = new Map([
+        [milkId, row(milkId, "חלב", [employeeId])],
+        [breadId, row(breadId, "לחם", [employeeId, talId])],
+        [eggsId, row(eggsId, "ביצים", [employeeId, michalId])],
+      ]);
+      itemFindFirst.mockImplementation(({ where }: { where: { id?: string } }) =>
+        Promise.resolve(byId.get(where.id ?? "") ?? null),
+      );
+
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [
+                { item_id: milkId },
+                { item_id: breadId },
+                { item_id: eggsId },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          visibleTo: [employeeId, michalId],
+          itemOnly: true,
+        },
+        employeeId,
+      );
+
+      expect(itemUpdate).toHaveBeenCalledTimes(2);
+      const updates = itemUpdate.mock.calls.map(
+        (call: [{ where: { id: string }; data: { visibleTo: string[] } }]) =>
+          call[0],
+      );
+      const milkUpdate = updates.find((c) => c.where.id === milkId);
+      const breadUpdate = updates.find((c) => c.where.id === breadId);
+      const eggsUpdate = updates.find((c) => c.where.id === eggsId);
+      expect(milkUpdate?.data.visibleTo.sort()).toEqual(
+        [employeeId, michalId].sort(),
+      );
+      expect(breadUpdate?.data.visibleTo.sort()).toEqual(
+        [employeeId, talId, michalId].sort(),
+      );
+      expect(eggsUpdate).toBeUndefined();
+
+      const byItem = Object.fromEntries(
+        result.mutations.map((m) => [m.itemId, m.shareOutcome]),
+      );
+      expect(byItem[milkId]).toEqual({
+        newlySharedCount: 1,
+        alreadySharedCount: 0,
+      });
+      expect(byItem[breadId]).toEqual({
+        newlySharedCount: 1,
+        alreadySharedCount: 0,
+      });
+      expect(byItem[eggsId]).toEqual({
+        newlySharedCount: 0,
+        alreadySharedCount: 1,
+      });
+      // Yogurt was never listed — engine does not auto-scan the shopping shell.
+      expect(byItem[yogurtId]).toBeUndefined();
+      expect(result.shareMisses).toEqual([]);
+    });
+
+    it("does not revoke existing partners when incoming targets name only the new person", async () => {
+      itemFindFirst.mockResolvedValue(
+        row(breadId, "לחם", [employeeId, talId]),
+      );
+      await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: breadId }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          // Planner often emits only owner + new partner — merge must keep Tal.
+          visibleTo: [employeeId, michalId],
+          itemOnly: true,
+        },
+        employeeId,
+      );
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: breadId },
+          data: expect.objectContaining({
+            scope: "shared",
+            visibleTo: expect.arrayContaining([employeeId, talId, michalId]),
+          }),
+        }),
+      );
+      const saved = itemUpdate.mock.calls[0][0].data.visibleTo as string[];
+      expect(saved).toHaveLength(3);
+    });
+
+    it("new shopping add with empty targets stays personal (no inherit from sibling shares)", async () => {
+      itemFindFirst.mockResolvedValue(null);
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "יוגורט" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: employeeId, visibleTo: [employeeId] },
+        employeeId,
+      );
+      expect(itemCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            scope: "personal",
+            visibleTo: [employeeId],
+          }),
+        }),
+      );
+      expect(result.mutations[0]?.action).toBe("add");
+      expect(result.mutations[0]?.collabApply).toBeUndefined();
+    });
+
+    it("new shopping add with speaker+partner targets is co-shared explicitly", async () => {
+      itemFindFirst.mockResolvedValue(null);
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "יוגורט" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        {
+          scope: "shared",
+          addedById: employeeId,
+          visibleTo: [employeeId, michalId],
+        },
+        employeeId,
+      );
+      expect(itemCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            scope: "shared",
+            visibleTo: expect.arrayContaining([employeeId, michalId]),
+          }),
+        }),
+      );
+      expect(result.mutations[0]?.collabApply).toEqual({
+        mode: "co_share",
+        partnerIds: [michalId],
+      });
     });
   });
 

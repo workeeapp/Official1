@@ -578,7 +578,13 @@ export type LlmWeatherAspect =
   | "humidity";
 
 export interface LlmWeatherAction {
+  /**
+   * City / place name from speech. Empty OK when near=speaker (PENDING_LOCATION).
+   * When non-empty, named place wins over a shared pin.
+   */
   place: string;
+  /** "speaker" = forecast at PENDING_LOCATION pin; empty for named place. */
+  near: "speaker" | "";
   /** YYYY-MM-DD or empty (= now/today). */
   date: string;
   aspects: LlmWeatherAspect[];
@@ -667,13 +673,26 @@ export type LlmPlacesIncludedType =
 
 const PLACES_INCLUDED_TYPE_SET = new Set<string>(PLACES_INCLUDED_TYPE_ALLOWLIST);
 
+/**
+ * Geographic scope for Places.
+ * - soft_place / omit: named city/area as soft text preference (or near=speaker pin bias).
+ * - area_restrict: hard inside-area search via locationRestriction (requires place).
+ */
+export type LlmPlacesGeoMode = "soft_place" | "area_restrict";
+
 export interface LlmPlacesAction {
   /** What to find (business name or category). */
   query: string;
-  /** City / area bias (פתח תקווה, קרית אונו). Empty OK when near=speaker. */
+  /** City / area name. Empty OK when near=speaker. Required for area_restrict. */
   place: string;
-  /** Search around PENDING_LOCATION pin. */
+  /** Search around PENDING_LOCATION pin. Mutually exclusive with area_restrict. */
   near: "speaker" | "";
+  /**
+   * soft_place (default/omit) = soft city text or pin bias.
+   * area_restrict = hard geographic restriction for an inside-area ask.
+   * Never auto-upgrade ordinary city soft search to area_restrict.
+   */
+  geoMode: LlmPlacesGeoMode;
   lat: number | null;
   lng: number | null;
   aspects: LlmPlacesAspect[];
@@ -708,6 +727,19 @@ export interface LlmPlacesAction {
    * the ask (no second select call).
    */
   requireLiveSelect: boolean;
+}
+
+/** Normalize metadata.places.geo_mode — default soft_place. */
+export function normalizePlacesGeoMode(raw: unknown): LlmPlacesGeoMode {
+  const key = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  // Only documented enum values (and omit/null → soft_place). No informal aliases.
+  if (key === "area_restrict") {
+    return "area_restrict";
+  }
+  return "soft_place";
 }
 
 /** Normalize metadata.places.intent — default business. */
@@ -1599,6 +1631,8 @@ function splitUnifiedListEntries(
     const listTypeRaw = String(record.list_type ?? record.listType ?? "")
       .trim()
       .toLowerCase();
+    // listType camelCase is accepted so a second parse of normalized output
+    // still routes filing/reminders correctly (harness may re-enter parse).
     if (
       listTypeRaw === FILING_LIST_TYPE ||
       actionRaw === "add_filing" ||
@@ -1879,8 +1913,11 @@ function toListAction(value: unknown): LlmListAction | null {
     return null;
   }
 
-  const listType = LIST_TYPES.has(value.list_type as LlmListType)
-    ? (value.list_type as LlmListType)
+  const listTypeRaw = String(value.list_type ?? value.listType ?? "")
+    .trim()
+    .toLowerCase();
+  const listType = LIST_TYPES.has(listTypeRaw as LlmListType)
+    ? (listTypeRaw as LlmListType)
     : "custom";
   let items = Array.isArray(value.items)
     ? value.items.filter(
@@ -1899,8 +1936,11 @@ function toListAction(value: unknown): LlmListAction | null {
     }
   }
 
+  // Idempotent: accept own camelCase listName after a prior parseLlmMetadata.
   let listName =
-    listType === "custom" ? readText(value, ["list_name", "רשימה"]) : "";
+    listType === "custom"
+      ? readText(value, ["list_name", "listName", "רשימה"])
+      : "";
   if (listType === "custom" && !listName) {
     listName = listNameFromItems(items);
   }
@@ -1940,7 +1980,9 @@ function toListAction(value: unknown): LlmListAction | null {
   }
 
   const titleField =
-    listType === "custom" ? readText(value, ["title_field"]).slice(0, 100) : "";
+    listType === "custom"
+      ? readText(value, ["title_field", "titleField"]).slice(0, 100)
+      : "";
   const columns = listType === "custom" ? readStringList(value.columns) : [];
 
   const createEmojiRaw =
@@ -3342,7 +3384,19 @@ export function parseWeatherAction(
     0,
     255,
   );
-  if (!place) {
+  const nearRaw = readText(row, ["near", "near_me", "nearMe", "around"])
+    .trim()
+    .toLowerCase();
+  const near: "speaker" | "" =
+    nearRaw === "speaker" ||
+    nearRaw === "me" ||
+    nearRaw === "here" ||
+    nearRaw === "כאן" ||
+    nearRaw === "שלי"
+      ? "speaker"
+      : "";
+  // Named place OR near=speaker (PENDING_LOCATION). Never invent coords here.
+  if (!place && near !== "speaker") {
     return null;
   }
   const dateRaw = readText(row, ["date", "day", "on"]);
@@ -3372,6 +3426,7 @@ export function parseWeatherAction(
   }
   return {
     place,
+    near,
     date,
     aspects: aspects.length > 0 ? aspects : ["summary"],
     ...(minWaveM != null ? { minWaveM } : {}),
@@ -3596,7 +3651,7 @@ export function parsePlacesAction(
   const nearRaw = readText(row, ["near", "near_me", "nearMe", "around"])
     .trim()
     .toLowerCase();
-  const near: "speaker" | "" =
+  let near: "speaker" | "" =
     nearRaw === "speaker" ||
     nearRaw === "me" ||
     nearRaw === "here" ||
@@ -3612,8 +3667,22 @@ export function parsePlacesAction(
     "מקום",
     "עיר",
   ]).slice(0, 255);
-  const lat = parseOptionalCoord(row.lat ?? row.latitude);
-  const lng = parseOptionalCoord(row.lng ?? row.lon ?? row.longitude);
+  const geoMode = normalizePlacesGeoMode(
+    row.geo_mode ?? row.geoMode ?? row.geographic_mode ?? row.geographicMode,
+  );
+  // Hard area search: require place; never combine with near=speaker or coords.
+  if (geoMode === "area_restrict") {
+    near = "";
+    if (!query || !place) {
+      return null;
+    }
+  }
+  let lat = parseOptionalCoord(row.lat ?? row.latitude);
+  let lng = parseOptionalCoord(row.lng ?? row.lon ?? row.longitude);
+  if (geoMode === "area_restrict") {
+    lat = null;
+    lng = null;
+  }
   const hasPin = lat != null && lng != null;
   if (!query || (!place && near !== "speaker" && !hasPin)) {
     return null;
@@ -3726,6 +3795,7 @@ export function parsePlacesAction(
     query,
     place,
     near,
+    geoMode,
     lat,
     lng,
     aspects: aspects.length > 0 ? aspects : ["summary"],
@@ -4440,7 +4510,13 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
   }
 
   const filingId = readText(value, ["filing_id", "filingId", "id"]);
-  const itemName = readText(value, ["item_name", "שם הפריט", "name"]);
+  // Idempotent: accept own camelCase itemName/itemInfo after a prior parse.
+  const itemName = readText(value, [
+    "item_name",
+    "itemName",
+    "שם הפריט",
+    "name",
+  ]);
   const action = value.action as LlmFilingActionName;
   if (action === "remove_filing" || action === "update_filing") {
     if (!filingId) {
@@ -4458,9 +4534,16 @@ function toFilingAction(value: unknown): LlmFilingAction | null {
     itemName,
     // Product תיאור = item_info (detail/value). Do not map «תיאור» to
     // item_description (מידע לחיפוש) — that hid phones/addresses in dumps.
-    itemInfo: readText(value, ["item_info", "מידע נוסף", "info", "תיאור"]),
+    itemInfo: readText(value, [
+      "item_info",
+      "itemInfo",
+      "מידע נוסף",
+      "info",
+      "תיאור",
+    ]),
     itemDescription: readText(value, [
       "item_description",
+      "itemDescription",
       "description",
       "מידע לחיפוש",
       "תיאור הפריט",

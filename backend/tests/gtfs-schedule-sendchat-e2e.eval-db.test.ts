@@ -29,7 +29,7 @@ import * as whatsappSend from "../src/services/whatsapp-send.js";
 import * as reminderFire from "../src/services/reminder-fire.js";
 
 /** Active MOT day-slice from one-day nationwide ingest (must stay put). */
-const EXPECTED_GENERATION_ID = "a629a522-f283-4fe3-9420-b438366a4b46";
+const EXPECTED_GENERATION_ID = "22cebd10-1204-47ee-8a7e-80508fbe3e73";
 const SERVICE_DATE = "2026-10-24";
 /** Near שער שכם / מסוף סולטאן סולימאן area (Jerusalem). */
 const SHAAR_SHECHEM = { lat: 31.784232, lng: 35.228601 };

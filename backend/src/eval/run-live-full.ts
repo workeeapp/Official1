@@ -23,6 +23,7 @@ import {
   resolveEvalPrompt,
   type ResolvedEvalPrompt,
 } from "./eval-prompt-source.js";
+import { extractEvalRawActionDiagnostic } from "./raw-action-diagnostic.js";
 import {
   runModelApplyCase,
   type ModelApplyCase,
@@ -96,10 +97,13 @@ export async function runLiveFullCase(
         instructions: prompt.instructions,
         textFormat: config.responseFormat,
       });
+      // Capture raw lists/filing BEFORE parse/normalize (eval diagnostic only).
+      const rawActionDiagnostic = extractEvalRawActionDiagnostic(turn.reply);
       const parsed = parseLlmReply(turn.reply);
       return {
         metadata: parseReplyMetadata(turn.reply),
         response: parsed.response,
+        rawActionDiagnostic,
       };
     },
     { speaker },

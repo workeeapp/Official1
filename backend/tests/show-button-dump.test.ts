@@ -31,8 +31,10 @@ import {
   stripMatchingTitleClock,
   formatShoppingTitle,
   formatLastNumberedDumpContext,
+  formatFullDump,
   formatShowDumpFromKind,
   formatShowDumpWithLineMap,
+  liveDumpRowIdsFromSnapshot,
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
   itemHasDumpCalendarDate,
@@ -992,6 +994,177 @@ describe("filings flat dump", () => {
           itemIds: new Set(),
         }),
       ).toBe("");
+    });
+  });
+
+  describe("TOPIC DUMP show_dump=full + mixed show_dump_ids", () => {
+    const now = new Date("2026-10-23T10:00:00+03:00");
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "shop-teeth", "שם פריט": "חוט דנטלי", כמות: 1 },
+            { item_id: "shop-milk", "שם פריט": "חלב", כמות: 2 },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+        {
+          list_type: "tasks",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "task-dentist", "שם מטלה": "לשיננית" },
+            { item_id: "task-pkg", "שם מטלה": "לאסוף חבילה" },
+          ],
+        },
+        {
+          list_type: "custom",
+          list_name: "ציוד שיניים",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "custom-brush", "שם פריט": "מברשת" },
+            { item_id: "custom-other", "שם פריט": "מגבת" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [
+        {
+          filing_id: "fil-clinic",
+          item_name: "מרפאת שיניים",
+          item_info: "רחוב 1",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "fil-gate",
+          item_name: "קוד שער",
+          item_info: "1234",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+      reminders: [
+        {
+          list_type: "tasks",
+          repeat: "once",
+          ping: ["טל"],
+          ping_ids: ["e1"],
+          owner: "טל",
+          text: "",
+          status: "active",
+          reminder_id: "rem-teeth",
+          item: "תור לשיננית",
+          fire_at: "2026-10-24 12:00",
+        },
+        {
+          list_type: "tasks",
+          repeat: "once",
+          ping: ["טל"],
+          ping_ids: ["e1"],
+          owner: "טל",
+          text: "",
+          status: "active",
+          reminder_id: "rem-other",
+          item: "לקחת חבילה",
+          fire_at: "2026-10-25 12:00",
+        },
+      ] as EmployeeRecordSnapshot["reminders"],
+    };
+
+    it("mixed ids: only matching rows; section headers only where hits; shopping as lines", () => {
+      const ids = new Set([
+        "task-dentist",
+        "shop-teeth",
+        "rem-teeth",
+        "fil-clinic",
+        "custom-brush",
+      ]);
+      const text = formatShowDumpFromKind("full", snap, {
+        viewerName: "טל",
+        now,
+        omitEmptySentence: true,
+        itemIds: ids,
+      })!;
+      expect(text).toContain("לשיננית");
+      expect(text).toContain("חוט דנטלי");
+      expect(text).toContain("תור לשיננית");
+      expect(text).toContain("מרפאת שיניים");
+      expect(text).toContain("מברשת");
+      expect(text).not.toContain("לאסוף חבילה");
+      expect(text).not.toContain("חלב");
+      expect(text).not.toContain("לקחת חבילה");
+      expect(text).not.toContain("קוד שער");
+      expect(text).not.toContain("מגבת");
+      // Shopping: item lines, not counts-only overview.
+      expect(text).toMatch(/🛒 קניות:/);
+      expect(text).not.toMatch(/אישיות — \d+ פריט/);
+      expect(text).toContain("מטלות:");
+      expect(text).toContain("תזכורות פעילות:");
+      expect(text).toMatch(/תיוקים:/);
+      expect(text).toContain("ציוד שיניים");
+      // No empty-section leftovers / inventory hint.
+      expect(text).not.toContain("אנשי קשר");
+      expect(text).not.toContain("לפירוט רשימה");
+      const live = liveDumpRowIdsFromSnapshot(snap);
+      for (const id of ids) {
+        expect(live.has(id)).toBe(true);
+      }
+    });
+
+    it("unknown / empty ids → empty (no unfiltered full)", () => {
+      // formatShowDumpFromKind maps empty dump text to null.
+      expect(
+        formatShowDumpFromKind("full", snap, {
+          viewerName: "טל",
+          now,
+          omitEmptySentence: true,
+          itemIds: new Set(["missing-a", "missing-b"]),
+        }),
+      ).toBeNull();
+      expect(
+        formatShowDumpFromKind("full", snap, {
+          viewerName: "טל",
+          now,
+          omitEmptySentence: true,
+          itemIds: new Set(),
+        }),
+      ).toBeNull();
+      expect(
+        formatFullDump(snap, {
+          viewerName: "טל",
+          now,
+          omitEmptySentence: true,
+          itemIds: new Set(["missing-a"]),
+        }).text,
+      ).toBe("");
+      // Bare full (no itemIds) still counts shopping.
+      const bare = formatFullDump(snap, { viewerName: "טל", now });
+      expect(bare.text).toMatch(/אישיות — \d+ פריט/);
+      expect(bare.text).toContain("לפירוט רשימה");
+    });
+
+    it("path 2 same-kind filter unchanged: tasks + foreign id stays empty", () => {
+      expect(
+        formatShowDumpFromKind("tasks", snap, {
+          viewerName: "טל",
+          omitEmptySentence: true,
+          itemIds: new Set(["fil-clinic"]),
+        }),
+      ).toBe("");
+      const onlyTask = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        omitEmptySentence: true,
+        itemIds: new Set(["task-dentist"]),
+      })!;
+      expect(onlyTask).toContain("לשיננית");
+      expect(onlyTask).not.toContain("חוט דנטלי");
+      expect(onlyTask).not.toContain("מרפאת שיניים");
     });
   });
 

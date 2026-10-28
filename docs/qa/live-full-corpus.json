@@ -827,7 +827,7 @@
         "single-turn",
         "core-pack"
       ],
-      "description": "Share shopping applies; milk still present",
+      "description": "Whole shopping list share (item co-share fan-out) applies; milk still present",
       "setup": {
         "lists": [
           {
@@ -885,7 +885,7 @@
         "multi-turn",
         "core-pack"
       ],
-      "description": "Share clarify then partner; milk kept",
+      "description": "Ask partner then whole shopping share (fan-out); milk kept",
       "setup": {
         "lists": [
           {
@@ -1003,19 +1003,17 @@
           "utterance": "עוגה ושתיה",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "add",
-              "listType": "custom",
-              "minCount": 1,
-              "itemTextIncludes": "עוגה"
+              "type": "lists_custom_create_and_link",
+              "listNameIncludes": "כיבוד",
+              "itemTextIncludes": "עוגה",
+              "hostListType": "tasks"
             },
             {
               "type": "lists_has_action",
               "action": "update",
               "listType": "tasks",
               "minCount": 1,
-              "maxCount": 1,
-              "itemTextIncludes": "כיבוד"
+              "maxCount": 1
             },
             {
               "type": "no_lists_add",
@@ -1030,10 +1028,17 @@
               "eval-item-host-bday"
             ],
             "factsInclude": [
-              "כיבוד",
+              "כיבוד · ערב יום הולדת",
               "עוגה",
+              "שתייה",
               "ערב יום הולדת"
-            ]
+            ],
+            "linkedListNamesOnItem": {
+              "itemId": "eval-item-host-bday",
+              "listNames": [
+                "כיבוד · ערב יום הולדת"
+              ]
+            }
           }
         }
       ]
@@ -1253,7 +1258,10 @@
               "type": "lists_has_action",
               "action": "remove",
               "listType": "shopping",
-              "itemTextIncludes": "יוגורט"
+              "minCount": 1
+            },
+            {
+              "type": "list_ops_empty"
             }
           ],
           "stateAfter": {
@@ -1455,7 +1463,10 @@
               "type": "lists_has_action",
               "action": "remove",
               "listType": "shopping",
-              "itemTextIncludes": "חלב"
+              "minCount": 1
+            },
+            {
+              "type": "list_ops_empty"
             }
           ],
           "stateAfter": {

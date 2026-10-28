@@ -42,6 +42,70 @@ const billing = {
   digitalEmployeeId: "lucy-1",
 };
 
+describe("composeScheduledOutbound honesty helpers", () => {
+  beforeEach(() => {
+    createConversation.mockReset();
+    createResponse.mockReset();
+    recordLlmUsage.mockReset();
+    createConversation.mockResolvedValue("openai-ephemeral");
+  });
+
+  it("non-watch fixedBody short-circuits without calling the LLM", async () => {
+    const text = await composeScheduledOutbound({
+      brief: "סכם מזג אוויר",
+      itemLabel: "מזג",
+      actorName: "לוסי",
+      recipientName: "עמית",
+      facts: {
+        kind: "weather",
+        facts: "",
+        factsLabel: "FACTS",
+        fixedBody: "מעונן בפתח תקווה.",
+      },
+    });
+    expect(text).toBe("מעונן בפתח תקווה.");
+    expect(createResponse).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the LLM yields empty text on a fact clock without fixedBody", async () => {
+    createResponse.mockResolvedValue({
+      reply: "   ",
+      usage: null,
+      raw: {},
+    });
+    const text = await composeScheduledOutbound({
+      brief: "סכם קומיטים",
+      itemLabel: "דוח",
+      actorName: "לוסי",
+      recipientName: "עמית",
+      facts: {
+        kind: "git_log",
+        facts: "commit: add feature",
+        factsLabel: "COMMITS",
+      },
+    });
+    expect(text).toBeNull();
+  });
+
+  it("watch falls back to fixedBody when the LLM fails", async () => {
+    createResponse.mockRejectedValue(new Error("llm down"));
+    const text = await composeScheduledOutbound({
+      brief: "עדכון גשם",
+      itemLabel: "גשם",
+      actorName: "לוסי",
+      recipientName: "עמית",
+      watch: true,
+      facts: {
+        kind: "weather",
+        facts: "rain=true",
+        factsLabel: "FACTS",
+        fixedBody: "יורד גשם בפתח תקווה.",
+      },
+    });
+    expect(text).toBe("יורד גשם בפתח תקווה.");
+  });
+});
+
 describe("compose LLM billing purpose", () => {
   beforeEach(() => {
     createConversation.mockReset();

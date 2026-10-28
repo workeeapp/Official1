@@ -212,6 +212,240 @@ describe("Phase 4 constraint checkers", () => {
     ).toBe(false);
   });
 
+  it("itemTextIncludes ignores linked_lists names (no text-only false pass)", () => {
+    const constraints: ModelEvalConstraint[] = [
+      {
+        type: "lists_has_action",
+        action: "update",
+        listType: "tasks",
+        itemTextIncludes: "כיבוד",
+      },
+    ];
+    const result = evaluateConstraints(
+      constraints,
+      meta({
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            items: [
+              {
+                item_id: "eval-item-host-bday",
+                "שם מטלה": "ערב יום הולדת",
+                linked_lists: [
+                  {
+                    list_type: "custom",
+                    list_name: "כיבוד · ערב יום הולדת",
+                  },
+                ],
+              },
+            ],
+            targets: [],
+          },
+        ],
+      }),
+      "חיברתי",
+    );
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(" ")).toMatch(/missing item text/);
+  });
+
+  describe("lists_custom_create_and_link (full-mt-event-clarify-then-link shape)", () => {
+    const createAndLink: ModelEvalConstraint[] = [
+      {
+        type: "lists_custom_create_and_link",
+        listNameIncludes: "כיבוד",
+        itemTextIncludes: "עוגה",
+        hostListType: "tasks",
+      },
+    ];
+    const listName = "כיבוד · ערב יום הולדת";
+
+    it("rejects empty custom list_name with items while host links by name", () => {
+      const result = evaluateConstraints(
+        createAndLink,
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "",
+              items: [{ שם: "עוגה" }, { שם: "שתיה" }],
+              targets: [],
+            },
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [
+                {
+                  item_id: "eval-item-host-bday",
+                  "שם מטלה": "ערב יום הולדת",
+                  linked_lists: [
+                    { list_type: "custom", list_name: listName },
+                  ],
+                },
+              ],
+              targets: [],
+            },
+          ],
+        }),
+        "שמרתי",
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failures.join(" ")).toMatch(/non-empty list_name/);
+    });
+
+    it("passes named same-turn create-and-link with matching linked_lists", () => {
+      const result = evaluateConstraints(
+        createAndLink,
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: listName,
+              items: [{ שם: "עוגה" }, { שם: "שתיה" }],
+              targets: [],
+            },
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [
+                {
+                  item_id: "eval-item-host-bday",
+                  "שם מטלה": "ערב יום הולדת",
+                  linked_lists: [
+                    { list_type: "custom", list_name: listName },
+                  ],
+                },
+              ],
+              targets: [],
+            },
+          ],
+        }),
+        "הוספתי כיבוד וחיברתי",
+      );
+      expect(result.ok, result.failures.join("; ")).toBe(true);
+    });
+
+    it("rejects when link name appears only as item text, not linked_lists", () => {
+      const result = evaluateConstraints(
+        createAndLink,
+        meta({
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: listName,
+              items: [{ שם: "עוגה" }],
+              targets: [],
+            },
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [
+                {
+                  item_id: "eval-item-host-bday",
+                  "שם מטלה": `ערב יום הולדת ${listName}`,
+                },
+              ],
+              targets: [],
+            },
+          ],
+        }),
+        "שמרתי",
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failures.join(" ")).toMatch(/linked_lists/);
+    });
+  });
+
+  it("full-filing-add-simple constraints accept filing.add_filing with address info", () => {
+    const constraints: ModelEvalConstraint[] = [
+      {
+        type: "filing_has_action",
+        action: "add_filing",
+        infoIncludes: "הרצל",
+      },
+    ];
+    expect(
+      evaluateConstraints(
+        constraints,
+        meta({
+          filing: [
+            {
+              action: "add_filing",
+              itemName: "כתובת",
+              itemInfo: "רחוב הרצל 1 תל אביב",
+              itemDescription: "",
+              targets: [],
+            },
+          ],
+        }),
+        "תייקתי",
+      ).ok,
+    ).toBe(true);
+    expect(
+      evaluateConstraints(constraints, meta({ filing: [] }), "תייקתי").ok,
+    ).toBe(false);
+  });
+
+  describe("LIVE_FULL remove-by-id (no title on remove ACTION)", () => {
+    /** Same shape as 2026-10-22 LIVE_FULL failures for yogurt/milk removes. */
+    const removeByIdOnly = meta({
+      lists: [
+        {
+          action: "remove",
+          listType: "shopping",
+          listName: "",
+          items: [{ item_id: "94c45c3e-4976-4be7-86d7-19f289d47364" }],
+          targets: [],
+        },
+      ],
+    });
+
+    it("fails the old itemTextIncludes remove constraint (harness false negative)", () => {
+      const legacy: ModelEvalConstraint[] = [
+        {
+          type: "lists_has_action",
+          action: "remove",
+          listType: "shopping",
+          itemTextIncludes: "יוגורט",
+        },
+      ];
+      const result = evaluateConstraints(
+        legacy,
+        removeByIdOnly,
+        "הסרתי יוגורט מרשימת הקניות.",
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failures.join(" ")).toMatch(/missing item text/);
+    });
+
+    it("passes the Decision-Core-aligned remove constraint (minCount + list_ops_empty)", () => {
+      const aligned: ModelEvalConstraint[] = [
+        {
+          type: "lists_has_action",
+          action: "remove",
+          listType: "shopping",
+          minCount: 1,
+        },
+        { type: "list_ops_empty" },
+      ];
+      expect(
+        evaluateConstraints(
+          aligned,
+          removeByIdOnly,
+          "הסרתי יוגורט מרשימת הקניות.",
+        ).ok,
+      ).toBe(true);
+    });
+  });
+
   it("fails when lists.remove is used instead of remove_filing", () => {
     const result = evaluateConstraints(
       [
@@ -873,6 +1107,88 @@ describe("Phase 4 constraint checkers", () => {
   });
 
   describe("show_dump and exact domain ids", () => {
+    it("show_dump_ids_includes / excludes score opaque dump ids", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "show_dump", value: "full" },
+        {
+          type: "show_dump_ids_includes",
+          ids: ["eval-topic-shop-paste", "eval-topic-custom-brush"],
+        },
+        {
+          type: "show_dump_ids_excludes",
+          ids: ["eval-topic-custom-towel"],
+        },
+      ];
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            showDump: "full",
+            showDumpIds: [
+              "eval-topic-shop-paste",
+              "eval-topic-custom-brush",
+              "eval-topic-fil-clinic",
+            ],
+          }),
+          "הנה",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            showDump: "full",
+            showDumpIds: [
+              "eval-topic-shop-paste",
+              "eval-topic-custom-brush",
+              "eval-topic-custom-towel",
+            ],
+          }),
+          "הנה",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({
+            showDump: "full",
+            showDumpIds: ["eval-topic-custom-brush"],
+          }),
+          "הנה",
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("topic_no_match_dump rejects bare full and selected distractors", () => {
+      const constraints: ModelEvalConstraint[] = [
+        { type: "topic_no_match_dump" },
+      ];
+      expect(evaluateConstraints(constraints, meta({}), "לא מצאתי").ok).toBe(
+        true,
+      );
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({ showDump: "full", showDumpIds: [] }),
+          "לא מצאתי",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({ showDump: "full" }),
+          "הנה הכל",
+        ).ok,
+      ).toBe(false);
+      expect(
+        evaluateConstraints(
+          constraints,
+          meta({ showDump: "tasks", showDumpIds: ["eval-nomatch-task-pkg"] }),
+          "הנה",
+        ).ok,
+      ).toBe(false);
+    });
+
     it("requires show_dump full and rejects placeholder filing ids", () => {
       expect(
         evaluateConstraints(

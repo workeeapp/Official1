@@ -76,6 +76,10 @@ export function formatPendingLocationContext(
       address: loc.address,
       label,
     }),
-    "Speaker shared this WhatsApp pin. «באזור שלי» → metadata.places { query, place:\"\", near:\"speaker\" }. «מכאן» trip → metadata.routes origin \"speaker\". Do not invent coordinates.",
+    "Speaker shared this WhatsApp pin — AVAILABLE only, not an automatic instruction.",
+    "Use it ONLY when the speaker clearly means this pin (near-me deixis / «שם» / «מהמיקום ששלחתי» / «מכאן»).",
+    "Then: places { query, place:\"\", near:\"speaker\" } | weather { place:\"\", near:\"speaker\", aspects } | routes origin \"speaker\".",
+    "Named city/place → use that place string; FORBIDDEN substituting this pin. Vague «מה יש לידי?» with no clear deixis → ASK for a pin/clarification (do not emit near=speaker just because PENDING_LOCATION exists).",
+    "Do not invent coordinates.",
   ].join("\n");
 }

@@ -2927,6 +2927,352 @@
           "type": "reminders_empty"
         }
       ]
+    },
+    {
+      "id": "retrieval-path3-teeth-item-not-list-latch",
+      "tag": "hallucination-boundaries",
+      "tags": [
+        "show",
+        "retrieval",
+        "path3",
+        "single-turn"
+      ],
+      "description": "Path 3 topic ask: pick rows by item meaning; exclude distractor on a topic-named custom list (מגבת).",
+      "utterance": "מה יש לי שקשור לשיניים?",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-topic-shop-paste",
+                "שם פריט": "משחת שיניים",
+                "כמות": 1
+              },
+              {
+                "item_id": "eval-topic-shop-milk",
+                "שם פריט": "חלב",
+                "כמות": 1
+              }
+            ]
+          },
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-topic-task-dentist",
+                "שם מטלה": "תור לרופא שיניים",
+                "תאריך לביצוע": "2026-10-28"
+              },
+              {
+                "item_id": "eval-topic-task-pkg",
+                "שם מטלה": "לאסוף חבילה",
+                "תאריך לביצוע": "2026-10-29"
+              }
+            ]
+          },
+          {
+            "list_type": "custom",
+            "list_name": "ציוד שיניים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-topic-custom-brush",
+                "שם פריט": "מברשת שיניים"
+              },
+              {
+                "item_id": "eval-topic-custom-towel",
+                "שם פריט": "מגבת"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-topic-fil-clinic",
+            "item_name": "מרפאת שיניים",
+            "item_info": "רחוב 1",
+            "item_description": "",
+            "owner": "טל",
+            "scope": "personal"
+          },
+          {
+            "filing_id": "eval-topic-fil-gate",
+            "item_name": "קוד שער",
+            "item_info": "9999",
+            "item_description": "",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-topic-rem-teeth",
+            "list_type": "tasks",
+            "repeat": "once",
+            "ping": ["טל"],
+            "ping_ids": ["e1"],
+            "owner": "טל",
+            "text": "",
+            "status": "active",
+            "item": "תור לשיננית",
+            "fire_at": "2026-10-28 09:00"
+          },
+          {
+            "reminder_id": "eval-topic-rem-pkg",
+            "list_type": "tasks",
+            "repeat": "once",
+            "ping": ["טל"],
+            "ping_ids": ["e1"],
+            "owner": "טל",
+            "text": "",
+            "status": "active",
+            "item": "לקחת חבילה",
+            "fire_at": "2026-10-29 12:00"
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "show_dump",
+          "value": "full"
+        },
+        {
+          "type": "show_dump_ids_includes",
+          "ids": [
+            "eval-topic-shop-paste",
+            "eval-topic-task-dentist",
+            "eval-topic-custom-brush",
+            "eval-topic-fil-clinic",
+            "eval-topic-rem-teeth"
+          ]
+        },
+        {
+          "type": "show_dump_ids_excludes",
+          "ids": [
+            "eval-topic-custom-towel",
+            "eval-topic-shop-milk",
+            "eval-topic-task-pkg",
+            "eval-topic-fil-gate",
+            "eval-topic-rem-pkg"
+          ]
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_query_report"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-path3-named-teeth-list-all-items",
+      "tag": "happy",
+      "tags": [
+        "show",
+        "retrieval",
+        "path3",
+        "single-turn"
+      ],
+      "description": "Explicit named-list ask keeps whole list (including מגבת) via show_dump=<list_name>.",
+      "utterance": "מה יש ברשימת ציוד שיניים?",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "custom",
+            "list_name": "ציוד שיניים",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-topic-custom-brush",
+                "שם פריט": "מברשת שיניים"
+              },
+              {
+                "item_id": "eval-topic-custom-towel",
+                "שם פריט": "מגבת"
+              }
+            ]
+          },
+          {
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-topic-shop-paste",
+                "שם פריט": "משחת שיניים",
+                "כמות": 1
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "show_dump",
+          "value": "ציוד שיניים"
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_query_report"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-path3-topic-no-match",
+      "tag": "hallucination-boundaries",
+      "tags": [
+        "show",
+        "retrieval",
+        "path3",
+        "single-turn"
+      ],
+      "description": "Path 3 topic with zero semantic hits: no bare full/category dump and no unrelated ids.",
+      "utterance": "מה יש לי שקשור לצלילה בסקוטלנד?",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-nomatch-shop-milk",
+                "שם פריט": "חלב",
+                "כמות": 1
+              }
+            ]
+          },
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-nomatch-task-pkg",
+                "שם מטלה": "לאסוף חבילה",
+                "תאריך לביצוע": "2026-10-29"
+              }
+            ]
+          }
+        ],
+        "filing": [
+          {
+            "filing_id": "eval-nomatch-fil-gate",
+            "item_name": "קוד שער",
+            "item_info": "1234",
+            "item_description": "",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-nomatch-rem-pkg",
+            "list_type": "tasks",
+            "repeat": "once",
+            "ping": ["טל"],
+            "ping_ids": ["e1"],
+            "owner": "טל",
+            "text": "",
+            "status": "active",
+            "item": "לקחת חבילה",
+            "fire_at": "2026-10-29 12:00"
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "topic_no_match_dump"
+        },
+        {
+          "type": "show_dump_ids_excludes",
+          "ids": [
+            "eval-nomatch-shop-milk",
+            "eval-nomatch-task-pkg",
+            "eval-nomatch-fil-gate",
+            "eval-nomatch-rem-pkg"
+          ]
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_query_report"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-path2-meetings-only",
+      "tag": "happy",
+      "tags": [
+        "show",
+        "retrieval",
+        "path2",
+        "tasks",
+        "single-turn"
+      ],
+      "description": "Path 2 meetings ask: dump meeting task ids only — not unrelated chores.",
+      "utterance": "אילו פגישות יש לי?",
+      "setup": {
+        "lists": [
+          {
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-meet-accountant",
+                "שם מטלה": "פגישה עם רואה חשבון",
+                "תאריך לביצוע": "2026-10-28",
+                "שעה לביצוע": "10:00"
+              },
+              {
+                "item_id": "eval-meet-team",
+                "שם מטלה": "פגישת צוות",
+                "תאריך לביצוע": "2026-10-29",
+                "שעה לביצוע": "14:00"
+              },
+              {
+                "item_id": "eval-chore-milk",
+                "שם מטלה": "לקנות חלב",
+                "תאריך לביצוע": "2026-10-28"
+              }
+            ]
+          }
+        ]
+      },
+      "constraints": [
+        {
+          "type": "show_dump",
+          "value": "tasks"
+        },
+        {
+          "type": "show_dump_ids_includes",
+          "ids": ["eval-meet-accountant", "eval-meet-team"]
+        },
+        {
+          "type": "show_dump_ids_excludes",
+          "ids": ["eval-chore-milk"]
+        },
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "no_query_report"
+        }
+      ]
     }
   ]
 }

@@ -750,6 +750,85 @@ describe("formatRoutesHebrew", () => {
     expect(text).not.toMatch(/הגעה משוערת 0:25/);
   });
 
+  /**
+   * Live failure mode: arrival ask + ≥2 Google alts; door-to-door leave-by
+   * (arrival − duration) must stay in the multi lead even when step/ISO clocks
+   * cannot evidence a boarding time.
+   */
+  it("multi arrival-ask keeps door-to-door leave-by without inventing boarding", () => {
+    // 18:00 − 2866s ≈ 17:12 Asia/Jerusalem (matches live primary duration shape).
+    const primary = sampleItinerary({
+      durationText: "48 דקות",
+      durationSeconds: 2866,
+      leaveByText: "17:12",
+      // Step arrive far from door-to-door span (would previously strip leave).
+      arriveByText: "17:30",
+      leaveIsBoarding: false,
+      steps: [
+        sampleStep({
+          travelMode: "WALK",
+          line: "",
+          durationSeconds: 240,
+          durationText: "4 דקות",
+          departureTime: "",
+          departureIso: "",
+          arrivalTime: "",
+          fromStop: "",
+          toStop: "ארנס",
+        }),
+        sampleStep({
+          line: "51",
+          // Board clock ≠ door-to-door leave-by; no ISO → cannot back leave.
+          departureTime: "17:20",
+          departureIso: "",
+          arrivalTime: "17:30",
+        }),
+      ],
+    });
+    const secondary = sampleItinerary({
+      durationText: "55 דקות",
+      durationSeconds: 3300,
+      leaveByText: "17:05",
+      arriveByText: "18:00",
+      leaveIsBoarding: false,
+      steps: [
+        sampleStep({
+          line: "66",
+          departureTime: "17:15",
+          departureIso: "",
+          arrivalTime: "18:00",
+        }),
+      ],
+    });
+
+    const clocks = displayLeaveArriveForLead(primary);
+    expect(clocks.leaveByText).toBe("17:12");
+    expect(clocks.leaveIsBoarding).toBe(false);
+    // Mismatched step arrive must not be paired as verified with door-to-door leave.
+    expect(clocks.arriveByText).toBe("");
+
+    const text = formatRoutesHebrew({
+      ...base,
+      arrival: "2026-10-28T18:00",
+      leaveByText: "17:12",
+      durationText: "48 דקות",
+      durationSeconds: 2866,
+      itineraries: [primary, secondary],
+      steps: primary.steps,
+      aspects: ["summary"],
+    });
+    expect(text).toMatch(/יעד הגעה:\s*עד 18:00/);
+    expect(text).toMatch(/צא בסביבות\s+\*17:12\*/);
+    expect(text).toMatch(/משך משוער\s+\*48 דקות\*/);
+    expect(text).toContain("קו 51");
+    expect(text).toContain("מצאתי 2 אפשרויות");
+    // Not presented as a verified boarding clock.
+    expect(text).not.toMatch(/עלייה משוערת\s+17:12/);
+    expect(text).not.toMatch(/עלייה משוערת\s+17:20/);
+    expect(text).not.toContain("קו 66");
+    expectMultiAltsCue(text, 1);
+  });
+
   it("cue stays neutral when alternatives are clones", () => {
     const twin = sampleItinerary({
       durationText: "40 דקות",

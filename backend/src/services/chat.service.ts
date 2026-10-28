@@ -46,6 +46,7 @@ import {
   alignListTypeInReply,
   applyEmployeeRecords,
   correctAttachmentClaimReply,
+  correctDurableSaveClaimReply,
   correctListMutationClaimReply,
   correctShareClaimReply,
   EMPTY_REPLY_RETRY,
@@ -78,6 +79,7 @@ import {
   employeeDisplayName,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  formatScheduleSkippedWithoutQueueNotice,
   filingActionIds,
   listActionItemIds,
   matchEmployee,
@@ -172,6 +174,7 @@ import {
   filterSnapshotForAboutPerson,
   formatLastNumberedDumpContext,
   formatShowDumpWithLineMap,
+  liveDumpRowIdsFromSnapshot,
   isTasksShowDumpKind,
   dumpFilterNames,
   mapShowButtonCommandToDumpTarget,
@@ -183,7 +186,7 @@ import { resolveWeatherMessages } from "./weather.js";
 import { composeWeatherLiveTip } from "./reminder-compose.js";
 import { resolveMarketReply } from "./market.js";
 import { resolveMashovReply } from "./mashov.js";
-import { resolvePlacesReply } from "./places.js";
+import { resolvePlacesReplyDetailed } from "./places.js";
 import { resolveJewishReply } from "./jewish.js";
 import { resolveRoutesReply } from "./routes.js";
 import { resolveFlightsReply } from "./flights.js";
@@ -192,6 +195,12 @@ import {
   formatPendingLocationContext,
   getPendingLocation,
 } from "./pending-location.js";
+import {
+  fromPendingLocation,
+  parseCoordinatePair,
+  replyAsksForWhatsAppPin,
+  shouldClearPendingAfterSpeakerPinUse,
+} from "./resolved-location.js";
 import {
   clearMutatingMetadata,
   stripShowTurnMutates,
@@ -212,7 +221,10 @@ import {
   withAttachmentRefs,
   type TurnAttachments,
 } from "./attachment.service.js";
-import { withLinkedListRefs } from "./list-item-list-link.service.js";
+import {
+  fillBlankCustomListNameFromSameTurnLinks,
+  withLinkedListRefs,
+} from "./list-item-list-link.service.js";
 
 function speakerName(employee: {
   name: string;
@@ -430,7 +442,7 @@ function promptsEqual(
   return a.length > 0 && a === b;
 }
 
-/** Protected Lucy (or name/nickname לוסי) — not the guest onboarding worker. */
+/** Protected Lucy (or name/nickname ????) ? not the guest onboarding worker. */
 function isLucyDigital(digital: PublicEmployee): boolean {
   if (digital.kind !== "digital" || isGuestLucy(digital)) {
     return false;
@@ -440,7 +452,7 @@ function isLucyDigital(digital: PublicEmployee): boolean {
   }
   const name = (digital.name ?? "").trim();
   const nickname = digital.nickname?.trim() ?? "";
-  return name === "לוסי" || nickname === "לוסי";
+  return name === "????" || nickname === "????";
 }
 
 /**
@@ -484,7 +496,7 @@ export function shouldAttachLucyRuntimeEngine(
  * written and the relay is out. A job problem must never fail the turn.
  */
 const ATTACHMENTS_RULE =
-  "ATTACHMENTS: files arrive as new_attachments under [קבצים שהתקבלו בהודעה זו] (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. ATTACH via items[].attachment_ids / filing|reminders attachment_ids / lists alter_list add_attachments / lists[].list_attachment_ids. DESTINATION LADDER (full recipe in system DECISION & FOCUS / ATTACHMENTS): תייקי|תשמרי|תצרפי are equivalent save verbs — NOT always filings. (A) filings — only לתיוקים / תחת… / כ… new title + attachment_ids; (B) list SHELL — alter_list add_attachments ONLY when לרשימה עצמה / ברמת הרשימה; (C) list ITEM — default when ל-X uniquely matches a custom list_name: update/add item_id + attachment_ids (identify item from wording / active USER topic / LAST_NUMBERED_DUMP / live rows — FORBIDDEN last-mentioned latch; item unclear → ask which item; never ask list-vs-item). ל-X person → assign. No save intent in this or prior USER turns → empty mutates on bare file/forward (FORBIDDEN invent filing). Deferred file after USER named a target → complete with PENDING/new_attachments despite intervening Lucy messages. BY LINE attach (לפריטים 1-3) → update×N dump item_ids + same attachment_ids; stale/missing dump → ASK. STABLE REFS: pronouns (זה/םותו) and ordinals (הרםשון/השני) → active USER topic + LAST_NUMBERED_DUMP id (+ live match); FORBIDDEN last-mentioned latch alone; unclear → ASK. Document/image filing when create-filing is clear: short item_name + attachment_ids; item_info = optional SHORT summary only; item_description = find-helper only when useful — FORBIDDEN full OCR into item_info/description. Reminder with files → same ids on task and reminder. PAPERCLIP / LINK ICON / send_attachments / DEICTIC SHOW: same as system ATTACHMENTS. Never speak ids; never invent video/document content.";
+  "ATTACHMENTS: files arrive as new_attachments under [????? ??????? ?????? ??] (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) ? never because an item inside has files. ATTACH via items[].attachment_ids / filing|reminders attachment_ids / lists alter_list add_attachments / lists[].list_attachment_ids. DESTINATION LADDER (full recipe in system DECISION & FOCUS / ATTACHMENTS): ?????|?????|????? are equivalent save verbs ? NOT always filings. (A) filings ? only ??????? / ???? / ?? new title + attachment_ids; (B) list SHELL ? alter_list add_attachments ONLY when ?????? ???? / ???? ??????; (C) list ITEM ? default when ?-X uniquely matches a custom list_name: update/add item_id + attachment_ids (identify item from wording / active USER topic / LAST_NUMBERED_DUMP / live rows ? FORBIDDEN last-mentioned latch; item unclear ? ask which item; never ask list-vs-item). ?-X person ? assign. No save intent in this or prior USER turns ? empty mutates on bare file/forward (FORBIDDEN invent filing). Deferred file after USER named a target ? complete with PENDING/new_attachments despite intervening Lucy messages. BY LINE attach (??????? 1-3) ? update?N dump item_ids + same attachment_ids; stale/missing dump ? ASK. STABLE REFS: pronouns (??/????) and ordinals (??????/????) ? active USER topic + LAST_NUMBERED_DUMP id (+ live match); FORBIDDEN last-mentioned latch alone; unclear ? ASK. Document/image filing when create-filing is clear: short item_name + attachment_ids; item_info = optional SHORT summary only; item_description = find-helper only when useful ? FORBIDDEN full OCR into item_info/description. Reminder with files ? same ids on task and reminder. PAPERCLIP / LINK ICON / send_attachments / DEICTIC SHOW: same as system ATTACHMENTS. Never speak ids; never invent video/document content.";
 
 async function withAttachmentRefsSafe(
   snapshot: EmployeeRecordSnapshot,
@@ -632,8 +644,8 @@ const OPEN_JOBS_RULES = [
   "DECLINE (?? ????? / ?? ???????) ? action decline + report_text, job closes. ??? ????? / ???? ??? with no hour is NOT a decline.",
   "PROGRESS (???? ???? ??? / ?? ???? with no hour) ? action progress or snooze with no time. report_text empty. The asker is not told. The job stays open and stays raisable. A different clock time is COUNTER only ? never progress.",
   `RAISING (mandatory when raisable=true and viewer_is=subject): after you answer what they just asked, raise one such job. Also raise it when they open (??? / ?? ????) or switch to a new topic. A raise is ALWAYS its own entry in responses ? never inside the answer entry. The answer entry is written as if no job were open (greeting ???? ? ???, ??? ???? ???????); a normal raise is the NEXT entry and starts with ????,?. Example: ???? ???? with a raisable self-check ??? ???? ????? ? responses: ["??, ??? ???? ??????", "???, ????? ?????? ?? ???? ????"]. A meeting raise entry is the question: ????, ???? ???? ???? ???? ????? ???? ????? ?-12:00. ????? ?? ??? ?? ??? ??????? Do not stop at ???? ????? ???? ?????. Skip the raise while your own question is still unanswered ? including an open DELETE CLARIFY (which item/list/scope to delete): that turn is ONE responses entry only; FORBIDDEN a second ????? raise or any other yes/no in the same turn; the job stays raisable for a later turn after they answer. Also skip in the same reply where they just said ?? ????. FORBIDDEN to RAISE when they ask what YOU need to do/check/list (${WORKER_INVENTORY_ASKS}) ? that is INVENTORY only (see below). raisable=false (a clock is set, or scheduled=true deferred check not yet due) ? wait, do not raise early. A row with urgency=urgent ? the raise entry comes FIRST in responses, before the answer entry, and says it is urgent (no ?????) ? still FORBIDDEN in the same turn as an open DELETE CLARIFY. urgency=very_urgent ? that first raise entry appears in EVERY reply while it is open, even right after ?? ???? (one short line) ? except during an open DELETE CLARIFY.`,
-  "OVERDUE TASKS (overdue_tasks=true on an OPEN_JOBS row): the server opened this self-job on a new conversation for speaker tasks whose last day passed. Raise ONLY when raisable=true (first offer this conversation) with varied Hebrew + buttons סגירה / עדכן מועד להיום (and הצג את המטלות when raise omits some overdue_titles). On סגירה → jobs.answer (report_text \"\") + lists.remove per overdue_item_ids. On עדכן מועד להיום → jobs.answer + lists.update תאריך לביצוע=\"היום\". On הצג את המטלות → show_dump=tasks + show_dump_ids=overdue_item_ids; lists=[]; jobs=[]; do NOT close. If overdue_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN opening another overdue job via messages; FORBIDDEN inventing item ids; still skip raise during DELETE CLARIFY / inventory.",
-  "STALE UNDATED (stale_undated=true): undated speaker tasks at a 7/14/28/56… day milestone (only when no overdue_tasks). Raise ONLY when raisable=true with varied Hebrew (title + age); buttons סגירה + להוסיף תאריך; when stale_item_ids.length>1 ALSO הצג מטלות (label=command). On סגירה → jobs.answer + lists.remove per ids. On להוסיף תאריך → ask for date(s) first (jobs.progress OK); when they give a date → lists.update תאריך לביצוע + jobs.answer. On הצג מטלות → show_dump=tasks + show_dump_ids=stale_item_ids; do NOT close. If stale_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer.",
+  "OVERDUE TASKS (overdue_tasks=true on an OPEN_JOBS row): the server opened this self-job on a new conversation for speaker tasks whose last day passed. Raise ONLY when raisable=true (first offer this conversation) with varied Hebrew + buttons ????? / ???? ???? ????? (and ??? ?? ?????? when raise omits some overdue_titles). On ????? ? jobs.answer (report_text \"\") + lists.remove per overdue_item_ids. On ???? ???? ????? ? jobs.answer + lists.update ????? ??????=\"????\". On ??? ?? ?????? ? show_dump=tasks + show_dump_ids=overdue_item_ids; lists=[]; jobs=[]; do NOT close. If overdue_offered / raisable=false ? FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN opening another overdue job via messages; FORBIDDEN inventing item ids; still skip raise during DELETE CLARIFY / inventory.",
+  "STALE UNDATED (stale_undated=true): undated speaker tasks at a 7/14/28/56? day milestone (only when no overdue_tasks). Raise ONLY when raisable=true with varied Hebrew (title + age); buttons ????? + ?????? ?????; when stale_item_ids.length>1 ALSO ??? ????? (label=command). On ????? ? jobs.answer + lists.remove per ids. On ?????? ????? ? ask for date(s) first (jobs.progress OK); when they give a date ? lists.update ????? ?????? + jobs.answer. On ??? ????? ? show_dump=tasks + show_dump_ids=stale_item_ids; do NOT close. If stale_offered / raisable=false ? FORBIDDEN raise or re-ask; still accept those commands if they volunteer.",
   "SNOOZE: ??????? ?? ???? 10 ????? / ?????? about a raised OPEN_JOBS raise ? ONLY metadata.jobs [{ action:\"snooze\", job_id, in: seconds }] or time HH:mm. The server moves that job's nudge clock (or creates one if none) ? FORBIDDEN lists add reminders / lists three-action self-nudge / a second ?????? for that job. ??? ????? / ???? ??? with no time ? snooze with no time (deferred, still raisable); asker not told. Vague hour ? ask.",
   "CANCEL / STOP THE CHECK: ??? ????? ????? / ???????? / ?????? ?? ??? / ?????? ???? on a raised OPEN_JOBS row ? jobs.close or decline with job_id + report_text (ends chat raises AND the nudge clock). response short ack that you will update the asker (?????, ?????? ? ????? ?? ????.?). No regret turn, no ??? ???? ??????. FORBIDDEN lists remove reminders or clear_clock alone when they mean stop the whole check. ????? ?? ???????? only (clearly the WhatsApp ping, not the check) ? clear_clock: asker closes the job + subject is told; subject only drops the clock and the job stays (asker not told). Silent full-cancel does not exist: ???? ??? ?? ???? ??? ? do NOT close yet; explain ending the check always updates the asker; ask cancel+notify or leave open. A report you deliver is the end of that job ? never set expects_reply on it.",
   "CONSULT FOLLOW-UP: a ?<worker> ????: ?? line in your earlier reply is a digital co-worker's answer, already shown to the speaker. If that worker asked for missing details (??? ????? / ??? ????? / ???) and the speaker now gives them (3 ????? / ????'???), pass them to that worker: messages to that worker, expects_reply:true, text restates the original topic plus the new details (????? ???? ??????? ???? ?????: ?????? 3 ??????), ask_summary with the full topic. Never answer it yourself, never ??? ??????, and never ask the speaker what the details are for.",
@@ -819,7 +831,7 @@ function workerTargetingInstructions(
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git ? compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent ????), compose_lookback_hours from the spoken window (minutes?fractional hours e.g. 5 ?????0.083, 24?day, 168?week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given ? ASK ??? (????? / ???? X / daily) with no reminders clock, then emit the full git_log clock with their answer; NEVER say ???? without in/time. ??????? ? in?5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. ???? ?????? ???????). NEVER invent ???? or any coworker; NEVER offer ????? ?? / ????? ?????? unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction ? not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (?? ??? ??8 ?? ?? ?? ???? / ???? ??? ??? ?????? ??? / ???? ??? ?? ???? ????? ??? / ????? ?? ???? 10 ????? ?? ????? ?????? ??????? ?? ????) ? compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said ???? ??, brief=the question; ??? ????? is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later (??????? ???? ???? ????) ? refuse; offer save-now or a normal reminder. Never ask ?? ???? ????? ????? for a send-me list dump.",
     "LIVE CAPABILITY GATE (generic ? ALL live domains: weather/market/mashov/places/jewish/routes/flights): Before emitting a live ACTION, classify the ask F/Q/V/U against THAT domain's connected API and schema fields. F = map into structured ACTION fields we expose. Q = only facts that provider can return. V = residual filter on returned rows (Places/Flights/Routes ? require_live_select Stage B). U = the ask needs a fact this integration cannot supply (no endpoint / no field / outside what we wire). If U blocks answering the ask ? that domain ACTION = null; explain the limit in responses NOW ? FORBIDDEN fetching a nearby aspect and presenting empty/wrong results as if the unsupported ask was checked. If U is only an add-on and remaining F/Q still useful ? fetch F/Q and disclose the U part. Never invent verification. Distinguish ???? ??????? (fetched, empty match) vs ??? ???? ????? ?? ?? ??? ?????? ???? (never fetched).",
-    "WEATHER (live): ??? ??? ?????? ??? ??? ????? / ???? ???? / ??? ??? / ??? ???? ? metadata.weather { place, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }; lists/no reminders clock. WAVE SCAN: ????? ??? ?????? ???? ??? ???? ? place=\"?????\", aspects:[waves], min_wave_m=1, date=???; server scans main coasts. Single city + min_wave_m ? say above/below. LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition ? no require_live_select / no Stage B for weather. U = lifestyle judgments (???? ??? ???? / ????? ??????) ? disclose as tip/opinion grounded in facts, NEVER invent numbers; if only U and no useful forecast ask ? explain before fetch (weather=null). Pure ask ? responses may be empty; server fills the facts. WITH an ack (WATCH sample / short confirm) ? responses = ack only (no numbers); server appends weather as a 2nd message. FORBIDDEN inventing temps/wind/waves. Missing place ? ask; weather=null. ???/??? X ? date via SESSION_CLOCK.",
+    "WEATHER (live): named city/place ? metadata.weather { place, near:\"\"|omit, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }. Clear deixis to PENDING_LOCATION (pin there / shared location) ? { place:\"\", near:\"speaker\", aspects }. PENDING_LOCATION is AVAILABLE only ? FORBIDDEN near=speaker merely because a pin is still in TTL; vague near-me without clear pin deixis ? ASK (weather=null). Named city ALWAYS wins over a stored pin. lists/no reminders clock. WAVE SCAN: Israel coast waves ? place=\"Israel\", aspects:[waves], min_wave_m=1. LIVE CAPABILITY (F/Q/V/U): F/Q = place|near=speaker + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition ? no require_live_select. U = lifestyle judgments ? disclose as tip/opinion, NEVER invent numbers. Pure ask ? responses may be empty; server fills. WITH ack (WATCH sample) ? responses = ack only; server appends weather as 2nd message. FORBIDDEN inventing temps/wind/waves or coordinates. Missing place and no clear near=speaker ? ask; weather=null. Relative day ? date via SESSION_CLOCK.",
     "SCHEDULED WEATHER: ??? ???? ??7 ???? ?? ??? ????? ????? / ????? ??? ????? ?????? ? compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for ???? ??, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH weather_rain exception: no ask-when.",
     "MARKET (live): ??? ???? ???? / NVDA / ??? / ??????? / ?????? / S&P ? metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|?], aspects:[summary|price|change|range] }; lists/no reminders clock. Prefer Yahoo tickers when known (BTC-USD). FX (????/????/?) is Market too ? not a separate ACTION. LIVE CAPABILITY (F/Q/V/U): F/Q = queries[] + aspects (Yahoo quote); V = returned price/change/range ? no require_live_select / no Stage B. U = investment advice / ????? ?????? ? FORBIDDEN presenting as verified fact; disclose not advice. Missing quote ? server says not found; do not invent. Pure ask ? responses may be empty; server fills the quote. WITH an ack (WATCH sample) ? responses = ack only (no prices); server appends the quote as a 2nd message. FORBIDDEN inventing prices. Missing what to quote ? ask; market=null.",
     "SCHEDULED MARKET: ??? ???? ??9 ???? ?? ?? AAPL ????????? ? compose:true, compose_source:\"market\", compose_place:\"AAPL,BTC-USD\" (comma-separated), ping=SPEAKER, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH market_price exception: no ask-when.",
@@ -830,10 +842,10 @@ function workerTargetingInstructions(
     "WATCH (??????? ???? ???? / ?????? ?? ????): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov). Types: market_price | weather_rain | weather_changed | mashov_new | market_change_compare | expr | field_changed | bus_eta | flight_eta | flight_changed. SAME TURN: emit live weather/market/mashov/flights sample ACTION + responses = short watch ack ONLY (e.g. ?????? ???? ??? ???????? ?????? ?????? ??? 84,000?) ? FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message prefaced ???????? ??????. Server stamps baseline only ? first condition check is the next poll (never fire immediately on create). No spoken time ? recurrence {freq:\"interval\",interval:5,unit:\"minutes\"} (FORBIDDEN ask ???; FORBIDDEN defaulting to hourly). bus_eta / flight_eta (?60m window) / flight_changed ? every 2?5 minutes OK; flight_eta with hours_before ? every 15 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
     "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT ??????? ???? ????? ????? ??? 3? ? watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING ??????? ?? ??? ???? ????? ??? 3? ? watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true ? send then sleep until next interval. (3) RECURRING SCHEDULED ??????? ???? ?? ???? ??8 ?? ??? ????? ??? 3? ? watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for ?????? ?????? ??????. mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. market_change_compare e.g. {type:\"market_change_compare\",left:\"????\",right:\"????\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "WATCH EXPR (arithmetic on catalog fields): ????????? ???? ????? ???? 2 = 50? ? compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"??? ?????\"},{const:2}]},right:{const:50}}; compose_source weather. ????? + ???? ??? ???10? ? expr compare approx/lt with market.price fields (symbols ????/????). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (?? ? approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. ???????????? ?????? on a number ? field_changed {field:\"weather.temp_now\",place:?}. FORBIDDEN putting the math only in the brief.",
-    "PLACES (live local): ?????? ?? ?????? ???? ?????? / ??? ?????? ?? ???????? ????? ????? / ????? ?? ????? ??? ??????? ? metadata.places { query, place, aspects, intent:\"business\"|omit }. Parking-place asks ? intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): ????? ?? ????? ??? ???????? ? { query:\"?????\", place:\"??????\"|area, intent:\"parking\" }; ????? ?? ???? ?????? ? { query:\"????\", near:\"speaker\"|place, intent:\"parking\" }; ????? ???? ?????? ??? ???????? ? { query:\"????\", place:\"??????\"|area, intent:\"parking\" }; ??? ???? ???? ??????? ? { query:\"????\", place|near, intent:\"parking\", parking_cost:\"free\" }; ??? ????? ?????? ??????? ? { query:\"?????\", place|near, intent:\"parking\", parking_cost:\"paid\" }. ??? ??????? ????? ???? + PENDING_LOCATION ? places { query:\"??????\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for ???? ?????; min_rating 0?5 exact (e.g. 4.1) for ????? ??? X; parking_cost free|paid for ???? ????/?????? (server local-filters ParkingOptions; FORBIDDEN stuffing ????/?????? only into query); included_type ? restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). ??? ???? ???????? / attribute of a named business ? intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/?) are expected to evidence the ask ? require_live_select:true; U = cannot verify (e.g. ??????/ownership) ? NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. ?????? ???? ?????? ? parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer ? explain BEFORE fetch (places=null). Distinguish ??? ????? ?????? ??????? vs ??? ???? ???? ?? ??????????. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query ? ask; places=null. Near-me without pin ? ask to share WhatsApp location.",
+    "PLACES (live local): ?????? ?? ?????? ???? ?????? / ??? ?????? ?? ???????? ????? ????? / ????? ?? ????? ??? ??????? / ????? ???? ?????? ? metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (????? ???? / ???? ?????) ? geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Inside-region (????? ?????? / ???? ??? ??) ? geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me ? near=speaker. Parking examples: ????? ?? ????? ??? ???????? / ????? ?? ???? ?????? / ????? ???? ?????? ??? ???????? / ??? ????? ?????? ???????; ordinary business ????? ?? ????? ??? ???????. Parking-place asks ? intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): ????? ?? ????? ??? ???????? ? { query:\"?????\", place:\"??????\"|area, intent:\"parking\" }; ????? ?? ???? ?????? ? { query:\"????\", near:\"speaker\"|place, intent:\"parking\" }; ????? ???? ?????? ??? ???????? ? { query:\"????\", place:\"??????\"|area, intent:\"parking\" }; ??? ???? ???? ??????? ? { query:\"????\", place|near, intent:\"parking\", parking_cost:\"free\" }; ??? ????? ?????? ??????? ? { query:\"?????\", place|near, intent:\"parking\", parking_cost:\"paid\" }. ??? ??????? ????? ???? + PENDING_LOCATION ? places { query:\"??????\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for ???? ?????; min_rating 0?5 exact (e.g. 4.1) for ????? ??? X; parking_cost free|paid for ???? ????/?????? (server local-filters ParkingOptions; FORBIDDEN stuffing ????/?????? only into query); included_type ? restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). ??? ???? ???????? / attribute of a named business ? intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/?) are expected to evidence the ask ? require_live_select:true; U = cannot verify (e.g. ??????/ownership) ? NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. ?????? ???? ?????? ? parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer ? explain BEFORE fetch (places=null). Distinguish ??? ????? ?????? ??????? vs ??? ???? ???? ?? ??????????. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query ? ask; places=null. Near-me without pin ? ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): ???? ??????? ???? ???? ?????? / ???? ????? ??? ??? ????? / ??? ???? ?????? / ????? ?? ???? / ???? ??? ???? ? metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. NAMED HOLIDAY (???? ???? / ????? / ?????) ? aspects:[holidays] + query with that name (NOT bare upcoming list ? server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts ? no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal ? disclose; never invent times. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare ???? ???? ? [summary]; ??? ???? ? [candles]; ?????/????? ??? ? [havdalah]; ???? ? [parasha]; ???? ? [holidays]. FORBIDDEN jewish when they asked ?????? ?? ?????? ???? ? use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: ??????? ?? ?????? ???? 10 ???? ???? ????? ??? ???? ?????? ? Self-nudge + lists add reminders { item:\"?????? ????\", text:\"?????? ????\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"??? ?????\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal ? FORBIDDEN inventing time/in. Missing city ? ask; no reminders clock jewish=null. ??? ???? / ?? ????? ? same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot ?????? ???????; weekly ???? ?????? ? not live candle times.",
-    "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up option N ? new routes ACTION (recalculate); FORBIDDEN claiming a new fetch is the same prior option index ? say recalculated and show current options or ask to clarify (no itinerary store). Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected); FORBIDDEN inventing SX/alerts. Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
+    "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up option N ? new routes ACTION (recalculate); FORBIDDEN claiming a new fetch is the same prior option index ? say recalculated and show current options or ask to clarify (no itinerary store). Missed bus/departure (speaker says they missed the bus / asks what now after a prior transit plan) ? new routes ACTION: reuse the same origin+destination from conversation history ONLY when both are reliably known; departure = SESSION_CLOCK now/ASAP (do NOT keep the missed departure time); aspects:[summary] via existing Google TRANSIT path; present as a newly calculated itinerary (NOT continued tracking of the prior trip; NOT continuous monitoring). FORBIDDEN claiming prior option N is still available without reliable identity and current validity. Origin or destination not recoverable ? ASK only for the missing field (routes=null); FORBIDDEN inventing O/D. Not a bus_eta watch unless they asked to be reminded. Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected); FORBIDDEN inventing SX/alerts. Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
     "BUS WATCH: ??????? ?? 10 ???? ???? ??? 51 ???? ????? X ?????? Y? ? Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination ? ask; no clock. Server polls Routes periodically; quiet-skip until ETA ? N ? NOT continuous realtime monitoring; FORBIDDEN claiming live stream tracking. Sub-hour refuse does NOT apply to bus_eta.",
     "FLIGHTS (live AviationStack, default TLV/?????): ????? ????? ?? ?? ????? ???? ? metadata.flights { airport:\"\"|TLV, direction:\"departures\", airline:\"?? ??\", city:\"????\", date:YYYY-MM-DD, aspects:[board] }. ???? ????? ?????? ?????? ? flights { direction:\"arrivals\", city:\"????\", aspects:[next] }. ????? ????? ?????? ???? ???? ? flights { direction:\"arrivals\", within_minutes:30, aspects:[board] }. ??????? ???? 19:00? ? { direction:\"arrivals\", time_from:\"19:00\", aspects:[board] }; ???? 8 ??10? ? time_from+time_to HH:mm Jerusalem; ????? 22:00? ? time_to. ??????? ?? ????? ?????????? ? direction arrivals + airlines:[concrete IATA/names from world knowledge] (e.g. LH,AF,BA,KL,LX,OS,AZ,IB,SN,TP,AY,SK,DY,EW,U2,FR,W6,A3,RO,BT,JU,?) ? FORBIDDEN asking ????? ????? when the region/group is clear; server ORs airlines client-side; require_live_select:false when airlines[] fully expresses the group. LIVE CAPABILITY (F/Q/V/U): F ? airline/airlines/city/flight/date/within_minutes/time_from/time_to/direction; Q ? only AviationStack-supported search params (date is client-side filter); V ? residual semantic when board fields (airline/status/gate/times/city) evidence the ask ? require_live_select:true; U ? cannot verify from API (e.g. ????? ????? / seat comfort) ? disclose, never Stage B for U alone; continue with useful F/Q/V or explain before fetch if blocked. Distinguish no-match vs unable-to-verify. ???? ????? ???? ???? 3242CXD? ? flights { flight:\"3242CXD\", direction:\"arrivals\", aspects:[summary] } ? flight AS SPOKEN. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends board as 2nd message. FORBIDDEN inventing times/gates/status. Missing needed filter ? ask; flights=null.",
     "FLIGHT ETA WATCH: ??????? ?? 30 ???? ???? ?????? ?? LY831? ? Self-nudge + reminders { compose:true, compose_condition:{type:\"flight_eta\",airport:\"TLV\",direction:\"departures\",flight:\"LY831\",minutes_before:30,hours_before:0}, every_count:2?5, every_unit:\"minutes\", watch_once:true }. ?30 ???? ???? ?????? ?????? ? direction:\"arrivals\", hours_before:30 (or minutes_before:1800), interval 15 minutes. Missing flight (and no airline+city) ? ask; no clock. Server quiet-skips until ETA ? threshold. Sub-hour refuse waived for flight_eta.",
@@ -869,7 +881,7 @@ function workerTargetingInstructions(
     "PERSONAL TASK DEFAULT: ??????? ?? ????? / ????? ??? / ????? ??? without naming a custom list ? list_type tasks, list_name empty, targets [] (built-in personal ?????). Detail/????? stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like ?????? ?????? just because it exists or sounds work-related ? only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
     "NAMED LIST MUTATE: when they name a list (?????? X / ??????? ??????), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA ? personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in ?????/?????/???? ??? ? fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL: exactly ONE list_name equals what they said ? mutate NOW, no ask. Spoken token in TWO OR MORE titles (????? / ????? ???? / ?) ? NOT unique ? treat as (3). (2) VERY SIMILAR but not identical (exactly one near-miss) ? lists=[] and ASK once ???????? ?????? ?X??? ? never mutate until confirm. (3) Several close candidates, OR spoken token in ?2 list_name titles, OR none ? lists=[] and ASK which as NUMBERED 1. 2. 3. (exact list_name; personal vs ?????? ?? X); never pick first/shared/looks-like. Example: ?????? ????? ????????? then ?1. ?????? / ?2. ????? ???? (?????? ?? ????)?. After they answer with the title OR a line index (?2? / ??2?) ? map to the LAST list-pick ask line ? exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index ? re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone (??????? ???? ? a ?????* list). Server will not fix a wrong list_name.",
-    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown ? ask once ?????? ???? ????? ??? ?? ?????? with empty actions; on answer ? filing add ????? ?????? (item_info ???/????) ? the server stores address gender for next turns. Never ignore SPEAKER_ADDRESS.",
+    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» when the turn needs address conjugation and there is no complete durable filing/save this turn; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. FORBIDDEN: empty actions or deferring a complete same-turn durable filing/save (e.g. «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב») until gender is answered — emit that filing ACTION this turn. Never ignore SPEAKER_ADDRESS.",
     "Durable personal memory ? file with lists add list_type filing in the same turn (do not only say ?????): ???? ?????/????, ?????, ?????/??? (street+city without the word ????? still counts ? ???? ??? ??? ????), ??? ??????, ?????, ?????, ???? ?????, pets/school/diet/allergies. SAVE VERB (?????/?????/????? ? text and/or files): follow ATTACHMENTS DESTINATION LADDER ? unique custom list_name defaults to ITEM attach (ask which item if unclear; list shell only when explicitly ???? ??????/?????? ????); filings only when ???????/????/??; FORBIDDEN filing only because ?????. LIST NAME MATCH on named lists. TOPIC-ONLY / NO LIST NAMED (??????? ???: ?? / ?????? ?? ?????): lists=[] ? if ?2 list_names contain ???/????? ? ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a ?????* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product ?????); item_description = optional find-helper (???? ??????) after ANY code/ID/doc/car-number/gate-code/?.?/file filing when description empty (bare ????? ???? 703?? counts ? not only ?????); never after soft auto-memory (???? ?????/?????/??????). Find filings by name+info+description. ?? ??????? ??? ? explicit saves; ?? ?? ????? ??? ? memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
@@ -1863,7 +1875,7 @@ export async function sendChatMessage(input: {
         "Status / ??? / show a list / ???? ????? X? / ?????? ???????: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts|filings / ABOUT X / exact ???? ????? ?? / ???? ??????? / spoken inventory ?????? ??????? ? metadata.show_dump (+ show_dump_about for X) + empty lists; server replaces response ? FORBIDDEN model-written numbered filing inventory. Unique filing lookup (address/home/gate code/by meaning when exactly one filing matches) ? ITEM DUMP: show_dump=filings + show_dump_ids=[filing_id] from THIS turn; lists=[]; server replaces ? FORBIDDEN prose restating item_info/coords. >=2 matches ? ASK; 0 ? short no-match (no bare filings inventory). SHOW DUMP SECTION: bare ? show_dump only; ????? ? personal; ?????? ? shared; ?? X ? partner=X; ??????? ??? ? assignee=self; ??????? ???? ? assignee=????; date range ? show_dump_from + show_dump_to YYYY-MM-DD. OR WITHIN FIELD: X ?? Y on same dimension ? string[] (assignee/partner/about); AND across fields; ????? ?? ?????? ? omit section; FORBIDDEN cross-shape OR ? ask or full dump. FORBIDDEN same-as-bare for ?????/??????. Bare FULL DUMP (??? ?? ??? / ????? ??? / ????? ??? / ?? ?? ?????) ? metadata.show_dump=full; lists=[]; server replaces (FORBIDDEN model-written overview). SAVE VERB (?????/??????/?????/????? + text and/or files): (1) clear existing list or item (unique name / active context ? NOT last-mentioned latch) ? add/update THAT list or item (attachment_ids when files); (2) no clear list ? filing add (new durable fact); (3) ambiguous ?2 lists ? NUMBERED which-list ask, actions empty. FORBIDDEN always-filing only because they said ?????. TOPIC-ONLY ??????? ???? ? NUMBERED which-list ask if ?2 ?????* titles (else ask destination); never invent/auto-pick custom list_name from topic. Deletes: unique target+scope ? remove/delete_list NOW with ids; unclear ? ASK, delete mutates empty. SHARE-ONLY FACTS: filing/contacts/directory co-share; partners may mutate/unshare by id. Contacts alter_list participants OK; shopping/tasks whole-list share refused.",
         `Ping clocks (${SPEAKER_CLOCK_ASKS}) ? metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
         "WHEN / TODAY / SOON ? FULL agenda only (?? ????? ???? / ??? / ??? ????? / ????? / ???? ?????? with NO meaning filter): SESSION_CLOCK. ???/??? ? metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. ?? ?? ????? ???? X ? show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (?????) ? from=first to=last of the window. SEMANTIC day asks (???????? / ???????) ? RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump+show_dump_ids for all clear matches; no parallel prose inventory; no dump on no-match/ASK) ? FORBIDDEN bare show_dump without ids. TIME-OF-DAY (????) is NOT an engine dump filter.",
-        "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids. (3) CROSS-KIND SEMANTIC -> responses prose; show_dump=null; NO multi-domain dump. (4) TIME-OF-DAY -> not an engine hour filter.",
+        "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids. (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
         "SHOW MY LISTS / ????? ?? ??????? ???: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact ???? ????? X? stays category/custom dump.",
         "FULL DUMP / ?? ?? ?? / ????? ??? / ??? ??? / ?? ???? ?? / ?? ?? ????? ??? / ????? ???: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY ????? enumerate items (1. 2. 3. under one ??????:? header; assign ?(??????? X ? ??? Y)?; co-share ?(A, B)?; LINKED REMINDER on task lines). ????? COUNTS ONLY breakdown under ??????:? ? ?????? / ?(A, B)? / ?(??????? X ? ??? Y)? (all involved on co-share); ?????? ????? = ?*name* (A, B) ? N ??????? (all involved, e.g. ?(????, ??)?; no ????). ??????? ??????: NUMBERED 1. 2. 3. (never ?) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / ??? ????? X stay category dumps. Hint once: ?????? ?????: ??? ????? ?. ?????? (one ???????:? + ?(A, B)?); ???? ??? (one ????? ???:? from EMPLOYEE_SAVED_DATA only ? not SPEAKER_CONTACTS); ??? ???????? (one ???? ????????:? from SPEAKER_CONTACTS; co-share ?(A, B)?; empty ? ???). FORBIDDEN: skipping ??? ???????? when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ??? ???????? from list_type contacts or calling the phone book ????? ????. No schema jargon.",
         "PHONE BOOK ALONE / ??? ???????? / ????? ?? ??? ????????: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. FORBIDDEN model-written phone book; FORBIDDEN confusing with ???? ??? (contacts list).",
@@ -2066,6 +2078,8 @@ export async function sendChatMessage(input: {
     }
     // show_dump: display-only ? drop spurious removes; mutates win over accidental show_dump.
     metadata = stripShowTurnMutates(metadata);
+    // Same-turn blank custom create + unambiguous host linked_lists name ? fill listName.
+    metadata = fillBlankCustomListNameFromSameTurnLinks(metadata);
     const metadataForApply = {
       ...metadata,
       lists: [
@@ -2485,6 +2499,7 @@ export async function sendChatMessage(input: {
     // relay actually went out, so the answer can be bound and reported later.
     // Relaying through a worker means the asker is waiting, so the job opens
     // unless the model marked the message as pure information.
+    let scheduledJobDeliveryCount = 0;
     if (!guestSpeaker) {
       const relayJobDeliveries = outbound.relays
         .filter(
@@ -2523,6 +2538,7 @@ export async function sendChatMessage(input: {
         employees,
         messages: relayMessages,
       });
+      scheduledJobDeliveryCount = scheduledJobDeliveries.length;
       await withoutFailingTurn("job_schedule_failed", () =>
         createScheduledJobsFromRelays({
           userId: input.userId,
@@ -2635,7 +2651,15 @@ export async function sendChatMessage(input: {
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = formatWhatsAppSkipNotice(skips);
     const missingSend = formatMissingSendTextNotice(metadata.messages ?? []);
-    const deliveryFailed = formatWhatsAppSkipNotice(outboundSkips).length > 0;
+    const scheduleSkipNotice = guestSpeaker
+      ? ""
+      : formatScheduleSkippedWithoutQueueNotice({
+          messages: metadata.messages ?? [],
+          scheduledJobCount: scheduledJobDeliveryCount,
+        });
+    const deliveryFailed =
+      formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
+      scheduleSkipNotice.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
     const misaddressed = correctMisaddressedJobReply({
       response: parseLlmReply(workingReply).response,
@@ -2668,6 +2692,12 @@ export async function sendChatMessage(input: {
     );
     const requestedListAdd = (metadata.lists ?? []).some(
       (row) => row.action === "add",
+    );
+    const requestedFilingAdd = (metadata.filing ?? []).some(
+      (row) => row.action === "add_filing",
+    );
+    const requestedFilingUpdate = (metadata.filing ?? []).some(
+      (row) => row.action === "update_filing",
     );
     const appliedListRemove = listMutations.some(
       (row) => row.action === "remove" && !row.listShell,
@@ -2762,6 +2792,19 @@ export async function sendChatMessage(input: {
       outcome: attachmentOutcome,
       setResponse: setEngineResponse,
     });
+    workingReply = correctDurableSaveClaimReply({
+      reply: workingReply,
+      spoken: parseLlmReply(workingReply).response,
+      requestedListAdd,
+      requestedListUpdate,
+      requestedFilingAdd,
+      requestedFilingUpdate,
+      appliedListAdd,
+      appliedListUpdate,
+      appliedFilingAdd,
+      appliedFilingUpdate,
+      setResponse: setEngineResponse,
+    });
     if (
       requestedListRemove &&
       appliedListRemove &&
@@ -2825,7 +2868,7 @@ export async function sendChatMessage(input: {
             : {}),
         }),
       );
-      const dumpIds = showDumpIdList(metadata.showDumpIds);
+      const dumpIdsRequested = showDumpIdList(metadata.showDumpIds);
       const itemDumpRequested = isShowDumpIdsRequested(metadata.showDumpIds);
       const dumpPartner = metadata.showDumpPartner ?? null;
       const dumpAssignee = metadata.showDumpAssignee ?? null;
@@ -2849,10 +2892,7 @@ export async function sendChatMessage(input: {
         dateTo: metadata.showDumpTo ?? null,
         urgency: metadata.showDumpUrgency ?? null,
         collaboration: dumpCollaboration,
-        ...(itemDumpRequested
-          ? { itemIds: new Set(dumpIds), omitEmptySentence: true }
-          : {}),
-      };
+              };
       const resolvedDumpKind = resolveShowDumpKind(showDumpKind);
       const needsPhoneBook =
         resolvedDumpKind?.kind === "full" ||
@@ -2885,14 +2925,22 @@ export async function sendChatMessage(input: {
         text: string | null;
         lines: LastNumberedDumpLine[];
         snapshot: typeof snapshot;
+        validIds: string[];
         opts: typeof baseDumpOpts & {
           viewerName: string;
           viewerAliases: string[];
           phoneBook?: typeof speakerPhoneBook;
           flatLayout?: boolean;
           omitEmptySentence?: boolean;
+          itemIds?: Set<string>;
         };
       }> => {
+        // Drop unknown ids against THIS snapshot ? never fall back to unfiltered full.
+        const validIds = itemDumpRequested
+          ? dumpIdsRequested.filter((id) =>
+              liveDumpRowIdsFromSnapshot(snapshot).has(id),
+            )
+          : dumpIdsRequested;
         const dumpOpts = {
           ...baseDumpOpts,
           viewerName,
@@ -2901,6 +2949,9 @@ export async function sendChatMessage(input: {
           ...(extraOpts?.flatLayout ? { flatLayout: true } : {}),
           ...(extraOpts?.omitEmptySentence
             ? { omitEmptySentence: true }
+            : {}),
+          ...(itemDumpRequested
+            ? { itemIds: new Set(validIds), omitEmptySentence: true }
             : {}),
         };
         const mapped = formatShowDumpWithLineMap(
@@ -2912,12 +2963,13 @@ export async function sendChatMessage(input: {
           text: mapped.text,
           lines: mapped.lines,
           snapshot,
+          validIds,
           opts: dumpOpts,
         };
       };
 
       if (aboutNames.length === 0) {
-        const { text, lines, snapshot, opts } = await dumpForSubject(
+        const { text, lines, snapshot, opts, validIds } = await dumpForSubject(
           speaker,
           speakerAliases,
           speakerSnapshot,
@@ -2927,10 +2979,10 @@ export async function sendChatMessage(input: {
         if (text) {
           workingReply = setEngineResponse(workingReply, text);
           const resolved = resolveShowDumpKind(showDumpKind);
-          if (itemDumpRequested && dumpIds.length > 0) {
+          if (itemDumpRequested && validIds.length > 0) {
             itemDumpAttachmentIds = collectAttachmentIdsForDumpRows(
               snapshot,
-              dumpIds,
+              validIds,
             );
           }
           if (resolved?.kind === "filings") {
@@ -2943,14 +2995,14 @@ export async function sendChatMessage(input: {
             }
           }
           if (
-            dumpIds.length === 1 &&
+            validIds.length === 1 &&
             resolved?.kind === "tasks" &&
             lines.length === 1
           ) {
             const title =
               lines[0]!.title_stem.trim() ||
-              taskTitleFromSnapshot(snapshot, dumpIds[0]!);
-            const hasLinked = taskHasLinkedReminder(snapshot, dumpIds[0]!);
+              taskTitleFromSnapshot(snapshot, validIds[0]!);
+            const hasLinked = taskHasLinkedReminder(snapshot, validIds[0]!);
             const itemButtons = singleTaskShowButtons({
               title,
               hasLinkedReminder: hasLinked,
@@ -3039,6 +3091,7 @@ export async function sendChatMessage(input: {
             lines: subjectLines,
             snapshot,
             opts,
+            validIds,
           } = await dumpForSubject(
             employeeDisplayName(aboutPerson),
             aboutAliases,
@@ -3078,11 +3131,11 @@ export async function sendChatMessage(input: {
                 ? `*${employeeDisplayName(aboutPerson)}*\n${text}`
                 : text;
             blocks.push(header);
-            if (itemDumpRequested && dumpIds.length > 0) {
+            if (itemDumpRequested && validIds.length > 0) {
               itemDumpAttachmentIds = [
                 ...new Set([
                   ...itemDumpAttachmentIds,
-                  ...collectAttachmentIdsForDumpRows(snapshot, dumpIds),
+                  ...collectAttachmentIdsForDumpRows(snapshot, validIds),
                 ]),
               ].slice(0, 10);
             }
@@ -3155,14 +3208,29 @@ export async function sendChatMessage(input: {
     // Live weather ACTION ? Open-Meteo; tip LLM then facts (pure ask = 2 bubbles).
     // Guests: weather as main topic stays forbidden ? skip even if model emitted it.
     const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
-    if (weatherAction?.place.trim()) {
+    const weatherNearSpeaker = weatherAction?.near === "speaker";
+    if (
+      weatherAction &&
+      (weatherAction.place.trim() || weatherNearSpeaker)
+    ) {
       const weatherBilling = {
         conversationId: conversation.id,
         employeeId: employee.id,
         digitalEmployeeId: digital.id,
       };
+      const weatherPin = weatherNearSpeaker
+        ? fromPendingLocation(getPendingLocation(input.employeeId))
+        : null;
+      // Named place on ACTION wins: do not pass pin coords when place is set.
+      const weatherUsePin =
+        weatherNearSpeaker && !weatherAction.place.trim() && weatherPin != null;
       const weather = await resolveWeatherMessages({
-        place: weatherAction.place,
+        place: weatherUsePin
+          ? weatherPin.label
+          : weatherAction.place,
+        nearSpeaker: weatherNearSpeaker && !weatherAction.place.trim(),
+        latitude: weatherUsePin ? weatherPin.lat : null,
+        longitude: weatherUsePin ? weatherPin.lng : null,
         date: weatherAction.date,
         aspects: weatherAction.aspects,
         minWaveM: weatherAction.minWaveM ?? null,
@@ -3178,6 +3246,15 @@ export async function sendChatMessage(input: {
         watchSampleTurn ? weather.body : weather.messages,
         { watchSample: watchSampleTurn },
       );
+      if (
+        shouldClearPendingAfterSpeakerPinUse({
+          usedPendingPin: weather.usedPendingPin,
+          needsLocation: weather.needsLocation,
+          replyText: weather.body,
+        })
+      ) {
+        clearPendingLocation(input.employeeId);
+      }
     }
     // Live market ACTION ? Yahoo Finance; guests skip (same as weather).
     const marketAction = guestSpeaker ? null : metadata.market ?? null;
@@ -3208,25 +3285,40 @@ export async function sendChatMessage(input: {
       });
     }
     // Live places ACTION ? Google Places; guests skip.
+    // PENDING_LOCATION coords only when near=speaker (or ACTION already has lat/lng).
+    // Named city/area must not inherit a stale pin bias.
     const placesAction = guestSpeaker ? null : metadata.places ?? null;
     const pendingLoc = guestSpeaker
       ? null
       : getPendingLocation(input.employeeId);
+    const pendingResolved = fromPendingLocation(pendingLoc);
     if (placesAction?.query.trim()) {
-      const nearSpeaker = placesAction.near === "speaker";
+      const areaRestrict = placesAction.geoMode === "area_restrict";
+      const nearSpeaker =
+        !areaRestrict && placesAction.near === "speaker";
+      const actionCoords = areaRestrict
+        ? null
+        : parseCoordinatePair(placesAction.lat, placesAction.lng);
+      const placesLat =
+        actionCoords?.lat ??
+        (nearSpeaker ? pendingResolved?.lat ?? null : null);
+      const placesLng =
+        actionCoords?.lng ??
+        (nearSpeaker ? pendingResolved?.lng ?? null : null);
       const liveBilling = {
         conversationId: conversation.id,
         employeeId: employee.id,
         digitalEmployeeId: digital.id,
       };
-      const placesText = await resolvePlacesReply({
+      const placesResult = await resolvePlacesReplyDetailed({
         query: placesAction.query,
         place: placesAction.place,
         aspects: placesAction.aspects,
         intent: placesAction.intent,
         nearSpeaker,
-        lat: placesAction.lat ?? pendingLoc?.lat ?? null,
-        lng: placesAction.lng ?? pendingLoc?.lng ?? null,
+        areaRestrict,
+        lat: placesLat,
+        lng: placesLng,
         openNow: placesAction.openNow,
         minRating: placesAction.minRating,
         includedType: placesAction.includedType,
@@ -3237,13 +3329,15 @@ export async function sendChatMessage(input: {
         speakerAsk: input.message,
         billing: liveBilling,
       });
-      workingReply = applyLiveDomainReply(workingReply, placesText, {
+      workingReply = applyLiveDomainReply(workingReply, placesResult.text, {
         watchSample: watchSampleTurn,
       });
       if (
-        nearSpeaker &&
-        pendingLoc &&
-        !placesText.includes("??? ?????")
+        shouldClearPendingAfterSpeakerPinUse({
+          usedPendingPin: placesResult.usedPendingPin,
+          needsLocation: placesResult.needsLocation,
+          replyText: placesResult.text,
+        })
       ) {
         clearPendingLocation(input.employeeId);
       }
@@ -3284,7 +3378,9 @@ export async function sendChatMessage(input: {
         (routesAction.origin.trim() &&
           (routesAction.destination.trim() || routesLinesBoard)))
     ) {
-      const pin = getPendingLocation(input.employeeId);
+      const pin = fromPendingLocation(getPendingLocation(input.employeeId));
+      const speakerOrigin =
+        routesAction.origin.toLowerCase() === "speaker";
       const routesSnapshot = await getEmployeeRecordSnapshot(input.employeeId);
       const liveBilling = {
         conversationId: conversation.id,
@@ -3309,14 +3405,8 @@ export async function sendChatMessage(input: {
         speakerAsk: input.message,
         billing: liveBilling,
         snapshot: routesSnapshot,
-        originLat:
-          routesAction.origin.toLowerCase() === "speaker"
-            ? pin?.lat ?? null
-            : null,
-        originLng:
-          routesAction.origin.toLowerCase() === "speaker"
-            ? pin?.lng ?? null
-            : null,
+        originLat: speakerOrigin ? pin?.lat ?? null : null,
+        originLng: speakerOrigin ? pin?.lng ?? null : null,
       });
       workingReply = applyLiveDomainReply(workingReply, routesResult.text, {
         watchSample: watchSampleTurn,
@@ -3330,10 +3420,14 @@ export async function sendChatMessage(input: {
           routesResult.navigateAddress,
         );
       }
+      const routesNeedsLocation = replyAsksForWhatsAppPin(routesResult.text);
       if (
-        routesAction.origin.toLowerCase() === "speaker" &&
-        pin &&
-        !routesResult.text.includes("??? ?????")
+        shouldClearPendingAfterSpeakerPinUse({
+          usedPendingPin:
+            speakerOrigin && pin != null && !routesNeedsLocation,
+          needsLocation: routesNeedsLocation,
+          replyText: routesResult.text,
+        })
       ) {
         clearPendingLocation(input.employeeId);
       }
@@ -3488,6 +3582,7 @@ export async function sendChatMessage(input: {
       guestMutationNotice,
       registerNotice,
       missingSend,
+      scheduleSkipNotice,
       whatsappNotice,
       noTimeSkipped ? "" : reminderApplyNotice,
     ]

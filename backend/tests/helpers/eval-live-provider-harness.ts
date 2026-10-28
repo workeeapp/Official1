@@ -21,7 +21,7 @@ import { getActiveGenerationId } from "../../src/services/gtfs-query.js";
 
 /** Validated MOT day-slice — real-provider suites must leave this alone. */
 export const EXPECTED_GTFS_GENERATION_ID =
-  "a629a522-f283-4fe3-9420-b438366a4b46";
+  "22cebd10-1204-47ee-8a7e-80508fbe3e73";
 
 export function stubLlmReply(payload: unknown) {
   return {

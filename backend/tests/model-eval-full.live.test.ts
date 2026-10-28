@@ -6,6 +6,7 @@ import {
   casesFromLiveFullResults,
   writeEvalReportArtifacts,
 } from "../src/eval/human-report.js";
+import { buildPostApplyEvidence } from "../src/eval/post-apply-evidence.js";
 import { runLiveFullCorpus } from "../src/eval/run-live-full.js";
 
 /**
@@ -91,6 +92,14 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
               stateFailures: t.stateFailures,
               appliedViaProduction: t.appliedViaProduction,
               metadata: t.metadata,
+              ...(t.rawActionDiagnostic
+                ? { rawActionDiagnostic: t.rawActionDiagnostic }
+                : {}),
+              // Focused post-apply slice from harness turn (before destroy).
+              postApplyEvidence: buildPostApplyEvidence({
+                facts: t.facts,
+                snapshot: t.snapshot,
+              }),
             })),
           })),
         },

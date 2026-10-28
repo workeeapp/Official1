@@ -76,6 +76,14 @@ describe("Batch A prompt align to LIVE_FULL fixtures (offline)", () => {
     expect(sha256Hex(batch)).toBe(sha256Hex(liveFullStyle));
   });
 
+  it("unknown SPEAKER_ADDRESS must not block complete durable address filing", () => {
+    const text = buildBatchAThinInstructions("טל");
+    expect(text).toContain("SPEAKER_ADDRESS");
+    expect(text).toContain("תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב");
+    expect(text).toMatch(/FORBIDDEN:\s*empty actions or deferring/i);
+    expect(text).toContain("לפנות אליך בלשון זכר או נקבה");
+  });
+
   it("matches resolveEvalPrompt config path with includeMichal:false", async () => {
     delete process.env.WORKEE_EVAL_PROMPT_SOURCE;
     const batch = buildBatchAThinInstructions("טל");

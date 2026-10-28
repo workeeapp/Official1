@@ -333,21 +333,63 @@ describe("resolveComposeFireOutbound", () => {
         composed: "למה האשכנזי…",
       }),
     ).toEqual({
+      outcome: "send",
       body: "למה האשכנזי…",
       lastComposedToSave: "למה האשכנזי…",
     });
   });
 
-  it("falls back to the brief without persisting when compose fails", () => {
+  it("creative clocks fall back to the brief when compose returns null", () => {
     expect(
       resolveComposeFireOutbound({
         brief: "בדיחה חדשה על עדות",
         itemLabel: "לקבל בדיחה",
         composed: null,
+        kind: "creative",
       }),
     ).toEqual({
+      outcome: "send",
       body: "בדיחה חדשה על עדות",
       lastComposedToSave: null,
     });
+  });
+
+  it("fact clocks send truthful fixedBody when LLM compose returns null", () => {
+    expect(
+      resolveComposeFireOutbound({
+        brief: "סכם מזג אוויר",
+        itemLabel: "מזג אוויר בוקר",
+        composed: null,
+        kind: "weather",
+        fixedBody: "לא הצלחתי לקבל תחזית עכשיו.",
+      }),
+    ).toEqual({
+      outcome: "send",
+      body: "לא הצלחתי לקבל תחזית עכשיו.",
+      lastComposedToSave: null,
+    });
+  });
+
+  it("fact clocks fail closed when LLM compose is empty and there is no fixedBody", () => {
+    expect(
+      resolveComposeFireOutbound({
+        brief: "סכם קומיטים מאז אתמול",
+        itemLabel: "דוח מוצר",
+        composed: "",
+        kind: "git_log",
+      }),
+    ).toEqual({
+      outcome: "fail",
+      body: "",
+      lastComposedToSave: null,
+    });
+    expect(
+      resolveComposeFireOutbound({
+        brief: "מה יש במטלות",
+        itemLabel: "סטטוס",
+        composed: null,
+        kind: "saved_data",
+      }).outcome,
+    ).toBe("fail");
   });
 });

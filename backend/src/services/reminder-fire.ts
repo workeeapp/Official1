@@ -107,21 +107,63 @@ function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-/** Compose-at-fire body: use LLM text when present; else fall back to the brief/label. */
+/** Compose sources that must never WhatsApp the raw brief when the LLM fails. */
+const FACT_COMPOSE_KINDS = new Set([
+  "git_log",
+  "saved_data",
+  "weather",
+  "market",
+  "mashov",
+  "jewish",
+  "places",
+  "flights",
+  "routes",
+]);
+
+export type ComposeFireOutbound = {
+  /** "send" → WhatsApp/chat; "fail" → settle failed, no body. */
+  outcome: "send" | "fail";
+  body: string;
+  lastComposedToSave: string | null;
+};
+
+/**
+ * Compose-at-fire body selection.
+ * - LLM text when present.
+ * - Else truthful fixedBody when the facts loader provided one.
+ * - Else fact-dependent clocks fail closed (never send the instruction brief).
+ * - Creative / empty-source clocks may still fall back to brief/label.
+ */
 export function resolveComposeFireOutbound(input: {
   brief: string;
   itemLabel: string;
   composed: string | null | undefined;
-}): { body: string; lastComposedToSave: string | null } {
+  kind?: string | null;
+  fixedBody?: string | null;
+}): ComposeFireOutbound {
   const composed = input.composed?.trim() || "";
   if (composed) {
     return {
+      outcome: "send",
       body: composed.slice(0, 4096),
       lastComposedToSave: composed.slice(0, 4096),
     };
   }
+  const fixed = input.fixedBody?.trim() || "";
+  if (fixed) {
+    return {
+      outcome: "send",
+      body: fixed.slice(0, 4096),
+      lastComposedToSave: null,
+    };
+  }
+  const kind = String(input.kind ?? "").trim();
+  if (FACT_COMPOSE_KINDS.has(kind)) {
+    return { outcome: "fail", body: "", lastComposedToSave: null };
+  }
   const brief = input.brief.trim();
   return {
+    outcome: "send",
     body: brief || input.itemLabel,
     lastComposedToSave: null,
   };
@@ -658,14 +700,28 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         brief: reminder.messageText,
         itemLabel: reminder.itemLabel,
         composed,
+        kind: factsBundle?.kind,
+        fixedBody: factsBundle?.fixedBody,
       });
       const conditionDefaultBody = busEtaDefaultBody || flightDefaultBody;
-      outboundBody =
-        conditionDefaultBody &&
+      const preferConditionDefault =
+        Boolean(conditionDefaultBody) &&
         (!resolved.body.trim() ||
-          resolved.body.trim() === String(reminder.messageText ?? "").trim())
-          ? conditionDefaultBody
-          : resolved.body;
+          resolved.body.trim() === String(reminder.messageText ?? "").trim() ||
+          resolved.outcome === "fail");
+      if (preferConditionDefault && conditionDefaultBody) {
+        outboundBody = conditionDefaultBody;
+      } else if (resolved.outcome === "fail") {
+        // Fact clock: LLM empty/null and no fixedBody — do not send the brief.
+        recordWhatsAppEvent(
+          "reminder_compose_outbound_fail",
+          `kind=${factsBundle?.kind ?? ""} item=${reminder.itemLabel.slice(0, 40)}`,
+        );
+        await settleFiredReminder(reminder, now, "failed");
+        continue;
+      } else {
+        outboundBody = resolved.body;
+      }
       if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
         await prisma.reminder.update({
           where: { id: reminder.id },

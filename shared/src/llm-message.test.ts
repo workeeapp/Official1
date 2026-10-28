@@ -3,6 +3,7 @@ import {
   applyShowButtonsToBubbles,
   coerceMetadataFromPayload,
   normalizeListsField,
+  parseLlmMetadata,
   parseLlmReply,
   parseReplyMetadata,
   parseWatchExprNode,
@@ -13,6 +14,75 @@ import {
   isClosedChoiceReplyButton,
   isShowListReplyButton,
 } from "./llm-message.js";
+
+describe("parseLlmMetadata idempotency (normalized re-entry)", () => {
+  it("keeps filing itemName/itemInfo when parsing already-normalized metadata again", () => {
+    const raw = {
+      lists: [
+        {
+          action: "add",
+          list_type: "filing",
+          list_name: "",
+          items: [
+            {
+              item_name: "כתובת",
+              item_info: "רחוב הרצל 1, תל אביב",
+              item_description: "",
+            },
+          ],
+        },
+      ],
+    };
+    const once = parseLlmMetadata(raw);
+    expect(once.filing).toHaveLength(1);
+    expect(once.filing[0]?.itemName).toBe("כתובת");
+    expect(once.filing[0]?.itemInfo).toBe("רחוב הרצל 1, תל אביב");
+
+    const twice = parseLlmMetadata(once);
+    expect(twice.filing).toHaveLength(1);
+    expect(twice.filing[0]?.itemName).toBe("כתובת");
+    expect(twice.filing[0]?.itemInfo).toBe("רחוב הרצל 1, תל אביב");
+    expect(twice.filing).toEqual(once.filing);
+  });
+
+  it("keeps custom listName when parsing already-normalized metadata again", () => {
+    const raw = {
+      lists: [
+        {
+          action: "add",
+          list_type: "custom",
+          list_name: "כיבוד",
+          columns: ["פריט"],
+          items: [{ פריט: "עוגה" }, { פריט: "שתיה" }],
+        },
+      ],
+    };
+    const once = parseLlmMetadata(raw);
+    expect(once.lists[0]?.listName).toBe("כיבוד");
+    expect(once.lists[0]?.items).toHaveLength(2);
+
+    const twice = parseLlmMetadata(once);
+    expect(twice.lists[0]?.listName).toBe("כיבוד");
+    expect(twice.lists[0]?.listType).toBe("custom");
+    expect(twice.lists[0]?.items).toHaveLength(2);
+    expect(twice.lists[0]?.listName).toBe(once.lists[0]?.listName);
+  });
+
+  it("still drops filing rows that lack a usable name (no invention)", () => {
+    const once = parseLlmMetadata({
+      lists: [
+        {
+          action: "add",
+          list_type: "filing",
+          list_name: "",
+          items: [{ שם: "כתובת", תיאור: "רחוב הרצל" }],
+        },
+      ],
+    });
+    expect(once.filing).toEqual([]);
+    expect(parseLlmMetadata(once).filing).toEqual([]);
+  });
+});
 
 describe("custom list title_field", () => {
   it("reads title_field for custom lists only", () => {

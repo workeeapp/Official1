@@ -19,7 +19,7 @@
     "      {",
     "        \"action\": \"<add | remove | update | alter_list | delete_list>\",",
     "        \"list_type\": \"<shopping | contacts | tasks | custom | filing | reminders>\",",
-    "        \"list_name\": \"\",",
+    "        \"list_name\": \"<required non-empty for custom; \\\"\\\" only for shopping|tasks|contacts|filing|reminders>\",",
     "        \"list_id\": \"\",",
     "        \"targets\": [\"<employee name | all>\"],",
     "        \"items\": [",
@@ -253,7 +253,7 @@
     "DURABLE PERSONAL MEMORY (file without waiting for תתיקי — lasting speaker facts, not one-off chores):",
     "When they clearly state stable identity/household/work facts, emit lists add list_type filing in the same turn. Put the spoken detail in item_info (product תיאור); item_description \"\". Do NOT only say «אזכור» — without lists filing metadata nothing is saved.",
     "Examples (item_name + optional item_info; item_description \"\"):",
-    "- Address form / gender: follow SPEAKER_ADDRESS every turn. If unknown → ask «לפנות אליך בלשון זכר או נקבה?». \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", item_info \"זכר — לפנות בלשון זכר\" (same for נקבה). Server stores address gender from that filing.",
+    "- Address form / gender: follow SPEAKER_ADDRESS every turn. If unknown → ask «לפנות אליך בלשון זכר או נקבה?» when conjugation is needed and there is no complete durable filing/save this turn. FORBIDDEN: empty actions / delaying a complete same-turn durable filing (e.g. «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב») until gender is answered — file that fact now. \"אני זכר\" / \"תפני אלי בלשון זכר\" → שם \"לשון פנייה\", item_info \"זכר — לפנות בלשון זכר\" (same for נקבה). Server stores address gender from that filing.",
     "- Family: \"יש לי שני ילדים\" → SAME TURN lists add filing שם \"משפחה\", item_info = their words. May ask ages after — never skip filing while only asking. Ages later → lists update filing.",
     "- Home address / city: \"אני גר בתל אביב…\" → שם \"כתובת מגורים\" or \"עיר מגורים\", item_info = detail.",
     "- Marital status: \"אני נשוי\" / \"רווק\" → שם \"מצב משפחתי\", item_info = what they said.",
@@ -385,7 +385,7 @@
                     },
                     "list_name": {
                       "type": "string",
-                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). Empty for shopping/tasks/contacts/filing/reminders. Never put the new row text here."
+                      "description": "Required for custom lists: the list title from speech / EMPLOYEE_SAVED_DATA (e.g. בעיות). On same-turn create+link, emit the same non-empty string on lists.add.list_name AND linked_lists[].list_name — never leave custom list_name \"\" while adding items. Empty string is valid only for shopping/tasks/contacts/filing/reminders. Never put the new row text here."
                     },
                     "list_id": {
                       "type": "string",
@@ -1013,7 +1013,7 @@
                   "null"
                 ],
                 "maxLength": 100,
-                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full. Phone book alone → phone_book. FULL WHEN day/week agenda (no meaning filter) → tasks + show_dump_from/to, show_dump_ids null. Semantic/focused same-kind picks → same kind WITH show_dump_ids (required) or leave show_dump null and answer from live JSON. Cross-kind topic → show_dump null. Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response when set. null otherwise."
+                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full with show_dump_ids null. Phone book alone → phone_book. FULL WHEN day/week agenda (no meaning filter) → tasks + show_dump_from/to, show_dump_ids null. Semantic/focused same-kind picks → same kind WITH show_dump_ids (required). Cross-kind topic («שקשור ל…») → full WITH show_dump_ids=[row ids whose own meaning matches the topic — not every item on a topic-named list]. Explicit whole-list ask («מה יש ברשימת X») → exact list_name (all items; not list_id). Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response when set. null otherwise."
               },
               "show_dump_section": {
                 "type": [
@@ -1095,7 +1095,7 @@
                   "maxLength": 80
                 },
                 "maxLength": 80,
-                "description": "ITEM DUMP / same-kind semantic: opaque id(s) from THIS turn that exist in live data AND match show_dump kind (item_id / filing_id / contact_id / reminder_id). string or string[] — one or many. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows (does not expand). Preserves the chosen set only — does not prove completeness of candidates. Ambiguous / ids not in JSON → ASK with null; never invent ids. Empty array or no matching ids → server no-match (never full list). null = full category dump under existing filters — use only for FULL inventory, never as a semantic answer. Forbidden inventing ids or cross-kind ids."
+                "description": "ITEM DUMP / same-kind semantic / cross-kind topic: opaque row id(s) from THIS turn that exist in live data (item_id / filing_id / contact_id / reminder_id — never list_id). string or string[] — one or many. Same-kind: ids must match show_dump kind. Cross-kind topic: show_dump=full + mixed ids for rows whose own meaning matches the topic — FORBIDDEN picking an id only because its custom list_name matches; explicit whole-list ask uses show_dump=<list_name> instead. Model resolves (line numbers via LAST_NUMBERED_DUMP only for SHOW; semantic/title in live JSON) then sets show_dump + show_dump_ids; server dumps ONLY those rows (does not expand; multi-section when full+ids). Preserves the chosen set only — does not prove completeness of candidates. Ambiguous / ids not in JSON → ASK with null; never invent ids. Empty array or no matching ids → server no-match (never unfiltered full list). null = full category/overview dump under existing filters — use only for FULL inventory, never as a semantic/topic answer. Forbidden inventing ids; forbidden cross-kind ids when show_dump is a single domain."
               },
               "live_select": {
                 "type": [
@@ -1138,12 +1138,24 @@
                   "object",
                   "null"
                 ],
-                "description": "Live weather ask («מה מזג האוויר מחר בתל אביב» / גובה גלים / משב רוח / ניו יורק). Server fetches Open-Meteo and replaces response. null when not a weather ask. Missing place → ask; leave weather null.",
+                "description": "Live weather ask («מה מזג האוויר מחר בתל אביב» / גובה גלים / «מה מזג האוויר שם?» + WhatsApp pin). Server fetches Open-Meteo and replaces response. null when not a weather ask. Named city → place required, near empty. Clear deixis to PENDING_LOCATION → place:\"\", near:\"speaker\". Vague near-me with no clear pin deixis → ask; leave weather null. FORBIDDEN inventing coordinates or substituting a stored pin for a named city.",
                 "properties": {
                   "place": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "City / place name from speech (Hebrew or English). Required to fetch."
+                    "description": "City / place name from speech (Hebrew or English). Empty OK when near=speaker. Non-empty named place wins over PENDING_LOCATION."
+                  },
+                  "near": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "speaker",
+                      "",
+                      null
+                    ],
+                    "description": "\"speaker\" = forecast at PENDING_LOCATION pin when the speaker clearly means that pin. null/empty for named city text."
                   },
                   "date": {
                     "type": "string",
@@ -1171,9 +1183,7 @@
                     "description": "Optional minimum wave height in meters. «גלים מעל מטר» → 1. With place ישראל/חופי ישראל + aspects[waves] server scans main coasts; with a city it says above/below. null/omit when no threshold."
                   }
                 },
-                "required": [
-                  "place"
-                ]
+                "required": []
               },
               "market": {
                 "type": [
@@ -1260,12 +1270,24 @@
                   "object",
                   "null"
                 ],
-                "description": "Live local search («תמצאי לי חשמלאי בפתח תקווה» / «מה המסעדות באזור שלי» / «איפה יש חניון ליד הקניון» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. intent=business (default/omit) ordinary find; intent=parking dedicated parking-place search (forces included_type parking). Parking-place asks MUST set intent parking: «איפה יש חניון ליד הקניון?» / «תמצא לי חניה קרובה» / «איפה אפשר להחנות ליד המסעדה?» / «יש חניה חינם?» / «יש חניון בתשלום באזור?» — NOT a regular business search. Ordinary business: «תמצא לי מסעדה ליד הקניון» → intent business|omit (NOT parking). Filters via fields (open_now / min_rating / parking_cost / included_type / radius_meters), not stuffed into query. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. City search: place required, near empty/null. Postal code (מיקוד) always included when Google has it. radius_meters is locationBias preference only (not a hard geo fence). ParkingOptions never prove public vs private ownership.",
+                "description": "Live local search («תמצאי לי חשמלאי בפתח תקווה» / «מסעדות באזור השרון» / «מה המסעדות באזור שלי» / «איפה יש חניון ליד הקניון» + WhatsApp pin). Server fetches Google Places and replaces response — FORBIDDEN inventing phones/addresses. intent=business (default/omit) ordinary find; intent=parking dedicated parking-place search (forces included_type parking). Parking-place asks MUST set intent parking. Filters via fields (open_now / min_rating / parking_cost / included_type / radius_meters / geo_mode), not stuffed into query. Missing query → ask; leave places null. Near-me: near=\"speaker\" (PENDING_LOCATION); place may be empty. Soft city: place required, near empty, geo_mode omit/soft_place. Hard inside-area («בתי קפה באזור השרון» / «בתוך השרון»): geo_mode=area_restrict + place=region name + near empty — server resolves viewport and uses locationRestriction (NOT soft text stuffing; NOT auto for every city). PENDING_LOCATION never overrides area_restrict or named soft city. radius_meters is locationBias preference only (not a hard geo fence). ParkingOptions never prove public vs private ownership.",
                 "properties": {
                   "query": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "What to find: business category/name (חשמלאי, מסעדות, מקדונלדס) with intent business; or parking-place ask (חניה / חניון / להחנות) with intent=parking."
+                    "description": "What to find: business category/name (חשמלאי, מסעדות, מקדונלדס) with intent business; or parking-place ask (חניה / חניון / להחנות) with intent=parking. For area_restrict prefer categorical query / included_type (not only a brand)."
+                  },
+                  "geo_mode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "soft_place",
+                      "area_restrict",
+                      null
+                    ],
+                    "description": "Geographic intent. omit/null/soft_place = soft city text preference or near=speaker pin bias. area_restrict = hard inside-area search for an explicit region ask («באזור השרון» / «בתוך גוש דן») — requires place; near must be empty; server uses locationRestriction rectangle. FORBIDDEN upgrading ordinary city soft asks («בתי קפה בפתח תקווה») to area_restrict. FORBIDDEN combining area_restrict with near=speaker."
                   },
                   "intent": {
                     "type": [
@@ -1301,7 +1323,7 @@
                   "place": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "City / area from speech (פתח תקווה). Empty OK when near=speaker."
+                    "description": "City / area name from speech (פתח תקווה / השרון). Empty OK when near=speaker. Required for geo_mode=area_restrict."
                   },
                   "near": {
                     "type": [
@@ -1309,7 +1331,7 @@
                       "null"
                     ],
                     "maxLength": 32,
-                    "description": "\"speaker\" = search around PENDING_LOCATION pin. null/empty for city text search."
+                    "description": "\"speaker\" = search around PENDING_LOCATION pin. null/empty for city text or area_restrict. FORBIDDEN with geo_mode=area_restrict."
                   },
                   "lat": {
                     "type": [
@@ -1422,7 +1444,7 @@
                   "object",
                   "null"
                 ],
-                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin (line REQUIRED). Live SIRI: [live_arrivals] + stop_code or stop name. Closest boarding among trip options («איזה קו הכי קרוב לבית ליעד») → prefer:\"closest_board\" + origin + destination + aspects[summary] (NOT nearest_stop without line; NOT bare multi-compare). Closest line WITHOUT destination → routes=null + disclose U. Ordinary trip → aspects[summary]; steps aspect only for step-by-step. Follow-up for a prior option index → new ACTION + recalculate; FORBIDDEN claiming the new board is the same prior «אפשרות N» without reliable identity — say recalculated / clarify (no itinerary store). Network-wide disruptions → routes=null + disclose U (not connected). Residual V (fewer transfers / shortest among returned) → require_live_select:true — do NOT invent other prefer values. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
+                "description": "TRANSIT or DRIVE via Google Routes, or MOT GTFS/SIRI. Trip/ETA: origin+destination (+ mode). Stop board: aspects [lines], empty destination. Official timetable: [schedule] + stop_code + line. Nearest stop: [nearest_stop] + line + origin (line REQUIRED). Live SIRI: [live_arrivals] + stop_code or stop name. Closest boarding among trip options («איזה קו הכי קרוב לבית ליעד») → prefer:\"closest_board\" + origin + destination + aspects[summary] (NOT nearest_stop without line; NOT bare multi-compare). Closest line WITHOUT destination → routes=null + disclose U. Ordinary trip → aspects[summary]; steps aspect only for step-by-step. Follow-up for a prior option index → new ACTION + recalculate; FORBIDDEN claiming the new board is the same prior «אפשרות N» without reliable identity — say recalculated / clarify (no itinerary store). Missed bus/departure («פספסתי את האוטובוס» / «מה עכשיו?» after a prior transit plan) → new routes ACTION: same origin+destination from history when both are reliably known; departure≈SESSION_CLOCK now/ASAP (not the missed time); aspects:[summary] (Google TRANSIT); present as newly calculated (not continued tracking / not continuous monitoring). FORBIDDEN claiming prior «אפשרות N» still available without reliable identity+current validity. Unreliable O/D → ASK only for the missing field (routes=null); FORBIDDEN inventing places. Not bus_eta unless they asked for a reminder. Network-wide disruptions → routes=null + disclose U (not connected). Residual V (fewer transfers / shortest among returned) → require_live_select:true — do NOT invent other prefer values. Bare «איך להגיע» with no mode → ASK car vs transit. Car ETA/duration → mode \"drive\". Transit → mode \"transit\" or omit. FORBIDDEN inventing times/lines. origin \"speaker\" = PENDING_LOCATION pin only (never a saved filing/list place). Saved place (home/work/any labeled spot in THIS turn's EMPLOYEE_SAVED_DATA filings or any list) → origin/destination = that row's exact item_name / item title OR opaque item_id/filing_id — server resolves coords; FORBIDDEN inventing lat,lng.",
                 "properties": {
                   "origin": {
                     "type": "string",

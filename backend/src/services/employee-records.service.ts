@@ -38,6 +38,7 @@ import {
 } from "./attachment.service.js";
 import {
   applyListItemListLinks,
+  isUnresolvedLinkOnlyUpdate,
   splitItemListLinks,
 } from "./list-item-list-link.service.js";
 import { jobMetaFrom, stripJobMeta } from "./job-meta.js";
@@ -701,6 +702,51 @@ function looksLikeAttachClaim(spoken: string): boolean {
   return /(?:צרפתי|תייקתי|שמרתי).{0,40}(?:קובץ|תמונ|מסמך|סרטון|הקלטה|קבצים|תמונות)|(?:צרפתי|תייקתי) את (?:ה)?(?:קובץ|תמונ)/u.test(
     text,
   );
+}
+
+/** Spoken past-tense durable save claim (filing/list), not file-attach wording. */
+export function looksLikeDurableSaveClaim(spoken: string): boolean {
+  const text = spoken.trim();
+  if (!text || looksLikeAttachClaim(text)) {
+    return false;
+  }
+  return /תייקתי|שמרתי/.test(text);
+}
+
+/** When the model claimed תייקתי/שמרתי without a matching applied list/filing mutate. */
+export const DURABLE_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את זה.";
+
+/**
+ * Align spoken «תייקתי»/«שמרתי» with apply evidence for list/filing mutates.
+ * Attach claims stay with correctAttachmentClaimReply. Keep the reply only when
+ * a requested list or filing add/update also applied this turn.
+ */
+export function correctDurableSaveClaimReply(input: {
+  reply: string;
+  spoken: string;
+  requestedListAdd: boolean;
+  requestedListUpdate: boolean;
+  requestedFilingAdd: boolean;
+  requestedFilingUpdate: boolean;
+  appliedListAdd: boolean;
+  appliedListUpdate: boolean;
+  appliedFilingAdd: boolean;
+  appliedFilingUpdate: boolean;
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  if (!looksLikeDurableSaveClaim(input.spoken)) {
+    return input.reply;
+  }
+  const listOk =
+    (input.requestedListAdd && input.appliedListAdd) ||
+    (input.requestedListUpdate && input.appliedListUpdate);
+  const filingOk =
+    (input.requestedFilingAdd && input.appliedFilingAdd) ||
+    (input.requestedFilingUpdate && input.appliedFilingUpdate);
+  if (listOk || filingOk) {
+    return input.reply;
+  }
+  return input.setResponse(input.reply, DURABLE_SAVE_CLAIM_MISS);
 }
 
 /**
@@ -3192,57 +3238,111 @@ async function applyListAction(
         shareOutcome,
       });
 
-      if (!shareNoop) {
-        await prisma.employeeListItem.update({
-          where: { id: existing.id },
-          data: {
-            ...fields,
-            ...(resolvedAction.action === "update" &&
-            nextItemKey &&
-            nextItemKey !== existing.itemKey
-              ? { itemKey: nextItemKey }
-              : {}),
-          },
+      if (shareNoop) {
+        mutations.push({
+          action: "update",
+          itemId: existing.id,
+          employeeId,
+          listType: resolvedAction.listType,
+          itemKey: existing.itemKey,
+          itemLabel:
+            ownedItemTitle(
+              resolvedAction.listType,
+              nextDataRecord,
+              nextItemKey || existing.itemKey,
+              effectiveTitleField,
+            ) ||
+            nextItemKey ||
+            existing.itemKey,
+          listName: list.name || resolvedAction.listName || undefined,
+          ...(access && existing.reminderId
+            ? { workerTaskInvolvedIds: access.involvedIds }
+            : {}),
+          ...(shareOutcome ? { shareOutcome } : {}),
+          ...(collabApply ? { collabApply } : {}),
         });
-        attachmentOutcome = mergeAttachmentOutcomes(
-          attachmentOutcome,
-          await applyAttachmentLinks({
-            actorId,
-            target: { listItemId: existing.id },
-            attachmentIds: attachments?.attach,
-            detachIds: attachments?.detach,
-          }),
-        );
-        await applyListItemListLinks({
+        continue;
+      }
+
+      const attachBefore = attachmentOutcome;
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        await applyAttachmentLinks({
           actorId,
-          listItemId: existing.id,
-          hostListId: existing.listId,
-          hostListType: resolvedAction.listType,
-          linkedListIds: listLinks?.linkedListIds,
-          linkedLists: listLinks?.linkedLists,
-          unlinkListIds: listLinks?.unlinkListIds,
+          target: { listItemId: existing.id },
+          attachmentIds: attachments?.attach,
+          detachIds: attachments?.detach,
+        }),
+      );
+      const linkApply = await applyListItemListLinks({
+        actorId,
+        listItemId: existing.id,
+        hostListId: existing.listId,
+        hostListType: resolvedAction.listType,
+        linkedListIds: listLinks?.linkedListIds,
+        linkedLists: listLinks?.linkedLists,
+        unlinkListIds: listLinks?.unlinkListIds,
+      });
+      const requestedLinkOrUnlink =
+        (listLinks?.linkedListIds?.length ?? 0) > 0 ||
+        (listLinks?.linkedLists?.length ?? 0) > 0 ||
+        (listLinks?.unlinkListIds?.length ?? 0) > 0;
+      if (
+        isUnresolvedLinkOnlyUpdate({
+          contentFieldChanged,
+          occurrenceChanged,
+          hasDoneDate: Boolean(done.doneDate),
+          visibilityUnchanged,
+          shareIntent,
+          attachmentLinked: Math.max(
+            0,
+            attachmentOutcome.linked - attachBefore.linked,
+          ),
+          attachmentDetached: Math.max(
+            0,
+            attachmentOutcome.detached - attachBefore.detached,
+          ),
+          requestedLinkOrUnlink,
+          linked: linkApply.linked,
+          detached: linkApply.detached,
+        })
+      ) {
+        // Unresolved link-only update: no field change, no link created —
+        // do not count as an applied update (no «עדכנתי» fallback).
+        continue;
+      }
+
+      await prisma.employeeListItem.update({
+        where: { id: existing.id },
+        data: {
+          ...fields,
+          ...(resolvedAction.action === "update" &&
+          nextItemKey &&
+          nextItemKey !== existing.itemKey
+            ? { itemKey: nextItemKey }
+            : {}),
+        },
+      });
+      if (listOwner) {
+        const occurrenceDone =
+          Boolean(done.doneDate) && doneRecord !== ruledRecord;
+        const change = occurrenceChanged ? occurrence.change : null;
+        await recordAuditEvent({
+          userId: listOwner.userId,
+          actorEmployeeId: actorId,
+          action: change
+            ? "list_occurrence_change"
+            : occurrenceDone
+              ? "list_occurrence_done"
+              : "list_update",
+          entityType: "EmployeeListItem",
+          entityId: existing.id,
+          summary: change
+            ? `occurrence ${change.cancel ? "cancel" : `time ${change.time}`} ${change.date} ${resolvedAction.listType}: ${existing.itemKey}`
+            : occurrenceDone
+              ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
+              : `update ${resolvedAction.listType}: ${existing.itemKey}`,
         });
-        if (listOwner) {
-          const occurrenceDone =
-            Boolean(done.doneDate) && doneRecord !== ruledRecord;
-          const change = occurrenceChanged ? occurrence.change : null;
-          await recordAuditEvent({
-            userId: listOwner.userId,
-            actorEmployeeId: actorId,
-            action: change
-              ? "list_occurrence_change"
-              : occurrenceDone
-                ? "list_occurrence_done"
-                : "list_update",
-            entityType: "EmployeeListItem",
-            entityId: existing.id,
-            summary: change
-              ? `occurrence ${change.cancel ? "cancel" : `time ${change.time}`} ${change.date} ${resolvedAction.listType}: ${existing.itemKey}`
-              : occurrenceDone
-                ? `occurrence done ${done.doneDate} ${resolvedAction.listType}: ${existing.itemKey}`
-                : `update ${resolvedAction.listType}: ${existing.itemKey}`,
-          });
-        }
       }
       mutations.push({
         action: "update",
@@ -3266,9 +3366,6 @@ async function applyListAction(
         ...(shareOutcome ? { shareOutcome } : {}),
         ...(collabApply ? { collabApply } : {}),
       });
-      if (shareNoop) {
-        continue;
-      }
     } else {
       if (!nextItemKey) {
         continue;

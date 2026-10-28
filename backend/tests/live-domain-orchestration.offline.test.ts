@@ -11,8 +11,9 @@
  *
  * Covered: reply-metadata parse, Chat-parity gates for weather/places/jewish,
  *   provider arg mapping via mocked fetch, Hebrew formatting, replace vs append,
- *   empty fallback, guest skip, places near=speaker + pending pin.
- * Not covered: natural-language → model tool selection, sendChatMessage,
+ *   empty fallback, guest skip, places near=speaker + pending pin,
+ *   places area_restrict ignoring pending pin (chat-parity mirror).
+ * Not covered: natural-language → model tool selection, full sendChatMessage,
  *   PENDING_LOCATION store/clear, WATCH wrap, OpenAI tip composer (injected),
  *   Meta Graph, reminder create/fire, product DB.
  */
@@ -112,6 +113,41 @@ function placesSearchFetchImpl(places: unknown[]) {
   });
 }
 
+/** Geocode viewport + Places searchText for B2a area_restrict orchestration. */
+function placesAreaRestrictFetchImpl(places: unknown[]) {
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes("maps.googleapis.com/maps/api/geocode")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: "OK",
+          results: [
+            {
+              formatted_address: "השרון, ישראל",
+              partial_match: false,
+              geometry: {
+                viewport: {
+                  southwest: { lat: 32.05, lng: 34.75 },
+                  northeast: { lat: 32.35, lng: 35.05 },
+                },
+              },
+            },
+          ],
+        }),
+      } as Response;
+    }
+    expect(href).toContain("places.googleapis.com");
+    const body = JSON.parse(String(init?.body ?? "{}")) as { textQuery?: string };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ places, _queried: body.textQuery }),
+    } as Response;
+  });
+}
+
 function hebcalShabbatFetchImpl() {
   return vi.fn(async (url: string) => {
     const href = String(url);
@@ -174,9 +210,20 @@ async function applyChatLiveDomainPass(input: {
   );
 
   const weatherAction = guestSpeaker ? null : metadata.weather ?? null;
-  if (weatherAction?.place.trim()) {
+  const weatherNearSpeaker = weatherAction?.near === "speaker";
+  if (
+    weatherAction &&
+    (weatherAction.place.trim() || weatherNearSpeaker)
+  ) {
+    const weatherUsePin =
+      weatherNearSpeaker &&
+      !weatherAction.place.trim() &&
+      input.pendingLoc != null;
     const weather = await resolveWeatherMessages({
-      place: weatherAction.place,
+      place: weatherUsePin ? "המיקום שלך" : weatherAction.place,
+      nearSpeaker: weatherNearSpeaker && !weatherAction.place.trim(),
+      latitude: weatherUsePin ? input.pendingLoc!.lat : null,
+      longitude: weatherUsePin ? input.pendingLoc!.lng : null,
       date: weatherAction.date,
       aspects: weatherAction.aspects,
       now: input.weatherNow ?? WEATHER_NOW,
@@ -193,14 +240,25 @@ async function applyChatLiveDomainPass(input: {
   const placesAction = guestSpeaker ? null : metadata.places ?? null;
   const pendingLoc = guestSpeaker ? null : input.pendingLoc ?? null;
   if (placesAction?.query.trim()) {
-    const nearSpeaker = placesAction.near === "speaker";
+    // Stage B2a parity with chat.service: area_restrict ignores pending pin.
+    const areaRestrict = placesAction.geoMode === "area_restrict";
+    const nearSpeaker =
+      !areaRestrict && placesAction.near === "speaker";
     const placesText = await resolvePlacesReply({
       query: placesAction.query,
       place: placesAction.place,
       aspects: placesAction.aspects,
       nearSpeaker,
-      lat: placesAction.lat ?? pendingLoc?.lat ?? null,
-      lng: placesAction.lng ?? pendingLoc?.lng ?? null,
+      areaRestrict,
+      // Stage B1/B2a: pending pin only when near=speaker (never area_restrict).
+      lat: areaRestrict
+        ? null
+        : placesAction.lat ??
+          (nearSpeaker ? pendingLoc?.lat ?? null : null),
+      lng: areaRestrict
+        ? null
+        : placesAction.lng ??
+          (nearSpeaker ? pendingLoc?.lng ?? null : null),
       fetchImpl: input.fetchImpl,
       apiKey: input.placesApiKey,
     });
@@ -266,6 +324,7 @@ describe("live-domain orchestration (offline, post-model)", () => {
     const metadata = parseReplyMetadata(stub);
     expect(metadata.weather).toEqual({
       place: "תל אביב",
+      near: "",
       date: "2026-10-21",
       aspects: ["summary"],
     });
@@ -418,6 +477,112 @@ describe("live-domain orchestration (offline, post-model)", () => {
     const spoken = parseLlmReply(reply).response;
     expect(spoken).toContain("מקדונלדס קרית אונו");
     expect(spoken).toContain("03-9998888");
+  });
+
+  it("places: named city ignores stale pending pin (no locationBias)", async () => {
+    const stalePin = { lat: 32.087, lng: 34.887 };
+    const fetchImpl = placesSearchFetchImpl([
+      {
+        id: "places/city",
+        displayName: { text: "מסעדה בחיפה", languageCode: "he" },
+        nationalPhoneNumber: "04-111",
+        formattedAddress: "חיפה",
+      },
+    ]);
+    const stub = modelReply([], {
+      places: {
+        query: "מסעדה",
+        place: "חיפה",
+        near: "",
+        aspects: ["summary"],
+      },
+    });
+    const metadata = parseReplyMetadata(stub);
+    expect(metadata.places?.near).toBe("");
+    expect(metadata.places?.place).toBe("חיפה");
+
+    await applyChatLiveDomainPass({
+      workingReply: stub,
+      metadata,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      placesApiKey: "test-key",
+      pendingLoc: stalePin,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      textQuery?: string;
+      locationBias?: unknown;
+      rankPreference?: string;
+    };
+    expect(body.textQuery).toBe("מסעדה חיפה");
+    expect(body.locationBias).toBeUndefined();
+    expect(body.rankPreference).toBeUndefined();
+  });
+
+  it("places: area_restrict ignores pending pin (locationRestriction, no bias)", async () => {
+    // Chat-parity mirror (applyChatLiveDomainPass), not full sendChatMessage.
+    const stalePin = { lat: 32.087, lng: 34.887 };
+    const fetchImpl = placesAreaRestrictFetchImpl([
+      {
+        id: "places/sharon",
+        displayName: { text: "קפה בשרון", languageCode: "he" },
+        nationalPhoneNumber: "09-111",
+        formattedAddress: "השרון",
+      },
+    ]);
+    const stub = modelReply([], {
+      places: {
+        query: "בית קפה",
+        place: "השרון",
+        near: "",
+        geo_mode: "area_restrict",
+        aspects: ["summary"],
+      },
+    });
+    const metadata = parseReplyMetadata(stub);
+    expect(metadata.places?.geoMode).toBe("area_restrict");
+    expect(metadata.places?.near).toBe("");
+    expect(metadata.places?.lat).toBeNull();
+    expect(metadata.places?.lng).toBeNull();
+
+    await applyChatLiveDomainPass({
+      workingReply: stub,
+      metadata,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      placesApiKey: "test-key",
+      pendingLoc: stalePin,
+    });
+
+    const placesCalls = fetchImpl.mock.calls.filter((c) =>
+      String(c[0]).includes("places.googleapis.com"),
+    );
+    expect(placesCalls).toHaveLength(1);
+    const body = JSON.parse(
+      String((placesCalls[0]![1] as RequestInit).body ?? "{}"),
+    ) as {
+      textQuery?: string;
+      locationBias?: unknown;
+      rankPreference?: string;
+      locationRestriction?: {
+        rectangle?: {
+          low?: { latitude?: number; longitude?: number };
+          high?: { latitude?: number; longitude?: number };
+        };
+      };
+    };
+    expect(body.textQuery).toBe("בית קפה");
+    expect(body.locationBias).toBeUndefined();
+    expect(body.rankPreference).toBeUndefined();
+    expect(body.locationRestriction?.rectangle?.low).toEqual({
+      latitude: 32.05,
+      longitude: 34.75,
+    });
+    expect(body.locationRestriction?.rectangle?.high).toEqual({
+      latitude: 32.35,
+      longitude: 35.05,
+    });
   });
 
   it("places: near=speaker uses pending lat/lng as locationBias", async () => {

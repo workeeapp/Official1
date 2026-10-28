@@ -667,6 +667,10 @@ function itineraryLeaveHasIsoBacking(opt: RouteItineraryOption): boolean {
  * Display leave/arrive for the compact multi lead. Omits unreliable clocks;
  * never invents replacements. Boarding leave may legitimately span less than
  * door-to-door duration (walk before board).
+ *
+ * Door-to-door leave-by (arrival − duration, leaveIsBoarding false) is kept even
+ * when step board/arrive clocks do not reconcile or lack ISO backing — that
+ * estimate is independent of boarding clocks and must not be silently dropped.
  */
 export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
   leaveByText: string;
@@ -685,11 +689,15 @@ export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
   const walkSec = walkSecondsFromSteps(opt.steps);
   const walkMin = walkSec != null ? Math.round(walkSec / 60) : null;
   const hasIso = itineraryLeaveHasIsoBacking(opt);
+  /** Engine door-to-door leave-by (not a verified board clock). */
+  const doorToDoorLeave = Boolean(leave) && !boarding;
 
   const within = (a: number, b: number) =>
     Math.abs(a - b) <= CLOCK_RECONCILE_TOLERANCE_MIN;
 
   let keep = true;
+  /** Keep leave but drop arrive when pairing is unreliable. */
+  let leaveOnly = false;
   if (
     leave &&
     !hasIso &&
@@ -697,9 +705,14 @@ export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
     durMin != null &&
     durMin >= 20
   ) {
-    // Midnight-looking clocks without ISO + substantial duration — unreliable
-    // (do not keep just because board→arrive span is shorter than door-to-door).
-    keep = false;
+    if (doorToDoorLeave) {
+      // Arrival−duration leave-by is never ISO-backed; keep leave, drop clocks.
+      leaveOnly = true;
+    } else {
+      // Midnight-looking boarding clocks without ISO + substantial duration —
+      // unreliable (do not keep just because board→arrive span is shorter).
+      keep = false;
+    }
   } else if (leave && arrive && durMin != null && span != null) {
     const doorOk = within(span, durMin);
     const boardWalkOk =
@@ -712,6 +725,9 @@ export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
       keep = true;
     } else if (!boarding && doorOk) {
       keep = true;
+    } else if (doorToDoorLeave) {
+      // Preserve arrival−duration leave-by; step arrive may not match duration.
+      leaveOnly = true;
     } else if (!hasIso && !doorOk && !(boarding && span < durMin)) {
       keep = false;
     }
@@ -719,6 +735,8 @@ export function displayLeaveArriveForLead(opt: RouteItineraryOption): {
 
   if (!keep) {
     leave = "";
+    arrive = "";
+  } else if (leaveOnly) {
     arrive = "";
   }
   return { leaveByText: leave, arriveByText: arrive, leaveIsBoarding: boarding };

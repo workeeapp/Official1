@@ -8,6 +8,7 @@ import {
   dropSpeakerTaskAddsForOutboundClocks,
   fallbackNotificationText,
   formatMissingSendTextNotice,
+  formatScheduleSkippedWithoutQueueNotice,
   planPhoneRelays,
   planRelayDeliveries,
   planScheduledJobDeliveries,
@@ -2959,6 +2960,114 @@ describe("employee targets", () => {
     ).toEqual([{ phone: "0502222222", text: "היי מהמטה", label: "0502222222" }]);
   });
 
+  it("does not send a phone target immediately when the message is scheduled for later", () => {
+    expect(
+      planPhoneRelays(
+        [
+          {
+            targets: ["050-222-2222"],
+            text: "היי מחר",
+            inSeconds: 3600,
+          },
+        ],
+        employees,
+        amit.id,
+      ),
+    ).toEqual([]);
+    expect(
+      planPhoneRelays(
+        [
+          {
+            targets: ["דני"],
+            text: "שלום בערב",
+            date: "2026-10-29",
+            time: "20:00",
+            expectsReply: false,
+          },
+        ],
+        employees,
+        amit.id,
+        [{ id: "c1", name: "דני", phone: "0503333333" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("Send LATER rule: scheduled messages never go through immediate named relay", () => {
+    // Contract: deferred check-with (expects_reply) is queued separately;
+    // pure-info + schedule must not WhatsApp now (Send LATER → reminders).
+    const lucy: PublicEmployee = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+    };
+    const roster = [...employees, lucy];
+    expect(
+      planRelayDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: roster,
+        messages: [
+          {
+            targets: ["טל"],
+            text: "עדכון מחר",
+            expectsReply: false,
+            inSeconds: 7200,
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(
+      planRelayDeliveries({
+        actor: amit,
+        sender: lucy,
+        employees: roster,
+        messages: [
+          {
+            targets: ["טל"],
+            text: "עמית שואל מחר?",
+            expectsReply: true,
+            askSummary: "שאלה",
+            date: "2026-10-29",
+            time: "09:00",
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not claim deferred delivery when schedule was only skipped", () => {
+    expect(
+      formatScheduleSkippedWithoutQueueNotice({
+        messages: [
+          {
+            targets: ["050-222-2222"],
+            text: "היי בערב",
+            time: "20:00",
+            expectsReply: false,
+          },
+        ],
+        scheduledJobCount: 0,
+      }),
+    ).toContain("לא תוזמנה");
+    expect(
+      formatScheduleSkippedWithoutQueueNotice({
+        messages: [
+          {
+            targets: ["טל"],
+            text: "קנית חלב?",
+            expectsReply: true,
+            inSeconds: 3600,
+          },
+        ],
+        scheduledJobCount: 1,
+      }),
+    ).toBe("");
+  });
+
   it("does not double-send when the recipient is both an employee and a contact", () => {
     expect(
       planPhoneRelays(
@@ -3168,6 +3277,44 @@ describe("employee targets", () => {
     });
     expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
       { item_id: coffeeId },
+    ]);
+  });
+
+  it("packs whole shopping fan-out (many item_ids) into one owner application", () => {
+    const milkId = "11111111-1111-4111-8111-111111111101";
+    const breadId = "11111111-1111-4111-8111-111111111102";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      itemOwners: new Map([
+        [milkId, ownerRef(amit.id, "shopping")],
+        [breadId, ownerRef(amit.id, "shopping")],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: ["עמית", "טל"],
+            items: [{ item_id: milkId }, { item_id: breadId }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: {
+        scope: "shared",
+        visibleTo: expect.arrayContaining([amit.id, tal.id]),
+        itemOnly: true,
+      },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { item_id: milkId },
+      { item_id: breadId },
     ]);
   });
 

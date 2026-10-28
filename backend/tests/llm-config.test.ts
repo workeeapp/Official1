@@ -152,15 +152,25 @@ describe("LLM action schema", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("SAME-TURN CREATE+LINK");
     expect(config.systemMessage).toContain(
-      "lists.add.list_name MUST be the same collision-safe string",
+      "lists.add.list_name AND linked_lists[].list_name MUST both be the same non-empty",
     );
     expect(config.systemMessage).toContain(
-      "FORBIDDEN empty list_name on the custom add when adding items",
+      "A name only on the link side does NOT substitute for lists.add.list_name",
     );
     expect(config.systemMessage).toContain("MULTI-SHELL CLEAR");
     expect(config.systemMessage).toContain("נקה את הקניות");
     expect(config.systemMessage).toContain(
       "FORBIDDEN removing items from more than one shell",
+    );
+  });
+
+  it("FILING address example must not be blocked by unknown SPEAKER_ADDRESS gender", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain(
+      "תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב",
+    );
+    expect(config.systemMessage).toMatch(
+      /SPEAKER_ADDRESS gender:\s*unknown must NOT block/i,
     );
   });
 
@@ -345,8 +355,15 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "Ambiguous / ids not in THIS turn's JSON → ASK, show_dump/ids null",
     );
+    expect(config.systemMessage).toContain("Forbidden inventing ids");
     expect(config.systemMessage).toContain(
-      "Forbidden inventing ids or cross-kind ids",
+      "ids must match that kind (FORBIDDEN cross-kind ids)",
+    );
+    expect(config.systemMessage).toContain(
+      "Cross-kind topic → show_dump=full + semantically matching row ids",
+    );
+    expect(config.systemMessage).toContain(
+      "not every sibling on a topic-named list",
     );
     // Offline MODEL_APPLY stubs author the ACTION; they cannot prove a live model
     // asks instead of picking one of two similar tasks. No LIVE run here.

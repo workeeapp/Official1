@@ -1,0 +1,204 @@
+{
+  "generatedAt": "2026-10-28T17:36:14.518Z",
+  "suite": "live-full-corpus",
+  "track": "LIVE_FULL",
+  "promptSource": "config:LLM.config.json+buildLucyModelEvalInstructions",
+  "instructionsSha256": "7dd006cfe7913f942b17a906476b7c7e641bdab48d718a1eb404c39d3568d449",
+  "envelopeMode": "lucy_eval",
+  "attachLucyRuntimeEngine": true,
+  "model": "gpt-6-luna",
+  "temperature": 0,
+  "reasoningEffort": "medium",
+  "workerName": "לוסי",
+  "workerProtected": true,
+  "employeeId": null,
+  "instructionsFile": null,
+  "evalPath": "model-then-production-apply",
+  "productionApply": true,
+  "total": 2,
+  "passed": 0,
+  "failed": 2,
+  "passRate": 0,
+  "requiredPassRate": 0.7,
+  "softOk": false,
+  "criticalOk": false,
+  "criticalFailed": [
+    "full-filing-add-simple",
+    "full-mt-event-clarify-then-link"
+  ],
+  "ok": false,
+  "results": [
+    {
+      "id": "full-filing-add-simple",
+      "ok": false,
+      "failures": [
+        "turn 0 constraints: expected filing.add_filing",
+        "turn 0 facts: expected to include \"הרצל\""
+      ],
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב",
+          "response": "לא הצלחתי לשמור את זה.",
+          "ok": false,
+          "constraintFailures": [
+            "expected filing.add_filing"
+          ],
+          "stateFailures": [
+            "facts: expected to include \"הרצל\""
+          ],
+          "appliedViaProduction": false,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          },
+          "rawActionDiagnostic": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "filing",
+                "list_name": "",
+                "items": [
+                  {
+                    "item_name": "כתובת",
+                    "item_info": "רחוב הרצל 1, תל אביב",
+                    "item_description": ""
+                  }
+                ]
+              }
+            ],
+            "filing": null,
+            "listEntryCount": 1,
+            "filingLikeListEntryCount": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "full-mt-event-clarify-then-link",
+      "ok": false,
+      "failures": [
+        "turn 1 constraints: lists_custom_create_and_link: custom lists.add with items requires non-empty list_name; lists.update/tasks count 0 < 1",
+        "turn 1 facts: expected to include \"כיבוד\"",
+        "turn 1 facts: expected to include \"עוגה\""
+      ],
+      "turns": [
+        {
+          "index": 0,
+          "utterance": "תוסיפי רשימת כיבוד?",
+          "response": "איזה עמודות תרצה ברשימת «כיבוד»? למשל: פריט, כמות והערות.",
+          "ok": true,
+          "constraintFailures": [],
+          "stateFailures": [],
+          "appliedViaProduction": false,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [],
+            "listOps": [],
+            "filing": []
+          },
+          "rawActionDiagnostic": {
+            "lists": [],
+            "filing": null,
+            "listEntryCount": 0,
+            "filingLikeListEntryCount": 0
+          }
+        },
+        {
+          "index": 1,
+          "utterance": "עוגה ושתיה",
+          "response": "לא הצלחתי להוסיף את הפריט.",
+          "ok": false,
+          "constraintFailures": [
+            "lists_custom_create_and_link: custom lists.add with items requires non-empty list_name",
+            "lists.update/tasks count 0 < 1"
+          ],
+          "stateFailures": [
+            "facts: expected to include \"כיבוד\"",
+            "facts: expected to include \"עוגה\""
+          ],
+          "appliedViaProduction": true,
+          "metadata": {
+            "messages": [],
+            "reminders": [],
+            "directory": [],
+            "jobs": [],
+            "handoff": null,
+            "register": null,
+            "reportSections": [],
+            "reportHistoryKinds": [],
+            "confirm": null,
+            "targets": [],
+            "lists": [
+              {
+                "action": "add",
+                "listType": "custom",
+                "listName": "",
+                "columns": [
+                  "פריט"
+                ],
+                "emoji": "🍽️",
+                "items": [
+                  {
+                    "פריט": "עוגה"
+                  },
+                  {
+                    "פריט": "שתיה"
+                  }
+                ],
+                "targets": []
+              }
+            ],
+            "listOps": [],
+            "filing": []
+          },
+          "rawActionDiagnostic": {
+            "lists": [
+              {
+                "action": "add",
+                "list_type": "custom",
+                "list_name": "כיבוד",
+                "title_field": "פריט",
+                "columns": [
+                  "פריט"
+                ],
+                "emoji": "🍽️",
+                "items": [
+                  {
+                    "פריט": "עוגה"
+                  },
+                  {
+                    "פריט": "שתיה"
+                  }
+                ]
+              }
+            ],
+            "filing": null,
+            "listEntryCount": 1,
+            "filingLikeListEntryCount": 0
+          }
+        }
+      ]
+    }
+  ]
+}

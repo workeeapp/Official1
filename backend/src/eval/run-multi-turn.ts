@@ -34,6 +34,7 @@ import {
   type RegressionStateAssert,
   type RegressionTurn,
 } from "./corpus.js";
+import type { EvalRawActionDiagnostic } from "./raw-action-diagnostic.js";
 import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
 
 const UUID_RE =
@@ -61,6 +62,11 @@ export interface MultiTurnTurnResult {
   /** True when production applyEmployeeRecords ran this turn. */
   appliedViaProduction: boolean;
   ok: boolean;
+  /**
+   * Eval-only: raw lists/filing before parse (LIVE_FULL). Optional; set by
+   * MODEL_APPLY/LIVE propose when capturing pre-parse diagnostics.
+   */
+  rawActionDiagnostic?: EvalRawActionDiagnostic;
 }
 
 export interface MultiTurnCaseResult {

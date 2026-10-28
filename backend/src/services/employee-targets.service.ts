@@ -321,6 +321,40 @@ export function formatMissingSendTextNotice(
     : `מה לשלוח? אפשר גם שלום.`;
 }
 
+/**
+ * When messages carried an explicit later schedule but the engine did not open
+ * a deferred check-with job (phone-only targets, or expects_reply:false),
+ * immediate send is skipped and nothing is queued. Correct false "אשלח ב…" claims.
+ */
+export function formatScheduleSkippedWithoutQueueNotice(input: {
+  messages: LlmMessageAction[];
+  /** Deliveries that planScheduledJobDeliveries will actually queue. */
+  scheduledJobCount: number;
+}): string {
+  const scheduled = input.messages.filter(
+    (action) => messageHasSchedule(action) && action.text.trim(),
+  );
+  if (scheduled.length === 0) {
+    return "";
+  }
+  const checkWithCount = scheduled.filter(
+    (action) => action.expectsReply !== false,
+  ).length;
+  const pureInfoScheduled = scheduled.some(
+    (action) => action.expectsReply === false,
+  );
+  // Every scheduled entry is a deferred check-with and all were queued.
+  if (
+    !pureInfoScheduled &&
+    checkWithCount > 0 &&
+    input.scheduledJobCount >= checkWithCount
+  ) {
+    return "";
+  }
+  // Pure-info + schedule, phone-only check-with, or partial queue — skip ≠ schedule.
+  return "ההודעה לא תוזמנה לשליחה מאוחרת. לשליחה בזמן עתידי צריך שעון תזכורת עם הטקסט והנמען.";
+}
+
 export function planRelayDeliveries(input: {
   actor: PublicEmployee;
   sender: PublicEmployee;
@@ -349,8 +383,10 @@ export function planRelayDeliveries(input: {
   const seen = new Set<string>();
 
   for (const action of input.messages) {
-    // Deferred check-with: no WhatsApp until the clock fires.
-    if (messageHasSchedule(action) && action.expectsReply !== false) {
+    // Any future schedule on messages: no immediate WhatsApp.
+    // Deferred check-with (expects_reply) is queued by planScheduledJobDeliveries.
+    // Send LATER / pure-info+schedule must use reminders — never send now.
+    if (messageHasSchedule(action)) {
       continue;
     }
     const targets = resolveNamedRelayTargets(
@@ -521,6 +557,11 @@ export function planPhoneRelays(
 
   for (const action of messages) {
     if (!action.text.trim()) {
+      continue;
+    }
+    // Explicit later schedule must not WhatsApp now via the phone path.
+    // Phone digits are not deferred-check jobs; Send LATER belongs on reminders.
+    if (messageHasSchedule(action)) {
       continue;
     }
     for (const raw of action.targets) {

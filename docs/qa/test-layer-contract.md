@@ -70,9 +70,13 @@ The QA infrastructure implementation phase is **closed**. Further infrastructure
 |-------|-------|----------|-----------|
 | LIVE_MODEL | **34/34 PASS** | [`phase-4-last-report.md`](phase-4-last-report.md) / `.json` | 2026-10-22 |
 | LIVE_MODEL_MT | **13/13 PASS** | [`phase-4-multi-turn-last-report.md`](phase-4-multi-turn-last-report.md) / `.json` | 2026-10-22 |
-| LIVE_FULL | **6/27 FAIL** | [`live-full-last-report.md`](live-full-last-report.md) / `.json` | 2026-10-20 |
+| LIVE_FULL | **22/32 FAIL** (passRate 0.69; 10 failed; 6 critical) | [`live-full-last-report.md`](live-full-last-report.md) / `.json` | 2026-10-22 |
 
-LIVE_FULL has **not** been re-verified after the recent infrastructure commits (eval prompt-source resolver/provenance, Studio provenance alignment, Batch A fixture alignment with LIVE_FULL defaults).
+**Authoritative on-disk LIVE_FULL** (`live-full-last-report.*` / `live-full-last-eval.json`, `generatedAt=2026-10-22T16:45:29.851Z`): **22 passed / 32 total**, **10 failed**, soft gate fail, criticalFailed=`full-filing-add-simple`, `full-share-shop-with-amit`, `full-mt-event-clarify-then-link`, `full-mt-multi-add-then-buy`, `full-mt-complex-personal-vs-shared`, `full-mt-share-ask-then-partner`. Console twin: [`live-full-baseline-32-console.txt`](live-full-baseline-32-console.txt).
+
+**Historical (superseded on disk, not deleted from narrative):** 2026-10-20 LIVE_FULL report header **6/27** meant **6 passed / 27 total** (21 failed, passRate 0.22) — older corpus size. Report files are gitignored and were overwritten by the 2026-10-22 run; do not treat “6/27 FAIL” as six failures.
+
+LIVE_FULL has **not** been re-run after the 2026-10-28 eval-DB `transcript_status` migration or the remove-by-id / shopping whole-list share triage fixes — re-verify only with approved `workee_test` + kill switches.
 
 ### Explicitly deferred
 

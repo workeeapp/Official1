@@ -32,8 +32,11 @@ vi.mock("../src/database/prisma.js", () => ({
   },
 }));
 
+import { emptyLlmMetadata, type LlmMetadata } from "@workee/shared";
 import {
   applyListItemListLinks,
+  fillBlankCustomListNameFromSameTurnLinks,
+  isUnresolvedLinkOnlyUpdate,
   splitItemListLinks,
   withLinkedListRefs,
 } from "../src/services/list-item-list-link.service.js";
@@ -45,6 +48,168 @@ const HOST_LIST = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const SHOP_LIST = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const CUSTOM_LIST = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const OTHER_USER_LIST = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+describe("fillBlankCustomListNameFromSameTurnLinks", () => {
+  const hostId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+  function blankCreateAndLink(linkNames: string[]): LlmMetadata {
+    return {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add",
+          listType: "custom",
+          listName: "",
+          items: [{ שם: "עוגה" }, { שם: "שתייה" }],
+          targets: [],
+        },
+        {
+          action: "update",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              item_id: hostId,
+              linked_lists: linkNames.map((list_name) => ({
+                list_type: "custom",
+                list_name,
+              })),
+            },
+          ],
+          targets: [],
+        },
+      ],
+    };
+  }
+
+  it("copies the sole unambiguous linked_lists name onto blank custom create", () => {
+    const name = "כיבוד · ערב יום הולדת";
+    const out = fillBlankCustomListNameFromSameTurnLinks(
+      blankCreateAndLink([name]),
+    );
+    expect(out.lists?.[0]?.listName).toBe(name);
+    expect(out.lists?.[1]?.listName).toBe("");
+  });
+
+  it("leaves blank create unchanged when link names are missing or ambiguous", () => {
+    expect(
+      fillBlankCustomListNameFromSameTurnLinks(blankCreateAndLink([])).lists?.[0]
+        ?.listName,
+    ).toBe("");
+    expect(
+      fillBlankCustomListNameFromSameTurnLinks(
+        blankCreateAndLink(["כיבוד · א", "מי מגיע · א"]),
+      ).lists?.[0]?.listName,
+    ).toBe("");
+  });
+
+  it("does not rename built-in shopping adds or already-named custom creates", () => {
+    const shopping: LlmMetadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add",
+          listType: "shopping",
+          listName: "",
+          items: [{ "שם פריט": "חלב" }],
+          targets: [],
+        },
+        {
+          action: "update",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              item_id: hostId,
+              linked_lists: [
+                { list_type: "custom", list_name: "כיבוד · ערב יום הולדת" },
+              ],
+            },
+          ],
+          targets: [],
+        },
+      ],
+    };
+    expect(fillBlankCustomListNameFromSameTurnLinks(shopping).lists?.[0]).toEqual(
+      shopping.lists?.[0],
+    );
+
+    const named = blankCreateAndLink(["כיבוד · ערב יום הולדת"]);
+    named.lists![0]!.listName = "כיבוד · ערב יום הולדת";
+    expect(fillBlankCustomListNameFromSameTurnLinks(named).lists?.[0]?.listName).toBe(
+      "כיבוד · ערב יום הולדת",
+    );
+  });
+
+  it("refuses fill when two blank custom creates share one link name", () => {
+    const meta: LlmMetadata = {
+      ...emptyLlmMetadata(),
+      lists: [
+        {
+          action: "add",
+          listType: "custom",
+          listName: "",
+          items: [{ שם: "עוגה" }],
+          targets: [],
+        },
+        {
+          action: "add",
+          listType: "custom",
+          listName: "",
+          items: [{ שם: "שתייה" }],
+          targets: [],
+        },
+        {
+          action: "update",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              item_id: hostId,
+              linked_lists: [
+                { list_type: "custom", list_name: "כיבוד · ערב יום הולדת" },
+              ],
+            },
+          ],
+          targets: [],
+        },
+      ],
+    };
+    const out = fillBlankCustomListNameFromSameTurnLinks(meta);
+    expect(out.lists?.[0]?.listName).toBe("");
+    expect(out.lists?.[1]?.listName).toBe("");
+  });
+});
+
+describe("isUnresolvedLinkOnlyUpdate", () => {
+  const base = {
+    contentFieldChanged: false,
+    occurrenceChanged: false,
+    hasDoneDate: false,
+    visibilityUnchanged: true,
+    shareIntent: false,
+    attachmentLinked: 0,
+    attachmentDetached: 0,
+    requestedLinkOrUnlink: true,
+    linked: 0,
+    detached: 0,
+  };
+
+  it("is true when only requested change was an unresolved list link", () => {
+    expect(isUnresolvedLinkOnlyUpdate(base)).toBe(true);
+  });
+
+  it("is false when a link was created or other fields changed", () => {
+    expect(isUnresolvedLinkOnlyUpdate({ ...base, linked: 1 })).toBe(false);
+    expect(
+      isUnresolvedLinkOnlyUpdate({ ...base, contentFieldChanged: true }),
+    ).toBe(false);
+    expect(isUnresolvedLinkOnlyUpdate({ ...base, detached: 1 })).toBe(false);
+    expect(
+      isUnresolvedLinkOnlyUpdate({ ...base, requestedLinkOrUnlink: false }),
+    ).toBe(false);
+  });
+});
 
 describe("splitItemListLinks", () => {
   it("strips link fields from item data", () => {

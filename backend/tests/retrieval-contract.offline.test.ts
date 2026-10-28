@@ -1,7 +1,8 @@
 /**
- * Offline prompt contract: intent→ACTION + same-kind semantic retrieval (path 2).
- * Model selects ids; engine renders via show_dump + show_dump_ids.
- * No engine NLP / multi-domain dump / next-occurrence computation implied.
+ * Offline prompt contract: intent→ACTION + semantic retrieval (paths 2–3).
+ * Model selects ids; engine renders via show_dump + show_dump_ids
+ * (path 3: show_dump=full + mixed row ids). No engine NLP / next-occurrence
+ * computation implied.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -81,12 +82,27 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
     );
   });
 
-  it("LLM.config.json keeps cross-kind on prose path without multi-domain dump", () => {
+  it("LLM.config.json routes cross-kind to full + show_dump_ids (not prose)", () => {
     expect(config).toMatch(
-      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?There is NO multi-domain dump/,
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?show_dump=full \+ show_dump_ids=\[all matching opaque row ids\]/,
     );
     expect(config).toMatch(
-      /Cross-kind topic → path \(3\) prose — there is NO multi-domain dump/,
+      /Cross-kind topic → path \(3\) show_dump=full \+ show_dump_ids \(multi-section; not prose\)/,
+    );
+    expect(config).toMatch(
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?FORBIDDEN answering in prose instead of that dump/,
+    );
+    expect(config).toMatch(
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?never list_id/,
+    );
+    expect(config).toMatch(
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?Same-kind-only topics stay on path \(2\)/,
+    );
+    expect(config).toMatch(
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?FORBIDDEN including a row only because it sits on a custom list whose list_name matches the topic/,
+    );
+    expect(config).toMatch(
+      /\(3\) CROSS-KIND SEMANTIC[\s\S]*?Explicit whole-list ask[\s\S]*?show_dump=<exact list_name>/,
     );
   });
 
@@ -134,7 +150,13 @@ describe("RETRIEVAL CONTRACT semantic path 2 (prompt-only)", () => {
       "single focused/temporal hit -> dump that one id even if one-sentence prose seems enough",
     );
     expect(chat).toContain("no matches -> no dump + short no-match");
-    expect(chat).toContain("NO multi-domain dump");
+    expect(chat).toContain(
+      "CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]",
+    );
+    expect(chat).toContain(
+      "FORBIDDEN including a row only because its custom list_name matches",
+    );
+    expect(chat).toContain("never unfiltered full");
     expect(chat).toContain(
       "meetings/appointments example -> show_dump=tasks + show_dump_ids",
     );

@@ -31,7 +31,7 @@ describe("Gate 0 live capability prompt markers", () => {
       /LIVE CAPABILITY GATE \(generic[\s\S]*?FORBIDDEN fetching a nearby aspect/,
     );
     expect(chat).toMatch(
-      /WEATHER \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no Stage B for weather/,
+      /WEATHER \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no require_live_select/,
     );
     expect(chat).toMatch(
       /MARKET \(live\):[\s\S]*?LIVE CAPABILITY \(F\/Q\/V\/U\):[\s\S]*?no Stage B/,
@@ -60,6 +60,16 @@ describe("Gate 0 live capability prompt markers", () => {
     // Follow-up option N must recalculate — no itinerary store claim.
     expect(chat).toMatch(
       /ROUTES:[\s\S]*?recalculate[\s\S]*?no itinerary store/,
+    );
+    // Capability #7: missed-bus → fresh routes now/ASAP, not sticky prior option.
+    expect(chat).toMatch(
+      /ROUTES:[\s\S]*?Missed bus\/departure[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+    );
+    expect(config).toMatch(
+      /Missed bus[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
+    );
+    expect(action).toMatch(
+      /Missed bus\/departure[\s\S]*?SESSION_CLOCK now\/ASAP[\s\S]*?newly calculated/,
     );
     // Seed/schema prompts (Hebrew) must also refuse disruption checks.
     expect(config).toMatch(

@@ -1,4 +1,7 @@
-import { parseAttachmentIds } from "@workee/shared";
+import {
+  parseAttachmentIds,
+  type LlmMetadata,
+} from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 
@@ -122,6 +125,106 @@ function displayListName(listType: string, name: string): string {
  * Resolve and apply linked_list_ids / linked_lists / unlink_list_ids on a
  * tasks host item. Visibility stays independent — linking never auto-shares.
  */
+/**
+ * Same-turn create+link safety net: when custom `lists.add` has a blank
+ * `listName` but items, and the same ACTION has host `lists.update` rows whose
+ * `linked_lists` identify exactly one non-empty custom list name, and there is
+ * exactly one such blank create — copy that name onto the create.
+ *
+ * Does not read the user utterance. Ambiguous / missing link names leave the
+ * blank create unchanged (existing unnamed-custom refuse). Built-ins untouched.
+ */
+export function fillBlankCustomListNameFromSameTurnLinks(
+  metadata: LlmMetadata,
+): LlmMetadata {
+  const lists = metadata.lists ?? [];
+  if (lists.length === 0) {
+    return metadata;
+  }
+
+  const linkNames = new Set<string>();
+  for (const row of lists) {
+    if (row.action !== "update") {
+      continue;
+    }
+    for (const item of row.items ?? []) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        continue;
+      }
+      const { linkedLists } = splitItemListLinks(
+        item as Record<string, unknown>,
+      );
+      for (const link of linkedLists) {
+        if (link.listType === "custom" && link.listName.trim()) {
+          linkNames.add(link.listName.trim());
+        }
+      }
+    }
+  }
+  if (linkNames.size !== 1) {
+    return metadata;
+  }
+  const soleName = [...linkNames][0]!;
+
+  const blankCreateIndexes: number[] = [];
+  lists.forEach((row, index) => {
+    if (
+      row.action === "add" &&
+      row.listType === "custom" &&
+      !(row.listName ?? "").trim() &&
+      (row.items?.length ?? 0) > 0
+    ) {
+      blankCreateIndexes.push(index);
+    }
+  });
+  if (blankCreateIndexes.length !== 1) {
+    return metadata;
+  }
+
+  const fillIndex = blankCreateIndexes[0]!;
+  return {
+    ...metadata,
+    lists: lists.map((row, index) =>
+      index === fillIndex ? { ...row, listName: soleName } : row,
+    ),
+  };
+}
+
+/**
+ * Host update whose only requested change is list link/unlink, and resolve
+ * created no links and detached nothing — must not count as an applied update
+ * (no success-style «עדכנתי» fallback). Legitimate field/visibility/share/
+ * attachment/occurrence updates are not link-only.
+ */
+export function isUnresolvedLinkOnlyUpdate(input: {
+  contentFieldChanged: boolean;
+  occurrenceChanged: boolean;
+  hasDoneDate: boolean;
+  visibilityUnchanged: boolean;
+  shareIntent: boolean;
+  attachmentLinked: number;
+  attachmentDetached: number;
+  requestedLinkOrUnlink: boolean;
+  linked: number;
+  detached: number;
+}): boolean {
+  if (!input.requestedLinkOrUnlink) {
+    return false;
+  }
+  if (
+    input.contentFieldChanged ||
+    input.occurrenceChanged ||
+    input.hasDoneDate ||
+    !input.visibilityUnchanged ||
+    input.shareIntent ||
+    input.attachmentLinked > 0 ||
+    input.attachmentDetached > 0
+  ) {
+    return false;
+  }
+  return input.linked === 0 && input.detached === 0;
+}
+
 export async function applyListItemListLinks(input: {
   actorId: string;
   listItemId: string;

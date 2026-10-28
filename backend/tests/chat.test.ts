@@ -2301,6 +2301,187 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("הנה הפגישות שבחרתי");
   });
 
+  it("TOPIC DUMP: show_dump=full + mixed show_dump_ids keeps only matching rows", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-shop-topic",
+            listType: "shopping",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "shop-floss",
+                data: { "שם פריט": "חוט דנטלי", כמות: 1 },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "shop-milk",
+                data: { "שם פריט": "חלב", כמות: 1 },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+          {
+            id: "list-tasks-topic",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-dentist",
+                data: { "שם מטלה": "לשיננית" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "task-pkg",
+                data: { "שם מטלה": "לאסוף חבילה" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    filingFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "fil-clinic",
+            itemName: "מרפאת שיניים",
+            itemInfo: "רחוב 1",
+            itemDescription: "",
+            employeeId,
+            scope: "personal",
+            employee: { name: "עמית", nickname: "עמית" },
+          },
+          {
+            id: "fil-gate",
+            itemName: "קוד שער",
+            itemInfo: "9999",
+            itemDescription: "",
+            employeeId,
+            scope: "personal",
+            employee: { name: "עמית", nickname: "עמית" },
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "הנה מה שמצאתי על שיניים" }],
+        metadata: {
+          lists: [],
+          show_dump: "full",
+          show_dump_ids: ["task-dentist", "shop-floss", "fil-clinic", "ghost-id"],
+        },
+      }),
+      raw: { output_text: "topic dump" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "מה יש לי שקשור לשיניים?", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לשיננית");
+    expect(response.body.reply).toContain("חוט דנטלי");
+    expect(response.body.reply).toContain("מרפאת שיניים");
+    expect(response.body.reply).not.toContain("לאסוף חבילה");
+    expect(response.body.reply).not.toContain("חלב");
+    expect(response.body.reply).not.toContain("קוד שער");
+    expect(response.body.reply).not.toContain("הנה מה שמצאתי על שיניים");
+    expect(response.body.reply).not.toMatch(/אישיות — \d+ פריט/);
+    expect(response.body.reply).not.toContain("לפירוט רשימה");
+  });
+
+  it("TOPIC DUMP: full + unknown/empty show_dump_ids → no-match, not unfiltered full", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-full-miss",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-keep",
+                data: { "שם מטלה": "משימה קיימת" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "אמור להיות no-match" }],
+        metadata: {
+          lists: [],
+          show_dump: "full",
+          show_dump_ids: ["missing-topic-id"],
+        },
+      }),
+      raw: { output_text: "topic miss" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי לפי מזהה חסר", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain("משימה קיימת");
+    expect(response.body.reply).not.toContain("לפירוט רשימה");
+    expect(response.body.reply).not.toContain("אמור להיות no-match");
+  });
+
   // T5: no show_dump → model responses kept (no dump REPLACE).
   it("T5: without show_dump the spoken reply is not replaced by a dump", async () => {
     createResponse.mockResolvedValue({

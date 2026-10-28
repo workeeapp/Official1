@@ -423,6 +423,11 @@ model Attachment {
   caption              String    @default("") @db.Text
   /** Voice/audio transcription. */
   transcript           String    @default("") @db.Text
+  /**
+   * STT outcome for audio: ok | empty | unavailable | error.
+   * Null = legacy row (pre-status) — do not invent a failure in facts.
+   */
+  transcriptStatus     String?   @map("transcript_status") @db.VarChar(16)
   waInboundMediaId     String    @default("") @map("wa_inbound_media_id") @db.VarChar(128)
   /** Media id from our own upload to WhatsApp (valid about 30 days). */
   waOutboundMediaId    String    @default("") @map("wa_outbound_media_id") @db.VarChar(128)

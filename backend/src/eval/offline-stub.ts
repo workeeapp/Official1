@@ -167,7 +167,11 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       meta.lists.push({
         action: c.action,
         list_type: c.listType ?? "shopping",
-        list_name: "",
+        list_name: c.requireNonEmptyListName
+          ? c.listType === "custom"
+            ? "כיבוד · ערב יום הולדת"
+            : label
+          : "",
         items:
           c.action === "add"
             ? [labeledItem]
@@ -177,6 +181,32 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
         targets: [],
       });
       return "עדכנתי";
+    }
+    case "lists_custom_create_and_link": {
+      const axis = c.listNameIncludes.trim() || "כיבוד";
+      const listName = axis.includes("·") ? axis : `${axis} · ערב יום הולדת`;
+      const itemLabel = c.itemTextIncludes ?? "עוגה";
+      meta.lists.push({
+        action: "add",
+        list_type: "custom",
+        list_name: listName,
+        items: [{ שם: itemLabel }],
+        targets: [],
+      });
+      meta.lists.push({
+        action: "update",
+        list_type: c.hostListType ?? "tasks",
+        list_name: "",
+        items: [
+          {
+            item_id: "eval-item-host-bday",
+            "שם מטלה": "ערב יום הולדת",
+            linked_lists: [{ list_type: "custom", list_name: listName }],
+          },
+        ],
+        targets: [],
+      });
+      return "הוספתי וחיברתי";
     }
     case "lists_remove_item_ids":
       meta.lists.push({
@@ -286,6 +316,7 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
     case "weather_action":
       meta.weather = {
         place: c.placeIncludes ?? "תל אביב",
+        near: "",
         date: c.dateEqualsRelative?.trim()
           ? resolveRelativeDateLabel(c.dateEqualsRelative.trim())
           : c.requireDate
@@ -321,6 +352,8 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       meta.places = {
         query: c.queryIncludes ?? "מסעדה",
         place: c.placeIncludes ?? "פתח תקווה",
+        near: "",
+        geo_mode: "soft_place",
         intent: c.intent ?? "business",
         open_now: c.openNow ?? null,
         min_rating: c.minRatingAtLeast ?? null,

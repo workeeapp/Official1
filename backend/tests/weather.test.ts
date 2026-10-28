@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { parseWeatherAction } from "@workee/shared";
 import {
   conditionFromWmo,
   fetchWeatherFacts,
@@ -254,5 +255,123 @@ describe("resolveWeatherMessages", () => {
     expect(composeTip).not.toHaveBeenCalled();
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]).toMatch(/גלים/);
+  });
+});
+
+describe("weather shared pin (Stage A)", () => {
+  const now = new Date("2026-10-20T10:00:00+03:00");
+  const pin = { lat: 32.05, lng: 34.75 };
+
+  it("parseWeatherAction accepts near=speaker with empty place", () => {
+    const action = parseWeatherAction({
+      weather: { place: "", near: "speaker", aspects: ["summary"] },
+    });
+    expect(action).toEqual({
+      place: "",
+      near: "speaker",
+      date: "",
+      aspects: ["summary"],
+    });
+  });
+
+  it("parseWeatherAction keeps named place with near empty", () => {
+    const action = parseWeatherAction({
+      weather: { place: "חיפה", aspects: ["temp"] },
+    });
+    expect(action).toEqual({
+      place: "חיפה",
+      near: "",
+      date: "",
+      aspects: ["temp"],
+    });
+  });
+
+  it("near=speaker with coords skips geocode and forecasts at pin", async () => {
+    const fetchImpl = openMeteoFetchImpl();
+    const result = await resolveWeatherMessages({
+      place: "המיקום שלך",
+      nearSpeaker: true,
+      latitude: pin.lat,
+      longitude: pin.lng,
+      aspects: ["temp"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.usedPendingPin).toBe(true);
+    expect(result.needsLocation).toBe(false);
+    expect(result.body).toContain("המיקום שלך");
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("geocoding-api"))).toBe(false);
+    expect(urls.some((u) => u.includes("api.open-meteo.com/v1/forecast"))).toBe(
+      true,
+    );
+    const forecastUrl = urls.find((u) => u.includes("forecast"));
+    expect(forecastUrl).toContain(`latitude=${pin.lat}`);
+    expect(forecastUrl).toContain(`longitude=${pin.lng}`);
+  });
+
+  it("named city geocodes even when pin coords are also passed", async () => {
+    const fetchImpl = openMeteoFetchImpl();
+    const result = await resolveWeatherMessages({
+      place: "תל אביב",
+      nearSpeaker: false,
+      latitude: pin.lat,
+      longitude: pin.lng,
+      aspects: ["temp"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.usedPendingPin).toBe(false);
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("geocoding-api"))).toBe(true);
+    expect(result.body).toMatch(/Tel Aviv|תל אביב/i);
+  });
+
+  it("near=speaker without coords asks for pin and does not fetch", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveWeatherMessages({
+      place: "",
+      nearSpeaker: true,
+      aspects: ["summary"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.needsLocation).toBe(true);
+    expect(result.usedPendingPin).toBe(false);
+    expect(result.body).toMatch(/שלח מיקום/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects out-of-range pin coords (asks / no provider)", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveWeatherMessages({
+      place: "",
+      nearSpeaker: true,
+      latitude: 999,
+      longitude: 34,
+      aspects: ["summary"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.usedPendingPin).toBe(false);
+    expect(result.needsLocation).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("fetchWeatherFacts with coords skips geocode", async () => {
+    const fetchImpl = openMeteoFetchImpl();
+    const facts = await fetchWeatherFacts({
+      place: "המיקום שלך",
+      latitude: pin.lat,
+      longitude: pin.lng,
+      aspects: ["summary"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(facts).not.toBeNull();
+    expect(facts!.place.latitude).toBe(pin.lat);
+    expect(facts!.place.longitude).toBe(pin.lng);
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("geocoding-api"))).toBe(false);
   });
 });
