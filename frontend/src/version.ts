@@ -1,2 +1,2 @@
 /** App display version — bumped on every git push. */
-export const APP_VERSION = "1.22";
+export const APP_VERSION = "1.23";
