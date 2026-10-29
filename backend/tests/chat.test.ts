@@ -29,6 +29,7 @@ const {
   findFirst,
   findMany,
   teamFindUnique,
+  teamFindFirst,
   teamCreate,
   conversationFindUnique,
   conversationFindUniqueOrThrow,
@@ -60,6 +61,7 @@ const {
   findFirst: vi.fn(),
   findMany: vi.fn(),
   teamFindUnique: vi.fn(),
+  teamFindFirst: vi.fn(),
   teamCreate: vi.fn(),
   conversationFindUnique: vi.fn(),
   conversationFindUniqueOrThrow: vi.fn(),
@@ -140,6 +142,7 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     team: {
       findUnique: teamFindUnique,
+      findFirst: teamFindFirst,
       create: teamCreate,
     },
     employee: {
@@ -458,6 +461,13 @@ describe("chat API", () => {
     findFirst.mockReset();
     findMany.mockReset().mockResolvedValue([]);
     teamFindUnique.mockReset().mockResolvedValue({
+      id: teamId,
+      userId,
+      name: "Amit",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    teamFindFirst.mockReset().mockResolvedValue({
       id: teamId,
       userId,
       name: "Amit",
@@ -2586,5 +2596,271 @@ describe("chat API", () => {
     expect(response.body.reply).toContain("לפי המידע הזמין עכשיו");
     expect(response.body.reply).toContain("תור לשיננית");
     expect(response.body.reply).not.toContain("מטלות:");
+  });
+
+  // Free-text «הצג מטלות» is NOT allowlisted — depends on stubbed model show_dump=tasks.
+  // Proves production dump REPLACE on speaker book; does not prove live-model behavior.
+  it("free-text הצג מטלות + stubbed show_dump=tasks dumps speaker book — not Lucy follow-ups", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        const eid =
+          typeof where?.employeeId === "string" ? where.employeeId : "";
+        if (eid === lucyId) {
+          return [
+            {
+              id: "list-lucy-fu-free",
+              listType: "tasks",
+              name: "",
+              employeeId: lucyId,
+              scope: "personal",
+              employee: { id: lucyId, name: "לוסי", nickname: "לוסי" },
+              items: [
+                {
+                  id: "lucy-free-1",
+                  data: { "שם מטלה": "לבדוק עם עמית: אם קנית חלב?" },
+                  addedById: employeeId,
+                  visibleTo: [employeeId, lucyId],
+                  scope: "personal",
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        return [
+          {
+            id: "list-speaker-free",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "speaker-free-1",
+                data: { "שם מטלה": "לקנות חלב" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "speaker-free-2",
+                data: { "שם מטלה": "להתקשר לרופא" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "רגע" }],
+        metadata: { lists: [], show_dump: "tasks" },
+      }),
+      raw: { output_text: "free-text speaker tasks" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הצג מטלות", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לקנות חלב");
+    expect(response.body.reply).toContain("להתקשר לרופא");
+    expect(response.body.reply).not.toContain("לבדוק עם עמית");
+    expect(response.body.reply).not.toContain("רגע");
+  });
+
+  // Critical isolation: opaque «הצג רשימת מטלות» → speaker book (not Lucy follow-ups).
+  it("button הצג רשימת מטלות dumps speaker tasks — not Lucy follow-ups", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        const eid =
+          typeof where?.employeeId === "string" ? where.employeeId : "";
+        if (eid === lucyId) {
+          return [
+            {
+              id: "list-lucy-followups",
+              listType: "tasks",
+              name: "",
+              employeeId: lucyId,
+              scope: "personal",
+              employee: { id: lucyId, name: "לוסי", nickname: "לוסי" },
+              items: [
+                {
+                  id: "lucy-follow-1",
+                  data: { "שם מטלה": "לבדוק עם עמית: אם קנית חלב?" },
+                  addedById: employeeId,
+                  visibleTo: [employeeId, lucyId],
+                  scope: "personal",
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        return [
+          {
+            id: "list-speaker-tasks",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "speaker-task-1",
+                data: { "שם מטלה": "לקנות חלב" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+              {
+                id: "speaker-task-2",
+                data: { "שם מטלה": "להתקשר לרופא" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    // Model omits show_dump — engine synthesizes from opaque button command.
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "רגע" }],
+        metadata: { lists: [] },
+      }),
+      raw: { output_text: "button speaker tasks" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הצג רשימת מטלות", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לקנות חלב");
+    expect(response.body.reply).toContain("להתקשר לרופא");
+    expect(response.body.reply).not.toContain("לבדוק עם עמית");
+    expect(response.body.reply).not.toContain("רגע");
+  });
+
+  // Lucy follow-ups still work after an intervening automated Lucy bubble.
+  it("הצג מטלות של לוסי after intervening Lucy message dumps worker follow-ups", async () => {
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        const eid =
+          typeof where?.employeeId === "string" ? where.employeeId : "";
+        if (eid === lucyId) {
+          return [
+            {
+              id: "list-lucy-fu",
+              listType: "tasks",
+              name: "",
+              employeeId: lucyId,
+              scope: "personal",
+              employee: { id: lucyId, name: "לוסי", nickname: "לוסי" },
+              items: [
+                {
+                  id: "lucy-nudge-1",
+                  data: { "שם מטלה": "להזכיר לעמית לקנות חלב" },
+                  addedById: employeeId,
+                  visibleTo: [employeeId, lucyId],
+                  scope: "personal",
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        return [
+          {
+            id: "list-speaker-only",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "speaker-only-1",
+                data: { "שם מטלה": "להתקשר לרופא" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    // Turn 1: intervening automated Lucy text (no dump ACTION).
+    createResponse.mockResolvedValueOnce({
+      reply: JSON.stringify({
+        responses: [{ text: "קיבלתי, אעדכן אותך כשיהיה משהו." }],
+        metadata: { lists: [] },
+      }),
+      raw: { output_text: "intervening lucy" },
+    });
+    const intervening = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "תודה", employeeId });
+    expect(intervening.status).toBe(200);
+    expect(intervening.body.reply).toContain("קיבלתי");
+
+    // Turn 2: opaque worker-inventory button — engine synthesizes about=לוסי.
+    createResponse.mockResolvedValueOnce({
+      reply: JSON.stringify({
+        responses: [{ text: "רגע" }],
+        metadata: { lists: [] },
+      }),
+      raw: { output_text: "button lucy followups" },
+    });
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הצג מטלות של לוסי", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("להזכיר לעמית לקנות חלב");
+    expect(response.body.reply).not.toContain("להתקשר לרופא");
+    expect(response.body.reply).not.toContain("רגע");
   });
 });

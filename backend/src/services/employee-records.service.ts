@@ -3396,6 +3396,13 @@ async function applyListAction(
         }
         continue;
       }
+      const liveType = resolved.existing.list?.listType ?? "";
+      // Cross-kind id (shopping ACTION + tasks item_id) → miss; do not share/edit
+      // the wrong domain after «הצג קניות» / dump line N.
+      if (liveType && liveType !== resolvedAction.listType) {
+        shareMisses.push({ itemId: resolved.existing.id, reason: "missing" });
+        continue;
+      }
       existing = resolved.existing;
       rowOwnerId = resolved.ownerEmployeeId;
     }
@@ -3921,6 +3928,13 @@ async function resolveListActionAgainstSaved(
   const resolved = await resolveLiveListItemForMutate(itemId, employeeId);
   const list = resolved?.existing?.list ?? null;
   if (!list?.listType) {
+    return action;
+  }
+
+  // Remove: remap list_type to where the id lives (wrong shopping/tasks wording).
+  // Update: keep the model's list_type — apply refuses cross-kind ids so a
+  // shopping share cannot land on an unrelated tasks row (share-by-index bug).
+  if (action.action === "update") {
     return action;
   }
 

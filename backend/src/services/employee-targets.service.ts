@@ -1010,6 +1010,18 @@ export function planTargetedActions(input: {
           rest.push(raw);
           continue;
         }
+        // Update: refuse cross-kind item_id (shopping ACTION + tasks id) — do not
+        // remap list_type onto the live row (share-by-index wrong-entity bug).
+        // Remove still remaps via bucket.listType (wrong shopping/tasks wording).
+        // Semantic / show_dump retrieval across kinds is unrelated and untouched.
+        if (
+          list.action === "update" &&
+          isBuiltinItemIdRoute(ref.listType) &&
+          isBuiltinItemIdRoute(list.listType) &&
+          list.listType !== ref.listType
+        ) {
+          continue;
+        }
         const listName = ref.listType === "custom" ? ref.listName : "";
         const key = `${ref.ownerId}\u0000${ref.listType}\u0000${listName}`;
         const bucket = byOwner.get(key) ?? {
@@ -1063,6 +1075,13 @@ export function planTargetedActions(input: {
             },
           });
         }
+        if (rest.length === 0) {
+          continue;
+        }
+        list = { ...list, items: rest };
+      } else if (rest.length !== list.items.length) {
+        // Cross-kind update drops left nothing in byOwner — do not fall through
+        // with the original mismatched item_ids still on the ACTION.
         if (rest.length === 0) {
           continue;
         }

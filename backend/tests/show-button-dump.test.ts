@@ -3530,6 +3530,9 @@ describe("worker inventory tasks dump helpers", () => {
     expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
       kind: "tasks",
     });
+    expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
+    // Label-only «הצג מטלות» is NOT the opaque allowlist command (engine uses full command).
+    expect(mapShowButtonCommandToDump("הצג מטלות")).toBeNull();
     expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",
@@ -3547,7 +3550,17 @@ describe("worker inventory tasks dump helpers", () => {
       flatLayout: true,
     })!;
     expect(workerDump).toContain("לבדוק עם טל");
+    expect(workerDump).toContain("להזכיר לטל");
     expect(workerDump).not.toContain("להתקשר לרופא");
+    // Intervening automated Lucy text does not change button→kind mapping.
+    expect(
+      mapShowButtonCommandToDumpTarget(
+        "הצג מטלות של לוסי",
+      ),
+    ).toEqual({ kind: "tasks", about: "לוסי" });
+    expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
+      kind: "tasks",
+    });
   });
 
   it("stitches ממתינים after tasks; empty tasks string skips tasks block", () => {

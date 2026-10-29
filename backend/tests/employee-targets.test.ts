@@ -3280,6 +3280,31 @@ describe("employee targets", () => {
     ]);
   });
 
+  it("refuses shopping update that addresses a tasks item_id (no cross-kind remap)", () => {
+    // Share-by-index wrong-entity: shopping ACTION + tasks row must not remap
+    // list_type via itemOwners and co-share the task. Semantic cross-kind
+    // show_dump retrieval is a separate path and stays allowed.
+    const taskId = "7dc44b7b-3c12-4694-ac49-75b5d8d92f9d";
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      itemOwners: new Map([[taskId, ownerRef(amit.id, "tasks")]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: ["טל"],
+            items: [{ item_id: taskId }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(0);
+  });
+
   it("lifts item-nested targets onto list share visibility (model shape drift)", () => {
     // Live miss: lists.update with targets only inside items[] → SHARE_CLAIM_MISS.
     const birthdayId = "7dc44b7b-3c12-4694-ac49-75b5d8d92f9d";

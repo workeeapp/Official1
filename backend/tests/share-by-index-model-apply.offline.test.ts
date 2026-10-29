@@ -17,7 +17,10 @@ import {
   type ModelApplyProposeInput,
 } from "../src/eval/run-model-apply.js";
 import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
-import { resolveDumpLineId } from "../src/services/show-button-dump.js";
+import {
+  formatShowDumpWithLineMap,
+  resolveDumpLineId,
+} from "../src/services/show-button-dump.js";
 
 const DUMP_LINES = [
   {
@@ -343,5 +346,191 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
     expect(milkShared).toBe(true);
     expect(breadShared).toBe(false);
     expect(taskShared).toBe(false);
+  });
+
+  it("הצג קניות → שתף 1 עם מיכל shares only גלידה; unrelated task unchanged", async () => {
+    const shoppingSnap = {
+      lists: [
+        {
+          list_type: "shopping" as const,
+          list_name: "",
+          owner: "טל",
+          scope: "personal" as const,
+          items: [
+            { item_id: "eval-shop-icecream", "שם פריט": "גלידה", כמות: 1 },
+            { item_id: "eval-shop-bread2", "שם פריט": "לחם", כמות: 1 },
+          ],
+        },
+        {
+          list_type: "tasks" as const,
+          list_name: "",
+          owner: "טל",
+          scope: "personal" as const,
+          items: [
+            { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    const { text, lines } = formatShowDumpWithLineMap("shopping", shoppingSnap, {
+      viewerName: "טל",
+    });
+    expect(text).toContain("גלידה");
+    expect(lines[0]?.n).toBe(1);
+    expect(lines[0]?.kind).toBe("shopping");
+    expect(lines[0]?.id).toBe("eval-shop-icecream");
+    expect(resolveDumpLineId(lines, 1)).toBe("eval-shop-icecream");
+    expect(resolveDumpLineId(lines, 1)).not.toBe("eval-task-unrelated");
+
+    const result = await runModelApplyCase(
+      {
+        id: "SH-INDEX-GLIDA-MICHAL",
+        track: "MODEL_APPLY",
+        description:
+          "After shopping dump line 1 (גלידה), share with מיכל — only that shopping row",
+        setup: {
+          lists: [
+            {
+              list_id: "eval-list-shop-glida",
+              list_type: "shopping",
+              owner: "טל",
+              scope: "personal",
+              items: [
+                { item_id: "eval-shop-icecream", "שם פריט": "גלידה" },
+                { item_id: "eval-shop-bread2", "שם פריט": "לחם" },
+              ],
+            },
+            {
+              list_id: "eval-list-tasks-unrel",
+              list_type: "tasks",
+              owner: "טל",
+              scope: "personal",
+              items: [
+                { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+              ],
+            },
+          ],
+        },
+        turns: [
+          {
+            utterance: "שתף 1 עם מיכל",
+            constraints: [
+              { type: "lists_has_action", action: "update", listType: "shopping" },
+            ],
+          },
+        ],
+      },
+      () => ({
+        metadata: {
+          lists: [
+            {
+              action: "update",
+              list_type: "shopping",
+              list_name: "",
+              targets: ["טל", "מיכל"],
+              items: [{ item_id: resolveDumpLineId(lines, 1)! }],
+            },
+          ],
+        },
+        response: "שיתפתי את גלידה עם מיכל",
+      }),
+      { partners: ["מיכל"] },
+    );
+    expect(result.ok, result.failures.join("\n")).toBe(true);
+    expect(result.turns.some((t) => t.appliedViaProduction === true)).toBe(true);
+    const snap = result.turns.at(-1)?.snapshot;
+    expect(snap).toBeTruthy();
+
+    let iceCream: Record<string, unknown> | null = null;
+    let bread: Record<string, unknown> | null = null;
+    let task: Record<string, unknown> | null = null;
+    for (const list of snap!.lists) {
+      for (const item of list.items) {
+        if (list.list_type === "shopping" && JSON.stringify(item).includes("גלידה")) {
+          iceCream = item;
+        }
+        if (list.list_type === "shopping" && JSON.stringify(item).includes("לחם")) {
+          bread = item;
+        }
+        if (list.list_type === "tasks" && JSON.stringify(item).includes("לבדוק עם ערן")) {
+          task = item;
+        }
+      }
+    }
+    expect(iceCream).toBeTruthy();
+    expect(String(iceCream!.item_id ?? "")).toBeTruthy();
+    expect(Array.isArray(iceCream!.shared_with) && iceCream!.shared_with.includes("מיכל")).toBe(
+      true,
+    );
+    expect(Array.isArray(bread?.shared_with) && bread!.shared_with.includes("מיכל")).toBe(
+      false,
+    );
+    expect(Array.isArray(task?.shared_with) && task!.shared_with.includes("מיכל")).toBe(
+      false,
+    );
+  });
+
+  it("shopping share with a tasks item_id does not co-share the unrelated task", async () => {
+    const result = await runModelApplyCase(
+      {
+        id: "SH-INDEX-CROSS-KIND-MISS",
+        track: "MODEL_APPLY",
+        description:
+          "Wrong-entity defense: shopping ACTION + tasks item_id must not share the task",
+        setup: {
+          lists: [
+            {
+              list_id: "eval-list-shop-x",
+              list_type: "shopping",
+              owner: "טל",
+              scope: "personal",
+              items: [{ item_id: "eval-shop-icecream", "שם פריט": "גלידה" }],
+            },
+            {
+              list_id: "eval-list-tasks-y",
+              list_type: "tasks",
+              owner: "טל",
+              scope: "personal",
+              items: [
+                { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+              ],
+            },
+          ],
+        },
+        turns: [
+          {
+            utterance: "שתף 1 עם מיכל",
+            constraints: [{ type: "list_ops_empty" }],
+          },
+        ],
+      },
+      () => ({
+        metadata: {
+          lists: [
+            {
+              action: "update",
+              list_type: "shopping",
+              list_name: "",
+              targets: ["טל", "מיכל"],
+              // Deliberately wrong domain id (as if dump line mapped to a task).
+              items: [{ item_id: "eval-task-unrelated" }],
+            },
+          ],
+        },
+        response: "שיתפתי",
+      }),
+      { partners: ["מיכל"] },
+    );
+    expect(result.ok, result.failures.join("\n")).toBe(true);
+    const snap = result.turns.at(-1)?.snapshot;
+    expect(snap).toBeTruthy();
+    for (const list of snap!.lists) {
+      for (const item of list.items) {
+        const shared = item.shared_with;
+        const hasMichal = Array.isArray(shared) && shared.includes("מיכל");
+        expect(hasMichal).toBe(false);
+      }
+    }
   });
 });
