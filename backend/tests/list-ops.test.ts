@@ -153,6 +153,7 @@ describe("list ops", () => {
     ]);
 
     expect(result).toMatchObject({ applied: true, listLabel: "באגים" });
+    expect(result.attachmentsOnly).toBeUndefined();
     expect(listUpdate).toHaveBeenCalledWith({
       where: { id: listId },
       data: {
@@ -382,6 +383,9 @@ describe("list ops", () => {
     });
     const [result] = await run([op({ addAttachments: [attId] })]);
     expect(result.applied).toBe(true);
+    expect(result.attachmentsOnly).toBe(true);
+    expect(result.listType).toBe("custom");
+    expect(result.listName).toBe("בעיות");
     expect(result.attachmentOutcome?.linked).toBe(1);
     expect(formatListOpFallback([result])).toBe("עדכנתי את הרשימה «בעיות».");
   });

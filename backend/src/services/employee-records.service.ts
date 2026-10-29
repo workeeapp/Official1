@@ -3832,7 +3832,9 @@ async function applyListAction(
       itemKey: listName,
       itemLabel: listName,
       listName,
-      listShell: true,
+      // Overview «הצג רשימות» only for opening a new empty shell — not for
+      // list-level attach (list_attachment_ids) on an existing list.
+      listShell: Boolean(createdList),
     });
     // Notify partners only when opening a *new* empty shared list — not when
     // re-touching an existing one (that would look like "added a shared list"

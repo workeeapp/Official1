@@ -39,7 +39,17 @@ export interface ListOpResult {
   listId: string;
   /** Product label of the list (custom name, or קניות / מטלות / אנשי קשר). */
   listLabel: string;
+  /** When the list was loaded — for POST-MUTATE show nav keys. */
+  listType?: string;
+  /** Custom list name, or "" for builtins. */
+  listName?: string;
   applied: boolean;
+  /**
+   * True when alter_list only attached/detached files (no rename/columns/
+   * participants/emoji). Not a list-shell overview — speaker gets that list's
+   * «הצג רשימה», not «הצג רשימות».
+   */
+  attachmentsOnly?: boolean;
   /** delete_list on a built-in list clears its items instead of deleting it. */
   cleared?: boolean;
   refusal?: { reason: ListOpRefusalReason; detail?: string };
@@ -92,6 +102,12 @@ async function applyListOp(
     action: op.action,
     listId: op.listId,
     listLabel: list ? listLabel(list) : "",
+    ...(list
+      ? {
+          listType: list.listType,
+          listName: list.listType === "custom" ? list.name : "",
+        }
+      : {}),
     applied: false,
     notices: [],
     cancelledReminders: [],
@@ -138,6 +154,7 @@ async function applyListOp(
     return {
       ...base,
       applied,
+      attachmentsOnly: true,
       attachmentOutcome,
       ...(!applied
         ? { refusal: { reason: "empty" as const, detail: "attach_failed" } }

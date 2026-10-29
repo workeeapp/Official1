@@ -1638,9 +1638,10 @@ export type AppliedNavFilter = {
   listKeys: ReadonlySet<string>;
   filing: boolean;
   /**
-   * List-shell work only (create empty custom / alter_list / delete_list /
-   * listShell mutation). Item add|update|remove must NOT set this — those keep
-   * existing per-list LIST BUTTON only.
+   * List-shell work only (create empty custom / rename|columns|participants /
+   * delete_list / listShell mutation). Item add|update|remove and
+   * attachment-only alter_list must NOT set this — those keep per-list LIST
+   * BUTTON only («הצג רשימה», not «הצג רשימות»).
    */
   listsOverview?: boolean;
   /**
@@ -2682,6 +2683,31 @@ function plainSafetyNetListShowButtons(
       continue;
     }
     pushNavButton(buttons, seen, plain);
+  }
+
+  // Applied list keys without a matching metadata.lists mutate (e.g. list_ops
+  // attachment-only alter_list) still need the specific-list safety-net.
+  if (appliedNav) {
+    for (const listKey of appliedNav.listKeys) {
+      if (coveredListKeys.has(listKey)) {
+        continue;
+      }
+      if (
+        !listKeyNavEligible(
+          listKey,
+          metadata,
+          appliedNav,
+          skipSourceCommands,
+        )
+      ) {
+        continue;
+      }
+      const plain = plainButtonForListKey(listKey);
+      if (!plain) {
+        continue;
+      }
+      pushNavButton(buttons, seen, plain);
+    }
   }
 
   if (workerDisplay) {

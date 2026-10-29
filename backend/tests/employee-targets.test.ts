@@ -1927,6 +1927,34 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג רשימות", command: "הצג רשימות" }]);
   });
 
+  it("LIST-LEVEL ATTACH: applied list key without listsOverview → הצג רשימה only", () => {
+    expect(
+      ensureSpeakerShowButtons(emptyLlmMetadata(), [], {
+        appliedNav: {
+          listKeys: new Set(["custom:ציוד"]),
+          filing: false,
+          listsOverview: false,
+        },
+      }),
+    ).toEqual([{ label: "הצג רשימה", command: "הצג רשימת ציוד" }]);
+  });
+
+  it("LIST-LEVEL ATTACH: model הצג רשימות dropped when listsOverview false", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        emptyLlmMetadata(),
+        [{ label: "הצג רשימות", command: "הצג רשימות" }],
+        {
+          appliedNav: {
+            listKeys: new Set(["custom:ציוד"]),
+            filing: false,
+            listsOverview: false,
+          },
+        },
+      ),
+    ).toEqual([{ label: "הצג רשימה", command: "הצג רשימת ציוד" }]);
+  });
+
   it("LIST SHELL: item-only mutate must NOT get הצג רשימות", () => {
     const buttons = ensureSpeakerShowButtons(
       {
@@ -1973,7 +2001,7 @@ describe("employee targets", () => {
           listsOverview: false,
         },
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג קניות", command: "הצג רשימת קניות" }]);
     expect(isEngineOwnedListNavButton(overview)).toBe(true);
   });
 
