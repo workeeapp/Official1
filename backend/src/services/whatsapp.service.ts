@@ -20,6 +20,7 @@ import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
   sendWhatsAppButtons,
   beginWhatsAppTyping,
+  sendWhatsAppComposeUrl,
   sendWhatsAppMarkRead,
   sendWhatsAppNavigate,
   sendWhatsAppReaction,
@@ -40,6 +41,12 @@ import {
 } from "./whatsapp-outbound-memory.js";
 import { isKnownShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
+import {
+  bindInboundToInvite,
+  findPendingInviteByPhone,
+  findPendingInviteForGuest,
+  WHATSAPP_COMPOSE_LABEL,
+} from "./whatsapp-invite.service.js";
 import {
   applyWhatsAppWorkerSticky,
   clearWhatsAppWorkerSticky,
@@ -684,7 +691,43 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
   let stopTyping: () => void = () => {};
   try {
     await markWhatsAppInbound(from);
-    const speaker = await resolveWhatsAppSpeaker(from);
+    let speaker = await resolveWhatsAppSpeaker(from);
+    const inboundSpoken = batch
+      .map((message) => message.text.trim())
+      .filter(Boolean)
+      .join("\n");
+    const inviteBind = await bindInboundToInvite({
+      fromPhone: from,
+      inboundText: inboundSpoken,
+      currentUserId: speaker.userId,
+      currentEmployeeId: speaker.employeeId,
+    }).catch(() => null);
+    let pendingInvite = inviteBind?.context;
+    if (inviteBind) {
+      speaker = {
+        userId: inviteBind.userId,
+        employeeId: inviteBind.employeeId,
+      };
+    } else {
+      const sticky =
+        (await findPendingInviteForGuest(speaker.employeeId).catch(() => null)) ??
+        (await findPendingInviteByPhone(from).catch(() => null));
+      if (sticky) {
+        const rebound = await bindInboundToInvite({
+          fromPhone: from,
+          inboundText: `${sticky.token}\n`,
+          currentUserId: speaker.userId,
+          currentEmployeeId: speaker.employeeId,
+        }).catch(() => null);
+        if (rebound) {
+          speaker = {
+            userId: rebound.userId,
+            employeeId: rebound.employeeId,
+          };
+          pendingInvite = rebound.context;
+        }
+      }
+    }
     const employees = await listEmployeesForUser(speaker.userId);
     const speakerEmployee = employees.find((row) => row.id === speaker.employeeId);
     const digitals = digitalEmployees(employees);
@@ -759,6 +802,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
           ? formatWhatsAppReplyContext(replyToText, spoken)
           : spoken,
       ...(attachments ? { attachments } : {}),
+      ...(pendingInvite ? { pendingInvite } : {}),
     });
     const handoff =
       parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
@@ -817,6 +861,15 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
           { ignoreSession: true },
         );
         recordWhatsAppEvent("navigate_send", `result=${navigateResult}`);
+      }
+      if (bubble.whatsappComposeUrl) {
+        const composeResult = await sendWhatsAppComposeUrl(
+          from,
+          bubble.whatsappComposeUrl,
+          WHATSAPP_COMPOSE_LABEL,
+          { ignoreSession: true },
+        );
+        recordWhatsAppEvent("compose_send", `result=${composeResult}`);
       }
     }
     if (delivered && turn.outboundAttachmentIds.length > 0) {

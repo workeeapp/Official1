@@ -389,7 +389,9 @@ export function ChatPage() {
                     <ChatAttachments attachments={message.attachments} />
                   ) : null}
                   {message.author === "assistant" &&
-                  (message.buttons?.length || message.navigateAddress) ? (
+                  (message.buttons?.length ||
+                    message.navigateAddress ||
+                    message.whatsappComposeUrl) ? (
                     <div
                       data-testid="chat-reply-buttons"
                       className="mt-2 flex flex-wrap gap-2"
@@ -405,6 +407,19 @@ export function ChatPage() {
                           className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-primary/40 bg-surface px-3 shadow-sm transition-colors hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
                         >
                           <WazeIcon />
+                        </a>
+                      ) : null}
+                      {message.whatsappComposeUrl ? (
+                        <a
+                          data-testid="chat-whatsapp-compose-button"
+                          href={message.whatsappComposeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="שלח בוואטסאפ"
+                          title="שלח בוואטסאפ"
+                          className="min-h-11 rounded-xl border border-primary/40 bg-surface px-4 text-sm font-medium text-primary shadow-sm transition-colors hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        >
+                          שלח בוואטסאפ
                         </a>
                       ) : null}
                       {(message.buttons ?? []).map((button) => (

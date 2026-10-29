@@ -546,13 +546,21 @@ export function planScheduledJobDeliveries(input: {
   return deliveries;
 }
 
+export type PhoneRelayDelivery = {
+  phone: string;
+  text: string;
+  label: string;
+  expectsReply: boolean;
+  askSummary: string;
+};
+
 export function planPhoneRelays(
   messages: LlmMessageAction[],
   employees: PublicEmployee[],
   actorId?: string,
   contacts: SpeakerContact[] = [],
-): Array<{ phone: string; text: string; label: string }> {
-  const deliveries: Array<{ phone: string; text: string; label: string }> = [];
+): PhoneRelayDelivery[] {
+  const deliveries: PhoneRelayDelivery[] = [];
   const seen = new Set<string>();
 
   for (const action of messages) {
@@ -581,7 +589,7 @@ export function planPhoneRelays(
           continue;
         }
         const contact = matchContact(raw, contacts);
-        if (!contact) {
+        if (!contact?.phone) {
           continue;
         }
         phone = normalizePhoneDigits(contact.phone);
@@ -601,7 +609,13 @@ export function planPhoneRelays(
         continue;
       }
       seen.add(phone);
-      deliveries.push({ phone, text: action.text, label });
+      deliveries.push({
+        phone,
+        text: action.text,
+        label,
+        expectsReply: action.expectsReply !== false,
+        askSummary: (action.askSummary ?? "").trim(),
+      });
     }
   }
 

@@ -17,7 +17,8 @@ Ideas to consider later — not committed work. Captured from product discussion
 3. **Guest directory / labels**  
    Optional display name for guests (e.g. “מיכל”) without making them employees; clearer than nickname-on-אורח only.
 4. **Invite / share link**  
-   Share a list with a phone number → auto-create or attach guest, send WhatsApp notice.
+   Share a list with a phone number → auto-create or attach guest, send WhatsApp notice.  
+   *(Partial: cold check-with invite via personal `wa.me` + business token → לוסי-אורח register-first is shipped; list-share invite still future.)*
 5. **Guest chat scope knobs**  
    Account setting: shared-list Q&A only (today) vs allow limited chitchat vs block chat entirely (cost control).
 6. **Audit “who is this guest”**  

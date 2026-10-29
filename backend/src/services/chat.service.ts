@@ -36,6 +36,7 @@ import {
   type ReasoningEffort,
 } from "@workee/shared";
 import { loadLlmConfig, type LlmConfig, type LlmJsonSchemaFormat } from "../config/llm.js";
+import { getEnv } from "../config/env.js";
 import { ValidationError } from "../utils/errors.js";
 import { prisma } from "../database/prisma.js";
 import {
@@ -159,6 +160,15 @@ import {
 } from "./contact.service.js";
 import { registerGuestMember } from "./guest-register.service.js";
 import {
+  consumeWhatsAppInvite,
+  createWhatsAppInvite,
+  findPendingInviteByPhone,
+  findPendingInviteForGuest,
+  formatPendingInviteContext,
+  saveContactReplyButton,
+  type PendingInviteContext,
+} from "./whatsapp-invite.service.js";
+import {
   collectAppliedTipOps,
   formatAvailableTipsContext,
   resolveAndRecordTipsForTurn,
@@ -170,10 +180,12 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   applyLiveDomainReply,
+  sendWhatsAppText,
   setEngineButtons,
   setEngineNavigateAddress,
   setEngineResponse,
   setEngineSpokenBubbles,
+  setEngineWhatsappComposeUrl,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
 import { singleTaskShowButtons } from "./outbound-text.js";
@@ -469,6 +481,9 @@ function toThreadMessage(row: ChatMessageRow): ChatThreadMessage {
     ...(actions.length > 0 ? { actions } : {}),
     ...(buttons.length > 0 ? { buttons } : {}),
     ...(row.navigateAddress ? { navigateAddress: row.navigateAddress } : {}),
+    ...(row.whatsappComposeUrl
+      ? { whatsappComposeUrl: row.whatsappComposeUrl }
+      : {}),
     ...(row.showIcon ? { showIcon: row.showIcon } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
   };
@@ -861,9 +876,10 @@ function workerTargetingInstructions(
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
     "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping / lists.targets / filing.targets / directory.targets. NEVER ask for their number again. Registered Workee members in the phone book share and assign the same way as Known employees (any team) — guests stay view-only.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person, ASK ????? ?? ?name? ???? ???????? ???? Empty directory and empty messages/reminders while asking.",
-    "Yes ? same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER ? do not ask again what to send. No ? directory []; still emit messages or reminders using the phone digits if the words were already given.",
-    "Only ask ?? ???? ????? after a directory save when they never dictated words.",
+    "After they give digits for an unknown person: offer to save with a tap button on that bubble — label «שמור באנשי קשר», command «שמור את {name} באנשי הקשר {digits}» (or כן/לא). Empty directory and empty messages/reminders while asking.",
+    "Yes / שמור באנשי קשר command → same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; still emit messages or reminders using the phone digits if the words were already given.",
+    "COLD WHATSAPP: when the engine cannot free-form WhatsApp (no 24h session), it replaces a false «שלחתי» with a draft + «שלח בוואטסאפ» for the speaker to forward — do not invent that UX yourself; do not claim business WhatsApp was sent.",
+    "Only ask מה לשלוח after a directory save when they never dictated words.",
     "Phone book / ???? ??? with name+phone already given ? directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, ask with that action empty; next turn emit it complete from your previous turn plus the answer ? never ?? ????? to the short fill-in.",
     "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body ? even without dash/colon/quotes. ????? ??? ?????? / ????? ????? ????? ?????? ????? / ????? ????? ???? ???? ???? ? messages NOW; confirm with ?? ?????? ??? = exact messages.text; do NOT ask ?? ???? ????? or ??? ?? ????? ?? ????? ?????. Exception ? ANSWER BEATS DICTATED SEND: if OPEN_JOBS has a matching subject check and ??????/????? (??X) ??? / ?????? ???? means answering that check ? jobs.answer only, not messages. Only ask what to send when a recipient is named but no message content follows; you may offer ????. While asking: messages=[]. Next short reply (??? / ?? ?????? / ?? ?????) ? send that text to the recipient you asked about ? never ask again; confirm with exact quote. Cancel (?? / ??? / ?? ????? / cancel) ? empty arrays; do not use cancel words as the message.",
     `Example delayed send: \"????? ????? ???? ??? ??? ???? ?? ????\" ? messages [], lists tasks add on ${workerName} ????? ????? ?????, lists add reminders in 3600 ping:[\"????\"] text \"?? ???? ?? ????\"; response ????? ????? ???? ??? ?? ?????? ??? ???? ?? ??????.`,
@@ -1102,6 +1118,8 @@ async function saveTurn(input: {
           ? toJsonValue(parsed.responseBubbles[0].buttons)
           : Prisma.JsonNull,
         navigateAddress: parsed.responseBubbles[0]?.navigateAddress ?? null,
+        whatsappComposeUrl:
+          parsed.responseBubbles[0]?.whatsappComposeUrl ?? null,
         raw: toJsonValue(packStoredLlmRaw(safeRequest, safeRaw)),
         createdAt: assistantAt,
       },
@@ -1134,6 +1152,7 @@ async function syncTurnReplies(input: {
   const [first, ...rest] = bubbles;
   const firstButtons = first?.buttons ?? [];
   const firstNavigate = first?.navigateAddress ?? null;
+  const firstComposeUrl = first?.whatsappComposeUrl ?? null;
   const showIcon = input.showIcon?.trim() || null;
   if (showIcon) {
     await prisma.chatMessage.update({
@@ -1173,6 +1192,7 @@ async function syncTurnReplies(input: {
       buttons:
         firstButtons.length > 0 ? toJsonValue(firstButtons) : Prisma.JsonNull,
       navigateAddress: firstNavigate,
+      whatsappComposeUrl: firstComposeUrl,
       ...(input.attachments?.length
         ? { attachments: toJsonValue(input.attachments) }
         : {}),
@@ -1191,6 +1211,7 @@ async function syncTurnReplies(input: {
       buttons:
         entryButtons.length > 0 ? toJsonValue(entryButtons) : Prisma.JsonNull,
       navigateAddress: bubble.navigateAddress ?? null,
+      whatsappComposeUrl: bubble.whatsappComposeUrl ?? null,
       createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
     };
   });
@@ -1825,6 +1846,8 @@ export async function sendChatMessage(input: {
   consult?: { fromWorkerId: string; fromWorkerName: string };
   /** Files that arrived with this message (stored already). */
   attachments?: TurnAttachments;
+  /** Cold invite context for לוסי-אורח (register-first check-with). */
+  pendingInvite?: PendingInviteContext;
 }): Promise<{
   reply: string;
   raw: unknown;
@@ -1969,6 +1992,9 @@ export async function sendChatMessage(input: {
     guestSpeaker
       ? ""
       : formatPendingLocationContext(getPendingLocation(input.employeeId)),
+    input.pendingInvite
+      ? formatPendingInviteContext(input.pendingInvite)
+      : "",
     (await withoutFailingTurn("tips_context_failed", () =>
       formatAvailableTipsContext({
         userId: input.userId,
@@ -1988,11 +2014,19 @@ export async function sendChatMessage(input: {
     ? [
         "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
         "Never say אני אורח / אני גם אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
-        "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender זכר→male / נקבה→female. Surname optional if they volunteer it. FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password — stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
+        input.pendingInvite
+          ? [
+              "PENDING_INVITE is active this turn.",
+              `First message: tell them ${input.pendingInvite.askerName} wants to know: ${input.pendingInvite.askSummary}.`,
+              "Then require registration before continuing that check: collect ONLY (1) first name (2) gender זכר→male / נקבה→female. Surname optional if volunteered.",
+              "FORBIDDEN until metadata.register succeeds: answering the ask substance, messaging the asker, or claiming the check is done.",
+            ].join(" ")
+          : "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender זכר→male / נקבה→female. Surname optional if they volunteer it.",
+        "FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password — stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
         "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
-        "Off-topic outside shared lists or registration ? guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
-        "Add/update/delete/buy/remind/send while guest ? response: ????? ?? ????? ??????? ?????? ???? ? ??? ?????? ?? ?????. ???? ?????? ??? ???? ????? ????.? Empty mutate arrays.",
+        "Off-topic outside shared lists or registration — guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
+        "Add/update/delete/buy/remind/send while guest — say they can only view shared lists until they register. Empty mutate arrays.",
         "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
       ].join("\n")
     : "";
@@ -2392,6 +2426,9 @@ export async function sendChatMessage(input: {
         ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
         : "";
     let registerNotice = "";
+    let pendingInviteContinue: Awaited<
+      ReturnType<typeof continueInviteAfterRegister>
+    > | null = null;
     if (guestSpeaker && metadata.register) {
       if (!isGuestLucy(digital)) {
         registerNotice = "";
@@ -2408,6 +2445,19 @@ export async function sendChatMessage(input: {
             "guest_register",
             `ok employee=${registerResult.employeeId.slice(0, 8)}`,
           );
+          pendingInviteContinue = await withoutFailingTurn(
+            "invite_continue_failed",
+            () =>
+              continueInviteAfterRegister({
+                hostUserId: input.userId,
+                guestEmployeeId: registerResult.employeeId,
+                guestDisplayName: registerResult.displayName,
+                guestPhone: employee.phone,
+              }),
+          );
+          if (pendingInviteContinue?.guestAck) {
+            registerNotice = `${registerNotice}\n${pendingInviteContinue.guestAck}`;
+          }
         } else if (registerResult.reason === "invalid_fields") {
           registerNotice =
             "חסר שם או מגדר (זכר/נקבה) להשלמת ההרשמה — אשלים כשיהיו לי שניהם.";
@@ -2579,6 +2629,24 @@ export async function sendChatMessage(input: {
     const savedLabels = new Map(
       listMutations.map((row) => [row.itemId, row.itemLabel] as const),
     );
+    if (pendingInviteContinue?.askerNotice) {
+      notifications.push(
+        await pushRelayMessage({
+          userId: pendingInviteContinue.askerUserId,
+          employeeId: pendingInviteContinue.askerEmployeeId,
+          digitalEmployeeId: pendingInviteContinue.digitalEmployeeId,
+          speaker: assistantSpeaker,
+          text: pendingInviteContinue.askerNotice,
+        }),
+      );
+      if (pendingInviteContinue.askerPhone) {
+        await sendWhatsAppText(
+          pendingInviteContinue.askerPhone,
+          pendingInviteContinue.askerNotice,
+          { ignoreSession: true },
+        ).catch(() => "failed" as const);
+      }
+    }
 
     // Prefer plan notifications (named shared lists include partner context + full list payload).
     for (const notification of plan.notifications) {
@@ -2684,6 +2752,12 @@ export async function sendChatMessage(input: {
         ),
         text: row.text,
       }),
+      expectsReply:
+        "expectsReply" in row ? Boolean(row.expectsReply) : true,
+      askSummary:
+        "askSummary" in row && typeof row.askSummary === "string"
+          ? row.askSummary
+          : "",
     }));
     // A question to another digital worker is a job like any other, but that worker
     // answers now: open the job, run its turn, report, close. Consulted workers never
@@ -2851,9 +2925,42 @@ export async function sendChatMessage(input: {
     const waPhones = await deliverWhatsAppPhones(attributedPhones);
     // Partner shared-list notify skips must not erase the speaker's spoken reply.
     // replaceSpoken is only for intentional outbound sends the model claimed to deliver.
-    const outboundSkips = [...waRelays.skips, ...waPhones.skips];
+    let outboundSkips = [...waRelays.skips, ...waPhones.skips];
+    let inviteComposeUrl: string | null = null;
+    let inviteNotice = "";
+    let inviteSaveContactButton: { label: string; command: string } | null =
+      null;
+    if (!guestSpeaker) {
+      const inviteBuilt = await withoutFailingTurn("cold_invite_failed", () =>
+        buildColdInvitesForNoSession({
+          userId: input.userId,
+          asker: employee,
+          digitalId: digital.id,
+          askerName: actorName,
+          phoneRelays: attributedPhones,
+          phoneSkips: waPhones.skips,
+          relaySkips: waRelays.skips,
+          relays: attributedRelays,
+          messages: metadata.messages ?? [],
+          contacts: refreshedContacts,
+          employees: [...employees, ...externalPartners],
+        }),
+      );
+      if (inviteBuilt) {
+        inviteNotice = inviteBuilt.notice;
+        inviteComposeUrl = inviteBuilt.composeUrl;
+        inviteSaveContactButton = inviteBuilt.saveContactButton;
+        const invitedLabels = new Set(inviteBuilt.labels);
+        outboundSkips = outboundSkips.filter(
+          (skip) =>
+            !(skip.reason === "no_session" && invitedLabels.has(skip.label)),
+        );
+      }
+    }
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
-    const whatsappNotice = formatWhatsAppSkipNotice(skips);
+    const whatsappNotice = [inviteNotice, formatWhatsAppSkipNotice(skips)]
+      .filter(Boolean)
+      .join("\n\n");
     const missingSend = formatMissingSendTextNotice(metadata.messages ?? []);
     const scheduleSkipNotice = guestSpeaker
       ? ""
@@ -2862,6 +2969,7 @@ export async function sendChatMessage(input: {
           scheduledJobCount: scheduledJobDeliveryCount,
         });
     const deliveryFailed =
+      inviteNotice.length > 0 ||
       formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
       scheduleSkipNotice.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
@@ -4048,7 +4156,7 @@ export async function sendChatMessage(input: {
       .filter(Boolean)
       .join("\n\n");
     const replaceSpoken = deliveryFailed;
-    const reply = replaceSpoken
+    let reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
           notice: [...consultAnswers, notice, ...tipTurn.texts]
@@ -4062,6 +4170,21 @@ export async function sendChatMessage(input: {
             (current, extra) => appendEngineNotice(current, extra),
             workingReply,
           );
+    if (inviteComposeUrl) {
+      reply = setEngineWhatsappComposeUrl(reply, inviteComposeUrl);
+    }
+    if (inviteSaveContactButton) {
+      const existingButtons = parseLlmReply(reply).buttons ?? [];
+      const already = existingButtons.some(
+        (button) => button.command === inviteSaveContactButton!.command,
+      );
+      if (!already) {
+        reply = setEngineButtons(reply, [
+          ...existingButtons,
+          inviteSaveContactButton,
+        ]);
+      }
+    }
     const outboundAttachments = guestSpeaker
       ? []
       : ((await withoutFailingTurn("attachments_send_failed", () =>
@@ -4148,6 +4271,244 @@ export async function sendChatMessage(input: {
     }
     throw new ServiceUnavailableError();
   }
+}
+
+async function buildColdInvitesForNoSession(input: {
+  userId: string;
+  asker: PublicEmployee;
+  digitalId: string;
+  askerName: string;
+  phoneRelays: Array<{
+    phone: string;
+    text: string;
+    label?: string;
+    expectsReply?: boolean;
+    askSummary?: string;
+  }>;
+  phoneSkips: WhatsAppDeliverySkip[];
+  relaySkips: WhatsAppDeliverySkip[];
+  relays: Array<{
+    target: PublicEmployee;
+    text: string;
+    expectsReply?: boolean;
+    askSummary?: string;
+  }>;
+  messages: Array<{
+    expectsReply?: boolean;
+    askSummary?: string;
+    text: string;
+    targets: string[];
+  }>;
+  contacts: Array<{ name: string; phone: string | null }>;
+  employees: PublicEmployee[];
+}): Promise<{
+  notice: string;
+  composeUrl: string;
+  labels: string[];
+  saveContactButton: { label: string; command: string } | null;
+} | null> {
+  const { hasWhatsAppSession } = await import("./whatsapp-window.js");
+  const env = getEnv();
+  const graphReady =
+    env.NODE_ENV !== "test" && Boolean(env.WHATSAPP_ACCESS_TOKEN?.trim());
+
+  type Candidate = {
+    phone: string;
+    label: string;
+    askSummary: string;
+    expectsReply: boolean;
+  };
+  const candidates: Candidate[] = [];
+  const seen = new Set<string>();
+
+  async function needsColdInvite(
+    phone: string,
+    label: string,
+    skips: WhatsAppDeliverySkip[],
+  ): Promise<boolean> {
+    const noSessionSkip = skips.some(
+      (skip) => skip.label === label && skip.reason === "no_session",
+    );
+    if (noSessionSkip) {
+      return true;
+    }
+    const sessionOpen = await hasWhatsAppSession(phone);
+    if (sessionOpen) {
+      return false;
+    }
+    // No open 24h window: invite even without Graph / without DISPLAY_PHONE
+    // (Amit→recipient wa.me only needs the recipient digits).
+    if (!graphReady) {
+      return true;
+    }
+    // Graph ready but no skip listed — still invite when session is closed.
+    return true;
+  }
+
+  for (const phone of input.phoneRelays) {
+    const label = phone.label?.trim() || phone.phone;
+    if (seen.has(phone.phone)) {
+      continue;
+    }
+    if (!(await needsColdInvite(phone.phone, label, input.phoneSkips))) {
+      continue;
+    }
+    seen.add(phone.phone);
+    const matchedMessage = input.messages.find((row) =>
+      row.targets.some((t) => t.includes(label) || t.includes(phone.phone)),
+    );
+    const expectsReply =
+      phone.expectsReply ?? matchedMessage?.expectsReply !== false;
+    const askSummary =
+      phone.askSummary?.trim() ||
+      matchedMessage?.askSummary?.trim() ||
+      phone.text;
+    candidates.push({
+      phone: phone.phone,
+      label,
+      askSummary,
+      expectsReply,
+    });
+  }
+
+  for (const relay of input.relays) {
+    if (!relay.target.phone) {
+      continue;
+    }
+    const label = relay.target.nickname?.trim() || relay.target.name;
+    const phone = relay.target.phone;
+    if (seen.has(phone)) {
+      continue;
+    }
+    if (!(await needsColdInvite(phone, label, input.relaySkips))) {
+      continue;
+    }
+    seen.add(phone);
+    candidates.push({
+      phone,
+      label,
+      askSummary: relay.askSummary?.trim() || relay.text,
+      expectsReply: relay.expectsReply !== false,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const primary = candidates[0]!;
+  const created = await createWhatsAppInvite({
+    userId: input.userId,
+    askerEmployeeId: input.asker.id,
+    digitalEmployeeId: input.digitalId,
+    askerName: input.askerName,
+    recipientPhone: primary.phone,
+    recipientLabel: primary.label,
+    askSummary: primary.askSummary,
+    expectsReply: primary.expectsReply,
+  });
+  if (!created) {
+    return null;
+  }
+  for (const extra of candidates.slice(1)) {
+    await createWhatsAppInvite({
+      userId: input.userId,
+      askerEmployeeId: input.asker.id,
+      digitalEmployeeId: input.digitalId,
+      askerName: input.askerName,
+      recipientPhone: extra.phone,
+      recipientLabel: extra.label,
+      askSummary: extra.askSummary,
+      expectsReply: extra.expectsReply,
+    });
+  }
+
+  const inContacts = input.contacts.some(
+    (contact) =>
+      contact.phone && phonesMatch(contact.phone, primary.phone),
+  );
+  const isEmployee = input.employees.some(
+    (row) =>
+      row.id !== input.asker.id &&
+      row.phone &&
+      phonesMatch(row.phone, primary.phone),
+  );
+  const saveContactButton =
+    !inContacts && !isEmployee
+      ? saveContactReplyButton(primary.label, primary.phone)
+      : null;
+
+  return {
+    notice: created.notice,
+    composeUrl: created.composeUrl,
+    labels: candidates.map((row) => row.label),
+    saveContactButton,
+  };
+}
+
+async function continueInviteAfterRegister(input: {
+  hostUserId: string;
+  guestEmployeeId: string;
+  guestDisplayName: string;
+  guestPhone: string | null | undefined;
+}): Promise<{
+  askerUserId: string;
+  askerEmployeeId: string;
+  askerPhone: string | null;
+  digitalEmployeeId: string;
+  askerNotice: string;
+  guestAck: string;
+} | null> {
+  let invite =
+    (await findPendingInviteForGuest(input.guestEmployeeId)) ??
+    (input.guestPhone
+      ? await findPendingInviteByPhone(input.guestPhone)
+      : null);
+  if (!invite) {
+    return null;
+  }
+  await consumeWhatsAppInvite(invite.id);
+
+  const asker = await prisma.employee.findUnique({
+    where: { id: invite.askerEmployeeId },
+  });
+  if (!asker) {
+    return null;
+  }
+  const askerName = asker.nickname?.trim() || asker.name;
+  const ask = invite.askSummary;
+  const subjectName = input.guestDisplayName;
+
+  await createJobsFromRelays({
+    userId: invite.userId,
+    digitalEmployeeId: invite.digitalEmployeeId,
+    asker: { id: asker.id, name: askerName },
+    deliveries: [
+      {
+        subjectId: input.guestEmployeeId,
+        subjectName,
+        text: ask,
+        ask,
+        urgency: "normal",
+      },
+    ],
+  });
+
+  if (input.guestPhone) {
+    const askText = `${askerName} שאל: ${ask}`;
+    await sendWhatsAppText(input.guestPhone, askText, {
+      ignoreSession: true,
+    }).catch(() => "failed" as const);
+  }
+
+  return {
+    askerUserId: invite.userId,
+    askerEmployeeId: invite.askerEmployeeId,
+    askerPhone: asker.phone,
+    digitalEmployeeId: invite.digitalEmployeeId,
+    askerNotice: `${subjectName} נרשם/ה בוורקי. שאלתי: ${ask} — אעדכן כשיענה/תענה.`,
+    guestAck: `עכשיו אפשר להמשיך: ${ask}`,
+  };
 }
 
 async function listSharedCustomListsForActor(

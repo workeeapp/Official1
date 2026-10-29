@@ -131,7 +131,7 @@ WhatsApp is a channel into `sendChatMessage`, not a second bot. Inbound texts hi
 
 On WhatsApp, asking to talk to a worker is `metadata.handoff`. A raw phone in `messages.targets` or `reminders.ping` is a WhatsApp destination.
 
-Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound text is skipped unless that number wrote to the business in the last 24 hours (Meta session window). Replies to someone who just wrote always send.
+Inbound messages store `lastInboundAt` (`WhatsAppInbounds`). Free-form outbound text is skipped unless that number wrote to the business in the last 24 hours (Meta session window). Replies to someone who just wrote always send. For any NOW `messages` send/check to a cold number, the engine opens a **WhatsAppInvite**: the asker gets a draft + **שלח בוואטסאפ** (`wa.me` compose) and, if the phone is not in contacts, **שמור באנשי קשר**. Optional `WHATSAPP_DISPLAY_PHONE` adds a business link (`WRK-INV-…`) so the recipient opens לוסי-אורח on the asker's account, registers (name+gender), then the check continues.
 
 Two laptops can run the web app on different branches with their own Postgres. The Meta webhook is **one** URL (`wa.workee.site`), so only one machine’s tunnel should be up for WhatsApp.
 

@@ -21,6 +21,8 @@ export interface LlmSpokenBubble {
   text: string;
   buttons?: LlmReplyButton[];
   navigateAddress?: string;
+  /** Personal wa.me URL so the speaker can forward a cold invite. */
+  whatsappComposeUrl?: string;
 }
 
 export interface ParsedLlmMessage {
@@ -39,6 +41,8 @@ export interface ParsedLlmMessage {
   buttons?: LlmReplyButton[];
   /** First non-empty navigate across bubbles (legacy readers). */
   navigateAddress?: string;
+  /** First non-empty personal WhatsApp compose URL across bubbles. */
+  whatsappComposeUrl?: string;
   /** Emoji from metadata.show_icon — attached to the speaker's message. */
   showIcon?: string;
 }
@@ -47,6 +51,7 @@ export const REPLY_BUTTON_MAX = 3;
 export const REPLY_BUTTON_LABEL_MAX = 20;
 export const REPLY_BUTTON_COMMAND_MAX = 256;
 export const NAVIGATE_ADDRESS_MAX = 300;
+export const WHATSAPP_COMPOSE_URL_MAX = 2000;
 export const SHOW_ICON_MAX = 32;
 
 export type LlmListType = "shopping" | "contacts" | "tasks" | "custom";
@@ -4863,7 +4868,11 @@ function entryDeclaresBubbleChrome(entry: unknown): boolean {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     return false;
   }
-  return "buttons" in entry || "navigate_address" in entry;
+  return (
+    "buttons" in entry ||
+    "navigate_address" in entry ||
+    "whatsapp_compose_url" in entry
+  );
 }
 
 function parseBubbleButtons(raw: unknown): LlmReplyButton[] {
@@ -4876,6 +4885,17 @@ function parseBubbleNavigate(raw: unknown): string | undefined {
   }
   const address = raw.trim().slice(0, NAVIGATE_ADDRESS_MAX).trim();
   return address || undefined;
+}
+
+function parseBubbleComposeUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const url = raw.trim().slice(0, WHATSAPP_COMPOSE_URL_MAX).trim();
+  if (!url || !/^https:\/\/wa\.me\//i.test(url)) {
+    return undefined;
+  }
+  return url;
 }
 
 /**
@@ -4905,6 +4925,7 @@ function normalizeSpokenBubble(entry: unknown): LlmSpokenBubble | null {
       text?: unknown;
       buttons?: unknown;
       navigate_address?: unknown;
+      whatsapp_compose_url?: unknown;
     };
     const text =
       typeof record.text === "string" ? record.text.trim() : "";
@@ -4922,6 +4943,12 @@ function normalizeSpokenBubble(entry: unknown): LlmSpokenBubble | null {
       const address = parseBubbleNavigate(record.navigate_address);
       if (address) {
         bubble.navigateAddress = address;
+      }
+    }
+    if ("whatsapp_compose_url" in record) {
+      const composeUrl = parseBubbleComposeUrl(record.whatsapp_compose_url);
+      if (composeUrl) {
+        bubble.whatsappComposeUrl = composeUrl;
       }
     }
     return bubble;
@@ -4991,7 +5018,8 @@ export function serializeSpokenBubbles(
   const anyChrome = bubbles.some(
     (bubble) =>
       (bubble.buttons && bubble.buttons.length > 0) ||
-      Boolean(bubble.navigateAddress),
+      Boolean(bubble.navigateAddress) ||
+      Boolean(bubble.whatsappComposeUrl),
   );
   if (!anyChrome) {
     return bubbles.map((bubble) => bubble.text);
@@ -5009,6 +5037,9 @@ export function serializeSpokenBubbles(
     }
     if (bubble.navigateAddress) {
       entry.navigate_address = bubble.navigateAddress;
+    }
+    if (bubble.whatsappComposeUrl) {
+      entry.whatsapp_compose_url = bubble.whatsappComposeUrl;
     }
     return entry;
   });
@@ -5038,6 +5069,15 @@ function firstBubbleNavigate(bubbles: LlmSpokenBubble[]): string | undefined {
   return undefined;
 }
 
+function firstBubbleComposeUrl(bubbles: LlmSpokenBubble[]): string | undefined {
+  for (const bubble of bubbles) {
+    if (bubble.whatsappComposeUrl) {
+      return bubble.whatsappComposeUrl;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Bind turn-level metadata.buttons / navigate_address onto bubbles when the
  * model used plain string responses (legacy). Object entries that already
@@ -5048,6 +5088,7 @@ export function bindTurnChromeToBubbles(
   options: {
     turnButtons: LlmReplyButton[];
     turnNavigate?: string;
+    turnComposeUrl?: string;
     /** True when at least one raw responses entry declared buttons/navigate. */
     perBubbleChrome: boolean;
   },
@@ -5071,6 +5112,17 @@ export function bindTurnChromeToBubbles(
     next = next.map((bubble, index) =>
       index === 0
         ? { ...bubble, navigateAddress: options.turnNavigate }
+        : bubble,
+    );
+  }
+  if (
+    options.turnComposeUrl &&
+    !firstBubbleComposeUrl(next) &&
+    next.length > 0
+  ) {
+    next = next.map((bubble, index) =>
+      index === 0
+        ? { ...bubble, whatsappComposeUrl: options.turnComposeUrl }
         : bubble,
     );
   }
@@ -5250,14 +5302,17 @@ export function parseLlmReply(text: string): ParsedLlmMessage {
 
   const turnButtons = toReplyButtons(payload.rawMetadata);
   const turnNavigate = toNavigateAddress(payload.rawMetadata);
+  const turnComposeUrl = toWhatsappComposeUrl(payload.rawMetadata);
   const showIcon = toShowIcon(payload.rawMetadata);
   const responseBubbles = bindTurnChromeToBubbles(payload.responseBubbles, {
     turnButtons,
     ...(turnNavigate ? { turnNavigate } : {}),
+    ...(turnComposeUrl ? { turnComposeUrl } : {}),
     perBubbleChrome: payload.perBubbleChrome,
   });
   const buttons = flattenBubbleButtons(responseBubbles);
   const navigateAddress = firstBubbleNavigate(responseBubbles);
+  const whatsappComposeUrl = firstBubbleComposeUrl(responseBubbles);
   return {
     response: joinSpokenResponses(responseBubbles.map((bubble) => bubble.text)),
     responses: responseBubbles.map((bubble) => bubble.text),
@@ -5265,6 +5320,7 @@ export function parseLlmReply(text: string): ParsedLlmMessage {
     actions: collectActionDescriptions(payload.rawMetadata),
     ...(buttons.length > 0 ? { buttons } : {}),
     ...(navigateAddress ? { navigateAddress } : {}),
+    ...(whatsappComposeUrl ? { whatsappComposeUrl } : {}),
     ...(showIcon ? { showIcon } : {}),
   };
 }
@@ -5279,6 +5335,15 @@ export function toNavigateAddress(rawMetadata: unknown): string | undefined {
   }
   const address = raw.trim().slice(0, NAVIGATE_ADDRESS_MAX).trim();
   return address || undefined;
+}
+
+export function toWhatsappComposeUrl(rawMetadata: unknown): string | undefined {
+  if (!rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+    return undefined;
+  }
+  const raw = (rawMetadata as { whatsapp_compose_url?: unknown })
+    .whatsapp_compose_url;
+  return parseBubbleComposeUrl(raw);
 }
 
 export function toShowIcon(rawMetadata: unknown): string | undefined {

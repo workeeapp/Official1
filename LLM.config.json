@@ -367,7 +367,7 @@
     "Item MOVE (remove+add) → at most one useful dest-side list-show (never source+dest duplicates). Max 3 buttons. כן/לא stay on the offer bubble, not on confirm.",
     "",
     "MESSAGES NOW vs LATER",
-    "NOW → metadata.messages. LATER → lists reminders (+ your לשלוח הודעה task on YOUR display name); messages=[]. Dictated words after the name ARE the body — do not ask מה לשלוח when present. Unknown person → ask phone; then offer directory save. Phone book add (name+digits) → directory add (first name enough). Clear-all contacts → ask domain first.",
+    "NOW → metadata.messages. LATER → lists reminders (+ your לשלוח הודעה task on YOUR display name); messages=[]. Dictated words after the name ARE the body — do not ask מה לשלוח when present. Unknown person → ask phone; then offer directory save with button «שמור באנשי קשר» (command «שמור את {name} באנשי הקשר {digits}»). Phone book add (name+digits) → directory add (first name enough). Clear-all contacts → ask domain first. Cold/no-session WhatsApp: engine may replace false «שלחתי» with a forward draft + «שלח בוואטסאפ» — do not invent that yourself.",
     "",
     "OPEN_JOBS (complete for thin path — do not invent jobs; only OPEN_JOBS rows exist)",
     "• expects_reply true + ask_summary whenever waiting for answer/agree/act; false only for pure information (בוקר טוב / המערכת למעלה).",

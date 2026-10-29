@@ -635,6 +635,9 @@ export function buildTurnReplies(input: {
     ...(bubble.navigateAddress
       ? { navigateAddress: bubble.navigateAddress }
       : {}),
+    ...(bubble.whatsappComposeUrl
+      ? { whatsappComposeUrl: bubble.whatsappComposeUrl }
+      : {}),
     ...(index === 0
       ? {
           actions: parsed.actions,

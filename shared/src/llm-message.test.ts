@@ -672,6 +672,26 @@ describe("parseLlmReply", () => {
     expect(parsed.navigateAddress).toBe("הרצל 12, תל אביב");
   });
 
+  it("reads whatsapp_compose_url from bubble and metadata", () => {
+    const url = "https://wa.me/972549595333?text=hi";
+    const fromBubble = parseLlmReply(
+      JSON.stringify({
+        responses: [{ text: "שלח לאבא", whatsapp_compose_url: url }],
+        metadata: {},
+      }),
+    );
+    expect(fromBubble.whatsappComposeUrl).toBe(url);
+    expect(fromBubble.responseBubbles[0]?.whatsappComposeUrl).toBe(url);
+
+    const fromMeta = parseLlmReply(
+      JSON.stringify({
+        responses: ["שלח לאבא"],
+        metadata: { whatsapp_compose_url: url },
+      }),
+    );
+    expect(fromMeta.whatsappComposeUrl).toBe(url);
+  });
+
   it("reads show_icon from metadata", () => {
     const parsed = parseLlmReply(
       JSON.stringify({

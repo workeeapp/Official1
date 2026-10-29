@@ -316,6 +316,30 @@ export function wazeNavigateCtaBody(address: string): string {
   return trimmed;
 }
 
+/** CTA URL button for a personal wa.me compose link (cold invite). */
+export async function sendWhatsAppComposeUrl(
+  to: string,
+  url: string,
+  displayText: string,
+  options?: { ignoreSession?: boolean },
+): Promise<WhatsAppTextResult> {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return "failed";
+  }
+  const label = displayText.trim().slice(0, 20) || "שלח בוואטסאפ";
+  const result = await sendWhatsAppPayload(
+    to,
+    (destination) =>
+      whatsappCtaUrlBody(destination, label, label, trimmed),
+    options,
+  );
+  if (result === "failed") {
+    return sendWhatsAppText(to, `${label}: ${trimmed}`, options);
+  }
+  return result;
+}
+
 /** Waze button for the reply's address; plain text with the link if the CTA send fails. */
 export async function sendWhatsAppNavigate(
   to: string,
@@ -741,6 +765,14 @@ function withSpokenBubbles(
   } else {
     delete metadata.navigate_address;
   }
+  const composeUrl = bubbles.find(
+    (bubble) => bubble.whatsappComposeUrl,
+  )?.whatsappComposeUrl;
+  if (composeUrl) {
+    metadata.whatsapp_compose_url = composeUrl;
+  } else {
+    delete metadata.whatsapp_compose_url;
+  }
   return JSON.stringify({
     ...rest,
     responses: serializeSpokenBubbles(bubbles),
@@ -861,6 +893,48 @@ export function setEngineNavigateAddress(
     delete metadata.navigate_address;
   } else {
     metadata.navigate_address = trimmed;
+  }
+  return JSON.stringify({ ...record, metadata });
+}
+
+/** Patches whatsapp_compose_url onto the first bubble without one, plus metadata. */
+export function setEngineWhatsappComposeUrl(
+  reply: string,
+  url: string | null,
+): string {
+  const record = parseReplyRecord(reply);
+  if (!record) {
+    return reply;
+  }
+  const trimmed = url?.trim() ?? "";
+  const bubbles = readSpokenBubbles(record);
+  if (bubbles && bubbles.length > 0) {
+    const next = bubbles.map((bubble, index) => {
+      if (!trimmed) {
+        const { whatsappComposeUrl: _drop, ...rest } = bubble;
+        return rest;
+      }
+      if (bubble.whatsappComposeUrl) {
+        return bubble;
+      }
+      const firstEmpty = bubbles.findIndex((row) => !row.whatsappComposeUrl);
+      if (index === (firstEmpty >= 0 ? firstEmpty : 0)) {
+        return { ...bubble, whatsappComposeUrl: trimmed };
+      }
+      return bubble;
+    });
+    return withSpokenBubbles(record, next);
+  }
+  const metadata =
+    record.metadata &&
+    typeof record.metadata === "object" &&
+    !Array.isArray(record.metadata)
+      ? { ...(record.metadata as Record<string, unknown>) }
+      : {};
+  if (!trimmed) {
+    delete metadata.whatsapp_compose_url;
+  } else {
+    metadata.whatsapp_compose_url = trimmed;
   }
   return JSON.stringify({ ...record, metadata });
 }

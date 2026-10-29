@@ -21,6 +21,7 @@ model User {
   contacts          Contact[]
   contactBooks      ContactBook[]
   tips              Tip[]
+  whatsappInvites   WhatsAppInvite[]
 
   @@map("Users")
 }
@@ -189,6 +190,8 @@ model ChatMessage {
   actions        Json?
   buttons        Json?
   navigateAddress String?         @map("navigate_address") @db.VarChar(300)
+  /// wa.me compose URL for the speaker to open personal WhatsApp (cold invite).
+  whatsappComposeUrl String?      @map("whatsapp_compose_url") @db.VarChar(2000)
   /// Emoji reaction on the speaker bubble (metadata.show_icon).
   showIcon       String?          @map("show_icon") @db.VarChar(32)
   /// Files shown on this bubble: [{ id, kind, file_name }].
@@ -675,4 +678,34 @@ model GtfsCalendarDate {
   @@id([generationId, serviceId, date])
   @@index([generationId, date])
   @@map("GtfsCalendarDates")
+}
+
+/**
+ * Cold WhatsApp invite: asker cannot free-form message a number with no 24h
+ * session. Speaker forwards a personal wa.me draft; recipient opens business
+ * chat via token and must register before the check continues.
+ */
+model WhatsAppInvite {
+  id                 String    @id @default(uuid()) @db.Uuid
+  /** Opaque code embedded in business wa.me prefilled text (WRK-INV-…). */
+  token              String    @unique @db.VarChar(32)
+  userId             String    @map("user_id") @db.Uuid
+  askerEmployeeId    String    @map("asker_employee_id") @db.Uuid
+  digitalEmployeeId  String    @map("digital_employee_id") @db.Uuid
+  recipientPhone     String    @map("recipient_phone") @db.VarChar(32)
+  recipientLabel     String    @map("recipient_label") @db.VarChar(100)
+  askSummary         String    @map("ask_summary") @db.VarChar(500)
+  /** Full draft the asker forwards to the recipient (includes business link). */
+  draftText          String    @map("draft_text") @db.Text
+  /** pending | consumed | expired */
+  status             String    @default("pending") @db.VarChar(16)
+  guestEmployeeId    String?   @map("guest_employee_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at")
+  consumedAt         DateTime? @map("consumed_at")
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([recipientPhone, status])
+  @@index([guestEmployeeId])
+  @@map("WhatsAppInvites")
 }

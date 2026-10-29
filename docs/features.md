@@ -370,6 +370,24 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 
 ---
 
+## 18. Cold WhatsApp invite (no 24h session)
+
+Free-form outbound WhatsApp is skipped when the recipient has not written the business in the last 24 hours (or Graph is not configured). For **any** NOW `messages` delivery to a phone/contact (send **or** check-with) that cannot send, the engine opens a durable **WhatsAppInvite** instead of only showing the skip notice.
+
+| Piece | Behavior |
+|-------|----------|
+| Asker UX | Hebrew draft (as Lucy) + **שלח בוואטסאפ** (`whatsapp_compose_url` → personal `wa.me/<recipient>?text=…`) |
+| Save contact | If that phone is **not** in SPEAKER_CONTACTS (and not an employee), engine also attaches **שמור באנשי קשר** (next turn → `directory` add) |
+| Draft body | Introduces Lucy; pure send quotes the body, check-with uses «לברר»; optional business URL when `WHATSAPP_DISPLAY_PHONE` is set (`WRK-INV-…` token). Compose button works **without** display phone |
+| Recipient | Taps business link (when configured) → guest `אורח` + **לוסי-אורח** on the **asker's** account |
+| Register-first | לוסי-אורח states the ask, then requires `metadata.register` (name + gender) before continuing |
+| After register | Invite consumed; job opened on Lucy; ask sent; asker notified |
+
+**Code:** `whatsapp-invite.service.ts`, `chat.service.ts`, `whatsapp.service.ts`, `whatsapp-send.ts` (`sendWhatsAppComposeUrl`), `ChatMessages.whatsapp_compose_url`, Prisma `WhatsAppInvites`.  
+**Tests:** `backend/tests/whatsapp-invite.test.ts`.
+
+---
+
 ## Quick reference — ACTION surface
 
 | Metadata | Role |

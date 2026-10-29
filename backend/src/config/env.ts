@@ -33,6 +33,11 @@ const envSchema = z.object({
   WHATSAPP_APP_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
+  /**
+   * Public E.164 digits for wa.me business invite links (not the Graph phone number id).
+   */
+  WHATSAPP_DISPLAY_PHONE: z.string().optional(),
+
   /** Root folder for uploaded attachment bytes. */
   UPLOADS_DIR: z.string().default(".data/uploads"),
   /** OpenAI model for voice/audio transcription. */

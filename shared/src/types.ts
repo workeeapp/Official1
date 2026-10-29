@@ -498,6 +498,8 @@ export interface ChatThreadMessage {
   actions?: string[];
   buttons?: LlmReplyButton[];
   navigateAddress?: string;
+  /** Personal wa.me compose URL under the bubble (cold WhatsApp invite). */
+  whatsappComposeUrl?: string;
   /** Emoji reaction attached to the speaker's message (metadata.show_icon). */
   showIcon?: string;
   /** Files on this message (view-only in the web chat). */
