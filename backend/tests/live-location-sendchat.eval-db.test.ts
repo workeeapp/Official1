@@ -3,7 +3,8 @@
  * Stubbed LLM + stubbed Open-Meteo / Places fetch — no live provider calls.
  *
  * Asserts exact downstream coords and that geocoding is skipped only for
- * resolved coordinate sources. Does not verify live-model behavior.
+ * resolved coordinate sources. Also covers factual home ITEM DUMP vs pending pin.
+ * Does not verify live-model behavior.
  *
  * Run: npm run test:eval-db -w backend -- tests/live-location-sendchat.eval-db.test.ts
  */
@@ -474,6 +475,70 @@ describe("live location sendChat (eval-db, stubbed providers)", () => {
     expect(forecast[0]).not.toContain(`latitude=${PIN_LAT}`);
     expect(getPendingLocation(account!.employeeId)?.lat).toBeCloseTo(PIN_LAT);
     clearPendingLocation(account!.employeeId);
+    expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
+  });
+
+  it("8 factual home dump with street text; pending pin unused and preserved", async () => {
+    const before = await assertEvalDbAndGtfsUntouched();
+    const lucyId = await boot();
+    const STREET = "הרצל 1 תל אביב";
+    const filing = await seedHomeFiling(account!.employeeId, STREET);
+    setPendingLocation(account!.employeeId, {
+      lat: PIN_LAT,
+      lng: PIN_LNG,
+      name: "סיכה לא קשורה",
+      address: "",
+    });
+    // Stubbed factual path: ITEM DUMP for the unique saved address filing.
+    setLlmClientForTests(
+      stubLlmReply({
+        responses: [{ text: "רגע, מציגה.", buttons: [] }],
+        metadata: {
+          lists: [],
+          show_dump: "filings",
+          show_dump_ids: [filing.id],
+        },
+      }),
+    );
+    const result = await sendChatMessage({
+      userId: account!.userId,
+      employeeId: account!.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "איפה אני גר?",
+    });
+
+    expect(whatsappTextSpy).not.toHaveBeenCalled();
+    const parsed = parseLlmReply(result.reply);
+    const spoken = parsed.response;
+    expect(spoken).toContain("מיקום הבית");
+    expect(spoken).toContain(STREET);
+    expect(spoken).toContain("📍");
+    expect(spoken).toContain("תיוקים:");
+    expect(spoken).not.toContain("רגע, מציגה");
+    // Pin must not leak into the home answer (coords or pin label).
+    expect(spoken).not.toContain(String(PIN_LAT));
+    expect(spoken).not.toContain(String(PIN_LNG));
+    expect(spoken).not.toContain("סיכה לא קשורה");
+    // Street-only filing → no Waze navigate_address.
+    expect(parsed.navigateAddress).toBeUndefined();
+    for (const bubble of parsed.responseBubbles) {
+      expect(bubble.navigateAddress).toBeUndefined();
+    }
+
+    const pin = getPendingLocation(account!.employeeId);
+    expect(pin?.lat).toBeCloseTo(PIN_LAT);
+    expect(pin?.lng).toBeCloseTo(PIN_LNG);
+
+    expect(placesBodies(fetchProbe!.probes)).toHaveLength(0);
+    expect(forecastUrls(fetchProbe!.probes)).toHaveLength(0);
+    expect(geocodeUrls(fetchProbe!.probes)).toHaveLength(0);
+    expect(
+      fetchProbe!.probes.filter((p) => p.url.includes("places.googleapis.com")),
+    ).toHaveLength(0);
+    expect(
+      fetchProbe!.probes.filter((p) => p.url.includes("api.open-meteo.com")),
+    ).toHaveLength(0);
+
     expect(await assertEvalDbAndGtfsUntouched()).toBe(before);
   });
 });

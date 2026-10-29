@@ -418,8 +418,18 @@ describe("formatFilingDumpBody", () => {
       lat: 32.099279,
       lng: 34.8923104,
     });
+    expect(parseLatLngCoordinates("32.099279,34.8923104")).toEqual({
+      lat: 32.099279,
+      lng: 34.8923104,
+    });
+    expect(parseLatLngCoordinates("-12.5, 130")).toEqual({
+      lat: -12.5,
+      lng: 130,
+    });
     expect(parseLatLngCoordinates("הרצל 1, תל אביב")).toBeNull();
     expect(parseLatLngCoordinates("https://maps.google.com/?q=1,2")).toBeNull();
+    expect(parseLatLngCoordinates("32.099279")).toBeNull();
+    expect(parseLatLngCoordinates("91, 34")).toBeNull();
   });
 });
 
@@ -620,13 +630,13 @@ describe("filings flat dump", () => {
       filingNavigateCoordinates(snap.filing[0]!),
     ).toBe("32.099279,34.8923104");
 
-    // Street-only location: 📍 in text, no Waze (no valid coordinates).
+    // Street-only ITEM DUMP: readable address in body; still 📍; no Waze.
     expect(
       formatShowDumpFromKind("filings", snap, {
         viewerName: "טל",
         itemIds: new Set(["street"]),
       }),
-    ).toBe("📁 תיוקים:\n1. כתובת עבודה 📍");
+    ).toBe("📁 תיוקים:\n1. כתובת עבודה · הרצל 1 תל אביב 📍");
     expect(
       navigateAddressFromFilingsDump(snap.filing, {
         viewerName: "טל",
@@ -643,6 +653,64 @@ describe("filings flat dump", () => {
         "full",
       ),
     ).toBe(" 📍");
+  });
+
+  it("ITEM DUMP address filing keeps search-helper text with street", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [],
+      filing: [
+        {
+          filing_id: "street",
+          item_name: "כתובת עבודה",
+          item_info: "הרצל 1 תל אביב",
+          item_description: "ליד הסופר",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "home",
+          item_name: "מיקום הבית",
+          item_info: "32.099279, 34.8923104",
+          item_description: "שער אחורי",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+    };
+    expect(
+      formatShowDumpFromKind("filings", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["street"]),
+      }),
+    ).toBe(
+      "📁 תיוקים:\n1. כתובת עבודה · הרצל 1 תל אביב · מידע לחיפוש: ליד הסופר 📍",
+    );
+    // Coords-only: helper kept; raw lat/lng still hidden.
+    expect(
+      formatShowDumpFromKind("filings", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["home"]),
+      }),
+    ).toBe("📁 תיוקים:\n1. מיקום הבית · מידע לחיפוש: שער אחורי 📍");
+    expect(
+      formatShowDumpFromKind("filings", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["home"]),
+      }),
+    ).not.toContain("32.099279");
+    expect(
+      navigateAddressFromFilingsDump(snap.filing, {
+        viewerName: "טל",
+        itemIds: new Set(["home"]),
+      }),
+    ).toBe("32.099279,34.8923104");
+    // Inventory still name + 📍 only (no street, no helper).
+    const list = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(list).toMatch(/כתובת עבודה 📍/);
+    expect(list).not.toContain("הרצל 1");
+    expect(list).not.toContain("מידע לחיפוש");
   });
 
   it("ITEM DUMP filters filings to show_dump_ids and shows full labeled body", () => {

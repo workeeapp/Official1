@@ -1810,15 +1810,22 @@ export function formatFilingsDump(
   const dumpMode: "list" | "full" =
     opts?.itemIds != null ? "full" : "list";
   const collected: DumpItem[] = rows.map((row) => {
-    // Address filings: short name only (📍 mark added in formatNumberedItem).
-    // Never inline coords / Maps URL into the dump body (option A).
+    // Address filings: inventory = name only (📍 via formatNumberedItem).
+    // ITEM DUMP (full): show readable street text from item_info; never raw lat,lng
+    // (Waze still uses filingNavigateCoordinates / navigateAddressFromFilingsDump).
     const address = filingDumpAddressText(row);
     let title: string;
     if (address) {
       title = row.item_name?.trim() || "תיוק";
-      const findHelper = row.item_description?.trim() ?? "";
-      if (dumpMode === "full" && findHelper) {
-        title += ` · מידע לחיפוש: ${findHelper}`;
+      if (dumpMode === "full") {
+        const info = row.item_info?.trim() ?? "";
+        if (info && !parseLatLngCoordinates(info)) {
+          title += ` · ${info}`;
+        }
+        const findHelper = row.item_description?.trim() ?? "";
+        if (findHelper) {
+          title += ` · מידע לחיפוש: ${findHelper}`;
+        }
       }
     } else {
       title = formatFilingDumpBody(row, dumpMode);
