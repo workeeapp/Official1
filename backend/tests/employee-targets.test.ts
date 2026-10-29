@@ -3280,6 +3280,166 @@ describe("employee targets", () => {
     ]);
   });
 
+  it("lifts item-nested targets onto list share visibility (model shape drift)", () => {
+    // Live miss: lists.update with targets only inside items[] → SHARE_CLAIM_MISS.
+    const birthdayId = "7dc44b7b-3c12-4694-ac49-75b5d8d92f9d";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([[birthdayId, ownerRef(tal.id, "tasks")]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            targets: [],
+            items: [
+              {
+                item_id: birthdayId,
+                targets: ["טל", "עמית"],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: tal.id,
+      visibility: {
+        scope: "shared",
+        visibleTo: expect.arrayContaining([tal.id, amit.id]),
+        itemOnly: true,
+      },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      { item_id: birthdayId },
+    ]);
+  });
+
+  it("item-level targets win over list-level when both are present on the same row", () => {
+    const coffeeId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([[coffeeId, ownerRef(tal.id, "shopping")]]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            // List says Amit; item says Shani — item wins.
+            targets: ["טל", "עמית"],
+            items: [{ item_id: coffeeId, targets: ["טל", "שני"] }],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([tal.id, shani.id]),
+    );
+    expect(plan.applications[0]?.visibility.visibleTo).not.toContain(amit.id);
+  });
+
+  it("splits multi-item updates so different nested targets do not mix recipients", () => {
+    const milkId = "11111111-1111-4111-8111-111111111101";
+    const breadId = "11111111-1111-4111-8111-111111111102";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([
+        [milkId, ownerRef(tal.id, "shopping")],
+        [breadId, ownerRef(tal.id, "shopping")],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: [],
+            items: [
+              { item_id: milkId, targets: ["טל", "עמית"] },
+              { item_id: breadId, targets: ["טל", "שני"] },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(2);
+    const milkApp = plan.applications.find((row) =>
+      row.metadata.lists[0]?.items.some(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          (item as { item_id?: string }).item_id === milkId,
+      ),
+    );
+    const breadApp = plan.applications.find((row) =>
+      row.metadata.lists[0]?.items.some(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          (item as { item_id?: string }).item_id === breadId,
+      ),
+    );
+    expect(milkApp?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([tal.id, amit.id]),
+    );
+    expect(milkApp?.visibility.visibleTo).not.toContain(shani.id);
+    expect(breadApp?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([tal.id, shani.id]),
+    );
+    expect(breadApp?.visibility.visibleTo).not.toContain(amit.id);
+  });
+
+  it("inherits list-level targets for items without nested targets in a mixed update", () => {
+    const milkId = "11111111-1111-4111-8111-111111111201";
+    const breadId = "11111111-1111-4111-8111-111111111202";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([
+        [milkId, ownerRef(tal.id, "shopping")],
+        [breadId, ownerRef(tal.id, "shopping")],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "shopping",
+            listName: "",
+            targets: ["טל", "עמית"],
+            items: [
+              { item_id: milkId },
+              { item_id: breadId, targets: ["טל", "שני"] },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(2);
+    const milkApp = plan.applications.find((row) =>
+      JSON.stringify(row.metadata.lists[0]?.items).includes(milkId),
+    );
+    const breadApp = plan.applications.find((row) =>
+      JSON.stringify(row.metadata.lists[0]?.items).includes(breadId),
+    );
+    expect(milkApp?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([tal.id, amit.id]),
+    );
+    expect(breadApp?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([tal.id, shani.id]),
+    );
+  });
+
   it("packs whole shopping fan-out (many item_ids) into one owner application", () => {
     const milkId = "11111111-1111-4111-8111-111111111101";
     const breadId = "11111111-1111-4111-8111-111111111102";

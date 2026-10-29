@@ -684,6 +684,7 @@ export function filingActionIds(filing: LlmFilingAction[]): string[] {
 }
 
 const UNSHARE_KEYS = ["unshare_with", "unshareWith"] as const;
+const ITEM_SHARE_TARGET_KEYS = ["targets", "target", "for", "assignees"] as const;
 
 /** Names the model asked to stop sharing this item with (lists.update). */
 function itemUnshareNames(item: Record<string, unknown>): string[] {
@@ -697,6 +698,84 @@ function itemUnshareNames(item: Record<string, unknown>): string[] {
     }
   }
   return [];
+}
+
+/** Co-share partners nested on the item (model often puts targets here, not on the list entry). */
+function itemShareTargetNames(item: Record<string, unknown>): string[] {
+  for (const key of ITEM_SHARE_TARGET_KEYS) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) {
+      return [value.trim()];
+    }
+    if (Array.isArray(value)) {
+      return value
+        .flatMap((entry) => {
+          if (typeof entry === "number" && Number.isFinite(entry)) {
+            return [String(entry)];
+          }
+          if (typeof entry === "string" && entry.trim()) {
+            return [entry.trim()];
+          }
+          return [];
+        });
+    }
+  }
+  return [];
+}
+
+/**
+ * Normalize nested item targets onto list-level actions (same ACTION contract as
+ * unshare_with on items).
+ *
+ * Determinism per item:
+ * - If the item has nested targets → those names alone apply to that item
+ *   (item-level wins over list-level when both are present on the same row).
+ * - Else → list.targets apply.
+ * Items with different effective target sets become separate list actions so
+ * recipients never mix across rows.
+ */
+function expandListByItemShareTargets(list: LlmListAction): LlmListAction[] {
+  if (list.action !== "update" && list.action !== "add") {
+    return [list];
+  }
+  if (list.items.length === 0) {
+    return [list];
+  }
+
+  type Group = {
+    targets: string[];
+    items: LlmListAction["items"];
+  };
+  const groups = new Map<string, Group>();
+  for (const raw of list.items) {
+    const nested = itemShareTargetNames(raw);
+    // Item-level wins when present; otherwise inherit list-level.
+    const targets = nested.length > 0 ? nested : [...list.targets];
+    const key = targets.join("\0");
+    const group = groups.get(key) ?? { targets, items: [] };
+    // Strip nested targets only — keep unshare_with for the itemOwners path.
+    group.items.push(withoutItemShareTargetFields(raw));
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].map((group) => ({
+    ...list,
+    targets: group.targets,
+    items: group.items,
+  }));
+}
+
+function withoutItemShareTargetFields(
+  item: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!ITEM_SHARE_TARGET_KEYS.some((key) => key in item)) {
+    return item;
+  }
+  const rest = { ...item };
+  for (const key of ITEM_SHARE_TARGET_KEYS) {
+    delete rest[key];
+  }
+  return rest;
 }
 
 function withoutUnshareField(
@@ -890,7 +969,12 @@ export function planTargetedActions(input: {
     resolveNamedRelayTargets(raw, input.employees, externalPartners);
 
   for (const rawList of lists) {
-    let list = rawList;
+    // Nested items[].targets → list.targets (split when rows disagree).
+    const expandedLists =
+      rawList.action === "update" || rawList.action === "add"
+        ? expandListByItemShareTargets(rawList)
+        : [rawList];
+    for (let list of expandedLists) {
     if (
       (list.action === "update" || list.action === "remove") &&
       input.itemOwners &&
@@ -1150,6 +1234,7 @@ export function planTargetedActions(input: {
         addNotification(target.id, metadata, partnerLabel(targets, target.id));
       }
     }
+    } // expandedLists
   }
 
   for (const filing of input.metadata.filing) {

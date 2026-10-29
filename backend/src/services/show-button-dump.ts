@@ -391,6 +391,35 @@ function emptyDumpResult(text = ""): DumpTextResult {
   return { text, lines: [] };
 }
 
+/**
+ * Exact dump-line → opaque id. Returns null when n is missing/out of range or
+ * section is required and does not match. Never picks another row.
+ */
+export function resolveDumpLineId(
+  lines: LastNumberedDumpLine[],
+  n: number,
+  section?: string | null,
+): string | null {
+  if (!Number.isFinite(n) || n <= 0) {
+    return null;
+  }
+  const sectionKey = section?.trim() || "";
+  const matches = lines.filter((row) => {
+    if (row.n !== n) {
+      return false;
+    }
+    if (!sectionKey) {
+      return true;
+    }
+    return (row.section ?? "") === sectionKey;
+  });
+  if (matches.length !== 1) {
+    return null;
+  }
+  const id = matches[0]?.id?.trim() ?? "";
+  return id || null;
+}
+
 export function formatLastNumberedDumpContext(
   lines: LastNumberedDumpLine[],
 ): string {
@@ -399,7 +428,7 @@ export function formatLastNumberedDumpContext(
   }
   return [
     "LAST_NUMBERED_DUMP:",
-    "Spoken dump indices («3» / «ל3» / «תמחק את 3») map to these rows from the last numbered dump. Copy id (+ kind) for that n; if section is set and several sections restart at 1, require a matching section or ASK which. Never invent ids. Never treat n as EMPLOYEE_SAVED_DATA array index.",
+    "Spoken dump indices («3» / «ל3» / «תמחק את 3» / «שתף 4 עם עמית») map to these rows from the last numbered dump. Copy the exact id (+ kind) for that n into the ACTION — never substitute another dump row or a live JSON neighbor. Share-by-index → lists.update with that item_id + targets:[speaker, partner] on the lists[] entry (same level as action/items; nesting targets only inside items[] is accepted by the engine but list-level is canonical). If n is present in this JSON → FORBIDDEN claiming «לא מופיע פריט N» / ASK which item. Missing/out of range / ambiguous section restart → ASK with empty mutates; never invent or guess ids. Never treat n as EMPLOYEE_SAVED_DATA array index.",
     JSON.stringify(lines),
   ].join("\n");
 }

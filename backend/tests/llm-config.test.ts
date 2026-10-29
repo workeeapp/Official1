@@ -131,6 +131,9 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("PERSONAL TASK DEFAULT");
     expect(config.systemMessage).toContain("BY LINE NUMBER (critical)");
     expect(config.systemMessage).toContain("שתף 1,2 עם מיכל");
+    expect(config.systemMessage).toContain("item-level wins per row");
+    expect(config.systemMessage).toContain("לא מופיע פריט N");
+    expect(config.systemMessage).toContain("Never copy a different dump line's id");
     expect(config.systemMessage).toContain(
       "Past-tense «שיתפתי» ONLY when this turn emits those updates",
     );

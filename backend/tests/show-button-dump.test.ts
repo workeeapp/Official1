@@ -31,6 +31,7 @@ import {
   stripMatchingTitleClock,
   formatShoppingTitle,
   formatLastNumberedDumpContext,
+  resolveDumpLineId,
   formatFullDump,
   formatShowDumpFromKind,
   formatShowDumpWithLineMap,
@@ -4538,7 +4539,44 @@ describe("LAST_NUMBERED_DUMP line map", () => {
     expect(ctx).toContain("LAST_NUMBERED_DUMP:");
     expect(ctx).toContain('"id":"a"');
     expect(ctx).toContain("Spoken dump indices");
+    expect(ctx).toContain("שתף 4 עם עמית");
+    expect(ctx).toContain("FORBIDDEN claiming");
+    expect(ctx).toContain("targets:[speaker, partner]");
+    expect(ctx).toContain("never substitute another dump row");
     expect(formatLastNumberedDumpContext([])).toBe("");
+  });
+
+  it("resolveDumpLineId returns the exact dump id or null (no substitute)", () => {
+    const lines = [
+      {
+        n: 1,
+        id: "8527b7ce-bcd5-48a8-a774-24b7b8f3c269",
+        kind: "tasks" as const,
+        title_stem: "ביט",
+      },
+      {
+        n: 4,
+        id: "7dc44b7b-3c12-4694-ac49-75b5d8d92f9d",
+        kind: "tasks" as const,
+        title_stem: "יום ההולדת של עמית",
+      },
+      {
+        n: 5,
+        id: "e534785b-26f5-4801-a213-475e7e58f0a2",
+        kind: "tasks" as const,
+        title_stem: "פגישה",
+      },
+      { n: 1, id: "rem-1", kind: "reminders" as const, section: "reminders", title_stem: "שעון" },
+    ];
+    // «שתף 4 עם עמית» → exact birthday id, never meeting (5) or bit (1).
+    expect(resolveDumpLineId(lines, 4)).toBe(
+      "7dc44b7b-3c12-4694-ac49-75b5d8d92f9d",
+    );
+    expect(resolveDumpLineId(lines, 99)).toBeNull();
+    expect(resolveDumpLineId(lines, 0)).toBeNull();
+    // Ambiguous restart at 1 without section → null (do not guess).
+    expect(resolveDumpLineId(lines, 1)).toBeNull();
+    expect(resolveDumpLineId(lines, 1, "reminders")).toBe("rem-1");
   });
 
   it("day-agenda lines restart n per day with section=ymd", () => {

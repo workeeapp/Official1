@@ -3509,6 +3509,8 @@ describe("employee records", () => {
           list_id: "bugs",
           list_type: "custom",
           list_name: "בעיות",
+          // Snapshot always includes effective emoji (canonical custom default).
+          emoji: "📋",
           owner: "עמית",
           scope: "shared",
           shared_with: ["עמית", "טל"],
