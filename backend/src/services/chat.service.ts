@@ -3859,12 +3859,15 @@ export async function sendChatMessage(input: {
           placesNearSpeaker = true;
           placesUsedPendingPin = placesResolved.usedPendingPin;
         } else {
-          // none / need_pin ? prior behavior (ACTION coords or near=speaker pin).
+          // none / need_pin: ACTION coords win; named place never inherits pending
+          // pin (Stage B1). near=speaker + empty place → pending / ask-for-pin.
           const actionCoords = parseCoordinatePair(
             placesAction.lat,
             placesAction.lng,
           );
-          placesNearSpeaker = placesAction.near === "speaker";
+          const namedPlace = placesAction.place.trim().length > 0;
+          placesNearSpeaker =
+            placesAction.near === "speaker" && !namedPlace;
           placesLat =
             actionCoords?.lat ??
             (placesNearSpeaker ? pendingResolved?.lat ?? null : null);

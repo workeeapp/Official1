@@ -240,17 +240,22 @@ async function applyChatLiveDomainPass(input: {
   const placesAction = guestSpeaker ? null : metadata.places ?? null;
   const pendingLoc = guestSpeaker ? null : input.pendingLoc ?? null;
   if (placesAction?.query.trim()) {
-    // Stage B2a parity with chat.service: area_restrict ignores pending pin.
+    // Stage B1/B2a parity with chat.service: area_restrict ignores pending pin;
+    // named place never inherits pending even if near=speaker was also set.
     const areaRestrict = placesAction.geoMode === "area_restrict";
+    const namedPlace = placesAction.place.trim().length > 0;
     const nearSpeaker =
-      !areaRestrict && placesAction.near === "speaker";
+      !areaRestrict &&
+      placesAction.near === "speaker" &&
+      !namedPlace;
     const placesText = await resolvePlacesReply({
       query: placesAction.query,
       place: placesAction.place,
       aspects: placesAction.aspects,
       nearSpeaker,
       areaRestrict,
-      // Stage B1/B2a: pending pin only when near=speaker (never area_restrict).
+      // Pending pin only for near=speaker + empty place (never area_restrict /
+      // named city). Explicit ACTION lat/lng still win when present.
       lat: areaRestrict
         ? null
         : placesAction.lat ??
@@ -499,6 +504,48 @@ describe("live-domain orchestration (offline, post-model)", () => {
     });
     const metadata = parseReplyMetadata(stub);
     expect(metadata.places?.near).toBe("");
+    expect(metadata.places?.place).toBe("חיפה");
+
+    await applyChatLiveDomainPass({
+      workingReply: stub,
+      metadata,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      placesApiKey: "test-key",
+      pendingLoc: stalePin,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const init = fetchImpl.mock.calls[0]![1] as RequestInit;
+    const body = JSON.parse(String(init.body ?? "{}")) as {
+      textQuery?: string;
+      locationBias?: unknown;
+      rankPreference?: string;
+    };
+    expect(body.textQuery).toBe("מסעדה חיפה");
+    expect(body.locationBias).toBeUndefined();
+    expect(body.rankPreference).toBeUndefined();
+  });
+
+  it("places: named city + near=speaker still ignores pending pin (Stage B1)", async () => {
+    const stalePin = { lat: 32.087, lng: 34.887 };
+    const fetchImpl = placesSearchFetchImpl([
+      {
+        id: "places/city-near",
+        displayName: { text: "מסעדה בחיפה", languageCode: "he" },
+        nationalPhoneNumber: "04-222",
+        formattedAddress: "חיפה",
+      },
+    ]);
+    const stub = modelReply([], {
+      places: {
+        query: "מסעדה",
+        place: "חיפה",
+        near: "speaker",
+        aspects: ["summary"],
+      },
+    });
+    const metadata = parseReplyMetadata(stub);
+    expect(metadata.places?.near).toBe("speaker");
     expect(metadata.places?.place).toBe("חיפה");
 
     await applyChatLiveDomainPass({

@@ -111,6 +111,49 @@ describe("places Stage B1 pin intent", () => {
     expect(leakBody.locationBias).toBeUndefined();
   });
 
+  it("chat none-fallback: named place + near=speaker ignores pending pin", async () => {
+    setPendingLocation(EMP, {
+      lat: PIN.lat,
+      lng: PIN.lng,
+      name: "פינ ישן",
+      address: "",
+    });
+    const action = parsePlacesAction({
+      places: {
+        query: "מסעדה",
+        place: "חיפה",
+        near: "speaker",
+        aspects: ["summary"],
+      },
+    });
+    expect(action?.near).toBe("speaker");
+    expect(action?.place).toBe("חיפה");
+
+    // Mirror chat.service none-branch after Stage B1 fix: named place wins.
+    const namedPlace = action!.place.trim().length > 0;
+    const nearSpeaker = action!.near === "speaker" && !namedPlace;
+    const lat = nearSpeaker ? PIN.lat : null;
+    const lng = nearSpeaker ? PIN.lng : null;
+
+    const fetchImpl = placesSearchFetchImpl();
+    const result = await resolvePlacesReplyDetailed({
+      query: action!.query,
+      place: action!.place,
+      nearSpeaker,
+      lat,
+      lng,
+      aspects: ["summary"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.usedPendingPin).toBe(false);
+    expect(result.needsLocation).toBe(false);
+    const body = readBody(fetchImpl);
+    expect(body.textQuery).toBe("מסעדה חיפה");
+    expect(body.locationBias).toBeUndefined();
+    expect(getPendingLocation(EMP)?.lat).toBeCloseTo(PIN.lat);
+  });
+
   it("near=speaker + pending pin: locationBias uses pin coords", async () => {
     setPendingLocation(EMP, {
       lat: PIN.lat,
