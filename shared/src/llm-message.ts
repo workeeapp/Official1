@@ -442,7 +442,7 @@ export type ReportSection =
 /** Mutation kinds for report section "history" (add / update / remove / fire). */
 export type ReportHistoryKind = "add" | "update" | "remove" | "fire";
 
-/** Guest onboarding: create a User login + own Lucy; keep host share mirror. */
+/** Guest onboarding: promote guest in place on the host (shared team; next turn with לוסי). */
 export interface LlmRegisterAction {
   name: string;
   /** Optional; empty when the guest did not give a surname. */
@@ -463,7 +463,7 @@ export interface LlmMetadata {
   jobs?: LlmJobAction[];
   handoff?: LlmHandoffAction | null;
   /**
-   * לוסי-אורח only: promote WhatsApp guest → new User + human with share mirror.
+   * לוסי-אורח only: promote WhatsApp guest in place on the host shared team.
    * null/omit when not registering this turn.
    */
   register?: LlmRegisterAction | null;

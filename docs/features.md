@@ -360,9 +360,9 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 | Piece | Behavior |
 |-------|----------|
 | ACTION | `metadata.register` `{ name, gender }` (+ optional `surname`) — לוסי-אורח only; `gender` = `male` \| `female`; null until name+gender known. No username/password |
-| Engine | `createWhatsAppOnlyUser` (nullable credentials) + protected Lucy + human (`isOwner`, `addressGender` from register) on the new account; host guest renamed, phone cleared, promoted to `isGuest=false` share mirror on the shared host team **`New Registered 30 days`** (same team for every new registrant — no personal Team); new human gets that `team_id` + `share_mirror_employee_id` |
-| After | Next WhatsApp turn resolves to the new member (non-guest preferred on phone match) and protected Lucy; host shared data still appears in `EMPLOYEE_SAVED_DATA` via the mirror; the member may mutate shared rows by id like any other non-guest partner |
-| Login | WhatsApp-only until a later set-password flow; web login rejects null `passwordHash` |
+| Engine | Promote guest **in place** on the host: rename, `addressGender`, `isGuest=false`, `isOwner=false`, keep phone, `team_id` = shared host team **`New Registered 30 days`**. No new User / share mirror |
+| After | Next WhatsApp turn uses the same `employeeId` with **לוסי** (new conversation); host web Chat As that person + Chat With Lucy sees Lucy history (and merges pre-reg לוסי-אורח messages for continuity) |
+| Login | Still no guest web login; registrants are host team members (later set-password / own-account flows stay future work) |
 | Safety | לוסי-אורח hidden from Chat-with |
 
 **Code:** `guest-register.service.ts`, `whatsapp.service.ts`, `employee.service.ts` (`ensureGuestLucy`), `employee-records.service.ts` (mirror merge), `LLM.action.json`, `shared/src/llm-message.ts`.
@@ -381,7 +381,7 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 | `messages` | Send now / open jobs (`expects_reply`, `ask_summary`, `urgency`, `book` with optional `end_time` / `window`) |
 | `reminders` | Clocks (`recurrence`, compose, ping) |
 | `jobs` | answer / decline / progress / counter / snooze / clear_clock / close by `job_id` |
-| `register` | Guest onboarding (לוסי-אורח → new User + Lucy + share mirror on shared team `New Registered 30 days`) |
+| `register` | Guest onboarding (לוסי-אורח → promote in place onto shared team `New Registered 30 days`; next turn with לוסי) |
 | `query` | `todos` / `self` / `reminders` (read hints only) |
 | `send_attachments` | Saved file ids to send after the reply |
 | `attachment_ids` (on items, filings, reminders; `list_attachment_ids`, `list_ops.add_attachments`) | Link uploaded files |

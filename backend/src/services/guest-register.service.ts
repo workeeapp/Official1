@@ -2,21 +2,17 @@ import type { LlmRegisterAction, PublicEmployee } from "@workee/shared";
 import { isGuestEmployee, isGuestLucy } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { ConflictError, isUniqueConstraintError } from "../utils/errors.js";
-import {
-  createEmployeeForUser,
-  ensureSharedRegisteredTeam,
-  listEmployeesForUser,
-} from "./employee.service.js";
-import { createWhatsAppOnlyUser } from "./user.service.js";
+import { ensureSharedRegisteredTeam } from "./employee.service.js";
 import { normalizeEmployeePhone } from "../utils/phone.js";
 import { clearWhatsAppWorkerSticky } from "./whatsapp-worker-sticky.js";
 
 export type GuestRegisterResult =
   | {
       ok: true;
-      newUserId: string;
-      newEmployeeId: string;
-      mirrorEmployeeId: string;
+      /** Host account — registration stays on this User. */
+      userId: string;
+      /** Same employee id as the guest shell (promoted in place). */
+      employeeId: string;
       displayName: string;
     }
   | {
@@ -30,10 +26,9 @@ export type GuestRegisterResult =
     };
 
 /**
- * Convert a WhatsApp guest into a registered member with their own User + Lucy.
- * Host guest row becomes a non-guest share mirror on the shared
- * "New Registered 30 days" team (same team as the new human — no personal Team).
- * WhatsApp-only: no username/password on the new User.
+ * Promote a WhatsApp guest in place on the host account.
+ * Same employee id keeps phone; joins shared "New Registered 30 days" team.
+ * Next WhatsApp turn talks with לוסי (not לוסי-אורח) on a new conversation.
  */
 export async function registerGuestMember(input: {
   hostUserId: string;
@@ -64,43 +59,18 @@ export async function registerGuestMember(input: {
   try {
     const sharedTeam = await ensureSharedRegisteredTeam(input.hostUserId);
 
-    const newUser = await createWhatsAppOnlyUser();
-    // Seed Lucy / לוסי-אורח onto the shared host team — no personal Team row.
-    await listEmployeesForUser(newUser.id, { teamId: sharedTeam.id });
-
-    // Clear host phone first so the global unique index allows the new member.
-    // Promote share-mirror off guest: same shared team as all new registrants.
     await prisma.employee.update({
       where: { id: input.guest.id },
       data: {
         name,
         surname,
         nickname: name,
-        phone: null,
         isGuest: false,
+        isOwner: false,
         teamId: sharedTeam.id,
         addressGender: gender,
+        // Keep phone on this row — no second User / human.
       },
-    });
-
-    const member = await createEmployeeForUser(
-      newUser.id,
-      {
-        kind: "human",
-        name,
-        surname,
-        nickname: name,
-        email: null,
-        phone,
-        isOwner: true,
-        addressGender: gender,
-      },
-      { teamId: sharedTeam.id },
-    );
-
-    await prisma.employee.update({
-      where: { id: member.id },
-      data: { shareMirrorEmployeeId: input.guest.id },
     });
 
     if (phone) {
@@ -109,9 +79,8 @@ export async function registerGuestMember(input: {
 
     return {
       ok: true,
-      newUserId: newUser.id,
-      newEmployeeId: member.id,
-      mirrorEmployeeId: input.guest.id,
+      userId: input.hostUserId,
+      employeeId: input.guest.id,
       displayName: name,
     };
   } catch (error) {

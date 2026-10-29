@@ -7,7 +7,9 @@ import {
   isDigitalEmployee,
   isGuestEmployee,
   isGuestLucy,
+  isProtectedEmployee,
   isSubHourlyRecurrence,
+  GUEST_LUCY_NAME,
   JOB_URGENCY_POLICY,
   parseChatAttachmentRefs,
   parseLlmReply,
@@ -1609,20 +1611,17 @@ export async function notifySharedItemEvents(input: {
   return { notifications, whatsappSkips };
 }
 
-export async function getChatHistory(
+async function loadConversationWithMessages(
   userId: string,
   employeeId: string,
-  digitalEmployeeId?: string,
-): Promise<ChatHistoryResponse> {
-  await getEmployeeForUser(userId, employeeId);
-  const digital = await requireDigitalChatPartner(userId, digitalEmployeeId);
-
-  const conversation = await prisma.chatConversation.findUnique({
+  digitalEmployeeId: string,
+) {
+  return prisma.chatConversation.findUnique({
     where: {
       userId_employeeId_digitalEmployeeId: {
         userId,
         employeeId,
-        digitalEmployeeId: digital.id,
+        digitalEmployeeId,
       },
     },
     include: {
@@ -1631,24 +1630,103 @@ export async function getChatHistory(
       },
     },
   });
+}
 
-  if (!conversation) {
+/**
+ * When viewing לוסי, also include same-speaker לוסי-אורח onboarding messages
+ * so host web Chat With Lucy shows pre-registration WhatsApp history.
+ */
+export async function getChatHistory(
+  userId: string,
+  employeeId: string,
+  digitalEmployeeId?: string,
+): Promise<ChatHistoryResponse> {
+  await getEmployeeForUser(userId, employeeId);
+  const digital = await requireDigitalChatPartner(userId, digitalEmployeeId);
+
+  const conversation = await loadConversationWithMessages(
+    userId,
+    employeeId,
+    digital.id,
+  );
+
+  if (conversation) {
+    const lastActivity =
+      conversation.messages.at(-1)?.createdAt ?? conversation.updatedAt;
+    if (isIdleSince(lastActivity)) {
+      const rotated = await rotateConversation(conversation);
+      return emptyHistory(
+        employeeId,
+        rotated.openaiConversationId,
+        rotated.updatedAt,
+        digital.id,
+      );
+    }
+  }
+
+  const mergeGuestLucy =
+    isProtectedEmployee(digital) && !isGuestLucy(digital);
+  let guestLucyMessages: ChatMessageRow[] = [];
+  if (mergeGuestLucy) {
+    const guestLucy = await prisma.employee.findFirst({
+      where: {
+        userId,
+        kind: "digital",
+        OR: [{ name: GUEST_LUCY_NAME }, { nickname: GUEST_LUCY_NAME }],
+      },
+      select: { id: true },
+    });
+    if (guestLucy && guestLucy.id !== digital.id) {
+      const guestConvo = await loadConversationWithMessages(
+        userId,
+        employeeId,
+        guestLucy.id,
+      );
+      if (guestConvo && !isIdleSince(
+        guestConvo.messages.at(-1)?.createdAt ?? guestConvo.updatedAt,
+      )) {
+        guestLucyMessages = guestConvo.messages;
+      }
+    }
+  }
+
+  if (!conversation && guestLucyMessages.length === 0) {
     return emptyHistory(employeeId, null, null, digital.id);
   }
 
-  const lastActivity =
-    conversation.messages.at(-1)?.createdAt ?? conversation.updatedAt;
-  if (isIdleSince(lastActivity)) {
-    const rotated = await rotateConversation(conversation);
-    return emptyHistory(
-      employeeId,
-      rotated.openaiConversationId,
-      rotated.updatedAt,
-      digital.id,
-    );
+  if (!conversation) {
+    const history = toHistoryResponse(employeeId, {
+      digitalEmployeeId: digital.id,
+      openaiConversationId: "pending",
+      updatedAt: guestLucyMessages.at(-1)?.createdAt ?? new Date(),
+      messages: guestLucyMessages,
+    });
+    return { ...history, conversationId: null };
   }
 
-  return toHistoryResponse(employeeId, conversation);
+  if (guestLucyMessages.length === 0) {
+    return toHistoryResponse(employeeId, conversation);
+  }
+
+  const seen = new Set(conversation.messages.map((row) => row.id));
+  const merged = [
+    ...guestLucyMessages.filter((row) => !seen.has(row.id)),
+    ...conversation.messages,
+  ].sort((a, b) => {
+    const byTime = a.createdAt.getTime() - b.createdAt.getTime();
+    if (byTime !== 0) {
+      return byTime;
+    }
+    // Match DB order: author desc as secondary when timestamps tie.
+    return b.author.localeCompare(a.author);
+  });
+
+  return toHistoryResponse(employeeId, {
+    digitalEmployeeId: digital.id,
+    openaiConversationId: conversation.openaiConversationId,
+    updatedAt: conversation.updatedAt,
+    messages: merged,
+  });
 }
 
 export async function resetChatConversation(
@@ -1910,7 +1988,7 @@ export async function sendChatMessage(input: {
     ? [
         "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
         "Never say אני אורח / אני גם אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
-        "Your purpose: help them register as a Workee member (their own account + לוסי). Collect ONLY: (1) first name, (2) gender זכר→male / נקבה→female. Surname optional if they volunteer it. FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password — stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
+        "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender זכר→male / נקבה→female. Surname optional if they volunteer it. FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password — stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
         "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
         "Off-topic outside shared lists or registration ? guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
@@ -2325,10 +2403,10 @@ export async function sendChatMessage(input: {
           register: metadata.register,
         });
         if (registerResult.ok) {
-          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}. מההודעה הבאה אפשר לדבר עם לוסי בחשבון שלך.`;
+          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}. מההודעה הבאה אפשר לדבר עם לוסי.`;
           recordWhatsAppEvent(
             "guest_register",
-            `ok user=${registerResult.newUserId.slice(0, 8)} mirror=${registerResult.mirrorEmployeeId.slice(0, 8)}`,
+            `ok employee=${registerResult.employeeId.slice(0, 8)}`,
           );
         } else if (registerResult.reason === "invalid_fields") {
           registerNotice =

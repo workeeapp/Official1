@@ -161,7 +161,7 @@ export async function listTeamsForUser(userId: string): Promise<PublicTeam[]> {
 /** Short custom prompt for WhatsApp guest onboarding (no Lucy capability catalog). */
 const GUEST_LUCY_INSTRUCTIONS = [
   "SYSTEM:",
-  "You are לוסי-אורח — Workee's guest guide. Your only job is to help this WhatsApp guest become a registered member with their own account.",
+  "You are לוסי-אורח — Workee's guest guide. Your only job is to help this WhatsApp guest become a registered team member.",
   "Speak Hebrew unless they write in English. Be warm and brief.",
   "You may answer questions about lists/filings already shared with them in EMPLOYEE_SAVED_DATA (scope=shared).",
   "You cannot add, change, or delete anything for them while they are a guest — say they can only view shared lists until they register.",
@@ -169,10 +169,10 @@ const GUEST_LUCY_INSTRUCTIONS = [
   "1) first name (שם פרטי) — required",
   "2) gender / לשון פנייה: זכר → gender \"male\", נקבה → gender \"female\" — required",
   "3) surname (שם משפחה) — optional; include only if they volunteered it; never demand it",
-  "FORBIDDEN: never ask for username, password, email, phone, or login credentials. This account is WhatsApp-only — there is no login to create.",
+  "FORBIDDEN: never ask for username, password, email, phone, or login credentials. There is no separate login to create.",
   "If earlier turns in this chat asked for username/password — stop that path immediately; apologize briefly and continue with name + gender only.",
   "Keep metadata.register null until name AND gender are known. Ask only for what is still missing.",
-  "When name + gender are known, emit metadata.register { name, gender } (and surname only if given) and confirm they are registered. Then they will talk with לוסי on their own account.",
+  "When name + gender are known, emit metadata.register { name, gender } (and surname only if given) and confirm they are registered. Then they will talk with לוסי (not you) from the next message.",
   "TIPS: when AVAILABLE_TIPS includes guest_terms and the guest asks how registration / usage works or about terms/תקנון, set metadata.tips=[\"guest_terms\"]. The engine sends the catalog text — do not paste תקנון into responses yourself. Otherwise tips null.",
   "Never invent private data. Never claim you are the guest. Do not hand off to other workers.",
 ].join("\n");
@@ -257,8 +257,9 @@ export async function getLucyPromptDefaults(
 
 async function ensureProtectedLucy(
   userId: string,
-  teamId: string,
+  teamId?: string,
 ): Promise<void> {
+  const resolvedTeamId = teamId ?? (await ensureTeamForUser(userId)).id;
   const existing = await prisma.employee.findFirst({
     where: { userId, isProtected: true },
   });
@@ -266,7 +267,7 @@ async function ensureProtectedLucy(
     if (!existing.teamId) {
       await prisma.employee.update({
         where: { id: existing.id },
-        data: { teamId, isGuest: false },
+        data: { teamId: resolvedTeamId, isGuest: false },
       });
     }
     return;
@@ -285,7 +286,7 @@ async function ensureProtectedLucy(
       data: {
         isProtected: true,
         isGuest: false,
-        ...(namedLucy.teamId ? {} : { teamId }),
+        ...(namedLucy.teamId ? {} : { teamId: resolvedTeamId }),
       },
     });
     return;
@@ -295,7 +296,7 @@ async function ensureProtectedLucy(
   await prisma.employee.create({
     data: {
       userId,
-      teamId,
+      teamId: resolvedTeamId,
       kind: "digital",
       isProtected: true,
       isGuest: false,

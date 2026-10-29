@@ -7,11 +7,11 @@ Ideas to consider later — not committed work. Captured from product discussion
 **Current intent**
 - **Human employees** = workspace team members.
 - **Guests** (`אורח` WhatsApp shells) = outsiders who talk with **לוסי-אורח** (not Lucy). They may **view** lists/filings shared with them; they do not get a full personal workspace until they register.
-- **Registration (shipped):** לוסי-אורח emits `metadata.register` `{ name, gender }` (+ optional surname) → WhatsApp-only User (nullable credentials) + own Lucy + `addressGender`; host guest becomes a non-guest share mirror on the shared host team **`New Registered 30 days`** (all new registrants join that same team; no per-user Team). WhatsApp prefers non-guest on phone match.
+- **Registration (shipped):** לוסי-אורח emits `metadata.register` `{ name, gender }` (+ optional surname) → promote guest **in place** on the host (`isGuest=false`, keep phone, shared team **`New Registered 30 days`**). Next WhatsApp turn talks with לוסי on a new conversation (same `employeeId`).
 
 **Features to consider**
-1. **Set password / web login for WhatsApp-only users**  
-   Let a registered member add username+password later so they can use the web UI (accounts created via guest register start with null credentials).
+1. **Set password / web login for registered WhatsApp members**  
+   Let a registered team member add username+password later so they can use the web UI (they remain on the host account until/unless a split-account flow is added).
 2. **Create-employee merges matching guest phone**  
    If the UI adds a human with a phone that already belongs to a guest, merge/promote instead of creating a second person.
 3. **Guest directory / labels**  
@@ -23,7 +23,7 @@ Ideas to consider later — not committed work. Captured from product discussion
 6. **Audit “who is this guest”**  
    UI to see guest shells, which shared lists they see, and last WhatsApp activity — without listing them in the main Employees / Chat-as pickers.
 
-**Shipped:** Cross-account share/assign/mutate for registered non-guests via SPEAKER_CONTACTS phone → global Employee (guests stay view-only). Share-mirror after guest registration remains a continuity link for host shared data.
+**Shipped:** Cross-account share/assign/mutate for registered non-guests via SPEAKER_CONTACTS phone → global Employee (guests stay view-only). Legacy `share_mirror_employee_id` rows may still exist from older registrations; new registrations promote in place and do not create a mirror.
 
 ## Related cleanup (done ad hoc when needed)
 
