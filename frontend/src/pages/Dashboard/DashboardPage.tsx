@@ -157,7 +157,7 @@ export function DashboardPage() {
 
     Promise.all([
       employeeApi.list(),
-      teamApi.get(),
+      teamApi.list(),
       employeeApi.teamUsage({ signal: abort.signal }).catch(() => null),
     ])
       .then(([employeesResponse, teamResponse, usage]) => {
@@ -166,7 +166,7 @@ export function DashboardPage() {
         }
         const employees = employeesResponse.employees;
         setCounts({
-          teams: teamResponse.team ? 1 : 0,
+          teams: teamResponse.teams.length,
           employees: workspaceHumans(employees).length,
           guests: humanEmployees(employees).filter((employee) =>
             isGuestEmployee(employee),

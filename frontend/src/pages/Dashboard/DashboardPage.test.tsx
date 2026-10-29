@@ -16,6 +16,7 @@ const {
   logoutMock,
   listEmployeesMock,
   getTeamMock,
+  listTeamsMock,
   teamUsageMock,
 } = vi.hoisted(() => ({
   loginMock: vi.fn(),
@@ -23,6 +24,7 @@ const {
   logoutMock: vi.fn(),
   listEmployeesMock: vi.fn(),
   getTeamMock: vi.fn(),
+  listTeamsMock: vi.fn(),
   teamUsageMock: vi.fn(),
 }));
 
@@ -37,19 +39,7 @@ vi.mock("@/services/auth.service", () => ({
 vi.mock("@/services/team.service", () => ({
   teamApi: {
     get: getTeamMock,
-    list: async () => {
-      const { team } = await getTeamMock();
-      return {
-        teams: [
-          team,
-          {
-            id: "33333333-3333-4333-8333-333333333333",
-            userId: team.userId,
-            name: "New Registered 30 days",
-          },
-        ],
-      };
-    },
+    list: listTeamsMock,
   },
 }));
 
@@ -94,12 +84,21 @@ describe("Dashboard page", () => {
     loginMock.mockReset();
     meMock.mockReset();
     logoutMock.mockReset().mockResolvedValue({ ok: true });
-    getTeamMock.mockReset().mockResolvedValue({
-      team: {
-        id: "22222222-2222-4222-8222-222222222222",
-        userId: "11111111-1111-4111-8111-111111111111",
-        name: "Amit",
-      },
+    const personalTeam = {
+      id: "22222222-2222-4222-8222-222222222222",
+      userId: "11111111-1111-4111-8111-111111111111",
+      name: "Amit",
+    };
+    getTeamMock.mockReset().mockResolvedValue({ team: personalTeam });
+    listTeamsMock.mockReset().mockResolvedValue({
+      teams: [
+        personalTeam,
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          userId: personalTeam.userId,
+          name: "New Registered 30 days",
+        },
+      ],
     });
     teamUsageMock.mockReset().mockResolvedValue({
       totalUsd: 0.0112,
@@ -218,10 +217,19 @@ describe("Dashboard page", () => {
     renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByTestId("dashboard-teams-count")).toHaveTextContent("1");
+      expect(screen.getByTestId("dashboard-teams-count")).toHaveTextContent("2");
     });
     expect(screen.getByTestId("dashboard-employees-count")).toHaveTextContent("2");
     expect(screen.getByTestId("dashboard-guests-count")).toHaveTextContent("1");
+  });
+
+  it("shows zero teams when the account has no teams", async () => {
+    listTeamsMock.mockResolvedValueOnce({ teams: [] });
+    renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-teams-count")).toHaveTextContent("0");
+    });
   });
 
   it("shows total usage first, then human-only team usage", async () => {
