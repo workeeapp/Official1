@@ -9,6 +9,7 @@ import {
   isValidCalendarYmd,
   normalizeShowDumpListName,
   resolveEffectiveOccurrenceReminder,
+  type LlmListAction,
   type LlmShowDumpSection,
   type RecurrenceException,
 } from "@workee/shared";
@@ -130,6 +131,11 @@ export type ShowDumpOptions = {
    * excludes assign when partner is set — see filterDumpRows).
    */
   collaboration?: "co_share" | "assign" | null;
+  /**
+   * Custom list_name stamped onto LAST_NUMBERED_DUMP lines (kind=custom) so the
+   * server can refuse add/update/remove against a different list.
+   */
+  dumpListName?: string | null;
 };
 
 /** Phone-book dump row (directory / SPEAKER_CONTACTS). */
@@ -264,6 +270,9 @@ export function mapShowButtonCommandToDumpTarget(
   if (!snapshot) {
     return null;
   }
+  // Longest custom list_name wins when one name prefixes another.
+  let bestCustom: ShowButtonDumpTarget | null = null;
+  let bestCustomLen = -1;
   for (const list of snapshot.lists) {
     if (list.list_type !== "custom") {
       continue;
@@ -272,36 +281,228 @@ export function mapShowButtonCommandToDumpTarget(
     if (!listName) {
       continue;
     }
-    if (trimmed === showListButtonCommand(listName)) {
-      return { kind: listName };
-    }
+    const prefix = showListButtonCommand(listName);
     const sharedSuffix = ` משותפות עם `;
     const assignSuffix = ` באחריות `;
-    const prefix = showListButtonCommand(listName);
     if (trimmed.startsWith(prefix + sharedSuffix)) {
       const person = trimmed.slice((prefix + sharedSuffix).length).trim();
-      if (person) {
-        return {
+      if (person && listName.length > bestCustomLen) {
+        bestCustom = {
           kind: listName,
           section: "shared",
           partner: person,
           collaboration: "co_share",
         };
+        bestCustomLen = listName.length;
       }
+      continue;
     }
     if (trimmed.startsWith(prefix + assignSuffix)) {
       const person = trimmed.slice((prefix + assignSuffix).length).trim();
-      if (person) {
-        return {
+      if (person && listName.length > bestCustomLen) {
+        bestCustom = {
           kind: listName,
           section: "shared",
           assignee: person,
           collaboration: "assign",
         };
+        bestCustomLen = listName.length;
       }
+      continue;
+    }
+    // Exact button command OR free-typed aliases («הצג משימות לטל»).
+    // Aliases keep LAST_NUMBERED_DUMP in sync — model-written inventory does not.
+    if (
+      matchesCustomListShowCommand(trimmed, listName) &&
+      listName.length > bestCustomLen
+    ) {
+      bestCustom = { kind: listName };
+      bestCustomLen = listName.length;
     }
   }
-  return null;
+  return bestCustom;
+}
+
+/**
+ * Opaque button «הצג רשימת X» plus free-typed show aliases for the same custom
+ * list (exact equality only — never fuzzy / partial).
+ */
+export function matchesCustomListShowCommand(
+  text: string,
+  listName: string,
+): boolean {
+  const trimmed = text.trim();
+  const name = listName.trim();
+  if (!trimmed || !name) {
+    return false;
+  }
+  return (
+    trimmed === showListButtonCommand(name) ||
+    trimmed === `הצג ${name}` ||
+    trimmed === `הציגי ${name}` ||
+    trimmed === `הצג את רשימת ${name}` ||
+    trimmed === `הציגי את רשימת ${name}` ||
+    trimmed === `הציגי רשימת ${name}`
+  );
+}
+
+/**
+ * Model-written numbered inventory (no show_dump REPLACE) — used to invalidate
+ * a stale LAST_NUMBERED_DUMP so «מחק את 1,2» cannot hit a previous list.
+ */
+export function looksLikeFreeWrittenNumberedInventory(text: string): boolean {
+  const lines = text
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const numbered = lines.filter((line) => /^\d+\.\s+/u.test(line));
+  if (numbered.length < 2) {
+    return false;
+  }
+  return lines.some((line) =>
+    /רשימת|קניות|מטלות|אנשי קשר|תיוקים|🛒|✅|📋|👤/u.test(line),
+  );
+}
+
+function actionItemIdFromRaw(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "";
+  }
+  const record = raw as Record<string, unknown>;
+  for (const key of ["item_id", "itemId", "id"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function normalizeDumpListName(value: string | null | undefined): string {
+  return normalizeShowDumpListName(value ?? "").trim();
+}
+
+/**
+ * Whether this lists.* ACTION targets a domain present in the active dump
+ * (add to shopping while custom dump is open → false).
+ */
+export function listActionMatchesLastNumberedDumpScope(
+  action: Pick<LlmListAction, "listType" | "listName">,
+  dump: ReadonlyArray<LastNumberedDumpLine>,
+): boolean {
+  if (dump.length === 0) {
+    return true;
+  }
+  const kinds = new Set(dump.map((row) => row.kind.trim()).filter(Boolean));
+  const customNames = new Set(
+    dump
+      .map((row) =>
+        row.kind === "custom" ? normalizeDumpListName(row.list_name) : "",
+      )
+      .filter(Boolean),
+  );
+  const legacyCustomWithoutName = dump.some(
+    (row) => row.kind === "custom" && !normalizeDumpListName(row.list_name),
+  );
+  const listType = action.listType;
+  if (listType === "shopping") {
+    return kinds.has("shopping");
+  }
+  if (listType === "tasks") {
+    return kinds.has("tasks");
+  }
+  if (listType === "reminders") {
+    return kinds.has("reminders");
+  }
+  if (listType === "contacts") {
+    return kinds.has("contacts") || kinds.has("phone_book");
+  }
+  if (listType === "filing") {
+    return kinds.has("filings") || kinds.has("filing");
+  }
+  if (listType === "custom") {
+    const name = normalizeDumpListName(action.listName);
+    if (name && customNames.has(name)) {
+      return true;
+    }
+    // Pre-list_name dump maps: allow any custom rather than lock the session.
+    return legacyCustomWithoutName && kinds.has("custom");
+  }
+  return false;
+}
+
+/**
+ * Hard server guard while LAST_NUMBERED_DUMP is active:
+ * - add → only to a list/domain present in that dump (no shopping add after custom dump)
+ * - remove/update with item_id → only ids from that dump
+ * - remove/update without item_id → same domain scope as add
+ * Empty dump → no filter.
+ */
+export function restrictListMutatesToLastNumberedDump(
+  lists: LlmListAction[],
+  dump: ReadonlyArray<LastNumberedDumpLine>,
+): { lists: LlmListAction[]; droppedOutsideDump: boolean } {
+  if (dump.length === 0 || lists.length === 0) {
+    return { lists, droppedOutsideDump: false };
+  }
+  const allowedIds = new Set(
+    dump.map((row) => row.id.trim()).filter(Boolean),
+  );
+  let droppedOutsideDump = false;
+  const next: LlmListAction[] = [];
+  for (const action of lists) {
+    if (action.action === "add") {
+      if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
+        droppedOutsideDump = true;
+        continue;
+      }
+      next.push(action);
+      continue;
+    }
+    if (action.action !== "remove" && action.action !== "update") {
+      next.push(action);
+      continue;
+    }
+    const items = Array.isArray(action.items) ? action.items : [];
+    const addressedIds = items
+      .map((raw) => actionItemIdFromRaw(raw))
+      .filter(Boolean);
+    if (addressedIds.length === 0) {
+      // No ids — scope by list_type / list_name only.
+      if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
+        droppedOutsideDump = true;
+        continue;
+      }
+      next.push(action);
+      continue;
+    }
+    if (allowedIds.size === 0) {
+      droppedOutsideDump = true;
+      continue;
+    }
+    const kept: typeof items = [];
+    for (const raw of items) {
+      const id = actionItemIdFromRaw(raw);
+      if (!id) {
+        kept.push(raw);
+        continue;
+      }
+      if (allowedIds.has(id)) {
+        kept.push(raw);
+        continue;
+      }
+      droppedOutsideDump = true;
+    }
+    if (kept.every((raw) => !actionItemIdFromRaw(raw))) {
+      continue;
+    }
+    if (kept.length !== items.length) {
+      next.push({ ...action, items: kept });
+    } else {
+      next.push(action);
+    }
+  }
+  return { lists: next, droppedOutsideDump };
 }
 
 /**
@@ -394,6 +595,11 @@ export type LastNumberedDumpLine = {
   title_stem: string;
   /** When numbering restarts (day YMD, full-dump section, ממתינים). */
   section?: string;
+  /**
+   * Exact custom list_name when kind=custom — scopes add/update/remove to that
+   * list while this dump is active (not another custom list).
+   */
+  list_name?: string;
 };
 
 type DumpTextResult = { text: string; lines: LastNumberedDumpLine[] };
@@ -3200,6 +3406,10 @@ function formatSingleHeaderDump(
     return emptyDumpResult();
   }
   const lines: LastNumberedDumpLine[] = [];
+  const dumpListName =
+    listType === "custom"
+      ? normalizeDumpListName(opts?.dumpListName) || undefined
+      : undefined;
   const text = [
     `${label}${paperclipSuffix(headerFiles)}:`,
     ...rows.map((row, i) => {
@@ -3211,6 +3421,7 @@ function formatSingleHeaderDump(
           id,
           kind: listType,
           title_stem: dumpItemTitleStem(listType, row),
+          ...(dumpListName ? { list_name: dumpListName } : {}),
         });
       }
       return formatNumberedItem(n, row.title, row.item, listType, {
@@ -3575,7 +3786,12 @@ function formatContactsOrCustomDump(
     dumpHeaderEmoji(kept, listType, lists),
     bareHeader,
   );
-  return formatSingleHeaderDump(header, listType, kept, opts);
+  return formatSingleHeaderDump(header, listType, kept, {
+    ...opts,
+    ...(listType === "custom"
+      ? { dumpListName: normalizedListName }
+      : {}),
+  });
 }
 
 /** Focused custom-list empty sentence (not used in FULL DUMP sections). */

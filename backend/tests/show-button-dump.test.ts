@@ -66,6 +66,7 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הצג רשימת קניות")).toBe("shopping");
     expect(mapShowButtonCommandToDump("הצג תזכורות")).toBe("reminders");
     expect(mapShowButtonCommandToDump("הצג תיוקים")).toBe("filings");
+    expect(mapShowButtonCommandToDump("הצג רשימות")).toBe("full");
     expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
     expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("phone_book");
     expect(mapShowButtonCommandToDump(showAllListButtonCommand("shopping"))).toBe(
@@ -147,10 +148,21 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הצג רשימת משימות לעבודה", snap)).toBe(
       "משימות לעבודה",
     );
+    // Free-typed alias (repro: הצג משימות לטל after shopping dump).
+    expect(mapShowButtonCommandToDump("הצג משימות לעבודה", snap)).toBe(
+      "משימות לעבודה",
+    );
+    expect(mapShowButtonCommandToDump("הציגי משימות לעבודה", snap)).toBe(
+      "משימות לעבודה",
+    );
+    expect(mapShowButtonCommandToDump("הצג את רשימת משימות לעבודה", snap)).toBe(
+      "משימות לעבודה",
+    );
     expect(mapShowButtonCommandToDump("הצג רשימת משימות לעבודה")).toBeNull();
     expect(
       mapShowButtonCommandToDump("הצג רשימת משימות לעבודה בבקשה", snap),
     ).toBeNull();
+    expect(mapShowButtonCommandToDump("הצג משימות לעבודה בבקשה", snap)).toBeNull();
   });
 
   it("strips WhatsApp reply prefix before allowlist equality", () => {

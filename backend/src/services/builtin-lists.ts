@@ -28,6 +28,8 @@ export const SHOW_REMINDERS_COMMAND = "הצג תזכורות";
 export const SHOW_FILINGS_COMMAND = "הצג תיוקים";
 export const SHOW_LIST_PREFIX = "הצג רשימת ";
 export const SHOW_FILINGS_ALL_COMMAND = "כל התיוקים";
+/** Full overview («מה יש לי» / SHOW MY LISTS) — list-shell post-mutate nav. */
+export const SHOW_LISTS_COMMAND = "הצג רשימות";
 
 export function isBuiltinListType(value: string): value is BuiltinListType {
   return (BUILTIN_LIST_TYPES as readonly string[]).includes(value);
@@ -140,6 +142,7 @@ export function staticShowButtonDumpMap(): Readonly<Record<string, string>> {
     [SHOW_REMINDERS_COMMAND]: "reminders",
     [SHOW_FILINGS_COMMAND]: "filings",
     [SHOW_FILINGS_ALL_COMMAND]: "filings",
+    [SHOW_LISTS_COMMAND]: "full",
     [showListButtonCommand("shopping")]: "shopping",
     [showListButtonCommand("tasks")]: "tasks",
     // Contacts v2: button dumps canonical SPEAKER_CONTACTS (phone_book), not lists.contacts.

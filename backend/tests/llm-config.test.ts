@@ -281,6 +281,20 @@ describe("LLM action schema", () => {
       "FORBIDDEN bare show_dump without ids for a semantic/focused ask",
     );
     expect(config.systemMessage).not.toContain("show_dump_ids (required)");
+    // Meetings-this-week must be path-2 dump+ids (server REPLACE), not prose.
+    expect(config.systemMessage).toContain("אילו פגישות יש לי השבוע");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN model-written meeting inventory",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN prose meeting list",
+    );
+    // List-shell post-mutate overview button (not item mutates).
+    expect(config.systemMessage).toContain("LIST SHELL SHOW");
+    expect(config.systemMessage).toContain('label «הצג רשימות»');
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN this button after item-level lists.add|update|remove alone",
+    );
     // Phone book parity: path 2 uses phone_book + SPEAKER_CONTACTS; path 3 includes contacts.
     expect(config.systemMessage).toContain("phone_book|filings|reminders");
     expect(config.systemMessage).toContain(

@@ -24,6 +24,7 @@ import {
   SHOW_FILINGS_ALL_COMMAND,
   SHOW_FILINGS_COMMAND,
   SHOW_LIST_PREFIX,
+  SHOW_LISTS_COMMAND,
   SHOW_REMINDERS_COMMAND,
   showListButtonCommand,
   showWorkerTasksButtonCommand,
@@ -1637,6 +1638,12 @@ export type AppliedNavFilter = {
   listKeys: ReadonlySet<string>;
   filing: boolean;
   /**
+   * List-shell work only (create empty custom / alter_list / delete_list /
+   * listShell mutation). Item add|update|remove must NOT set this — those keep
+   * existing per-list LIST BUTTON only.
+   */
+  listsOverview?: boolean;
+  /**
    * When set (including empty Map), collab button shape comes only from these
    * apply proofs — never from ACTION targets alone. Omit only in unit tests
    * that assert the metadata→button collab contract without apply.
@@ -1799,6 +1806,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
   if (
     cmd === SHOW_FILINGS_COMMAND ||
     cmd === SHOW_FILINGS_ALL_COMMAND ||
+    cmd === SHOW_LISTS_COMMAND ||
     cmd.startsWith(SHOW_LIST_PREFIX)
   ) {
     return true;
@@ -1814,6 +1822,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
     label === "הצג מטלות" ||
     label === "הצג אנשי קשר" ||
     label === "הצג רשימה" ||
+    label === "הצג רשימות" ||
     label === "הצג תיוקים" ||
     /^משותף עם /u.test(label) ||
     /^באחריות /u.test(label) ||
@@ -2100,6 +2109,14 @@ export function parseFixedListNavButton(
       plainButton,
     };
   }
+  if (cmd === SHOW_LISTS_COMMAND) {
+    return {
+      listKey: "lists_overview",
+      kind: "plain",
+      partner: null,
+      plainButton: { label: "הצג רשימות", command: SHOW_LISTS_COMMAND },
+    };
+  }
 
   const allMatch = cmd.match(
     /^כל (הקניות|המטלות|אנשי הקשר|התיוקים)$/u,
@@ -2180,6 +2197,13 @@ function listKeyNavEligible(
   appliedNav: AppliedNavFilter | undefined,
   skipSourceCommands: ReadonlySet<string>,
 ): boolean {
+  if (listKey === "lists_overview") {
+    if (skipSourceCommands.has(SHOW_LISTS_COMMAND)) {
+      return false;
+    }
+    // List-shell only — never from item-level metadata.lists alone.
+    return appliedNav?.listsOverview === true;
+  }
   const plain = plainButtonForListKey(listKey);
   if (!plain) {
     return false;
@@ -2689,6 +2713,17 @@ function plainSafetyNetListShowButtons(
     if (contactsBtn) {
       pushNavButton(buttons, seen, contactsBtn);
     }
+  }
+  // List-shell only (create / alter_list / delete_list) — never item mutate.
+  if (
+    appliedNav?.listsOverview &&
+    !coveredListKeys.has("lists_overview") &&
+    !skipSourceCommands.has(SHOW_LISTS_COMMAND)
+  ) {
+    pushNavButton(buttons, seen, {
+      label: "הצג רשימות",
+      command: SHOW_LISTS_COMMAND,
+    });
   }
   return buttons;
 }

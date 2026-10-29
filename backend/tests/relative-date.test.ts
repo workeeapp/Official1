@@ -60,12 +60,14 @@ describe("relative-date", () => {
     expect(text).toContain("FORBIDDEN model-written agenda");
     expect(text).toContain("server dump only");
     expect(text).toContain("Semantic day asks");
+    expect(text).toContain("אילו פגישות יש לי השבוע");
+    expect(text).toContain("FORBIDDEN answering in prose instead of dump+ids");
     expect(text).toContain("TIME-OF-DAY");
     // Former "RECURRING IN A DATE ANSWER" / DAY AGENDA — live SESSION_CLOCK wording.
     expect(text).toContain("RECURRING / WHEN DATE ASK");
     expect(text).toContain("FULL date-window agenda");
     expect(text).toContain("RETRIEVAL CONTRACT path 2");
-    expect(text).toContain("no free-built inventory/agenda");
+    expect(text).toContain("FORBIDDEN prose inventory");
   });
 
   it("bounds השבוע to today→Saturday and השבוע הבא to the next Sunday→Saturday", () => {

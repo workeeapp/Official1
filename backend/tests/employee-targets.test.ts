@@ -1736,6 +1736,98 @@ describe("employee targets", () => {
     ).toEqual([]);
   });
 
+  it("LIST SHELL: listsOverview → safety-net הצג רשימות (full dump)", () => {
+    expect(
+      ensureSpeakerShowButtons(emptyLlmMetadata(), [], {
+        appliedNav: {
+          listKeys: new Set(),
+          filing: false,
+          listsOverview: true,
+        },
+      }),
+    ).toEqual([{ label: "הצג רשימות", command: "הצג רשימות" }]);
+  });
+
+  it("LIST SHELL: item-only mutate must NOT get הצג רשימות", () => {
+    const buttons = ensureSpeakerShowButtons(
+      {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "ציוד",
+            items: [{ נושא: "מברג" }],
+            targets: [],
+          },
+        ],
+      },
+      [],
+      {
+        appliedNav: {
+          listKeys: new Set(["custom:ציוד"]),
+          filing: false,
+          listsOverview: false,
+        },
+      },
+    );
+    expect(buttons.map((b) => b.command)).toEqual(["הצג רשימת ציוד"]);
+    expect(buttons.some((b) => b.command === "הצג רשימות")).toBe(false);
+  });
+
+  it("LIST SHELL: model הצג רשימות kept only when listsOverview applied", () => {
+    const overview = { label: "הצג רשימות", command: "הצג רשימות" };
+    expect(
+      ensureSpeakerShowButtons(emptyLlmMetadata(), [overview], {
+        appliedNav: {
+          listKeys: new Set(),
+          filing: false,
+          listsOverview: true,
+        },
+      }),
+    ).toEqual([overview]);
+    expect(
+      ensureSpeakerShowButtons(emptyLlmMetadata(), [overview], {
+        appliedNav: {
+          listKeys: new Set(["shopping"]),
+          filing: false,
+          listsOverview: false,
+        },
+      }),
+    ).toEqual([]);
+    expect(isEngineOwnedListNavButton(overview)).toBe(true);
+  });
+
+  it("LIST SHELL: shell create key + listsOverview → specific list + overview", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "custom",
+              listName: "ציוד",
+              items: [],
+              targets: [],
+            },
+          ],
+        },
+        [],
+        {
+          appliedNav: {
+            listKeys: new Set(["custom:ציוד"]),
+            filing: false,
+            listsOverview: true,
+          },
+        },
+      ),
+    ).toEqual([
+      { label: "הצג רשימה", command: "הצג רשימת ציוד" },
+      { label: "הצג רשימות", command: "הצג רשימות" },
+    ]);
+  });
+
   it("LIST BUTTON: model plain LIST + appliedNav keep → original label, no safety-net duplicate", () => {
     const modelList = {
       label: "מה בקניות",

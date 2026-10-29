@@ -199,9 +199,11 @@ import {
   liveDumpRowIdsFromSnapshot,
   isTasksShowDumpKind,
   dumpFilterNames,
+  looksLikeFreeWrittenNumberedInventory,
   mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
+  restrictListMutatesToLastNumberedDump,
   type LastNumberedDumpLine,
 } from "./show-button-dump.js";
 import { resolveWeatherMessages } from "./weather.js";
@@ -323,6 +325,8 @@ function toHistoryResponse(
 const STORED_LLM_REQUEST = "workeeOpenAiRequest";
 const STORED_LLM_RESPONSE = "workeeOpenAiResponse";
 const STORED_LAST_NUMBERED_DUMP = "lastNumberedDump";
+/** Tombstone: free-written numbered inventory without show_dump ? wipe stale map. */
+const STORED_LAST_NUMBERED_DUMP_CLEARED = "lastNumberedDumpCleared";
 const STORED_LAST_ROUTES_BOARD = "lastRoutesBoard";
 
 function buildOpenAiRequest(input: {
@@ -342,12 +346,16 @@ function packStoredLlmRaw(
   response: unknown,
   lastNumberedDump?: LastNumberedDumpLine[],
   lastRoutesBoard?: LastRoutesBoard | null,
+  lastNumberedDumpCleared?: boolean,
 ): unknown {
   return {
     [STORED_LLM_REQUEST]: request,
     [STORED_LLM_RESPONSE]: response,
     ...(lastNumberedDump && lastNumberedDump.length > 0
       ? { [STORED_LAST_NUMBERED_DUMP]: lastNumberedDump }
+      : {}),
+    ...(lastNumberedDumpCleared
+      ? { [STORED_LAST_NUMBERED_DUMP_CLEARED]: true }
       : {}),
     ...(lastRoutesBoard
       ? { [STORED_LAST_ROUTES_BOARD]: lastRoutesBoard }
@@ -359,6 +367,7 @@ function unpackStoredLlmRaw(raw: unknown): {
   request: unknown;
   response: unknown;
   lastNumberedDump: LastNumberedDumpLine[];
+  lastNumberedDumpCleared: boolean;
   lastRoutesBoard: LastRoutesBoard | null;
 } {
   if (
@@ -372,6 +381,7 @@ function unpackStoredLlmRaw(raw: unknown): {
       request: packed[STORED_LLM_REQUEST] ?? null,
       response: packed[STORED_LLM_RESPONSE] ?? null,
       lastNumberedDump: parseLastNumberedDump(packed[STORED_LAST_NUMBERED_DUMP]),
+      lastNumberedDumpCleared: packed[STORED_LAST_NUMBERED_DUMP_CLEARED] === true,
       lastRoutesBoard: parseLastRoutesBoard(packed[STORED_LAST_ROUTES_BOARD]),
     };
   }
@@ -386,6 +396,7 @@ function unpackStoredLlmRaw(raw: unknown): {
     request: null,
     response: raw ?? null,
     lastNumberedDump: [],
+    lastNumberedDumpCleared: false,
     lastRoutesBoard: board,
   };
 }
@@ -412,12 +423,19 @@ function parseLastNumberedDump(value: unknown): LastNumberedDumpLine[] {
       typeof rec.section === "string" && rec.section.trim()
         ? rec.section.trim()
         : undefined;
+    const list_name =
+      typeof rec.list_name === "string" && rec.list_name.trim()
+        ? rec.list_name.trim()
+        : typeof rec.listName === "string" && rec.listName.trim()
+          ? rec.listName.trim()
+          : undefined;
     out.push({
       n,
       id,
       kind,
       title_stem: title_stem || id,
       ...(section ? { section } : {}),
+      ...(list_name ? { list_name } : {}),
     });
   }
   return out;
@@ -428,6 +446,8 @@ async function loadLastNumberedDumpForConversation(
 ): Promise<LastNumberedDumpLine[]> {
   // Dump map is stored on the first assistant row of a show_dump turn. Later
   // raise/extra rows in the same turn have no raw map ? scan newest-first.
+  // A cleared tombstone (free-written numbered inventory) stops the scan so a
+  // stale shopping map cannot win after a model-written custom-list lookalike.
   const recent = await prisma.chatMessage.findMany({
     where: { conversationId, author: "assistant" },
     orderBy: { createdAt: "desc" },
@@ -435,12 +455,47 @@ async function loadLastNumberedDumpForConversation(
     select: { raw: true },
   });
   for (const row of recent) {
-    const lines = unpackStoredLlmRaw(row.raw).lastNumberedDump;
-    if (lines.length > 0) {
-      return lines;
+    const unpacked = unpackStoredLlmRaw(row.raw);
+    if (unpacked.lastNumberedDumpCleared) {
+      return [];
+    }
+    if (unpacked.lastNumberedDump.length > 0) {
+      return unpacked.lastNumberedDump;
     }
   }
   return [];
+}
+
+/** Test/helper: same rules as the conversation loader over packed raw rows. */
+export function pickLastNumberedDumpFromAssistantRaws(
+  rawsNewestFirst: unknown[],
+): LastNumberedDumpLine[] {
+  for (const raw of rawsNewestFirst) {
+    const unpacked = unpackStoredLlmRaw(raw);
+    if (unpacked.lastNumberedDumpCleared) {
+      return [];
+    }
+    if (unpacked.lastNumberedDump.length > 0) {
+      return unpacked.lastNumberedDump;
+    }
+  }
+  return [];
+}
+
+/** Test helper: pack request/response + optional dump map / clear tombstone. */
+export function packAssistantLlmRawForTests(input: {
+  request?: unknown;
+  response?: unknown;
+  lastNumberedDump?: LastNumberedDumpLine[];
+  lastNumberedDumpCleared?: boolean;
+}): unknown {
+  return packStoredLlmRaw(
+    input.request ?? null,
+    input.response ?? null,
+    input.lastNumberedDump,
+    null,
+    input.lastNumberedDumpCleared === true,
+  );
 }
 
 /**
@@ -947,7 +1002,7 @@ function workerTargetingInstructions(
     "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE WHEN CLEAR (rows): unique target ? remove NOW with item_id; responses non-empty past-tense (?????? ?? ?title???); FORBIDDEN empty responses; FORBIDDEN alter_list/delete_list for a single item (those are only for the whole list); FORBIDDEN same-turn jobs.answer; FORBIDDEN ???? ?????? when the target is unique. ASK WHEN UNCLEAR (?2 candidates / which domain / ??? ???) ? delete mutates empty; one responses entry; FORBIDDEN raise/?????. WHOLE-LIST: each explicitly named list with unique list_id ? delete_list NOW (one per list); a name with several matches or unresolved ? ASK, lists=[]. Update with id applies immediately. Never invent or speak ids.",
     "CLEAR ALL CONTACTS / PHONE BOOK: ?????? ?? ?? ???? ????? / ???? ?? ?? ??? ????????? ? ASK first (which domain / confirm wipe); directory=[] lists=[]. If SPEAKER_CONTACTS has rows this turn, FORBIDDEN claiming the book is empty ? ask whether they meant ??? ???????? (name that contacts exist). Never wipe-all without a clarifying ask.",
     "Speaker still needs ? EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (?????? ??) ? WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only ? active_reminders. Empty clocks ? you have no work. Never emit metadata.query.",
-    "WHEN / TODAY / SOON ? FULL agenda only (?? ????? ???? / ??? / ??? ????? / ????? / ???? ?????? / ???? ?????? with NO meaning filter): SESSION_CLOCK. ???/??? ? metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. ?? ?? ????? ???? X ? show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Do NOT use TEAM_SCHEDULES as the speaker's day plan. Multi-day (?????) ? from=first to=last day of the window. SEMANTIC day asks (???????? / ??????? / topic filter) ? RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump+show_dump_ids for all clear matches; no parallel prose inventory; no dump on no-match/ASK) ? FORBIDDEN bare show_dump without ids for those. TIME-OF-DAY (????) is NOT an engine dump filter.",
+    "WHEN / TODAY / SOON — FULL agenda only (מה מתוכנן היום / מחר / מה יש לי היום / השבוע / מה ביומן with NO meaning filter): SESSION_CLOCK. היום/מחר → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה יש לך היום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
     "LIST ITEM URGENCY: on lists add/update set item urgency = normal | urgent | very_urgent by MEANING (same as messages) ? never ask. normal by default; urgent when they stress it (???? / ?????); very_urgent when hard (??? ???? / ???? ???? / ???). Clean title without urgency words. Shopping/tasks/contacts/custom alike.",
     "URGENCY IN RESPONSE: when a saved item has urgency (urgent / very_urgent ? normal is omitted from EMPLOYEE_SAVED_DATA), wrap that entire numbered line in guillemets so the whole row is bold. urgent ? ?1. ????? ??? ????. very_urgent ? the same wrap plus ?? after the closing guillemet: ?1. ????? ??? ???? ??. ?? and ?(??????: ?)? stay inside the wrap. FORBIDDEN: the words ???? / ???? ???? on the line. Never wrap or mark normal/missing. ?? ?? ?? ???? / ?? ???? ? metadata.show_dump=tasks (or full) + show_dump_urgency=urgent; lists=[]; server replaces.",
     "Status / ??? / what someone needs to buy or do / show a list: LIVE DATA ONLY ? never resurrect titles from earlier chat after a delete. Bare ??? ?? ??? / ?????? ???? / ????? ??? / ?? ?? ????? ? metadata.show_dump=full; lists=[]; server replaces response (FORBIDDEN model-written overview; shopping COUNTS + tasks detail + phone book). SHAREABLE STATUS ASK / ABOUT X / ???? ????? ?????|??????: metadata.show_dump = shopping|tasks|?; one flat dump header + row marks (co-share (A, B); assign (??????? X ? ??? Y)); filings two-section; about X = speaker?X co-share. Current field values only ? never dump ?? ??? / update drafts. Inventory dump lines are server-owned ? do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap ???:?). Urgency: wrap the whole item line in ???; very_urgent also appends ?? after the closing guillemet. FORBIDDEN to write ???? / ???? ???? on that line. Shared lists: use scope/shared_with. Custom list titles follow LIST NAME MATCH. APPLY FEEDBACK: name object+list after mutates.",
@@ -1144,6 +1199,11 @@ async function syncTurnReplies(input: {
   showIcon?: string;
   /** Line map from this turn's show_dump REPLACE (for next-turn BY LINE). */
   lastNumberedDump?: LastNumberedDumpLine[];
+  /**
+   * Free-written numbered inventory this turn (no show_dump) ? tombstone so the
+   * loader does not fall back to an older shopping/tasks map.
+   */
+  clearLastNumberedDump?: boolean;
   /** Successful Google A?B trip board (omit to preserve prior on dump-only writes). */
   lastRoutesBoard?: LastRoutesBoard;
 }): Promise<ChatTurnMessageIds> {
@@ -1165,16 +1225,21 @@ async function syncTurnReplies(input: {
     select: { raw: true },
   });
   const unpacked = unpackStoredLlmRaw(existingAssistant?.raw);
-  const dumpLines =
-    input.lastNumberedDump && input.lastNumberedDump.length > 0
-      ? input.lastNumberedDump
+  const hasFreshDump =
+    input.lastNumberedDump != null && input.lastNumberedDump.length > 0;
+  const clearDump = !hasFreshDump && input.clearLastNumberedDump === true;
+  const dumpLines = hasFreshDump
+    ? input.lastNumberedDump
+    : clearDump
+      ? []
       : unpacked.lastNumberedDump;
   const boardToStore =
     input.lastRoutesBoard !== undefined
       ? input.lastRoutesBoard
       : unpacked.lastRoutesBoard;
   const shouldRewriteRaw =
-    (input.lastNumberedDump && input.lastNumberedDump.length > 0) ||
+    hasFreshDump ||
+    clearDump ||
     input.lastRoutesBoard != null;
   const nextRaw = shouldRewriteRaw
     ? packStoredLlmRaw(
@@ -1182,6 +1247,7 @@ async function syncTurnReplies(input: {
         unpacked.response,
         dumpLines,
         boardToStore,
+        clearDump,
       )
     : existingAssistant?.raw;
   await prisma.chatMessage.update({
@@ -2079,9 +2145,10 @@ export async function sendChatMessage(input: {
         "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (??????? / ????? / ????? / ????). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
         "Status / ??? / show a list / ???? ????? X? / ?????? ???????: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts|filings / ABOUT X / exact ???? ????? ?? / ???? ??????? / spoken inventory ?????? ??????? ? metadata.show_dump (+ show_dump_about for X) + empty lists; server replaces response ? FORBIDDEN model-written numbered filing inventory. Unique filing lookup (address/home/gate code/by meaning when exactly one filing matches) ? ITEM DUMP: show_dump=filings + show_dump_ids=[filing_id] from THIS turn; lists=[]; server replaces ? FORBIDDEN prose restating item_info/coords. >=2 matches ? ASK; 0 ? short no-match (no bare filings inventory). SHOW DUMP SECTION: bare ? show_dump only; ????? ? personal; ?????? ? shared; ?? X ? partner=X; ??????? ??? ? assignee=self; ??????? ???? ? assignee=????; date range ? show_dump_from + show_dump_to YYYY-MM-DD. OR WITHIN FIELD: X ?? Y on same dimension ? string[] (assignee/partner/about); AND across fields; ????? ?? ?????? ? omit section; FORBIDDEN cross-shape OR ? ask or full dump. FORBIDDEN same-as-bare for ?????/??????. Bare FULL DUMP (??? ?? ??? / ????? ??? / ????? ??? / ?? ?? ?????) ? metadata.show_dump=full; lists=[]; server replaces (FORBIDDEN model-written overview). SAVE VERB (?????/??????/?????/????? + text and/or files): (1) clear existing list or item (unique name / active context ? NOT last-mentioned latch) ? add/update THAT list or item (attachment_ids when files); (2) no clear list ? filing add (new durable fact); (3) ambiguous ?2 lists ? NUMBERED which-list ask, actions empty. FORBIDDEN always-filing only because they said ?????. TOPIC-ONLY ??????? ???? ? NUMBERED which-list ask if ?2 ?????* titles (else ask destination); never invent/auto-pick custom list_name from topic. Deletes: unique target+scope ? remove/delete_list NOW with ids; unclear ? ASK, delete mutates empty. SHARE-ONLY FACTS: filing/contacts/directory co-share; partners may mutate/unshare by id. Contacts alter_list participants OK; shopping/tasks whole-list share refused.",
         `Ping clocks (${SPEAKER_CLOCK_ASKS}) ? metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
-        "WHEN / TODAY / SOON ? FULL agenda only (?? ????? ???? / ??? / ??? ????? / ????? / ???? ?????? with NO meaning filter): SESSION_CLOCK. ???/??? ? metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. ?? ?? ????? ???? X ? show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (?????) ? from=first to=last of the window. SEMANTIC day asks (???????? / ???????) ? RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump+show_dump_ids for all clear matches; no parallel prose inventory; no dump on no-match/ASK) ? FORBIDDEN bare show_dump without ids. TIME-OF-DAY (????) is NOT an engine dump filter.",
+        "WHEN / TODAY / SOON — FULL agenda only (מה מתוכנן היום / מחר / מה יש לי היום / השבוע / מה ביומן with NO meaning filter): SESSION_CLOCK. היום/מחר → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה יש לך היום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
         "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids. (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
-        "SHOW MY LISTS / ????? ?? ??????? ???: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact ???? ????? X? stays category/custom dump.",
+        "SHOW MY LISTS / הציגי את הרשימות שלי / הצג רשימות: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact הצג רשימת X? stays category/custom dump.",
+        "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list / delete_list (list shell only — NOT item add|update|remove), emit confirm button label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN this button after item-level lists mutates alone.",
         "FULL DUMP / ?? ?? ?? / ????? ??? / ??? ??? / ?? ???? ?? / ?? ?? ????? ??? / ????? ???: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY ????? enumerate items (1. 2. 3. under one ??????:? header; assign ?(??????? X ? ??? Y)?; co-share ?(A, B)?; LINKED REMINDER on task lines). ????? COUNTS ONLY breakdown under ??????:? ? ?????? / ?(A, B)? / ?(??????? X ? ??? Y)? (all involved on co-share); ?????? ????? = ?*name* (A, B) ? N ??????? (all involved, e.g. ?(????, ??)?; no ????). ??????? ??????: NUMBERED 1. 2. 3. (never ?) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / ??? ????? X stay category dumps. Hint once: ?????? ?????: ??? ????? ?. ?????? (one ???????:? + ?(A, B)?); ???? ??? (one ????? ???:? from EMPLOYEE_SAVED_DATA only ? not SPEAKER_CONTACTS); ??? ???????? (one ???? ????????:? from SPEAKER_CONTACTS; co-share ?(A, B)?; empty ? ???). FORBIDDEN: skipping ??? ???????? when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ??? ???????? from list_type contacts or calling the phone book ????? ????. No schema jargon.",
         "PHONE BOOK / ???? ??? / ??? ???????? / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
         "Show a named list / ????? ?? ????? X / ??????? ?????? / ??????? ????? ?? ?????: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written ? inventory for named lists (breaks ?????? 6?). items=[] ? server empty sentence. Speak Hebrew only ? never list_name / list_type / metadata. After that dump, ?????? 6? / ??? 3? ? ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range ? ASK, not invent ids.",
@@ -2248,8 +2315,10 @@ export async function sendChatMessage(input: {
         directory: [],
       };
     }
-    // Closed UI button command (opaque equality) ? synthesize show_dump if model omitted it.
-    // Free-form never maps here ? model must emit show_dump. Dump intent is ACTION-only.
+    // Closed show commands (opaque equality): button ???? ????? X? plus free-typed
+    // aliases (???? ?????? ???? when that custom list exists). Synthesize show_dump
+    // so LAST_NUMBERED_DUMP refreshes even if the model free-wrote inventory.
+    // Unmatched free-form still requires model-emitted show_dump.
     if (!(metadata.showDump?.trim() ?? "")) {
       const buttonText = stripWhatsAppReplyPrefix(input.message);
       let buttonDump = mapShowButtonCommandToDumpTarget(buttonText);
@@ -2317,6 +2386,17 @@ export async function sendChatMessage(input: {
     metadata = stripShowTurnMutates(metadata);
     // Same-turn blank custom create + unambiguous host linked_lists name ? fill listName.
     metadata = fillBlankCustomListNameFromSameTurnLinks(metadata);
+    // Hard guard: with an active LAST_NUMBERED_DUMP, remove/update item_ids
+    // outside that map are dropped (stale shopping ids after a custom dump).
+    const dumpRestricted = guestSpeaker
+      ? { lists: metadata.lists ?? [], droppedOutsideDump: false }
+      : restrictListMutatesToLastNumberedDump(
+          metadata.lists ?? [],
+          lastNumberedDump,
+        );
+    if (dumpRestricted.droppedOutsideDump) {
+      metadata = { ...metadata, lists: dumpRestricted.lists };
+    }
     const metadataForApply = {
       ...metadata,
       lists: [
@@ -4108,6 +4188,11 @@ export async function sendChatMessage(input: {
                 return keys;
               })(),
               filing: filingMutations.length > 0,
+              // List shell only (create empty / alter_list / delete_list) ?
+              // never item add|update|remove.
+              listsOverview:
+                listOpResults.some((row) => row.applied) ||
+                listMutations.some((row) => row.listShell === true),
               collabByListKey: buildCollabByListKey(
                 listMutations,
                 new Map(
@@ -4206,6 +4291,12 @@ export async function sendChatMessage(input: {
           ),
         )) ?? []);
     const finalParsed = parseLlmReply(reply);
+    const spokenForDumpGuard = finalParsed.responseBubbles
+      .map((bubble) => bubble.text ?? "")
+      .join("\n");
+    const clearStaleDump =
+      turnLastNumberedDump.length === 0 &&
+      looksLikeFreeWrittenNumberedInventory(spokenForDumpGuard);
     const turnMessageIds = await syncTurnReplies({
       conversationId: conversation.id,
       assistantSpeaker,
@@ -4215,7 +4306,9 @@ export async function sendChatMessage(input: {
       ...(finalParsed.showIcon ? { showIcon: finalParsed.showIcon } : {}),
       ...(turnLastNumberedDump.length > 0
         ? { lastNumberedDump: turnLastNumberedDump }
-        : {}),
+        : clearStaleDump
+          ? { clearLastNumberedDump: true }
+          : {}),
       ...(turnLastRoutesBoard
         ? { lastRoutesBoard: turnLastRoutesBoard }
         : {}),
