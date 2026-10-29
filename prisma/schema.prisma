@@ -15,7 +15,7 @@ model User {
   passwordHash String?    @map("password_hash") @db.VarChar(255)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
-  team              Team?
+  teams             Team[]
   employees         Employee[]
   chatConversations ChatConversation[]
   contacts          Contact[]
@@ -25,24 +25,29 @@ model User {
   @@map("Users")
 }
 
-/** One team per User. Non-guest employees belong to it; guests have no team. */
+/**
+ * Account teams. A User may have a personal team plus the shared
+ * "New Registered 30 days" bucket for new registrants. Guests have no team.
+ */
 model Team {
   id        String     @id @default(uuid()) @db.Uuid
-  userId    String     @unique @map("user_id") @db.Uuid
-  /** Null when the account has no username (WhatsApp-only). */
+  userId    String     @map("user_id") @db.Uuid
+  /** Null when the account has no username (WhatsApp-only personal team). */
   name      String?    @db.VarChar(100)
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   employees Employee[]
 
+  @@index([userId])
+  @@index([userId, name])
   @@map("Teams")
 }
 
 model Employee {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @map("user_id") @db.Uuid
-  /** Null for WhatsApp guest shells (`isGuest`); otherwise the account's sole team. */
+  /** Null for WhatsApp guest shells (`isGuest`); otherwise a team on the account (personal or shared registered). */
   teamId       String?  @map("team_id") @db.Uuid
   kind         String   @default("human") @db.VarChar(16)
   name         String   @db.VarChar(100)

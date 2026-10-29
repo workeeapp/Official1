@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GUEST_LUCY_NAME } from "@workee/shared";
 
-const { findFirst, update, findUnique, teamFindUnique, teamCreate } = vi.hoisted(
+const { findFirst, update, findUnique, teamFindFirst, teamCreate } = vi.hoisted(
   () => ({
     findFirst: vi.fn(),
     update: vi.fn(),
     findUnique: vi.fn(),
-    teamFindUnique: vi.fn(),
+    teamFindFirst: vi.fn(),
     teamCreate: vi.fn(),
   }),
 );
@@ -15,7 +15,7 @@ vi.mock("../src/database/prisma.js", () => ({
   prisma: {
     employee: { findFirst, update, findMany: vi.fn(), create: vi.fn() },
     user: { findUnique },
-    team: { findUnique: teamFindUnique, create: teamCreate },
+    team: { findFirst: teamFindFirst, create: teamCreate },
   },
 }));
 
@@ -30,7 +30,7 @@ describe("ensureGuestLucy", () => {
     findFirst.mockReset();
     update.mockReset();
     findUnique.mockReset();
-    teamFindUnique.mockReset().mockResolvedValue({
+    teamFindFirst.mockReset().mockResolvedValue({
       id: teamId,
       userId,
       name: "Amit",

@@ -1,6 +1,10 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { validateLoginInput, hasFieldErrors } from "@workee/shared";
+import {
+  DEFAULT_REGISTERED_TEAM_NAME,
+  validateLoginInput,
+  hasFieldErrors,
+} from "@workee/shared";
 import { hashPassword } from "../backend/src/auth/password.js";
 import { loadLlmConfig } from "../backend/src/config/llm.js";
 
@@ -35,11 +39,26 @@ async function main(): Promise<void> {
   }
 
   const team =
-    (await prisma.team.findUnique({ where: { userId: user.id } })) ??
+    (await prisma.team.findFirst({
+      where: {
+        userId: user.id,
+        NOT: { name: DEFAULT_REGISTERED_TEAM_NAME },
+      },
+      orderBy: { createdAt: "asc" },
+    })) ??
     (await prisma.team.create({
       data: { userId: user.id, name: user.username?.trim() || null },
     }));
   console.log(`Team "${team.name}" (${team.id})`);
+
+  const registeredTeam =
+    (await prisma.team.findFirst({
+      where: { userId: user.id, name: DEFAULT_REGISTERED_TEAM_NAME },
+    })) ??
+    (await prisma.team.create({
+      data: { userId: user.id, name: DEFAULT_REGISTERED_TEAM_NAME },
+    }));
+  console.log(`Team "${registeredTeam.name}" (${registeredTeam.id})`);
 
   const employeeSeeds = [
     {

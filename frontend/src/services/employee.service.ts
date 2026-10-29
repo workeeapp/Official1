@@ -47,8 +47,18 @@ export const employeeApi = {
     return api<EmployeeRecordsResponse>(`/api/employees/${id}/records`, { signal });
   },
 
-  teamUsage(signal?: AbortSignal): Promise<TeamUsageSummary> {
-    return api<TeamUsageSummary>("/api/employees/usage", { signal });
+  teamUsage(options?: {
+    teamId?: string | null;
+    signal?: AbortSignal;
+  }): Promise<TeamUsageSummary> {
+    const teamId = options?.teamId?.trim();
+    const query =
+      teamId && teamId.length > 0
+        ? `?teamId=${encodeURIComponent(teamId)}`
+        : "";
+    return api<TeamUsageSummary>(`/api/employees/usage${query}`, {
+      signal: options?.signal,
+    });
   },
 
   usage(id: string, signal?: AbortSignal): Promise<EmployeeUsageSummary> {

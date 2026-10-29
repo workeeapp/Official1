@@ -7,7 +7,7 @@ Ideas to consider later — not committed work. Captured from product discussion
 **Current intent**
 - **Human employees** = workspace team members.
 - **Guests** (`אורח` WhatsApp shells) = outsiders who talk with **לוסי-אורח** (not Lucy). They may **view** lists/filings shared with them; they do not get a full personal workspace until they register.
-- **Registration (shipped):** לוסי-אורח emits `metadata.register` `{ name, gender }` (+ optional surname) → WhatsApp-only User (nullable credentials) + own Lucy + `addressGender`; host guest row becomes a share mirror (`share_mirror_employee_id`). WhatsApp prefers non-guest on phone match.
+- **Registration (shipped):** לוסי-אורח emits `metadata.register` `{ name, gender }` (+ optional surname) → WhatsApp-only User (nullable credentials) + own Lucy + `addressGender`; host guest becomes a non-guest share mirror on the shared host team **`New Registered 30 days`** (all new registrants join that same team; no per-user Team). WhatsApp prefers non-guest on phone match.
 
 **Features to consider**
 1. **Set password / web login for WhatsApp-only users**  

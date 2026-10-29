@@ -71,7 +71,14 @@ export async function getTeamUsage(req: Request, res: Response): Promise<void> {
   }
 
   const employees = await listEmployeesForUser(req.user.id);
-  res.status(200).json(await getTeamUsageSummary(req.user.id, employees));
+  const teamId =
+    typeof req.query.teamId === "string" && req.query.teamId.trim().length > 0
+      ? req.query.teamId.trim()
+      : null;
+  const scoped = teamId
+    ? employees.filter((employee) => employee.teamId === teamId)
+    : employees;
+  res.status(200).json(await getTeamUsageSummary(req.user.id, scoped));
 }
 
 export async function getEmployeeUsage(req: Request, res: Response): Promise<void> {

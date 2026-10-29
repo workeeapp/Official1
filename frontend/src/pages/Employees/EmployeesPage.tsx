@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ChatAttachmentRef,
   EmployeeInput,
@@ -9,9 +9,11 @@ import type {
   EmployeeUsageSummary,
   JobUrgency,
   PublicEmployee,
+  PublicTeam,
   TeamUsageSummary,
 } from "@workee/shared";
 import {
+  DEFAULT_REGISTERED_TEAM_NAME,
   JOB_URGENCY_POLICY,
   isDigitalEmployee,
   isProtectedEmployee,
@@ -20,6 +22,7 @@ import { useEmployees } from "@/hooks/useEmployees";
 import { EmployeeFormDialog } from "@/components/EmployeeFormDialog";
 import { EmployeeRecordDialog } from "@/components/EmployeeRecordDialog";
 import { employeeApi } from "@/services/employee.service";
+import { teamApi } from "@/services/team.service";
 import { attachmentApi } from "@/services/attachment.service";
 import {
   IconButton,
@@ -40,7 +43,6 @@ type DialogMode = "add" | "update" | null;
 export function EmployeesPage() {
   const {
     employees,
-    count,
     status,
     error,
     createEmployee,
@@ -48,6 +50,11 @@ export function EmployeesPage() {
     deleteEmployee,
   } = useEmployees();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [teams, setTeams] = useState<PublicTeam[]>([]);
+  const [teamsStatus, setTeamsStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [watchedTeamId, setWatchedTeamId] = useState<string>("");
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -63,24 +70,75 @@ export function EmployeesPage() {
   const [recordSubmitting, setRecordSubmitting] = useState(false);
   const [recordFormError, setRecordFormError] = useState<string | null>(null);
 
+  const visibleEmployees = useMemo(() => {
+    if (!watchedTeamId) {
+      return employees;
+    }
+    return employees.filter((employee) => employee.teamId === watchedTeamId);
+  }, [employees, watchedTeamId]);
+
+  const count = visibleEmployees.length;
   const selectedEmployee =
-    employees.find((employee) => employee.id === selectedId) ?? null;
+    visibleEmployees.find((employee) => employee.id === selectedId) ?? null;
   const canUpdateSelected = Boolean(selectedEmployee);
   const canDeleteSelected = Boolean(
     selectedEmployee && !isProtectedEmployee(selectedEmployee),
   );
+  const watchedTeam =
+    teams.find((team) => team.id === watchedTeamId) ?? null;
 
   useEffect(() => {
-    if (status !== "ready") {
+    let cancelled = false;
+    setTeamsStatus("loading");
+    teamApi
+      .list()
+      .then(({ teams: next }) => {
+        if (cancelled) {
+          return;
+        }
+        setTeams(next);
+        setTeamsStatus("ready");
+        setWatchedTeamId((current) => {
+          if (current && next.some((team) => team.id === current)) {
+            return current;
+          }
+          const personal =
+            next.find((team) => team.name !== DEFAULT_REGISTERED_TEAM_NAME) ??
+            next[0];
+          return personal?.id ?? "";
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTeams([]);
+          setTeamsStatus("error");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      return;
+    }
+    if (!visibleEmployees.some((employee) => employee.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [selectedId, visibleEmployees]);
+
+  useEffect(() => {
+    if (status !== "ready" || !watchedTeamId) {
       return;
     }
     const abort = new AbortController();
     employeeApi
-      .teamUsage(abort.signal)
+      .teamUsage({ teamId: watchedTeamId, signal: abort.signal })
       .then(setTeamUsage)
       .catch(() => setTeamUsage(null));
     return () => abort.abort();
-  }, [status, employees]);
+  }, [status, employees, watchedTeamId]);
 
   useEffect(() => {
     if (!selectedEmployee) {
@@ -244,21 +302,59 @@ export function EmployeesPage() {
         className="rounded-2xl border border-border bg-surface p-6 shadow-sm sm:p-8"
       >
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-primary">Employees</p>
-            <h1 className="mt-2 flex flex-wrap items-baseline gap-x-3 text-xl font-semibold tracking-tight text-text-primary">
-              Team
-              {teamUsage ? (
-                <span
-                  data-testid="team-usage"
-                  className="text-sm font-medium text-text-secondary"
-                  title="All employees (human employees only)"
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="max-w-xs w-full">
+                <label
+                  htmlFor="watched-team"
+                  className="text-sm font-medium text-text-primary"
                 >
-                  {formatUsd(teamUsage.allEmployeesUsd)} (
-                  {formatUsd(teamUsage.humanEmployeesUsd)})
+                  Watching team
+                </label>
+                <select
+                  id="watched-team"
+                  name="watchedTeam"
+                  data-testid="watched-team"
+                  value={watchedTeamId}
+                  disabled={teamsStatus !== "ready" || teams.length === 0}
+                  onChange={(event) => {
+                    setWatchedTeamId(event.target.value);
+                    setActionError(null);
+                  }}
+                  className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-background px-3 text-sm text-text-primary shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                >
+                  {teamsStatus === "loading" ? (
+                    <option value="">Loading teams…</option>
+                  ) : teamsStatus === "error" ? (
+                    <option value="">Unable to load teams</option>
+                  ) : teams.length === 0 ? (
+                    <option value="">No teams</option>
+                  ) : (
+                    teams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {teamDisplayName(team)}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <h1 className="flex flex-wrap items-baseline gap-x-3 text-xl font-semibold tracking-tight text-text-primary">
+                <span data-testid="watched-team-heading">
+                  {watchedTeam ? teamDisplayName(watchedTeam) : "Team"}
                 </span>
-              ) : null}
-            </h1>
+                {teamUsage ? (
+                  <span
+                    data-testid="team-usage"
+                    className="text-sm font-medium text-text-secondary"
+                    title="Employees on this team (human employees only)"
+                  >
+                    {formatUsd(teamUsage.allEmployeesUsd)} (
+                    {formatUsd(teamUsage.humanEmployeesUsd)})
+                  </span>
+                ) : null}
+              </h1>
+            </div>
             {teamUsage && teamUsage.months.length > 0 ? (
               <ul
                 data-testid="team-usage-months"
@@ -324,8 +420,12 @@ export function EmployeesPage() {
           </p>
         ) : null}
 
-        {status === "ready" && employees.length === 0 ? (
-          <p className="mt-4 text-sm text-text-secondary">No employees yet.</p>
+        {status === "ready" && visibleEmployees.length === 0 ? (
+          <p className="mt-4 text-sm text-text-secondary">
+            {employees.length === 0
+              ? "No employees yet."
+              : "No employees on this team."}
+          </p>
         ) : null}
 
         {selectedEmployee ? (
@@ -351,12 +451,12 @@ export function EmployeesPage() {
           </p>
         ) : null}
 
-        {employees.length > 0 ? (
+        {visibleEmployees.length > 0 ? (
           <ul
             data-testid="employee-nicknames"
             className="mt-5 flex flex-wrap gap-2"
           >
-            {employees.map((employee) => (
+            {visibleEmployees.map((employee) => (
               <EmployeeChip
                 key={employee.id}
                 employee={employee}
@@ -408,6 +508,11 @@ export function EmployeesPage() {
       ) : null}
     </>
   );
+}
+
+function teamDisplayName(team: PublicTeam): string {
+  const name = team.name?.trim();
+  return name && name.length > 0 ? name : "Untitled team";
 }
 
 function recordGroupKey(group: {

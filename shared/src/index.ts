@@ -94,6 +94,7 @@ export {
   digitalEmployees,
   isGuestEmployee,
   workspaceHumans,
+  DEFAULT_REGISTERED_TEAM_NAME,
   GUEST_LUCY_NAME,
   isGuestLucy,
   workspaceDigitals,

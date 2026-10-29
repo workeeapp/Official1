@@ -41,11 +41,14 @@ export function parseReasoningEffort(value: unknown): ReasoningEffort | null {
 /** How Lucy addresses a human speaker in Hebrew second person. */
 export type AddressGender = "male" | "female";
 
-/** Account's sole team (1 User → 1 Team). Guests are not members. */
+/** Shared team every new registrant joins (host account; not per-user). */
+export const DEFAULT_REGISTERED_TEAM_NAME = "New Registered 30 days";
+
+/** Account team. Guests are not members. */
 export interface PublicTeam {
   id: string;
   userId: string;
-  /** Null for WhatsApp-only accounts with no username. */
+  /** Null for WhatsApp-only personal teams with no username. */
   name: string | null;
 }
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderApp } from "@/test/render";
@@ -18,11 +18,13 @@ const {
   updateEmployeeMock,
   usageMock,
   teamUsageMock,
+  listTeamsMock,
 } = vi.hoisted(() => ({
   configFileDefaultsMock: vi.fn(),
   updateEmployeeMock: vi.fn(),
   usageMock: vi.fn(),
   teamUsageMock: vi.fn(),
+  listTeamsMock: vi.fn(),
   meMock: vi.fn(),
   listEmployeesMock: vi.fn(),
   recordsMock: vi.fn(),
@@ -30,6 +32,9 @@ const {
   deleteRecordMock: vi.fn(),
   digitalDefaultsMock: vi.fn(),
 }));
+
+const personalTeamId = "22222222-2222-4222-8222-222222222222";
+const sharedTeamId = "33333333-3333-4333-8333-333333333333";
 
 vi.mock("@/services/auth.service", () => ({
   authApi: {
@@ -61,6 +66,13 @@ vi.mock("@/services/employee.service", async () => {
   };
 });
 
+vi.mock("@/services/team.service", () => ({
+  teamApi: {
+    get: vi.fn(),
+    list: listTeamsMock,
+  },
+}));
+
 function renderEmployees() {
   return renderApp(
     <Routes>
@@ -75,6 +87,20 @@ function renderEmployees() {
 
 describe("Employees page", () => {
   beforeEach(() => {
+    listTeamsMock.mockReset().mockResolvedValue({
+      teams: [
+        {
+          id: personalTeamId,
+          userId: "11111111-1111-4111-8111-111111111111",
+          name: "Amit",
+        },
+        {
+          id: sharedTeamId,
+          userId: "11111111-1111-4111-8111-111111111111",
+          name: "New Registered 30 days",
+        },
+      ],
+    });
     listEmployeesMock.mockReset().mockResolvedValue({
       count: 3,
       employees: [
@@ -91,6 +117,7 @@ describe("Employees page", () => {
           temperature: 0,
           reasoningEffort: "low" as const,
           instructions: "You manage lists and filings.",
+          teamId: personalTeamId,
         },
         {
           id: "415ff13e-38d0-4dee-98b5-71e5dd11a38d",
@@ -99,6 +126,7 @@ describe("Employees page", () => {
           nickname: "עמית",
           email: "amit@example.com",
           phone: "050-0000001",
+          teamId: personalTeamId,
         },
         {
           id: "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4",
@@ -107,6 +135,7 @@ describe("Employees page", () => {
           nickname: "טל",
           email: "tal@example.com",
           phone: "050-0000002",
+          teamId: sharedTeamId,
         },
       ],
     });
@@ -187,11 +216,42 @@ describe("Employees page", () => {
     updateEmployeeMock.mockReset();
   });
 
+  it("filters employees when watching another team", async () => {
+    const user = userEvent.setup();
+    renderEmployees();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watched-team")).toHaveValue(personalTeamId);
+    });
+    expect(await screen.findByText("2 employees")).toBeInTheDocument();
+    expect(screen.getByTitle("לוסי · gpt-4.1-mini")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("עמית חתן · amit@example.com · 050-0000001"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTitle("טל דור · tal@example.com · 050-0000002"),
+    ).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByTestId("watched-team"), sharedTeamId);
+
+    expect(await screen.findByTestId("watched-team-heading")).toHaveTextContent(
+      "New Registered 30 days",
+    );
+    expect(await screen.findByText("1 employee")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("טל דור · tal@example.com · 050-0000002"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTitle("לוסי · gpt-4.1-mini")).not.toBeInTheDocument();
+    expect(teamUsageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: sharedTeamId }),
+    );
+  });
+
   it("lists employees and keeps default actions disabled until a row is selected", async () => {
     renderEmployees();
 
     expect(await screen.findByTestId("employees-page")).toBeInTheDocument();
-    expect(await screen.findByText("3 employees")).toBeInTheDocument();
+    expect(await screen.findByText("2 employees")).toBeInTheDocument();
     expect(screen.getByTitle("לוסי · gpt-4.1-mini")).toHaveTextContent("לוסי");
     expect(
       within(screen.getByTitle("לוסי · gpt-4.1-mini")).getByTestId("workee-mark"),
@@ -204,9 +264,9 @@ describe("Employees page", () => {
         "workee-mark",
       ),
     ).not.toBeInTheDocument();
-    expect(screen.getByTitle("טל דור · tal@example.com · 050-0000002")).toHaveTextContent(
-      "טל",
-    );
+    expect(
+      screen.queryByTitle("טל דור · tal@example.com · 050-0000002"),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add employee" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Update employee" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete employee" })).toBeDisabled();

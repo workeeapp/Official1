@@ -360,7 +360,7 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 | Piece | Behavior |
 |-------|----------|
 | ACTION | `metadata.register` `{ name, gender }` (+ optional `surname`) — לוסי-אורח only; `gender` = `male` \| `female`; null until name+gender known. No username/password |
-| Engine | `createWhatsAppOnlyUser` (nullable credentials) + protected Lucy + human (`isOwner`, `addressGender` from register) on the new account; host guest renamed, phone cleared, kept as share mirror (also gets `addressGender`); new human gets `share_mirror_employee_id` |
+| Engine | `createWhatsAppOnlyUser` (nullable credentials) + protected Lucy + human (`isOwner`, `addressGender` from register) on the new account; host guest renamed, phone cleared, promoted to `isGuest=false` share mirror on the shared host team **`New Registered 30 days`** (same team for every new registrant — no personal Team); new human gets that `team_id` + `share_mirror_employee_id` |
 | After | Next WhatsApp turn resolves to the new member (non-guest preferred on phone match) and protected Lucy; host shared data still appears in `EMPLOYEE_SAVED_DATA` via the mirror; the member may mutate shared rows by id like any other non-guest partner |
 | Login | WhatsApp-only until a later set-password flow; web login rejects null `passwordHash` |
 | Safety | לוסי-אורח hidden from Chat-with |
@@ -381,7 +381,7 @@ Unknown WhatsApp numbers become `אורח` shells on the host account and talk w
 | `messages` | Send now / open jobs (`expects_reply`, `ask_summary`, `urgency`, `book` with optional `end_time` / `window`) |
 | `reminders` | Clocks (`recurrence`, compose, ping) |
 | `jobs` | answer / decline / progress / counter / snooze / clear_clock / close by `job_id` |
-| `register` | Guest onboarding (לוסי-אורח → new User + Lucy + share mirror) |
+| `register` | Guest onboarding (לוסי-אורח → new User + Lucy + share mirror on shared team `New Registered 30 days`) |
 | `query` | `todos` / `self` / `reminders` (read hints only) |
 | `send_attachments` | Saved file ids to send after the reply |
 | `attachment_ids` (on items, filings, reminders; `list_attachment_ids`, `list_ops.add_attachments`) | Link uploaded files |

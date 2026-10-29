@@ -4,6 +4,7 @@ import { prisma } from "../database/prisma.js";
 import { ConflictError, isUniqueConstraintError } from "../utils/errors.js";
 import {
   createEmployeeForUser,
+  ensureSharedRegisteredTeam,
   listEmployeesForUser,
 } from "./employee.service.js";
 import { createWhatsAppOnlyUser } from "./user.service.js";
@@ -30,7 +31,8 @@ export type GuestRegisterResult =
 
 /**
  * Convert a WhatsApp guest into a registered member with their own User + Lucy.
- * Keeps the host employee row (renamed, phone cleared) as the share mirror.
+ * Host guest row becomes a non-guest share mirror on the shared
+ * "New Registered 30 days" team (same team as the new human — no personal Team).
  * WhatsApp-only: no username/password on the new User.
  */
 export async function registerGuestMember(input: {
@@ -60,12 +62,14 @@ export async function registerGuestMember(input: {
   const phone = normalizeEmployeePhone(input.guest.phone);
 
   try {
+    const sharedTeam = await ensureSharedRegisteredTeam(input.hostUserId);
+
     const newUser = await createWhatsAppOnlyUser();
-    // Seeds protected Lucy (and לוסי-אורח) on the new account.
-    await listEmployeesForUser(newUser.id);
+    // Seed Lucy / לוסי-אורח onto the shared host team — no personal Team row.
+    await listEmployeesForUser(newUser.id, { teamId: sharedTeam.id });
 
     // Clear host phone first so the global unique index allows the new member.
-    // Keep isGuest + no team: renamed share-mirror stays a guest shell on the host.
+    // Promote share-mirror off guest: same shared team as all new registrants.
     await prisma.employee.update({
       where: { id: input.guest.id },
       data: {
@@ -73,22 +77,26 @@ export async function registerGuestMember(input: {
         surname,
         nickname: name,
         phone: null,
-        isGuest: true,
-        teamId: null,
+        isGuest: false,
+        teamId: sharedTeam.id,
         addressGender: gender,
       },
     });
 
-    const member = await createEmployeeForUser(newUser.id, {
-      kind: "human",
-      name,
-      surname,
-      nickname: name,
-      email: null,
-      phone,
-      isOwner: true,
-      addressGender: gender,
-    });
+    const member = await createEmployeeForUser(
+      newUser.id,
+      {
+        kind: "human",
+        name,
+        surname,
+        nickname: name,
+        email: null,
+        phone,
+        isOwner: true,
+        addressGender: gender,
+      },
+      { teamId: sharedTeam.id },
+    );
 
     await prisma.employee.update({
       where: { id: member.id },

@@ -158,7 +158,7 @@ export function DashboardPage() {
     Promise.all([
       employeeApi.list(),
       teamApi.get(),
-      employeeApi.teamUsage(abort.signal).catch(() => null),
+      employeeApi.teamUsage({ signal: abort.signal }).catch(() => null),
     ])
       .then(([employeesResponse, teamResponse, usage]) => {
         if (cancelled) {

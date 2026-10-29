@@ -7,6 +7,7 @@ import type {
   PublicTeam,
 } from "@workee/shared";
 import {
+  DEFAULT_REGISTERED_TEAM_NAME,
   GUEST_LUCY_NAME,
   humanEmployees,
   parseAddressGender,
@@ -29,6 +30,11 @@ const LUCY_NAME = "לוסי";
 export type CreateEmployeeOptions = {
   /** WhatsApp outsider shell — no team. Digitals ignore this and are never guests. */
   isGuest?: boolean;
+  /**
+   * Force team membership (e.g. shared "New Registered 30 days" on the host).
+   * When set, skips ensureTeamForUser. Ignored for guests (still null).
+   */
+  teamId?: string;
 };
 
 export function toPublicTeam(team: Team): PublicTeam {
@@ -39,13 +45,20 @@ export function toPublicTeam(team: Team): PublicTeam {
   };
 }
 
-/** Ensure the account's sole team exists (1 User → 1 Team). */
+/**
+ * Ensure the account's personal team exists (not the shared registered bucket).
+ * Prefer a non-shared team; create one named after username when missing.
+ */
 export async function ensureTeamForUser(userId: string): Promise<Team> {
-  const existing = await prisma.team.findUnique({
-    where: { userId },
+  const personal = await prisma.team.findFirst({
+    where: {
+      userId,
+      NOT: { name: DEFAULT_REGISTERED_TEAM_NAME },
+    },
+    orderBy: { createdAt: "asc" },
   });
-  if (existing) {
-    return existing;
+  if (personal) {
+    return personal;
   }
 
   const user = await prisma.user.findUnique({
@@ -59,19 +72,67 @@ export async function ensureTeamForUser(userId: string): Promise<Team> {
   // WhatsApp-only users have username null; Team.name is nullable to match.
   const teamName = user.username?.trim() || null;
 
+  return prisma.team.create({
+    data: {
+      userId,
+      name: teamName,
+    },
+  });
+}
+
+/**
+ * Find or create the shared host team all new registrants join.
+ * Idempotent on (hostUserId, DEFAULT_REGISTERED_TEAM_NAME).
+ */
+export async function ensureSharedRegisteredTeam(
+  hostUserId: string,
+): Promise<Team> {
+  const existing = await prisma.team.findFirst({
+    where: {
+      userId: hostUserId,
+      name: DEFAULT_REGISTERED_TEAM_NAME,
+    },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: hostUserId },
+    select: { id: true },
+  });
+  if (!user) {
+    throw new NotFoundError("User not found");
+  }
+
   try {
     return await prisma.team.create({
       data: {
-        userId,
-        name: teamName,
+        userId: hostUserId,
+        name: DEFAULT_REGISTERED_TEAM_NAME,
       },
     });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      const raced = await prisma.team.findUnique({ where: { userId } });
+      const raced = await prisma.team.findFirst({
+        where: {
+          userId: hostUserId,
+          name: DEFAULT_REGISTERED_TEAM_NAME,
+        },
+      });
       if (raced) {
         return raced;
       }
+    }
+    // Concurrent create without a unique constraint — re-read.
+    const raced = await prisma.team.findFirst({
+      where: {
+        userId: hostUserId,
+        name: DEFAULT_REGISTERED_TEAM_NAME,
+      },
+    });
+    if (raced) {
+      return raced;
     }
     throw error;
   }
@@ -79,6 +140,22 @@ export async function ensureTeamForUser(userId: string): Promise<Team> {
 
 export async function getTeamForUser(userId: string): Promise<PublicTeam> {
   return toPublicTeam(await ensureTeamForUser(userId));
+}
+
+/** Personal + shared registered teams for the account (ensures both exist). */
+export async function listTeamsForUser(userId: string): Promise<PublicTeam[]> {
+  await ensureTeamForUser(userId);
+  try {
+    await ensureSharedRegisteredTeam(userId);
+  } catch (error) {
+    // Pre-migration DBs may still enforce 1 team per user — still return personal.
+    console.error("ensureSharedRegisteredTeam failed during listTeamsForUser", error);
+  }
+  const rows = await prisma.team.findMany({
+    where: { userId },
+    orderBy: [{ createdAt: "asc" }, { name: "asc" }],
+  });
+  return rows.map(toPublicTeam);
 }
 
 /** Short custom prompt for WhatsApp guest onboarding (no Lucy capability catalog). */
@@ -178,16 +255,18 @@ export async function getLucyPromptDefaults(
   };
 }
 
-async function ensureProtectedLucy(userId: string): Promise<void> {
+async function ensureProtectedLucy(
+  userId: string,
+  teamId: string,
+): Promise<void> {
   const existing = await prisma.employee.findFirst({
     where: { userId, isProtected: true },
   });
   if (existing) {
     if (!existing.teamId) {
-      const team = await ensureTeamForUser(userId);
       await prisma.employee.update({
         where: { id: existing.id },
-        data: { teamId: team.id, isGuest: false },
+        data: { teamId, isGuest: false },
       });
     }
     return;
@@ -201,26 +280,22 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
     },
   });
   if (namedLucy) {
-    const team = namedLucy.teamId
-      ? null
-      : await ensureTeamForUser(userId);
     await prisma.employee.update({
       where: { id: namedLucy.id },
       data: {
         isProtected: true,
         isGuest: false,
-        ...(team ? { teamId: team.id } : {}),
+        ...(namedLucy.teamId ? {} : { teamId }),
       },
     });
     return;
   }
 
-  const team = await ensureTeamForUser(userId);
   const defaults = getDigitalEmployeeDefaults();
   await prisma.employee.create({
     data: {
       userId,
-      teamId: team.id,
+      teamId,
       kind: "digital",
       isProtected: true,
       isGuest: false,
@@ -236,7 +311,11 @@ async function ensureProtectedLucy(userId: string): Promise<void> {
 }
 
 /** WhatsApp guest onboarding worker — not protected; hidden from Chat-with. */
-export async function ensureGuestLucy(userId: string): Promise<void> {
+export async function ensureGuestLucy(
+  userId: string,
+  teamId?: string,
+): Promise<void> {
+  const resolvedTeamId = teamId ?? (await ensureTeamForUser(userId)).id;
   const existing = await prisma.employee.findFirst({
     where: {
       userId,
@@ -248,21 +327,19 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
     // Do not overwrite instructions — the Employees UI may edit לוסי-אורח's prompt.
     // Seed text is applied only on create below (same pattern as custom digitals).
     if (!existing.teamId) {
-      const team = await ensureTeamForUser(userId);
       await prisma.employee.update({
         where: { id: existing.id },
-        data: { teamId: team.id, isGuest: false },
+        data: { teamId: resolvedTeamId, isGuest: false },
       });
     }
     return;
   }
 
-  const team = await ensureTeamForUser(userId);
   const defaults = getDigitalEmployeeDefaults();
   await prisma.employee.create({
     data: {
       userId,
-      teamId: team.id,
+      teamId: resolvedTeamId,
       kind: "digital",
       isProtected: false,
       isGuest: false,
@@ -277,10 +354,13 @@ export async function ensureGuestLucy(userId: string): Promise<void> {
   });
 }
 
-export async function listEmployeesForUser(userId: string): Promise<PublicEmployee[]> {
-  await ensureTeamForUser(userId);
-  await ensureProtectedLucy(userId);
-  await ensureGuestLucy(userId);
+export async function listEmployeesForUser(
+  userId: string,
+  options?: { teamId?: string },
+): Promise<PublicEmployee[]> {
+  const teamId = options?.teamId ?? (await ensureTeamForUser(userId)).id;
+  await ensureProtectedLucy(userId, teamId);
+  await ensureGuestLucy(userId, teamId);
   // Tip catalog sync must not block listing employees (Employees UI / chat-as).
   try {
     await ensureDefaultTips(userId);
@@ -477,13 +557,15 @@ export async function createEmployeeForUser(
   const kind = input.kind === "digital" ? "digital" : "human";
   const data = persistEmployeeData(input, kind);
   const isGuest = kind === "human" && options?.isGuest === true;
-  const team = isGuest ? null : await ensureTeamForUser(userId);
+  const teamId = isGuest
+    ? null
+    : (options?.teamId ?? (await ensureTeamForUser(userId)).id);
   await assertPhoneAvailable(data.phone);
   try {
     const employee = await prisma.employee.create({
       data: {
         userId,
-        teamId: team?.id ?? null,
+        teamId,
         isGuest,
         isProtected: false,
         ...data,

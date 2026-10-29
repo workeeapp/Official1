@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import { DEFAULT_REGISTERED_TEAM_NAME } from "@workee/shared";
 import { hashPassword } from "../src/auth/password.js";
 
 const {
   userFindUnique,
-  teamFindUnique,
+  teamFindFirst,
+  teamFindMany,
   teamCreate,
   employeeCreate,
   employeeFindFirst,
 } = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
-  teamFindUnique: vi.fn(),
+  teamFindFirst: vi.fn(),
+  teamFindMany: vi.fn(),
   teamCreate: vi.fn(),
   employeeCreate: vi.fn(),
   employeeFindFirst: vi.fn(),
@@ -22,7 +25,8 @@ vi.mock("../src/database/prisma.js", () => ({
       findUnique: userFindUnique,
     },
     team: {
-      findUnique: teamFindUnique,
+      findFirst: teamFindFirst,
+      findMany: teamFindMany,
       create: teamCreate,
     },
     employee: {
@@ -33,11 +37,16 @@ vi.mock("../src/database/prisma.js", () => ({
 }));
 
 import { createApp } from "../src/app.js";
-import { createEmployeeForUser } from "../src/services/employee.service.js";
+import {
+  createEmployeeForUser,
+  ensureSharedRegisteredTeam,
+  ensureTeamForUser,
+} from "../src/services/employee.service.js";
 
 const PASSWORD = "ChangeMe123!";
 const userId = "11111111-1111-4111-8111-111111111111";
 const teamId = "22222222-2222-4222-8222-222222222222";
+const sharedTeamId = "33333333-3333-4333-8333-333333333333";
 
 let passwordHash: string;
 let app: ReturnType<typeof createApp>;
@@ -52,7 +61,8 @@ describe("team API and membership", () => {
   beforeEach(async () => {
     passwordHash ??= await hashPassword(PASSWORD);
     userFindUnique.mockReset();
-    teamFindUnique.mockReset();
+    teamFindFirst.mockReset();
+    teamFindMany.mockReset();
     teamCreate.mockReset();
     employeeCreate.mockReset();
     employeeFindFirst.mockReset().mockResolvedValue(null);
@@ -72,7 +82,7 @@ describe("team API and membership", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    teamFindUnique
+    teamFindFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         id: teamId,
@@ -108,10 +118,7 @@ describe("team API and membership", () => {
     });
   });
 
-  it("creates a team with null name when username is null (WhatsApp-only)", async () => {
-    const { ensureTeamForUser } = await import(
-      "../src/services/employee.service.js"
-    );
+  it("creates a personal team with null name when username is null (WhatsApp-only)", async () => {
     userFindUnique.mockResolvedValue({
       id: userId,
       username: null,
@@ -119,7 +126,7 @@ describe("team API and membership", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    teamFindUnique.mockResolvedValue(null);
+    teamFindFirst.mockResolvedValue(null);
     teamCreate.mockResolvedValue({
       id: teamId,
       userId,
@@ -136,8 +143,37 @@ describe("team API and membership", () => {
     });
   });
 
-  it("assigns non-guest creates to the team", async () => {
-    teamFindUnique.mockResolvedValue({
+  it("ensureSharedRegisteredTeam finds or creates New Registered 30 days", async () => {
+    teamFindFirst.mockResolvedValueOnce(null);
+    userFindUnique.mockResolvedValue({ id: userId });
+    teamCreate.mockResolvedValue({
+      id: sharedTeamId,
+      userId,
+      name: DEFAULT_REGISTERED_TEAM_NAME,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const created = await ensureSharedRegisteredTeam(userId);
+    expect(created.name).toBe(DEFAULT_REGISTERED_TEAM_NAME);
+    expect(teamCreate).toHaveBeenCalledWith({
+      data: { userId, name: DEFAULT_REGISTERED_TEAM_NAME },
+    });
+
+    teamFindFirst.mockResolvedValueOnce({
+      id: sharedTeamId,
+      userId,
+      name: DEFAULT_REGISTERED_TEAM_NAME,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const found = await ensureSharedRegisteredTeam(userId);
+    expect(found.id).toBe(sharedTeamId);
+    expect(teamCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("assigns non-guest creates to the personal team", async () => {
+    teamFindFirst.mockResolvedValue({
       id: teamId,
       userId,
       name: "Amit",
@@ -219,12 +255,52 @@ describe("team API and membership", () => {
 
     expect(employee.isGuest).toBe(true);
     expect(employee.teamId).toBeNull();
-    expect(teamFindUnique).not.toHaveBeenCalled();
+    expect(teamFindFirst).not.toHaveBeenCalled();
     expect(employeeCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         teamId: null,
         isGuest: true,
       }),
     });
+  });
+
+  it("lists personal and shared teams via GET /api/team/list", async () => {
+    userFindUnique.mockResolvedValue({
+      id: userId,
+      username: "Amit",
+      passwordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const personal = {
+      id: teamId,
+      userId,
+      name: "Amit",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const shared = {
+      id: sharedTeamId,
+      userId,
+      name: DEFAULT_REGISTERED_TEAM_NAME,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    teamFindFirst.mockResolvedValueOnce(personal).mockResolvedValueOnce(shared);
+    teamFindMany.mockResolvedValue([personal, shared]);
+
+    const loginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "Amit", password: PASSWORD });
+
+    const response = await request(app)
+      .get("/api/team/list")
+      .set("Cookie", cookieHeader(loginResponse));
+
+    expect(response.status).toBe(200);
+    expect(response.body.teams).toEqual([
+      { id: teamId, userId, name: "Amit" },
+      { id: sharedTeamId, userId, name: DEFAULT_REGISTERED_TEAM_NAME },
+    ]);
   });
 });

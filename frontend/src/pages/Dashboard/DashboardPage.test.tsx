@@ -37,6 +37,19 @@ vi.mock("@/services/auth.service", () => ({
 vi.mock("@/services/team.service", () => ({
   teamApi: {
     get: getTeamMock,
+    list: async () => {
+      const { team } = await getTeamMock();
+      return {
+        teams: [
+          team,
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            userId: team.userId,
+            name: "New Registered 30 days",
+          },
+        ],
+      };
+    },
   },
 }));
 
