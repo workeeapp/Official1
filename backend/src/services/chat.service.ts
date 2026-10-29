@@ -235,6 +235,7 @@ import {
   fromPendingLocation,
   parseCoordinatePair,
   replyAsksForWhatsAppPin,
+  resolveActionLocation,
   shouldClearPendingAfterSpeakerPinUse,
 } from "./resolved-location.js";
 import {
@@ -3698,42 +3699,62 @@ export async function sendChatMessage(input: {
         employeeId: employee.id,
         digitalEmployeeId: digital.id,
       };
-      const weatherPin = weatherNearSpeaker
-        ? fromPendingLocation(getPendingLocation(input.employeeId))
-        : null;
-      // Named place on ACTION wins: do not pass pin coords when place is set.
-      const weatherUsePin =
-        weatherNearSpeaker && !weatherAction.place.trim() && weatherPin != null;
-      const weather = await resolveWeatherMessages({
-        place: weatherUsePin
-          ? weatherPin.label
-          : weatherAction.place,
-        nearSpeaker: weatherNearSpeaker && !weatherAction.place.trim(),
-        latitude: weatherUsePin ? weatherPin.lat : null,
-        longitude: weatherUsePin ? weatherPin.lng : null,
-        date: weatherAction.date,
-        aspects: weatherAction.aspects,
-        minWaveM: weatherAction.minWaveM ?? null,
-        addressGender: employee.addressGender,
-        composeTip: (tipInput) =>
-          composeWeatherLiveTip({
-            ...tipInput,
-            billing: weatherBilling,
-          }),
-      });
-      workingReply = applyLiveDomainReply(
-        workingReply,
-        watchSampleTurn ? weather.body : weather.messages,
-        { watchSample: watchSampleTurn },
+      const weatherSnapshot = await getEmployeeRecordSnapshot(
+        input.employeeId,
       );
+      const weatherResolved = resolveActionLocation({
+        place: weatherAction.place,
+        nearSpeaker: weatherNearSpeaker,
+        pending: getPendingLocation(input.employeeId),
+        snapshot: weatherSnapshot,
+      });
       if (
-        shouldClearPendingAfterSpeakerPinUse({
-          usedPendingPin: weather.usedPendingPin,
-          needsLocation: weather.needsLocation,
-          replyText: weather.body,
-        })
+        weatherResolved.kind === "ambiguous" ||
+        weatherResolved.kind === "label_without_coords"
       ) {
-        clearPendingLocation(input.employeeId);
+        workingReply = applyLiveDomainReply(
+          workingReply,
+          weatherResolved.askText,
+          { watchSample: watchSampleTurn },
+        );
+      } else {
+        const weatherHit =
+          weatherResolved.kind === "hit" ? weatherResolved : null;
+        const weather = await resolveWeatherMessages({
+          place: weatherHit
+            ? weatherHit.location.label
+            : weatherAction.place,
+          nearSpeaker:
+            weatherHit != null
+              ? weatherHit.usedPendingPin
+              : weatherResolved.kind === "need_pin",
+          useCoords: weatherHit != null && !weatherHit.usedPendingPin,
+          latitude: weatherHit?.location.lat ?? null,
+          longitude: weatherHit?.location.lng ?? null,
+          date: weatherAction.date,
+          aspects: weatherAction.aspects,
+          minWaveM: weatherAction.minWaveM ?? null,
+          addressGender: employee.addressGender,
+          composeTip: (tipInput) =>
+            composeWeatherLiveTip({
+              ...tipInput,
+              billing: weatherBilling,
+            }),
+        });
+        workingReply = applyLiveDomainReply(
+          workingReply,
+          watchSampleTurn ? weather.body : weather.messages,
+          { watchSample: watchSampleTurn },
+        );
+        if (
+          shouldClearPendingAfterSpeakerPinUse({
+            usedPendingPin: weather.usedPendingPin,
+            needsLocation: weather.needsLocation,
+            replyText: weather.body,
+          })
+        ) {
+          clearPendingLocation(input.employeeId);
+        }
       }
     }
     // Live market ACTION ? Yahoo Finance; guests skip (same as weather).
@@ -3785,8 +3806,7 @@ export async function sendChatMessage(input: {
       });
     }
     // Live places ACTION ? Google Places; guests skip.
-    // PENDING_LOCATION coords only when near=speaker (or ACTION already has lat/lng).
-    // Named city/area must not inherit a stale pin bias.
+    // Shared resolve (place/saved before pin). area_restrict bypasses resolve.
     const placesAction = guestSpeaker ? null : metadata.places ?? null;
     const pendingLoc = guestSpeaker
       ? null
@@ -3794,52 +3814,101 @@ export async function sendChatMessage(input: {
     const pendingResolved = fromPendingLocation(pendingLoc);
     if (placesAction?.query.trim()) {
       const areaRestrict = placesAction.geoMode === "area_restrict";
-      const nearSpeaker =
-        !areaRestrict && placesAction.near === "speaker";
-      const actionCoords = areaRestrict
-        ? null
-        : parseCoordinatePair(placesAction.lat, placesAction.lng);
-      const placesLat =
-        actionCoords?.lat ??
-        (nearSpeaker ? pendingResolved?.lat ?? null : null);
-      const placesLng =
-        actionCoords?.lng ??
-        (nearSpeaker ? pendingResolved?.lng ?? null : null);
       const liveBilling = {
         conversationId: conversation.id,
         employeeId: employee.id,
         digitalEmployeeId: digital.id,
       };
-      const placesResult = await resolvePlacesReplyDetailed({
-        query: placesAction.query,
-        place: placesAction.place,
-        aspects: placesAction.aspects,
-        intent: placesAction.intent,
-        nearSpeaker,
-        areaRestrict,
-        lat: placesLat,
-        lng: placesLng,
-        openNow: placesAction.openNow,
-        minRating: placesAction.minRating,
-        includedType: placesAction.includedType,
-        radiusMeters: placesAction.radiusMeters,
-        parkingCost: placesAction.parkingCost,
-        radiusExplicit: placesAction.radiusMeters != null,
-        requireLiveSelect: placesAction.requireLiveSelect === true,
-        speakerAsk: input.message,
-        billing: liveBilling,
-      });
-      workingReply = applyLiveDomainReply(workingReply, placesResult.text, {
-        watchSample: watchSampleTurn,
-      });
-      if (
-        shouldClearPendingAfterSpeakerPinUse({
-          usedPendingPin: placesResult.usedPendingPin,
-          needsLocation: placesResult.needsLocation,
-          replyText: placesResult.text,
-        })
-      ) {
-        clearPendingLocation(input.employeeId);
+      let skipPlacesFetch = false;
+      let placesNearSpeaker =
+        !areaRestrict && placesAction.near === "speaker";
+      let placesPlace = placesAction.place;
+      let placesLat: number | null = null;
+      let placesLng: number | null = null;
+      let placesUsedPendingPin = false;
+
+      if (areaRestrict) {
+        // Preserve hard area_restrict semantics ? no saved/pin resolve.
+        placesLat = null;
+        placesLng = null;
+        placesNearSpeaker = false;
+      } else {
+        const placesSnapshot = await getEmployeeRecordSnapshot(
+          input.employeeId,
+        );
+        const placesResolved = resolveActionLocation({
+          place: placesAction.place,
+          nearSpeaker: placesAction.near === "speaker",
+          pending: pendingLoc,
+          snapshot: placesSnapshot,
+        });
+        if (
+          placesResolved.kind === "ambiguous" ||
+          placesResolved.kind === "label_without_coords"
+        ) {
+          workingReply = applyLiveDomainReply(
+            workingReply,
+            placesResolved.askText,
+            { watchSample: watchSampleTurn },
+          );
+          skipPlacesFetch = true;
+        } else if (placesResolved.kind === "hit") {
+          placesLat = placesResolved.location.lat;
+          placesLng = placesResolved.location.lng;
+          placesPlace = placesResolved.location.label;
+          placesNearSpeaker = true;
+          placesUsedPendingPin = placesResolved.usedPendingPin;
+        } else {
+          // none / need_pin ? prior behavior (ACTION coords or near=speaker pin).
+          const actionCoords = parseCoordinatePair(
+            placesAction.lat,
+            placesAction.lng,
+          );
+          placesNearSpeaker = placesAction.near === "speaker";
+          placesLat =
+            actionCoords?.lat ??
+            (placesNearSpeaker ? pendingResolved?.lat ?? null : null);
+          placesLng =
+            actionCoords?.lng ??
+            (placesNearSpeaker ? pendingResolved?.lng ?? null : null);
+          placesUsedPendingPin =
+            placesNearSpeaker && placesLat != null && placesLng != null;
+        }
+      }
+
+      if (!skipPlacesFetch) {
+        const placesResult = await resolvePlacesReplyDetailed({
+          query: placesAction.query,
+          place: placesPlace,
+          aspects: placesAction.aspects,
+          intent: placesAction.intent,
+          nearSpeaker: placesNearSpeaker,
+          areaRestrict,
+          lat: placesLat,
+          lng: placesLng,
+          openNow: placesAction.openNow,
+          minRating: placesAction.minRating,
+          includedType: placesAction.includedType,
+          radiusMeters: placesAction.radiusMeters,
+          parkingCost: placesAction.parkingCost,
+          radiusExplicit: placesAction.radiusMeters != null,
+          requireLiveSelect: placesAction.requireLiveSelect === true,
+          speakerAsk: input.message,
+          billing: liveBilling,
+        });
+        workingReply = applyLiveDomainReply(workingReply, placesResult.text, {
+          watchSample: watchSampleTurn,
+        });
+        if (
+          shouldClearPendingAfterSpeakerPinUse({
+            usedPendingPin:
+              placesUsedPendingPin && placesResult.usedPendingPin,
+            needsLocation: placesResult.needsLocation,
+            replyText: placesResult.text,
+          })
+        ) {
+          clearPendingLocation(input.employeeId);
+        }
       }
     }
     // Live Jewish / Shabbat ACTION ? Hebcal; guests skip.

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import {
+  collectAddressLikeFilingsWithoutCoords,
   collectSavedRouteLocationCandidates,
+  matchAddressLikeFilingWithoutCoords,
   resolveSavedRoutePoint,
 } from "../src/services/saved-route-location.js";
 
@@ -170,5 +172,50 @@ describe("resolveSavedRoutePoint", () => {
 
   it("returns none for free-text with no saved coords match", () => {
     expect(resolveSavedRoutePoint("דיזנגוף סנטר", snapshot).kind).toBe("none");
+  });
+});
+
+describe("address-like filing without coords", () => {
+  it("collects address-like filings that lack valid lat,lng", () => {
+    const snapshot: EmployeeRecordSnapshot = {
+      filing: [
+        baseFiling({
+          filing_id: "f-home",
+          item_name: "מיקום הבית",
+          item_info: "הרצל 1",
+        }),
+        baseFiling({
+          filing_id: "f-note",
+          item_name: "הערה",
+          item_info: "בלי מיקום",
+        }),
+        baseFiling({
+          filing_id: "f-coords",
+          item_name: "מיקום העבודה",
+          item_info: "32.08, 34.78",
+        }),
+      ],
+      lists: [],
+    };
+    const rows = collectAddressLikeFilingsWithoutCoords(snapshot);
+    expect(rows.map((r) => r.id)).toEqual(["f-home"]);
+  });
+
+  it("matches label without inventing coordinates", () => {
+    const snapshot: EmployeeRecordSnapshot = {
+      filing: [
+        baseFiling({
+          filing_id: "f-home",
+          item_name: "מיקום הבית",
+          item_info: "הרצל 1 תל אביב",
+        }),
+      ],
+      lists: [],
+    };
+    expect(resolveSavedRoutePoint("מיקום הבית", snapshot).kind).toBe("none");
+    const match = matchAddressLikeFilingWithoutCoords("מיקום הבית", snapshot);
+    expect(match.kind).toBe("unique");
+    if (match.kind !== "unique") return;
+    expect(match.row.label).toBe("מיקום הבית");
   });
 });

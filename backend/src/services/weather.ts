@@ -756,6 +756,11 @@ export async function resolveWeatherMessages(input: {
   place: string;
   /** When true, use latitude/longitude (PENDING_LOCATION) and skip geocode. */
   nearSpeaker?: boolean;
+  /**
+   * When true with valid lat/lng, skip geocode (saved place or pin).
+   * Does not imply usedPendingPin — caller sets nearSpeaker for the pin path.
+   */
+  useCoords?: boolean;
   latitude?: number | null;
   longitude?: number | null;
   date?: string | null;
@@ -780,9 +785,10 @@ export async function resolveWeatherMessages(input: {
     input.longitude >= -180 &&
     input.longitude <= 180;
 
-  // Caller must set nearSpeaker only for the pin path (named city → nearSpeaker false).
-  // Display label in `place` is OK while using pin coords.
-  const usePin = nearSpeaker && hasPin;
+  // Caller: nearSpeaker only for PENDING_LOCATION; useCoords for any resolved coords.
+  // Display label in `place` is OK while using coords.
+  const useCoords = hasPin && (nearSpeaker || input.useCoords === true);
+  const usedPendingPinFlag = nearSpeaker && hasPin;
   const emptyResult = (
     text: string,
     flags: { usedPendingPin?: boolean; needsLocation?: boolean } = {},
@@ -799,7 +805,7 @@ export async function resolveWeatherMessages(input: {
       { needsLocation: true },
     );
   }
-  if (!place && !usePin) {
+  if (!place && !useCoords) {
     return emptyResult("לאיזה מקום לבדוק את מזג האוויר?", {
       needsLocation: true,
     });
@@ -808,11 +814,11 @@ export async function resolveWeatherMessages(input: {
   const aspects = parseWeatherAspects(input.aspects);
   const wantsWaves =
     aspects.includes("waves") || aspects.includes("summary");
-  const displayPlace = usePin
+  const displayPlace = useCoords
     ? place || "המיקום שלך"
     : place;
   try {
-    if (!usePin && wantsWaves && isIsraelWideWavePlace(place)) {
+    if (!useCoords && wantsWaves && isIsraelWideWavePlace(place)) {
       const body = await scanIsraelCoastWaves(input);
       return {
         messages: [body],
@@ -827,12 +833,12 @@ export async function resolveWeatherMessages(input: {
       aspects: input.aspects,
       now: input.now,
       fetchImpl: input.fetchImpl,
-      ...(usePin
+      ...(useCoords
         ? { latitude: input.latitude, longitude: input.longitude }
         : {}),
     });
     if (!facts) {
-      const text = usePin
+      const text = useCoords
         ? "לא הצלחתי לשלוף עכשיו את מזג האוויר למיקום ששלחת."
         : `לא מצאתי מקום בשם «${place}».`;
       return emptyResult(text);
@@ -843,7 +849,7 @@ export async function resolveWeatherMessages(input: {
         ? Number(input.minWaveM)
         : null;
     const okFlags = {
-      usedPendingPin: usePin,
+      usedPendingPin: usedPendingPinFlag,
       needsLocation: false,
     };
     if (min != null && wantsWaves) {

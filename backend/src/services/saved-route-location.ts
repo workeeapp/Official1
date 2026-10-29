@@ -2,9 +2,14 @@
  * Resolve routes origin/destination against saved items that already carry
  * valid lat,lng in EMPLOYEE_SAVED_DATA (filings + every list). No parallel store.
  * Matching uses the ACTION string only — never the raw user utterance.
+ *
+ * Live weather/places also reuse this matcher via resolveActionLocation.
+ * Address-like filings without valid coords are detected separately so those
+ * labels are never geocoded as city names.
  */
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import {
+  filingNameLooksLikeAddress,
   parseLatLngCoordinates,
   resolveCustomTitleField,
 } from "./show-button-dump.js";
@@ -361,4 +366,130 @@ export function formatSavedRouteNotice(label: string): string {
   return trimmed
     ? `משתמש במיקום השמור «${trimmed}».`
     : "משתמש במיקום השמור.";
+}
+
+/** Address-like filing row that has a label but no valid lat,lng. */
+export type SavedPlaceLabelOnly = {
+  id: string;
+  label: string;
+  listType: "filings";
+};
+
+/**
+ * Filings whose name looks like a place/address but item fields have no
+ * valid lat,lng. Used so ACTION place «מיקום הבית» without coords asks
+ * instead of geocoding the label as a city.
+ */
+export function collectAddressLikeFilingsWithoutCoords(
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+): SavedPlaceLabelOnly[] {
+  if (!snapshot) {
+    return [];
+  }
+  const out: SavedPlaceLabelOnly[] = [];
+  const seenIds = new Set<string>();
+  for (const row of snapshot.filing ?? []) {
+    const id = String(row.filing_id ?? "").trim();
+    const label = String(row.item_name ?? "").trim();
+    if (!id || !label || seenIds.has(id)) {
+      continue;
+    }
+    if (!filingNameLooksLikeAddress(label)) {
+      continue;
+    }
+    if (filingCoords(row)) {
+      continue;
+    }
+    seenIds.add(id);
+    out.push({ id, label, listType: "filings" });
+  }
+  return out;
+}
+
+export type SavedPlaceLabelMatch =
+  | { kind: "unique"; row: SavedPlaceLabelOnly }
+  | {
+      kind: "ambiguous";
+      options: Array<{ id: string; label: string; listType?: string }>;
+    }
+  | { kind: "none" };
+
+/**
+ * Match ACTION place against address-like filings that lack coordinates.
+ * Same id / exact label / unique soft rules as resolveSavedRoutePoint.
+ */
+export function matchAddressLikeFilingWithoutCoords(
+  query: string,
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+): SavedPlaceLabelMatch {
+  const q = String(query ?? "").trim();
+  if (!q || q.toLowerCase() === "speaker") {
+    return { kind: "none" };
+  }
+  const rows = collectAddressLikeFilingsWithoutCoords(snapshot);
+  if (rows.length === 0) {
+    return { kind: "none" };
+  }
+  const byId = rows.filter((r) => r.id === q);
+  if (byId.length === 1) {
+    return { kind: "unique", row: byId[0]! };
+  }
+  if (byId.length > 1) {
+    return {
+      kind: "ambiguous",
+      options: byId.map((r) => ({
+        id: r.id,
+        label: r.label,
+        listType: r.listType,
+      })),
+    };
+  }
+  const qNorm = normalizeLabel(q);
+  if (!qNorm) {
+    return { kind: "none" };
+  }
+  const byExact = rows.filter((r) => normalizeLabel(r.label) === qNorm);
+  if (byExact.length === 1) {
+    return { kind: "unique", row: byExact[0]! };
+  }
+  if (byExact.length > 1) {
+    return {
+      kind: "ambiguous",
+      options: byExact.map((r) => ({
+        id: r.id,
+        label: r.label,
+        listType: r.listType,
+      })),
+    };
+  }
+  if (qNorm.length < 2) {
+    return { kind: "none" };
+  }
+  const soft = rows.filter((r) => {
+    const labelNorm = normalizeLabel(r.label);
+    if (labelNorm.length < 2) {
+      return false;
+    }
+    return labelNorm.includes(qNorm) || qNorm.includes(labelNorm);
+  });
+  if (soft.length === 1) {
+    return { kind: "unique", row: soft[0]! };
+  }
+  if (soft.length > 1) {
+    return {
+      kind: "ambiguous",
+      options: soft.map((r) => ({
+        id: r.id,
+        label: r.label,
+        listType: r.listType,
+      })),
+    };
+  }
+  return { kind: "none" };
+}
+
+/** Ask when a saved place label matched but has no usable coordinates. */
+export function formatSavedLabelMissingCoordsAsk(label: string): string {
+  const trimmed = label.trim() || "המיקום השמור";
+  return `ל«${trimmed}» אין קואורדינטות שמורות. שלח מיקום בוואטסאפ או ציין עיר לבדיקה.`;
 }

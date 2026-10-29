@@ -310,6 +310,28 @@ describe("weather shared pin (Stage A)", () => {
     expect(forecastUrl).toContain(`longitude=${pin.lng}`);
   });
 
+  it("useCoords (saved place) skips geocode and does not set usedPendingPin", async () => {
+    const fetchImpl = openMeteoFetchImpl();
+    const result = await resolveWeatherMessages({
+      place: "מיקום הבית",
+      nearSpeaker: false,
+      useCoords: true,
+      latitude: pin.lat,
+      longitude: pin.lng,
+      aspects: ["temp"],
+      now,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.usedPendingPin).toBe(false);
+    expect(result.needsLocation).toBe(false);
+    expect(result.body).toContain("מיקום הבית");
+    const urls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("geocoding-api"))).toBe(false);
+    const forecastUrl = urls.find((u) => u.includes("forecast"));
+    expect(forecastUrl).toContain(`latitude=${pin.lat}`);
+    expect(forecastUrl).toContain(`longitude=${pin.lng}`);
+  });
+
   it("named city geocodes even when pin coords are also passed", async () => {
     const fetchImpl = openMeteoFetchImpl();
     const result = await resolveWeatherMessages({

@@ -2,14 +2,25 @@
  * Shared location representation for live domains (Stage A).
  * Coordinates are canonical; address/name are optional display only.
  * No DB / second global store — PENDING_LOCATION remains the pin cache.
+ *
+ * resolveActionLocation: ACTION intent → coords for weather/places.
+ * Place/saved wins over a pending pin; pin only when near=speaker + empty place.
  */
 
+import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import type { PendingLocation } from "./pending-location.js";
+import {
+  formatSavedLabelMissingCoordsAsk,
+  formatSavedRouteAmbiguousAsk,
+  matchAddressLikeFilingWithoutCoords,
+  resolveSavedRoutePoint,
+} from "./saved-route-location.js";
 
 export type ResolvedLocationSource =
   | "whatsapp_pin"
   | "action_coords"
-  | "geocode";
+  | "geocode"
+  | "saved";
 
 export type ResolvedLocation = {
   lat: number;
@@ -135,6 +146,107 @@ export function fromActionCoords(
     label: trimmed || NEUTRAL_PIN_LABEL,
     ...(trimmed ? { placeName: trimmed } : {}),
   };
+}
+
+/** Saved filing/list row that already stores valid lat,lng. */
+export function fromSavedCoords(
+  lat: unknown,
+  lng: unknown,
+  label?: string,
+): ResolvedLocation | null {
+  const pair = parseCoordinatePair(lat, lng);
+  if (!pair) return null;
+  const trimmed = String(label ?? "").trim();
+  return {
+    lat: pair.lat,
+    lng: pair.lng,
+    source: "saved",
+    label: trimmed || NEUTRAL_PIN_LABEL,
+    ...(trimmed ? { placeName: trimmed } : {}),
+  };
+}
+
+export type ActionLocationResult =
+  | {
+      kind: "hit";
+      location: ResolvedLocation;
+      /** True only when the hit came from PENDING_LOCATION via near=speaker. */
+      usedPendingPin: boolean;
+    }
+  | {
+      kind: "ambiguous";
+      askText: string;
+    }
+  | {
+      kind: "label_without_coords";
+      askText: string;
+    }
+  | { kind: "need_pin" }
+  | { kind: "none" };
+
+/**
+ * Resolve weather/places ACTION location from intent, not mere availability.
+ *
+ * 1. Non-empty place → saved coords (hit) / ambiguous ask / address-like
+ *    label without coords (ask, never geocode that label) / none (named city).
+ * 2. Else near=speaker → PENDING_LOCATION or need_pin.
+ * 3. Else none.
+ *
+ * A pending pin is never used when place is set. Never invents coordinates.
+ */
+export function resolveActionLocation(input: {
+  place: string;
+  nearSpeaker: boolean;
+  pending: PendingLocation | null | undefined;
+  snapshot:
+    | Pick<EmployeeRecordSnapshot, "lists" | "filing">
+    | null
+    | undefined;
+}): ActionLocationResult {
+  const place = String(input.place ?? "").trim();
+  if (place) {
+    const saved = resolveSavedRoutePoint(place, input.snapshot);
+    if (saved.kind === "hit") {
+      const location = fromSavedCoords(saved.lat, saved.lng, saved.label);
+      if (!location) {
+        return {
+          kind: "label_without_coords",
+          askText: formatSavedLabelMissingCoordsAsk(saved.label),
+        };
+      }
+      return { kind: "hit", location, usedPendingPin: false };
+    }
+    if (saved.kind === "ambiguous") {
+      return {
+        kind: "ambiguous",
+        askText: formatSavedRouteAmbiguousAsk(place, saved.options),
+      };
+    }
+    const noCoords = matchAddressLikeFilingWithoutCoords(place, input.snapshot);
+    if (noCoords.kind === "unique") {
+      return {
+        kind: "label_without_coords",
+        askText: formatSavedLabelMissingCoordsAsk(noCoords.row.label),
+      };
+    }
+    if (noCoords.kind === "ambiguous") {
+      return {
+        kind: "ambiguous",
+        askText: formatSavedRouteAmbiguousAsk(place, noCoords.options),
+      };
+    }
+    return { kind: "none" };
+  }
+
+  if (input.nearSpeaker) {
+    const pin = fromPendingLocation(input.pending);
+    if (!pin) {
+      return { kind: "need_pin" };
+    }
+    return { kind: "hit", location: pin, usedPendingPin: true };
+  }
+
+  return { kind: "none" };
 }
 
 export function fromGeocode(place: {
