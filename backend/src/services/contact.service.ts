@@ -7,6 +7,14 @@ import {
   phonesMatch,
   toWhatsAppAddress,
 } from "../utils/phone.js";
+import {
+  applyAttachmentLinks,
+  emptyAttachmentOutcome,
+  mergeAttachmentOutcomes,
+  withContactAttachmentRefs,
+  type AttachmentApplyOutcome,
+  type AttachmentSavedRef,
+} from "./attachment.service.js";
 import { listRegisteredHumansByPhones } from "./employee.service.js";
 
 export interface SpeakerContact {
@@ -27,6 +35,8 @@ export interface SpeakerContact {
    * (same ESD meaning as list/filing `assigned_by` — not the responsible party).
    */
   assignedBy?: string;
+  /** Same shape as list/filing/reminder row attachments. */
+  attachments?: AttachmentSavedRef[];
 }
 
 function normalizeContactDescription(value: unknown): string {
@@ -158,7 +168,7 @@ export async function listContactsForEmployee(
     }
   }
 
-  return out;
+  return withContactAttachmentRefs(out);
 }
 
 export async function getContactBookShare(
@@ -321,6 +331,9 @@ export function formatSpeakerContacts(
           : {}),
         // assigned_by = assigner (who הטיל), not the responsible owner.
         ...(row.assignedBy ? { assigned_by: row.assignedBy } : {}),
+        ...(row.attachments && row.attachments.length > 0
+          ? { attachments: row.attachments }
+          : {}),
       })),
     ),
   ].join("\n");
@@ -430,6 +443,27 @@ export type DirectoryShareNotice = {
   metadata: LlmMetadata;
 };
 
+async function applyDirectoryRowAttachments(input: {
+  actorId: string;
+  contactId: string;
+  action: LlmDirectoryAction;
+}): Promise<AttachmentApplyOutcome> {
+  const attachmentIds = input.action.attachmentIds ?? [];
+  const detachIds =
+    input.action.action === "update"
+      ? (input.action.detachAttachmentIds ?? [])
+      : [];
+  if (attachmentIds.length === 0 && detachIds.length === 0) {
+    return emptyAttachmentOutcome(false);
+  }
+  return applyAttachmentLinks({
+    actorId: input.actorId,
+    target: { contactId: input.contactId },
+    attachmentIds,
+    detachIds,
+  });
+}
+
 export async function applyDirectoryActions(input: {
   userId: string;
   ownerEmployeeId: string;
@@ -443,14 +477,23 @@ export async function applyDirectoryActions(input: {
   alreadyExisting: SpeakerContact[];
   shareNotices: DirectoryShareNotice[];
   bookShared?: boolean;
+  attachmentOutcome: AttachmentApplyOutcome;
 }> {
   const saved: SpeakerContact[] = [];
   const removed: string[] = [];
   const alreadyExisting: SpeakerContact[] = [];
   const shareNotices: DirectoryShareNotice[] = [];
   let bookShared = false;
+  let attachmentOutcome = emptyAttachmentOutcome();
   if (!prisma.contact?.upsert || input.actions.length === 0) {
-    return { saved, removed, alreadyExisting, shareNotices, bookShared };
+    return {
+      saved,
+      removed,
+      alreadyExisting,
+      shareNotices,
+      bookShared,
+      attachmentOutcome,
+    };
   }
 
   const employees = input.employees ?? [];
@@ -604,6 +647,14 @@ export async function applyDirectoryActions(input: {
           visibleTo: shared ? nextVisible : [ownerId],
         },
       });
+      attachmentOutcome = mergeAttachmentOutcomes(
+        attachmentOutcome,
+        await applyDirectoryRowAttachments({
+          actorId: input.ownerEmployeeId,
+          contactId: existing.id,
+          action,
+        }),
+      );
       saved.push({
         id: existing.id,
         name: nextName,
@@ -679,6 +730,14 @@ export async function applyDirectoryActions(input: {
             addedById: input.ownerEmployeeId,
           },
         });
+        attachmentOutcome = mergeAttachmentOutcomes(
+          attachmentOutcome,
+          await applyDirectoryRowAttachments({
+            actorId: input.ownerEmployeeId,
+            contactId: row.id,
+            action,
+          }),
+        );
         saved.push({
           id: row.id,
           name: row.name,
@@ -742,6 +801,14 @@ export async function applyDirectoryActions(input: {
         visibleTo,
       },
     });
+    attachmentOutcome = mergeAttachmentOutcomes(
+      attachmentOutcome,
+      await applyDirectoryRowAttachments({
+        actorId: input.ownerEmployeeId,
+        contactId: row.id,
+        action,
+      }),
+    );
     saved.push({
       id: row.id,
       name: row.name,
@@ -767,7 +834,14 @@ export async function applyDirectoryActions(input: {
     }
   }
 
-  return { saved, removed, alreadyExisting, shareNotices, bookShared };
+  return {
+    saved,
+    removed,
+    alreadyExisting,
+    shareNotices,
+    bookShared,
+    attachmentOutcome,
+  };
 }
 
 async function loadBookPartnerIds(ownerEmployeeId: string): Promise<string[]> {

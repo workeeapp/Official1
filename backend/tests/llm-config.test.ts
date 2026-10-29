@@ -289,6 +289,12 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN prose meeting list",
     );
+    expect(config.systemMessage).toContain("MEETING ≠ NUDGE");
+    expect(config.systemMessage).toContain(
+      "dated message ≠ meeting",
+    );
+    expect(config.systemMessage).toContain("לשלוח נדנוד");
+    expect(config.systemMessage).toContain("ברכת בוקר");
     // List-shell post-mutate overview button (not item mutates).
     expect(config.systemMessage).toContain("LIST SHELL SHOW");
     expect(config.systemMessage).toContain('label «הצג רשימות»');

@@ -73,7 +73,8 @@ export type AttachmentTarget =
   | { listId: string }
   | { listItemId: string }
   | { filingId: string }
-  | { reminderId: string };
+  | { reminderId: string }
+  | { contactId: string };
 
 /** Outcome of one applyAttachmentLinks call. Attach and detach are independent. */
 export type AttachmentApplyOutcome = {
@@ -389,6 +390,7 @@ export interface AttachmentRefsByTarget {
   listItems: Map<string, AttachmentSavedRef[]>;
   filings: Map<string, AttachmentSavedRef[]>;
   reminders: Map<string, AttachmentSavedRef[]>;
+  contacts: Map<string, AttachmentSavedRef[]>;
 }
 
 export async function loadAttachmentRefs(input: {
@@ -396,18 +398,21 @@ export async function loadAttachmentRefs(input: {
   listItemIds?: string[];
   filingIds?: string[];
   reminderIds?: string[];
+  contactIds?: string[];
 }): Promise<AttachmentRefsByTarget> {
   const result: AttachmentRefsByTarget = {
     lists: new Map(),
     listItems: new Map(),
     filings: new Map(),
     reminders: new Map(),
+    contacts: new Map(),
   };
   const or = [
     input.listIds?.length ? { listId: { in: input.listIds } } : null,
     input.listItemIds?.length ? { listItemId: { in: input.listItemIds } } : null,
     input.filingIds?.length ? { filingId: { in: input.filingIds } } : null,
     input.reminderIds?.length ? { reminderId: { in: input.reminderIds } } : null,
+    input.contactIds?.length ? { contactId: { in: input.contactIds } } : null,
   ].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   if (or.length === 0) {
     return result;
@@ -438,6 +443,7 @@ export async function loadAttachmentRefs(input: {
     push(result.listItems, link.listItemId, link.attachment);
     push(result.filings, link.filingId, link.attachment);
     push(result.reminders, link.reminderId, link.attachment);
+    push(result.contacts, link.contactId, link.attachment);
   }
   return result;
 }
@@ -532,6 +538,11 @@ export function collectAttachmentIdsForDumpRows(
   snapshot: SnapshotShape,
   rowIds: ReadonlySet<string> | Iterable<string>,
   max = SEND_ATTACHMENTS_MAX,
+  /**
+   * Extra saved rows keyed by opaque id (e.g. phone-book contacts). Same
+   * `attachments` shape as list/filing/reminder rows.
+   */
+  extraRows: ReadonlyArray<{ id: string; attachments?: unknown }> = [],
 ): string[] {
   const want =
     rowIds instanceof Set
@@ -572,7 +583,31 @@ export function collectAttachmentIdsForDumpRows(
       take((row as { attachments?: unknown }).attachments);
     }
   }
+  for (const row of extraRows) {
+    const id = row.id.trim();
+    if (id && want.has(id)) {
+      take(row.attachments);
+    }
+  }
   return out;
+}
+
+/** Decorate phone-book / SPEAKER_CONTACTS rows with the same `attachments` refs. */
+export async function withContactAttachmentRefs<
+  T extends { id: string },
+>(rows: T[]): Promise<Array<T & { attachments?: AttachmentSavedRef[] }>> {
+  const contactIds = rows.map((row) => row.id.trim()).filter(Boolean);
+  if (contactIds.length === 0) {
+    return rows;
+  }
+  const refs = await loadAttachmentRefs({ contactIds });
+  if (refs.contacts.size === 0) {
+    return rows;
+  }
+  return rows.map((row) => {
+    const own = refs.contacts.get(row.id);
+    return own ? { ...row, attachments: own } : row;
+  });
 }
 
 /**
@@ -681,6 +716,9 @@ function targetEntity(target: AttachmentTarget): [string, string] {
   }
   if ("filingId" in target) {
     return ["EmployeeFiling", target.filingId];
+  }
+  if ("contactId" in target) {
+    return ["Contact", target.contactId];
   }
   return ["Reminder", target.reminderId];
 }

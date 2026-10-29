@@ -461,6 +461,7 @@ model AttachmentLink {
   listItemId   String?           @map("list_item_id") @db.Uuid
   filingId     String?           @map("filing_id") @db.Uuid
   reminderId   String?           @map("reminder_id") @db.Uuid
+  contactId    String?           @map("contact_id") @db.Uuid
   addedById    String?           @map("added_by_id") @db.Uuid
   createdAt    DateTime          @default(now()) @map("created_at")
   attachment   Attachment        @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
@@ -468,15 +469,18 @@ model AttachmentLink {
   listItem     EmployeeListItem? @relation(fields: [listItemId], references: [id], onDelete: Cascade)
   filing       EmployeeFiling?   @relation(fields: [filingId], references: [id], onDelete: Cascade)
   reminder     Reminder?         @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  contact      Contact?          @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@unique([attachmentId, listId])
   @@unique([attachmentId, listItemId])
   @@unique([attachmentId, filingId])
   @@unique([attachmentId, reminderId])
+  @@unique([attachmentId, contactId])
   @@index([listId])
   @@index([listItemId])
   @@index([filingId])
   @@index([reminderId])
+  @@index([contactId])
   @@map("AttachmentLinks")
 }
 
@@ -548,6 +552,8 @@ model Contact {
   @@index([userId])
   @@index([ownerEmployeeId, name])
   @@index([scope])
+  attachmentLinks AttachmentLink[]
+
   @@index([migratedFromItemId])
   @@map("Contacts")
 }

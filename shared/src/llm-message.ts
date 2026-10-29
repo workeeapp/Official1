@@ -225,6 +225,10 @@ export interface LlmDirectoryAction {
   targets: string[];
   /** update / share_book: partner names to drop from visible_to. */
   unshareWith?: string[];
+  /** Same as list/filing/reminder item attach — files on this contact row. */
+  attachmentIds?: string[];
+  /** update only: detach these attachment_ids from the contact. */
+  detachAttachmentIds?: string[];
 }
 
 export type LlmReminderActionName = "add" | "remove" | "update";
@@ -2507,6 +2511,16 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
       ...(unshareWith.length > 0 ? { unshareWith } : {}),
     };
   }
+  const attachmentIds = readStringList(
+    record.attachment_ids ?? record.attachmentIds,
+  );
+  const detachAttachmentIds = readStringList(
+    record.detach_attachment_ids ?? record.detachAttachmentIds,
+  );
+  const withAttachments = {
+    ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+    ...(detachAttachmentIds.length > 0 ? { detachAttachmentIds } : {}),
+  };
   if (action === "remove" || action === "update") {
     if (!contactId) {
       return null;
@@ -2519,6 +2533,7 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
       targets,
       ...withDescription,
       ...(unshareWith.length > 0 ? { unshareWith } : {}),
+      ...withAttachments,
     };
   }
   if (!name || !phone) {
@@ -2531,6 +2546,7 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
     contactId: "",
     targets,
     ...withDescription,
+    ...withAttachments,
   };
 }
 

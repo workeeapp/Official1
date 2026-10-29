@@ -62,6 +62,8 @@ describe("relative-date", () => {
     expect(text).toContain("Semantic day asks");
     expect(text).toContain("אילו פגישות יש לי השבוע");
     expect(text).toContain("FORBIDDEN answering in prose instead of dump+ids");
+    expect(text).toContain("MEETING ≠ NUDGE");
+    expect(text).toContain("ברכת בוקר");
     expect(text).toContain("TIME-OF-DAY");
     // Former "RECURRING IN A DATE ANSWER" / DAY AGENDA — live SESSION_CLOCK wording.
     expect(text).toContain("RECURRING / WHEN DATE ASK");

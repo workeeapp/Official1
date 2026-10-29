@@ -153,6 +153,8 @@ export type PhoneBookDumpRow = {
   assigned_by?: string;
   /** Book owner when viewing an assigned/shared row on someone else's book. */
   owner?: string;
+  /** Same `attachments` refs as other saved rows (paperclip / send). */
+  attachments?: unknown;
 };
 
 /** Normalize dump filter name(s) to a trimmed list. */
@@ -1101,11 +1103,13 @@ export function formatPhoneBookDump(
     const contactId = (row.contact_id ?? "").trim();
     const base = phone ? `${name} — ${phone}` : name;
     const title = description ? `${base} · ${description}` : base;
+    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     const item: Record<string, unknown> = {
       ...(contactId ? { contact_id: contactId } : {}),
       name,
       ...(phone ? { phone } : {}),
       ...(description ? { description } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
     };
     const sharedWith = (row.shared_with ?? [])
       .map((value) => value.trim())
