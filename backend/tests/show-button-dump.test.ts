@@ -67,7 +67,7 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הצג תזכורות")).toBe("reminders");
     expect(mapShowButtonCommandToDump("הצג תיוקים")).toBe("filings");
     expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
-    expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("contacts");
+    expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("phone_book");
     expect(mapShowButtonCommandToDump(showAllListButtonCommand("shopping"))).toBe(
       "shopping",
     );
@@ -101,6 +101,16 @@ describe("closed show button allowlist", () => {
     expect(
       mapShowButtonCommandToDumpTarget(showAllListButtonCommand("filings")),
     ).toEqual({ kind: "filings" });
+    expect(
+      mapShowButtonCommandToDumpTarget(
+        showSharedWithButtonCommand("contacts", "מיכל"),
+      ),
+    ).toEqual({
+      kind: "phone_book",
+      section: "shared",
+      partner: "מיכל",
+      collaboration: "co_share",
+    });
     expect(
       isKnownShowButtonCommand(showSharedWithButtonCommand("shopping", "מיכל")),
     ).toBe(true);
@@ -866,31 +876,23 @@ describe("filings flat dump", () => {
       ).toBe("");
     });
 
-    it("contacts: single, many, wrong, empty Set", () => {
-      const snap: EmployeeRecordSnapshot = {
-        lists: [
-          {
-            list_type: "contacts",
-            list_name: "",
-            owner: "טל",
-            scope: "personal",
-            items: [
-              { item_id: "c1", "שם פרטי": "דני", טלפון: "0501111111" },
-              { item_id: "c2", "שם פרטי": "מיכל", טלפון: "0502222222" },
-              { item_id: "c3", "שם פרטי": "עמית", טלפון: "0503333333" },
-            ],
-          } as EmployeeRecordSnapshot["lists"][number],
-        ],
-        filing: [],
-      };
+    it("contacts/phone_book: single, many, wrong, empty Set", () => {
+      const snap: EmployeeRecordSnapshot = { lists: [], filing: [] };
+      const phoneBook = [
+        { contact_id: "c1", name: "דני", phone: "0501111111", scope: "personal" as const },
+        { contact_id: "c2", name: "מיכל", phone: "0502222222", scope: "personal" as const },
+        { contact_id: "c3", name: "עמית", phone: "0503333333", scope: "personal" as const },
+      ];
       const one = formatShowDumpFromKind("contacts", snap, {
         ...omitEmpty,
+        phoneBook,
         itemIds: new Set(["c2"]),
       })!;
       expect(one).toContain("מיכל");
       expect(one).not.toContain("דני");
       const many = formatShowDumpFromKind("contacts", snap, {
         ...omitEmpty,
+        phoneBook,
         itemIds: new Set(["c1", "c3"]),
       })!;
       expect(many).toContain("דני");
@@ -899,12 +901,14 @@ describe("filings flat dump", () => {
       expect(
         formatShowDumpFromKind("contacts", snap, {
           ...omitEmpty,
+          phoneBook,
           itemIds: new Set(["nope"]),
         }),
       ).toBe("");
       expect(
         formatShowDumpFromKind("contacts", snap, {
           ...omitEmpty,
+          phoneBook,
           itemIds: new Set(),
         }),
       ).toBe("");
@@ -3243,7 +3247,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
   });
 
-  it("contacts: omits empty shared unless section=shared", () => {
+  it("contacts/אנשי קשר dump uses phone_book (not lists.contacts)", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -3264,18 +3268,53 @@ describe("formatShowDumpFromKind", () => {
     };
     const full = formatShowDumpFromKind("contacts", snap, {
       viewerName: "טל",
+      phoneBook: [
+        { contact_id: "pb1", name: "דני", phone: "050", scope: "personal" },
+      ],
     })!;
     expect(full).toContain("👤 אנשי קשר:");
     expect(full).toContain("דני");
     expect(full).not.toContain("אנשי קשר אישיים:");
     expect(full).not.toContain("אנשי קשר משותפים:");
 
-    const sharedOnly = formatShowDumpFromKind("contacts", snap, {
+    const sharedOnly = formatShowDumpFromKind("אנשי קשר", snap, {
       viewerName: "טל",
       section: "shared",
+      phoneBook: [
+        { contact_id: "pb1", name: "דני", phone: "050", scope: "personal" },
+      ],
     })!;
     expect(sharedOnly).toBe("אין אנשי קשר משותפים.");
     expect(sharedOnly).not.toContain("דני");
+  });
+
+  it("phone_book dump emits LAST_NUMBERED_DUMP lines with contact_id", () => {
+    const { text, lines } = formatShowDumpWithLineMap(
+      "phone_book",
+      { lists: [], filing: [] },
+      {
+        viewerName: "טל",
+        phoneBook: [
+          {
+            contact_id: "cid-1",
+            name: "דני",
+            phone: "050",
+            description: "שכן",
+            scope: "personal",
+          },
+        ],
+      },
+    );
+    expect(text).toContain("👤 אנשי קשר:");
+    expect(text).toContain("דני — 050 · שכן");
+    expect(lines).toEqual([
+      {
+        n: 1,
+        id: "cid-1",
+        kind: "phone_book",
+        title_stem: "דני",
+      },
+    ]);
   });
 
   it("shopping countsOnly: breakdown by bucket; empty shared section sentence", () => {
@@ -3683,24 +3722,6 @@ describe("worker inventory tasks dump helpers", () => {
           scope: "personal",
           items: [{ item_id: "c2", שם: "b" }],
         } as EmployeeRecordSnapshot["lists"][number],
-        {
-          list_type: "contacts",
-          list_name: "",
-          owner: "טל",
-          scope: "personal",
-          items: [
-            {
-              item_id: "ct-personal",
-              "שם פרטי": "דני",
-            },
-            {
-              item_id: "ct-shared",
-              "שם פרטי": "נועה",
-              scope: "shared",
-              shared_with: ["טל", "עמית"],
-            },
-          ],
-        } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [],
       reminders: [
@@ -3788,7 +3809,6 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("פגישה (טל, עמית)");
     expect(text).toMatch(/🔔 תזכורת:/);
     expect(text).not.toContain("פגישה עם עמית");
-    expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
     expect(text).toContain("שרה");
     expect(text).toContain("👤 אנשי קשר:");

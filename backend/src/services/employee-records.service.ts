@@ -1101,8 +1101,10 @@ export function listItemLabels(
 }
 
 export function hasEmployeeRecords(snapshot: EmployeeRecordSnapshot): boolean {
+  // Contacts v2: lists.contacts is retired from ESD — phone book is SPEAKER_CONTACTS.
+  const lists = snapshot.lists.filter((list) => list.list_type !== "contacts");
   return (
-    snapshot.lists.length > 0 ||
+    lists.length > 0 ||
     snapshot.filing.length > 0 ||
     (snapshot.reminders?.length ?? 0) > 0
   );
@@ -1155,15 +1157,18 @@ export function clusterSnapshotShoppingTasksItems(
 function listsForEmployeeContext(
   lists: EmployeeRecordSnapshot["lists"],
 ): EmployeeRecordSnapshot["lists"] {
-  return lists.map((list) => {
-    if (list.list_type !== "shopping" && list.list_type !== "tasks") {
-      return list;
-    }
-    return {
-      ...list,
-      items: clusterSnapshotShoppingTasksItems(list, list.items),
-    };
-  });
+  // Contacts v2: omit builtin contacts shells — directory / SPEAKER_CONTACTS only.
+  return lists
+    .filter((list) => list.list_type !== "contacts")
+    .map((list) => {
+      if (list.list_type !== "shopping" && list.list_type !== "tasks") {
+        return list;
+      }
+      return {
+        ...list,
+        items: clusterSnapshotShoppingTasksItems(list, list.items),
+      };
+    });
 }
 
 export function formatEmployeeContext(
@@ -3091,6 +3096,17 @@ async function applyListAction(
   let attachmentOutcome = emptyAttachmentOutcome();
   const shareMisses: ShareApplyMiss[] = [];
   const accessCache: WorkerAccessCache = {};
+  // Contacts v2: refuse lists.* on contacts — phone book mutates via directory only.
+  if (action.listType === "contacts") {
+    return {
+      events: [],
+      mutations: [],
+      cancelledReminders: [],
+      cancelledReminderIds: [],
+      shareMisses: [],
+      attachmentOutcome: emptyAttachmentOutcome(),
+    };
+  }
   const shareIntent =
     visibility.scope === "shared" ||
     visibility.visibleTo.some((id) => id !== employeeId);

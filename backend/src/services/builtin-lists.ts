@@ -142,9 +142,10 @@ export function staticShowButtonDumpMap(): Readonly<Record<string, string>> {
     [SHOW_FILINGS_ALL_COMMAND]: "filings",
     [showListButtonCommand("shopping")]: "shopping",
     [showListButtonCommand("tasks")]: "tasks",
-    [showListButtonCommand("contacts")]: "contacts",
+    // Contacts v2: button dumps canonical SPEAKER_CONTACTS (phone_book), not lists.contacts.
+    [showListButtonCommand("contacts")]: "phone_book",
     [showAllListButtonCommand("shopping")]: "shopping",
     [showAllListButtonCommand("tasks")]: "tasks",
-    [showAllListButtonCommand("contacts")]: "contacts",
+    [showAllListButtonCommand("contacts")]: "phone_book",
   };
 }

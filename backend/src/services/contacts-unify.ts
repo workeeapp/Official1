@@ -1,6 +1,7 @@
 /**
- * Unify lists.contacts → canonical Contacts (Issue 3).
- * Inventory + dry-run are pure; apply is additive and never hard-deletes source rows.
+ * Unify lists.contacts → canonical Contacts (Issue 3 / Contacts v2).
+ * Inventory + dry-run are pure; apply creates/merges Contacts; soft-delete
+ * retires only list items with Contact.migratedFromItemId (never hard-delete).
  */
 
 import { prisma } from "../database/prisma.js";
@@ -243,7 +244,7 @@ export function planContactsUnify(input: {
   };
 }
 
-/** Minimal prisma surface used by apply — keeps tests injectable. */
+/** Minimal prisma surface used by apply / soft-delete — keeps tests injectable. */
 export type ContactsUnifyDb = {
   contact: {
     create: (args: {
@@ -253,6 +254,16 @@ export type ContactsUnifyDb = {
       where: { id: string };
       data: Record<string, unknown>;
     }) => Promise<unknown>;
+    findMany?: (args: {
+      where: { migratedFromItemId: { not: null } };
+      select: { migratedFromItemId: true };
+    }) => Promise<Array<{ migratedFromItemId: string | null }>>;
+  };
+  employeeListItem?: {
+    updateMany: (args: {
+      where: { id: { in: string[] }; deletedAt: null };
+      data: { deletedAt: Date };
+    }) => Promise<{ count: number }>;
   };
 };
 
@@ -326,6 +337,7 @@ export async function loadContactsUnifyInventory(): Promise<ContactsUnifyInvento
 
   // Before migration, migratedFromItemId may not exist — use raw when needed.
   let contacts: CanonicalContactRow[] = [];
+  const extraPhones: string[] = [];
   if (schema.hasMigratedFromItemId) {
     const rows = await prisma.contact.findMany({
       select: {
@@ -334,15 +346,31 @@ export async function loadContactsUnifyInventory(): Promise<ContactsUnifyInvento
         name: true,
         phone: true,
         migratedFromItemId: true,
+        ...(schema.hasExtras ? { extras: true } : {}),
       },
     });
-    contacts = rows.map((row) => ({
-      id: row.id,
-      ownerEmployeeId: row.ownerEmployeeId,
-      name: row.name,
-      phone: row.phone,
-      migratedFromItemId: row.migratedFromItemId,
-    }));
+    contacts = rows.map((row) => {
+      const extras = asDataRecord(
+        "extras" in row ? (row as { extras?: unknown }).extras : null,
+      );
+      const phones = extras.phones;
+      if (Array.isArray(phones)) {
+        for (const raw of phones) {
+          if (typeof raw !== "string") continue;
+          const normalized = toWhatsAppAddress(raw);
+          if (looksLikePhone(normalized) && !extraPhones.includes(normalized)) {
+            extraPhones.push(normalized);
+          }
+        }
+      }
+      return {
+        id: row.id,
+        ownerEmployeeId: row.ownerEmployeeId,
+        name: row.name,
+        phone: row.phone,
+        migratedFromItemId: row.migratedFromItemId,
+      };
+    });
   } else {
     const rows = await prisma.$queryRaw<
       Array<{
@@ -368,11 +396,12 @@ export async function loadContactsUnifyInventory(): Promise<ContactsUnifyInvento
     }
   }
   const contactPhones = [
-    ...new Set(
-      contacts
+    ...new Set([
+      ...contacts
         .map((c) => c.phone)
         .filter((p): p is string => Boolean(p && looksLikePhone(p))),
-    ),
+      ...extraPhones,
+    ]),
   ];
 
   return {
@@ -405,7 +434,8 @@ export function dryRunLooksSafe(dry: ContactUnifyDryRun): {
 }
 
 /**
- * Apply a dry-run plan. Additive only — never deletes lists.contacts source rows.
+ * Apply a dry-run plan. Additive on Contacts — does not touch list source rows.
+ * Call {@link softDeleteMigratedListContactSources} separately for Contacts v2 retire.
  */
 export async function applyContactsUnifyPlan(
   db: ContactsUnifyDb,
@@ -459,4 +489,36 @@ export async function applyContactsUnifyPlan(
     merged += 1;
   }
   return { created, merged, skipped };
+}
+
+/**
+ * Contacts v2: soft-delete lists.contacts items that already have a Contact
+ * tagged with migratedFromItemId. Never hard-deletes; never touches unmigrated items.
+ */
+export async function softDeleteMigratedListContactSources(
+  db: ContactsUnifyDb,
+  now: Date = new Date(),
+): Promise<{ softDeleted: number; itemIds: string[] }> {
+  if (!db.contact.findMany || !db.employeeListItem?.updateMany) {
+    return { softDeleted: 0, itemIds: [] };
+  }
+  const migrated = await db.contact.findMany({
+    where: { migratedFromItemId: { not: null } },
+    select: { migratedFromItemId: true },
+  });
+  const itemIds = [
+    ...new Set(
+      migrated
+        .map((row) => row.migratedFromItemId)
+        .filter((id): id is string => Boolean(id && id.trim())),
+    ),
+  ];
+  if (itemIds.length === 0) {
+    return { softDeleted: 0, itemIds: [] };
+  }
+  const result = await db.employeeListItem.updateMany({
+    where: { id: { in: itemIds }, deletedAt: null },
+    data: { deletedAt: now },
+  });
+  return { softDeleted: result.count, itemIds };
 }

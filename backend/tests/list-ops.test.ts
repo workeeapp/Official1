@@ -243,7 +243,7 @@ describe("list ops", () => {
     expect(removed.refusal?.reason).toBe("builtin");
   });
 
-  it("allows participants-only on contacts builtin; refuses structural", async () => {
+  it("refuses all list ops on contacts builtin (directory-only)", async () => {
     listFindFirst.mockResolvedValue(
       bugsList({
         listType: "contacts",
@@ -256,11 +256,12 @@ describe("list ops", () => {
 
     const [structural] = await run([op({ newName: "חברים" })]);
     expect(structural.refusal?.reason).toBe("builtin");
+    expect(structural.applied).toBe(false);
 
     const [shared] = await run([op({ addParticipants: ["טל"] })]);
-    expect(shared.refusal).toBeUndefined();
-    expect(shared.applied).toBe(true);
-    expect(listUpdate).toHaveBeenCalled();
+    expect(shared.refusal?.reason).toBe("builtin");
+    expect(shared.applied).toBe(false);
+    expect(listUpdate).not.toHaveBeenCalled();
   });
 
   it("removes a participant from the list and from its rows", async () => {

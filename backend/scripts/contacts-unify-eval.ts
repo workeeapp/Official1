@@ -23,6 +23,7 @@ import {
   dryRunLooksSafe,
   loadContactsUnifyInventory,
   planContactsUnify,
+  softDeleteMigratedListContactSources,
 } from "../src/services/contacts-unify.js";
 
 function redactUrl(url: string): string {
@@ -168,25 +169,27 @@ async function seedEvalContactFixture(): Promise<{
   };
 }
 
-async function verifyPreservation(beforeListCount: number, beforeListPhones: string[]) {
+async function verifyPreservation(beforeListPhones: string[]) {
   const afterListCount = await countListContacts();
   const inv = await loadContactsUnifyInventory();
+  // Contacts v2: phones must live on canonical Contacts (live list sources may be soft-deleted).
   const missingPhones = beforeListPhones.filter(
-    (p) => !inv.contactPhones.includes(p) && !inv.listPhones.includes(p),
+    (p) => !inv.contactPhones.includes(p),
   );
-  // Source rows must remain; phones from list inventory must still exist on Contacts or source.
-  const sourceOk = afterListCount === beforeListCount;
   const phonesOnCanonical = beforeListPhones.filter((p) =>
     inv.contactPhones.includes(p),
   );
+  const liveMigratedStillPresent = inv.listRows.filter((row) =>
+    inv.contacts.some((c) => c.migratedFromItemId === row.itemId),
+  ).length;
   return {
-    sourceOk,
+    phonesOk: missingPhones.length === 0,
     afterListCount,
-    beforeListCount,
     beforeListPhoneCount: beforeListPhones.length,
     canonicalPhoneCount: inv.contactPhones.length,
     listPhonesStillPresent: inv.listPhones.length,
     phonesMigratedToCanonical: phonesOnCanonical.length,
+    liveMigratedStillPresent,
     missingPhones,
     schema: inv.schema,
     contactCount: inv.contactCount,
@@ -297,52 +300,58 @@ async function main() {
       process.exitCode = 2;
       return;
     }
-    const beforeListCount = inventory.listContactCount;
     const beforeListPhones = [...inventory.listPhones];
     const result = await applyContactsUnifyPlan(prisma, dry.plans);
-    const preservation = await verifyPreservation(beforeListCount, beforeListPhones);
-    // Idempotency: second dry-run should only skip
+    const retire = await softDeleteMigratedListContactSources(prisma);
+    const preservation = await verifyPreservation(beforeListPhones);
+    // Idempotency: second dry-run should only skip; soft-delete re-run should be 0.
+    const afterInv = await loadContactsUnifyInventory();
     const again = planContactsUnify({
-      listRows: (await loadContactsUnifyInventory()).listRows,
-      contacts: (await loadContactsUnifyInventory()).contacts,
+      listRows: afterInv.listRows,
+      contacts: afterInv.contacts,
     });
+    const retireAgain = await softDeleteMigratedListContactSources(prisma);
     console.log(
       JSON.stringify(
         {
           apply: result,
+          softDelete: retire,
           preservation,
           idempotencyDryRun: {
             creates: again.creates,
             merges: again.merges,
             alreadyMigrated: again.alreadyMigrated,
+            liveListContacts: afterInv.listContactCount,
           },
+          softDeleteIdempotent: retireAgain.softDeleted === 0,
         },
         null,
         2,
       ),
     );
-    if (!preservation.sourceOk || preservation.missingPhones.length > 0) {
-      console.error("VERIFY_FAIL: source or phones not preserved");
+    if (!preservation.phonesOk || preservation.liveMigratedStillPresent > 0) {
+      console.error("VERIFY_FAIL: phones missing or migrated sources still live");
       process.exitCode = 3;
     }
     if (again.creates > 0 || again.merges > 0) {
       console.error("IDEMPOTENCY_WARN: second dry-run still has creates/merges");
       process.exitCode = process.exitCode || 4;
     }
+    if (retireAgain.softDeleted > 0) {
+      console.error("IDEMPOTENCY_WARN: soft-delete re-run still deleted rows");
+      process.exitCode = process.exitCode || 4;
+    }
     return;
   }
 
   // verify
-  const preservation = await verifyPreservation(
-    inventory.listContactCount,
-    inventory.listPhones,
-  );
+  const preservation = await verifyPreservation(inventory.listPhones);
   console.log(JSON.stringify({ verify: preservation, dryRunAfter: {
     creates: dry.creates,
     merges: dry.merges,
     alreadyMigrated: dry.alreadyMigrated,
   } }, null, 2));
-  if (!preservation.sourceOk) {
+  if (!preservation.phonesOk || preservation.liveMigratedStillPresent > 0) {
     process.exitCode = 3;
   }
 }

@@ -4,6 +4,7 @@ import {
   extractListContactFields,
   pickPrimaryPhone,
   planContactsUnify,
+  softDeleteMigratedListContactSources,
 } from "../src/services/contacts-unify.js";
 
 describe("contacts-unify dry-run", () => {
@@ -147,9 +148,10 @@ describe("contacts-unify dry-run", () => {
     expect(dry.merges).toBe(0);
   });
 
-  it("apply is additive and never deletes source list rows", async () => {
+  it("apply is additive on Contacts (does not soft-delete sources)", async () => {
     const create = vi.fn(async () => ({ id: "new-1" }));
     const update = vi.fn(async () => ({}));
+    const updateMany = vi.fn(async () => ({ count: 0 }));
     const dry = planContactsUnify({
       listRows: [
         {
@@ -186,10 +188,11 @@ describe("contacts-unify dry-run", () => {
       ],
     });
     const result = await applyContactsUnifyPlan(
-      { contact: { create, update } },
+      { contact: { create, update }, employeeListItem: { updateMany } },
       dry.plans,
     );
     expect(result).toEqual({ created: 1, merged: 1, skipped: 0 });
+    expect(updateMany).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -209,5 +212,40 @@ describe("contacts-unify dry-run", () => {
         }),
       }),
     );
+  });
+
+  it("soft-deletes only migrated sources; leaves unmigrated; idempotent", async () => {
+    const findMany = vi.fn(async () => [
+      { migratedFromItemId: "item-migrated" },
+      { migratedFromItemId: "item-migrated" },
+      { migratedFromItemId: null },
+    ]);
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const first = await softDeleteMigratedListContactSources({
+      contact: {
+        create: vi.fn(),
+        update: vi.fn(),
+        findMany,
+      },
+      employeeListItem: { updateMany },
+    });
+    expect(first.softDeleted).toBe(1);
+    expect(first.itemIds).toEqual(["item-migrated"]);
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["item-migrated"] }, deletedAt: null },
+      }),
+    );
+
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    const second = await softDeleteMigratedListContactSources({
+      contact: {
+        create: vi.fn(),
+        update: vi.fn(),
+        findMany,
+      },
+      employeeListItem: { updateMany },
+    });
+    expect(second.softDeleted).toBe(0);
   });
 });

@@ -43,7 +43,8 @@ describe("builtin-lists", () => {
     expect(map["הצג תיוקים"]).toBe("filings");
     expect(map[showListButtonCommand("shopping")]).toBe("shopping");
     expect(map[showListButtonCommand("tasks")]).toBe("tasks");
-    expect(map[showListButtonCommand("contacts")]).toBe("contacts");
+    expect(map[showListButtonCommand("contacts")]).toBe("phone_book");
+    expect(map[showAllListButtonCommand("contacts")]).toBe("phone_book");
     expect(map[showAllListButtonCommand("shopping")]).toBe("shopping");
     expect(map[showAllListButtonCommand("filings")]).toBe("filings");
   });

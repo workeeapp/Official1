@@ -2049,7 +2049,7 @@ export async function sendChatMessage(input: {
         "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids. (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
         "SHOW MY LISTS / ????? ?? ??????? ???: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact ???? ????? X? stays category/custom dump.",
         "FULL DUMP / ?? ?? ?? / ????? ??? / ??? ??? / ?? ???? ?? / ?? ?? ????? ??? / ????? ???: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY ????? enumerate items (1. 2. 3. under one ??????:? header; assign ?(??????? X ? ??? Y)?; co-share ?(A, B)?; LINKED REMINDER on task lines). ????? COUNTS ONLY breakdown under ??????:? ? ?????? / ?(A, B)? / ?(??????? X ? ??? Y)? (all involved on co-share); ?????? ????? = ?*name* (A, B) ? N ??????? (all involved, e.g. ?(????, ??)?; no ????). ??????? ??????: NUMBERED 1. 2. 3. (never ?) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / ??? ????? X stay category dumps. Hint once: ?????? ?????: ??? ????? ?. ?????? (one ???????:? + ?(A, B)?); ???? ??? (one ????? ???:? from EMPLOYEE_SAVED_DATA only ? not SPEAKER_CONTACTS); ??? ???????? (one ???? ????????:? from SPEAKER_CONTACTS; co-share ?(A, B)?; empty ? ???). FORBIDDEN: skipping ??? ???????? when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ??? ???????? from list_type contacts or calling the phone book ????? ????. No schema jargon.",
-        "PHONE BOOK ALONE / ??? ???????? / ????? ?? ??? ????????: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. FORBIDDEN model-written phone book; FORBIDDEN confusing with ???? ??? (contacts list).",
+        "PHONE BOOK / ???? ??? / ??? ???????? / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
         "Show a named list / ????? ?? ????? X / ??????? ?????? / ??????? ????? ?? ?????: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written ? inventory for named lists (breaks ?????? 6?). items=[] ? server empty sentence. Speak Hebrew only ? never list_name / list_type / metadata. After that dump, ?????? 6? / ??? 3? ? ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range ? ASK, not invent ids.",
         "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared ? say ?????? and name shared_with partners; never ??? ????? alone if the speaker is in shared_with. ????? ?????? ??????? ? only scope=shared. scope=shared_items shopping/tasks ? status header ??????/????? ?? <owner>? (FORBIDDEN ?????? ??). Named-list add/update/remove ? LIST NAME MATCH (identical-unique ? mutate; very similar one ? confirm; several / token in ?2 titles / topic-only ??????? ???? ? NUMBERED which-list ask; FORBIDDEN pick by topic). ?????? ????? ??????? / ?? after that offer ? shopping + list_name \"\" (FORBIDDEN custom with list_name ????? / ????? / ???? ???).",
         "?? ?? ?? ?? X / ?? ?? ?? ????? ?? X / ?? ????? ?? ???X / ?? ????? ?? X / ?? ?? ??? ?? X / ?? ????? ?????? ?? X: metadata.show_dump=\"full\"; show_dump_section=shared; show_dump_partner=X; lists=[]. Server dump (partner-filtered). FORBIDDEN model-written with-X overview.",
@@ -3145,8 +3145,10 @@ export async function sendChatMessage(input: {
         resolvedDumpKind?.kind === "phone_book";
       const speakerPhoneBook = needsPhoneBook
         ? speakerContacts.map((row) => ({
+            contact_id: row.id,
             name: row.name,
             phone: row.phone ?? "",
+            ...(row.description ? { description: row.description } : {}),
             scope: (row.scope ?? "personal") as "personal" | "shared",
             ...(row.sharedWith && row.sharedWith.length > 1
               ? { shared_with: row.sharedWith }
@@ -3161,10 +3163,14 @@ export async function sendChatMessage(input: {
         viewerAliases: string[],
         snapshot: Awaited<ReturnType<typeof withAttachmentRefsSafe>>,
         phoneBook?: Array<{
+          contact_id?: string;
           name: string;
           phone: string;
+          description?: string;
           scope: "personal" | "shared";
           shared_with?: string[];
+          assigned_by?: string;
+          owner?: string;
         }>,
         extraOpts?: { flatLayout?: boolean; omitEmptySentence?: boolean },
       ): Promise<{
@@ -3184,7 +3190,7 @@ export async function sendChatMessage(input: {
         // Drop unknown ids against THIS snapshot ? never fall back to unfiltered full.
         const validIds = itemDumpRequested
           ? dumpIdsRequested.filter((id) =>
-              liveDumpRowIdsFromSnapshot(snapshot).has(id),
+              liveDumpRowIdsFromSnapshot(snapshot, phoneBook).has(id),
             )
           : dumpIdsRequested;
         const dumpOpts = {

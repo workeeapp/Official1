@@ -134,6 +134,8 @@ export type ShowDumpOptions = {
 
 /** Phone-book dump row (directory / SPEAKER_CONTACTS). */
 export type PhoneBookDumpRow = {
+  /** Opaque Contacts.id for LAST_NUMBERED_DUMP / directory mutates. */
+  contact_id?: string;
   name: string;
   phone?: string;
   /** Optional free-text note (תיאור). */
@@ -210,7 +212,8 @@ export function mapShowButtonCommandToDumpTarget(
     const listType = builtinListTypeFromHebrew(hebrew);
     if (listType && person) {
       return {
-        kind: listType,
+        // Contacts v2: אנשי קשר collab dumps canonical phone_book.
+        kind: listType === "contacts" ? "phone_book" : listType,
         section: "shared",
         partner: person,
         collaboration: "co_share",
@@ -238,7 +241,7 @@ export function mapShowButtonCommandToDumpTarget(
     const listType = builtinListTypeFromHebrew(hebrew);
     if (listType && person) {
       return {
-        kind: listType,
+        kind: listType === "contacts" ? "phone_book" : listType,
         section: "shared",
         assignee: person,
         collaboration: "assign",
@@ -360,9 +363,11 @@ export function resolveShowDumpKind(
   if (
     lower === "phone_book" ||
     lower === "phonebook" ||
+    lower === "contacts" ||
     trimmed === "ספר הטלפונים" ||
     trimmed === "אנשי קשר"
   ) {
+    // Contacts v2: one surface — SPEAKER_CONTACTS / directory (not lists.contacts).
     return { kind: "phone_book" };
   }
   if (isBuiltinListType(lower)) {
@@ -372,6 +377,9 @@ export function resolveShowDumpKind(
     };
   }
   const fromHebrew = builtinListTypeFromHebrew(trimmed);
+  if (fromHebrew === "contacts") {
+    return { kind: "phone_book" };
+  }
   if (fromHebrew) {
     return { kind: "list", name: builtinListHebrew(fromHebrew) };
   }
@@ -718,26 +726,8 @@ export function formatFullDump(
 
   pushBlock(formatFilingsDump(snapshot.filing ?? [], opts), "filings");
 
-  const hasContacts = snapshot.lists.some(
-    (list) => list.list_type === "contacts",
-  );
-  if (hasContacts) {
-    const contacts = formatContactsOrCustomDump(
-      "contacts",
-      "",
-      snapshot,
-      builtinListHebrew("contacts"),
-      opts,
-    );
-    if (contacts) {
-      pushBlock(contacts, "contacts");
-    }
-  }
-
-  // Phone-book SPEAKER_CONTACTS rows lack dump opaque ids — skip on id filter.
-  if (!itemDump) {
-    pushBlock(formatPhoneBookDump(opts?.phoneBook, opts), "phone_book");
-  }
+  // Contacts v2: single «אנשי קשר» from SPEAKER_CONTACTS (never lists.contacts).
+  pushBlock(formatPhoneBookDump(opts?.phoneBook, opts), "phone_book");
 
   if (sections.length === 0) {
     if (opts?.omitEmptySentence === true) {
@@ -755,12 +745,18 @@ export function formatFullDump(
 /**
  * Opaque dump row ids present in this live snapshot (item_id / filing_id /
  * contact_id / reminder_id). Used to validate show_dump_ids before format.
+ * Pass phoneBook so Contacts.id values count for phone_book ITEM DUMP.
  */
 export function liveDumpRowIdsFromSnapshot(
   snapshot: EmployeeRecordSnapshot,
+  phoneBook?: PhoneBookDumpRow[] | null,
 ): Set<string> {
   const ids = new Set<string>();
   for (const list of snapshot.lists ?? []) {
+    if (list.list_type === "contacts") {
+      // Contacts v2: legacy list rows are not dump ids.
+      continue;
+    }
     const listType = list.list_type as ListDumpType;
     for (const item of list.items ?? []) {
       const id = dumpItemId(listType, item as Record<string, unknown>);
@@ -777,6 +773,12 @@ export function liveDumpRowIdsFromSnapshot(
   }
   for (const row of snapshot.reminders ?? []) {
     const id = String(row.reminder_id ?? "").trim();
+    if (id) {
+      ids.add(id);
+    }
+  }
+  for (const row of phoneBook ?? []) {
+    const id = String(row.contact_id ?? "").trim();
     if (id) {
       ids.add(id);
     }
@@ -890,8 +892,15 @@ export function formatPhoneBookDump(
     const name = row.name.trim() || "איש קשר";
     const phone = (row.phone ?? "").trim();
     const description = (row.description ?? "").trim();
+    const contactId = (row.contact_id ?? "").trim();
     const base = phone ? `${name} — ${phone}` : name;
     const title = description ? `${base} · ${description}` : base;
+    const item: Record<string, unknown> = {
+      ...(contactId ? { contact_id: contactId } : {}),
+      name,
+      ...(phone ? { phone } : {}),
+      ...(description ? { description } : {}),
+    };
     const sharedWith = (row.shared_with ?? [])
       .map((value) => value.trim())
       .filter(Boolean);
@@ -903,7 +912,7 @@ export function formatPhoneBookDump(
       const mark = formatAssignResponsibilityMark(assignee, assignedBy);
       return {
         title,
-        item: row as unknown as Record<string, unknown>,
+        item,
         isShared: true,
         partnerFilterKey: assignedBy,
         assigneeName: assignee || undefined,
@@ -919,17 +928,15 @@ export function formatPhoneBookDump(
       : "";
     return {
       title,
-      item: row as unknown as Record<string, unknown>,
+      item,
       isShared,
       ...(partnerFilterKey ? { partnerFilterKey } : {}),
       ...(allInvolved ? { responsibilityMark: allInvolved } : {}),
     };
   });
   const kept = filterDumpRows(collected, "phone_book", opts);
-  // Phone-book rows have no contact_id in the dump payload — omit LAST_NUMBERED_DUMP ids.
-  // Unified UX label «אנשי קשר» + 👤 (aliases phone_book / ספר הטלפונים still parse).
-  const { text } = formatSingleHeaderDump("👤 אנשי קשר", "phone_book", kept, opts);
-  return { text, lines: [] };
+  // Unified UX label «אנשי קשר» + 👤; lines carry contact_id for directory mutates.
+  return formatSingleHeaderDump("👤 אנשי קשר", "phone_book", kept, opts);
 }
 
 /** Conditional watch clock («תעדכני אותי אם…») — gate is structured compose_condition. */
@@ -2557,16 +2564,8 @@ function formatListDump(
     return emptyDumpResult(emptyListDumpSentence(bareLabel, opts));
   }
   if (builtin === "contacts") {
-    const body = formatContactsOrCustomDump(
-      "contacts",
-      "",
-      snapshot,
-      builtinListHebrew("contacts"),
-      opts,
-    );
-    if (body === null) {
-      return { text: null, lines: [] };
-    }
+    // Contacts v2: list-name path redirects to canonical phone_book dump.
+    const body = formatPhoneBookDump(opts?.phoneBook, opts);
     if (body.text) {
       return body;
     }
@@ -3152,6 +3151,13 @@ function dumpItemTitleStem(
   }
   if (listType === "contacts") {
     return readText(item, TITLE_KEYS.contacts) || row.title.trim() || "איש קשר";
+  }
+  if (listType === "phone_book") {
+    return (
+      String(item.name ?? "").trim() ||
+      row.title.trim().split(" — ")[0]?.trim() ||
+      "איש קשר"
+    );
   }
   if (listType === "filings") {
     return String(item.item_name ?? "").trim() || row.title.trim() || "תיוק";

@@ -301,19 +301,13 @@ describe("list-emoji parse + dump", () => {
     expect(formatShowDumpFromKind("בעיות", snap)).toMatch(/^🐛 רשימת «בעיות»:/m);
   });
 
-  it("dump falls back to canonical when snapshot omits emoji", () => {
-    const snap: EmployeeRecordSnapshot = {
-      lists: [
-        {
-          list_type: "contacts",
-          owner: "עמית",
-          scope: "personal",
-          items: [{ item_id: "c1", "שם פרטי": "דני", טלפון: "050" }],
-        },
-      ],
-      filing: [],
-    };
-    expect(formatShowDumpFromKind("contacts", snap)).toMatch(/^👤 אנשי קשר:/m);
+  it("phone_book dump uses 👤 אנשי קשר header", () => {
+    const snap: EmployeeRecordSnapshot = { lists: [], filing: [] };
+    expect(
+      formatShowDumpFromKind("contacts", snap, {
+        phoneBook: [{ contact_id: "c1", name: "דני", phone: "050" }],
+      }),
+    ).toMatch(/^👤 אנשי קשר:/m);
   });
 
   it("full dump headers reuse list emoji; custom counts too", () => {
@@ -341,17 +335,12 @@ describe("list-emoji parse + dump", () => {
           scope: "personal",
           items: [{ item_id: "c1", שם: "באג" }],
         },
-        {
-          list_type: "contacts",
-          emoji: "👤",
-          owner: "עמית",
-          scope: "personal",
-          items: [{ item_id: "p1", "שם פרטי": "דני", טלפון: "050" }],
-        },
       ],
       filing: [],
     };
-    const full = formatShowDumpFromKind("full", snap)!;
+    const full = formatShowDumpFromKind("full", snap, {
+      phoneBook: [{ contact_id: "p1", name: "דני", phone: "050" }],
+    })!;
     expect(full).toMatch(/^🛍️ קניות:/m);
     expect(full).toMatch(/^✅ מטלות:/m);
     expect(full).toContain("🐛 *בעיות*");

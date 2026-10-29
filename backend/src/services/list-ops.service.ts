@@ -100,6 +100,10 @@ async function applyListOp(
   if (!list) {
     return { ...base, refusal: { reason: "not_found" } };
   }
+  // Contacts v2: phone book mutates via directory only — refuse list shell ops.
+  if (list.listType === "contacts") {
+    return { ...base, refusal: { reason: "builtin" } };
+  }
   const attachmentsOnly =
     op.action === "alter_list" &&
     Boolean(op.addAttachments?.length || op.removeAttachments?.length) &&
@@ -269,15 +273,13 @@ async function alterList(
   const participantsOnly =
     op.addParticipants.length > 0 || op.removeParticipants.length > 0;
   // Shopping/tasks builtins: never whole-list share (item-level only).
-  // Contacts: allow participants-only whole-list share; still refuse structural.
+  // Contacts shells are refused earlier in applyListOp (directory-only).
   // Emoji override is allowed on every list type (including builtins).
   if (list.listType === "shopping" || list.listType === "tasks") {
     if (structural || participantsOnly) {
       throw new ListOpRefused("builtin");
     }
-  } else if (builtin && structural) {
-    throw new ListOpRefused("builtin");
-  } else if (builtin && participantsOnly && list.listType !== "contacts") {
+  } else if (builtin && (structural || participantsOnly)) {
     throw new ListOpRefused("builtin");
   }
 

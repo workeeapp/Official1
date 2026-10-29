@@ -113,12 +113,12 @@
     "   - יחידת מידה (optional)",
     "   * אל תציג ערכי ברירת מחדל למשתמש, אבל כן תכניס אותם ל-metadata אם צריך.",
     "",
-    "2. רשימת אנשי קשר (contacts):",
-    "   - שם פרטי (required)",
-    "   - שם משפחה (required)",
-    "   - טלפון (optional)",
-    "   - טלפון נוסף (optional)",
-    "   - כתובת (optional)",
+    "2. אנשי קשר / phone book (Contacts v2 — NOT a lists.* list_type):",
+    "   - Mutate ONLY via metadata.directory (add/update/remove/share_book).",
+    "   - Show → metadata.show_dump=\"phone_book\" (aliases אנשי קשר / contacts / ספר הטלפונים).",
+    "   - add: name (required) + phone (required valid digits); optional description/תיאור.",
+    "   - update/remove: contact_id from THIS turn's SPEAKER_CONTACTS / LAST_NUMBERED_DUMP.",
+    "   - FORBIDDEN lists.add|update|remove|alter_list|delete_list with list_type contacts.",
     "",
     "3. רשימת מטלות (tasks):",
     "   - שם מטלה (required)",
@@ -1016,7 +1016,7 @@
                   "null"
                 ],
                 "maxLength": 100,
-                "description": "When the speaker asks to SHOW shopping/tasks/contacts/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | contacts | filings | reminders | the exact custom list_name. Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full with show_dump_ids null. Phone book alone → phone_book. FULL WHEN day/week agenda (no meaning filter) → tasks + show_dump_from/to, show_dump_ids null. Semantic/focused same-kind picks → same kind WITH show_dump_ids (required). Cross-kind topic («שקשור ל…») → full WITH show_dump_ids=[row ids whose own meaning matches the topic — not every item on a topic-named list]. Explicit whole-list ask («מה יש ברשימת X») → exact list_name (all items; not list_id). Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response when set. null otherwise."
+                "description": "When the speaker asks to SHOW shopping/tasks/reminders/filings/a named custom list OR ABOUT X for one category: set to shopping | tasks | filings | reminders | the exact custom list_name. אנשי קשר / contacts / ספר הטלפונים / phone book alone → phone_book (never a separate contacts list dump). Bare FULL DUMP / SHOW MY LISTS («מה יש לי» / הציגי הכל / הציגי את הרשימות שלי) → full with show_dump_ids null. FULL WHEN day/week agenda (no meaning filter) → tasks + show_dump_from/to, show_dump_ids null. Semantic/focused same-kind picks → same kind WITH show_dump_ids (required). Cross-kind topic («שקשור ל…») → full WITH show_dump_ids=[row ids whose own meaning matches the topic — not every item on a topic-named list]. Explicit whole-list ask («מה יש ברשימת X») → exact list_name (all items; not list_id). Shared-with-X → full + show_dump_section=shared + show_dump_partner=X. Urgency-only → tasks or full + show_dump_urgency. lists/reminders stay empty. Server replaces response when set. null otherwise."
               },
               "show_dump_section": {
                 "type": [
