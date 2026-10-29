@@ -88,6 +88,43 @@ describe("contact directory POC", () => {
     ]);
   });
 
+  it("parses optional directory description (תיאור)", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        response: "שמרתי",
+        metadata: {
+          directory: [
+            {
+              action: "add",
+              name: "מיכל",
+              phone: "0541111111",
+              תיאור: "שכנה מהבניין",
+            },
+          ],
+        },
+      }),
+    );
+    expect(meta.directory?.[0]).toMatchObject({
+      action: "add",
+      name: "מיכל",
+      phone: "0541111111",
+      description: "שכנה מהבניין",
+    });
+  });
+
+  it("includes description in SPEAKER_CONTACTS JSON when present", () => {
+    const text = formatSpeakerContacts([
+      {
+        id: "1",
+        name: "מיכל",
+        phone: "972541111111",
+        description: "שכנה",
+        kind: "personal",
+      },
+    ]);
+    expect(text).toContain('"description":"שכנה"');
+  });
+
   it("formats a save notice", () => {
     expect(
       formatDirectoryApplyNotice({

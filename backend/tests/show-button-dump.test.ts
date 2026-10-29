@@ -3235,9 +3235,9 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toContain("תזכורות פעילות:");
     expect(text).not.toContain("תיוקים אישיים:");
     expect(text).not.toContain("תיוקים משותפים:");
-    expect(text).not.toContain("👤 אנשי קשר:");
+    expect(text).toContain("👤 אנשי קשר:");
     expect(text).not.toMatch(/ריק/);
-    expect(text).toContain("ספר הטלפונים:");
+    expect(text).not.toContain("ספר הטלפונים:");
     expect(text).not.toContain("ספר הטלפונים אישי:");
     expect(text).toContain("דני — 0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
@@ -3448,6 +3448,69 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).not.toContain("לבדוק עם ערן");
   });
 
+  it("הצג מטלות (speaker book) dumps speaker tasks — not Lucy OPEN_JOBS follow-ups", () => {
+    // Speaker ESD snapshot has the human's tasks; worker follow-ups live on Lucy's book.
+    // Bare show_dump=tasks must use the speaker snapshot (no about=לוסי).
+    const speakerSnap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "user-1", "שם מטלה": "לקנות חלב" },
+            { item_id: "user-2", "שם מטלה": "להתקשר לרופא" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const lucyFollowUps: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "לוסי",
+          scope: "personal",
+          items: [
+            {
+              item_id: "job-follow",
+              "שם מטלה": "לבדוק עם טל: אם קנית חלב?",
+            },
+            {
+              item_id: "nudge",
+              "שם מטלה": "להזכיר לטל לקנות חלב",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    // Bare button → kind=tasks (speaker book). Worker path is «הצג מטלות של לוסי» (+ about).
+    expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
+      kind: "tasks",
+    });
+    expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
+      kind: "tasks",
+      about: "לוסי",
+    });
+    const speakerDump = formatShowDumpFromKind("tasks", speakerSnap, {
+      viewerName: "טל",
+    })!;
+    expect(speakerDump).toContain("לקנות חלב");
+    expect(speakerDump).toContain("להתקשר לרופא");
+    expect(speakerDump).not.toContain("לבדוק עם טל");
+    expect(speakerDump).not.toContain("להזכיר לטל");
+    // Contrast: worker inventory path uses Lucy's book (+ about), not bare speaker dump.
+    const workerDump = formatShowDumpFromKind("tasks", lucyFollowUps, {
+      viewerName: "לוסי",
+      flatLayout: true,
+    })!;
+    expect(workerDump).toContain("לבדוק עם טל");
+    expect(workerDump).not.toContain("להתקשר לרופא");
+  });
+
   it("stitches ממתינים after tasks; empty tasks string skips tasks block", () => {
     expect(
       composeTasksDumpWithWaiting("", "ממתינים לתשובה:\n1. א"),
@@ -3501,11 +3564,11 @@ describe("worker inventory tasks dump helpers", () => {
   it("dumps phone_book from opts.phoneBook", () => {
     expect(isTasksShowDumpKind("phone_book")).toBe(false);
     const text = formatShowDumpFromKind("phone_book", { lists: [], filing: [] }, {
-      phoneBook: [{ name: "דני", phone: "050" }],
+      phoneBook: [{ name: "דני", phone: "050", description: "שכנה" }],
     })!;
-    expect(text).toContain("ספר הטלפונים:");
-    expect(text).not.toContain("ספר הטלפונים אישי:");
-    expect(text).toContain("1. דני — 050");
+    expect(text).toContain("👤 אנשי קשר:");
+    expect(text).not.toContain("ספר הטלפונים:");
+    expect(text).toContain("1. דני — 050 · שכנה");
   });
 
   it("phone_book flat: personal then co-share (A, B)", () => {
@@ -3526,7 +3589,7 @@ describe("worker inventory tasks dump helpers", () => {
       },
     )!;
     expect(text).toMatch(
-      /ספר הטלפונים:\n1\. דני — 050\n2\. שרה — 052 \(עמית, טל\)/,
+      /👤 אנשי קשר:\n1\. דני — 050\n2\. שרה — 052 \(עמית, טל\)/,
     );
     expect(text).not.toContain("(עם ");
     expect(text).not.toContain("ספר הטלפונים משותף");
@@ -3728,11 +3791,12 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toContain("נועה");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
     expect(text).toContain("שרה");
-    expect(text).toContain("ספר הטלפונים:");
+    expect(text).toContain("👤 אנשי קשר:");
     expect(text).toContain("(עמית, טל)");
     expect(text).not.toContain("ספר הטלפונים משותף");
     expect(text).not.toContain("ספר הטלפונים אישי:");
-    expect(text).not.toMatch(/ספר הטלפונים:[\s\S]*דני/);
+    expect(text).not.toContain("ספר הטלפונים:");
+    expect(text).not.toMatch(/👤 אנשי קשר:[\s\S]*דני/);
   });
 });
 

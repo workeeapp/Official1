@@ -520,24 +520,32 @@ model ContactBook {
 // Personal phone book for a human employee (POC). Later: ownerEmployeeId null = business-wide.
 // Row share/assign: scope/visible_to + addedById — same co-share vs הטלה rules as list items.
 model Contact {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String   @map("user_id") @db.Uuid
-  ownerEmployeeId  String   @map("owner_employee_id") @db.Uuid
-  name             String   @db.VarChar(100)
-  phone            String   @db.VarChar(32)
-  kind             String   @default("personal") @db.VarChar(32)
-  addedById        String?  @map("added_by_id") @db.Uuid
-  scope            String   @default("personal") @db.VarChar(16)
-  visibleTo        Json     @default("[]") @map("visible_to")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  owner            Employee @relation(fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  ownerEmployeeId    String   @map("owner_employee_id") @db.Uuid
+  name               String   @db.VarChar(100)
+  /** Primary routable phone; null = phoneless (retrievable, not routable). */
+  phone              String?  @db.VarChar(32)
+  /** Optional free-text note (תיאור) — not used for routing. */
+  description        String?  @db.VarChar(500)
+  kind               String   @default("personal") @db.VarChar(32)
+  addedById          String?  @map("added_by_id") @db.Uuid
+  scope              String   @default("personal") @db.VarChar(16)
+  visibleTo          Json     @default("[]") @map("visible_to")
+  /** Extra numbers + Meta card fields; never drop on merge. */
+  extras             Json?
+  /** Provenance when imported from lists.contacts (source row retained). */
+  migratedFromItemId String?  @map("migrated_from_item_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  owner              Employee @relation(fields: [ownerEmployeeId], references: [id], onDelete: Cascade)
 
   @@unique([ownerEmployeeId, phone])
   @@index([userId])
   @@index([ownerEmployeeId, name])
   @@index([scope])
+  @@index([migratedFromItemId])
   @@map("Contacts")
 }
 

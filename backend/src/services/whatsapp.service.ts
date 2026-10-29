@@ -46,6 +46,8 @@ import {
   sessionDigitalFromSticky,
 } from "./whatsapp-worker-sticky.js";
 import { setPendingLocation } from "./pending-location.js";
+import { enrichEmptyLocationLabels } from "./reverse-geocode.js";
+import { parseCoordinatePair } from "./resolved-location.js";
 
 export { phonesMatch, clearWhatsAppWorkerSticky };
 
@@ -221,7 +223,11 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
 
 export const SHARED_LOCATION_MARKER = "[מיקום שותף בוואטסאפ]";
 
-/** WhatsApp `location` payload → inbound pin. */
+/**
+ * WhatsApp static `location` pin → inbound coords.
+ * `live_location` is not supported (Meta sends a different type; we ignore it).
+ * Out-of-range lat/lng (±90 / ±180) are rejected at ingest.
+ */
 export function readInboundLocation(
   record: Record<string, unknown>,
 ): InboundLocation | undefined {
@@ -238,24 +244,13 @@ export function readInboundLocation(
     name?: unknown;
     address?: unknown;
   };
-  const lat =
-    typeof loc.latitude === "number"
-      ? loc.latitude
-      : typeof loc.latitude === "string"
-        ? Number(loc.latitude)
-        : NaN;
-  const lng =
-    typeof loc.longitude === "number"
-      ? loc.longitude
-      : typeof loc.longitude === "string"
-        ? Number(loc.longitude)
-        : NaN;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  const pair = parseCoordinatePair(loc.latitude, loc.longitude);
+  if (!pair) {
     return undefined;
   }
   return {
-    lat,
-    lng,
+    lat: pair.lat,
+    lng: pair.lng,
     name: asTrimmed(loc.name),
     address: asTrimmed(loc.address),
   };
@@ -725,9 +720,17 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
         mediaFailed += 1;
       }
     }
-    const location = batch.find((message) => message.location)?.location;
+    const locMessage = batch.find((message) => message.location);
+    const location = locMessage?.location
+      ? await enrichEmptyLocationLabels(locMessage.location)
+      : undefined;
     if (location) {
       setPendingLocation(speaker.employeeId, location);
+      // Keep the model-facing turn in sync when reverse-geocode filled labels.
+      if (locMessage) {
+        locMessage.location = location;
+        locMessage.text = formatSharedLocationMessage(location);
+      }
     }
     const spoken = batchSpokenText(
       batch,

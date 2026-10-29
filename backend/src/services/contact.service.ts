@@ -12,7 +12,10 @@ import { listRegisteredHumansByPhones } from "./employee.service.js";
 export interface SpeakerContact {
   id: string;
   name: string;
-  phone: string;
+  /** Null = phoneless (shown in אנשי קשר; not routable for WA/reminders). */
+  phone: string | null;
+  /** Optional free-text note (תיאור). */
+  description?: string;
   kind: string;
   scope?: "personal" | "shared";
   /** Partner display names when scope=shared (includes owner). */
@@ -24,6 +27,13 @@ export interface SpeakerContact {
    * (same ESD meaning as list/filing `assigned_by` — not the responsible party).
    */
   assignedBy?: string;
+}
+
+function normalizeContactDescription(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().slice(0, 500);
 }
 
 /** Whole-book partners for this owner (includes owner when shared). */
@@ -184,7 +194,8 @@ function toSpeakerContact(
   row: {
     id: string;
     name: string;
-    phone: string;
+    phone: string | null;
+    description?: string | null;
     kind: string;
     ownerEmployeeId: string;
     scope?: string | null;
@@ -213,12 +224,14 @@ function toSpeakerContact(
     assignerId &&
     assignerId !== row.ownerEmployeeId &&
     (names.get(assignerId)?.trim() ?? "");
+  const description = normalizeContactDescription(row.description);
   return {
     id: row.id,
     name: row.name,
     phone: row.phone,
     kind: row.kind,
     scope,
+    ...(description ? { description } : {}),
     ...(sharedWith.length > 1 ? { sharedWith } : {}),
     ...(row.ownerEmployeeId !== viewerId
       ? {
@@ -260,11 +273,11 @@ function uniqueIds(values: Array<string | null | undefined>): string[] {
 
 const SHARED_CONTACT_RULES = [
   "SHARED CONTACT CARD: a speaker message starting with [כרטיס איש קשר שותף בוואטסאפ] followed by {\"shared_contacts\":[{name, phones}]} is a WhatsApp contact-share card — NOT a silent save.",
-  "→ Same turn: directory=[] and ASK «לשמור את «name» (phone) בספר הטלפונים שלך?». כן → directory add (name + first phone). לא → directory=[]; acknowledge. Several clearly different phones on one card → ask which to save first (directory []).",
+  "→ Same turn: directory=[] and ASK «לשמור את «name» (phone) באנשי הקשר שלך?». כן → directory add (name + first phone; optional description/תיאור when they gave a note). לא → directory=[]; acknowledge. Several clearly different phones on one card → ask which to save first (directory []).",
   "Already in SPEAKER_CONTACTS with the same phone → say it is already saved; do not re-add silently. Same name with a different phone → ASK whether to update; on כן → directory remove (old contact_id) + add (new phone).",
-  "A card without any phone cannot be saved — say so. A card without a name → ask what name to save it under (directory []).",
-  "SHARE / ASSIGN ONE CONTACT: directory add/update MAY include targets. Speaker+partners → speaker-owned co-share (shared_with). Partners only (speaker omitted) → assign onto each assignee's phone book (addedById = speaker). Same as shopping/tasks.",
-  "SHARE WHOLE PHONE BOOK: «שתף את ספר הטלפונים עם עמית» → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners (whole-book share, not item assign).",
+  "A card without any phone cannot be saved via directory create — say so (phoneless rows exist only via migration). A card without a name → ask what name to save it under (directory []).",
+  "SHARE / ASSIGN ONE CONTACT: directory add/update MAY include targets. Speaker+partners → speaker-owned co-share (shared_with). Partners only (speaker omitted) → assign onto each assignee's אנשי קשר (addedById = speaker). Same as shopping/tasks.",
+  "SHARE WHOLE PHONE BOOK: «שתף את אנשי הקשר עם עמית» / «שתף את ספר הטלפונים עם עמית» (alias) → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners (whole-book share, not item assign).",
 ];
 
 export function formatSpeakerContacts(
@@ -296,6 +309,7 @@ export function formatSpeakerContacts(
         contact_id: row.id,
         name: row.name,
         phone: row.phone,
+        ...(row.description ? { description: row.description } : {}),
         kind: row.kind,
         scope: row.scope ?? "personal",
         ...(row.sharedWith && row.sharedWith.length > 1
@@ -324,7 +338,7 @@ export async function resolveExternalSharePartners(
     return [];
   }
   const phones = contacts
-    .map((row) => row.phone.trim())
+    .map((row) => (row.phone ?? "").trim())
     .filter((phone) => looksLikePhone(phone));
   const registered = await listRegisteredHumansByPhones(phones);
   if (registered.length === 0) {
@@ -333,7 +347,7 @@ export async function resolveExternalSharePartners(
 
   const byId = new Map<string, PublicEmployee>();
   for (const contact of contacts) {
-    const phone = contact.phone.trim();
+    const phone = (contact.phone ?? "").trim();
     if (!looksLikePhone(phone)) {
       continue;
     }
@@ -394,7 +408,13 @@ export function matchContact(
   });
 }
 
-function phonesLooseMatch(left: string, right: string): boolean {
+function phonesLooseMatch(
+  left: string | null | undefined,
+  right: string,
+): boolean {
+  if (!left) {
+    return false;
+  }
   const a = normalizePhoneDigits(left);
   const b = normalizePhoneDigits(right);
   if (!a || !b) {
@@ -564,11 +584,18 @@ export async function applyDirectoryActions(input: {
       const nextPhone = action.phone.trim()
         ? toWhatsAppAddress(action.phone)
         : existing.phone;
+      const descriptionProvided = typeof action.description === "string";
+      const nextDescription = descriptionProvided
+        ? normalizeContactDescription(action.description)
+        : normalizeContactDescription(existing.description);
       await prisma.contact.update({
         where: { id: existing.id },
         data: {
           name: nextName,
           ...(looksLikePhone(nextPhone) ? { phone: nextPhone } : {}),
+          ...(descriptionProvided
+            ? { description: nextDescription || null }
+            : {}),
           scope: shared ? "shared" : "personal",
           visibleTo: shared ? nextVisible : [ownerId],
         },
@@ -579,12 +606,14 @@ export async function applyDirectoryActions(input: {
         phone: looksLikePhone(nextPhone) ? nextPhone : existing.phone,
         kind: existing.kind,
         scope: shared ? "shared" : "personal",
+        ...(nextDescription ? { description: nextDescription } : {}),
       });
       continue;
     }
 
     const name = action.name.trim().slice(0, 100);
     const phone = toWhatsAppAddress(action.phone);
+    const description = normalizeContactDescription(action.description);
     if (!name || !looksLikePhone(phone)) {
       continue;
     }
@@ -631,6 +660,7 @@ export async function applyDirectoryActions(input: {
             ownerEmployeeId: partnerId,
             name,
             phone,
+            ...(description ? { description } : {}),
             kind: "personal",
             addedById: input.ownerEmployeeId,
             scope: "shared",
@@ -638,6 +668,7 @@ export async function applyDirectoryActions(input: {
           },
           update: {
             name,
+            ...(description ? { description } : {}),
             kind: "personal",
             scope: "shared",
             visibleTo,
@@ -650,6 +681,9 @@ export async function applyDirectoryActions(input: {
           phone: row.phone,
           kind: row.kind,
           scope: "shared",
+          ...(normalizeContactDescription(row.description)
+            ? { description: normalizeContactDescription(row.description) }
+            : {}),
         });
         shareNotices.push({
           employeeId: partnerId,
@@ -680,6 +714,7 @@ export async function applyDirectoryActions(input: {
         ownerEmployeeId: input.ownerEmployeeId,
         name,
         phone,
+        ...(description ? { description } : {}),
         kind: "personal",
         addedById: input.ownerEmployeeId,
         scope: shared ? "shared" : "personal",
@@ -687,6 +722,7 @@ export async function applyDirectoryActions(input: {
       },
       update: {
         name,
+        ...(description ? { description } : {}),
         kind: "personal",
         ...(shared
           ? {
@@ -703,6 +739,9 @@ export async function applyDirectoryActions(input: {
       phone: row.phone,
       kind: row.kind,
       scope: shared ? "shared" : "personal",
+      ...(normalizeContactDescription(row.description)
+        ? { description: normalizeContactDescription(row.description) }
+        : {}),
     });
 
     if (partnerIds.length > 0) {
@@ -807,13 +846,13 @@ export function formatDirectoryApplyNotice(result: {
 }): string {
   const parts: string[] = [];
   if (result.bookShared) {
-    parts.push("שיתפתי את ספר הטלפונים.");
+    parts.push("שיתפתי את אנשי הקשר.");
   }
   for (const row of result.saved) {
-    parts.push(`שמרתי את «${row.name}» בספר הטלפונים שלך.`);
+    parts.push(`שמרתי את «${row.name}» באנשי הקשר שלך.`);
   }
   for (const name of result.removed) {
-    parts.push(`הסרתי את «${name}» מספר הטלפונים שלך.`);
+    parts.push(`הסרתי את «${name}» מאנשי הקשר שלך.`);
   }
   return parts.join("\n");
 }

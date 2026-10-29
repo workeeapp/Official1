@@ -762,12 +762,18 @@ export function summarizeShareApply(
   let newlySharedCount = 0;
   let alreadySharedCount = 0;
   for (const row of mutations) {
-    if (!row.shareOutcome) {
+    if (row.shareOutcome) {
+      shareIntentCount += 1;
+      newlySharedCount += row.shareOutcome.newlySharedCount;
+      alreadySharedCount += row.shareOutcome.alreadySharedCount;
       continue;
     }
-    shareIntentCount += 1;
-    newlySharedCount += row.shareOutcome.newlySharedCount;
-    alreadySharedCount += row.shareOutcome.alreadySharedCount;
+    // Co-share add: no shareOutcome (that is update-only), but collabApply proves
+    // partners landed — count as new share so «שיתפתי» is not wiped.
+    if (row.action === "add" && row.collabApply?.mode === "co_share") {
+      shareIntentCount += 1;
+      newlySharedCount += 1;
+    }
   }
   let missingCount = 0;
   let forbiddenCount = 0;
@@ -857,6 +863,8 @@ export function correctShareClaimReply(input: {
   spoken: string;
   mutations: ListItemMutation[];
   misses?: ShareApplyMiss[];
+  /** Filing add/update landed shared this turn (no list shareOutcome). */
+  filingShareApplied?: boolean;
   setResponse: (reply: string, response: string) => string;
 }): string {
   if (!looksLikeShareClaim(input.spoken)) {
@@ -868,6 +876,15 @@ export function correctShareClaimReply(input: {
     summary.newlySharedCount > 0 &&
     summary.alreadySharedCount === 0 &&
     summary.missCount === 0
+  ) {
+    return input.reply;
+  }
+  // Filing co-share is proven outside list shareOutcome.
+  if (
+    input.filingShareApplied &&
+    summary.missCount === 0 &&
+    summary.newlySharedCount === 0 &&
+    summary.alreadySharedCount === 0
   ) {
     return input.reply;
   }
@@ -903,9 +920,9 @@ export function looksLikeDurableSaveClaim(spoken: string): boolean {
 export const DURABLE_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את זה.";
 
 /**
- * Align spoken «תייקתי»/«שמרתי» with apply evidence for list/filing mutates.
- * Attach claims stay with correctAttachmentClaimReply. Keep the reply only when
- * a requested list or filing add/update also applied this turn.
+ * Align spoken «תייקתי»/«שמרתי» with apply evidence for list/filing/directory
+ * mutates. Attach claims stay with correctAttachmentClaimReply. Keep the reply
+ * only when a requested durable save also applied this turn.
  */
 export function correctDurableSaveClaimReply(input: {
   reply: string;
@@ -918,6 +935,10 @@ export function correctDurableSaveClaimReply(input: {
   appliedListUpdate: boolean;
   appliedFilingAdd: boolean;
   appliedFilingUpdate: boolean;
+  /** directory add/update requested this turn (metadata.directory). */
+  requestedDirectory?: boolean;
+  /** At least one contact saved/updated this turn. */
+  appliedDirectory?: boolean;
   setResponse: (reply: string, response: string) => string;
 }): string {
   if (!looksLikeDurableSaveClaim(input.spoken)) {
@@ -929,7 +950,9 @@ export function correctDurableSaveClaimReply(input: {
   const filingOk =
     (input.requestedFilingAdd && input.appliedFilingAdd) ||
     (input.requestedFilingUpdate && input.appliedFilingUpdate);
-  if (listOk || filingOk) {
+  const directoryOk =
+    Boolean(input.requestedDirectory) && Boolean(input.appliedDirectory);
+  if (listOk || filingOk || directoryOk) {
     return input.reply;
   }
   return input.setResponse(input.reply, DURABLE_SAVE_CLAIM_MISS);
@@ -2458,6 +2481,8 @@ export interface FilingMutation {
   itemName: string;
   itemInfo: string;
   itemDescription: string;
+  /** True when the row landed/stayed shared (co-share or assign audience). */
+  shared?: boolean;
 }
 
 export async function applyEmployeeRecords(
@@ -2678,6 +2703,7 @@ export async function applyEmployeeRecords(
         itemDescription: fieldsOnly
           ? existingFiling.itemDescription ?? ""
           : nextDescription,
+        ...(shareFiling ? { shared: true } : {}),
       });
       if (!fieldsOnly) {
         await syncSpeakerAddressGenderFromFiling({
@@ -2734,6 +2760,7 @@ export async function applyEmployeeRecords(
         itemName,
         itemInfo: action.itemInfo,
         itemDescription,
+        ...(shareFiling ? { shared: true } : {}),
       });
       await syncSpeakerAddressGenderFromFiling({
         employeeId,
@@ -3230,22 +3257,38 @@ async function applyListAction(
     }
 
     if (resolvedAction.action === "remove") {
-      const existing = await findLiveListItemById(mutateId, employeeId);
-      if (!existing?.id) {
+      const resolved = await resolveLiveListItemForMutate(mutateId, employeeId);
+      if (!resolved?.existing?.id) {
+        if (mutateId) {
+          shareMisses.push({ itemId: mutateId, reason: "missing" });
+        }
         continue;
       }
-      const access = await workerTaskAccess(employeeId, actorId, existing, accessCache);
+      const { existing, ownerEmployeeId: rowOwnerId } = resolved;
+      const access = await workerTaskAccess(
+        rowOwnerId,
+        actorId,
+        existing,
+        accessCache,
+      );
       if (access && !access.allowed) {
+        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
         continue;
       }
       if (
         !access &&
-        !(await humanItemAccessAllowed(employeeId, actorId, existing, accessCache))
+        !(await humanItemAccessAllowed(
+          rowOwnerId,
+          actorId,
+          existing,
+          accessCache,
+        ))
       ) {
+        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
         continue;
       }
-      const targetListId = existing.listId;
-      const targetListName = list.name || listName;
+      const targetListName =
+        existing.list?.name || list.name || listName;
       const removedKey = existing.itemKey;
       const removedTitleField = existing.list?.titleField ?? "";
       const linked = await cancelReminderLinkedToWorkerItem(existing.id);
@@ -3256,7 +3299,7 @@ async function applyListAction(
       mutations.push({
         action: "remove",
         itemId: existing.id,
-        employeeId,
+        employeeId: rowOwnerId,
         listType: resolvedAction.listType,
         itemKey: removedKey,
         itemLabel:
@@ -3276,7 +3319,7 @@ async function applyListAction(
         data: { deletedAt: new Date(), reminderId: null },
       });
       const owner = await prisma.employee.findUnique({
-        where: { id: employeeId },
+        where: { id: rowOwnerId },
         select: { userId: true },
       });
       if (owner) {
@@ -3294,7 +3337,7 @@ async function applyListAction(
       const watchers = await resolveWatchers({
         existing,
         visibility,
-        ownerId: employeeId,
+        ownerId: rowOwnerId,
         actorId,
         itemKey: removedKey,
       });
@@ -3305,7 +3348,7 @@ async function applyListAction(
             lists: [{ ...resolvedAction, items: [item] }],
             filing: [],
           },
-          listOwnerId: employeeId,
+          listOwnerId: rowOwnerId,
           addedById: existing.addedById,
         });
       }
@@ -3327,21 +3370,24 @@ async function applyListAction(
       continue;
     }
 
-    const existing =
-      resolvedAction.action === "update"
-        ? await findLiveListItemById(mutateId, employeeId)
-        : null;
-    if (resolvedAction.action === "update" && !existing?.id) {
-      if (shareIntent && mutateId) {
-        shareMisses.push({ itemId: mutateId, reason: "missing" });
+    let existing: LiveListItemRow | null = null;
+    let rowOwnerId = employeeId;
+    if (resolvedAction.action === "update") {
+      const resolved = await resolveLiveListItemForMutate(mutateId, employeeId);
+      if (!resolved?.existing?.id) {
+        if (mutateId) {
+          shareMisses.push({ itemId: mutateId, reason: "missing" });
+        }
+        continue;
       }
-      continue;
+      existing = resolved.existing;
+      rowOwnerId = resolved.ownerEmployeeId;
     }
     const access = existing
-      ? await workerTaskAccess(employeeId, actorId, existing, accessCache)
+      ? await workerTaskAccess(rowOwnerId, actorId, existing, accessCache)
       : null;
     if (access && !access.allowed) {
-      if (shareIntent && existing?.id) {
+      if (existing?.id) {
         shareMisses.push({ itemId: existing.id, reason: "forbidden" });
       }
       continue;
@@ -3349,11 +3395,14 @@ async function applyListAction(
     if (
       existing &&
       !access &&
-      !(await humanItemAccessAllowed(employeeId, actorId, existing, accessCache))
+      !(await humanItemAccessAllowed(
+        rowOwnerId,
+        actorId,
+        existing,
+        accessCache,
+      ))
     ) {
-      if (shareIntent) {
-        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
-      }
+      shareMisses.push({ itemId: existing.id, reason: "forbidden" });
       continue;
     }
     // Editing a worker task never re-shares it; who it involves comes from the task itself.
@@ -3364,14 +3413,19 @@ async function applyListAction(
             addedById: existing.addedById ?? actorId,
             visibleTo: idList(existing.visibleTo),
           }
-        : mergeItemVisibility(existing, visibility, employeeId);
+        : mergeItemVisibility(existing, visibility, rowOwnerId);
     const unshared =
       existing && !access
         ? (visibility.removeIds ?? []).filter(
-            (id) => id !== employeeId && idList(existing.visibleTo).includes(id),
+            (id) =>
+              id !== rowOwnerId && idList(existing.visibleTo).includes(id),
           )
         : [];
-    const resolvedVisibility = withoutPartners(mergedVisibility, unshared, employeeId);
+    const resolvedVisibility = withoutPartners(
+      mergedVisibility,
+      unshared,
+      rowOwnerId,
+    );
     const mergedRecord =
       resolvedAction.action === "update" && existing
         ? mergeListItemData(asRecord(existing.data), fieldsItem)
@@ -3431,21 +3485,21 @@ async function applyListAction(
     };
 
     const listOwner = await prisma.employee.findUnique({
-      where: { id: employeeId },
+      where: { id: rowOwnerId },
       select: { userId: true, kind: true },
     });
     if (existing) {
       // People this update just added to visible_to hear «שיתף איתך», not «עדכן».
       const newlySharedForOutcome = shareIntent
-        ? newlySharedIds(existing, resolvedVisibility, employeeId, actorId)
+        ? newlySharedIds(existing, resolvedVisibility, rowOwnerId, actorId)
         : [];
       const beforeAudience = new Set([
-        employeeId,
+        rowOwnerId,
         existing.addedById ?? "",
         ...idList(existing.visibleTo),
       ]);
       const intendedPartners = uniqueIds(resolvedVisibility.visibleTo).filter(
-        (id) => id !== employeeId && id !== actorId,
+        (id) => id !== rowOwnerId && id !== actorId,
       );
       const alreadySharedPartners = intendedPartners.filter((id) =>
         beforeAudience.has(id),
@@ -3454,12 +3508,12 @@ async function applyListAction(
         (key) => !ITEM_ID_KEYS.has(key),
       );
       const visibilityUnchanged =
-        uniqueIds([employeeId, ...idList(existing.visibleTo)])
+        uniqueIds([rowOwnerId, ...idList(existing.visibleTo)])
           .sort()
           .join("\0") ===
           uniqueIds(resolvedVisibility.visibleTo).sort().join("\0") &&
-        (existing.addedById ?? employeeId) ===
-          (resolvedVisibility.addedById ?? employeeId);
+        (existing.addedById ?? rowOwnerId) ===
+          (resolvedVisibility.addedById ?? rowOwnerId);
       const shareNoop =
         shareIntent &&
         newlySharedForOutcome.length === 0 &&
@@ -3480,7 +3534,7 @@ async function applyListAction(
         : undefined;
       const collabApply = listCollabApplyFromSave({
         action: "update",
-        employeeId,
+        employeeId: rowOwnerId,
         actorId,
         ownerKind: listOwner?.kind ?? "human",
         visibleTo: resolvedVisibility.visibleTo,
@@ -3488,12 +3542,14 @@ async function applyListAction(
         shareIntent,
         shareOutcome,
       });
+      const rowListName =
+        existing.list?.name || list.name || resolvedAction.listName || undefined;
 
       if (shareNoop) {
         mutations.push({
           action: "update",
           itemId: existing.id,
-          employeeId,
+          employeeId: rowOwnerId,
           listType: resolvedAction.listType,
           itemKey: existing.itemKey,
           itemLabel:
@@ -3505,7 +3561,7 @@ async function applyListAction(
             ) ||
             nextItemKey ||
             existing.itemKey,
-          listName: list.name || resolvedAction.listName || undefined,
+          listName: rowListName,
           ...(access && existing.reminderId
             ? { workerTaskInvolvedIds: access.involvedIds }
             : {}),
@@ -3598,7 +3654,7 @@ async function applyListAction(
       mutations.push({
         action: "update",
         itemId: existing.id,
-        employeeId,
+        employeeId: rowOwnerId,
         listType: resolvedAction.listType,
         itemKey: existing.itemKey,
         itemLabel:
@@ -3610,7 +3666,7 @@ async function applyListAction(
           ) ||
           nextItemKey ||
           existing.itemKey,
-        listName: list.name || resolvedAction.listName || undefined,
+        listName: rowListName,
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
@@ -3693,13 +3749,13 @@ async function applyListAction(
     };
     // People this update just added to visible_to hear «שיתף איתך», not «עדכן».
     const newlyShared = existing
-      ? newlySharedIds(existing, resolvedVisibility, employeeId, actorId)
+      ? newlySharedIds(existing, resolvedVisibility, rowOwnerId, actorId)
       : [];
     if (newlyShared.length > 0) {
       events.push({
         notifyEmployeeIds: newlyShared,
         metadata: eventMetadata,
-        listOwnerId: employeeId,
+        listOwnerId: rowOwnerId,
         shared: true,
         addedById: resolvedVisibility.addedById,
       });
@@ -3709,7 +3765,7 @@ async function applyListAction(
       events.push({
         notifyEmployeeIds: unsharedRecipients,
         metadata: eventMetadata,
-        listOwnerId: employeeId,
+        listOwnerId: rowOwnerId,
         unshared: true,
         addedById: resolvedVisibility.addedById,
       });
@@ -3723,7 +3779,7 @@ async function applyListAction(
           await resolveWatchers({
             existing,
             visibility: resolvedVisibility,
-            ownerId: employeeId,
+            ownerId: rowOwnerId,
             actorId,
             itemKey: nextItemKey || existing?.itemKey || "",
           })
@@ -3733,7 +3789,7 @@ async function applyListAction(
       events.push({
         notifyEmployeeIds: watchers,
         metadata: eventMetadata,
-        listOwnerId: employeeId,
+        listOwnerId: rowOwnerId,
         addedById: resolvedVisibility.addedById,
       });
     }
@@ -3846,8 +3902,8 @@ async function resolveListActionAgainstSaved(
     return action;
   }
 
-  const existing = await findLiveListItemById(itemId, employeeId);
-  const list = existing && "list" in existing ? existing.list : null;
+  const resolved = await resolveLiveListItemForMutate(itemId, employeeId);
+  const list = resolved?.existing?.list ?? null;
   if (!list?.listType) {
     return action;
   }
@@ -3886,6 +3942,7 @@ export async function loadListItemOwners(
     select: {
       id: true,
       visibleTo: true,
+      addedById: true,
       list: {
         select: {
           employeeId: true,
@@ -3905,6 +3962,7 @@ export async function loadListItemOwners(
     const actorAllowed =
       Boolean(actorId) &&
       (row.list.employeeId === actorId ||
+        row.addedById === actorId ||
         itemVisibleTo.includes(actorId!) ||
         listVisibleTo.includes(actorId!));
     if (!sameAccount && !actorAllowed) {
@@ -3979,9 +4037,64 @@ async function findLiveListItemById(itemId: string, employeeId: string) {
       list: { employeeId },
     },
     include: {
-      list: { select: { id: true, listType: true, name: true, titleField: true } },
+      list: {
+        select: {
+          id: true,
+          listType: true,
+          name: true,
+          titleField: true,
+          employeeId: true,
+        },
+      },
     },
   });
+}
+
+type LiveListItemRow = NonNullable<
+  Awaited<ReturnType<typeof findLiveListItemById>>
+>;
+
+/**
+ * Id mutate lookup: prefer the book this apply targeted; if missing, defend by
+ * resolving the live row wherever it lives (co-shared rows sit on the owner).
+ */
+async function resolveLiveListItemForMutate(
+  itemId: string,
+  preferredEmployeeId: string,
+): Promise<{ existing: LiveListItemRow; ownerEmployeeId: string } | null> {
+  const scoped = await findLiveListItemById(itemId, preferredEmployeeId);
+  if (scoped?.id) {
+    return {
+      existing: scoped,
+      ownerEmployeeId: scoped.list?.employeeId ?? preferredEmployeeId,
+    };
+  }
+  const id = itemId.trim();
+  if (!id || !UUID_RE.test(id)) {
+    return null;
+  }
+  const row = await prisma.employeeListItem.findFirst({
+    where: {
+      id,
+      deletedAt: null,
+      list: { deletedAt: null },
+    },
+    include: {
+      list: {
+        select: {
+          id: true,
+          listType: true,
+          name: true,
+          titleField: true,
+          employeeId: true,
+        },
+      },
+    },
+  });
+  if (!row?.id || !row.list?.employeeId) {
+    return null;
+  }
+  return { existing: row, ownerEmployeeId: row.list.employeeId };
 }
 
 /**

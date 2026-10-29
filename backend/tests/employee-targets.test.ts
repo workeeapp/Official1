@@ -3860,6 +3860,56 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.metadata.lists[0]?.listType).toBe("shopping");
   });
 
+  it("routes a partner's content update of a co-shared task to the owner's list", () => {
+    const taskId = "a9ea236b-9203-4a4f-be3f-69882dacf8ac";
+    const plan = planTargetedActions({
+      actor: tal,
+      employees,
+      itemOwners: new Map([
+        [
+          taskId,
+          {
+            ...ownerRef(amit.id, "tasks"),
+            itemVisibleTo: [amit.id, tal.id],
+          },
+        ],
+      ]),
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            targets: [],
+            items: [
+              {
+                item_id: taskId,
+                "שם מטלה": "לקנות עוגה גדולה",
+                "תאריך לביצוע": "2026-10-31",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]).toMatchObject({
+      employeeId: amit.id,
+      visibility: {
+        scope: "personal",
+        itemOnly: true,
+        visibleTo: [amit.id],
+      },
+    });
+    expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
+      expect.objectContaining({
+        item_id: taskId,
+        "שם מטלה": "לקנות עוגה גדולה",
+      }),
+    ]);
+  });
+
   it("assigns filing onto the other person when targets omit the speaker", () => {
     const plan = planTargetedActions({
       actor: tal,

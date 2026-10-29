@@ -1,7 +1,14 @@
 /**
  * Last WhatsApp location pin per speaker (in-memory, 48h TTL).
  * Injected as PENDING_LOCATION; used by places nearby / routes origin=speaker.
+ *
+ * Limits (by design — no second conversation-state store):
+ * - Process-local Map only: lost on restart / multi-instance not shared.
+ * - Static `location` pins only (`live_location` is not ingested).
+ * - Out-of-range coords are refused here and at WhatsApp ingest.
  */
+
+import { parseCoordinatePair } from "./resolved-location.js";
 
 export type PendingLocation = {
   lat: number;
@@ -22,12 +29,13 @@ export function setPendingLocation(
   if (!id) {
     return;
   }
-  if (!Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) {
+  const pair = parseCoordinatePair(loc.lat, loc.lng);
+  if (!pair) {
     return;
   }
   byEmployee.set(id, {
-    lat: loc.lat,
-    lng: loc.lng,
+    lat: pair.lat,
+    lng: pair.lng,
     name: String(loc.name ?? "").trim(),
     address: String(loc.address ?? "").trim(),
     at: Date.now(),

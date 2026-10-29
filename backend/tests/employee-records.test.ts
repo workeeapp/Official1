@@ -152,6 +152,7 @@ import {
   readItemUrgency,
   removeVisibleCustomItems,
   urgencySnapshotField,
+  type ListItemMutation,
 } from "../src/services/employee-records.service.js";
 
 const talId = "4cded1a2-c4c1-4edc-9d87-fe5ac740c1f4";
@@ -817,6 +818,50 @@ describe("employee records", () => {
     ).toBe(reply);
   });
 
+  it("correctDurableSaveClaimReply: keeps שמרתי when directory add requested and applied", () => {
+    const reply = "שמרתי את נועה בספר.";
+    expect(
+      correctDurableSaveClaimReply({
+        reply,
+        spoken: reply,
+        requestedListAdd: false,
+        requestedListUpdate: false,
+        requestedFilingAdd: false,
+        requestedFilingUpdate: false,
+        appliedListAdd: false,
+        appliedListUpdate: false,
+        appliedFilingAdd: false,
+        appliedFilingUpdate: false,
+        requestedDirectory: true,
+        appliedDirectory: true,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
+  it("correctShareClaimReply: co-share add with collabApply keeps שיתפתי", () => {
+    const reply = "שיתפתי את הבאג עם עמית.";
+    const mutations: ListItemMutation[] = [
+      {
+        action: "add",
+        itemId: "item-1",
+        employeeId: "speaker",
+        listType: "custom",
+        itemKey: "מסך",
+        collabApply: { mode: "co_share", partnerIds: ["partner"] },
+      },
+    ];
+    expect(summarizeShareApply(mutations).newlySharedCount).toBe(1);
+    expect(
+      correctShareClaimReply({
+        reply,
+        spoken: reply,
+        mutations,
+        setResponse: (_r, response) => response,
+      }),
+    ).toBe(reply);
+  });
+
   it("correctDurableSaveClaimReply: defers attach-worded תייקתי קובץ to attach path", () => {
     const reply = "תייקתי את הקובץ.";
     expect(
@@ -1210,6 +1255,224 @@ describe("employee records", () => {
         data: { deletedAt: expect.any(Date), reminderId: null },
       });
       expect(result.mutations.some((row) => row.action === "remove")).toBe(true);
+    });
+
+    it("lets a partner in visible_to content-update a co-shared tasks row", async () => {
+      const taskId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+      const tasksList = {
+        id: "amit-tasks",
+        employeeId,
+        listType: "tasks",
+        name: "",
+        scope: "personal",
+        visibleTo: [],
+        titleField: "",
+      };
+      const sharedTask = {
+        id: taskId,
+        listId: tasksList.id,
+        itemKey: "לקנות עוגה",
+        data: { "שם מטלה": "לקנות עוגה", "תאריך לביצוע": "2026-10-30" },
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [employeeId, talId],
+        deletedAt: null,
+        reminderId: null,
+        list: { ...tasksList, employeeId },
+      };
+      listFindFirst.mockResolvedValue(tasksList);
+      itemFindFirst.mockResolvedValue(sharedTask);
+      itemUpdate.mockResolvedValue({ id: taskId });
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [
+                {
+                  item_id: taskId,
+                  "שם מטלה": "לקנות עוגה גדולה",
+                  "תאריך לביצוע": "2026-10-31",
+                },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: talId, visibleTo: [employeeId] },
+        talId,
+      );
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: taskId },
+          data: expect.objectContaining({
+            data: expect.objectContaining({
+              "שם מטלה": "לקנות עוגה גדולה",
+              "תאריך לביצוע": "2026-10-31",
+            }),
+            scope: "shared",
+            visibleTo: expect.arrayContaining([employeeId, talId]),
+          }),
+        }),
+      );
+      expect(result.mutations).toEqual([
+        expect.objectContaining({
+          action: "update",
+          itemId: taskId,
+          employeeId,
+          listType: "tasks",
+        }),
+      ]);
+      expect(result.shareMisses).toEqual([]);
+    });
+
+    it("defense-routes a mis-targeted partner update onto the owner book", async () => {
+      const taskId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+      const ownerTasks = {
+        id: "amit-tasks",
+        employeeId,
+        listType: "tasks",
+        name: "",
+        titleField: "",
+      };
+      const shareeTasks = {
+        id: "tal-tasks",
+        employeeId: talId,
+        listType: "tasks",
+        name: "",
+        titleField: "",
+      };
+      const sharedTask = {
+        id: taskId,
+        listId: ownerTasks.id,
+        itemKey: "לקנות עוגה",
+        data: { "שם מטלה": "לקנות עוגה" },
+        scope: "shared",
+        addedById: employeeId,
+        visibleTo: [employeeId, talId],
+        deletedAt: null,
+        reminderId: null,
+        list: { ...ownerTasks, employeeId },
+      };
+      listFindFirst.mockResolvedValue(shareeTasks);
+      // resolveListActionAgainstSaved + update each: scoped miss then defense hit.
+      itemFindFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(sharedTask)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(sharedTask);
+      itemUpdate.mockResolvedValue({ id: taskId });
+      const result = await applyEmployeeRecords(
+        talId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: taskId, "שם מטלה": "לקנות עוגה מעודכנת" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: talId, visibleTo: [talId] },
+        talId,
+      );
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: taskId },
+          data: expect.objectContaining({
+            data: expect.objectContaining({
+              "שם מטלה": "לקנות עוגה מעודכנת",
+            }),
+            visibleTo: expect.arrayContaining([employeeId, talId]),
+          }),
+        }),
+      );
+      expect(result.mutations).toEqual([
+        expect.objectContaining({
+          action: "update",
+          itemId: taskId,
+          employeeId,
+        }),
+      ]);
+      expect(result.shareMisses).toEqual([]);
+    });
+
+    it("content-update miss of a missing id records a missing miss", async () => {
+      itemFindFirst.mockResolvedValue(null);
+      const missingId = "99ea236b-9203-4a4f-be3f-69882dacf8ac";
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: missingId, "שם מטלה": "לא קיים" }],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: employeeId, visibleTo: [employeeId] },
+        employeeId,
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
+      expect(result.shareMisses).toEqual([
+        { itemId: missingId, reason: "missing" },
+      ]);
+    });
+
+    it("blocks a guest from updating a co-shared row", async () => {
+      const guestId = "7cded1a2-c4c1-4edc-9d87-fe5ac740c1f7";
+      itemFindFirst.mockResolvedValue(coffee([employeeId, talId]));
+      employeeFindUnique.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve({
+            userId: "user-1",
+            kind: "human",
+            isOwner: false,
+            id: where.id,
+          }),
+      );
+      const result = await applyEmployeeRecords(
+        employeeId,
+        {
+          lists: [
+            {
+              action: "update",
+              listType: "shopping",
+              listName: "",
+              items: [
+                {
+                  item_id: "99ea236b-9203-4a4f-be3f-69882dacf8ac",
+                  "שם פריט": "קפה שחור",
+                },
+              ],
+              targets: [],
+            },
+          ],
+          filing: [],
+        },
+        { scope: "personal", addedById: guestId, visibleTo: [employeeId] },
+        guestId,
+      );
+      expect(itemUpdate).not.toHaveBeenCalled();
+      expect(result.mutations).toEqual([]);
+      expect(result.shareMisses).toEqual([
+        {
+          itemId: "99ea236b-9203-4a4f-be3f-69882dacf8ac",
+          reason: "forbidden",
+        },
+      ]);
     });
 
     it("sharing an existing row notifies only the new partner, as a share", async () => {
@@ -3332,6 +3595,7 @@ describe("employee records", () => {
       lists: [
         {
           list_type: "tasks",
+          emoji: "✅",
           owner: "עמית",
           scope: "personal",
           items: [

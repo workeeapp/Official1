@@ -2389,7 +2389,7 @@ export async function sendChatMessage(input: {
         (metadata.directory?.length ?? 0) > 0 ||
         (parsedMetadata.messages?.length ?? 0) > 0 ||
         plan.guestMutationBlocked)
-        ? "???? ?? ????? ??????? ?????? ???? ? ??? ?????? ?? ?????."
+        ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
         : "";
     let registerNotice = "";
     if (guestSpeaker && metadata.register) {
@@ -2988,6 +2988,11 @@ export async function sendChatMessage(input: {
       spoken: parseLlmReply(workingReply).response,
       mutations: listMutations,
       misses: shareMisses,
+      filingShareApplied: filingMutations.some(
+        (row) =>
+          (row.action === "add" || row.action === "update") &&
+          row.shared === true,
+      ),
       setResponse: setEngineResponse,
     });
     {
@@ -3032,6 +3037,13 @@ export async function sendChatMessage(input: {
       appliedListUpdate,
       appliedFilingAdd,
       appliedFilingUpdate,
+      requestedDirectory: (metadata.directory ?? []).some(
+        (row) =>
+          row.action === "add" ||
+          row.action === "update" ||
+          row.action === "share_book",
+      ),
+      appliedDirectory: directoryResult.saved.length > 0,
       setResponse: setEngineResponse,
     });
     if (

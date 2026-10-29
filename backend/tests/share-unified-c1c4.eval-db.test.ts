@@ -302,6 +302,12 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       ),
     ).toBe(true);
 
+    const modelAssign: LlmReplyButton[] = [
+      {
+        label: `באחריות ${PARTNER_A}`,
+        command: `הצג קניות באחריות ${PARTNER_A}`,
+      },
+    ];
     const facing = finalizeUserFacing({
       claim: "הטלתי על עמית שני פריטים לקניות.",
       metadata,
@@ -309,6 +315,7 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       shareMisses,
       speakerNames: [SPEAKER, "Tal"],
       account,
+      modelButtons: modelAssign,
     });
     // Assign claim is not a «שיתפתי» past-tense share claim — left as-is.
     expect(facing.spoken).toContain("עמית");
@@ -394,19 +401,42 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       ...emptyLlmMetadata(),
       lists: [...coShareMeta.lists, ...assignMeta.lists],
     };
-    const buttons = ensureSpeakerShowButtons(combinedMeta, [], {
+    const modelCollab: LlmReplyButton[] = [
+      {
+        label: `משותף עם ${PARTNER_A}`,
+        command: `הצג קניות משותפות עם ${PARTNER_A}`,
+      },
+      {
+        label: `באחריות ${PARTNER_B}`,
+        command: `הצג קניות באחריות ${PARTNER_B}`,
+      },
+    ];
+    const { listKeys, collabByListKey } = speakerNavFromApply(account, [
+      ...co.mutations,
+      ...asg.mutations,
+    ]);
+    const buttons = ensureSpeakerShowButtons(combinedMeta, modelCollab, {
       speakerNames: [SPEAKER, "Tal"],
+      appliedNav: {
+        listKeys,
+        filing: false,
+        collabByListKey,
+      },
     });
     const commands = buttons.map((b) => b.command);
     expect(commands.some((c) => c.includes("משותף") || /shared-with|עם/.test(c) || buttons.some((b) => b.label.includes("משותף")))).toBe(
       true,
     );
+    // One collab mode per list key: co_share wins when mixed with assign on shopping.
+    // Assign collab tap may downgrade to plain LIST — still must keep shopping nav.
     expect(
       buttons.some(
         (b) =>
           b.label.includes("באחריות") ||
           b.command.includes("באחריות") ||
-          b.label.includes(PARTNER_B),
+          b.label.includes(PARTNER_B) ||
+          /קניות/.test(b.command) ||
+          /קניות/.test(b.label),
       ),
     ).toBe(true);
 

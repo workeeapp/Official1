@@ -241,4 +241,107 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
     expect(sharedWithIncludes(snap!, "פגישה", "עמית")).toBe(false);
     expect(sharedWithIncludes(snap!, "לבדוק ביט", "עמית")).toBe(false);
   });
+
+  it("shopping dump line share never co-shares an unrelated tasks row", async () => {
+    const shoppingDump = [
+      {
+        n: 1,
+        id: "eval-shop-milk",
+        kind: "shopping" as const,
+        title_stem: "חלב",
+      },
+      {
+        n: 2,
+        id: "eval-shop-bread",
+        kind: "shopping" as const,
+        title_stem: "לחם",
+      },
+    ];
+    expect(resolveDumpLineId(shoppingDump, 1)).toBe("eval-shop-milk");
+    expect(resolveDumpLineId(shoppingDump, 1)).not.toBe("eval-task-bday");
+
+    const result = await runModelApplyCase(
+      {
+        id: "SH-INDEX-SHOP-NOT-TASK",
+        track: "MODEL_APPLY",
+        description:
+          "שתף 1 עם עמית after shopping dump — only that shopping item; tasks untouched",
+        setup: {
+          lists: [
+            {
+              list_id: "eval-list-shop",
+              list_type: "shopping",
+              owner: "טל",
+              scope: "personal",
+              items: [
+                { item_id: "eval-shop-milk", "שם פריט": "חלב" },
+                { item_id: "eval-shop-bread", "שם פריט": "לחם" },
+              ],
+            },
+            {
+              list_id: "eval-list-tasks-x",
+              list_type: "tasks",
+              owner: "טל",
+              scope: "personal",
+              items: [
+                { item_id: "eval-task-bday", "שם מטלה": "יום ההולדת של עמית" },
+              ],
+            },
+          ],
+        },
+        turns: [
+          {
+            utterance: "שתף 1 עם עמית",
+            constraints: [
+              { type: "lists_has_action", action: "update", listType: "shopping" },
+            ],
+          },
+        ],
+      },
+      () => ({
+        metadata: {
+          lists: [
+            {
+              action: "update",
+              list_type: "shopping",
+              list_name: "",
+              targets: ["טל", "עמית"],
+              items: [{ item_id: resolveDumpLineId(shoppingDump, 1)! }],
+            },
+          ],
+        },
+        response: "שיתפתי את חלב עם עמית",
+      }),
+      { partners: ["עמית"] },
+    );
+    expect(result.ok, result.failures.join("\n")).toBe(true);
+    const snap = result.turns.at(-1)?.snapshot;
+    expect(snap).toBeTruthy();
+    // Shopping line shared
+    let milkShared = false;
+    let breadShared = false;
+    let taskShared = false;
+    for (const list of snap!.lists) {
+      for (const item of list.items) {
+        const shared = item.shared_with;
+        const hasPartner =
+          Array.isArray(shared) && shared.includes("עמית");
+        if (JSON.stringify(item).includes("חלב") && list.list_type === "shopping") {
+          milkShared = hasPartner;
+        }
+        if (JSON.stringify(item).includes("לחם") && list.list_type === "shopping") {
+          breadShared = hasPartner;
+        }
+        if (
+          JSON.stringify(item).includes("יום ההולדת") &&
+          list.list_type === "tasks"
+        ) {
+          taskShared = hasPartner;
+        }
+      }
+    }
+    expect(milkShared).toBe(true);
+    expect(breadShared).toBe(false);
+    expect(taskShared).toBe(false);
+  });
 });

@@ -212,6 +212,8 @@ export interface LlmDirectoryAction {
   action: LlmDirectoryActionName;
   name: string;
   phone: string;
+  /** Optional free-text note (תיאור). Empty/omit = unchanged on update; empty on add = none. */
+  description?: string;
   /** Copy from this turn's SPEAKER_CONTACTS[].contact_id on remove/update. */
   contactId: string;
   /** Co-share (speaker+partners) or assign (partners only) — same as list items. Empty = personal. */
@@ -2477,10 +2479,19 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
   const contactId = readText(record, ["contact_id", "contactId", "id"]);
   const name = readText(record, ["name", "שם", "contact", "label"]);
   const phone = readText(record, ["phone", "טלפון", "number", "whatsapp"]);
+  const description = readText(record, [
+    "description",
+    "תיאור",
+    "note",
+    "notes",
+  ]);
   const targets = parseTargets(record);
   const unshareWith = readStringList(
     record.unshare_with ?? record.unshareWith,
   );
+  const withDescription = description
+    ? { description: description.slice(0, 500) }
+    : {};
   if (action === "share_book") {
     return {
       action,
@@ -2501,13 +2512,21 @@ function toDirectoryAction(value: unknown): LlmDirectoryAction | null {
       phone,
       contactId,
       targets,
+      ...withDescription,
       ...(unshareWith.length > 0 ? { unshareWith } : {}),
     };
   }
   if (!name || !phone) {
     return null;
   }
-  return { action, name, phone, contactId: "", targets };
+  return {
+    action,
+    name,
+    phone,
+    contactId: "",
+    targets,
+    ...withDescription,
+  };
 }
 
 function reminderActionName(value: unknown): LlmReminderActionName | null {

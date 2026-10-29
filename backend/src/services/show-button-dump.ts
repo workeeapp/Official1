@@ -136,6 +136,8 @@ export type ShowDumpOptions = {
 export type PhoneBookDumpRow = {
   name: string;
   phone?: string;
+  /** Optional free-text note (תיאור). */
+  description?: string;
   scope?: "personal" | "shared";
   /** Partner display names when shared (may include owner). */
   shared_with?: string[];
@@ -358,7 +360,8 @@ export function resolveShowDumpKind(
   if (
     lower === "phone_book" ||
     lower === "phonebook" ||
-    trimmed === "ספר הטלפונים"
+    trimmed === "ספר הטלפונים" ||
+    trimmed === "אנשי קשר"
   ) {
     return { kind: "phone_book" };
   }
@@ -573,15 +576,15 @@ function emptyPhoneBookSentence(opts?: ShowDumpOptions): string {
   const section = opts?.section ?? null;
   const partners = dumpFilterNames(opts?.partner);
   if (section === "shared" && partners.length > 0) {
-    return `אין אנשי קשר בספר הטלפונים המשותף עם ${partnerFilterLabel(partners)}.`;
+    return `אין אנשי קשר משותפים עם ${partnerFilterLabel(partners)}.`;
   }
   if (section === "shared" || partners.length > 0) {
-    return "אין אנשי קשר משותפים בספר הטלפונים.";
+    return "אין אנשי קשר משותפים.";
   }
   if (section === "personal") {
-    return "אין אנשי קשר אישיים בספר הטלפונים.";
+    return "אין אנשי קשר אישיים.";
   }
-  return "ספר הטלפונים ריק.";
+  return "אין אנשי קשר שמורים.";
 }
 
 function emptyContactsSentence(opts?: ShowDumpOptions): string {
@@ -886,7 +889,9 @@ export function formatPhoneBookDump(
   const collected: DumpItem[] = rows.map((row) => {
     const name = row.name.trim() || "איש קשר";
     const phone = (row.phone ?? "").trim();
-    const title = phone ? `${name} — ${phone}` : name;
+    const description = (row.description ?? "").trim();
+    const base = phone ? `${name} — ${phone}` : name;
+    const title = description ? `${base} · ${description}` : base;
     const sharedWith = (row.shared_with ?? [])
       .map((value) => value.trim())
       .filter(Boolean);
@@ -922,7 +927,8 @@ export function formatPhoneBookDump(
   });
   const kept = filterDumpRows(collected, "phone_book", opts);
   // Phone-book rows have no contact_id in the dump payload — omit LAST_NUMBERED_DUMP ids.
-  const { text } = formatSingleHeaderDump("ספר הטלפונים", "phone_book", kept, opts);
+  // Unified UX label «אנשי קשר» + 👤 (aliases phone_book / ספר הטלפונים still parse).
+  const { text } = formatSingleHeaderDump("👤 אנשי קשר", "phone_book", kept, opts);
   return { text, lines: [] };
 }
 

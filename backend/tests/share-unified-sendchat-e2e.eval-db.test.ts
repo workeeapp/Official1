@@ -197,7 +197,17 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     const amit = account.partners[0]!;
     setLlmClientForTests(
       stubReply({
-        responses: [{ text: "הטלתי על עמית לקנות יוגורט.", buttons: [] }],
+        responses: [
+          {
+            text: "הטלתי על עמית לקנות יוגורט.",
+            buttons: [
+              {
+                label: `באחריות ${PARTNER}`,
+                command: `הצג קניות באחריות ${PARTNER}`,
+              },
+            ],
+          },
+        ],
         metadata: {
           lists: [
             {
@@ -250,7 +260,12 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     const amit = account.partners[0]!;
     setLlmClientForTests(
       stubReply({
-        responses: [{ text: "שיתפתי את התיוק קוד עם עמית.", buttons: [] }],
+        responses: [
+          {
+            text: "שיתפתי את התיוק קוד עם עמית.",
+            buttons: [{ label: "הצג תיוקים", command: "הצג תיוקים" }],
+          },
+        ],
         metadata: {
           filing: [
             {
@@ -282,10 +297,16 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     expect(filing?.visibleTo as string[]).toEqual(
       expect.arrayContaining([account.employeeId, amit.id]),
     );
-    expect(parseLlmReply(result.reply).response).toMatch(/שיתפתי|תיוק|עמית/);
+    const parsed = parseLlmReply(result.reply);
+    expect(parsed.response).toMatch(/שיתפתי|תיוק|עמית/);
+    expect(parsed.response).not.toMatch(/לא הצלחתי לשתף/);
     const bubbles = readSpokenBubbles(JSON.parse(result.reply));
+    const allButtons = [
+      ...(parsed.buttons ?? []),
+      ...(bubbles ?? []).flatMap((b) => b.buttons ?? []),
+    ];
     expect(
-      (bubbles?.[0]?.buttons ?? []).some(
+      allButtons.some(
         (b) => b.command.includes("תיוק") || b.label.includes("תיוק"),
       ),
     ).toBe(true);
@@ -298,7 +319,17 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     const listName = "באגים-E2E";
     setLlmClientForTests(
       stubReply({
-        responses: [{ text: "שיתפתי את הבאג עם עמית.", buttons: [] }],
+        responses: [
+          {
+            text: "שיתפתי את הבאג עם עמית.",
+            buttons: [
+              {
+                label: `משותף עם ${PARTNER}`,
+                command: `הצג רשימת ${listName} משותפות עם ${PARTNER}`,
+              },
+            ],
+          },
+        ],
         metadata: {
           lists: [
             {
@@ -352,6 +383,8 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         surname: "",
         nickname: "אורח",
         isOwner: false,
+        isGuest: true,
+        teamId: null,
       },
     });
     const guest: PublicEmployee = {
@@ -363,6 +396,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
       email: null,
       phone: null,
       isOwner: false,
+      isGuest: true,
     };
     const mutateMeta = {
       ...emptyModelMetadata(),
@@ -422,7 +456,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     });
     expect(after).toBe(before);
     expect(parseLlmReply(result.reply).response).toMatch(
-      /רק לצפות|בלי להוסיף|בלי לשנות|שותפו/,
+      /רק לצפות|בלי להוסיף|בלי לשנות|שותפו|אורחים יכולים/,
     );
   }, 60_000);
 

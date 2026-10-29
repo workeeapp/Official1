@@ -891,6 +891,10 @@
                       "type": "string",
                       "description": "Phone digits. Empty for share_book."
                     },
+                    "description": {
+                      "type": "string",
+                      "description": "Optional free-text note (תיאור) for this contact — e.g. «שכנה», «חשמלאי», context. Empty/omit on add = none. On update: set to change; omit to leave unchanged. Never used for WhatsApp routing."
+                    },
                     "contact_id": {
                       "type": "string",
                       "description": "Copy exactly from this turn's SPEAKER_CONTACTS[].contact_id. Required on directory.remove and directory.update. Empty for share_book."
