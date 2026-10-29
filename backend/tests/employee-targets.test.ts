@@ -705,6 +705,185 @@ describe("employee targets", () => {
     ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
   });
 
+  it("WATCH cadence update with appliedWorkerWatchName gets worker inventory nav", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          reminders: [
+            {
+              action: "update",
+              item: "משוב יואב",
+              listType: "tasks",
+              date: "",
+              time: "",
+              repeat: "1:hours",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: 1,
+              everyUnit: "hours",
+              weekdays: null,
+              confirmed: false,
+              compose: true,
+              composeSource: "mashov",
+              composeLookbackHours: 0,
+              composePlace: "יואב",
+              composeCondition: { type: "mashov_new" },
+              reminderId: "r1",
+            },
+          ],
+        },
+        [],
+        {
+          speakerNames: ["טל"],
+          workerNames: ["לוסי"],
+          appliedWorkerWatchName: "לוסי",
+        },
+      ),
+    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+  });
+
+  it("WATCH cadence update without appliedWorkerWatchName injects nothing", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          reminders: [
+            {
+              action: "update",
+              item: "משוב יואב",
+              listType: "tasks",
+              date: "",
+              time: "",
+              repeat: "1:hours",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: 1,
+              everyUnit: "hours",
+              weekdays: null,
+              confirmed: false,
+              compose: true,
+              composeSource: "mashov",
+              composeLookbackHours: 0,
+              composePlace: "יואב",
+              composeCondition: { type: "mashov_new" },
+              reminderId: "r1",
+            },
+          ],
+        },
+        [],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("ordinary reminder update without apply proof injects nothing", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          reminders: [
+            {
+              action: "update",
+              item: "לקחת אקמול",
+              listType: "tasks",
+              date: "",
+              time: "14:50",
+              repeat: "daily",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: false,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "r1",
+            },
+          ],
+        },
+        [],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("WATCH create + appliedWorkerWatchName dedupes to one worker inventory button", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
+              targets: ["לוסי"],
+            },
+          ],
+        },
+        [],
+        {
+          speakerNames: ["טל"],
+          workerNames: ["לוסי"],
+          appliedWorkerWatchName: "לוסי",
+        },
+      ),
+    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+  });
+
+  it("chat appliedWorkerWatchName predicate follows saved.hasComposeCondition", () => {
+    // Mirrors chat.service: only pass the worker name when apply proved a watch clock.
+    const resolveName = (
+      saved: Array<{ hasComposeCondition?: boolean }>,
+    ): string | undefined =>
+      saved.some((row) => row.hasComposeCondition === true)
+        ? "לוסי"
+        : undefined;
+    expect(
+      resolveName([{ hasComposeCondition: true }, {}]),
+    ).toBe("לוסי");
+    expect(resolveName([{}])).toBeUndefined();
+    expect(resolveName([])).toBeUndefined();
+  });
+
+  it("speaker-book tasks + appliedWorkerWatchName still yields speaker הצג מטלות only", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "לשתות מים" }],
+              targets: [],
+            },
+          ],
+        },
+        [],
+        {
+          speakerNames: ["טל"],
+          workerNames: ["לוסי"],
+          appliedWorkerWatchName: "לוסי",
+        },
+      ),
+    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
+  });
+
   it("speaker tasks + worker להזכיר still gets speaker הצג מטלות (not worker-only rewrite)", () => {
     expect(
       ensureSpeakerShowButtons(

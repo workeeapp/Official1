@@ -4270,6 +4270,11 @@ export async function sendChatMessage(input: {
               digital.nickname?.trim() ?? "",
               digital.name?.trim() ?? "",
             ].filter(Boolean),
+            appliedWorkerWatchName: reminderResult.saved.some(
+              (row) => row.hasComposeCondition === true,
+            )
+              ? employeeDisplayName(digital)
+              : undefined,
             // Validate model LIST/collab against real apply ? not bare ACTION emit.
             // Collab kept only when mutation.collabApply proves it; else plain LIST.
             appliedNav: {

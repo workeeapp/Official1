@@ -146,4 +146,44 @@ describe("applyReminders recurrence updates", () => {
     expect(data.repeat).toBe("once");
     expect(data.fireAt).toEqual(existing.fireAt);
   });
+
+  it("cadence update preserving compose_condition sets hasComposeCondition on saved", async () => {
+    const watchExisting = {
+      ...existing,
+      itemKey: "משוב יואב",
+      itemLabel: "משוב יואב",
+      repeat: "1:hours",
+      recurrence: { freq: "interval", interval: 2, unit: "hours" },
+      composeAtFire: true,
+      composeSource: "mashov",
+      composePlace: "יואב",
+      composeCondition: { type: "mashov_new" },
+      watchOnce: false,
+      pingIds: [amit.id],
+    };
+    reminderFindMany.mockResolvedValue([watchExisting]);
+    reminderUpdate.mockImplementation(async ({ data }) => ({
+      ...watchExisting,
+      ...data,
+    }));
+    const result = await run({
+      ...base,
+      item: "משוב יואב",
+      compose: true,
+      composeSource: "mashov",
+      composePlace: "יואב",
+      // Cadence-only ACTION: omit composeCondition; apply keeps existing.
+      everyCount: 1,
+      everyUnit: "hours",
+      recurrence: { freq: "interval", interval: 1, unit: "hours" },
+    });
+    expect(result.saved).toHaveLength(1);
+    expect(result.saved[0]?.hasComposeCondition).toBe(true);
+  });
+
+  it("ordinary reminder save omits hasComposeCondition", async () => {
+    const result = await run({ ...base, text: "לשלם באתר" });
+    expect(result.saved).toHaveLength(1);
+    expect(result.saved[0]?.hasComposeCondition).toBeUndefined();
+  });
 });

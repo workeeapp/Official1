@@ -1486,6 +1486,8 @@ export async function applyReminders(input: {
     ping?: string;
     sameTimeOthers?: string[];
     composeAtFire?: boolean;
+    /** True when the saved row has a non-null compose_condition (WATCH family). */
+    hasComposeCondition?: boolean;
   }>;
   skipped: Array<{
     item: string;
@@ -1525,6 +1527,7 @@ export async function applyReminders(input: {
     ping?: string;
     sameTimeOthers?: string[];
     composeAtFire?: boolean;
+    hasComposeCondition?: boolean;
   }> = [];
   const skipped: Array<{
     item: string;
@@ -2090,6 +2093,7 @@ export async function applyReminders(input: {
           .join(","),
         ...(sameTimeOthers.length > 0 ? { sameTimeOthers } : {}),
         ...(nextCompose ? { composeAtFire: true } : {}),
+        ...(hasComposeCondition ? { hasComposeCondition: true } : {}),
       });
       if (existing) {
         changes.push({

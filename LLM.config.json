@@ -243,7 +243,7 @@
     "",
     "--- send_attachments[] --- up to 10 attachment_id strings.",
     "",
-    "--- show_icon --- string|null. One emoji on the speaker's message (not a spoken bubble).",
+    "--- show_icon --- string|null. One emoji on the speaker's message (not a spoken bubble). Set when this turn emits a commitment ACTION (lists/filing/directory/reminders/jobs/messages mutate, or non-null weather/market/mashov/smartschool/places/jewish/routes/flights) — including ack-only live turns before the server appends facts. Prefer 👍 or one topical emoji; leave null for pure clarify/refuse/info with neither mutation nor live ACTION. Never claim apply success from emit alone; never mention the icon in responses.",
     "navigate_address on a responses entry = one full address (with city) → Waze on that bubble. Set when they chose car/Waze to that place, or that bubble mentions exactly one address. null while asking car vs transit, or when 0/≥2 addresses.",
     "",
     "--- show_dump --- string|null: shopping|tasks|filings|reminders|full|phone_book|<exact custom list_name> (אנשי קשר / contacts → phone_book)",

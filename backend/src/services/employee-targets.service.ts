@@ -1743,6 +1743,11 @@ export type SpeakerShowButtonOptions = {
    * Item-open with no mutate intent this turn (existing row) is kept.
    */
   appliedItems?: AppliedItemEvidence;
+  /**
+   * When set, a WATCH clock (compose_condition) was proven saved this turn.
+   * Safety-net emits worker inventory when there is no speaker-book tasks mutate.
+   */
+  appliedWorkerWatchName?: string;
 };
 
 /** Builtin list_type, or `custom:<normalized name>`. */
@@ -2452,6 +2457,7 @@ export function ensureSpeakerShowButtons(
     coveredListKeys,
     speakerNames,
     workerNames,
+    options?.appliedWorkerWatchName,
   )) {
     if (!remember(required.command)) {
       continue;
@@ -2631,6 +2637,7 @@ function plainSafetyNetListShowButtons(
   coveredListKeys: ReadonlySet<string>,
   speakerNames: string[] = [],
   workerNames: string[] = [],
+  appliedWorkerWatchName?: string,
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
@@ -2685,6 +2692,17 @@ function plainSafetyNetListShowButtons(
       listKeyNavEligible("tasks", metadata, appliedNav, skipSourceCommands)
     ) {
       pushNavButton(buttons, seen, workerBtn);
+    }
+  } else if (
+    !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames)
+  ) {
+    const watchName = (appliedWorkerWatchName ?? "").trim();
+    if (watchName) {
+      const workerBtn = workerInventoryButton(watchName);
+      const workerKey = workerInventoryListKey(workerBtn.command);
+      if (!coveredListKeys.has(workerKey)) {
+        pushNavButton(buttons, seen, workerBtn);
+      }
     }
   }
 
