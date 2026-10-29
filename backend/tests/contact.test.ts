@@ -22,8 +22,12 @@ describe("contact directory POC", () => {
 
   it("formats empty and filled speaker contacts", () => {
     expect(formatSpeakerContacts([])).toContain("No personal contacts");
-    expect(formatSpeakerContacts([])).toContain("ASK «לשמור את");
+    expect(formatSpeakerContacts([])).toContain("SAVE-ALL");
+    expect(formatSpeakerContacts([])).toContain("FORBIDDEN asking «לשמור את X?»");
+    expect(formatSpeakerContacts([])).toContain("DUPLICATE PHONE");
+    expect(formatSpeakerContacts([])).toContain("הצג אנשי קשר");
     expect(formatSpeakerContacts([])).toContain("share_book");
+    expect(formatSpeakerContacts([])).not.toContain("ask which to save first");
     expect(formatSpeakerContacts(contacts)).toContain("מיכל");
   });
 

@@ -4639,6 +4639,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
     expect(ctx).toContain("שתף 4 עם עמית");
     expect(ctx).toContain("FORBIDDEN claiming");
     expect(ctx).toContain("targets:[speaker, partner]");
+    expect(ctx).toContain("directory.update with that contact_id");
     expect(ctx).toContain("never substitute another dump row");
     expect(formatLastNumberedDumpContext([])).toBe("");
   });

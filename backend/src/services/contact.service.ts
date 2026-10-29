@@ -273,9 +273,10 @@ function uniqueIds(values: Array<string | null | undefined>): string[] {
 
 const SHARED_CONTACT_RULES = [
   "SHARED CONTACT CARD: a speaker message starting with [כרטיס איש קשר שותף בוואטסאפ] followed by {\"shared_contacts\":[{name, phones}]} is a WhatsApp contact-share card — NOT a silent save.",
-  "→ Same turn: directory=[] and ASK «לשמור את «name» (phone) באנשי הקשר שלך?». כן → directory add (name + first phone; optional description/תיאור when they gave a note). לא → directory=[]; acknowledge. Several clearly different phones on one card → ask which to save first (directory []).",
-  "Already in SPEAKER_CONTACTS with the same phone → say it is already saved; do not re-add silently. Same name with a different phone → ASK whether to update; on כן → directory remove (old contact_id) + add (new phone).",
-  "A card without any phone cannot be saved via directory create — say so (phoneless rows exist only via migration). A card without a name → ask what name to save it under (directory []).",
+  "SAVE-ALL (multi-card / multi-entry shared_contacts): SAME TURN emit directory.add for EVERY card that has a name + one usable phone AND is NOT already in SPEAKER_CONTACTS by phone. FORBIDDEN asking «לשמור את X?» for a clear new card; FORBIDDEN asking which card to process first when several cards are independently valid. One problematic card does NOT block others — process valid cards now; ask only about unresolved ones.",
+  "Per-card ASK only when that card alone is incomplete/ambiguous: no phone → cannot directory-create (say so; phoneless rows exist only via migration); no name → ask what name to save under (directory [] for that card); several clearly different phones on ONE card and speaker did not pick → ask which phone(s) (directory [] for that card only).",
+  "DUPLICATE PHONE already in SPEAKER_CONTACTS → do NOT directory.add. Show the existing contact (name + phone + description when present) and ASK whether to update; on כן → directory.update with that contact_id (fields they want changed). Same name with a different phone → ASK update existing phone vs add a second contact; on update → directory.update + contact_id + new phone (not silent remove+add).",
+  "After any successful directory add|update|remove this turn: emit confirm-bubble show button label «הצג אנשי קשר» command «הצג רשימת אנשי קשר» (same POST-MUTATE SHOW contract as other lists). Concise Hebrew summary in responses: what was saved, what already existed (name+phone), what still needs an answer — never invent missing details.",
   "SHARE / ASSIGN ONE CONTACT: directory add/update MAY include targets. Speaker+partners → speaker-owned co-share (shared_with). Partners only (speaker omitted) → assign onto each assignee's אנשי קשר (addedById = speaker). Same as shopping/tasks.",
   "SHARE WHOLE PHONE BOOK: «שתף את אנשי הקשר עם עמית» / «שתף את ספר הטלפונים עם עמית» (alias) → directory [{ action:\"share_book\", name:\"\", phone:\"\", targets:[\"עמית\"] }]. unshare_with drops partners (whole-book share, not item assign).",
 ];
@@ -438,15 +439,18 @@ export async function applyDirectoryActions(input: {
 }): Promise<{
   saved: SpeakerContact[];
   removed: string[];
+  /** Speaker-owned add hit an existing phone — no silent rename. */
+  alreadyExisting: SpeakerContact[];
   shareNotices: DirectoryShareNotice[];
   bookShared?: boolean;
 }> {
   const saved: SpeakerContact[] = [];
   const removed: string[] = [];
+  const alreadyExisting: SpeakerContact[] = [];
   const shareNotices: DirectoryShareNotice[] = [];
   let bookShared = false;
   if (!prisma.contact?.upsert || input.actions.length === 0) {
-    return { saved, removed, shareNotices, bookShared };
+    return { saved, removed, alreadyExisting, shareNotices, bookShared };
   }
 
   const employees = input.employees ?? [];
@@ -702,14 +706,31 @@ export async function applyDirectoryActions(input: {
       ? uniqueIds([input.ownerEmployeeId, ...allPartners])
       : [input.ownerEmployeeId];
 
-    const row = await prisma.contact.upsert({
+    // Duplicate phone on speaker book: never silent-rename via add.
+    // Model must directory.update with contact_id after asking the speaker.
+    const prior = await prisma.contact.findUnique({
       where: {
         ownerEmployeeId_phone: {
           ownerEmployeeId: input.ownerEmployeeId,
           phone,
         },
       },
-      create: {
+    });
+    if (prior) {
+      const priorDescription = normalizeContactDescription(prior.description);
+      alreadyExisting.push({
+        id: prior.id,
+        name: prior.name,
+        phone: prior.phone,
+        kind: prior.kind,
+        scope: prior.scope === "shared" ? "shared" : "personal",
+        ...(priorDescription ? { description: priorDescription } : {}),
+      });
+      continue;
+    }
+
+    const row = await prisma.contact.create({
+      data: {
         userId: input.userId,
         ownerEmployeeId: input.ownerEmployeeId,
         name,
@@ -719,18 +740,6 @@ export async function applyDirectoryActions(input: {
         addedById: input.ownerEmployeeId,
         scope: shared ? "shared" : "personal",
         visibleTo,
-      },
-      update: {
-        name,
-        ...(description ? { description } : {}),
-        kind: "personal",
-        ...(shared
-          ? {
-              scope: "shared",
-              visibleTo,
-              addedById: input.ownerEmployeeId,
-            }
-          : {}),
       },
     });
     saved.push({
@@ -758,7 +767,7 @@ export async function applyDirectoryActions(input: {
     }
   }
 
-  return { saved, removed, shareNotices, bookShared };
+  return { saved, removed, alreadyExisting, shareNotices, bookShared };
 }
 
 async function loadBookPartnerIds(ownerEmployeeId: string): Promise<string[]> {

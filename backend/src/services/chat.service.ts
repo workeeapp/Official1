@@ -874,12 +874,12 @@ function workerTargetingInstructions(
     "Do not turn a send/check/tell request into a list or task unless they also asked to add one ? except the worker task required for a scheduled send above. After tell-to-buy/task/meeting/filing: send first; offer ONLY a shared/partnered save with the people you messaged (never the speaker's private shopping/tasks alone). On yes ? lists/filing with targets including those people (+ speaker for shared). After a speaker timed task without ????? ??: save the task and offer a reminder in response ? do not auto-add reminders.",
     "messages.targets and reminders.ping may be employee names, SPEAKER_CONTACTS names, or a phone number.",
     "If the name is in Known employees, use that name in messages.targets or reminders.ping. NEVER ask for their WhatsApp number.",
-    "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping / lists.targets / filing.targets / directory.targets. NEVER ask for their number again. Registered Workee members in the phone book share and assign the same way as Known employees (any team) — guests stay view-only.",
+    "If the name is in SPEAKER_CONTACTS, use that name (or their saved phone) in messages.targets / reminders.ping / lists.targets / filing.targets / directory.targets. NEVER ask for their number again. Registered Workee members in the phone book share and assign the same way as Known employees (any team) ? guests stay view-only.",
     "If they name someone who is not in Known employees and not in SPEAKER_CONTACTS, ask for their WhatsApp number. Empty messages and reminders until you have digits.",
-    "After they give digits for an unknown person: offer to save with a tap button on that bubble — label «שמור באנשי קשר», command «שמור את {name} באנשי הקשר {digits}» (or כן/לא). Empty directory and empty messages/reminders while asking.",
-    "Yes / שמור באנשי קשר command → same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER — do not ask again what to send. No → directory []; still emit messages or reminders using the phone digits if the words were already given.",
-    "COLD WHATSAPP: when the engine cannot free-form WhatsApp (no 24h session), it replaces a false «שלחתי» with a draft + «שלח בוואטסאפ» for the speaker to forward — do not invent that UX yourself; do not claim business WhatsApp was sent.",
-    "Only ask מה לשלוח after a directory save when they never dictated words.",
+    "After they give digits for an unknown person: offer to save with a tap button on that bubble ? label ????? ????? ????, command ????? ?? {name} ????? ???? {digits}? (or ??/??). Empty directory and empty messages/reminders while asking.",
+    "Yes / ???? ????? ??? command ? same turn: directory add with name + phone, AND if they already dictated words: messages if NOW, or reminders + your worker task if LATER ? do not ask again what to send. No ? directory []; still emit messages or reminders using the phone digits if the words were already given.",
+    "COLD WHATSAPP: when the engine cannot free-form WhatsApp (no 24h session), it replaces a false ??????? with a draft + ???? ????????? for the speaker to forward ? do not invent that UX yourself; do not claim business WhatsApp was sent.",
+    "Only ask ?? ????? after a directory save when they never dictated words.",
     "Phone book / ???? ??? with name+phone already given ? directory add immediately (first name enough). Never ask for last name. If you must ask for a missing required field on any domain, ask with that action empty; next turn emit it complete from your previous turn plus the answer ? never ?? ????? to the short fill-in.",
     "DICTATED SEND WORDS: after the recipient name, remaining words in the same sentence ARE the body ? even without dash/colon/quotes. ????? ??? ?????? / ????? ????? ????? ?????? ????? / ????? ????? ???? ???? ???? ? messages NOW; confirm with ?? ?????? ??? = exact messages.text; do NOT ask ?? ???? ????? or ??? ?? ????? ?? ????? ?????. Exception ? ANSWER BEATS DICTATED SEND: if OPEN_JOBS has a matching subject check and ??????/????? (??X) ??? / ?????? ???? means answering that check ? jobs.answer only, not messages. Only ask what to send when a recipient is named but no message content follows; you may offer ????. While asking: messages=[]. Next short reply (??? / ?? ?????? / ?? ?????) ? send that text to the recipient you asked about ? never ask again; confirm with exact quote. Cancel (?? / ??? / ?? ????? / cancel) ? empty arrays; do not use cancel words as the message.",
     `Example delayed send: \"????? ????? ???? ??? ??? ???? ?? ????\" ? messages [], lists tasks add on ${workerName} ????? ????? ?????, lists add reminders in 3600 ping:[\"????\"] text \"?? ???? ?? ????\"; response ????? ????? ???? ??? ?? ?????? ??? ???? ?? ??????.`,
@@ -905,21 +905,21 @@ function workerTargetingInstructions(
     "Dynamic scheduled message (compose at fire): compose:true, text = brief/instruction only (any kind ? greeting, note, joke, whatever). Final WhatsApp copy is written at fire time. Fixed copy ? compose false/omit with full text. Daily ????? ????? ???? ???? ??9? ? also lists tasks on yourself ????? ????? ?????; never a speaker task.",
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git ? compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent ????), compose_lookback_hours from the spoken window (minutes?fractional hours e.g. 5 ?????0.083, 24?day, 168?week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given ? ASK ??? (????? / ???? X / daily) with no reminders clock, then emit the full git_log clock with their answer; NEVER say ???? without in/time. ??????? ? in?5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. ???? ?????? ???????). NEVER invent ???? or any coworker; NEVER offer ????? ?? / ????? ?????? unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction ? not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (?? ??? ??8 ?? ?? ?? ???? / ???? ??? ??? ?????? ??? / ???? ??? ?? ???? ????? ??? / ????? ?? ???? 10 ????? ?? ????? ?????? ??????? ?? ????) ? compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said ???? ??, brief=the question; ??? ????? is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later (??????? ???? ???? ????) ? refuse; offer save-now or a normal reminder. Never ask ?? ???? ????? ????? for a send-me list dump.",
-    "LIVE CAPABILITY GATE (generic — ALL live domains: weather/market/mashov/smartschool/places/jewish/routes/flights): Before emitting a live ACTION, classify the ask F/Q/V/U against THAT domain's connected API and schema fields. F = map into structured ACTION fields we expose. Q = only facts that provider can return. V = residual filter on returned rows (Places/Flights/Routes — require_live_select Stage B). U = the ask needs a fact this integration cannot supply (no endpoint / no field / outside what we wire). If U blocks answering the ask — that domain ACTION = null; explain the limit in responses NOW — FORBIDDEN fetching a nearby aspect and presenting empty/wrong results as if the unsupported ask was checked. If U is only an add-on and remaining F/Q still useful — fetch F/Q and disclose the U part. Never invent verification. Distinguish אין תוצאות (fetched, empty match) vs אין לנו גישה למה שביקשת (never fetched).",
-    "WEATHER (live): named city/place → metadata.weather { place, near:\"\"|omit, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }. Clear deixis to PENDING_LOCATION (pin there / shared location) → { place:\"\", near:\"speaker\", aspects }. PENDING_LOCATION is AVAILABLE only — FORBIDDEN near=speaker merely because a pin is still in TTL; vague near-me without clear pin deixis → ASK (weather=null). Named city ALWAYS wins over a stored pin. lists/no reminders clock. WAVE SCAN: Israel coast waves → place=\"Israel\", aspects:[waves], min_wave_m=1. LIVE CAPABILITY (F/Q/V/U): F/Q = place|near=speaker + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition — no require_live_select. U = lifestyle judgments — disclose as tip/opinion, NEVER invent numbers. Pure ask → responses may be empty; server fills. WITH ack (WATCH sample) → responses = ack only; server appends weather as 2nd message. FORBIDDEN inventing temps/wind/waves or coordinates. Missing place and no clear near=speaker → ask; weather=null. Relative day → date via SESSION_CLOCK.",
+    "LIVE CAPABILITY GATE (generic ? ALL live domains: weather/market/mashov/smartschool/places/jewish/routes/flights): Before emitting a live ACTION, classify the ask F/Q/V/U against THAT domain's connected API and schema fields. F = map into structured ACTION fields we expose. Q = only facts that provider can return. V = residual filter on returned rows (Places/Flights/Routes ? require_live_select Stage B). U = the ask needs a fact this integration cannot supply (no endpoint / no field / outside what we wire). If U blocks answering the ask ? that domain ACTION = null; explain the limit in responses NOW ? FORBIDDEN fetching a nearby aspect and presenting empty/wrong results as if the unsupported ask was checked. If U is only an add-on and remaining F/Q still useful ? fetch F/Q and disclose the U part. Never invent verification. Distinguish ??? ?????? (fetched, empty match) vs ??? ??? ???? ??? ?????? (never fetched).",
+    "WEATHER (live): named city/place ? metadata.weather { place, near:\"\"|omit, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }. Clear deixis to PENDING_LOCATION (pin there / shared location) ? { place:\"\", near:\"speaker\", aspects }. PENDING_LOCATION is AVAILABLE only ? FORBIDDEN near=speaker merely because a pin is still in TTL; vague near-me without clear pin deixis ? ASK (weather=null). Named city ALWAYS wins over a stored pin. lists/no reminders clock. WAVE SCAN: Israel coast waves ? place=\"Israel\", aspects:[waves], min_wave_m=1. LIVE CAPABILITY (F/Q/V/U): F/Q = place|near=speaker + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition ? no require_live_select. U = lifestyle judgments ? disclose as tip/opinion, NEVER invent numbers. Pure ask ? responses may be empty; server fills. WITH ack (WATCH sample) ? responses = ack only; server appends weather as 2nd message. FORBIDDEN inventing temps/wind/waves or coordinates. Missing place and no clear near=speaker ? ask; weather=null. Relative day ? date via SESSION_CLOCK.",
     "SCHEDULED WEATHER: ??? ???? ??7 ???? ?? ??? ????? ????? / ????? ??? ????? ?????? ? compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for ???? ??, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH weather_rain exception: no ask-when.",
     "MARKET (live): ??? ???? ???? / NVDA / ??? / ??????? / ?????? / S&P ? metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|?], aspects:[summary|price|change|range] }; lists/no reminders clock. Prefer Yahoo tickers when known (BTC-USD). FX (????/????/?) is Market too ? not a separate ACTION. LIVE CAPABILITY (F/Q/V/U): F/Q = queries[] + aspects (Yahoo quote); V = returned price/change/range ? no require_live_select / no Stage B. U = investment advice / ????? ?????? ? FORBIDDEN presenting as verified fact; disclose not advice. Missing quote ? server says not found; do not invent. Pure ask ? responses may be empty; server fills the quote. WITH an ack (WATCH sample) ? responses = ack only (no prices); server appends the quote as a 2nd message. FORBIDDEN inventing prices. Missing what to quote ? ask; market=null.",
     "SCHEDULED MARKET: ??? ???? ??9 ???? ?? ?? AAPL ????????? ? compose:true, compose_source:\"market\", compose_place:\"AAPL,BTC-USD\" (comma-separated), ping=SPEAKER, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH market_price exception: no ask-when.",
     "MASHOV FILINGS (password included): ALWAYS save Mashov secrets as filings ? item_name ?????? ???? ?????? / ?????? ????? or ?????? ???? ?? {???}? / prefer ??? ??? ??? ?????? (server resolves semel via /schools) + required ???? ??????? ?????? OR ???? ??? ??? ?????? + year. ??????? ?? ????? ????? ??? ds73s? ? filing add THIS turn ? MUST persist. FORBIDDEN: skipping the password filing; putting password in metadata.mashov; quoting the password in responses.",
     "MASHOV YEAR (critical): year is NEVER invented. Missing ??? ??????? ????? ? ask ONLY ?????? ??? ????????? (one question; mashov=null; FORBIDDEN mixing gender/tips). Example: you asked for year ? speaker ???? / 2026? or just ?2026? ? SAME TURN lists add filing item_name=??? ??????? ????? item_info=2026 AND metadata.mashov with the pending child/aspects. YOU file ? never tell them ????? ??????. FORBIDDEN: hearing 2026 and not filing; mashov while year filing is still missing. Login academic year ? event-date filter.",
     "MASHOV (live): ??? ??????? ?? ?????? / ?????? ??? / ??????? / ????? / ??????? / ?????? ? metadata.mashov { child:\"?????\"|\"\", aspects:[grades|homework|behavior|timetable|absences|messages], date_from?, date_to? }; lists/no reminders clock. Apply LIVE CAPABILITY GATE: Q exposes grades/homework/behavior/timetable/absences/messages only ? NOT an upcoming exam calendar. Future ????? ?????? ?? ???????? ???????? / ungraded test board ? U ? mashov=null + disclose (FORBIDDEN homework/messages/grades fetch that pretends to answer it). Past/recorded scores or graded tests ? [grades] + optional date_*. ?????? = inbox (parent account; child optional). Calendar range (??????? / ???2025? / ???1.9 ?? ?????) ? date_from/date_to as YYYY-MM-DD from SESSION_CLOCK; null/omit when no range asked ? NEVER invent dates; NEVER put academic login year into date_*. LIVE CAPABILITY (F/Q/V/U): F = aspects + optional date_from/date_to (calendar filter ? ??? ??????? ????? login year); Q = child/school from filings + Mashov feeds above; V = returned Mashov rows ? no require_live_select / no Stage B. U = inventing year/password/grades OR asks outside Q (upcoming exam board) ? FORBIDDEN invent; missing filings ? ask (mashov=null); U-blocked ask ? mashov=null + explain. Pure ask ? responses may be empty; server fills. WITH ack (WATCH sample) ? ack only; server appends mashov as 2nd message. Server reads filings (incl. ????? ???? + ??? ???????) + fetches. Missing creds ? ask (mashov=null) then file on answer; never mashov without complete filings. Several children and no child ? ask which.",
-    "SCHEDULED MASHOV: «כל יום ב־18 שלחי לי את הציונים של דניאל» → compose:true, compose_source:\"mashov\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי; no reminders clock. WATCH mashov_new exception: no ask-when.",
-    "SMARTSCHOOL FILINGS (password included): ALWAYS save SmartSchool/Webtop secrets as filings — item_name שם משתמש לסמארט סקול / סיסמת סמארט סקול or סיסמת סמארט סקול של {ילד} / שנת לימודים לסמארט סקול (required for timetable). «הסיסמה של דניאל לסמארט סקול היא …» → filing add THIS turn — MUST persist. FORBIDDEN: skipping the password filing; putting password in metadata.smartschool; quoting the password in responses. Distinct from Mashov (משוב) filings.",
-    "SMARTSCHOOL YEAR: year is NEVER invented. Missing שנת לימודים לסמארט סקול when timetable is needed → ask ONLY לאיזו שנת לימודים? (one question; smartschool=null). On answer → SAME TURN lists add filing + metadata.smartschool. FORBIDDEN: inventing year; smartschool timetable while year filing missing.",
-    "SMARTSCHOOL (live Webtop Israel): «מה שיעורי הבית של דניאל בסמארט סקול» / התנהגות / מערכת / הודעות → metadata.smartschool { child:\"דניאל\"|\"\", aspects:[homework|behavior|timetable|messages], date_from?, date_to? }; lists/no reminders clock. Distinct from mashov. Apply LIVE CAPABILITY GATE: Q = homework|behavior|timetable|messages ONLY. grades / absences / ציונים / חיסורים → U → smartschool=null + disclose (FORBIDDEN fetching homework as a substitute). Calendar range → date_from/date_to from SESSION_CLOCK; null when no range. Pure ask → responses may be empty; server fills. WITH ack (WATCH sample) → ack only; server appends as 2nd message. Missing creds → ask (smartschool=null) then file on answer. Several children and no child → ask which.",
-    "SCHEDULED SMARTSCHOOL: «כל יום ב־18 שלחי לי את שיעורי הבית של דניאל מסמארט סקול» → compose:true, compose_source:\"smartschool\", compose_place:\"דניאל\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time → ASK מתי. WATCH smartschool_new exception: no ask-when.",
-    "WATCH («תעדכני אותי אם…» / «תבדקי לי אם…»): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov/smartschool). Types: market_price | weather_rain | weather_changed | mashov_new | smartschool_new | market_change_compare | expr | field_changed | bus_eta | flight_eta | flight_changed. SAME TURN: emit live weather/market/mashov/smartschool/flights sample ACTION + responses = short watch ack ONLY — FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message prefaced «לידיעתך כרגע…». Server stamps baseline only — first condition check is the next poll (never fire immediately on create). No spoken time → recurrence {freq:\"interval\",interval:5,unit:\"minutes\"} (FORBIDDEN ask מתי; FORBIDDEN defaulting to hourly). bus_eta / flight_eta (≤60m window) / flight_changed → every 2–5 minutes OK; flight_eta with hours_before → every 15 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
-    "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT «תעדכני אותי כשביטקוין מתחת ל־3» → watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING «תעדכני כל פעם שביטקוין מתחת ל־3» → watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true → send then sleep until next interval. (3) RECURRING SCHEDULED «תעדכני אותי כל בוקר ב־8 אם הביטקוין מתחת ל־3» → watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for «תעדכני כשהמזג משתנה». mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. smartschool_new recurring: compose_aspects [homework,behavior,messages] when broad. market_change_compare e.g. {type:\"market_change_compare\",left:\"דולר\",right:\"יורו\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
+    "SCHEDULED MASHOV: ??? ??? ??18 ???? ?? ?? ??????? ?? ?????? ? compose:true, compose_source:\"mashov\", compose_place:\"?????\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH mashov_new exception: no ask-when.",
+    "SMARTSCHOOL FILINGS (password included): ALWAYS save SmartSchool/Webtop secrets as filings ? item_name ?? ????? ?????? ???? / ????? ????? ???? or ????? ????? ???? ?? {???} / ??? ??????? ?????? ???? (required for timetable). ??????? ?? ????? ?????? ???? ??? ?? ? filing add THIS turn ? MUST persist. FORBIDDEN: skipping the password filing; putting password in metadata.smartschool; quoting the password in responses. Distinct from Mashov (????) filings.",
+    "SMARTSCHOOL YEAR: year is NEVER invented. Missing ??? ??????? ?????? ???? when timetable is needed ? ask ONLY ????? ??? ???????? (one question; smartschool=null). On answer ? SAME TURN lists add filing + metadata.smartschool. FORBIDDEN: inventing year; smartschool timetable while year filing missing.",
+    "SMARTSCHOOL (live Webtop Israel): ??? ?????? ???? ?? ????? ?????? ????? / ??????? / ????? / ?????? ? metadata.smartschool { child:\"?????\"|\"\", aspects:[homework|behavior|timetable|messages], date_from?, date_to? }; lists/no reminders clock. Distinct from mashov. Apply LIVE CAPABILITY GATE: Q = homework|behavior|timetable|messages ONLY. grades / absences / ?????? / ??????? ? U ? smartschool=null + disclose (FORBIDDEN fetching homework as a substitute). Calendar range ? date_from/date_to from SESSION_CLOCK; null when no range. Pure ask ? responses may be empty; server fills. WITH ack (WATCH sample) ? ack only; server appends as 2nd message. Missing creds ? ask (smartschool=null) then file on answer. Several children and no child ? ask which.",
+    "SCHEDULED SMARTSCHOOL: ??? ??? ??18 ???? ?? ?? ?????? ???? ?? ????? ?????? ????? ? compose:true, compose_source:\"smartschool\", compose_place:\"?????\" (or empty if one child), ping=SPEAKER, text=brief, real clock. No time ? ASK ???. WATCH smartschool_new exception: no ask-when.",
+    "WATCH (??????? ???? ???? / ?????? ?? ????): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov/smartschool). Types: market_price | weather_rain | weather_changed | mashov_new | smartschool_new | market_change_compare | expr | field_changed | bus_eta | flight_eta | flight_changed. SAME TURN: emit live weather/market/mashov/smartschool/flights sample ACTION + responses = short watch ack ONLY ? FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message prefaced ???????? ??????. Server stamps baseline only ? first condition check is the next poll (never fire immediately on create). No spoken time ? recurrence {freq:\"interval\",interval:5,unit:\"minutes\"} (FORBIDDEN ask ???; FORBIDDEN defaulting to hourly). bus_eta / flight_eta (?60m window) / flight_changed ? every 2?5 minutes OK; flight_eta with hours_before ? every 15 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
+    "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT ??????? ???? ????????? ???? ??3? ? watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING ??????? ?? ??? ???????? ???? ??3? ? watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true ? send then sleep until next interval. (3) RECURRING SCHEDULED ??????? ???? ?? ???? ??8 ?? ???????? ???? ??3? ? watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for ??????? ?????? ??????. mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. smartschool_new recurring: compose_aspects [homework,behavior,messages] when broad. market_change_compare e.g. {type:\"market_change_compare\",left:\"????\",right:\"????\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "WATCH EXPR (arithmetic on catalog fields): ????????? ???? ????? ???? 2 = 50? ? compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"??? ?????\"},{const:2}]},right:{const:50}}; compose_source weather. ????? + ???? ??? ???10? ? expr compare approx/lt with market.price fields (symbols ????/????). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (?? ? approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. ???????????? ?????? on a number ? field_changed {field:\"weather.temp_now\",place:?}. FORBIDDEN putting the math only in the brief.",
     "PLACES (live local): ?????? ?? ?????? ???? ?????? / ??? ?????? ?? ???????? ????? ????? / ????? ?? ????? ??? ??????? / ????? ???? ?????? ? metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (????? ???? / ???? ?????) ? geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Inside-region (????? ?????? / ???? ??? ??) ? geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me ? near=speaker. Parking examples: ????? ?? ????? ??? ???????? / ????? ?? ???? ?????? / ????? ???? ?????? ??? ???????? / ??? ????? ?????? ???????; ordinary business ????? ?? ????? ??? ???????. Parking-place asks ? intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): ????? ?? ????? ??? ???????? ? { query:\"?????\", place:\"??????\"|area, intent:\"parking\" }; ????? ?? ???? ?????? ? { query:\"????\", near:\"speaker\"|place, intent:\"parking\" }; ????? ???? ?????? ??? ???????? ? { query:\"????\", place:\"??????\"|area, intent:\"parking\" }; ??? ???? ???? ??????? ? { query:\"????\", place|near, intent:\"parking\", parking_cost:\"free\" }; ??? ????? ?????? ??????? ? { query:\"?????\", place|near, intent:\"parking\", parking_cost:\"paid\" }. ??? ??????? ????? ???? + PENDING_LOCATION ? places { query:\"??????\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for ???? ?????; min_rating 0?5 exact (e.g. 4.1) for ????? ??? X; parking_cost free|paid for ???? ????/?????? (server local-filters ParkingOptions; FORBIDDEN stuffing ????/?????? only into query); included_type ? restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). ??? ???? ???????? / attribute of a named business ? intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/?) are expected to evidence the ask ? require_live_select:true; U = cannot verify (e.g. ??????/ownership) ? NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. ?????? ???? ?????? ? parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer ? explain BEFORE fetch (places=null). Distinguish ??? ????? ?????? ??????? vs ??? ???? ???? ?? ??????????. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query ? ask; places=null. Near-me without pin ? ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): ???? ??????? ???? ???? ?????? / ???? ????? ??? ??? ????? / ??? ???? ?????? / ????? ?? ???? / ???? ??? ???? ? metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. NAMED HOLIDAY (???? ???? / ????? / ?????) ? aspects:[holidays] + query with that name (NOT bare upcoming list ? server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts ? no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal ? disclose; never invent times. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare ???? ???? ? [summary]; ??? ???? ? [candles]; ?????/????? ??? ? [havdalah]; ???? ? [parasha]; ???? ? [holidays]. FORBIDDEN jewish when they asked ?????? ?? ?????? ???? ? use CANDLE-OFFSET REMINDER.",
@@ -1654,7 +1654,7 @@ async function loadConversationWithMessages(
 }
 
 /**
- * When viewing לוסי, also include same-speaker לוסי-אורח onboarding messages
+ * When viewing ????, also include same-speaker ????-???? onboarding messages
  * so host web Chat With Lucy shows pre-registration WhatsApp history.
  */
 export async function getChatHistory(
@@ -1846,7 +1846,7 @@ export async function sendChatMessage(input: {
   consult?: { fromWorkerId: string; fromWorkerName: string };
   /** Files that arrived with this message (stored already). */
   attachments?: TurnAttachments;
-  /** Cold invite context for לוסי-אורח (register-first check-with). */
+  /** Cold invite context for ????-???? (register-first check-with). */
   pendingInvite?: PendingInviteContext;
 }): Promise<{
   reply: string;
@@ -2012,21 +2012,21 @@ export async function sendChatMessage(input: {
   );
   const guestModeInstructions = guestSpeaker
     ? [
-        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
-        "Never say אני אורח / אני גם אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
+        "GUEST MODE: The SPEAKER is a WhatsApp guest (????) ? not you. You are ????-????.",
+        "Never say ??? ???? / ??? ?? ???? / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
         input.pendingInvite
           ? [
               "PENDING_INVITE is active this turn.",
               `First message: tell them ${input.pendingInvite.askerName} wants to know: ${input.pendingInvite.askSummary}.`,
-              "Then require registration before continuing that check: collect ONLY (1) first name (2) gender זכר→male / נקבה→female. Surname optional if volunteered.",
+              "Then require registration before continuing that check: collect ONLY (1) first name (2) gender ????male / ?????female. Surname optional if volunteered.",
               "FORBIDDEN until metadata.register succeeds: answering the ask substance, messaging the asker, or claiming the check is done.",
             ].join(" ")
-          : "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender זכר→male / נקבה→female. Surname optional if they volunteer it.",
-        "FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password — stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
+          : "Your purpose: help them register as a Workee team member (then they talk with ????). Collect ONLY: (1) first name, (2) gender ????male / ?????female. Surname optional if they volunteer it.",
+        "FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password ? stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
         "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
         "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
-        "Off-topic outside shared lists or registration — guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
-        "Add/update/delete/buy/remind/send while guest — say they can only view shared lists until they register. Empty mutate arrays.",
+        "Off-topic outside shared lists or registration ? guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
+        "Add/update/delete/buy/remind/send while guest ? say they can only view shared lists until they register. Empty mutate arrays.",
         "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
       ].join("\n")
     : "";
@@ -2040,7 +2040,7 @@ export async function sendChatMessage(input: {
         guestSpeaker ? "" : OPEN_JOBS_RULES,
         consultEnvelope,
         guestSpeaker
-          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
+          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are ????-????."
           : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
         "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
         "LIVE DATA ONLY (lists / status / clocks / jobs): answer ???? ???????, ?? ??????/?????? ???, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected ? absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous ???????? / ??????? ???????? reply if they are not in this turn's JSON ? including after a delete when they tap ???. Empty section ? one empty sentence; never re-show chat-history-only titles. Exact button commands ???? ????? X? / ???? ????????: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER ? after a numbered dump, spoken indices map dump titles ? ids in THIS turn's JSON, then any supported ACTION (???? / ???? / ???? ?????? / ????? ?? N?); FORBIDDEN show_dump on that turn.",
@@ -2423,7 +2423,7 @@ export async function sendChatMessage(input: {
         (metadata.directory?.length ?? 0) > 0 ||
         (parsedMetadata.messages?.length ?? 0) > 0 ||
         plan.guestMutationBlocked)
-        ? "אפשר רק לצפות ברשימות ששותפו איתך — בלי להוסיף או לשנות."
+        ? "???? ?? ????? ??????? ?????? ???? ? ??? ?????? ?? ?????."
         : "";
     let registerNotice = "";
     let pendingInviteContinue: Awaited<
@@ -2440,7 +2440,7 @@ export async function sendChatMessage(input: {
           register: metadata.register,
         });
         if (registerResult.ok) {
-          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}. מההודעה הבאה אפשר לדבר עם לוסי.`;
+          registerNotice = `????? ??????, ${registerResult.displayName}. ??????? ???? ???? ???? ?? ????.`;
           recordWhatsAppEvent(
             "guest_register",
             `ok employee=${registerResult.employeeId.slice(0, 8)}`,
@@ -2460,9 +2460,9 @@ export async function sendChatMessage(input: {
           }
         } else if (registerResult.reason === "invalid_fields") {
           registerNotice =
-            "חסר שם או מגדר (זכר/נקבה) להשלמת ההרשמה — אשלים כשיהיו לי שניהם.";
+            "??? ?? ?? ???? (???/????) ?????? ?????? ? ????? ?????? ?? ?????.";
         } else {
-          registerNotice = "לא הצלחתי להשלים את ההרשמה כרגע. ננסה שוב בעוד רגע.";
+          registerNotice = "?? ?????? ?????? ?? ?????? ????. ???? ??? ???? ???.";
           recordWhatsAppEvent(
             "guest_register",
             `fail reason=${registerResult.reason}`,
@@ -2525,7 +2525,7 @@ export async function sendChatMessage(input: {
       });
     }
     const directoryResult = guestSpeaker
-      ? { saved: [], removed: [], shareNotices: [] }
+      ? { saved: [], removed: [], alreadyExisting: [], shareNotices: [] }
       : await applyDirectoryActions({
           userId: input.userId,
           ownerEmployeeId: employee.id,
@@ -4095,9 +4095,18 @@ export async function sendChatMessage(input: {
             // Validate model LIST/collab against real apply ? not bare ACTION emit.
             // Collab kept only when mutation.collabApply proves it; else plain LIST.
             appliedNav: {
-              listKeys: new Set(
-                listMutations.map((row) => listNavKeyFromMutation(row)),
-              ),
+              listKeys: (() => {
+                const keys = new Set(
+                  listMutations.map((row) => listNavKeyFromMutation(row)),
+                );
+                if (
+                  directoryResult.saved.length > 0 ||
+                  directoryResult.removed.length > 0
+                ) {
+                  keys.add("contacts");
+                }
+                return keys;
+              })(),
               filing: filingMutations.length > 0,
               collabByListKey: buildCollabByListKey(
                 listMutations,
@@ -4337,11 +4346,11 @@ async function buildColdInvitesForNoSession(input: {
       return false;
     }
     // No open 24h window: invite even without Graph / without DISPLAY_PHONE
-    // (Amit→recipient wa.me only needs the recipient digits).
+    // (Amit?recipient wa.me only needs the recipient digits).
     if (!graphReady) {
       return true;
     }
-    // Graph ready but no skip listed — still invite when session is closed.
+    // Graph ready but no skip listed ? still invite when session is closed.
     return true;
   }
 
@@ -4495,7 +4504,7 @@ async function continueInviteAfterRegister(input: {
   });
 
   if (input.guestPhone) {
-    const askText = `${askerName} שאל: ${ask}`;
+    const askText = `${askerName} ???: ${ask}`;
     await sendWhatsAppText(input.guestPhone, askText, {
       ignoreSession: true,
     }).catch(() => "failed" as const);
@@ -4506,8 +4515,8 @@ async function continueInviteAfterRegister(input: {
     askerEmployeeId: invite.askerEmployeeId,
     askerPhone: asker.phone,
     digitalEmployeeId: invite.digitalEmployeeId,
-    askerNotice: `${subjectName} נרשם/ה בוורקי. שאלתי: ${ask} — אעדכן כשיענה/תענה.`,
-    guestAck: `עכשיו אפשר להמשיך: ${ask}`,
+    askerNotice: `${subjectName} ????/? ??????. ?????: ${ask} ? ????? ??????/????.`,
+    guestAck: `????? ???? ??????: ${ask}`,
   };
 }
 

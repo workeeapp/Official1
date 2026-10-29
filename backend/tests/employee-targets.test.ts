@@ -576,6 +576,20 @@ describe("employee targets", () => {
         ],
       }),
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    expect(
+      showButtonsForNotify({
+        ...emptyLlmMetadata(),
+        directory: [
+          {
+            action: "add",
+            name: "נועה",
+            phone: "0521111111",
+            contactId: "",
+            targets: ["עמית"],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג", command: "הצג רשימת אנשי קשר" }]);
     expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
   });
 
@@ -1879,6 +1893,40 @@ describe("employee targets", () => {
           },
         ],
       }),
+    ).toEqual([{ label: "הצג אנשי קשר", command: "הצג רשימת אנשי קשר" }]);
+
+    // Contacts v2: directory add/update/remove → same LIST nav as other domains.
+    expect(
+      ensureSpeakerShowButtons({
+        ...emptyLlmMetadata(),
+        directory: [
+          {
+            action: "add",
+            name: "דני",
+            phone: "0501111111",
+            contactId: "",
+            targets: [],
+          },
+        ],
+      }),
+    ).toEqual([{ label: "הצג אנשי קשר", command: "הצג רשימת אנשי קשר" }]);
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          directory: [
+            {
+              action: "update",
+              name: "דני",
+              phone: "0501111111",
+              contactId: "c1",
+              targets: [],
+            },
+          ],
+        },
+        [],
+        { appliedNav: { listKeys: new Set(["contacts"]), filing: false } },
+      ),
     ).toEqual([{ label: "הצג אנשי קשר", command: "הצג רשימת אנשי קשר" }]);
   });
 

@@ -2198,6 +2198,15 @@ function listKeyNavEligible(
         row.action === "update_filing",
     );
   }
+  if (listKey === "contacts") {
+    if (appliedNav) {
+      return appliedNav.listKeys.has("contacts");
+    }
+    // Contacts v2: directory mutates; legacy lists.contacts still eligible for nav key.
+    if (directoryMutatesForShow(metadata)) {
+      return true;
+    }
+  }
   if (appliedNav) {
     return appliedNav.listKeys.has(listKey);
   }
@@ -2208,6 +2217,15 @@ function listKeyNavEligible(
         list.action === "update") &&
       list.listType !== "reminders" &&
       listNavKeyFromAction(list) === listKey,
+  );
+}
+
+function directoryMutatesForShow(metadata: LlmMetadata): boolean {
+  return (metadata.directory ?? []).some(
+    (row) =>
+      row.action === "add" ||
+      row.action === "remove" ||
+      row.action === "update",
   );
 }
 
@@ -2662,6 +2680,16 @@ function plainSafetyNetListShowButtons(
       command: SHOW_FILINGS_COMMAND,
     });
   }
+  if (
+    directoryMutatesForShow(metadata) &&
+    !coveredListKeys.has("contacts") &&
+    listKeyNavEligible("contacts", metadata, appliedNav, skipSourceCommands)
+  ) {
+    const contactsBtn = plainButtonForListKey("contacts");
+    if (contactsBtn) {
+      pushNavButton(buttons, seen, contactsBtn);
+    }
+  }
   return buttons;
 }
 
@@ -2710,6 +2738,14 @@ export function showButtonsForNotify(metadata: LlmMetadata): LlmReplyButton[] {
     if (!seen.has(command)) {
       seen.add(command);
       buttons.push({ label: "הצג", command });
+    }
+  }
+
+  if (buttons.length < REPLY_BUTTON_MAX && directoryMutatesForShow(metadata)) {
+    const contactsBtn = plainButtonForListKey("contacts");
+    if (contactsBtn && !seen.has(contactsBtn.command)) {
+      seen.add(contactsBtn.command);
+      buttons.push({ label: "הצג", command: contactsBtn.command });
     }
   }
 

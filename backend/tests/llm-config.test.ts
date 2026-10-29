@@ -271,7 +271,7 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("no free-built inventory/agenda");
     expect(config.systemMessage).toContain("CROSS-KIND SEMANTIC");
-    expect(config.systemMessage).toContain("existing items only");
+    expect(config.systemMessage).toContain("existing rows only");
     expect(config.systemMessage).toContain("TIME-OF-DAY");
     expect(config.systemMessage).toContain("PARTIAL CONTEXT");
     expect(config.systemMessage).toContain(
@@ -281,6 +281,17 @@ describe("LLM action schema", () => {
       "FORBIDDEN bare show_dump without ids for a semantic/focused ask",
     );
     expect(config.systemMessage).not.toContain("show_dump_ids (required)");
+    // Phone book parity: path 2 uses phone_book + SPEAKER_CONTACTS; path 3 includes contacts.
+    expect(config.systemMessage).toContain("phone_book|filings|reminders");
+    expect(config.systemMessage).toContain(
+      "copy contact_id from SPEAKER_CONTACTS",
+    );
+    expect(config.systemMessage).toContain(
+      "AND SPEAKER_CONTACTS: pick opaque row ids",
+    );
+    expect(config.systemMessage).toContain(
+      "directory.update with those contact_ids",
+    );
   });
 
   it("requires two-entry soft reminder offer after tasks add without explicit ping", () => {
