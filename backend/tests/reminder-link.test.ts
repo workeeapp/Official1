@@ -8,6 +8,8 @@ const {
   reminderUpdate,
   reminderFindFirst,
   employeeFindMany,
+  linkCreate,
+  linkFindUnique,
 } = vi.hoisted(() => ({
   itemUpdate: vi.fn(),
   itemFindUnique: vi.fn(),
@@ -16,6 +18,8 @@ const {
   reminderUpdate: vi.fn(),
   reminderFindFirst: vi.fn(),
   employeeFindMany: vi.fn(),
+  linkCreate: vi.fn(),
+  linkFindUnique: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -28,6 +32,10 @@ vi.mock("../src/database/prisma.js", () => ({
       findUnique: itemFindUnique,
       findMany: itemFindMany,
       updateMany: itemUpdateMany,
+    },
+    employeeListItemReminderLink: {
+      create: linkCreate,
+      findUnique: linkFindUnique,
     },
     reminder: {
       update: reminderUpdate,
@@ -63,6 +71,10 @@ describe("reminder worker link", () => {
     reminderUpdate.mockReset();
     reminderFindFirst.mockReset();
     employeeFindMany.mockReset();
+    linkCreate.mockReset();
+    linkFindUnique.mockReset();
+    linkFindUnique.mockResolvedValue(null);
+    linkCreate.mockResolvedValue({});
   });
 
   it("involves the human the clock pings without sharing the worker task", async () => {
@@ -165,21 +177,19 @@ describe("reminder worker link", () => {
     ).toEqual([]);
   });
 
-  it("writes only linked_reminder_id for a speaker item (no cascade link)", async () => {
-    itemUpdate.mockResolvedValue({});
+  it("writes join row for a speaker item (no cascade / no legacy FK write)", async () => {
     await linkRemindersToItems(
       [{ id: "r1", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" }],
       [{ id: "i1", itemKey: "לבדוק שטויות", itemLabel: "לבדוק שטויות" }],
     );
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "i1" },
-      data: { linkedReminderId: "r1" },
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: { listItemId: "i1", reminderId: "r1" },
     });
+    expect(itemUpdate).not.toHaveBeenCalled();
     expect(reminderUpdate).not.toHaveBeenCalled();
   });
 
   it("soft-links a new clock to an existing live human row by exact key (REUSE, no list mutate)", async () => {
-    itemUpdate.mockResolvedValue({});
     itemFindMany.mockResolvedValue([
       {
         id: "existing-maya",
@@ -206,14 +216,12 @@ describe("reminder worker link", () => {
       ],
       live,
     );
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "existing-maya" },
-      data: { linkedReminderId: "r-ping" },
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: { listItemId: "existing-maya", reminderId: "r-ping" },
     });
   });
 
   it("unions same-turn mutate with live rows so REUSE still links when another list mutates", async () => {
-    itemUpdate.mockResolvedValue({});
     itemFindMany.mockResolvedValue([
       {
         id: "existing-maya",
@@ -252,9 +260,8 @@ describe("reminder worker link", () => {
       ],
       candidates,
     );
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "existing-maya" },
-      data: { linkedReminderId: "r-ping" },
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: { listItemId: "existing-maya", reminderId: "r-ping" },
     });
   });
 
@@ -324,7 +331,6 @@ describe("reminder worker link", () => {
   });
 
   it("soft-links a same-turn update row to a matching new clock", async () => {
-    itemUpdate.mockResolvedValue({});
     const items = itemsFromListMutationsForSoftLink(
       [
         {
@@ -347,9 +353,35 @@ describe("reminder worker link", () => {
       ],
       items,
     );
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "skazi-am" },
-      data: { linkedReminderId: "r-0830" },
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: { listItemId: "skazi-am", reminderId: "r-0830" },
+    });
+  });
+
+  it("soft-link skips when reminder already linked to another item (no steal)", async () => {
+    linkFindUnique.mockResolvedValue({ listItemId: "other-item" });
+    await linkRemindersToItems(
+      [{ id: "r1", itemKey: "חלב", itemLabel: "חלב" }],
+      [{ id: "i1", itemKey: "חלב", itemLabel: "חלב" }],
+    );
+    expect(linkCreate).not.toHaveBeenCalled();
+  });
+
+  it("soft-link appends a second clock on an item that already has one", async () => {
+    linkFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    await linkRemindersToItems(
+      [
+        { id: "r-am", itemKey: "וטרינר", itemLabel: "וטרינר" },
+        { id: "r-pm", itemKey: "וטרינר", itemLabel: "וטרינר" },
+      ],
+      [{ id: "task-1", itemKey: "וטרינר", itemLabel: "וטרינר" }],
+    );
+    // Exact key pairs one clock per pass; first clock wins the itemKey slot.
+    expect(linkCreate).toHaveBeenCalledTimes(1);
+    expect(linkCreate).toHaveBeenCalledWith({
+      data: { listItemId: "task-1", reminderId: "r-am" },
     });
   });
 

@@ -829,25 +829,188 @@ export function pairLinkedItemsToReminders(
   return pairs;
 }
 
+/**
+ * Exact-key soft-link: INSERT join only. Never steals a reminder already linked
+ * to another item; never clears other clocks on the item. Link failure is
+ * silent (clock stays saved). Legacy linked_reminder_id is not written.
+ */
 export async function linkRemindersToItems(
   reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
   items: LinkedItemRef[],
 ): Promise<void> {
-  if (reminders.length === 0 || items.length === 0 || !prisma.employeeListItem?.update) {
+  if (
+    reminders.length === 0 ||
+    items.length === 0 ||
+    !prisma.employeeListItemReminderLink?.create
+  ) {
     return;
   }
   for (const pair of pairLinkedItemsToReminders(reminders, items)) {
+    await insertItemReminderLink({
+      listItemId: pair.itemId,
+      reminderId: pair.reminderId,
+    });
+  }
+}
+
+const LINK_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
+}
+
+/** Insert one join row; skip on missing table/record, unique clash, or other soft failures. */
+async function insertItemReminderLink(input: {
+  listItemId: string;
+  reminderId: string;
+}): Promise<boolean> {
+  if (!prisma.employeeListItemReminderLink?.create) {
+    return false;
+  }
+  try {
+    // Skip when this reminder is already linked to a different item (no steal).
+    const existing = prisma.employeeListItemReminderLink.findUnique
+      ? await prisma.employeeListItemReminderLink.findUnique({
+          where: { reminderId: input.reminderId },
+          select: { listItemId: true },
+        })
+      : null;
+    if (existing && existing.listItemId !== input.listItemId) {
+      return false;
+    }
+    if (existing && existing.listItemId === input.listItemId) {
+      return true;
+    }
+    await prisma.employeeListItemReminderLink.create({
+      data: {
+        listItemId: input.listItemId,
+        reminderId: input.reminderId,
+      },
+    });
+    return true;
+  } catch (error) {
+    if (
+      isMissingTableError(error) ||
+      isMissingRecord(error) ||
+      isUniqueViolation(error)
+    ) {
+      return false;
+    }
+    // Never fail the reminder save path for link issues.
+    return false;
+  }
+}
+
+/**
+ * Explicit ACTION item_id → join after clocks are saved.
+ * Links only when that exact item row exists, is live tasks|shopping on this
+ * account, and the actor may access it. Failures skip the link only.
+ */
+export async function linkRemindersByItemId(input: {
+  userId: string;
+  actorId: string;
+  saved: Array<{ id: string; requestedItemId?: string }>;
+}): Promise<void> {
+  if (!prisma.employeeListItem?.findFirst) {
+    return;
+  }
+  let actorKind: { kind: string; isOwner: boolean } | null | undefined;
+  for (const clock of input.saved) {
+    const itemId = (clock.requestedItemId ?? "").trim();
+    if (!LINK_UUID_RE.test(itemId) || !LINK_UUID_RE.test(clock.id)) {
+      continue;
+    }
     try {
-      await prisma.employeeListItem.update({
-        where: { id: pair.itemId },
-        data: { linkedReminderId: pair.reminderId },
-      });
-    } catch (error) {
-      if (!isMissingTableError(error) && !isMissingRecord(error)) {
-        throw error;
+      const reminder = prisma.reminder?.findFirst
+        ? await prisma.reminder.findFirst({
+            where: { id: clock.id, userId: input.userId },
+            select: { id: true },
+          })
+        : null;
+      if (!reminder) {
+        continue;
       }
+      const item = await prisma.employeeListItem.findFirst({
+        where: {
+          id: itemId,
+          deletedAt: null,
+          list: {
+            deletedAt: null,
+            listType: { in: ["shopping", "tasks"] },
+            employee: { userId: input.userId, kind: "human" },
+          },
+        },
+        select: {
+          id: true,
+          addedById: true,
+          visibleTo: true,
+          list: { select: { employeeId: true } },
+        },
+      });
+      if (!item) {
+        continue;
+      }
+      const ownerId = item.list.employeeId;
+      const visible = Array.isArray(item.visibleTo)
+        ? item.visibleTo.map(String)
+        : [];
+      let allowed =
+        input.actorId === ownerId ||
+        item.addedById === input.actorId ||
+        visible.includes(input.actorId);
+      if (!allowed) {
+        if (actorKind === undefined) {
+          actorKind = prisma.employee?.findUnique
+            ? await prisma.employee.findUnique({
+                where: { id: input.actorId },
+                select: { kind: true, isOwner: true },
+              })
+            : null;
+        }
+        allowed =
+          actorKind?.kind === "digital" || actorKind?.isOwner === true;
+      }
+      if (!allowed) {
+        continue;
+      }
+      await insertItemReminderLink({
+        listItemId: item.id,
+        reminderId: clock.id,
+      });
+    } catch {
+      // Skip link only — reminder already persisted.
     }
   }
+}
+
+/**
+ * Pure preflight for migration: duplicate live linked_reminder_id values.
+ * Non-empty → abort signal (migration RAISE; tests assert this helper).
+ */
+export function findDuplicateLegacyLinkedReminderIds(
+  rows: Array<{ id: string; linkedReminderId: string | null; deletedAt: Date | null }>,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.deletedAt != null) {
+      continue;
+    }
+    const id = row.linkedReminderId?.trim() ?? "";
+    if (!id) {
+      continue;
+    }
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n > 1)
+    .map(([id]) => id)
+    .sort();
 }
 
 /**
@@ -1488,6 +1651,11 @@ export async function applyReminders(input: {
     composeAtFire?: boolean;
     /** True when the saved row has a non-null compose_condition (WATCH family). */
     hasComposeCondition?: boolean;
+    /**
+     * Echo of ACTION reminders[].item_id for join linking (exact id match only —
+     * not array-order zip).
+     */
+    requestedItemId?: string;
   }>;
   skipped: Array<{
     item: string;
@@ -2082,6 +2250,8 @@ export async function applyReminders(input: {
           )
           .map((peer) => peer.itemLabel),
       );
+      const requestedItemId =
+        typeof reminder.itemId === "string" ? reminder.itemId.trim() : "";
       saved.push({
         id: row.id,
         item: reminder.item.trim(),
@@ -2094,6 +2264,9 @@ export async function applyReminders(input: {
         ...(sameTimeOthers.length > 0 ? { sameTimeOthers } : {}),
         ...(nextCompose ? { composeAtFire: true } : {}),
         ...(hasComposeCondition ? { hasComposeCondition: true } : {}),
+        ...(requestedItemId && LINK_UUID_RE.test(requestedItemId)
+          ? { requestedItemId }
+          : {}),
       });
       if (existing) {
         changes.push({

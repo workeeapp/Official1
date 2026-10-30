@@ -429,6 +429,11 @@ export interface LlmReminderAction {
   composeAspects?: string[];
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
+  /**
+   * Speaker/shopping item to soft-link this clock to (EMPLOYEE_SAVED_DATA
+   * item_id, or same-turn minted lists.add items[].item_id). Add only.
+   */
+  itemId?: string;
   /** update only: cancel / move one occurrence of a repeating clock; the rule stays. */
   occurrenceChange?: RecurrenceException;
   /** Files sent together with the reminder when it fires. */
@@ -1812,7 +1817,10 @@ function reminderActionsFromUnifiedEntry(
       delete merged.list_type;
       delete merged.listType;
     }
+    // remove/update legacy: item_id may stand in for reminder_id.
+    // add: item_id is the speaker/shopping item to soft-link — never promote.
     if (
+      (sourceAction === "remove" || sourceAction === "update") &&
       !readText(merged, ["reminder_id", "reminderId", "id"]) &&
       readText(merged, ["item_id", "itemId"])
     ) {
@@ -2589,6 +2597,9 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     "name",
   ]);
   const reminderId = readText(record, ["reminder_id", "reminderId", "id"]);
+  // Speaker item soft-link target — add only (never alias into reminder_id).
+  const itemId =
+    action === "add" ? readText(record, ["item_id", "itemId"]) : "";
   if (action === "remove" || action === "update") {
     if (!reminderId) {
       return null;
@@ -2688,6 +2699,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
       record.compose_aspects ?? record.composeAspects,
     ),
     reminderId,
+    ...(itemId ? { itemId } : {}),
     ...(occurrenceChange ? { occurrenceChange } : {}),
     ...optionalIds("attachmentIds", record.attachment_ids ?? record.attachmentIds),
     ...optionalIds(

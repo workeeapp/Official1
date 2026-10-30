@@ -142,7 +142,7 @@
     "",
     "6. תזכורות / clocks (reminders) — built-in clocks list:",
     "   - list_type:\"reminders\", list_name:\"\". Never invent a custom list titled תזכורות.",
-    "   - items:[{ item, list_type:\"shopping|tasks\" (wrapper), time/in/recurrence, ping, reminder_id? }]. Outer list_type is reminders; wrapper shopping|tasks is on the item.",
+    "   - items:[{ item, list_type:\"shopping|tasks\" (wrapper), time/in/recurrence, ping, reminder_id?, item_id? }]. Outer list_type is reminders; wrapper shopping|tasks is on the item. Soft-link: item_id = speaker shopping/tasks row (minted same-turn on lists.add or copied from EMPLOYEE_SAVED_DATA). ≥2 clocks on one chore → same item_id on every clock; FORBIDDEN title-only linking.",
     "",
     "Rules:",
     "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
@@ -492,7 +492,7 @@
                         "properties": {
                           "item_id": {
                             "type": "string",
-                            "description": "Copy exactly from this turn's EMPLOYEE_SAVED_DATA list item item_id. Required on lists.remove and lists.update for shopping/tasks/contacts/custom — omitting it skips the mutate."
+                            "description": "Shopping/tasks/contacts/custom: copy exactly from EMPLOYEE_SAVED_DATA on remove/update (required — omitting skips the mutate). On lists.add for a NEW speaker shopping/tasks row that same-turn clocks will soft-link: mint a fresh UUID and put it here, then copy that SAME UUID onto each related list_type reminders items[].item_id. list_type reminders add: copy the speaker/shopping item_id (minted same-turn or from facts) so every clock for that chore links to it — required when ≥2 clocks target one task; FORBIDDEN title-only linking."
                           },
                           "filing_id": {
                             "type": "string",

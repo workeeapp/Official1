@@ -1184,8 +1184,7 @@ function linkedReminderIdsFromTasks(
       continue;
     }
     for (const item of list.items) {
-      const id = reminderIdFromTaskItem(item);
-      if (id) {
+      for (const id of reminderIdsFromTaskItem(item)) {
         ids.add(id);
       }
     }
@@ -1196,12 +1195,32 @@ function linkedReminderIdsFromTasks(
 function reminderIdFromTaskItem(
   item: Record<string, unknown>,
 ): string | null {
-  const raw = item.reminder;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
+  const ids = reminderIdsFromTaskItem(item);
+  return ids[0] ?? null;
+}
+
+/** All linked reminder_ids on a task (reminders[] ∪ singular reminder). */
+function reminderIdsFromTaskItem(item: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: unknown) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return;
+    }
+    const id = (raw as { reminder_id?: unknown }).reminder_id;
+    if (typeof id === "string" && id.trim() && !seen.has(id.trim())) {
+      seen.add(id.trim());
+      out.push(id.trim());
+    }
+  };
+  const many = item.reminders;
+  if (Array.isArray(many)) {
+    for (const entry of many) {
+      push(entry);
+    }
   }
-  const id = (raw as { reminder_id?: unknown }).reminder_id;
-  return typeof id === "string" && id.trim() ? id.trim() : null;
+  push(item.reminder);
+  return out;
 }
 
 /**
@@ -1259,8 +1278,7 @@ export function linkedReminderIdsFromPartnerTasks(
       ) {
         continue;
       }
-      const id = reminderIdFromTaskItem(item);
-      if (id) {
+      for (const id of reminderIdsFromTaskItem(item)) {
         ids.add(id);
       }
     }
@@ -4057,7 +4075,11 @@ export function formatNumberedItem(
 /** True when the item carries a linked active-clock object (any non-array object). */
 export function itemHasLinkedReminder(item: Record<string, unknown>): boolean {
   const raw = item.reminder;
-  return Boolean(raw) && typeof raw === "object" && !Array.isArray(raw);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return true;
+  }
+  const many = item.reminders;
+  return Array.isArray(many) && many.length > 0;
 }
 
 /**
@@ -4250,18 +4272,52 @@ function nextOccurrenceYmds(item: Record<string, unknown>): string[] {
 
 /**
  * Linked-reminder mark for non-occurrence paths.
- * Both modes → `🔔 תזכורת: <formatReminderWhen>` (flat cadence) when when known.
+ * One clock → `🔔 תזכורת: <formatReminderWhen>` (unchanged).
+ * Many → `🔔 תזכורת: a · b` with whens from sorted `reminders[]`.
  */
 export function formatLinkedReminderParen(
   item: Record<string, unknown>,
   now = new Date(),
   mode: ReminderDisplayMode = "list",
 ): string {
-  const raw = item.reminder;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+  const many = Array.isArray(item.reminders)
+    ? item.reminders.filter(
+        (row): row is Record<string, unknown> =>
+          Boolean(row) && typeof row === "object" && !Array.isArray(row),
+      )
+    : [];
+  if (many.length > 1) {
+    const whens: string[] = [];
+    for (const reminder of many) {
+      const when = whenTextFromLinkedReminder(reminder, now);
+      if (when) {
+        whens.push(when);
+      }
+    }
+    if (whens.length === 0) {
+      return itemHasLinkedReminder(item) ? "🔔" : "";
+    }
+    return formatReminderMarkText(mode, whens.join(" · "));
+  }
+  const raw =
+    many.length === 1
+      ? many[0]
+      : item.reminder &&
+          typeof item.reminder === "object" &&
+          !Array.isArray(item.reminder)
+        ? (item.reminder as Record<string, unknown>)
+        : null;
+  if (!raw) {
     return "";
   }
-  const reminder = raw as Record<string, unknown>;
+  const when = whenTextFromLinkedReminder(raw, now);
+  return formatReminderMarkText(mode, when || null);
+}
+
+function whenTextFromLinkedReminder(
+  reminder: Record<string, unknown>,
+  now: Date,
+): string {
   const fireAt =
     typeof reminder.fire_at === "string" ? reminder.fire_at.trim() : "";
   const recurrenceText =
@@ -4270,7 +4326,11 @@ export function formatLinkedReminderParen(
       : "";
   const repeat =
     typeof reminder.repeat === "string" ? reminder.repeat.trim() : "";
-  if (!fireAt && !recurrenceText && (!repeat || repeat === "none" || repeat === "once")) {
+  if (
+    !fireAt &&
+    !recurrenceText &&
+    (!repeat || repeat === "none" || repeat === "once")
+  ) {
     return "";
   }
   const exceptions = Array.isArray(reminder.exceptions)
@@ -4278,7 +4338,7 @@ export function formatLinkedReminderParen(
         (entry): entry is string => typeof entry === "string",
       )
     : undefined;
-  const when = formatReminderWhen(
+  return formatReminderWhen(
     {
       fire_at: fireAt,
       repeat,
@@ -4288,7 +4348,6 @@ export function formatLinkedReminderParen(
     now,
     { flatCadence: true },
   );
-  return formatReminderMarkText(mode, when || null);
 }
 
 /**

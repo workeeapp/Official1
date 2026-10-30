@@ -299,6 +299,8 @@ model EmployeeListItem {
   /** Same-turn clock for a speaker/shared item; deleting the clock keeps the item. */
   linkedReminderId String?   @map("linked_reminder_id") @db.Uuid
   linkedReminder   Reminder? @relation("ClockLinksItem", fields: [linkedReminderId], references: [id], onDelete: SetNull)
+  /** Many clocks per speaker/shopping item (one item per clock). */
+  reminderLinks    EmployeeListItemReminderLink[]
   attachmentLinks  AttachmentLink[]
   /** Task hosts: shopping/custom lists linked to this item. */
   linkedLists      ListItemListLink[]
@@ -308,6 +310,21 @@ model EmployeeListItem {
   @@index([scope])
   @@index([deletedAt])
   @@map("EmployeeListItems")
+}
+
+/// Many clocks ↔ one speaker/shopping item; each clock links to at most one item.
+model EmployeeListItemReminderLink {
+  id         String           @id @default(uuid()) @db.Uuid
+  listItemId String           @map("list_item_id") @db.Uuid
+  reminderId String           @map("reminder_id") @db.Uuid
+  createdAt  DateTime         @default(now()) @map("created_at")
+  listItem   EmployeeListItem @relation(fields: [listItemId], references: [id], onDelete: Cascade)
+  reminder   Reminder         @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+
+  @@unique([listItemId, reminderId])
+  @@unique([reminderId])
+  @@index([listItemId])
+  @@map("EmployeeListItemReminderLinks")
 }
 
 /// Many-to-many: a tasks item hosts links to shopping/custom lists.
@@ -412,6 +429,7 @@ model Reminder {
   workerItem EmployeeListItem? @relation("TaskOwnsClock", fields: [workerItemId], references: [id], onDelete: Cascade)
   ownedTask  EmployeeListItem? @relation("ClockOwnsTask")
   linkedItems EmployeeListItem[] @relation("ClockLinksItem")
+  itemLinks   EmployeeListItemReminderLink[]
   attachmentLinks AttachmentLink[]
 
   @@index([userId, status, fireAt])

@@ -138,6 +138,7 @@ import {
   formatReminderApplyNotice,
   formatReminderDeleteFallback,
   itemsFromListMutationsForSoftLink,
+  linkRemindersByItemId,
   linkRemindersToItems,
   linkRemindersToWorkerTasks,
   listLiveHumanItemsForReminderLink,
@@ -2645,8 +2646,14 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
+    // Explicit ACTION item_id → join (exact persisted id only; no array zip).
+    await linkRemindersByItemId({
+      userId: input.userId,
+      actorId: employee.id,
+      saved: reminderResult.saved,
+    });
     // Soft-link: same-turn human add/update union live shopping/tasks (exact
-    // itemKey later). Never fuzzy label ? that wrote wrong links.
+    // itemKey later). Join append only — never steals a linked clock.
     const humanIds = humans.map((human) => human.id);
     const sameTurnItems = itemsFromListMutationsForSoftLink(
       listMutations,

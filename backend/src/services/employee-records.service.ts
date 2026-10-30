@@ -12,7 +12,11 @@ import {
   type LlmListType,
   type LlmMetadata,
 } from "@workee/shared";
-import { NotFoundError, ValidationError } from "../utils/errors.js";
+import {
+  isMissingTableError,
+  NotFoundError,
+  ValidationError,
+} from "../utils/errors.js";
 import {
   hebrewWeekdayFromYmd,
   jerusalemYmd,
@@ -1961,6 +1965,21 @@ export async function getEmployeeRecordSnapshot(
       : Promise.resolve([]),
   ]);
 
+  // Join-table clocks for live items (union with legacy FK at linkedReminderField).
+  const joinReminderIdsByItem = await loadItemReminderLinkIds([
+    ...ownListsRaw.flatMap((list) => list.items.map((item) => item.id)),
+    ...sharedItems.map((item) => item.id),
+    ...partnerLists.flatMap((list) => list.items.map((item) => item.id)),
+  ]);
+  const attachJoinIds = <T extends { id: string }>(
+    item: T,
+  ): T & { linkedReminderIds?: string[] } => {
+    const ids = joinReminderIdsByItem.get(item.id);
+    return ids && ids.length > 0
+      ? { ...item, linkedReminderIds: ids }
+      : item;
+  };
+
   // Cross-account share partners appear in visible_to but not on this User —
   // load their display names so shared_with / assigned_by resolve.
   const missingNameIds = new Set<string>();
@@ -2056,7 +2075,7 @@ export async function getEmployeeRecordSnapshot(
       item.id,
       {
         ...linkedReminderField(
-          item,
+          attachJoinIds(item),
           activeReminders,
           activeByWorkerItemId,
           names,
@@ -2118,7 +2137,7 @@ export async function getEmployeeRecordSnapshot(
           item.id,
           {
             ...linkedReminderField(
-              item,
+              attachJoinIds(item),
               activeReminders,
               activeByWorkerItemId,
               names,
@@ -2169,7 +2188,7 @@ export async function getEmployeeRecordSnapshot(
         ownerName: list.employee.nickname?.trim() || list.employee.name,
         scope: list.scope === "shared" ? "shared" : "personal",
         visibleTo: list.visibleTo,
-        items: list.items,
+        items: list.items.map(attachJoinIds),
         names,
         activeReminders,
         activeByWorkerItemId,
@@ -2206,7 +2225,7 @@ export async function getEmployeeRecordSnapshot(
         ownerName: list.employee.nickname?.trim() || list.employee.name,
         scope: "shared",
         visibleTo: list.visibleTo,
-        items: list.items,
+        items: list.items.map(attachJoinIds),
         names,
         activeReminders,
         activeByWorkerItemId,
@@ -3700,8 +3719,24 @@ async function applyListAction(
       if (!nextItemKey) {
         continue;
       }
+      // Same-turn mint: model may supply items[].item_id as the PK so reminders
+      // can soft-link by that exact id (no array-order zip).
+      const clientId = readItemId(fieldsItem);
+      let createId: string | undefined;
+      if (clientId && UUID_RE.test(clientId)) {
+        const clash = prisma.employeeListItem?.findUnique
+          ? await prisma.employeeListItem.findUnique({
+              where: { id: clientId },
+              select: { id: true },
+            })
+          : null;
+        if (!clash) {
+          createId = clientId;
+        }
+      }
       const created = await prisma.employeeListItem.create({
         data: {
+          ...(createId ? { id: createId } : {}),
           listId: list.id,
           itemKey: nextItemKey,
           ...fields,
@@ -3949,6 +3984,39 @@ async function resolveListActionAgainstSaved(
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Join-table reminder ids keyed by list item id. Missing table → empty map
+ * (legacy FK path still works). Soft-deleted items are not queried by callers.
+ */
+export async function loadItemReminderLinkIds(
+  itemIds: string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const ids = [...new Set(itemIds.map((id) => id.trim()).filter((id) => UUID_RE.test(id)))];
+  if (
+    ids.length === 0 ||
+    !prisma.employeeListItemReminderLink?.findMany
+  ) {
+    return out;
+  }
+  try {
+    const rows = await prisma.employeeListItemReminderLink.findMany({
+      where: { listItemId: { in: ids } },
+      select: { listItemId: true, reminderId: true },
+    });
+    for (const row of rows) {
+      const list = out.get(row.listItemId) ?? [];
+      list.push(row.reminderId);
+      out.set(row.listItemId, list);
+    }
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error;
+    }
+  }
+  return out;
+}
 
 /**
  * Owner list of each live row addressed by item_id.
@@ -4543,6 +4611,8 @@ function toListSnapshotEntry(input: {
     urgency?: string | null;
     reminderId?: string | null;
     linkedReminderId?: string | null;
+    /** Join-table reminder ids (EmployeeListItemReminderLinks). */
+    linkedReminderIds?: string[];
     addedById?: string | null;
     visibleTo?: unknown;
   }>;
@@ -4640,48 +4710,108 @@ export type LinkedReminderRow = {
   aboutIds?: unknown;
 };
 
+/** Snapshot shape for one linked clock on a list item. */
+function linkedReminderSnapshot(
+  reminder: LinkedReminderRow,
+  names?: Map<string, string>,
+  occurrenceRange?: OccurrenceRange | null,
+): Record<string, unknown> {
+  const aboutIds = Array.isArray(reminder.aboutIds)
+    ? reminder.aboutIds.map(String).filter(Boolean)
+    : [];
+  return {
+    reminder_id: reminder.id,
+    fire_at: formatJerusalemDateTime(reminder.fireAt),
+    repeat: reminder.repeat,
+    ...(aboutIds.length
+      ? {
+          about_ids: aboutIds,
+          about: aboutIds.map((id) => names?.get(id) ?? id),
+        }
+      : {}),
+    ...reminderRuleSnapshot(reminder, occurrenceRange),
+  };
+}
+
 /**
- * The active clock FK-linked to this item: reminder_id (worker task),
- * linked_reminder_id (speaker/shared soft link), or reverse worker_item_id.
+ * Sort clocks for dump / primary pick: fireAt asc, then id.
+ * Primary prefers earliest future fireAt; else earliest overall.
+ */
+export function sortLinkedReminderRows(
+  rows: LinkedReminderRow[],
+  now = new Date(),
+): { primary: LinkedReminderRow; all: LinkedReminderRow[] } | null {
+  if (rows.length === 0) {
+    return null;
+  }
+  const byFire = [...rows].sort((a, b) => {
+    const t = a.fireAt.getTime() - b.fireAt.getTime();
+    return t !== 0 ? t : a.id.localeCompare(b.id);
+  });
+  const nowMs = now.getTime();
+  const future = byFire.filter((row) => row.fireAt.getTime() >= nowMs);
+  const primary = future[0] ?? byFire[0];
+  return { primary, all: byFire };
+}
+
+/**
+ * Active clocks linked to this item: join table ∪ legacy linked_reminder_id ∪
+ * worker reminder_id ∪ reverse worker_item_id. Dedupe by reminder id.
+ * Emits singular `reminder` (primary) + `reminders` (all, sorted).
  */
 export function linkedReminderField(
   item: {
     id?: string;
     reminderId?: string | null;
     linkedReminderId?: string | null;
+    linkedReminderIds?: string[];
   },
   activeReminders: Map<string, LinkedReminderRow>,
   activeByWorkerItemId?: Map<string, LinkedReminderRow>,
   names?: Map<string, string>,
   occurrenceRange?: OccurrenceRange | null,
+  now = new Date(),
 ): Record<string, unknown> {
   const itemId = typeof item.id === "string" ? item.id.trim() : "";
-  const reminder =
-    [item.reminderId, item.linkedReminderId]
-      .map((id) => (id ? activeReminders.get(id) : undefined))
-      .find(Boolean) ??
-    (itemId && activeByWorkerItemId
-      ? activeByWorkerItemId.get(itemId)
-      : undefined);
-  if (!reminder) {
+  const seen = new Set<string>();
+  const rows: LinkedReminderRow[] = [];
+  const pushId = (raw: string | null | undefined) => {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id || seen.has(id)) {
+      return;
+    }
+    const row = activeReminders.get(id);
+    if (!row) {
+      return;
+    }
+    seen.add(id);
+    rows.push(row);
+  };
+  for (const id of item.linkedReminderIds ?? []) {
+    pushId(id);
+  }
+  pushId(item.linkedReminderId);
+  pushId(item.reminderId);
+  if (itemId && activeByWorkerItemId) {
+    const reverse = activeByWorkerItemId.get(itemId);
+    if (reverse) {
+      pushId(reverse.id);
+    }
+  }
+  const sorted = sortLinkedReminderRows(rows, now);
+  if (!sorted) {
     return {};
   }
-  const aboutIds = Array.isArray(reminder.aboutIds)
-    ? reminder.aboutIds.map(String).filter(Boolean)
-    : [];
+  const snapshots = sorted.all.map((row) =>
+    linkedReminderSnapshot(row, names, occurrenceRange),
+  );
   return {
-    reminder: {
-      reminder_id: reminder.id,
-      fire_at: formatJerusalemDateTime(reminder.fireAt),
-      repeat: reminder.repeat,
-      ...(aboutIds.length
-        ? {
-            about_ids: aboutIds,
-            about: aboutIds.map((id) => names?.get(id) ?? id),
-          }
-        : {}),
-      ...reminderRuleSnapshot(reminder, occurrenceRange),
-    },
+    reminder: linkedReminderSnapshot(
+      sorted.primary,
+      names,
+      occurrenceRange,
+    ),
+    reminders: snapshots,
   };
 }
 
