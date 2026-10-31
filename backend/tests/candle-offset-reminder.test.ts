@@ -146,4 +146,39 @@ describe("candle-offset reminder apply", () => {
     ]);
     expect(nextCandleLighting).not.toHaveBeenCalled();
   });
+
+  /**
+   * Documents known write-path gap (out of Jewish Place MVP — do not fix here):
+   * snapshot display lists compose_place for compose_source=jewish, but
+   * nextPlace on create only keeps place for weather/market/mashov/smartschool
+   * or scheduleAnchor=jewish_candles — so compose_source=jewish wipes place.
+   */
+  it("documents compose_source jewish wiping composePlace on create (known bug)", async () => {
+    const result = await applyReminders({
+      userId: "u1",
+      actor: amit,
+      employees: [amit],
+      reminders: [
+        {
+          ...candleReminder,
+          item: "סיכום שבת",
+          text: "סיכום שבת",
+          compose: true,
+          composeSource: "jewish",
+          composePlace: "רמת גן",
+          scheduleAnchor: "",
+          scheduleOffsetMinutes: 0,
+          date: "2026-10-24",
+          time: "09:00",
+        },
+      ],
+    });
+    expect(result.skipped).toEqual([]);
+    expect(result.saved).toHaveLength(1);
+    expect(nextCandleLighting).not.toHaveBeenCalled();
+    const data = reminderCreate.mock.calls[0]![0].data;
+    expect(data.composeSource).toBe("jewish");
+    // Known bug: place is cleared on write despite composePlace on ACTION.
+    expect(data.composePlace).toBe("");
+  });
 });

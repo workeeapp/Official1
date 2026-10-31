@@ -105,4 +105,33 @@ describe("Phase 4 multi-turn corpus (offline wire)", () => {
       ).toBe(true);
     }
   });
+
+  it("live-mt-location tag filter selects Stage 5 deixis subset", () => {
+    const corpus = loadModelEvalMultiTurnCorpus();
+    const selected = filterCasesByTags(corpus.cases, ["live-mt-location"]);
+    expect(selected.map((c) => c.id).sort()).toEqual([
+      "mt-deixis-ambiguous-pin-vs-last-live",
+      "mt-deixis-mention-not-sticky-last-live",
+      "mt-deixis-named-place-not-pin",
+      "mt-deixis-pin-explicit-here",
+      "mt-deixis-shem-after-reminder",
+      "mt-deixis-shem-last-live",
+    ]);
+    expect(selected.every((c) => c.turns.length >= 2)).toBe(true);
+  });
+
+  it("live-mt-jewish-location tag filter selects Stage 2 Jewish place subset", () => {
+    const corpus = loadModelEvalMultiTurnCorpus();
+    const selected = filterCasesByTags(corpus.cases, [
+      "live-mt-jewish-location",
+    ]);
+    expect(selected.map((c) => c.id).sort()).toEqual([
+      "mt-jewish-ambiguous-saved-ask",
+      "mt-jewish-missing-pin-ask",
+      "mt-jewish-named-city",
+      "mt-jewish-pin-explicit-here",
+      "mt-jewish-saved-home",
+    ]);
+    expect(selected.every((c) => c.turns.length >= 2)).toBe(true);
+  });
 });

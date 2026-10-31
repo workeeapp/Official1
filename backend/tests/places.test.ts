@@ -171,6 +171,22 @@ describe("places parking intent prompt/schema routing (offline)", () => {
     // Schema distinguishes attribute-of-business from parking-place search.
     expect(actionJson).toContain("aspects [parking]");
     expect(chatService).toContain('intent:\\"parking\\"');
+
+    // Runtime extras must carry real Hebrew (not mojibake '?'), soft/hard cues, and parking.
+    const placesExtraIdx = chatService.indexOf("PLACES (live local):");
+    expect(placesExtraIdx).toBeGreaterThanOrEqual(0);
+    const placesExtraEnd = chatService.indexOf('\n', placesExtraIdx);
+    const placesExtra = chatService.slice(
+      placesExtraIdx,
+      placesExtraEnd > placesExtraIdx ? placesExtraEnd : placesExtraIdx + 4000,
+    );
+    expect(placesExtra).toMatch(/[\u0590-\u05FF]/);
+    expect(placesExtra).not.toMatch(/\?{5,}/);
+    expect(placesExtra).toContain("פתח תקווה");
+    expect(placesExtra).toContain("באזור השרון");
+    expect(placesExtra).toContain("area_restrict");
+    expect(placesExtra).toContain("soft_place");
+    expect(placesExtra).toContain("איפה יש חניון ליד הקניון?");
   });
 });
 
@@ -221,6 +237,8 @@ describe("formatPlacesHebrew", () => {
     openNow: true,
     weekdayHours: ["יום ראשון: 08:00–23:00"],
     mapsUrl: "https://maps.google.com/?cid=1",
+    lat: null,
+    lng: null,
     parking: null,
     accessibility: null,
     outdoorSeating: null,
@@ -1226,6 +1244,8 @@ describe("Phase D parking formatting", () => {
     openNow: null,
     weekdayHours: [],
     mapsUrl: "",
+    lat: null,
+    lng: null,
     parking: {
       freeLot: null,
       paidLot: true,

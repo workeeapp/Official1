@@ -1,7 +1,23 @@
 /**
  * Live Jewish calendar / Shabbat via Hebcal (no API key).
  * Model→Action→Engine: engine only formats Hebcal facts — never invents times.
+ *
+ * MVP place resolution (PIN / saved coords): product is Israel-only for now, so
+ * lat/lng paths use Asia/Jerusalem. Do not treat that as a global tz default
+ * for abroad pins — a real coords→tzid path needs a later approval.
  */
+
+import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import type { PendingLocation } from "./pending-location.js";
+import { fromPendingLocation } from "./resolved-location.js";
+import {
+  formatSavedLabelMissingCoordsAsk,
+  formatSavedRouteAmbiguousAsk,
+  formatSavedRouteNotice,
+  matchSavedPlaceWithoutCoords,
+  resolveSavedRoutePoint,
+  type SavedLocationContactRef,
+} from "./saved-route-location.js";
 
 export type JewishAspect =
   | "summary"
@@ -154,7 +170,11 @@ function normPlace(s: string): string {
     .toLowerCase();
 }
 
-/** Resolve spoken city to Hebcal geonameid when known. */
+/**
+ * Resolve spoken city to Hebcal geonameid when known.
+ * Exact normalized match only (aliases in IL_GEONAME still apply).
+ * No substring includes — avoids short-alias false positives (ראשון / תא).
+ */
 export function lookupIlGeonameid(place: string): number | null {
   const q = normPlace(place);
   if (!q) {
@@ -162,12 +182,127 @@ export function lookupIlGeonameid(place: string): number | null {
   }
   for (const row of IL_GEONAME) {
     for (const name of row.names) {
-      if (normPlace(name) === q || q.includes(normPlace(name))) {
+      if (normPlace(name) === q) {
         return row.id;
       }
     }
   }
   return null;
+}
+
+/** Hebrew ask when place=speaker but PENDING_LOCATION is missing. */
+export const JEWISH_SPEAKER_MISSING_PIN_ASK =
+  "שלח סיכת מיקום בוואטסאפ, או ציין יישוב לבדיקת זמני שבת.";
+
+/**
+ * True when live jewish must yield to a candle-offset reminder on the same
+ * turn (mirrors chat.service candleAnchorReminder).
+ */
+export function shouldSkipLiveJewishForCandleReminders(
+  reminders:
+    | ReadonlyArray<{
+        scheduleAnchor?: string | null;
+        action?: string | null;
+      }>
+    | null
+    | undefined,
+): boolean {
+  return (reminders ?? []).some(
+    (row) =>
+      String(row.scheduleAnchor ?? "") === "jewish_candles" &&
+      (row.action === "add" || row.action === "update"),
+  );
+}
+
+export type JewishPlaceInputResult =
+  | {
+      kind: "location";
+      loc: JewishLocation;
+      notice?: string;
+      source: "pin" | "saved";
+    }
+  | { kind: "ask"; text: string }
+  | { kind: "named"; place: string };
+
+/**
+ * Narrow place ladder for live jewish (not full RAL):
+ * speaker+PIN → SRP → address-like without coords → named string for
+ * resolveJewishLocation (geonameid / Open-Meteo).
+ *
+ * MVP: pin/saved coords use Asia/Jerusalem (Israel-only product assumption).
+ */
+export function resolveJewishPlaceInput(input: {
+  place: string;
+  pending?: PendingLocation | null;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+}): JewishPlaceInputResult {
+  const q = String(input.place ?? "").trim();
+  if (!q) {
+    return { kind: "named", place: "" };
+  }
+
+  const speaker = q.toLowerCase() === "speaker";
+  const pin = fromPendingLocation(input.pending ?? null);
+
+  if (speaker) {
+    if (pin) {
+      return {
+        kind: "location",
+        loc: {
+          label: pin.label || "המיקום שלך",
+          latitude: pin.lat,
+          longitude: pin.lng,
+          // MVP Israel-only: no coords→tzid helper yet.
+          tzid: DEFAULT_TZ,
+        },
+        source: "pin",
+      };
+    }
+    return { kind: "ask", text: JEWISH_SPEAKER_MISSING_PIN_ASK };
+  }
+
+  const saved = resolveSavedRoutePoint(q, input.snapshot, input.contacts);
+  if (saved.kind === "ambiguous") {
+    return {
+      kind: "ask",
+      text: formatSavedRouteAmbiguousAsk(q, saved.options),
+    };
+  }
+  if (saved.kind === "hit") {
+    return {
+      kind: "location",
+      loc: {
+        label: saved.label,
+        latitude: saved.lat,
+        longitude: saved.lng,
+        // MVP Israel-only: no coords→tzid helper yet.
+        tzid: DEFAULT_TZ,
+      },
+      notice: formatSavedRouteNotice(saved.label),
+      source: "saved",
+    };
+  }
+
+  const noCoords = matchSavedPlaceWithoutCoords(
+    q,
+    input.snapshot,
+    input.contacts,
+  );
+  if (noCoords.kind === "unique") {
+    return {
+      kind: "ask",
+      text: formatSavedLabelMissingCoordsAsk(noCoords.row.label),
+    };
+  }
+  if (noCoords.kind === "ambiguous") {
+    return {
+      kind: "ask",
+      text: formatSavedRouteAmbiguousAsk(q, noCoords.options),
+    };
+  }
+
+  return { kind: "named", place: q };
 }
 
 function clockFromIso(iso: string): string {
@@ -565,15 +700,39 @@ export async function nextCandleLighting(input: {
   }
 }
 
+/** Hint for LAST_LIVE pack — never invents a place; null on ask/fail/default. */
+export type JewishLastLiveHint = {
+  label: string;
+  lat: number | null;
+  lng: number | null;
+  kind: "pin" | "saved" | "geocoded" | "soft_place_text";
+  usedPendingPin: boolean;
+};
+
+export type JewishReplyResult = {
+  text: string;
+  lastLive: JewishLastLiveHint | null;
+};
+
+function jewishReplyText(text: string): JewishReplyResult {
+  return { text, lastLive: null };
+}
+
 export async function resolveJewishReply(input: {
   place: string;
   date?: string | null;
   aspects?: JewishAspect[] | unknown;
   /** Named holiday filter from ACTION (ערב פסח / חנוכה). */
   query?: string | null;
+  /** PENDING_LOCATION pin for place=speaker. */
+  pending?: PendingLocation | null;
+  /** Speaker lists/filings for SRP + address-like guards. */
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  /** SPEAKER_CONTACTS for saved-place resolve. */
+  contacts?: SavedLocationContactRef[] | null;
   fetchImpl?: typeof fetch;
   now?: Date;
-}): Promise<string> {
+}): Promise<JewishReplyResult> {
   const aspects = parseJewishAspects(input.aspects);
   const place = String(input.place ?? "").trim();
   const holidayQuery = String(input.query ?? "").trim();
@@ -581,25 +740,51 @@ export async function resolveJewishReply(input: {
     aspects.includes("summary") ||
     aspects.includes("candles") ||
     aspects.includes("havdalah");
+  // Explicit ACTION place only — empty place that falls through to Jerusalem
+  // default must NOT pack LAST_LIVE (avoids «שם» sticking to ירושלים).
+  const mayPackLastLive = place.length > 0;
 
   if (needsPlace && !place) {
-    return formatJewishHebrew({
-      placeLabel: "",
-      aspects,
-      candles: null,
-      havdalah: null,
-      parasha: null,
-      holidays: [],
-      missingPlace: true,
-      ...(holidayQuery ? { holidayQuery } : {}),
-    });
+    return jewishReplyText(
+      formatJewishHebrew({
+        placeLabel: "",
+        aspects,
+        candles: null,
+        havdalah: null,
+        parasha: null,
+        holidays: [],
+        missingPlace: true,
+        ...(holidayQuery ? { holidayQuery } : {}),
+      }),
+    );
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
   try {
-    const loc = await resolveJewishLocation(place, fetchImpl);
+    const placeInput = resolveJewishPlaceInput({
+      place,
+      pending: input.pending ?? null,
+      snapshot: input.snapshot ?? null,
+      contacts: input.contacts ?? null,
+    });
+    if (placeInput.kind === "ask") {
+      return jewishReplyText(placeInput.text);
+    }
+
+    let loc: JewishLocation | null = null;
+    let savedNotice = "";
+    let source: "pin" | "saved" | "named" = "named";
+    if (placeInput.kind === "location") {
+      loc = placeInput.loc;
+      savedNotice = placeInput.notice?.trim() ?? "";
+      source = placeInput.source;
+    } else {
+      loc = await resolveJewishLocation(placeInput.place, fetchImpl);
+    }
     if (!loc) {
-      return `לא מצאתי את היישוב «${place}». נסי עיר בישראל (למשל תל אביב).`;
+      return jewishReplyText(
+        `לא מצאתי את היישוב «${place}». נסי עיר בישראל (למשל תל אביב).`,
+      );
     }
 
     const date = String(input.date ?? "").trim();
@@ -652,7 +837,7 @@ export async function resolveJewishReply(input: {
       holidaysCollectCapped = named ? false : fetched.collectCapped;
     }
 
-    return formatJewishHebrew({
+    const body = formatJewishHebrew({
       placeLabel,
       aspects,
       candles,
@@ -665,7 +850,46 @@ export async function resolveJewishReply(input: {
         holidays.length > JEWISH_HOLIDAYS_DISPLAY_CAP,
       holidaysCollectCapped,
     });
+    const text = savedNotice ? `${savedNotice}\n${body}` : body;
+
+    let lastLive: JewishLastLiveHint | null = null;
+    if (mayPackLastLive) {
+      const lat =
+        typeof loc.latitude === "number" && Number.isFinite(loc.latitude)
+          ? loc.latitude
+          : null;
+      const lng =
+        typeof loc.longitude === "number" && Number.isFinite(loc.longitude)
+          ? loc.longitude
+          : null;
+      const kind: JewishLastLiveHint["kind"] =
+        source === "pin"
+          ? "pin"
+          : source === "saved"
+            ? "saved"
+            : lat != null && lng != null
+              ? "geocoded"
+              : "soft_place_text";
+      // Prefer ACTION/saved/pin label for deixis re-emit; named city keeps spoken place.
+      const label =
+        source === "pin" || source === "saved"
+          ? loc.label
+          : place || placeLabel;
+      if (label.trim()) {
+        lastLive = {
+          label: label.trim(),
+          lat,
+          lng,
+          kind,
+          usedPendingPin: source === "pin",
+        };
+      }
+    }
+
+    return { text, lastLive };
   } catch {
-    return "לא הצלחתי לבדוק את לוח השבת/החגים עכשיו. נסה שוב בעוד רגע.";
+    return jewishReplyText(
+      "לא הצלחתי לבדוק את לוח השבת/החגים עכשיו. נסה שוב בעוד רגע.",
+    );
   }
 }

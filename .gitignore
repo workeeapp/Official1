@@ -9,6 +9,8 @@ node_modules/
 dist/
 .tools/
 .data/
+# Offline geo coverage downloads (not the committed src/data index).
+backend/.tmp-geo-coverage/
 frontend/.vite/
 node_modules
 docs/qa/phase-4-last-eval.json

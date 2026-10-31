@@ -21,8 +21,28 @@ import {
   type LiveRetrievalRecord,
   type LiveSelectApplyResult,
 } from "./live-retrieval-select.js";
-import { resolvePlaceViewport } from "./geocode-viewport.js";
+import {
+  geographicAreaFromViewportBox,
+  isValidGeoAreaGeometry,
+  pointInAreaGeometry,
+  type GeoAreaGeometry,
+  type ResolvedGeographicArea,
+} from "./geo-area.js";
+import { resolveGeographicArea } from "./resolve-geographic-area.js";
 import type { ResolvedViewport } from "./resolved-location.js";
+
+/** Map facade area → Places rectangle+PIP viewport (same fields Places already consumes). */
+function areaViewportFromGeographicArea(
+  area: ResolvedGeographicArea,
+): ResolvedViewport {
+  return {
+    low: area.bbox.low,
+    high: area.bbox.high,
+    label: area.label,
+    source: area.source,
+    geometry: area.geometry,
+  };
+}
 
 export type PlacesAspect =
   | "summary"
@@ -76,6 +96,9 @@ export type PlaceResult = {
   openNow: boolean | null;
   weekdayHours: string[];
   mapsUrl: string;
+  /** WGS84 from Places `location` when present (needed for area polygon filter). */
+  lat: number | null;
+  lng: number | null;
   parking: PlaceParkingAttrs | null;
   accessibility: PlaceAccessibilityAttrs | null;
   outdoorSeating: TriState;
@@ -120,7 +143,27 @@ export type PlacesFacts = {
    * measured before local mapping / exact rating drops.
    */
   providerPartial?: boolean;
+  /**
+   * True when area_restrict polygon filter dropped rows (outside / missing coords).
+   * Does not invent replacements — kept set may be sparse.
+   */
+  areaPolygonFiltered?: boolean;
 };
+
+/**
+ * area_restrict: Places Text Search has no next-page beyond this many fetches.
+ * One optional follow-up page only when the first page was saturated and
+ * polygon filtering removed candidates (never unbounded).
+ */
+export const PLACES_AREA_RESTRICT_MAX_PAGES = 2;
+
+/**
+ * Caution when polygon filter ran on a saturated provider page — coverage
+ * of the named region is not guaranteed (bbox candidates may crowd out
+ * in-polygon hits).
+ */
+export const PLACES_AREA_POLYGON_PARTIAL_HE =
+  "(ייתכן שהרשימה חלקית לאזור — מועמדים מחוץ לגבול האמיתי תפסו מקום בדף הספק.)";
 
 /**
  * Saturated Places Text Search page (result count == requested max).
@@ -230,15 +273,23 @@ export const PLACES_BASE_FIELD_MASK = [
   "places.googleMapsUri",
 ] as const;
 
+/** Required for area_restrict point-in-polygon post-filter. */
+export const PLACES_LOCATION_FIELD = "places.location";
+
 /**
  * Build FieldMask: base always; Atmosphere/Pro attribute fields only when asked.
  * Parking intent also requests parkingOptions (without changing the base mask).
+ * areaRestrict adds places.location for polygon filtering (Places-specific).
  */
 export function buildPlacesFieldMask(
   aspects: PlacesAspect[],
   intent: PlacesIntent = "business",
+  opts?: { areaRestrict?: boolean },
 ): string {
   const fields = new Set<string>(PLACES_BASE_FIELD_MASK);
+  if (opts?.areaRestrict === true) {
+    fields.add(PLACES_LOCATION_FIELD);
+  }
   if (aspects.includes("parking") || intent === "parking") {
     fields.add("places.parkingOptions");
   }
@@ -397,6 +448,7 @@ type NewPlace = {
   formattedAddress?: string;
   addressComponents?: NewAddressComponent[];
   rating?: number;
+  location?: { latitude?: number; longitude?: number };
   currentOpeningHours?: {
     openNow?: boolean;
     weekdayDescriptions?: string[];
@@ -415,6 +467,7 @@ type NewPlace = {
 
 type SearchTextResponse = {
   places?: NewPlace[];
+  nextPageToken?: string;
   error?: {
     code?: number;
     message?: string;
@@ -510,6 +563,22 @@ function mapNewPlace(row: NewPlace): PlaceResult | null {
     : [];
   const mapsUrl = String(row.googleMapsUri ?? "").trim();
   const googleId = String(row.id ?? "").trim();
+  const latRaw = row.location?.latitude;
+  const lngRaw = row.location?.longitude;
+  const lat =
+    typeof latRaw === "number" &&
+    Number.isFinite(latRaw) &&
+    latRaw >= -90 &&
+    latRaw <= 90
+      ? latRaw
+      : null;
+  const lng =
+    typeof lngRaw === "number" &&
+    Number.isFinite(lngRaw) &&
+    lngRaw >= -180 &&
+    lngRaw <= 180
+      ? lngRaw
+      : null;
   return {
     id:
       googleId ||
@@ -522,12 +591,63 @@ function mapNewPlace(row: NewPlace): PlaceResult | null {
     openNow,
     weekdayHours,
     mapsUrl,
+    lat,
+    lng,
     parking: mapParking(row.parkingOptions),
     accessibility: mapAccessibility(row.accessibilityOptions),
     outdoorSeating: triFromUnknown(row.outdoorSeating),
     goodForChildren: triFromUnknown(row.goodForChildren),
     payment: mapPayment(row.paymentOptions),
   };
+}
+
+/**
+ * Ensure area_restrict viewport carries geometry (synthesize rectangle when
+ * a test stub / Google path omitted it). Invalid → null (fail closed).
+ */
+export function geometryForAreaViewport(
+  vp: ResolvedViewport | null | undefined,
+): GeoAreaGeometry | null {
+  if (!vp) {
+    return null;
+  }
+  if (vp.geometry && isValidGeoAreaGeometry(vp.geometry)) {
+    return vp.geometry;
+  }
+  const area = geographicAreaFromViewportBox({
+    label: vp.label || "area",
+    low: vp.low,
+    high: vp.high,
+    source: vp.source === "osm_nominatim" ? "osm_nominatim" : "geocode_viewport",
+  });
+  return area?.geometry ?? null;
+}
+
+/**
+ * Keep only places with coords inside the area geometry.
+ * Missing coords or outside → drop (fail closed). Does not invent rows.
+ */
+export function filterPlacesByAreaGeometry(
+  rows: PlaceResult[],
+  geometry: GeoAreaGeometry,
+): { kept: PlaceResult[]; dropped: number } {
+  if (!isValidGeoAreaGeometry(geometry)) {
+    return { kept: [], dropped: rows.length };
+  }
+  const kept: PlaceResult[] = [];
+  let dropped = 0;
+  for (const row of rows) {
+    if (row.lat == null || row.lng == null) {
+      dropped += 1;
+      continue;
+    }
+    if (pointInAreaGeometry(row.lat, row.lng, geometry)) {
+      kept.push(row);
+    } else {
+      dropped += 1;
+    }
+  }
+  return { kept, dropped };
 }
 
 /** Compact rows for Stage B live_select (fields returned this turn). */
@@ -824,9 +944,19 @@ export async function fetchPlacesFacts(input: {
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
+  const areaGeometry = areaRestrict
+    ? geometryForAreaViewport(input.areaViewport)
+    : null;
+  // Hard area without usable geometry → fail closed (no provider call leakage).
+  if (areaRestrict && !areaGeometry) {
+    facts.results = [];
+    facts.areaPolygonFiltered = true;
+    return facts;
+  }
+
   // Hard area: category query only — region enforced by locationRestriction.
   // Soft named place: keep query+place text preference.
-  const body: Record<string, unknown> = {
+  const baseBody: Record<string, unknown> = {
     textQuery:
       areaRestrict
         ? query
@@ -838,18 +968,18 @@ export async function fetchPlacesFacts(input: {
     maxResultCount: requestedMax,
   };
   if (openNowFilter === true) {
-    body.openNow = true;
+    baseBody.openNow = true;
   }
   if (minRatingProvider != null) {
-    body.minRating = minRatingProvider;
+    baseBody.minRating = minRatingProvider;
   }
   if (includedType) {
-    body.includedType = includedType;
-    body.strictTypeFiltering = true;
+    baseBody.includedType = includedType;
+    baseBody.strictTypeFiltering = true;
   }
   if (areaRestrict && input.areaViewport) {
     const vp = input.areaViewport;
-    body.locationRestriction = {
+    baseBody.locationRestriction = {
       rectangle: {
         low: { latitude: vp.low.lat, longitude: vp.low.lng },
         high: { latitude: vp.high.lat, longitude: vp.high.lng },
@@ -857,62 +987,129 @@ export async function fetchPlacesFacts(input: {
     };
     // Never pair with locationBias or DISTANCE.
   } else if (nearSpeaker && lat != null && lng != null && biasRadius != null) {
-    body.locationBias = {
+    baseBody.locationBias = {
       circle: {
         center: { latitude: lat, longitude: lng },
         radius: biasRadius,
       },
     };
-    body.rankPreference = "DISTANCE";
+    baseBody.rankPreference = "DISTANCE";
   }
-  const fieldMask = buildPlacesFieldMask(aspects, intent);
-  const searchRes = await fetchImpl(SEARCH_TEXT_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": fieldMask,
-    },
-    body: JSON.stringify(body),
+  const fieldMask = buildPlacesFieldMask(aspects, intent, {
+    areaRestrict,
   });
 
-  let searchJson: SearchTextResponse = {};
-  try {
-    searchJson = (await searchRes.json()) as SearchTextResponse;
-  } catch {
-    searchJson = {};
-  }
-
-  if (!searchRes.ok) {
-    if (isPermissionDenied(searchRes.status, searchJson)) {
-      throw new Error(PLACES_API_DENIED);
+  async function searchTextPage(
+    pageToken?: string,
+  ): Promise<{
+    places: NewPlace[];
+    nextPageToken: string | null;
+    saturated: boolean;
+  }> {
+    const body: Record<string, unknown> = { ...baseBody };
+    if (pageToken) {
+      body.pageToken = pageToken;
     }
-    throw new Error(`places search HTTP ${searchRes.status}`);
-  }
+    const searchRes = await fetchImpl(SEARCH_TEXT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": fieldMask,
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (searchJson.error) {
-    if (isPermissionDenied(searchRes.status, searchJson)) {
-      throw new Error(PLACES_API_DENIED);
+    let searchJson: SearchTextResponse = {};
+    try {
+      searchJson = (await searchRes.json()) as SearchTextResponse;
+    } catch {
+      searchJson = {};
     }
-    throw new Error(
-      `places search ${searchJson.error.status ?? "ERROR"}${
-        searchJson.error.message ? `: ${searchJson.error.message}` : ""
-      }`,
-    );
-  }
 
-  const places = Array.isArray(searchJson.places) ? searchJson.places : [];
-  // Saturation on raw provider page BEFORE local mapping / exact rating drops.
-  const providerPageSaturated = places.length >= requestedMax;
-  const mapped: PlaceResult[] = [];
-  for (const row of places.slice(0, requestedMax)) {
-    const item = mapNewPlace(row);
-    if (item) {
-      mapped.push(item);
+    if (!searchRes.ok) {
+      if (isPermissionDenied(searchRes.status, searchJson)) {
+        throw new Error(PLACES_API_DENIED);
+      }
+      throw new Error(`places search HTTP ${searchRes.status}`);
     }
+
+    if (searchJson.error) {
+      if (isPermissionDenied(searchRes.status, searchJson)) {
+        throw new Error(PLACES_API_DENIED);
+      }
+      throw new Error(
+        `places search ${searchJson.error.status ?? "ERROR"}${
+          searchJson.error.message ? `: ${searchJson.error.message}` : ""
+        }`,
+      );
+    }
+
+    const pagePlaces = Array.isArray(searchJson.places)
+      ? searchJson.places
+      : [];
+    const next =
+      typeof searchJson.nextPageToken === "string" &&
+      searchJson.nextPageToken.trim()
+        ? searchJson.nextPageToken.trim()
+        : null;
+    return {
+      places: pagePlaces.slice(0, requestedMax),
+      nextPageToken: next,
+      saturated: pagePlaces.length >= requestedMax,
+    };
   }
 
-  let working = mapped;
+  const firstPage = await searchTextPage();
+  let providerPageSaturated = firstPage.saturated;
+
+  function mapUnique(rows: NewPlace[], seen: Set<string>): PlaceResult[] {
+    const out: PlaceResult[] = [];
+    for (const row of rows) {
+      const item = mapNewPlace(row);
+      if (!item || seen.has(item.id)) {
+        continue;
+      }
+      seen.add(item.id);
+      out.push(item);
+    }
+    return out;
+  }
+
+  const seenIds = new Set<string>();
+  let working = mapUnique(firstPage.places, seenIds);
+  let areaPolygonFiltered = false;
+
+  if (areaRestrict && areaGeometry) {
+    const firstFilter = filterPlacesByAreaGeometry(working, areaGeometry);
+    areaPolygonFiltered = firstFilter.dropped > 0;
+    working = firstFilter.kept;
+
+    // One optional follow-up page only when the first page was full AND
+    // polygon drops removed candidates (outside-bbox leakage into the quota).
+    if (
+      firstPage.saturated &&
+      firstFilter.dropped > 0 &&
+      firstPage.nextPageToken &&
+      PLACES_AREA_RESTRICT_MAX_PAGES > 1
+    ) {
+      const second = await searchTextPage(firstPage.nextPageToken);
+      if (second.saturated || second.nextPageToken) {
+        providerPageSaturated = true;
+      }
+      const secondMapped = mapUnique(second.places, seenIds);
+      const secondFilter = filterPlacesByAreaGeometry(
+        secondMapped,
+        areaGeometry,
+      );
+      if (secondFilter.dropped > 0) {
+        areaPolygonFiltered = true;
+      }
+      working = working.concat(secondFilter.kept);
+    }
+    facts.areaPolygonFiltered = areaPolygonFiltered;
+  }
+
   let minRatingUnknownDropped = false;
   if (minRating != null) {
     const kept: PlaceResult[] = [];
@@ -1170,6 +1367,9 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
     const emptyBits = filterSummary ? ` (${filterSummary})` : "";
     if (saturated && requestFilters) {
       const notes = [PLACES_FILTERED_SATURATED_EMPTY_HE];
+      if (facts.areaPolygonFiltered) {
+        notes.push(PLACES_AREA_POLYGON_PARTIAL_HE);
+      }
       if (facts.minRatingUnknownDropped) {
         notes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
       }
@@ -1183,6 +1383,9 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
     }
     const empty = `לא מצאתי תוצאות עבור «${facts.query}» ב«${where}»${emptyBits}.`;
     const emptyNotes: string[] = [];
+    if (saturated && facts.areaPolygonFiltered) {
+      emptyNotes.push(PLACES_AREA_POLYGON_PARTIAL_HE);
+    }
     if (facts.minRatingUnknownDropped) {
       emptyNotes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
     }
@@ -1213,6 +1416,9 @@ export function formatPlacesHebrew(facts: PlacesFacts): string {
     notes.push(PLACES_FILTERED_SATURATED_SPARSE_HE);
   } else if (saturated) {
     notes.push(PLACES_PROVIDER_PARTIAL_HE);
+  }
+  if (facts.areaPolygonFiltered && saturated) {
+    notes.push(PLACES_AREA_POLYGON_PARTIAL_HE);
   }
   if (facts.minRatingUnknownDropped) {
     notes.push(PLACES_MIN_RATING_UNKNOWN_DROPPED_HE);
@@ -1254,8 +1460,8 @@ export async function resolvePlacesReplyDetailed(input: {
   speakerAsk?: string;
   billing?: ComposeLlmBilling | null;
   runSelect?: typeof runLivePostSelect;
-  /** Injected for tests — default resolvePlaceViewport. */
-  resolveViewport?: typeof resolvePlaceViewport;
+  /** Injected for tests — default resolveGeographicArea. */
+  resolveArea?: typeof resolveGeographicArea;
 }): Promise<PlacesReplyResult> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
@@ -1295,20 +1501,20 @@ export async function resolvePlacesReplyDetailed(input: {
 
   let areaViewport: ResolvedViewport | null = null;
   if (areaRestrict) {
-    const resolveVp = input.resolveViewport ?? resolvePlaceViewport;
-    const vp = await resolveVp({
+    const resolveArea = input.resolveArea ?? resolveGeographicArea;
+    const resolved = await resolveArea({
       place,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
     });
-    if (!vp.ok) {
+    if (!resolved.ok) {
       return {
-        text: vp.messageHe,
+        text: resolved.messageHe,
         usedPendingPin: false,
         needsLocation: true,
       };
     }
-    areaViewport = vp.viewport;
+    areaViewport = areaViewportFromGeographicArea(resolved.area);
   }
 
   try {
@@ -1382,7 +1588,7 @@ export async function resolvePlacesReply(input: {
   speakerAsk?: string;
   billing?: ComposeLlmBilling | null;
   runSelect?: typeof runLivePostSelect;
-  resolveViewport?: typeof resolvePlaceViewport;
+  resolveArea?: typeof resolveGeographicArea;
 }): Promise<string> {
   return (await resolvePlacesReplyDetailed(input)).text;
 }

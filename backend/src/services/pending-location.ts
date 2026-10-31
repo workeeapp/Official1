@@ -85,9 +85,13 @@ export function formatPendingLocationContext(
       label,
     }),
     "Speaker shared this WhatsApp pin — AVAILABLE only, not an automatic instruction.",
-    "Use it ONLY when the speaker clearly means this pin (near-me deixis / «שם» / «מהמיקום ששלחתי» / «מכאן»).",
-    "Then: places { query, place:\"\", near:\"speaker\" } | weather { place:\"\", near:\"speaker\", aspects } | routes origin \"speaker\".",
-    "Named city/place → use that place string; FORBIDDEN substituting this pin. Vague «מה יש לידי?» with no clear deixis → ASK for a pin/clarification (do not emit near=speaker just because PENDING_LOCATION exists).",
+    "Use near=speaker / routes origin \"speaker\" / jewish place:\"speaker\" ONLY for clear pin deixis: «מכאן», «מהמיקום ששלחתי», «הסיכה», or «כאן»/«לידי»/«באזור שלי» when they mean this shared pin (not a place named earlier in chat).",
+    "Then: places { query, place:\"\", near:\"speaker\" } | weather { place:\"\", near:\"speaker\", aspects } | routes origin \"speaker\" | jewish { place:\"speaker\", aspects }.",
+    "LOCATION ANAPHORA: «שם», «ליד המקום הזה», «באזור שדיברנו» after a city/POI/area named in recent chat → re-emit that place string in place/origin/destination (near empty). FORBIDDEN treating bare «שם» as this pin when a prior named place is the clearer referent.",
+    "Chat history (including turns after an automatic Lucy reminder/outbound) is for resolving that referent — skip intervening system/reminder noise; do not invent places.",
+    "Named city/place or saved label in the current ask → that string wins; FORBIDDEN substituting this pin. Pin TTL alone ≠ near=speaker / jewish place:\"speaker\".",
+    "If pin deixis and a prior named place / LAST_LIVE_LOCATION both fit (ambiguous bare «שם») → ASK one short question (pin vs that place); leave weather/places/routes/jewish null until answered — FORBIDDEN auto-picking LAST_LIVE merely because it is AVAILABLE.",
+    "Vague «מה יש לידי?» / Shabbat «כאן» with no clear pin or prior-place deixis → ASK for a pin/clarification (jewish=null when the ask is Jewish).",
     "Do not invent coordinates.",
   ].join("\n");
 }

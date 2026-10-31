@@ -1,11 +1,22 @@
 import {
   parseLlmReply,
+  parsePlacesAction,
   parseReplyMetadata,
+  parseWeatherAction,
 } from "@workee/shared";
 import { loadLlmConfig } from "../config/llm.js";
 import { formatSpeakerContacts } from "../services/contact.service.js";
 import { formatEmployeeContext } from "../services/employee-records.service.js";
+import {
+  buildLastLiveLocation,
+  formatLastLiveLocationContext,
+  type LastLiveLocation,
+} from "../services/last-live-location.js";
 import { getLlmClient } from "../services/llm-client.js";
+import {
+  formatPendingLocationContext,
+  type PendingLocation,
+} from "../services/pending-location.js";
 import { formatSessionClockContext } from "../utils/relative-date.js";
 import {
   evaluateConstraints,
@@ -19,8 +30,10 @@ import {
   snapshotFromSetup,
   type ModelEvalCorpus,
   type ModelEvalCorpusCase,
+  type ModelEvalLastLiveLocationSetup,
   type ModelEvalMultiTurnCase,
   type ModelEvalMultiTurnCorpus,
+  type ModelEvalPendingLocationSetup,
 } from "./corpus.js";
 import {
   evalPromptProvenance,
@@ -32,6 +45,74 @@ import {
   resetLiveModelItemSeq,
 } from "./live-model-snapshot-apply.js";
 import type { EmployeeRecordSnapshot } from "../services/employee-records.service.js";
+
+function pendingFromSetup(
+  raw: ModelEvalPendingLocationSetup | null | undefined,
+): PendingLocation | null {
+  if (!raw) return null;
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    lat,
+    lng,
+    name: String(raw.name ?? "").trim(),
+    address: String(raw.address ?? "").trim(),
+    at: Date.now(),
+  };
+}
+
+function lastLiveFromSetup(
+  raw: ModelEvalLastLiveLocationSetup | null | undefined,
+): LastLiveLocation | null {
+  if (!raw?.label?.trim()) return null;
+  return buildLastLiveLocation({
+    label: raw.label,
+    lat: raw.lat ?? null,
+    lng: raw.lng ?? null,
+    kind: raw.kind ?? "soft_place_text",
+    domain: raw.domain ?? "places",
+    role: raw.role ?? "place",
+    at: raw.at ?? "2026-10-30T12:00:00.000Z",
+  });
+}
+
+/** Simulate engine pack after a successful live places/weather ACTION emit. */
+function packLastLiveFromMetadata(
+  metadata: ReturnType<typeof parseReplyMetadata>,
+): LastLiveLocation | null {
+  const places = parsePlacesAction(
+    metadata as unknown as Record<string, unknown>,
+  );
+  if (places?.place.trim()) {
+    return buildLastLiveLocation({
+      label: places.place,
+      kind: places.near === "speaker" ? "pin" : "soft_place_text",
+      domain: "places",
+      role: "place",
+    });
+  }
+  if (places?.near === "speaker") {
+    return buildLastLiveLocation({
+      label: "סיכת מיקום",
+      kind: "pin",
+      domain: "places",
+      role: "place",
+    });
+  }
+  const weather = parseWeatherAction(
+    metadata as unknown as Record<string, unknown>,
+  );
+  if (weather?.place.trim()) {
+    return buildLastLiveLocation({
+      label: weather.place,
+      kind: weather.near === "speaker" ? "pin" : "geocoded",
+      domain: "weather",
+      role: "place",
+    });
+  }
+  return null;
+}
 
 export interface ModelEvalRunCaseResult extends ModelEvalCaseResult {
   id: string;
@@ -198,6 +279,8 @@ export interface ModelEvalMultiTurnRunResult {
     failures: string[];
     llmMs: number;
     metadata: ReturnType<typeof parseReplyMetadata>;
+    /** Location facts actually injected this turn (for deixis diagnostics). */
+    injectedLocationFacts?: string;
   }>;
   llmMs: number;
   prompt?: ReturnType<typeof evalPromptProvenance>;
@@ -208,6 +291,8 @@ export interface ModelEvalMultiTurnRunResult {
  * Same conversationId across turns. After each turn, proposed lists/reminders
  * mutate an in-memory snapshot so later turns see prior ACTION effects
  * (still not product DB / LIVE_FULL parity).
+ * Also injects LAST_LIVE_LOCATION / PENDING_LOCATION for deixis eval and
+ * packs LAST_LIVE from emitted places/weather (engine-pack simulation).
  */
 export async function runModelEvalMultiTurnCase(
   corpusCase: ModelEvalMultiTurnCase,
@@ -229,6 +314,8 @@ export async function runModelEvalMultiTurnCase(
     phone: row.phone,
     kind: "person",
   }));
+  let lastLive = lastLiveFromSetup(corpusCase.setup.lastLiveLocation);
+  let pending = pendingFromSetup(corpusCase.setup.pendingLocation);
 
   const client = getLlmClient();
   const conversationId = await client.createConversation();
@@ -237,6 +324,12 @@ export async function runModelEvalMultiTurnCase(
 
   for (let i = 0; i < corpusCase.turns.length; i += 1) {
     const turn = corpusCase.turns[i]!;
+    const locationFacts = [
+      formatPendingLocationContext(pending),
+      formatLastLiveLocationContext(lastLive),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const factsBlock = [
       formatSessionClockContext(),
       formatEmployeeContext(snapshot),
@@ -245,7 +338,10 @@ export async function runModelEvalMultiTurnCase(
         "WORKER_SAVED_DATA",
       ),
       formatSpeakerContacts(contacts),
-    ].join("\n\n");
+      locationFacts,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const message = `${factsBlock}\n\n${speaker}: ${turn.utterance}`;
     const llmStarted = Date.now();
     const llmTurn = await client.createResponse({
@@ -268,6 +364,16 @@ export async function runModelEvalMultiTurnCase(
     );
     // Evolve in-memory facts for the next turn only (eval harness, not product DB).
     applyLiveModelMetadataToSnapshot(snapshot, metadata, speaker);
+    const packed = packLastLiveFromMetadata(metadata);
+    if (packed) {
+      lastLive = packed;
+    }
+    if (turn.setLastLiveLocationAfter) {
+      lastLive = lastLiveFromSetup(turn.setLastLiveLocationAfter);
+    }
+    if (turn.setPendingLocationAfter) {
+      pending = pendingFromSetup(turn.setPendingLocationAfter);
+    }
     const inject = turn.injectAssistantAfter?.trim();
     if (inject) {
       await client.appendAssistantMessage?.(conversationId, inject);
@@ -280,6 +386,7 @@ export async function runModelEvalMultiTurnCase(
       failures: checked.failures,
       llmMs,
       metadata,
+      injectedLocationFacts: locationFacts || undefined,
     });
   }
 

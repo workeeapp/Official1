@@ -58,6 +58,30 @@ export function loadModelEvalCorpus(path = defaultCorpusPath()): ModelEvalCorpus
   return raw;
 }
 
+/** Optional location facts for LIVE multi-turn deixis eval (not product DB). */
+export type ModelEvalPendingLocationSetup = {
+  lat: number;
+  lng: number;
+  name?: string;
+  address?: string;
+};
+
+export type ModelEvalLastLiveLocationSetup = {
+  label: string;
+  lat?: number | null;
+  lng?: number | null;
+  kind?:
+    | "pin"
+    | "saved"
+    | "geocoded"
+    | "soft_place_text"
+    | "area"
+    | "routes_point";
+  domain?: "weather" | "places" | "routes";
+  role?: "origin" | "destination" | "place" | "area";
+  at?: string;
+};
+
 /** One turn inside a Phase 4 multi-turn LIVE / offline-wire case. */
 export interface ModelEvalMultiTurnTurn {
   utterance: string;
@@ -67,6 +91,23 @@ export interface ModelEvalMultiTurnTurn {
    * conversation (automated Lucy / reminder-style interrupt). No extra model call.
    */
   injectAssistantAfter?: string;
+  /**
+   * After this turn, set harness PENDING_LOCATION for the next turn's inject
+   * (simulates a WhatsApp pin arriving between turns).
+   */
+  setPendingLocationAfter?: ModelEvalPendingLocationSetup;
+  /**
+   * After this turn, set harness LAST_LIVE_LOCATION for the next turn
+   * (explicit seed; otherwise places/weather ACTION place may pack).
+   */
+  setLastLiveLocationAfter?: ModelEvalLastLiveLocationSetup;
+}
+
+export interface ModelEvalMultiTurnSetup extends ModelEvalCorpusCase["setup"] {
+  /** Seed LAST_LIVE_LOCATION into the first turn's facts block. */
+  lastLiveLocation?: ModelEvalLastLiveLocationSetup | null;
+  /** Seed PENDING_LOCATION (WhatsApp pin) into facts. */
+  pendingLocation?: ModelEvalPendingLocationSetup | null;
 }
 
 export interface ModelEvalMultiTurnCase {
@@ -75,7 +116,7 @@ export interface ModelEvalMultiTurnCase {
   /** Same topic filter array as single-turn LIVE cases. */
   tags?: string[];
   description?: string;
-  setup: ModelEvalCorpusCase["setup"];
+  setup: ModelEvalMultiTurnSetup;
   turns: ModelEvalMultiTurnTurn[];
 }
 

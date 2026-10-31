@@ -6,6 +6,7 @@ import {
   formatOfficialBoardingDeparturesHe,
   formatRoutesHebrew,
   geocodeNamedPlaceForNearestStop,
+  resolveRoutesEndpoint,
   itineraryWalkTransferBits,
   rankTripItineraries,
   rankTripItinerariesByClosestBoard,
@@ -2100,6 +2101,258 @@ describe("nearest_stop named place geocode", () => {
     );
     expect(text).toMatch(/חיפוש ליד «מיקום הבית»/);
     expect(text).toMatch(/שלום דורני/);
+  });
+
+  it("nearest_stop address-like filing without coords asks and skips geocode", async () => {
+    const fetchImpl = vi.fn();
+    const nearestSpy = vi.spyOn(gtfsQuery, "queryNearestStop");
+    const { text } = await resolveRoutesReply({
+      origin: "מיקום הבית",
+      destination: "",
+      line: "31",
+      aspects: ["nearest_stop"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home-no-coords",
+            item_name: "מיקום הבית",
+            item_info: "רחוב הרצל 1 פתח תקווה",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(nearestSpy).not.toHaveBeenCalled();
+    expect(text).toMatch(/אין קואורדינטות שמורות/);
+    expect(text).toMatch(/מיקום הבית/);
+  });
+});
+
+describe("resolveRoutesEndpoint (shared O/D ladder)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const speakerAsk = "שלח מיקום בוואטסאפ לבדיקה.";
+
+  it("speaker + pin returns pin coords without geocode", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveRoutesEndpoint({
+      label: "speaker",
+      pinLat: 32.1,
+      pinLng: 34.8,
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      kind: "coords",
+      lat: 32.1,
+      lng: 34.8,
+      label: "המיקום שלך",
+      source: "pin",
+    });
+  });
+
+  it("speaker without pin asks — does not fall back to saved", async () => {
+    const result = await resolveRoutesEndpoint({
+      label: "speaker",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f1",
+            item_name: "מיקום הבית",
+            item_info: "32.1, 34.8",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      apiKey: "test-key",
+    });
+    expect(result).toEqual({ kind: "ask", text: speakerAsk });
+  });
+
+  it("saved coords hit skips geocode (same for origin-style labels)", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveRoutesEndpoint({
+      label: "מיקום הבית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home",
+            item_name: "מיקום הבית",
+            item_info: "32.099279, 34.8923104",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.kind).toBe("coords");
+    if (result.kind === "coords") {
+      expect(result.source).toBe("saved");
+      expect(result.lat).toBeCloseTo(32.099279);
+      expect(result.lng).toBeCloseTo(34.8923104);
+      expect(result.savedNotice).toMatch(/מיקום הבית/);
+    }
+  });
+
+  it("address-like filing without coords asks before geocode", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveRoutesEndpoint({
+      label: "מיקום הבית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home-no-coords",
+            item_name: "מיקום הבית",
+            item_info: "רחוב הרצל 1 פתח תקווה",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.kind).toBe("ask");
+    if (result.kind === "ask") {
+      expect(result.text).toMatch(/אין קואורדינטות שמורות/);
+    }
+  });
+
+  it("SRP ambiguous asks and does not pick arbitrarily", async () => {
+    const fetchImpl = vi.fn();
+    const result = await resolveRoutesEndpoint({
+      label: "בית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-a",
+            item_name: "בית אמא",
+            item_info: "32.1, 34.8",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+          {
+            filing_id: "f-b",
+            item_name: "בית עבודה",
+            item_info: "32.2, 34.9",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.kind).toBe("ask");
+    if (result.kind === "ask") {
+      expect(result.text).toMatch(/כמה מיקומים שמורים/);
+      expect(result.text).toMatch(/בית אמא/);
+      expect(result.text).toMatch(/בית עבודה/);
+    }
+  });
+
+  it("origin and destination use the same saved-coords path", async () => {
+    const snapshot = {
+      filing: [
+        {
+          filing_id: "f-home",
+          item_name: "מיקום הבית",
+          item_info: "32.1, 34.8",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+        {
+          filing_id: "f-work",
+          item_name: "מקום העבודה",
+          item_info: "32.05, 34.75",
+          item_description: "",
+          owner: "טל",
+          scope: "personal",
+        },
+      ],
+      lists: [],
+    };
+    const fetchImpl = vi.fn();
+    const origin = await resolveRoutesEndpoint({
+      label: "מיקום הבית",
+      snapshot,
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "k",
+    });
+    const destination = await resolveRoutesEndpoint({
+      label: "מקום העבודה",
+      snapshot,
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "k",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(origin.kind).toBe("coords");
+    expect(destination.kind).toBe("coords");
+    if (origin.kind === "coords" && destination.kind === "coords") {
+      expect(origin.source).toBe("saved");
+      expect(destination.source).toBe("saved");
+      expect(origin.lat).not.toBe(destination.lat);
+    }
+  });
+
+  it("trip-style empty geocode continues unresolved (does not ask)", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ places: [] }),
+    }));
+    // Open-Meteo fallback also empty via rejected/empty — stub both paths by
+    // returning empty Places and making Open-Meteo fail through same fetch.
+    const result = await resolveRoutesEndpoint({
+      label: "מקום_שלא_קיים_xyz_12345",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+    });
+    expect(result.kind).toBe("unresolved");
+    if (result.kind === "unresolved") {
+      expect(result.query).toBe("מקום_שלא_קיים_xyz_12345");
+    }
   });
 });
 

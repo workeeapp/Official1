@@ -41,6 +41,8 @@ const placeA: PlaceResult = {
   openNow: true,
   weekdayHours: [],
   mapsUrl: "",
+  lat: null,
+  lng: null,
   parking: {
     freeLot: true,
     paidLot: false,

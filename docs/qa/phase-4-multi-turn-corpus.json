@@ -1904,6 +1904,567 @@
           ]
         }
       ]
+    },
+    {
+      "id": "mt-deixis-shem-last-live",
+      "tag": "continuity",
+      "description": "Stage5 #1: successful places then «שם» → re-emit LAST_LIVE place, near empty",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "תמצאי מסעדות ברמת גן",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "מסעד",
+              "placeIncludes": "רמת גן",
+              "nearEmpty": true,
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "בתי קפה שם",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "קפה",
+              "placeIncludes": "רמת גן",
+              "nearEmpty": true,
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-deixis-shem-after-reminder",
+      "tag": "continuity",
+      "description": "Stage5 #2: intervening reminder noise; «שם» still resolves prior place",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "תמצאי מסעדות ברמת גן",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "מסעד",
+              "placeIncludes": "רמת גן",
+              "nearEmpty": true
+            }
+          ],
+          "injectAssistantAfter": "⏰ תזכורת: לקנות חלב"
+        },
+        {
+          "utterance": "בתי קפה שם",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "קפה",
+              "placeIncludes": "רמת גן",
+              "nearEmpty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-deixis-ambiguous-pin-vs-last-live",
+      "tag": "continuity",
+      "description": "Stage5 #3: pin + LAST_LIVE both available; bare «שם» → ASK, no live ACTION",
+      "setup": {
+        "lastLiveLocation": {
+          "label": "רמת גן",
+          "kind": "soft_place_text",
+          "domain": "places",
+          "role": "place"
+        },
+        "pendingLocation": {
+          "lat": 31.501,
+          "lng": 34.501,
+          "name": "סיכה שלי"
+        }
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי לוסי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "בתי קפה שם",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-deixis-pin-explicit-here",
+      "tag": "continuity",
+      "description": "Stage5 #4: clear pin deixis «כאן» → places near=speaker, place empty",
+      "setup": {
+        "pendingLocation": {
+          "lat": 31.501,
+          "lng": 34.501,
+          "name": "סיכה שלי"
+        }
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "תמצאי בתי קפה כאן",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "קפה",
+              "nearSpeaker": true,
+              "placeEmpty": true,
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-deixis-named-place-not-pin",
+      "tag": "continuity",
+      "description": "Stage5 #5: named prior place with pin present → place label, not near=speaker",
+      "setup": {
+        "lastLiveLocation": {
+          "label": "רמת גן",
+          "kind": "soft_place_text",
+          "domain": "places",
+          "role": "place"
+        },
+        "pendingLocation": {
+          "lat": 31.501,
+          "lng": 34.501,
+          "name": "סיכה שלי"
+        }
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "תמצאי פיצה ברמת גן",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "פיצה",
+              "placeIncludes": "רמת גן",
+              "nearEmpty": true,
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-deixis-mention-not-sticky-last-live",
+      "tag": "continuity",
+      "description": "Stage5 #6: casual mention only (no LAST_LIVE) must not stick when a new city is named",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "live-mt-location",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "רמת גן זו עיר נחמדה",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "תמצאי מסעדות בתל אביב",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "places"
+            },
+            {
+              "type": "places_action",
+              "queryIncludes": "מסעד",
+              "placeIncludes": "תל אביב",
+              "placeExcludes": "רמת גן",
+              "nearEmpty": true,
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-jewish-pin-explicit-here",
+      "tag": "continuity",
+      "description": "Jewish Stage2: clear pin deixis «כאן» → jewish place=speaker",
+      "setup": {
+        "pendingLocation": {
+          "lat": 32.08,
+          "lng": 34.78,
+          "name": "סיכה שלי"
+        }
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-jewish-location",
+        "jewish",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "מתי נכנסת שבת כאן?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "jewish"
+            },
+            {
+              "type": "jewish_action",
+              "placeIncludes": "speaker",
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-jewish-saved-home",
+      "tag": "continuity",
+      "description": "Jewish Stage2: «בבית» with unique saved home → place=מיקום הבית",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-jewish-home",
+            "item_name": "מיקום הבית",
+            "item_description": "",
+            "item_info": "32.099279, 34.8923104",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-jewish-location",
+        "jewish",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "מתי נכנסת שבת בבית?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "jewish"
+            },
+            {
+              "type": "jewish_action",
+              "placeIncludes": "מיקום הבית",
+              "aspectsIncludes": [
+                "summary"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-jewish-named-city",
+      "tag": "continuity",
+      "description": "Jewish Stage2: explicit city → place=רמת גן (not speaker)",
+      "setup": {
+        "pendingLocation": {
+          "lat": 32.08,
+          "lng": 34.78,
+          "name": "סיכה שלי"
+        }
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-jewish-location",
+        "jewish",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "מתי יוצאת שבת ברמת גן?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domain_only",
+              "domain": "jewish"
+            },
+            {
+              "type": "jewish_action",
+              "placeIncludes": "רמת גן",
+              "aspectsIncludes": [
+                "havdalah"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-jewish-missing-pin-ask",
+      "tag": "continuity",
+      "description": "Jewish Stage2: «כאן» without PENDING → ASK, jewish null",
+      "setup": {},
+      "tags": [
+        "multi-turn",
+        "live-mt-jewish-location",
+        "jewish",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "מתי נכנסת שבת כאן?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mt-jewish-ambiguous-saved-ask",
+      "tag": "continuity",
+      "description": "Jewish Stage2: «בבית» with two saved homes → ASK, jewish null",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-jewish-home-tlv",
+            "item_name": "בית תל אביב",
+            "item_description": "",
+            "item_info": "32.08, 34.78",
+            "owner": "טל",
+            "scope": "personal"
+          },
+          {
+            "filing_id": "eval-jewish-home-haifa",
+            "item_name": "בית חיפה",
+            "item_description": "",
+            "item_info": "32.8, 34.99",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "tags": [
+        "multi-turn",
+        "live-mt-jewish-location",
+        "jewish",
+        "deixis"
+      ],
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "מתי נכנסת שבת בבית?",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

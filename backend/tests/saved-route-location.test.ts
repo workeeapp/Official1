@@ -173,6 +173,33 @@ describe("resolveSavedRoutePoint", () => {
   it("returns none for free-text with no saved coords match", () => {
     expect(resolveSavedRoutePoint("דיזנגוף סנטר", snapshot).kind).toBe("none");
   });
+
+  it("resolves SPEAKER_CONTACTS name when description holds lat,lng", () => {
+    const hit = resolveSavedRoutePoint("סבתא", snapshot, [
+      {
+        id: "c-grandma",
+        name: "סבתא",
+        description: "32.11, 34.85",
+      },
+    ]);
+    expect(hit.kind).toBe("hit");
+    if (hit.kind !== "hit") return;
+    expect(hit.id).toBe("c-grandma");
+    expect(hit.source).toBe("contact");
+    expect(hit.lat).toBeCloseTo(32.11);
+  });
+
+  it("PIN/speaker never wins over an explicit saved contact place string", () => {
+    // resolveSavedRoutePoint ignores speaker; place \"סבתא\" hits contact even if
+    // a pin exists elsewhere — engine uses this before pending when place is set.
+    const hit = resolveSavedRoutePoint("סבתא", snapshot, [
+      { id: "c-grandma", name: "סבתא", description: "32.11, 34.85" },
+    ]);
+    expect(hit.kind).toBe("hit");
+    expect(resolveSavedRoutePoint("speaker", snapshot, [
+      { id: "c-grandma", name: "סבתא", description: "32.11, 34.85" },
+    ]).kind).toBe("none");
+  });
 });
 
 describe("address-like filing without coords", () => {
@@ -217,5 +244,42 @@ describe("address-like filing without coords", () => {
     expect(match.kind).toBe("unique");
     if (match.kind !== "unique") return;
     expect(match.row.label).toBe("מיקום הבית");
+  });
+
+  it("asks when a task label matches but כתובת has street text only", () => {
+    const snapshot: EmployeeRecordSnapshot = {
+      filing: [],
+      lists: [
+        {
+          list_type: "tasks",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "t-work",
+              "שם מטלה": "העבודה",
+              כתובת: "דרך השלום 1 תל אביב",
+            },
+          ],
+        },
+      ],
+    };
+    expect(resolveSavedRoutePoint("העבודה", snapshot).kind).toBe("none");
+    const match = matchAddressLikeFilingWithoutCoords("העבודה", snapshot);
+    expect(match.kind).toBe("unique");
+    if (match.kind !== "unique") return;
+    expect(match.row.id).toBe("t-work");
+    expect(match.row.listType).toBe("tasks");
+  });
+
+  it("asks when a contact has street description without coords", () => {
+    const match = matchAddressLikeFilingWithoutCoords(
+      "סבתא",
+      { filing: [], lists: [] },
+      [{ id: "c-g", name: "סבתא", description: "הרצל 5 רמת גן" }],
+    );
+    expect(match.kind).toBe("unique");
+    if (match.kind !== "unique") return;
+    expect(match.row.listType).toBe("contacts");
   });
 });

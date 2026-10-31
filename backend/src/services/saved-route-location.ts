@@ -1,11 +1,12 @@
 /**
  * Resolve routes origin/destination against saved items that already carry
- * valid lat,lng in EMPLOYEE_SAVED_DATA (filings + every list). No parallel store.
+ * valid lat,lng in EMPLOYEE_SAVED_DATA (filings + every list) and SPEAKER_CONTACTS
+ * (phone-book description may hold coords). No parallel store.
  * Matching uses the ACTION string only — never the raw user utterance.
  *
  * Live weather/places also reuse this matcher via resolveActionLocation.
- * Address-like filings without valid coords are detected separately so those
- * labels are never geocoded as city names.
+ * Labels without valid coords are detected separately so they are never
+ * geocoded as city names.
  */
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import {
@@ -14,13 +15,20 @@ import {
   resolveCustomTitleField,
 } from "./show-button-dump.js";
 
+/** Minimal phone-book row for location resolve (SPEAKER_CONTACTS). */
+export type SavedLocationContactRef = {
+  id: string;
+  name: string;
+  description?: string | null;
+};
+
 export type SavedRoutePointHit = {
   kind: "hit";
   lat: number;
   lng: number;
   label: string;
   id: string;
-  source: "filing" | "list";
+  source: "filing" | "list" | "contact";
   listType?: string;
 };
 
@@ -41,7 +49,7 @@ export type SavedRouteLocationCandidate = {
   label: string;
   lat: number;
   lng: number;
-  source: "filing" | "list";
+  source: "filing" | "list" | "contact";
   listType?: string;
 };
 
@@ -84,6 +92,16 @@ const COORD_SCAN_SKIP_KEYS = new Set([
   "unit",
   "יחידה",
 ]);
+
+/** Fields that may hold a place string (coords or street) on list items. */
+const PLACE_FIELD_KEYS = [
+  "כתובת",
+  "address",
+  "מקום",
+  "location",
+  "מיקום",
+  "place",
+];
 
 function readTrimmed(item: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
@@ -176,20 +194,29 @@ function filingCoords(
   return null;
 }
 
+function contactCoords(
+  row: SavedLocationContactRef,
+): { lat: number; lng: number } | null {
+  const text = String(row.description ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  return parseLatLngCoordinates(text);
+}
+
 /**
  * All saved rows that already store a valid lat,lng string.
- * Filings + every list type (shopping / tasks / contacts / custom).
+ * Filings + every list type (shopping / tasks / custom) + phone-book contacts
+ * whose description holds coordinates.
  */
 export function collectSavedRouteLocationCandidates(
   snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  contacts?: SavedLocationContactRef[] | null,
 ): SavedRouteLocationCandidate[] {
-  if (!snapshot) {
-    return [];
-  }
   const out: SavedRouteLocationCandidate[] = [];
   const seenIds = new Set<string>();
 
-  for (const row of snapshot.filing ?? []) {
+  for (const row of snapshot?.filing ?? []) {
     const id = String(row.filing_id ?? "").trim();
     const coords = filingCoords(row);
     if (!id || !coords) {
@@ -210,7 +237,7 @@ export function collectSavedRouteLocationCandidates(
     });
   }
 
-  for (const list of snapshot.lists ?? []) {
+  for (const list of snapshot?.lists ?? []) {
     const listType = String(list.list_type ?? "").trim() || "custom";
     for (const item of list.items ?? []) {
       if (!item || typeof item !== "object") {
@@ -245,6 +272,24 @@ export function collectSavedRouteLocationCandidates(
         listType,
       });
     }
+  }
+
+  for (const row of contacts ?? []) {
+    const id = String(row.id ?? "").trim();
+    const label = String(row.name ?? "").trim();
+    const coords = contactCoords(row);
+    if (!id || !label || !coords || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    out.push({
+      id,
+      label,
+      lat: coords.lat,
+      lng: coords.lng,
+      source: "contact",
+      listType: "contacts",
+    });
   }
 
   return out;
@@ -283,12 +328,13 @@ function toAmbiguous(
 export function resolveSavedRoutePoint(
   query: string,
   snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  contacts?: SavedLocationContactRef[] | null,
 ): SavedRoutePointResult {
   const q = String(query ?? "").trim();
   if (!q || q.toLowerCase() === "speaker") {
     return { kind: "none" };
   }
-  const candidates = collectSavedRouteLocationCandidates(snapshot);
+  const candidates = collectSavedRouteLocationCandidates(snapshot, contacts);
   if (candidates.length === 0) {
     return { kind: "none" };
   }
@@ -351,7 +397,7 @@ export function formatSavedRouteAmbiguousAsk(
           ? "מטלות"
           : opt.listType === "shopping"
             ? "קניות"
-            : opt.listType === "contacts"
+            : opt.listType === "contacts" || opt.listType === "phone_book"
               ? "אנשי קשר"
               : opt.listType === "custom"
                 ? "רשימה"
@@ -368,12 +414,28 @@ export function formatSavedRouteNotice(label: string): string {
     : "משתמש במיקום השמור.";
 }
 
-/** Address-like filing row that has a label but no valid lat,lng. */
+/** Saved place label that has no valid lat,lng (ask instead of geocoding). */
 export type SavedPlaceLabelOnly = {
   id: string;
   label: string;
-  listType: "filings";
+  listType: string;
 };
+
+function listItemPlaceTextWithoutCoords(
+  item: Record<string, unknown>,
+): string {
+  for (const key of PLACE_FIELD_KEYS) {
+    const value = item[key];
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+    if (parseLatLngCoordinates(value)) {
+      continue;
+    }
+    return value.trim();
+  }
+  return "";
+}
 
 /**
  * Filings whose name looks like a place/address but item fields have no
@@ -406,6 +468,69 @@ export function collectAddressLikeFilingsWithoutCoords(
   return out;
 }
 
+/**
+ * Saved labels without usable coords: address-like filings, list items with a
+ * place field (כתובת/מקום/…), phone-book contacts with a non-coord description.
+ */
+export function collectSavedPlacesWithoutCoords(
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  contacts?: SavedLocationContactRef[] | null,
+): SavedPlaceLabelOnly[] {
+  const out: SavedPlaceLabelOnly[] = [];
+  const seenIds = new Set<string>();
+
+  for (const row of collectAddressLikeFilingsWithoutCoords(snapshot)) {
+    if (seenIds.has(row.id)) {
+      continue;
+    }
+    seenIds.add(row.id);
+    out.push(row);
+  }
+
+  for (const list of snapshot?.lists ?? []) {
+    const listType = String(list.list_type ?? "").trim() || "custom";
+    for (const item of list.items ?? []) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const rec = item as Record<string, unknown>;
+      const id = readTrimmed(rec, ["item_id", "itemId", "id"]);
+      if (!id || seenIds.has(id)) {
+        continue;
+      }
+      if (firstCoordsInItem(rec)) {
+        continue;
+      }
+      if (!listItemPlaceTextWithoutCoords(rec)) {
+        continue;
+      }
+      const label =
+        listItemLabel(listType, rec, list.title_field, list.columns) || id;
+      if (!label.trim()) {
+        continue;
+      }
+      seenIds.add(id);
+      out.push({ id, label: label.trim(), listType });
+    }
+  }
+
+  for (const row of contacts ?? []) {
+    const id = String(row.id ?? "").trim();
+    const label = String(row.name ?? "").trim();
+    const desc = String(row.description ?? "").trim();
+    if (!id || !label || !desc || seenIds.has(id)) {
+      continue;
+    }
+    if (contactCoords(row)) {
+      continue;
+    }
+    seenIds.add(id);
+    out.push({ id, label, listType: "contacts" });
+  }
+
+  return out;
+}
+
 export type SavedPlaceLabelMatch =
   | { kind: "unique"; row: SavedPlaceLabelOnly }
   | {
@@ -414,19 +539,14 @@ export type SavedPlaceLabelMatch =
     }
   | { kind: "none" };
 
-/**
- * Match ACTION place against address-like filings that lack coordinates.
- * Same id / exact label / unique soft rules as resolveSavedRoutePoint.
- */
-export function matchAddressLikeFilingWithoutCoords(
+function matchSavedPlaceLabelRows(
   query: string,
-  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  rows: SavedPlaceLabelOnly[],
 ): SavedPlaceLabelMatch {
   const q = String(query ?? "").trim();
   if (!q || q.toLowerCase() === "speaker") {
     return { kind: "none" };
   }
-  const rows = collectAddressLikeFilingsWithoutCoords(snapshot);
   if (rows.length === 0) {
     return { kind: "none" };
   }
@@ -486,6 +606,34 @@ export function matchAddressLikeFilingWithoutCoords(
     };
   }
   return { kind: "none" };
+}
+
+/**
+ * Match ACTION place against saved labels that lack coordinates (filings,
+ * list items with place fields, phone-book contacts with description).
+ * Same id / exact label / unique soft rules as resolveSavedRoutePoint.
+ */
+export function matchSavedPlaceWithoutCoords(
+  query: string,
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  contacts?: SavedLocationContactRef[] | null,
+): SavedPlaceLabelMatch {
+  return matchSavedPlaceLabelRows(
+    query,
+    collectSavedPlacesWithoutCoords(snapshot, contacts),
+  );
+}
+
+/**
+ * @deprecated Prefer matchSavedPlaceWithoutCoords — filings-only subset kept
+ * for callers/tests that only seed filings.
+ */
+export function matchAddressLikeFilingWithoutCoords(
+  query: string,
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+  contacts?: SavedLocationContactRef[] | null,
+): SavedPlaceLabelMatch {
+  return matchSavedPlaceWithoutCoords(query, snapshot, contacts);
 }
 
 /** Ask when a saved place label matched but has no usable coordinates. */

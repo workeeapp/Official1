@@ -216,6 +216,19 @@ export type ModelEvalConstraint =
       type: "places_action";
       queryIncludes?: string;
       placeIncludes?: string;
+      /** Parsed place must NOT include this substring (fold). */
+      placeExcludes?: string;
+      /** When true, parsed place must be empty (typical near=speaker pin). */
+      placeEmpty?: boolean;
+      /** Assert parsed geoMode (after parsePlacesAction normalization). */
+      geoMode?: "soft_place" | "area_restrict";
+      /**
+       * When true, require empty near on the ACTION after normalization
+       * (area_restrict clears near=speaker).
+       */
+      nearEmpty?: boolean;
+      /** When true, require near=speaker after normalization. */
+      nearSpeaker?: boolean;
       intent?: "business" | "parking";
       openNow?: boolean;
       minRatingAtLeast?: number;
@@ -1104,6 +1117,24 @@ export function checkConstraint(
         !includesFold(action.place, constraint.placeIncludes)
       ) {
         return `places.place missing ~${constraint.placeIncludes} (got ${action.place})`;
+      }
+      if (
+        constraint.placeExcludes &&
+        includesFold(action.place, constraint.placeExcludes)
+      ) {
+        return `places.place must not include ~${constraint.placeExcludes} (got ${action.place})`;
+      }
+      if (constraint.placeEmpty === true && String(action.place ?? "").trim()) {
+        return `places.place must be empty (got ${action.place})`;
+      }
+      if (constraint.geoMode && action.geoMode !== constraint.geoMode) {
+        return `places.geo_mode want ${constraint.geoMode}, got ${action.geoMode}`;
+      }
+      if (constraint.nearEmpty === true && String(action.near ?? "").trim()) {
+        return `places.near must be empty after normalize (got ${action.near})`;
+      }
+      if (constraint.nearSpeaker === true && action.near !== "speaker") {
+        return `places.near want speaker (got ${action.near || "(empty)"})`;
       }
       if (constraint.intent && action.intent !== constraint.intent) {
         return `places.intent want ${constraint.intent}, got ${action.intent}`;

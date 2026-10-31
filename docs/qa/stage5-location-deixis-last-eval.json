@@ -1,0 +1,104 @@
+{
+  "generatedAt": "2026-10-30T17:31:14.698Z",
+  "model": "gpt-6-luna",
+  "promptSource": "config:LLM.config.json+buildLucyModelEvalInstructions",
+  "instructionsSha256": "daaceea48f6e3872ce6ea2489e86b550931d62f56a2da6c1264353c357210230",
+  "passRate": 0.8333333333333334,
+  "passed": 5,
+  "total": 6,
+  "rows": [
+    {
+      "id": "mt-deixis-shem-last-live",
+      "scenario": "1 prior place + שם",
+      "expectedAction": "places place~רמת גן near empty",
+      "actualAction": "places query=בתי קפה place=רמת גן near=(empty)",
+      "passFail": "PASS",
+      "failures": [],
+      "inject": {
+        "hasLastLive": true,
+        "hasPendingPin": false
+      },
+      "failureSource": null,
+      "utteranceScored": "בתי קפה שם",
+      "response": "מחפשת בתי קפה ברמת גן."
+    },
+    {
+      "id": "mt-deixis-shem-after-reminder",
+      "scenario": "2 reminder mid + שם",
+      "expectedAction": "places place~רמת גן near empty",
+      "actualAction": "places query=בתי קפה place=רמת גן near=(empty)",
+      "passFail": "PASS",
+      "failures": [],
+      "inject": {
+        "hasLastLive": true,
+        "hasPendingPin": false
+      },
+      "failureSource": null,
+      "utteranceScored": "בתי קפה שם",
+      "response": ""
+    },
+    {
+      "id": "mt-deixis-ambiguous-pin-vs-last-live",
+      "scenario": "3 pin+LAST_LIVE ambiguous שם",
+      "expectedAction": "ASK; live domains empty",
+      "actualAction": "places query=בתי קפה place=רמת גן near=(empty)",
+      "passFail": "FAIL",
+      "failures": [
+        "turn 1: expected no live domain ACTION, got [places]",
+        "turn 1: expected clarifying ask in response"
+      ],
+      "inject": {
+        "hasLastLive": true,
+        "hasPendingPin": true
+      },
+      "failureSource": "model_choice",
+      "utteranceScored": "בתי קפה שם",
+      "response": ""
+    },
+    {
+      "id": "mt-deixis-pin-explicit-here",
+      "scenario": "4 explicit כאן",
+      "expectedAction": "places near=speaker place empty",
+      "actualAction": "places query=בתי קפה place=(empty) near=speaker",
+      "passFail": "PASS",
+      "failures": [],
+      "inject": {
+        "hasLastLive": false,
+        "hasPendingPin": true
+      },
+      "failureSource": null,
+      "utteranceScored": "תמצאי בתי קפה כאן",
+      "response": "מחפשת בתי קפה ליד הסיכה ששלחת."
+    },
+    {
+      "id": "mt-deixis-named-place-not-pin",
+      "scenario": "5 named place with pin present",
+      "expectedAction": "places place~רמת גן near empty",
+      "actualAction": "places query=פיצה place=רמת גן near=(empty)",
+      "passFail": "PASS",
+      "failures": [],
+      "inject": {
+        "hasLastLive": true,
+        "hasPendingPin": true
+      },
+      "failureSource": null,
+      "utteranceScored": "תמצאי פיצה ברמת גן",
+      "response": "מחפשת לך פיצה ברמת גן."
+    },
+    {
+      "id": "mt-deixis-mention-not-sticky-last-live",
+      "scenario": "6 mention only not sticky",
+      "expectedAction": "places place~תל אביב excludes רמת גן",
+      "actualAction": "places query=מסעדות place=תל אביב near=(empty)",
+      "passFail": "PASS",
+      "failures": [],
+      "inject": {
+        "hasLastLive": false,
+        "hasPendingPin": false
+      },
+      "failureSource": null,
+      "utteranceScored": "תמצאי מסעדות בתל אביב",
+      "response": ""
+    }
+  ]
+}

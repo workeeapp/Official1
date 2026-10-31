@@ -2742,6 +2742,36 @@
       ]
     },
     {
+      "id": "live-places-galil-area-restrict",
+      "tag": "happy",
+      "tags": [
+        "live-places",
+        "single-turn",
+        "area-restrict",
+        "galil"
+      ],
+      "description": "Hard inside-region ask for הגליל → geo_mode=area_restrict + place. Offline stub/constraints prove harness only; live model-eval needs separate approval. Live Geocoding for «הגליל» is a separate follow-up (no alias until recorded).",
+      "utterance": "חפש באזור הגליל מסעדות",
+      "setup": {},
+      "constraints": [
+        {
+          "type": "mutations_empty_or_read_only"
+        },
+        {
+          "type": "live_domain_only",
+          "domain": "places"
+        },
+        {
+          "type": "places_action",
+          "queryIncludes": "מסעד",
+          "placeIncludes": "גליל",
+          "geoMode": "area_restrict",
+          "nearEmpty": true,
+          "intent": "business"
+        }
+      ]
+    },
+    {
       "id": "live-routes-transit-pt-tlv",
       "tag": "happy",
       "tags": [

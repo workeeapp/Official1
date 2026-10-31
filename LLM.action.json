@@ -1155,7 +1155,7 @@
                   "object",
                   "null"
                 ],
-                "description": "Live weather ask («מה מזג האוויר מחר בתל אביב» / גובה גלים / «מה מזג האוויר שם?» + WhatsApp pin). Server fetches Open-Meteo and replaces response. null when not a weather ask. Named city → place required, near empty. Clear deixis to PENDING_LOCATION → place:\"\", near:\"speaker\". Vague near-me with no clear pin deixis → ask; leave weather null. FORBIDDEN inventing coordinates or substituting a stored pin for a named city.",
+                "description": "Live weather ask («מה מזג האוויר מחר בתל אביב» / גובה גלים / «מה מזג האוויר שם?» after a named place in chat → re-emit that place; clear pin deixis «מכאן»/«מהמיקום ששלחתי»/«כאן» meaning the shared pin → place:\"\", near:\"speaker\"). Server fetches Open-Meteo and replaces response. null when not a weather ask. Named city → place required, near empty. Bare «שם» is NOT automatically the WhatsApp pin when a prior city/POI is the clearer referent. Pin+prior-place conflict → ask; leave weather null. Vague near-me with no clear pin or prior-place deixis → ask; leave weather null. FORBIDDEN inventing coordinates or substituting a stored pin for a named city.",
                 "properties": {
                   "place": {
                     "type": "string",
@@ -1172,7 +1172,7 @@
                       "",
                       null
                     ],
-                    "description": "\"speaker\" = forecast at PENDING_LOCATION pin when the speaker clearly means that pin. null/empty for named city text."
+                    "description": "\"speaker\" = forecast at PENDING_LOCATION pin only with clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן»/«לידי» meaning the pin). null/empty when place is a named city or anaphoric re-emit of a prior chat place («שם» after תל אביב → place \"תל אביב\", near empty) when that place is clearer and no competing pin. When BOTH PENDING_LOCATION and LAST_LIVE_LOCATION are present and bare «שם» fits either → ASK (weather=null); FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE."
                   },
                   "date": {
                     "type": "string",
@@ -1391,7 +1391,7 @@
                       "null"
                     ],
                     "maxLength": 32,
-                    "description": "\"speaker\" = search around PENDING_LOCATION pin. null/empty for city text or area_restrict. FORBIDDEN with geo_mode=area_restrict."
+                    "description": "\"speaker\" = search around PENDING_LOCATION pin with clear pin deixis only («מכאן» / «מהמיקום ששלחתי» / «כאן» meaning the pin). null/empty for city text, area_restrict, or anaphoric re-emit of a prior chat place («שם» after a named POI → put that name in place) when that place is clearer and no competing pin. FORBIDDEN with geo_mode=area_restrict. FORBIDDEN near=speaker for bare «שם» when a prior named place is the clearer referent. When BOTH PENDING_LOCATION and LAST_LIVE_LOCATION are present and bare «שם» fits either → ASK (places=null); FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE."
                   },
                   "lat": {
                     "type": [
@@ -1463,12 +1463,12 @@
                   "object",
                   "null"
                 ],
-                "description": "Live Jewish calendar / Shabbat ask («מתי מדליקים נרות בפתח תקווה» / «מה פרשת השבוע» / «מתי יוצאת שבת» / «איזה חג הבא» / «מתי ערב פסח»). Server fetches Hebcal and replaces response — FORBIDDEN inventing times. Place required for candles/havdalah/summary (Israel city); optional for parasha/holidays. Named holiday («ערב פסח») → aspects[holidays] + query with that name (server matches beyond the short upcoming window). Missing required place → ask; leave jewish null.",
+                "description": "Live Jewish calendar / Shabbat ask («מתי מדליקים נרות בפתח תקווה» / «מתי נכנסת שבת כאן» / «מתי נכנסת שבת בבית» / «מה פרשת השבוע» / «מתי יוצאת שבת» / «איזה חג הבא» / «מתי ערב פסח»). Server fetches Hebcal and replaces response — FORBIDDEN inventing times. Place required for candles/havdalah/summary; optional for parasha/holidays. Named city → that city string. Clear pin deixis («כאן»/«מכאן»/«מהמיקום ששלחתי») → place:\"speaker\" (PENDING_LOCATION). Unique saved home/work label → place=exact EMPLOYEE_SAVED_DATA label. «שם» after prior LAST_LIVE/jewish place when that label is clearer and no competing pin → re-emit that label in place. When BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם» fits either → ASK; jewish=null — FORBIDDEN preferring LAST_LIVE merely because AVAILABLE. Ambiguous saved matches or pin vs city unclear → ASK; jewish=null. Named holiday («ערב פסח») → aspects[holidays] + query. Missing required place / missing pin when they meant כאן → ask; jewish=null.",
                 "properties": {
                   "place": {
                     "type": "string",
                     "maxLength": 255,
-                    "description": "Israel city for local candle/Havdalah times (פתח תקווה, תל אביב). Empty OK for parasha/holidays alone."
+                    "description": "Israel city (פתח תקווה, תל אביב), OR \"speaker\" for clear pin deixis (PENDING_LOCATION), OR exact saved location label from EMPLOYEE_SAVED_DATA («מיקום הבית»), OR re-emit of LAST_LIVE_LOCATION/prior chat label for «שם» when that referent is clearer and no competing pin. Empty OK for parasha/holidays alone. FORBIDDEN inventing coords; FORBIDDEN place:\"speaker\" merely because a pin is AVAILABLE; FORBIDDEN auto-picking LAST_LIVE when pin+LAST_LIVE both fit bare «שם» (ASK instead)."
                   },
                   "date": {
                     "type": "string",

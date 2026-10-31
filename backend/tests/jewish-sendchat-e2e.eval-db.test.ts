@@ -60,7 +60,7 @@ describe("Jewish sendChat E2E (eval-db, real Hebcal)", () => {
       "geocoding-api.open-meteo.com",
     ]);
 
-    const serviceText = await resolveJewishReply({
+    const { text: serviceText } = await resolveJewishReply({
       place: PLACE,
       date: "",
       aspects: ["candles"],

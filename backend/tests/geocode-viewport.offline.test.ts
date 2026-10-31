@@ -68,6 +68,7 @@ describe("resolvePlaceViewport (offline)", () => {
         {
           formatted_address: "השרון, ישראל",
           partial_match: false,
+          types: ["administrative_area_level_2", "political"],
           geometry: { viewport: SHARON_VIEWPORT },
         },
       ],
@@ -76,12 +77,15 @@ describe("resolvePlaceViewport (offline)", () => {
       place: "השרון",
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.viewport.low).toEqual({ lat: 32.05, lng: 34.75 });
     expect(out.viewport.high).toEqual({ lat: 32.35, lng: 35.05 });
     expect(out.viewport.source).toBe("geocode_viewport");
+    expect(out.viewport.geometry?.type).toBe("Polygon");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const url = String(fetchImpl.mock.calls[0]![0]);
     expect(url).toContain("maps.googleapis.com/maps/api/geocode/json");
@@ -94,6 +98,8 @@ describe("resolvePlaceViewport (offline)", () => {
       place: "אזור שלא קיים",
       apiKey: "test-key",
       fetchImpl: geocodeFetch({ status: "ZERO_RESULTS", results: [] }) as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -123,6 +129,8 @@ describe("resolvePlaceViewport (offline)", () => {
           },
         ],
       }) as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -143,6 +151,8 @@ describe("resolvePlaceViewport (offline)", () => {
           },
         ],
       }) as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -167,18 +177,22 @@ describe("resolvePlaceViewport (offline)", () => {
           },
         ],
       }) as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.kind).toBe("invalid");
   });
 
-  it("missing API key → missing_key (no fetch)", async () => {
+  it("missing API key → missing_key (no fetch) when Nominatim disabled", async () => {
     const fetchImpl = geocodeFetch({ status: "OK", results: [] });
     const out = await resolvePlaceViewport({
       place: "השרון",
       apiKey: "",
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -191,6 +205,8 @@ describe("resolvePlaceViewport (offline)", () => {
       place: "השרון",
       apiKey: "test-key",
       fetchImpl: geocodeFetch({}, { ok: false, status: 500 }) as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -205,6 +221,8 @@ describe("resolvePlaceViewport (offline)", () => {
       place: "השרון",
       apiKey: "test-key",
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      allowNominatimFallback: false,
+      allowIndexLookup: false,
     });
     expect(out.ok).toBe(false);
     if (out.ok) return;

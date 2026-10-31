@@ -351,9 +351,12 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
     case "places_action":
       meta.places = {
         query: c.queryIncludes ?? "מסעדה",
-        place: c.placeIncludes ?? "פתח תקווה",
-        near: "",
-        geo_mode: "soft_place",
+        place: c.placeEmpty
+          ? ""
+          : (c.placeIncludes ?? "פתח תקווה"),
+        near: c.nearSpeaker ? "speaker" : "",
+        // Infrastructure stub only — not a claim about live Lucy behavior.
+        geo_mode: c.geoMode ?? "soft_place",
         intent: c.intent ?? "business",
         open_now: c.openNow ?? null,
         min_rating: c.minRatingAtLeast ?? null,

@@ -280,7 +280,7 @@ async function applyChatLiveDomainPass(input: {
   const jewishAction =
     guestSpeaker || candleAnchorReminder ? null : metadata.jewish ?? null;
   if (jewishAction) {
-    const jewishText = await resolveJewishReply({
+    const { text: jewishText } = await resolveJewishReply({
       place: jewishAction.place,
       date: jewishAction.date,
       aspects: jewishAction.aspects,

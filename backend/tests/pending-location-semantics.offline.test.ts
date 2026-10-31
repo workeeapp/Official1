@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parsePlacesAction, parseWeatherAction } from "@workee/shared";
 import {
   clearPendingLocation,
+  formatPendingLocationContext,
   getPendingLocation,
   resetPendingLocations,
   setPendingLocation,
@@ -135,6 +136,77 @@ describe("pending-location semantics (Stage A)", () => {
     ).toBeNull();
     // Pin remains available — engine never auto-selects it.
     expect(getPendingLocation(EMP)).not.toBeNull();
+  });
+
+  it("LOCATION DEIXIS: PENDING_LOCATION inject teaches pin vs chat anaphora (not bare «שם»→pin)", () => {
+    seedPin();
+    const ctx = formatPendingLocationContext(getPendingLocation(EMP));
+    expect(ctx).toContain("PENDING_LOCATION:");
+    expect(ctx).toContain("AVAILABLE only");
+    // Clear pin cues remain.
+    expect(ctx).toContain("מכאן");
+    expect(ctx).toContain("מהמיקום ששלחתי");
+    // Jewish pin path uses place:"speaker" (no near field on jewish ACTION).
+    expect(ctx).toContain('jewish { place:"speaker"');
+    expect(ctx).toContain('jewish place:"speaker"');
+    // Conversational «שם» must not be listed as automatic pin deixis.
+    expect(ctx).toMatch(/LOCATION ANAPHORA/);
+    expect(ctx).toContain("שם");
+    expect(ctx).toContain("re-emit that place string");
+    expect(ctx).toContain("FORBIDDEN treating bare «שם» as this pin");
+    // Intervening reminder / ambiguity → ask.
+    expect(ctx).toMatch(/reminder|outbound/i);
+    expect(ctx).toMatch(/ASK one short question/);
+    // Must not revive the old blanket «שם»→pin teaching line.
+    expect(ctx).not.toContain(
+      "near-me deixis / «שם» / «מהמיקום ששלחתי» / «מכאן»",
+    );
+  });
+
+  it("LOCATION DEIXIS: expected ACTION shapes for pin vs prior place vs ask (stub contract)", () => {
+    // Pin path — model emits near=speaker (engine does not NLP «מכאן»).
+    const pinAsk = parseWeatherAction({
+      weather: { place: "", near: "speaker", aspects: ["summary"] },
+    });
+    expect(pinAsk?.near).toBe("speaker");
+    expect(pinAsk?.place).toBe("");
+
+    // Prior place anaphora — re-emit city; near empty (not speaker).
+    const priorPlace = parseWeatherAction({
+      weather: {
+        place: "תל אביב",
+        near: "",
+        aspects: ["summary"],
+      },
+    });
+    expect(priorPlace?.place).toBe("תל אביב");
+    expect(priorPlace?.near).toBe("");
+
+    // Ambiguous → model leaves weather null (ask in responses).
+    expect(parseWeatherAction({ weather: null })).toBeNull();
+
+    // Places: same split — near=speaker only for pin; named place for anaphora.
+    const placesPin = parsePlacesAction({
+      places: {
+        query: "מסעדה",
+        place: "",
+        near: "speaker",
+        aspects: ["summary"],
+      },
+    });
+    expect(placesPin?.near).toBe("speaker");
+    expect(placesPin?.place).toBe("");
+
+    const placesAnaphora = parsePlacesAction({
+      places: {
+        query: "בית קפה",
+        place: "מלון דן",
+        near: "",
+        aspects: ["summary"],
+      },
+    });
+    expect(placesAnaphora?.place).toContain("דן");
+    expect(placesAnaphora?.near).toBe("");
   });
 
   it("12 ACTION: clear deixis reuses pin after intervening turn (still in TTL)", async () => {

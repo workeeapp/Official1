@@ -8,12 +8,14 @@
  */
 
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import type { GeoAreaGeometry } from "./geo-area.js";
 import type { PendingLocation } from "./pending-location.js";
 import {
   formatSavedLabelMissingCoordsAsk,
   formatSavedRouteAmbiguousAsk,
-  matchAddressLikeFilingWithoutCoords,
+  matchSavedPlaceWithoutCoords,
   resolveSavedRoutePoint,
+  type SavedLocationContactRef,
 } from "./saved-route-location.js";
 
 export type ResolvedLocationSource =
@@ -32,12 +34,18 @@ export type ResolvedLocation = {
   label: string;
 };
 
-/** SW–NE rectangle for hard Places locationRestriction (B2a). */
+/**
+ * SW–NE rectangle for hard Places locationRestriction (B2a).
+ * Optional `geometry` carries the true region (Polygon/MultiPolygon) when
+ * known — Places uses the box for the API and geometry for post-filter.
+ */
 export type ResolvedViewport = {
   low: { lat: number; lng: number };
   high: { lat: number; lng: number };
   label: string;
-  source: "geocode_viewport";
+  source: "geocode_viewport" | "osm_nominatim" | "geo_area_index";
+  /** RFC7946 Polygon/MultiPolygon ([lng,lat]); omit only for legacy stubs. */
+  geometry?: GeoAreaGeometry;
 };
 
 export function isValidViewport(v: {
@@ -202,10 +210,16 @@ export function resolveActionLocation(input: {
     | Pick<EmployeeRecordSnapshot, "lists" | "filing">
     | null
     | undefined;
+  /** SPEAKER_CONTACTS — description may hold coords or a street note. */
+  contacts?: SavedLocationContactRef[] | null;
 }): ActionLocationResult {
   const place = String(input.place ?? "").trim();
   if (place) {
-    const saved = resolveSavedRoutePoint(place, input.snapshot);
+    const saved = resolveSavedRoutePoint(
+      place,
+      input.snapshot,
+      input.contacts,
+    );
     if (saved.kind === "hit") {
       const location = fromSavedCoords(saved.lat, saved.lng, saved.label);
       if (!location) {
@@ -222,7 +236,11 @@ export function resolveActionLocation(input: {
         askText: formatSavedRouteAmbiguousAsk(place, saved.options),
       };
     }
-    const noCoords = matchAddressLikeFilingWithoutCoords(place, input.snapshot);
+    const noCoords = matchSavedPlaceWithoutCoords(
+      place,
+      input.snapshot,
+      input.contacts,
+    );
     if (noCoords.kind === "unique") {
       return {
         kind: "label_without_coords",

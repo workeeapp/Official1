@@ -3,10 +3,13 @@ import {
   filterHolidaysByQuery,
   formatJewishHebrew,
   jewishHolidayMatchScore,
+  JEWISH_SPEAKER_MISSING_PIN_ASK,
   lookupIlGeonameid,
   nextCandleLighting,
   parseJewishAspects,
+  resolveJewishPlaceInput,
   resolveJewishReply,
+  shouldSkipLiveJewishForCandleReminders,
   stripHebrewNiqqud,
   JEWISH_HOLIDAYS_COLLECT_CAP,
   JEWISH_HOLIDAYS_COLLECT_CAP_HE,
@@ -78,6 +81,167 @@ describe("lookupIlGeonameid", () => {
 
   it("resolves Tel Aviv", () => {
     expect(lookupIlGeonameid("תל אביב")).toBe(293397);
+    expect(lookupIlGeonameid("ת״א")).toBe(293397);
+    expect(lookupIlGeonameid("תא")).toBe(293397);
+  });
+
+  it("resolves Ramat Gan and Rishon LeZion aliases", () => {
+    expect(lookupIlGeonameid("רמת גן")).toBe(293788);
+    expect(lookupIlGeonameid("ראשון לציון")).toBe(293807);
+    expect(lookupIlGeonameid("ראשון")).toBe(293807);
+  });
+
+  it("does not match short aliases as substrings of longer queries", () => {
+    // Exact-only: containing «תא» / «ראשון» must not false-hit the city id.
+    expect(lookupIlGeonameid("ראשון ברשימה שלי")).toBeNull();
+    expect(lookupIlGeonameid("התאמה כללית")).toBeNull();
+    expect(lookupIlGeonameid("רמת גן והסביבה")).toBeNull();
+  });
+});
+
+describe("resolveJewishPlaceInput", () => {
+  it("speaker + pin → lat/lng with Asia/Jerusalem (MVP Israel-only)", () => {
+    const result = resolveJewishPlaceInput({
+      place: "speaker",
+      pending: {
+        lat: 32.08,
+        lng: 34.78,
+        name: "",
+        address: "",
+        at: Date.now(),
+      },
+    });
+    expect(result.kind).toBe("location");
+    if (result.kind === "location") {
+      expect(result.source).toBe("pin");
+      expect(result.loc.latitude).toBeCloseTo(32.08);
+      expect(result.loc.longitude).toBeCloseTo(34.78);
+      expect(result.loc.tzid).toBe("Asia/Jerusalem");
+      expect(result.loc.geonameid).toBeUndefined();
+    }
+  });
+
+  it("speaker without pin asks", () => {
+    expect(
+      resolveJewishPlaceInput({ place: "speaker", pending: null }),
+    ).toEqual({ kind: "ask", text: JEWISH_SPEAKER_MISSING_PIN_ASK });
+  });
+
+  it("saved coords hit skips named geocode path", () => {
+    const result = resolveJewishPlaceInput({
+      place: "מיקום הבית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home",
+            item_name: "מיקום הבית",
+            item_info: "32.099279, 34.8923104",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+    });
+    expect(result.kind).toBe("location");
+    if (result.kind === "location") {
+      expect(result.source).toBe("saved");
+      expect(result.loc.latitude).toBeCloseTo(32.099279);
+      expect(result.loc.longitude).toBeCloseTo(34.8923104);
+      expect(result.loc.tzid).toBe("Asia/Jerusalem");
+      expect(result.notice).toMatch(/מיקום הבית/);
+    }
+  });
+
+  it("ambiguous saved places ask", () => {
+    const result = resolveJewishPlaceInput({
+      place: "בית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f1",
+            item_name: "בית תל אביב",
+            item_info: "32.1, 34.8",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+          {
+            filing_id: "f2",
+            item_name: "בית חיפה",
+            item_info: "32.8, 34.9",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+    });
+    expect(result.kind).toBe("ask");
+    if (result.kind === "ask") {
+      expect(result.text).toMatch(/כמה מיקומים/);
+    }
+  });
+
+  it("address-like filing without coords asks before named path", () => {
+    const result = resolveJewishPlaceInput({
+      place: "מיקום הבית",
+      snapshot: {
+        filing: [
+          {
+            filing_id: "f-home-no-coords",
+            item_name: "מיקום הבית",
+            item_info: "רחוב הרצל 1 פתח תקווה",
+            item_description: "",
+            owner: "טל",
+            scope: "personal",
+          },
+        ],
+        lists: [],
+      },
+    });
+    expect(result.kind).toBe("ask");
+    if (result.kind === "ask") {
+      expect(result.text).toMatch(/אין קואורדינטות/);
+    }
+  });
+
+  it("explicit city falls through as named", () => {
+    expect(resolveJewishPlaceInput({ place: "רמת גן" })).toEqual({
+      kind: "named",
+      place: "רמת גן",
+    });
+  });
+});
+
+describe("shouldSkipLiveJewishForCandleReminders", () => {
+  it("suppresses when jewish_candles add/update is on the same turn", () => {
+    expect(
+      shouldSkipLiveJewishForCandleReminders([
+        { scheduleAnchor: "jewish_candles", action: "add" },
+      ]),
+    ).toBe(true);
+    expect(
+      shouldSkipLiveJewishForCandleReminders([
+        { scheduleAnchor: "jewish_candles", action: "update" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not suppress for cancel or unrelated reminders", () => {
+    expect(
+      shouldSkipLiveJewishForCandleReminders([
+        { scheduleAnchor: "jewish_candles", action: "cancel" },
+      ]),
+    ).toBe(false);
+    expect(
+      shouldSkipLiveJewishForCandleReminders([
+        { scheduleAnchor: "", action: "add" },
+      ]),
+    ).toBe(false);
+    expect(shouldSkipLiveJewishForCandleReminders([])).toBe(false);
   });
 });
 
@@ -260,12 +424,13 @@ describe("nextCandleLighting", () => {
 describe("resolveJewishReply", () => {
   it("asks for place on candles without city", async () => {
     const fetchImpl = vi.fn();
-    const text = await resolveJewishReply({
+    const { text, lastLive } = await resolveJewishReply({
       place: "",
       aspects: ["candles"],
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(text).toMatch(/באיזה יישוב/);
+    expect(lastLive).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -300,7 +465,7 @@ describe("resolveJewishReply", () => {
       return { ok: true, json: async () => ({ results: [] }) };
     }) as unknown as typeof fetch;
 
-    const text = await resolveJewishReply({
+    const { text, lastLive } = await resolveJewishReply({
       place: "",
       aspects: ["holidays"],
       query: "ערב פסח",
@@ -310,6 +475,8 @@ describe("resolveJewishReply", () => {
     expect(text).toContain("ערב פסח");
     expect(text).toContain("21.04.2027");
     expect(text).not.toContain("סיגד");
+    // Empty place → Jerusalem default path: never pack LAST_LIVE.
+    expect(lastLive).toBeNull();
   });
 
   it("formats Shabbat from mocked Hebcal", async () => {
@@ -346,7 +513,7 @@ describe("resolveJewishReply", () => {
       } as Response;
     });
 
-    const text = await resolveJewishReply({
+    const { text, lastLive } = await resolveJewishReply({
       place: "פתח תקווה",
       aspects: ["summary"],
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -355,6 +522,114 @@ describe("resolveJewishReply", () => {
     expect(text).toContain("18:35");
     expect(text).toContain("לֶךְ־לְךָ");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(lastLive).toEqual({
+      label: "פתח תקווה",
+      lat: null,
+      lng: null,
+      kind: "soft_place_text",
+      usedPendingPin: false,
+    });
+  });
+
+  it("Ramat Gan uses geonameid (named path unchanged)", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      const href = String(url);
+      expect(href).toContain("geonameid=293788");
+      expect(href).not.toContain("latitude=");
+      return {
+        ok: true,
+        json: async () => ({
+          location: { title: "Ramat Gan, Israel", geonameid: 293788 },
+          items: [
+            {
+              category: "havdalah",
+              title: "Havdalah: 6:40pm",
+              hebrew: "הַבְדָּלָה: 18:40",
+              date: "2026-10-24T18:40:00+03:00",
+            },
+          ],
+        }),
+      } as Response;
+    });
+    const { text, lastLive } = await resolveJewishReply({
+      place: "רמת גן",
+      aspects: ["havdalah"],
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("18:40");
+    expect(lastLive?.label).toBe("רמת גן");
+    expect(lastLive?.kind).toBe("soft_place_text");
+  });
+
+  it("speaker + pending pin calls Hebcal with lat/lng + tzid", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      const href = String(url);
+      expect(href).toContain("hebcal.com/shabbat");
+      expect(href).toContain("latitude=32.08");
+      expect(href).toContain("longitude=34.78");
+      expect(href).toContain("tzid=Asia%2FJerusalem");
+      expect(href).not.toContain("geonameid=");
+      return {
+        ok: true,
+        json: async () => ({
+          location: { title: "Tel Aviv" },
+          items: [
+            {
+              category: "candles",
+              title: "Candle lighting: 5:30pm",
+              hebrew: "הַדְלָקַת נֵרוֹת: 17:30",
+              date: "2026-10-23T17:30:00+03:00",
+            },
+          ],
+        }),
+      } as Response;
+    });
+    const { text, lastLive } = await resolveJewishReply({
+      place: "speaker",
+      aspects: ["candles"],
+      pending: {
+        lat: 32.08,
+        lng: 34.78,
+        name: "",
+        address: "",
+        at: Date.now(),
+      },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toContain("17:30");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(lastLive).toMatchObject({
+      kind: "pin",
+      lat: 32.08,
+      lng: 34.78,
+      usedPendingPin: true,
+    });
+  });
+
+  it("speaker without pin returns ask and does not fetch", async () => {
+    const fetchImpl = vi.fn();
+    const { text, lastLive } = await resolveJewishReply({
+      place: "speaker",
+      aspects: ["candles"],
+      pending: null,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(text).toBe(JEWISH_SPEAKER_MISSING_PIN_ASK);
+    expect(lastLive).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("Hebcal failure does not pack LAST_LIVE", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("hebcal down");
+    }) as unknown as typeof fetch;
+    const { text, lastLive } = await resolveJewishReply({
+      place: "פתח תקווה",
+      aspects: ["candles"],
+      fetchImpl,
+    });
+    expect(text).toMatch(/לא הצלחתי/);
+    expect(lastLive).toBeNull();
   });
 
   it("fetches holidays from /hebcal", async () => {
@@ -381,7 +656,7 @@ describe("resolveJewishReply", () => {
       } as Response;
     });
 
-    const text = await resolveJewishReply({
+    const { text, lastLive } = await resolveJewishReply({
       place: "",
       aspects: ["holidays"],
       now: new Date("2026-10-20T12:00:00Z"),
@@ -391,6 +666,7 @@ describe("resolveJewishReply", () => {
     expect(text).toContain("05.12.2026");
     expect(text).not.toContain(JEWISH_HOLIDAYS_LOCAL_TRUNCATION_HE);
     expect(text).not.toContain(JEWISH_HOLIDAYS_COLLECT_CAP_HE);
+    expect(lastLive).toBeNull();
   });
 
   it("resolve: discloses display trunc + collect cap when Hebcal returns many holidays", async () => {
@@ -405,7 +681,7 @@ describe("resolveJewishReply", () => {
       json: async () => ({ items }),
     })) as unknown as typeof fetch;
 
-    const text = await resolveJewishReply({
+    const { text } = await resolveJewishReply({
       place: "",
       aspects: ["holidays"],
       now: new Date("2026-10-20T12:00:00Z"),

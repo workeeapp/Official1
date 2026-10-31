@@ -36,9 +36,12 @@ import {
   type SiriFetchResult,
 } from "./siri-sm.js";
 import {
+  formatSavedLabelMissingCoordsAsk,
   formatSavedRouteAmbiguousAsk,
   formatSavedRouteNotice,
+  matchSavedPlaceWithoutCoords,
   resolveSavedRoutePoint,
+  type SavedLocationContactRef,
 } from "./saved-route-location.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import { geocodePlace as geocodePlaceOpenMeteo } from "./weather.js";
@@ -799,6 +802,135 @@ export async function geocodeNamedPlaceForNearestStop(input: {
     kind: "empty",
     messageHe: `לא הצלחתי לזהות את המיקום «${q}». שלח סיכת מיקום בוואטסאפ או כתובת מדויקת יותר.`,
   };
+}
+
+/**
+ * Shared ladder for one routes endpoint (origin or destination):
+ * speaker+PIN → SRP → address-like filing without coords (ASK) →
+ * Places Text Search → Open-Meteo. Never invents coordinates;
+ * never picks arbitrarily on SRP ambiguity.
+ */
+export type RoutesEndpointResolveResult =
+  | {
+      kind: "coords";
+      lat: number;
+      lng: number;
+      label: string;
+      source: "pin" | "saved" | "geocode";
+      savedNotice?: string;
+    }
+  | { kind: "ask"; text: string }
+  | { kind: "unresolved"; query: string }
+  | { kind: "none" };
+
+export async function resolveRoutesEndpoint(input: {
+  label: string;
+  pinLat?: number | null;
+  pinLng?: number | null;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+  fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  /** Hebrew ask when label is speaker and no pin coords were provided. */
+  speakerMissingPinAsk: string;
+  /**
+   * Trip keeps the spoken string for Google when geocode is empty.
+   * nearest_stop surfaces the geocode empty ask.
+   */
+  onGeocodeEmpty: "continue" | "ask";
+}): Promise<RoutesEndpointResolveResult> {
+  const q = String(input.label ?? "").trim();
+  if (!q) {
+    return { kind: "none" };
+  }
+
+  const speaker = q.toLowerCase() === "speaker";
+  const pinOk =
+    input.pinLat != null &&
+    input.pinLng != null &&
+    Number.isFinite(input.pinLat) &&
+    Number.isFinite(input.pinLng);
+
+  if (speaker) {
+    if (pinOk) {
+      return {
+        kind: "coords",
+        lat: input.pinLat!,
+        lng: input.pinLng!,
+        label: "המיקום שלך",
+        source: "pin",
+      };
+    }
+    return { kind: "ask", text: input.speakerMissingPinAsk };
+  }
+
+  const saved = resolveSavedRoutePoint(q, input.snapshot, input.contacts);
+  if (saved.kind === "ambiguous") {
+    return {
+      kind: "ask",
+      text: formatSavedRouteAmbiguousAsk(q, saved.options),
+    };
+  }
+  if (saved.kind === "hit") {
+    return {
+      kind: "coords",
+      lat: saved.lat,
+      lng: saved.lng,
+      label: saved.label,
+      source: "saved",
+      savedNotice: formatSavedRouteNotice(saved.label),
+    };
+  }
+
+  const noCoords = matchSavedPlaceWithoutCoords(
+    q,
+    input.snapshot,
+    input.contacts,
+  );
+  if (noCoords.kind === "unique") {
+    return {
+      kind: "ask",
+      text: formatSavedLabelMissingCoordsAsk(noCoords.row.label),
+    };
+  }
+  if (noCoords.kind === "ambiguous") {
+    return {
+      kind: "ask",
+      text: formatSavedRouteAmbiguousAsk(q, noCoords.options),
+    };
+  }
+
+  const geo = await geocodeNamedPlaceForNearestStop({
+    query: q,
+    fetchImpl: input.fetchImpl,
+    apiKey: input.apiKey,
+  });
+  if (!geo.ok && geo.kind === "ambiguous") {
+    return {
+      kind: "ask",
+      text: geo.options?.length
+        ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
+        : geo.messageHe,
+    };
+  }
+  if (geo.ok) {
+    return {
+      kind: "coords",
+      lat: geo.lat,
+      lng: geo.lng,
+      label: geo.label,
+      source: "geocode",
+    };
+  }
+  if (input.onGeocodeEmpty === "ask") {
+    return {
+      kind: "ask",
+      text:
+        geo.messageHe ||
+        `לא הצלחתי לזהות את המיקום «${q}». שלח סיכת מיקום או כתובת מדויקת יותר.`,
+    };
+  }
+  return { kind: "unresolved", query: q };
 }
 
 /** Model local / ISO → RFC3339 for Routes API. Empty → null. */
@@ -2715,6 +2847,7 @@ async function resolveGtfsRoutesReply(input: {
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
   snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
 }): Promise<{ text: string; navigateAddress: string }> {
   const line = String(input.line ?? "").trim();
   const stopCode = String(input.stopCode ?? "").trim();
@@ -2776,56 +2909,31 @@ async function resolveGtfsRoutesReply(input: {
     }
     const originRaw = String(input.origin ?? "").trim();
     const speakerOrigin = originRaw.toLowerCase() === "speaker";
-    let lat = input.originLat;
-    let lng = input.originLng;
+    let lat: number | null | undefined;
+    let lng: number | null | undefined;
     let placeLabel = "";
-    const pinOk =
-      lat != null &&
-      lng != null &&
-      Number.isFinite(lat) &&
-      Number.isFinite(lng);
 
-    // Live pin wins for speaker. Saved places never replace an explicit pin.
-    if (!pinOk && !speakerOrigin && originRaw) {
-      const saved = resolveSavedRoutePoint(originRaw, input.snapshot);
-      if (saved.kind === "ambiguous") {
-        return {
-          text: formatSavedRouteAmbiguousAsk(originRaw, saved.options),
-          navigateAddress: "",
-        };
-      }
-      if (saved.kind === "hit") {
-        lat = saved.lat;
-        lng = saved.lng;
-        placeLabel = saved.label;
-      }
+    const originResolved = await resolveRoutesEndpoint({
+      label: originRaw,
+      pinLat: input.originLat,
+      pinLng: input.originLng,
+      snapshot: input.snapshot,
+      contacts: input.contacts,
+      fetchImpl: input.fetchImpl,
+      apiKey: input.apiKey,
+      speakerMissingPinAsk:
+        "שלח מיקום בוואטסאפ (סיכת מיקום) ואז אמצא תחנה קרובה לקו.",
+      onGeocodeEmpty: "ask",
+    });
+    if (originResolved.kind === "ask") {
+      return { text: originResolved.text, navigateAddress: "" };
     }
-
-    if (
-      (lat == null ||
-        lng == null ||
-        !Number.isFinite(lat) ||
-        !Number.isFinite(lng)) &&
-      !speakerOrigin &&
-      originRaw
-    ) {
-      const geo = await geocodeNamedPlaceForNearestStop({
-        query: originRaw,
-        fetchImpl: input.fetchImpl,
-        apiKey: input.apiKey,
-      });
-      if (!geo.ok) {
-        if (geo.kind === "ambiguous" && geo.options?.length) {
-          return {
-            text: `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`,
-            navigateAddress: "",
-          };
-        }
-        return { text: geo.messageHe, navigateAddress: "" };
+    if (originResolved.kind === "coords") {
+      lat = originResolved.lat;
+      lng = originResolved.lng;
+      if (originResolved.source !== "pin") {
+        placeLabel = originResolved.label;
       }
-      lat = geo.lat;
-      lng = geo.lng;
-      placeLabel = geo.label;
     }
 
     if (
@@ -3189,6 +3297,8 @@ export async function resolveRoutesReply(input: {
   originLng?: number | null;
   /** Speaker saved lists/filings — resolve named origin/destination to coords. */
   snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  /** SPEAKER_CONTACTS — resolve contact name → coords from description. */
+  contacts?: SavedLocationContactRef[] | null;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
   requireLiveSelect?: boolean;
@@ -3228,6 +3338,7 @@ export async function resolveRoutesReply(input: {
       originLat: input.originLat,
       originLng: input.originLng,
       snapshot: input.snapshot,
+      contacts: input.contacts,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
     });
@@ -3323,86 +3434,65 @@ export async function resolveRoutesReply(input: {
     Boolean(String(input.line ?? "").trim() || String(input.headsign ?? "").trim()) &&
     (aspects.includes("eta") || aspects.includes("frequency"));
 
-  // Named origin (not speaker pin): saved coords first, then geocode.
-  // Speaker + pin already set originLat/Lng — never replace with saved.
-  if (!speakerOrigin && origin && !hasPin) {
-    const saved = resolveSavedRoutePoint(origin, input.snapshot);
-    if (saved.kind === "ambiguous") {
-      return {
-        text: formatSavedRouteAmbiguousAsk(origin, saved.options),
-        navigateAddress: "",
-      };
-    }
-    if (saved.kind === "hit") {
-      originLat = saved.lat;
-      originLng = saved.lng;
-      originLabel = saved.label;
-      savedNotices.push(formatSavedRouteNotice(saved.label));
-    }
-  }
-
-  const originHasCoords =
-    originLat != null &&
-    originLng != null &&
-    Number.isFinite(originLat) &&
-    Number.isFinite(originLng);
-
-  if (!speakerOrigin && origin && !originHasCoords) {
-    const geo = await geocodeNamedPlaceForNearestStop({
-      query: origin,
+  // Shared endpoint ladder (speaker+pin / SRP / address-like ASK / geocode).
+  // Speaker without pin already returned above; pin coords stay when speaker.
+  if (origin) {
+    const originResolved = await resolveRoutesEndpoint({
+      label: origin,
+      pinLat: speakerOrigin ? input.originLat : null,
+      pinLng: speakerOrigin ? input.originLng : null,
+      snapshot: input.snapshot,
+      contacts: input.contacts,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
+      speakerMissingPinAsk:
+        "שלח מיקום בוואטסאפ (סיכת מיקום) ואז אגיד איך להגיע מכאן.",
+      onGeocodeEmpty: "continue",
     });
-    if (!geo.ok && geo.kind === "ambiguous") {
-      return {
-        text: geo.options?.length
-          ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
-          : geo.messageHe,
-        navigateAddress: "",
-      };
+    if (originResolved.kind === "ask") {
+      return { text: originResolved.text, navigateAddress: "" };
     }
-    if (geo.ok) {
-      originLat = geo.lat;
-      originLng = geo.lng;
-      // Keep spoken origin for line-ETA boarding-stop token match.
-      if (!lineFocus) {
-        originLabel = geo.label;
+    if (originResolved.kind === "coords") {
+      originLat = originResolved.lat;
+      originLng = originResolved.lng;
+      if (originResolved.source === "saved") {
+        originLabel = originResolved.label;
+        if (originResolved.savedNotice) {
+          savedNotices.push(originResolved.savedNotice);
+        }
+      } else if (originResolved.source === "geocode" && !lineFocus) {
+        // Keep spoken origin for line-ETA boarding-stop token match.
+        originLabel = originResolved.label;
       }
+      // pin: leave originLabel unset (display maps "speaker" elsewhere).
     }
-    // Empty geocode → keep Google address string (existing trip path).
+    // unresolved / none → keep Google address string (existing trip path).
   }
 
   if (destination) {
-    const savedDest = resolveSavedRoutePoint(destination, input.snapshot);
-    if (savedDest.kind === "ambiguous") {
-      return {
-        text: formatSavedRouteAmbiguousAsk(destination, savedDest.options),
-        navigateAddress: "",
-      };
+    const destResolved = await resolveRoutesEndpoint({
+      label: destination,
+      snapshot: input.snapshot,
+      contacts: input.contacts,
+      fetchImpl: input.fetchImpl,
+      apiKey: input.apiKey,
+      speakerMissingPinAsk:
+        "שלח מיקום בוואטסאפ (סיכת מיקום) ואז אגיד איך להגיע מכאן.",
+      onGeocodeEmpty: "continue",
+    });
+    if (destResolved.kind === "ask") {
+      return { text: destResolved.text, navigateAddress: "" };
     }
-    if (savedDest.kind === "hit") {
-      destinationLat = savedDest.lat;
-      destinationLng = savedDest.lng;
-      destinationLabel = savedDest.label;
-      savedNotices.push(formatSavedRouteNotice(savedDest.label));
-    } else {
-      const geo = await geocodeNamedPlaceForNearestStop({
-        query: destination,
-        fetchImpl: input.fetchImpl,
-        apiKey: input.apiKey,
-      });
-      if (!geo.ok && geo.kind === "ambiguous") {
-        return {
-          text: geo.options?.length
-            ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
-            : geo.messageHe,
-          navigateAddress: "",
-        };
-      }
-      if (geo.ok) {
-        destinationLat = geo.lat;
-        destinationLng = geo.lng;
-        destinationLabel = geo.label;
+    if (destResolved.kind === "coords") {
+      destinationLat = destResolved.lat;
+      destinationLng = destResolved.lng;
+      if (destResolved.source === "saved") {
+        destinationLabel = destResolved.label;
+        if (destResolved.savedNotice) {
+          savedNotices.push(destResolved.savedNotice);
+        }
+      } else if (destResolved.source === "geocode") {
+        destinationLabel = destResolved.label;
       }
     }
   }

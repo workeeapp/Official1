@@ -1,9 +1,22 @@
 /**
- * Resolve a named place/region to a Google Geocoding viewport (B2a).
- * Used only for Places geo_mode=area_restrict — fail closed on ambiguity.
+ * Resolve a named place/region for area_restrict.
+ *
+ * Order:
+ * 1. Local documented geo-area index (Polygon/MultiPolygon).
+ * 2. Google Geocoding as a filtered candidate (multi-signal accept).
+ * 3. Nominatim public API only when allowNominatimFallback === true
+ *    (off by default — not suitable as a product default).
+ *
  * Reuses GOOGLE_PLACES_API_KEY (Geocoding API must be enabled on that key).
  */
 import { getEnv } from "../config/env.js";
+import {
+  geographicAreaFromViewportBox,
+  type GeoAreaGeometry,
+} from "./geo-area.js";
+import { lookupGeoAreaIndex } from "./geo-area-index.js";
+import { decideGoogleAreaCandidate } from "./geo-area-policy.js";
+import { resolveAreaFromNominatim } from "./nominatim-area.js";
 import {
   isValidViewport,
   type ResolvedViewport,
@@ -35,6 +48,7 @@ type GeocodeGeometry = {
 type GeocodeResultRow = {
   formatted_address?: string;
   partial_match?: boolean;
+  types?: string[];
   geometry?: GeocodeGeometry;
 };
 type GeocodeApiResponse = {
@@ -44,17 +58,18 @@ type GeocodeApiResponse = {
 };
 
 function resolveGeocodeApiKey(apiKey?: string | null): string | null {
-  // Explicit apiKey (incl. "") wins — same contract as Places adapter tests.
   if (apiKey !== undefined && apiKey !== null) {
     return apiKey.trim() || null;
   }
   return (getEnv().GOOGLE_PLACES_API_KEY ?? "").trim() || null;
 }
 
-function viewportFromGeometry(
+function boxFromGeometry(
   geometry: GeocodeGeometry | undefined,
-  label: string,
-): ResolvedViewport | null {
+): {
+  low: { lat: number; lng: number };
+  high: { lat: number; lng: number };
+} | null {
   const box = geometry?.viewport ?? geometry?.bounds;
   const sw = box?.southwest;
   const ne = box?.northeast;
@@ -70,21 +85,47 @@ function viewportFromGeometry(
     low: { lat: sw.lat, lng: sw.lng },
     high: { lat: ne.lat, lng: ne.lng },
   };
-  if (!isValidViewport(candidate)) {
+  return isValidViewport(candidate) ? candidate : null;
+}
+
+function viewportFromBox(
+  box: { low: { lat: number; lng: number }; high: { lat: number; lng: number } },
+  label: string,
+): ResolvedViewport | null {
+  const area = geographicAreaFromViewportBox({
+    label,
+    low: box.low,
+    high: box.high,
+    source: "geocode_viewport",
+  });
+  if (!area) {
     return null;
   }
   return {
-    ...candidate,
-    label,
+    low: area.bbox.low,
+    high: area.bbox.high,
+    label: area.label,
     source: "geocode_viewport",
+    geometry: area.geometry,
   };
 }
 
-/**
- * Single clear Geocoding hit → viewport.
- * 0 hits / partial_match / multiple results / invalid box → fail closed.
- */
-export async function resolvePlaceViewport(input: {
+function viewportFromResolvedArea(area: {
+  label: string;
+  bbox: { low: { lat: number; lng: number }; high: { lat: number; lng: number } };
+  geometry: GeoAreaGeometry;
+  source: ResolvedViewport["source"];
+}): ResolvedViewport {
+  return {
+    low: area.bbox.low,
+    high: area.bbox.high,
+    label: area.label,
+    source: area.source,
+    geometry: area.geometry,
+  };
+}
+
+async function resolveGoogleGeocodeViewport(input: {
   place: string;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
@@ -120,7 +161,8 @@ export async function resolvePlaceViewport(input: {
       return {
         ok: false,
         kind: "error",
-        messageHe: "לא הצלחתי לזהות את האזור עכשיו. נסה שוב או ציין עיר מדויקת יותר.",
+        messageHe:
+          "לא הצלחתי לזהות את האזור עכשיו. נסה שוב או ציין עיר מדויקת יותר.",
       };
     }
     const json = (await res.json()) as GeocodeApiResponse;
@@ -149,7 +191,6 @@ export async function resolvePlaceViewport(input: {
     }
 
     const results = Array.isArray(json.results) ? json.results : [];
-    // Clearly defensible = exactly one non-partial hit with a valid viewport.
     if (results.length === 0) {
       return {
         ok: false,
@@ -165,16 +206,40 @@ export async function resolvePlaceViewport(input: {
       };
     }
     const row = results[0]!;
-    if (row.partial_match === true) {
+    const label = String(row.formatted_address ?? "").trim() || place;
+    const box = boxFromGeometry(row.geometry);
+    if (!box) {
       return {
         ok: false,
-        kind: "ambiguous",
-        messageHe: `לא בטוח שזיהיתי נכון את «${place}». אפשר לציין אזור או עיר מדויקים יותר?`,
+        kind: "invalid",
+        messageHe: `לא הצלחתי לקבוע גבולות ל«${place}». נסה עיר או אזור אחר.`,
       };
     }
-    const label =
-      String(row.formatted_address ?? "").trim() || place;
-    const viewport = viewportFromGeometry(row.geometry, label);
+
+    const decision = decideGoogleAreaCandidate({
+      query: place,
+      formattedAddress: label,
+      types: Array.isArray(row.types) ? row.types.map(String) : [],
+      partialMatch: row.partial_match === true,
+      viewport: box,
+    });
+    if (!decision.ok) {
+      const kind =
+        decision.reason === "partial" || decision.reason === "weak_affinity"
+          ? "ambiguous"
+          : decision.reason === "unreliable" ||
+              decision.reason === "point_like" ||
+              decision.reason === "narrow_admin"
+            ? "invalid"
+            : "invalid";
+      return {
+        ok: false,
+        kind,
+        messageHe: decision.messageHe,
+      };
+    }
+
+    const viewport = viewportFromBox(box, label);
     if (!viewport) {
       return {
         ok: false,
@@ -190,4 +255,93 @@ export async function resolvePlaceViewport(input: {
       messageHe: "לא הצלחתי לזהות את האזור עכשיו. נסה שוב בעוד רגע.",
     };
   }
+}
+
+/**
+ * Index → Google (filtered) → optional Nominatim (flag, default off).
+ */
+export async function resolvePlaceViewport(input: {
+  place: string;
+  fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  /**
+   * Public Nominatim fallback. Default false (product default).
+   * Tests that exercise Nominatim must pass true explicitly.
+   */
+  allowNominatimFallback?: boolean;
+  /** When false, skip local index (Google-only unit tests). Default true. */
+  allowIndexLookup?: boolean;
+}): Promise<GeocodeViewportResult> {
+  const place = String(input.place ?? "").trim();
+  if (!place) {
+    return {
+      ok: false,
+      kind: "none",
+      messageHe: "לאיזה אזור לחפש? (למשל השרון / גוש דן)",
+    };
+  }
+
+  if (input.allowIndexLookup !== false) {
+    const indexed = lookupGeoAreaIndex({ place });
+    if (indexed.status === "resolved") {
+      return {
+        ok: true,
+        viewport: viewportFromResolvedArea({
+          ...indexed.area,
+          source: "geo_area_index",
+        }),
+      };
+    }
+    if (indexed.status === "ambiguous") {
+      return {
+        ok: false,
+        kind: "ambiguous",
+        messageHe: indexed.messageHe,
+      };
+    }
+  }
+
+  const google = await resolveGoogleGeocodeViewport(input);
+  if (google.ok) {
+    return google;
+  }
+
+  // Nominatim is opt-in only — never the product default.
+  if (input.allowNominatimFallback !== true) {
+    return google;
+  }
+  if (
+    google.kind !== "none" &&
+    google.kind !== "invalid" &&
+    google.kind !== "missing_key" &&
+    google.kind !== "error"
+  ) {
+    return google;
+  }
+
+  const nominatim = await resolveAreaFromNominatim({
+    place,
+    fetchImpl: input.fetchImpl,
+  });
+  if (nominatim.ok) {
+    return {
+      ok: true,
+      viewport: viewportFromResolvedArea({
+        ...nominatim.area,
+        source: "osm_nominatim",
+      }),
+    };
+  }
+  if (
+    nominatim.kind === "none" ||
+    nominatim.kind === "ambiguous" ||
+    nominatim.kind === "invalid"
+  ) {
+    return {
+      ok: false,
+      kind: nominatim.kind,
+      messageHe: nominatim.messageHe,
+    };
+  }
+  return google;
 }

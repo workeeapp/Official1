@@ -95,6 +95,7 @@ describe("Phase 4 multi-turn model eval (live Lucy)", () => {
               failures: t.failures,
               llmMs: t.llmMs,
               metadata: t.metadata,
+              injectedLocationFacts: t.injectedLocationFacts ?? null,
             })),
           })),
         },

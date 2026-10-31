@@ -213,7 +213,10 @@ import { resolveMarketReply } from "./market.js";
 import { resolveMashovReply } from "./mashov.js";
 import { resolveSmartschoolReply } from "./smartschool.js";
 import { resolvePlacesReplyDetailed } from "./places.js";
-import { resolveJewishReply } from "./jewish.js";
+import {
+  resolveJewishReply,
+  shouldSkipLiveJewishForCandleReminders,
+} from "./jewish.js";
 import {
   fillRoutesOdFromBoard,
   formatOpenItineraryFromBoard,
@@ -232,6 +235,12 @@ import {
   formatPendingLocationContext,
   getPendingLocation,
 } from "./pending-location.js";
+import {
+  buildLastLiveLocation,
+  formatLastLiveLocationContext,
+  parseLastLiveLocation,
+  type LastLiveLocation,
+} from "./last-live-location.js";
 import {
   fromPendingLocation,
   parseCoordinatePair,
@@ -330,6 +339,7 @@ const STORED_LAST_NUMBERED_DUMP = "lastNumberedDump";
 /** Tombstone: free-written numbered inventory without show_dump ? wipe stale map. */
 const STORED_LAST_NUMBERED_DUMP_CLEARED = "lastNumberedDumpCleared";
 const STORED_LAST_ROUTES_BOARD = "lastRoutesBoard";
+const STORED_LAST_LIVE_LOCATION = "lastLiveLocation";
 
 function buildOpenAiRequest(input: {
   conversationId: string;
@@ -349,6 +359,7 @@ function packStoredLlmRaw(
   lastNumberedDump?: LastNumberedDumpLine[],
   lastRoutesBoard?: LastRoutesBoard | null,
   lastNumberedDumpCleared?: boolean,
+  lastLiveLocation?: LastLiveLocation | null,
 ): unknown {
   return {
     [STORED_LLM_REQUEST]: request,
@@ -362,6 +373,9 @@ function packStoredLlmRaw(
     ...(lastRoutesBoard
       ? { [STORED_LAST_ROUTES_BOARD]: lastRoutesBoard }
       : {}),
+    ...(lastLiveLocation
+      ? { [STORED_LAST_LIVE_LOCATION]: lastLiveLocation }
+      : {}),
   };
 }
 
@@ -371,6 +385,7 @@ function unpackStoredLlmRaw(raw: unknown): {
   lastNumberedDump: LastNumberedDumpLine[];
   lastNumberedDumpCleared: boolean;
   lastRoutesBoard: LastRoutesBoard | null;
+  lastLiveLocation: LastLiveLocation | null;
 } {
   if (
     raw &&
@@ -385,21 +400,27 @@ function unpackStoredLlmRaw(raw: unknown): {
       lastNumberedDump: parseLastNumberedDump(packed[STORED_LAST_NUMBERED_DUMP]),
       lastNumberedDumpCleared: packed[STORED_LAST_NUMBERED_DUMP_CLEARED] === true,
       lastRoutesBoard: parseLastRoutesBoard(packed[STORED_LAST_ROUTES_BOARD]),
+      lastLiveLocation: parseLastLiveLocation(
+        packed[STORED_LAST_LIVE_LOCATION],
+      ),
     };
   }
-  // Legacy / unpacked response-only raw: still try board if present on object.
-  const board =
+  // Legacy / unpacked response-only raw: still try board / location if present.
+  const legacy =
     raw && typeof raw === "object" && !Array.isArray(raw)
-      ? parseLastRoutesBoard(
-          (raw as Record<string, unknown>)[STORED_LAST_ROUTES_BOARD],
-        )
+      ? (raw as Record<string, unknown>)
       : null;
   return {
     request: null,
     response: raw ?? null,
     lastNumberedDump: [],
     lastNumberedDumpCleared: false,
-    lastRoutesBoard: board,
+    lastRoutesBoard: legacy
+      ? parseLastRoutesBoard(legacy[STORED_LAST_ROUTES_BOARD])
+      : null,
+    lastLiveLocation: legacy
+      ? parseLastLiveLocation(legacy[STORED_LAST_LIVE_LOCATION])
+      : null,
   };
 }
 
@@ -490,13 +511,16 @@ export function packAssistantLlmRawForTests(input: {
   response?: unknown;
   lastNumberedDump?: LastNumberedDumpLine[];
   lastNumberedDumpCleared?: boolean;
+  lastRoutesBoard?: LastRoutesBoard | null;
+  lastLiveLocation?: LastLiveLocation | null;
 }): unknown {
   return packStoredLlmRaw(
     input.request ?? null,
     input.response ?? null,
     input.lastNumberedDump,
-    null,
+    input.lastRoutesBoard ?? null,
     input.lastNumberedDumpCleared === true,
+    input.lastLiveLocation ?? null,
   );
 }
 
@@ -515,6 +539,54 @@ export async function loadLastRoutesBoardForConversation(
   });
   for (const row of recent) {
     const board = unpackStoredLlmRaw(row.raw).lastRoutesBoard;
+    if (board) {
+      return board;
+    }
+  }
+  return null;
+}
+
+/**
+ * Newest-first scan for LAST_LIVE_LOCATION. Intervening assistant rows without
+ * a location (e.g. reminder ack) must not hide an earlier successful live use.
+ */
+export async function loadLastLiveLocationForConversation(
+  conversationId: string,
+): Promise<LastLiveLocation | null> {
+  const recent = await prisma.chatMessage.findMany({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+    take: 12,
+    select: { raw: true },
+  });
+  for (const row of recent) {
+    const loc = unpackStoredLlmRaw(row.raw).lastLiveLocation;
+    if (loc) {
+      return loc;
+    }
+  }
+  return null;
+}
+
+/** Test helper: same newest-first scan over packed raw rows. */
+export function pickLastLiveLocationFromAssistantRaws(
+  rawsNewestFirst: unknown[],
+): LastLiveLocation | null {
+  for (const raw of rawsNewestFirst) {
+    const loc = unpackStoredLlmRaw(raw).lastLiveLocation;
+    if (loc) {
+      return loc;
+    }
+  }
+  return null;
+}
+
+/** Test helper: same newest-first scan for routes board. */
+export function pickLastRoutesBoardFromAssistantRaws(
+  rawsNewestFirst: unknown[],
+): LastRoutesBoard | null {
+  for (const raw of rawsNewestFirst) {
+    const board = unpackStoredLlmRaw(raw).lastRoutesBoard;
     if (board) {
       return board;
     }
@@ -963,7 +1035,7 @@ function workerTargetingInstructions(
     "PLATFORM INTERNAL for account owners only (do not list under general capabilities): scheduled digest of code/product changes from git ? compose:true, compose_source:\"git_log\", ping = recipient THEY named (never invent ????), compose_lookback_hours from the spoken window (minutes?fractional hours e.g. 5 ?????0.083, 24?day, 168?week; 0 only for recurring since-last-report). One-shot MUST set lookback so a report now does not empty/advance the next recurring report. Brief in their language. No time given ? ASK ??? (????? / ???? X / daily) with no reminders clock, then emit the full git_log clock with their answer; NEVER say ???? without in/time. ??????? ? in?5 then it fires; when saved, say WHEN. After a sent digest / RECENT_OUTBOUND: talk to THIS speaker only about the content (e.g. ???? ?????? ???????). NEVER invent ???? or any coworker; NEVER offer ????? ?? / ????? ?????? unless they named that person this turn. messages=[] until a real named recipient. Example names in prompts are fiction ? not defaults.",
     "SCHEDULED SAVED-DATA STATUS: live answer later from lists (?? ??? ??8 ?? ?? ?? ???? / ???? ??? ??? ?????? ??? / ???? ??? ?? ???? ????? ??? / ????? ?? ???? 10 ????? ?? ????? ?????? ??????? ?? ????) ? compose:true, compose_source:\"saved_data\", ping=SPEAKER when they said ???? ??, brief=the question; ??? ????? is the shared-list partner NOT the WhatsApp target; messages=[]. Need a real clock. FORBIDDEN: clock that ADDS/removes lists later (??????? ???? ???? ????) ? refuse; offer save-now or a normal reminder. Never ask ?? ???? ????? ????? for a send-me list dump.",
     "LIVE CAPABILITY GATE (generic ? ALL live domains: weather/market/mashov/smartschool/places/jewish/routes/flights): Before emitting a live ACTION, classify the ask F/Q/V/U against THAT domain's connected API and schema fields. F = map into structured ACTION fields we expose. Q = only facts that provider can return. V = residual filter on returned rows (Places/Flights/Routes ? require_live_select Stage B). U = the ask needs a fact this integration cannot supply (no endpoint / no field / outside what we wire). If U blocks answering the ask ? that domain ACTION = null; explain the limit in responses NOW ? FORBIDDEN fetching a nearby aspect and presenting empty/wrong results as if the unsupported ask was checked. If U is only an add-on and remaining F/Q still useful ? fetch F/Q and disclose the U part. Never invent verification. Distinguish ??? ?????? (fetched, empty match) vs ??? ??? ???? ??? ?????? (never fetched).",
-    "WEATHER (live): named city/place ? metadata.weather { place, near:\"\"|omit, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }. Clear deixis to PENDING_LOCATION (pin there / shared location) ? { place:\"\", near:\"speaker\", aspects }. PENDING_LOCATION is AVAILABLE only ? FORBIDDEN near=speaker merely because a pin is still in TTL; vague near-me without clear pin deixis ? ASK (weather=null). Named city ALWAYS wins over a stored pin. lists/no reminders clock. WAVE SCAN: Israel coast waves ? place=\"Israel\", aspects:[waves], min_wave_m=1. LIVE CAPABILITY (F/Q/V/U): F/Q = place|near=speaker + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition ? no require_live_select. U = lifestyle judgments ? disclose as tip/opinion, NEVER invent numbers. Pure ask ? responses may be empty; server fills. WITH ack (WATCH sample) ? responses = ack only; server appends weather as 2nd message. FORBIDDEN inventing temps/wind/waves or coordinates. Missing place and no clear near=speaker ? ask; weather=null. Relative day ? date via SESSION_CLOCK.",
+    "WEATHER (live): named city/place → metadata.weather { place, near:\"\"|omit, date YYYY-MM-DD or \"\" for now/today, aspects:[summary|temp|wind|waves|humidity], min_wave_m? }. Clear pin deixis to PENDING_LOCATION («מכאן» / «מהמיקום ששלחתי» / «כאן»|«לידי» meaning the shared pin) → { place:\"\", near:\"speaker\", aspects }. «שם» / «ליד המקום» after a city/POI named in recent chat (even across an intervening Lucy reminder) when that place is the clearer referent and no competing pin → re-emit that place string, near empty — FORBIDDEN treating bare «שם» as the pin when the prior place is clearer. When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK (weather=null) — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place cue → act, do not ask. PENDING_LOCATION is AVAILABLE only → FORBIDDEN near=speaker merely because a pin is still in TTL; vague near-me without clear pin or prior-place deixis → ASK (weather=null). Named city ALWAYS wins over a stored pin. lists/no reminders clock. WAVE SCAN: Israel coast waves → place=\"Israel\", aspects:[waves], min_wave_m=1. LIVE CAPABILITY (F/Q/V/U): F/Q = place|near=speaker + date + aspects (+ optional min_wave_m); V = returned temps/wind/waves/humidity/condition → no require_live_select. U = lifestyle judgments → disclose as tip/opinion, NEVER invent numbers. Pure ask → responses may be empty; server fills. WITH ack (WATCH sample) → responses = ack only; server appends weather as 2nd message. FORBIDDEN inventing temps/wind/waves or coordinates. Missing place and no clear near=speaker → ask; weather=null. Relative day → date via SESSION_CLOCK.",
     "SCHEDULED WEATHER: ??? ???? ??7 ???? ?? ??? ????? ????? / ????? ??? ????? ?????? ? compose:true, compose_source:\"weather\", compose_place required (city), ping=SPEAKER for ???? ??, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH weather_rain exception: no ask-when.",
     "MARKET (live): ??? ???? ???? / NVDA / ??? / ??????? / ?????? / S&P ? metadata.market { queries:[\"AAPL\"|\"BTC-USD\"|?], aspects:[summary|price|change|range] }; lists/no reminders clock. Prefer Yahoo tickers when known (BTC-USD). FX (????/????/?) is Market too ? not a separate ACTION. LIVE CAPABILITY (F/Q/V/U): F/Q = queries[] + aspects (Yahoo quote); V = returned price/change/range ? no require_live_select / no Stage B. U = investment advice / ????? ?????? ? FORBIDDEN presenting as verified fact; disclose not advice. Missing quote ? server says not found; do not invent. Pure ask ? responses may be empty; server fills the quote. WITH an ack (WATCH sample) ? responses = ack only (no prices); server appends the quote as a 2nd message. FORBIDDEN inventing prices. Missing what to quote ? ask; market=null.",
     "SCHEDULED MARKET: ??? ???? ??9 ???? ?? ?? AAPL ????????? ? compose:true, compose_source:\"market\", compose_place:\"AAPL,BTC-USD\" (comma-separated), ping=SPEAKER, text=brief, real clock. No time ? ASK ???; no reminders clock. WATCH market_price exception: no ask-when.",
@@ -978,8 +1050,8 @@ function workerTargetingInstructions(
     "WATCH (??????? ???? ???? / ?????? ?? ????): lists tasks on YOU + reminders compose:true with compose_source/place/compose_condition (+ compose_aspects when mashov/smartschool). Types: market_price | weather_rain | weather_changed | mashov_new | smartschool_new | market_change_compare | expr | field_changed | bus_eta | flight_eta | flight_changed. SAME TURN: emit live weather/market/mashov/smartschool/flights sample ACTION + responses = short watch ack ONLY ? FORBIDDEN inventing live numbers in that ack; server appends the real quote/facts as a 2nd message prefaced ???????? ??????. Server stamps baseline only ? first condition check is the next poll (never fire immediately on create). No spoken time ? recurrence {freq:\"interval\",interval:5,unit:\"minutes\"} (FORBIDDEN ask ???; FORBIDDEN defaulting to hourly). bus_eta / flight_eta (?60m window) / flight_changed ? every 2?5 minutes OK; flight_eta with hours_before ? every 15 minutes OK. Condition MUST be compose_condition JSON, not only the brief.",
     "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT ??????? ???? ????????? ???? ??3? ? watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING ??????? ?? ??? ???????? ???? ??3? ? watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true ? send then sleep until next interval. (3) RECURRING SCHEDULED ??????? ???? ?? ???? ??8 ?? ???????? ???? ??3? ? watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for ??????? ?????? ??????. mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. smartschool_new recurring: compose_aspects [homework,behavior,messages] when broad. market_change_compare e.g. {type:\"market_change_compare\",left:\"????\",right:\"????\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "WATCH EXPR (arithmetic on catalog fields): ????????? ???? ????? ???? 2 = 50? ? compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"??? ?????\"},{const:2}]},right:{const:50}}; compose_source weather. ????? + ???? ??? ???10? ? expr compare approx/lt with market.price fields (symbols ????/????). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (?? ? approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. ???????????? ?????? on a number ? field_changed {field:\"weather.temp_now\",place:?}. FORBIDDEN putting the math only in the brief.",
-    "PLACES (live local): ?????? ?? ?????? ???? ?????? / ??? ?????? ?? ???????? ????? ????? / ????? ?? ????? ??? ??????? / ????? ???? ?????? ? metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (????? ???? / ???? ?????) ? geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Inside-region (????? ?????? / ???? ??? ??) ? geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me ? near=speaker. Parking examples: ????? ?? ????? ??? ???????? / ????? ?? ???? ?????? / ????? ???? ?????? ??? ???????? / ??? ????? ?????? ???????; ordinary business ????? ?? ????? ??? ???????. Parking-place asks ? intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): ????? ?? ????? ??? ???????? ? { query:\"?????\", place:\"??????\"|area, intent:\"parking\" }; ????? ?? ???? ?????? ? { query:\"????\", near:\"speaker\"|place, intent:\"parking\" }; ????? ???? ?????? ??? ???????? ? { query:\"????\", place:\"??????\"|area, intent:\"parking\" }; ??? ???? ???? ??????? ? { query:\"????\", place|near, intent:\"parking\", parking_cost:\"free\" }; ??? ????? ?????? ??????? ? { query:\"?????\", place|near, intent:\"parking\", parking_cost:\"paid\" }. ??? ??????? ????? ???? + PENDING_LOCATION ? places { query:\"??????\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for ???? ?????; min_rating 0?5 exact (e.g. 4.1) for ????? ??? X; parking_cost free|paid for ???? ????/?????? (server local-filters ParkingOptions; FORBIDDEN stuffing ????/?????? only into query); included_type ? restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). ??? ???? ???????? / attribute of a named business ? intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/?) are expected to evidence the ask ? require_live_select:true; U = cannot verify (e.g. ??????/ownership) ? NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. ?????? ???? ?????? ? parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer ? explain BEFORE fetch (places=null). Distinguish ??? ????? ?????? ??????? vs ??? ???? ???? ?? ??????????. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query ? ask; places=null. Near-me without pin ? ask to share WhatsApp location.",
-    "JEWISH / SHABBAT (live): ???? ??????? ???? ???? ?????? / ???? ????? ??? ??? ????? / ??? ???? ?????? / ????? ?? ???? / ???? ??? ???? ? metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. NAMED HOLIDAY (???? ???? / ????? / ?????) ? aspects:[holidays] + query with that name (NOT bare upcoming list ? server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts ? no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal ? disclose; never invent times. Pure ask ? responses may be empty; server fills. WITH ack ? ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare ???? ???? ? [summary]; ??? ???? ? [candles]; ?????/????? ??? ? [havdalah]; ???? ? [parasha]; ???? ? [holidays]. FORBIDDEN jewish when they asked ?????? ?? ?????? ???? ? use CANDLE-OFFSET REMINDER.",
+    "PLACES (live local): תמצאי לי חשמלאי בפתח תקווה / מסעדות באזור השרון / מה המסעדות באזור שלי / איפה יש חניון ליד הקניון → metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (פתח תקווה / בתי קפה בפתח תקווה) → geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Inside-region (באזור השרון / בתוך גוש דן) → geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me / clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן» meaning the pin) → near=speaker. «שם» / «ליד המקום הזה» after a place named in recent chat (ignore intervening reminder noise) when that place is the clearer referent and no competing pin → re-emit that place in place, near empty — not automatic near=speaker. When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK (places=null) — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place/name cue → act, do not ask. Parking examples: איפה יש חניון ליד הקניון? / תמצא לי חניה קרובה / איפה אפשר להחנות ליד המסעדה? / יש חניון בתשלום באזור?; ordinary business תמצא לי מסעדה ליד הקניון. Parking-place asks → intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): איפה יש חניון ליד הקניון? → { query:\"חניון\", place:\"קניון\"|area, intent:\"parking\" }; תמצא לי חניה קרובה → { query:\"חניה\", near:\"speaker\"|place, intent:\"parking\" }; איפה אפשר להחנות ליד המסעדה? → { query:\"חניה\", place:\"מסעדה\"|area, intent:\"parking\" }; יש חניה חינם באזור? → { query:\"חניה\", place|near, intent:\"parking\", parking_cost:\"free\" }; יש חניון בתשלום באזור? → { query:\"חניון\", place|near, intent:\"parking\", parking_cost:\"paid\" }. מה המסעדות באזור שלי + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for פתוח עכשיו; min_rating 0–5 exact (e.g. 4.1) for דירוג מעל X; parking_cost free|paid for חניה חינם/בתשלום (server local-filters ParkingOptions; FORBIDDEN stuffing חינם/בתשלום only into query); included_type ∈ restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). יש חניה במסעדה? / attribute of a named business → intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/…) are expected to evidence the ask → require_live_select:true; U = cannot verify (e.g. בטיחות/ownership) → NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. חניון חינם ובטוח → parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer → explain BEFORE fetch (places=null). Distinguish אין תוצאה במסננים המבוקשים vs לא ניתן לוודא קריטריון שאינו נתמך. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
+    "JEWISH / SHABBAT (live): מתי מדליקים נרות בפתח תקווה / מתי נכנסת שבת כאן / מתי נכנסת שבת בבית / מה פרשת השבוע / מתי יוצאת שבת / איזה חג הבא / מתי ערב פסח → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. PLACE RESOLUTION: named Israel city → place that city string; clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן»|«לידי» meaning the shared pin) → place:\"speaker\" (server uses PENDING_LOCATION coords); unique saved label from filings/tasks/custom OR SPEAKER_CONTACTS name («בבית» / «מיקום הבית» / work / סבתא) → place=that exact label (server resolves coords from the saved row; FORBIDDEN substituting PENDING/LAST_LIVE when they named a saved place); FORBIDDEN place:\"speaker\" merely because PENDING_LOCATION is AVAILABLE; named city never replaced by pin. «שם» / «ליד המקום» after a prior jewish/weather/places place when THAT label is the clearer referent and no competing pin → re-emit that LAST_LIVE_LOCATION/prior label in place (not speaker). When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK once; jewish=null — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place cue → act, do not ask. Ambiguous saved matches OR pin vs prior/city unclear → ASK once; jewish=null. No pin when they meant כאן → ASK to share WhatsApp location; jewish=null. NAMED HOLIDAY (ערב פסח / חנוכה / פורים) → aspects:[holidays] + query with that name (NOT bare upcoming list — server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts — no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal → disclose; never invent times. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare זמני שבת → [summary]; הדלקת נרות → [candles]; מוצאי/יציאת שבת/הבדלה → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכיר לי לפני הדלקת נרות — use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: ??????? ?? ?????? ???? 10 ???? ???? ????? ??? ???? ?????? ? Self-nudge + lists add reminders { item:\"?????? ????\", text:\"?????? ????\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"??? ?????\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal ? FORBIDDEN inventing time/in. Missing city ? ask; no reminders clock jewish=null. ??? ???? / ?? ????? ? same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot ?????? ???????; weekly ???? ?????? ? not live candle times.",
     "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up for the saved board (?????? ?????? / ?? ???????? / ????? N) ? routes { open_itinerary:\"recommended\"|\"all\"|1..3 } with empty origin+destination (engine expands the last board; zero Google fetch). New origin/destination or material trip change ? fresh routes ACTION with full O/D (open_itinerary ignored). FORBIDDEN pretending expand works with no saved board; FORBIDDEN forcing a choice when the initial ask can be answered directly. Missed bus/departure (speaker says they missed the bus / did not catch it / asks what now after a prior transit plan ? paraphrases OK ? including after an intervening assistant reminder) ? routes { recalculate:true, origin+destination from history when reliably known OR empty O/D so the engine reuses the last saved board's O/D only, departure empty|SESSION_CLOCK now/ASAP, aspects:[summary] }; FORBIDDEN open_itinerary for missed-bus (that expands a stale board without Google refetch). Present as newly calculated (NOT continued tracking / NOT continuous monitoring). FORBIDDEN claiming prior option N is still available without reliable identity and current validity. Origin or destination not recoverable and no saved board ? ASK only for the missing field (routes=null); FORBIDDEN inventing O/D. Material O/D change in the same ask ? put the new places in origin/destination (recalculate still fresh-fetches). Exact typed board commands alone (??????? ??????? / ??? ????????? / ?????? N?) ? open_itinerary; board wording plus a new place ? fresh O/D (not open). Not a bus_eta watch unless they asked to be reminded. Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected) OR disclose_network_disruption:true with empty O/D (engine discloses; no provider fetch); FORBIDDEN inventing SX/alerts; FORBIDDEN claiming you checked the network and found no disruptions. Mixed disruption + trip ask ? full O/D routes ACTION + disclose_network_disruption:true (fetch the trip; append U disclose; do not block the route). Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
     "BUS WATCH: ??????? ?? 10 ???? ???? ??? 51 ???? ????? X ?????? Y? ? Self-nudge + reminders { compose:true, text:brief or empty, compose_condition:{type:\"bus_eta\",origin,destination,line,headsign?,minutes_before:10}, every_count:2, every_unit:\"minutes\" }. Missing destination ? ask; no clock. Server polls Google Routes ETA periodically (NOT MOT SIRI live); quiet-skip until ETA ? N and on transient poll failures; after repeated poll failures the server sends one honesty notice (no invented ETA) then quiet again ? NOT continuous realtime monitoring; FORBIDDEN claiming live stream tracking. Sub-hour refuse does NOT apply to bus_eta.",
@@ -1208,6 +1280,8 @@ async function syncTurnReplies(input: {
   clearLastNumberedDump?: boolean;
   /** Successful Google A?B trip board (omit to preserve prior on dump-only writes). */
   lastRoutesBoard?: LastRoutesBoard;
+  /** Successful live place use (omit to preserve prior on dump-only writes). */
+  lastLiveLocation?: LastLiveLocation;
 }): Promise<ChatTurnMessageIds> {
   const bubbles =
     input.bubbles.length > 0 ? input.bubbles : [{ text: "" }];
@@ -1239,10 +1313,15 @@ async function syncTurnReplies(input: {
     input.lastRoutesBoard !== undefined
       ? input.lastRoutesBoard
       : unpacked.lastRoutesBoard;
+  const liveLocToStore =
+    input.lastLiveLocation !== undefined
+      ? input.lastLiveLocation
+      : unpacked.lastLiveLocation;
   const shouldRewriteRaw =
     hasFreshDump ||
     clearDump ||
-    input.lastRoutesBoard != null;
+    input.lastRoutesBoard != null ||
+    input.lastLiveLocation != null;
   const nextRaw = shouldRewriteRaw
     ? packStoredLlmRaw(
         unpacked.request,
@@ -1250,6 +1329,7 @@ async function syncTurnReplies(input: {
         dumpLines,
         boardToStore,
         clearDump,
+        liveLocToStore,
       )
     : existingAssistant?.raw;
   await prisma.chatMessage.update({
@@ -2020,6 +2100,9 @@ export async function sendChatMessage(input: {
   const lastNumberedDump = guestSpeaker
     ? []
     : await loadLastNumberedDumpForConversation(conversation.id);
+  const lastLiveLocationCtx = guestSpeaker
+    ? null
+    : await loadLastLiveLocationForConversation(conversation.id);
   const context = [
     formatSessionClockContext(),
     guestSpeaker ? "" : formatSpeakerAddressContext(employee.addressGender),
@@ -2060,6 +2143,7 @@ export async function sendChatMessage(input: {
     guestSpeaker
       ? ""
       : formatPendingLocationContext(getPendingLocation(input.employeeId)),
+    guestSpeaker ? "" : formatLastLiveLocationContext(lastLiveLocationCtx),
     input.pendingInvite
       ? formatPendingInviteContext(input.pendingInvite)
       : "",
@@ -3289,6 +3373,7 @@ export async function sendChatMessage(input: {
     // Model / allowlist show_dump (+ section/partner/assignee/about) ? live DB dump.
     // Never utterance-parse dump intent ? ACTION fields only.
     let turnLastNumberedDump: LastNumberedDumpLine[] = [];
+    let turnLastLiveLocation: LastLiveLocation | undefined;
     /** ITEM DUMP rows with files ? engine sends them (model may omit send_attachments). */
     let itemDumpAttachmentIds: string[] = [];
     /**
@@ -3740,6 +3825,7 @@ export async function sendChatMessage(input: {
         nearSpeaker: weatherNearSpeaker,
         pending: getPendingLocation(input.employeeId),
         snapshot: weatherSnapshot,
+        contacts: speakerContacts,
       });
       if (
         weatherResolved.kind === "ambiguous" ||
@@ -3787,6 +3873,27 @@ export async function sendChatMessage(input: {
           })
         ) {
           clearPendingLocation(input.employeeId);
+        }
+        if (!weather.needsLocation) {
+          const kind =
+            weatherHit?.usedPendingPin === true
+              ? "pin"
+              : weatherHit?.location.source === "saved"
+                ? "saved"
+                : "geocoded";
+          const built = buildLastLiveLocation({
+            label: weatherHit
+              ? weatherHit.location.label
+              : weatherAction.place,
+            lat: weatherHit?.location.lat ?? null,
+            lng: weatherHit?.location.lng ?? null,
+            kind,
+            domain: "weather",
+            role: "place",
+          });
+          if (built) {
+            turnLastLiveLocation = built;
+          }
         }
       }
     }
@@ -3874,6 +3981,7 @@ export async function sendChatMessage(input: {
           nearSpeaker: placesAction.near === "speaker",
           pending: pendingLoc,
           snapshot: placesSnapshot,
+          contacts: speakerContacts,
         });
         if (
           placesResolved.kind === "ambiguous" ||
@@ -3945,27 +4053,72 @@ export async function sendChatMessage(input: {
         ) {
           clearPendingLocation(input.employeeId);
         }
+        if (!placesResult.needsLocation) {
+          let kind: "pin" | "saved" | "soft_place_text" | "area" =
+            "soft_place_text";
+          if (areaRestrict) {
+            kind = "area";
+          } else if (placesUsedPendingPin && placesResult.usedPendingPin) {
+            kind = "pin";
+          } else if (placesLat != null && placesLng != null) {
+            kind = "saved";
+          }
+          const built = buildLastLiveLocation({
+            label: placesPlace || placesAction.place || placesAction.query,
+            lat: placesLat,
+            lng: placesLng,
+            kind,
+            domain: "places",
+            role: areaRestrict ? "area" : "place",
+          });
+          if (built) {
+            turnLastLiveLocation = built;
+          }
+        }
       }
     }
     // Live Jewish / Shabbat ACTION ? Hebcal; guests skip.
     // Prefer candle-offset reminder over live jewish times when both appear.
-    const candleAnchorReminder = (metadata.reminders ?? []).some(
-      (row) =>
-        row.scheduleAnchor === "jewish_candles" &&
-        (row.action === "add" || row.action === "update"),
+    const candleAnchorReminder = shouldSkipLiveJewishForCandleReminders(
+      metadata.reminders,
     );
     const jewishAction =
       guestSpeaker || candleAnchorReminder ? null : metadata.jewish ?? null;
     if (jewishAction) {
-      const jewishText = await resolveJewishReply({
+      const jewishResult = await resolveJewishReply({
         place: jewishAction.place,
         date: jewishAction.date,
         aspects: jewishAction.aspects,
         query: jewishAction.query ?? null,
+        pending: getPendingLocation(input.employeeId),
+        snapshot: await getEmployeeRecordSnapshot(input.employeeId),
+        contacts: speakerContacts,
       });
-      workingReply = applyLiveDomainReply(workingReply, jewishText, {
+      workingReply = applyLiveDomainReply(workingReply, jewishResult.text, {
         watchSample: watchSampleTurn,
       });
+      if (
+        shouldClearPendingAfterSpeakerPinUse({
+          usedPendingPin: jewishResult.lastLive?.usedPendingPin === true,
+          needsLocation: false,
+          replyText: jewishResult.text,
+        })
+      ) {
+        clearPendingLocation(input.employeeId);
+      }
+      if (jewishResult.lastLive) {
+        const built = buildLastLiveLocation({
+          label: jewishResult.lastLive.label,
+          lat: jewishResult.lastLive.lat,
+          lng: jewishResult.lastLive.lng,
+          kind: jewishResult.lastLive.kind,
+          domain: "jewish",
+          role: "place",
+        });
+        if (built) {
+          turnLastLiveLocation = built;
+        }
+      }
     }
     // Live routes ACTION ? Google TRANSIT / Places board, MOT GTFS, or SIRI live_arrivals; guests skip.
     let routesAction = guestSpeaker ? null : metadata.routes ?? null;
@@ -4122,6 +4275,7 @@ export async function sendChatMessage(input: {
           speakerAsk: input.message,
           billing: liveBilling,
           snapshot: routesSnapshot,
+          contacts: speakerContacts,
           originLat: speakerOrigin ? pin?.lat ?? null : null,
           originLng: speakerOrigin ? pin?.lng ?? null : null,
         });
@@ -4174,6 +4328,32 @@ export async function sendChatMessage(input: {
           })
         ) {
           clearPendingLocation(input.employeeId);
+        }
+        if (!routesNeedsLocation && routesAction) {
+          const dest = routesAction.destination.trim();
+          const originLabel = routesAction.origin.trim();
+          const preferDest = Boolean(dest) && dest.toLowerCase() !== "speaker";
+          const label = preferDest
+            ? dest
+            : originLabel.toLowerCase() === "speaker"
+              ? pin?.label?.trim() || ""
+              : originLabel;
+          if (label) {
+            const built = buildLastLiveLocation({
+              label,
+              lat: preferDest ? null : (pin?.lat ?? null),
+              lng: preferDest ? null : (pin?.lng ?? null),
+              kind:
+                !preferDest && speakerOrigin && pin
+                  ? "pin"
+                  : "routes_point",
+              domain: "routes",
+              role: preferDest ? "destination" : "origin",
+            });
+            if (built) {
+              turnLastLiveLocation = built;
+            }
+          }
         }
       }
     }
@@ -4439,6 +4619,9 @@ export async function sendChatMessage(input: {
           : {}),
       ...(turnLastRoutesBoard
         ? { lastRoutesBoard: turnLastRoutesBoard }
+        : {}),
+      ...(turnLastLiveLocation
+        ? { lastLiveLocation: turnLastLiveLocation }
         : {}),
     });
 

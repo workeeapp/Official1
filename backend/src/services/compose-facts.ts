@@ -369,16 +369,16 @@ export async function loadComposeFacts(input: {
     const place = String(input.composePlace ?? "").trim();
     const aspects = parseJewishAspects(listAspects) as JewishAspect[];
     try {
-      const body = await resolveJewishReply({
+      const jewish = await resolveJewishReply({
         place,
         aspects: aspects.length > 0 ? aspects : ["summary"],
         now: input.now,
       });
       return {
         kind: "jewish",
-        facts: body,
+        facts: jewish.text,
         factsLabel: "Jewish calendar (Hebcal)",
-        fixedBody: body,
+        fixedBody: jewish.text,
         sessionClock: formatSessionClockContext(input.now),
       };
     } catch {

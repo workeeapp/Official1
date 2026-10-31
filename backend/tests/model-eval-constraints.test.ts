@@ -2030,6 +2030,58 @@ describe("Phase 4 constraint checkers", () => {
       ).toBe(false);
     });
 
+    it("places_action geoMode + nearEmpty after parse normalize (harness only — not live Lucy)", () => {
+      const galilConstraints: ModelEvalConstraint[] = [
+        { type: "live_domain_only", domain: "places" },
+        {
+          type: "places_action",
+          queryIncludes: "מסעד",
+          placeIncludes: "גליל",
+          geoMode: "area_restrict",
+          nearEmpty: true,
+          intent: "business",
+        },
+      ];
+      // Raw ACTION: near=speaker must be cleared by parsePlacesAction before nearEmpty.
+      expect(
+        evaluateConstraints(
+          galilConstraints,
+          meta({
+            places: {
+              query: "מסעדות",
+              place: "הגליל",
+              near: "speaker",
+              geo_mode: "area_restrict",
+              aspects: ["summary"],
+              intent: "business",
+            } as unknown as LlmMetadata["places"],
+          }),
+          "",
+        ).ok,
+      ).toBe(true);
+      expect(
+        evaluateConstraints(
+          galilConstraints,
+          meta({
+            places: {
+              query: "מסעדות",
+              place: "הגליל",
+              near: "",
+              geo_mode: "soft_place",
+              aspects: ["summary"],
+              intent: "business",
+            } as unknown as LlmMetadata["places"],
+          }),
+          "",
+        ).ok,
+      ).toBe(false);
+      // Stub emits geo_mode from constraint — proves infrastructure wiring only.
+      const stub = offlineStubForConstraints(galilConstraints);
+      expect(
+        evaluateConstraints(galilConstraints, stub.metadata, stub.response).ok,
+      ).toBe(true);
+    });
+
     it("routes_action separates Google transit from GTFS schedule/nearest_stop", () => {
       const transit: ModelEvalConstraint[] = [
         { type: "live_domain_only", domain: "routes" },
