@@ -100,8 +100,8 @@ describe("lookupIlGeonameid", () => {
 });
 
 describe("resolveJewishPlaceInput", () => {
-  it("speaker + pin → lat/lng with Asia/Jerusalem (MVP Israel-only)", () => {
-    const result = resolveJewishPlaceInput({
+  it("speaker + pin → lat/lng with Asia/Jerusalem (MVP Israel-only)", async () => {
+    const result = await resolveJewishPlaceInput({
       place: "speaker",
       pending: {
         lat: 32.08,
@@ -121,14 +121,14 @@ describe("resolveJewishPlaceInput", () => {
     }
   });
 
-  it("speaker without pin asks", () => {
+  it("speaker without pin asks", async () => {
     expect(
-      resolveJewishPlaceInput({ place: "speaker", pending: null }),
+      await resolveJewishPlaceInput({ place: "speaker", pending: null }),
     ).toEqual({ kind: "ask", text: JEWISH_SPEAKER_MISSING_PIN_ASK });
   });
 
-  it("saved coords hit skips named geocode path", () => {
-    const result = resolveJewishPlaceInput({
+  it("saved coords hit skips named geocode path", async () => {
+    const result = await resolveJewishPlaceInput({
       place: "מיקום הבית",
       snapshot: {
         filing: [
@@ -154,8 +154,8 @@ describe("resolveJewishPlaceInput", () => {
     }
   });
 
-  it("ambiguous saved places ask", () => {
-    const result = resolveJewishPlaceInput({
+  it("ambiguous saved places ask", async () => {
+    const result = await resolveJewishPlaceInput({
       place: "בית",
       snapshot: {
         filing: [
@@ -185,8 +185,8 @@ describe("resolveJewishPlaceInput", () => {
     }
   });
 
-  it("address-like filing without coords asks before named path", () => {
-    const result = resolveJewishPlaceInput({
+  it("saved without coords geocodes address and keeps saved identity", async () => {
+    const result = await resolveJewishPlaceInput({
       place: "מיקום הבית",
       snapshot: {
         filing: [
@@ -201,15 +201,35 @@ describe("resolveJewishPlaceInput", () => {
         ],
         lists: [],
       },
+      providers: [
+        {
+          id: "mock_om",
+          provenance: "open_meteo",
+          capabilities: { kinds: ["city"], geometries: ["point"] },
+          resolve: async (ask) => {
+            expect(ask.rawText).toMatch(/הרצל|פתח תקווה/);
+            return {
+              kind: "city",
+              labelHe: "פתח תקווה",
+              confidence: "high",
+              provenance: "open_meteo",
+              point: { lat: 32.09, lng: 34.88 },
+            };
+          },
+        },
+      ],
     });
-    expect(result.kind).toBe("ask");
-    if (result.kind === "ask") {
-      expect(result.text).toMatch(/אין קואורדינטות/);
+    expect(result.kind).toBe("location");
+    if (result.kind === "location") {
+      expect(result.source).toBe("saved");
+      expect(result.loc.label).toBe("מיקום הבית");
+      expect(result.loc.latitude).toBeCloseTo(32.09);
+      expect(result.loc.tzid).toBe("Asia/Jerusalem");
     }
   });
 
-  it("explicit city falls through as named", () => {
-    expect(resolveJewishPlaceInput({ place: "רמת גן" })).toEqual({
+  it("explicit city falls through as named", async () => {
+    expect(await resolveJewishPlaceInput({ place: "רמת גן" })).toEqual({
       kind: "named",
       place: "רמת גן",
     });

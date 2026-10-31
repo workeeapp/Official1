@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   baselineShaForWatch,
   evaluateComposeCondition,
-  idleEdgeShaForHolding,
   isHoldingEdgeSha,
   mashovContentFingerprint,
   weatherContentFingerprint,
@@ -110,7 +109,7 @@ describe("evaluateComposeCondition", () => {
     expect(gate.skipSend).toBe(false);
   });
 
-  it("market_price gt: already above at create → idle stamp then next fire sends once", () => {
+  it("market_price gt: already above at create → holding stamp, quiet until leave/re-enter", () => {
     const condition = {
       type: "market_price" as const,
       op: "gt" as const,
@@ -120,17 +119,38 @@ describe("evaluateComposeCondition", () => {
     const raw = baselineShaForWatch({ condition, facts });
     expect(raw).toBe("market:below"); // holding token (misnamed)
     expect(isHoldingEdgeSha(raw)).toBe(true);
-    const idle = idleEdgeShaForHolding(raw!);
-    expect(idle).toBe("market:above");
-    // Seed stamps idle → first fire edges into send.
-    const first = evaluateComposeCondition({
+    // rawSha matches evaluate immediateSha for the same holding state.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts,
+        lastReportSha: "",
+      }).immediateSha,
+    ).toBe(raw);
+    // Seed stamps raw holding → next poll while still above must quiet-skip.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts,
+        lastReportSha: raw,
+      }).skipSend,
+    ).toBe(true);
+    // Leave condition (price drops) then re-enter → one edge send.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: { marketPrice: 80_000 },
+        lastReportSha: raw,
+      }).immediateSha,
+    ).toBe("market:above");
+    const reenter = evaluateComposeCondition({
       condition,
       facts,
-      lastReportSha: idle,
+      lastReportSha: "market:above",
     });
-    expect(first.skipSend).toBe(false);
-    expect(first.immediateSha).toBe("market:below");
-    // Stay above after alert → quiet-skip.
+    expect(reenter.skipSend).toBe(false);
+    expect(reenter.immediateSha).toBe("market:below");
+    // Stay holding after that edge → quiet (watch_once closes after real send).
     expect(
       evaluateComposeCondition({
         condition,
@@ -157,6 +177,43 @@ describe("evaluateComposeCondition", () => {
         lastReportSha: raw,
       }).skipSend,
     ).toBe(true);
+  });
+
+  it("weather_rain: already wet at create → holding stamp, quiet until dry then wet again", () => {
+    const condition = { type: "weather_rain" as const };
+    const wet = { weatherIsRain: true };
+    const dry = { weatherIsRain: false };
+    const raw = baselineShaForWatch({ condition, facts: wet });
+    expect(raw).toBe("weather:wet");
+    expect(isHoldingEdgeSha(raw)).toBe(true);
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: wet,
+        lastReportSha: "",
+      }).immediateSha,
+    ).toBe(raw);
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: wet,
+        lastReportSha: raw,
+      }).skipSend,
+    ).toBe(true);
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: dry,
+        lastReportSha: raw,
+      }).immediateSha,
+    ).toBe("weather:dry");
+    const reenter = evaluateComposeCondition({
+      condition,
+      facts: wet,
+      lastReportSha: "weather:dry",
+    });
+    expect(reenter.skipSend).toBe(false);
+    expect(reenter.immediateSha).toBe("weather:wet");
   });
 
   it("weather_rain: skips when dry", () => {

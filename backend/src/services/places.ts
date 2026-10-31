@@ -28,8 +28,24 @@ import {
   type GeoAreaGeometry,
   type ResolvedGeographicArea,
 } from "./geo-area.js";
+import {
+  adaptMatchForConsumer,
+  PLACES_AREA_CONSUMER_CAPABILITIES,
+  PLACES_SOFT_CONSUMER_CAPABILITIES,
+} from "./geographic-consumer.js";
+import type { GeographicMatch } from "./geographic-match.js";
+import type { GeographicProvider } from "./geographic-provider.js";
+import { resolveGeographic } from "./geographic-resolve.js";
+import {
+  speakGeographicAreaFailure,
+  speakGeographicMatchForUser,
+} from "./geo-area-user-copy.js";
+import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import type { PendingLocation } from "./pending-location.js";
 import { resolveGeographicArea } from "./resolve-geographic-area.js";
 import type { ResolvedViewport } from "./resolved-location.js";
+import { openMeteoPointProvider } from "./providers/open-meteo-point.provider.js";
+import type { SavedLocationContactRef } from "./saved-route-location.js";
 
 /** Map facade area → Places rectangle+PIP viewport (same fields Places already consumes). */
 function areaViewportFromGeographicArea(
@@ -41,6 +57,30 @@ function areaViewportFromGeographicArea(
     label: area.label,
     source: area.source,
     geometry: area.geometry,
+  };
+}
+
+function areaViewportFromGeographicMatch(
+  match: GeographicMatch,
+): ResolvedViewport | null {
+  const vp = match.geometry?.viewport;
+  if (!vp?.low || !vp?.high) {
+    return null;
+  }
+  const source: ResolvedViewport["source"] =
+    match.provenance === "geo_area_index"
+      ? "geo_area_index"
+      : match.provenance === "osm_nominatim"
+        ? "osm_nominatim"
+        : "geocode_viewport";
+  return {
+    low: vp.low,
+    high: vp.high,
+    label: match.labelHe || match.asked.rawText || "אזור",
+    source,
+    ...(match.geometry?.polygon
+      ? { geometry: match.geometry.polygon }
+      : {}),
   };
 }
 
@@ -1460,23 +1500,37 @@ export async function resolvePlacesReplyDetailed(input: {
   speakerAsk?: string;
   billing?: ComposeLlmBilling | null;
   runSelect?: typeof runLivePostSelect;
-  /** Injected for tests — default resolveGeographicArea. */
+  /**
+   * Test inject — when set, bypasses Core for area_restrict (legacy stubs).
+   * Production uses resolveGeographic.
+   */
   resolveArea?: typeof resolveGeographicArea;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+  pending?: PendingLocation | null;
+  providers?: GeographicProvider[];
 }): Promise<PlacesReplyResult> {
   const query = String(input.query ?? "").trim();
-  const place = String(input.place ?? "").trim();
+  let place = String(input.place ?? "").trim();
   const areaRestrict = input.areaRestrict === true;
-  const hasPin =
+  let lat =
     !areaRestrict &&
     input.lat != null &&
-    input.lng != null &&
     Number.isFinite(input.lat) &&
-    Number.isFinite(input.lng) &&
     (input.lat as number) >= -90 &&
-    (input.lat as number) <= 90 &&
+    (input.lat as number) <= 90
+      ? (input.lat as number)
+      : null;
+  let lng =
+    !areaRestrict &&
+    input.lng != null &&
+    Number.isFinite(input.lng) &&
     (input.lng as number) >= -180 &&
-    (input.lng as number) <= 180;
-  const nearSpeaker = areaRestrict ? false : Boolean(input.nearSpeaker);
+    (input.lng as number) <= 180
+      ? (input.lng as number)
+      : null;
+  let hasPin = lat != null && lng != null;
+  let nearSpeaker = areaRestrict ? false : Boolean(input.nearSpeaker);
   if (!query || (!place && !hasPin && !nearSpeaker)) {
     return {
       text: "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)",
@@ -1501,28 +1555,135 @@ export async function resolvePlacesReplyDetailed(input: {
 
   let areaViewport: ResolvedViewport | null = null;
   if (areaRestrict) {
-    const resolveArea = input.resolveArea ?? resolveGeographicArea;
-    const resolved = await resolveArea({
-      place,
+    if (input.resolveArea) {
+      const resolved = await input.resolveArea({
+        place,
+        fetchImpl: input.fetchImpl,
+        apiKey: input.apiKey,
+      });
+      if (!resolved.ok) {
+        return {
+          text: speakGeographicAreaFailure({
+            place,
+            kind: resolved.kind,
+            policyMessageHe: resolved.messageHe,
+          }),
+          usedPendingPin: false,
+          needsLocation: true,
+        };
+      }
+      areaViewport = areaViewportFromGeographicArea(resolved.area);
+    } else {
+      const match = await resolveGeographic({
+        ask: {
+          rawText: place,
+          role: "area",
+          consumerHint: "places",
+        },
+        geometryNeeds: { area: true },
+        snapshot: input.snapshot,
+        contacts: input.contacts,
+        pending: input.pending,
+        providers: input.providers,
+        geocodeSavedWithoutCoords: false,
+        fetchImpl: input.fetchImpl,
+        apiKey: input.apiKey,
+      });
+      const fitted = adaptMatchForConsumer(
+        match,
+        PLACES_AREA_CONSUMER_CAPABILITIES,
+      );
+      if (fitted.status !== "resolved") {
+        return {
+          text: speakGeographicMatchForUser(fitted),
+          usedPendingPin: false,
+          needsLocation: true,
+        };
+      }
+      areaViewport = areaViewportFromGeographicMatch(fitted);
+      if (!areaViewport) {
+        return {
+          text: speakGeographicMatchForUser(
+            fitted.status === "resolved"
+              ? {
+                  ...fitted,
+                  status: "needs_clarify",
+                  userAskHe: `לא הצלחתי לקבוע גבולות ברורים ל«${place}». באיזו עיר או אזור מדויק יותר לחפש?`,
+                }
+              : fitted,
+          ),
+          usedPendingPin: false,
+          needsLocation: true,
+        };
+      }
+      place = fitted.labelHe || place;
+    }
+  } else if (
+    place &&
+    !hasPin &&
+    (input.snapshot != null ||
+      (input.contacts?.length ?? 0) > 0 ||
+      input.pending != null)
+  ) {
+    // Soft / near-saved via Core when saved/pin context exists. City OM hits
+    // (kind=city) are ignored so soft Text Search keeps the place string.
+    const softMatch = await resolveGeographic({
+      ask: {
+        rawText: place,
+        role: nearSpeaker ? "near" : "place",
+        consumerHint: "places",
+        deixis: nearSpeaker ? "pin" : "none",
+      },
+      geometryNeeds: { point: true },
+      snapshot: input.snapshot,
+      contacts: input.contacts,
+      pending: input.pending,
+      providers: input.providers ?? [openMeteoPointProvider],
+      geocodeSavedWithoutCoords: true,
       fetchImpl: input.fetchImpl,
       apiKey: input.apiKey,
     });
-    if (!resolved.ok) {
+    if (softMatch.status === "ambiguous") {
       return {
-        text: resolved.messageHe,
+        text: speakGeographicMatchForUser(softMatch),
         usedPendingPin: false,
         needsLocation: true,
       };
     }
-    areaViewport = areaViewportFromGeographicArea(resolved.area);
+    const softFitted = adaptMatchForConsumer(
+      softMatch,
+      PLACES_SOFT_CONSUMER_CAPABILITIES,
+    );
+    if (
+      softFitted.status === "resolved" &&
+      softFitted.geometry?.point &&
+      (softFitted.kind === "saved" || softFitted.kind === "pin")
+    ) {
+      lat = softFitted.geometry.point.lat;
+      lng = softFitted.geometry.point.lng;
+      place = softFitted.labelHe || place;
+      nearSpeaker = true;
+      hasPin = true;
+    } else if (
+      softFitted.status === "needs_clarify" &&
+      softFitted.kind === "saved"
+    ) {
+      return {
+        text: speakGeographicMatchForUser(softFitted),
+        usedPendingPin: false,
+        needsLocation: true,
+      };
+    }
+    // else: ordinary soft city / POI text — leave place string, no bias coords
   }
 
   try {
     const facts = await fetchPlacesFacts({
       ...input,
+      place,
       nearSpeaker,
-      lat: areaRestrict ? null : input.lat,
-      lng: areaRestrict ? null : input.lng,
+      lat: areaRestrict ? null : lat,
+      lng: areaRestrict ? null : lng,
       areaRestrict,
       areaViewport,
     });

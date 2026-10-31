@@ -200,7 +200,9 @@ describe("fetchWeatherFacts / resolveWeatherReply", () => {
       place: "NowhereLandXYZ",
       fetchImpl,
     });
-    expect(reply).toContain("לא מצאתי מקום");
+    // Natural clarify via Geographic UX Gate (not the old "לא מצאתי מקום").
+    expect(reply).toMatch(/לא זיהיתי|באיזו עיר/);
+    expect(reply).not.toMatch(/יחידה מינהלית|narrow_admin/);
   });
 
   it("asks for place when empty", async () => {

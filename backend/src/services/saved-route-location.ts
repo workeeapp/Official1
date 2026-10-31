@@ -414,11 +414,17 @@ export function formatSavedRouteNotice(label: string): string {
     : "משתמש במיקום השמור.";
 }
 
-/** Saved place label that has no valid lat,lng (ask instead of geocoding). */
+/**
+ * Saved place label that has no valid lat,lng.
+ * `label` is the alias matched from ACTION; `addressText` is what geocoders
+ * should use (street / place field) — never invent one from free prose.
+ */
 export type SavedPlaceLabelOnly = {
   id: string;
   label: string;
   listType: string;
+  /** Established address/place field value when distinct from label. */
+  addressText?: string;
 };
 
 function listItemPlaceTextWithoutCoords(
@@ -435,6 +441,59 @@ function listItemPlaceTextWithoutCoords(
     return value.trim();
   }
   return "";
+}
+
+/**
+ * True when text looks like a street / place address payload (not a bare
+ * memory note). Used only on established filing `item_info` for nicknames.
+ */
+export function looksLikeStreetOrPlaceAddress(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (t.length < 4) {
+    return false;
+  }
+  if (parseLatLngCoordinates(t)) {
+    return false;
+  }
+  // House/building number with letters (e.g. הרצל 5 רמת גן).
+  if (/\d/.test(t) && /[\u0590-\u05FFa-zA-Z]{2,}/.test(t)) {
+    return true;
+  }
+  return /רחוב|שדרות|רח['׳']|כתובת|שכונ|סמט|street|road|ave\.?|blvd|boulevard|lane/i.test(
+    t,
+  );
+}
+
+/**
+ * Filing without coords that still has an established address payload.
+ * - Address-like `item_name` (מיקום/כתובת/…): item_info, else name.
+ * - Nickname `item_name` (סבתא / בית הורים / …): only when item_info looks
+ *   like a street/place address — not arbitrary filing notes.
+ */
+export function filingStreetAddressWithoutCoords(
+  row: EmployeeRecordSnapshot["filing"][number],
+): { label: string; addressText: string } | null {
+  if (filingCoords(row)) {
+    return null;
+  }
+  const label = String(row.item_name ?? "").trim();
+  if (!label) {
+    return null;
+  }
+  const info = String(row.item_info ?? "").trim();
+  if (filingNameLooksLikeAddress(label)) {
+    if (info && !parseLatLngCoordinates(info)) {
+      return { label, addressText: info };
+    }
+    if (!parseLatLngCoordinates(label)) {
+      return { label, addressText: label };
+    }
+    return null;
+  }
+  if (info && looksLikeStreetOrPlaceAddress(info)) {
+    return { label, addressText: info };
+  }
+  return null;
 }
 
 /**
@@ -459,17 +518,56 @@ export function collectAddressLikeFilingsWithoutCoords(
     if (!filingNameLooksLikeAddress(label)) {
       continue;
     }
-    if (filingCoords(row)) {
+    const parsed = filingStreetAddressWithoutCoords(row);
+    if (!parsed) {
       continue;
     }
     seenIds.add(id);
-    out.push({ id, label, listType: "filings" });
+    out.push({
+      id,
+      label: parsed.label,
+      listType: "filings",
+      addressText: parsed.addressText,
+    });
   }
   return out;
 }
 
 /**
- * Saved labels without usable coords: address-like filings, list items with a
+ * All filings without coords that carry an established address payload
+ * (address-like names + nicknames with street-like item_info).
+ */
+export function collectFilingsWithoutCoords(
+  snapshot: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null | undefined,
+): SavedPlaceLabelOnly[] {
+  if (!snapshot) {
+    return [];
+  }
+  const out: SavedPlaceLabelOnly[] = [];
+  const seenIds = new Set<string>();
+  for (const row of snapshot.filing ?? []) {
+    const id = String(row.filing_id ?? "").trim();
+    if (!id || seenIds.has(id)) {
+      continue;
+    }
+    const parsed = filingStreetAddressWithoutCoords(row);
+    if (!parsed) {
+      continue;
+    }
+    seenIds.add(id);
+    out.push({
+      id,
+      label: parsed.label,
+      listType: "filings",
+      addressText: parsed.addressText,
+    });
+  }
+  return out;
+}
+
+/**
+ * Saved labels without usable coords across supported sources:
+ * filings (address-like name or nickname+street item_info), list items with a
  * place field (כתובת/מקום/…), phone-book contacts with a non-coord description.
  */
 export function collectSavedPlacesWithoutCoords(
@@ -479,7 +577,7 @@ export function collectSavedPlacesWithoutCoords(
   const out: SavedPlaceLabelOnly[] = [];
   const seenIds = new Set<string>();
 
-  for (const row of collectAddressLikeFilingsWithoutCoords(snapshot)) {
+  for (const row of collectFilingsWithoutCoords(snapshot)) {
     if (seenIds.has(row.id)) {
       continue;
     }
@@ -501,7 +599,8 @@ export function collectSavedPlacesWithoutCoords(
       if (firstCoordsInItem(rec)) {
         continue;
       }
-      if (!listItemPlaceTextWithoutCoords(rec)) {
+      const placeText = listItemPlaceTextWithoutCoords(rec);
+      if (!placeText) {
         continue;
       }
       const label =
@@ -510,7 +609,12 @@ export function collectSavedPlacesWithoutCoords(
         continue;
       }
       seenIds.add(id);
-      out.push({ id, label: label.trim(), listType });
+      out.push({
+        id,
+        label: label.trim(),
+        listType,
+        addressText: placeText,
+      });
     }
   }
 
@@ -525,7 +629,12 @@ export function collectSavedPlacesWithoutCoords(
       continue;
     }
     seenIds.add(id);
-    out.push({ id, label, listType: "contacts" });
+    out.push({
+      id,
+      label,
+      listType: "contacts",
+      addressText: desc,
+    });
   }
 
   return out;

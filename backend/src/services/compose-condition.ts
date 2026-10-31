@@ -82,21 +82,6 @@ export function isHoldingEdgeSha(sha: string | null | undefined): boolean {
   );
 }
 
-/** Idle counterpart so the next fire can edge into a send. */
-export function idleEdgeShaForHolding(sha: string): string {
-  const token = String(sha ?? "").trim();
-  if (token === "expr:hold") {
-    return "expr:idle";
-  }
-  if (token === "market:below") {
-    return "market:above";
-  }
-  if (token === "weather:wet") {
-    return "weather:dry";
-  }
-  return token;
-}
-
 /**
  * Holding conditions: edge = false→true only; level (alertWhileHolding) = send
  * whenever currently true (recurring watch_once:false).

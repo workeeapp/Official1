@@ -1,4 +1,35 @@
 import { jerusalemYmd } from "../utils/relative-date.js";
+import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import {
+  adaptMatchForConsumer,
+  WEATHER_CONSUMER_CAPABILITIES,
+} from "./geographic-consumer.js";
+import {
+  matchAllowsRepresentativePoint,
+  type GeographicAsk,
+} from "./geographic-match.js";
+import type { GeographicProvider } from "./geographic-provider.js";
+import { resolveGeographic } from "./geographic-resolve.js";
+import { speakGeographicMatchForUser } from "./geo-area-user-copy.js";
+import type { PendingLocation } from "./pending-location.js";
+import { googleGeocodeAreaProvider } from "./providers/google-geocode-area.provider.js";
+import { localGeoAreaIndexProvider } from "./providers/local-geo-area-index.provider.js";
+import { openMeteoPointProvider } from "./providers/open-meteo-point.provider.js";
+import type { SavedLocationContactRef } from "./saved-route-location.js";
+import {
+  formatWeatherPlaceClarifyAsk,
+  formatWeatherRegionAskCity,
+  formatWeatherRegionRepresentativeLabel,
+} from "./weather-region.js";
+
+/** OM city first, then area providers — preserves pre-Core weather ladder. */
+export function weatherGeographicProviders(): GeographicProvider[] {
+  return [
+    openMeteoPointProvider,
+    localGeoAreaIndexProvider,
+    googleGeocodeAreaProvider,
+  ];
+}
 
 export type WeatherAspect =
   | "summary"
@@ -184,6 +215,114 @@ export async function geocodePlace(
     longitude: row.longitude,
     country: row.country,
     timezone: row.timezone,
+  };
+}
+
+export type WeatherForecastPlaceResult =
+  | {
+      ok: true;
+      place: WeatherPlace;
+      /** Forecast at bbox center of a resolved geographic region. */
+      representativeRegion: boolean;
+    }
+  | {
+      ok: false;
+      askText: string;
+      needsLocation: true;
+    };
+
+/**
+ * Named-place / saved / region resolve for weather via Geographic Core + consumer fit.
+ * Provider order: Open-Meteo point → local index → Google area (same as pre-Core ladder).
+ */
+export async function resolveWeatherForecastPlace(input: {
+  place: string;
+  fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+  pending?: PendingLocation | null;
+  providers?: GeographicProvider[];
+}): Promise<WeatherForecastPlaceResult> {
+  const place = String(input.place ?? "").trim();
+  if (!place) {
+    return {
+      ok: false,
+      askText: "לאיזה מקום לבדוק את מזג האוויר?",
+      needsLocation: true,
+    };
+  }
+  const ask: GeographicAsk = {
+    rawText: place,
+    role: "place",
+    consumerHint: "weather",
+  };
+  const match = await resolveGeographic({
+    ask,
+    geometryNeeds: { point: true, area: true },
+    snapshot: input.snapshot,
+    contacts: input.contacts,
+    pending: input.pending,
+    providers: input.providers ?? weatherGeographicProviders(),
+    geocodeSavedWithoutCoords: true,
+    fetchImpl: input.fetchImpl,
+    apiKey: input.apiKey,
+  });
+  const fitted = adaptMatchForConsumer(match, WEATHER_CONSUMER_CAPABILITIES);
+  if (fitted.status !== "resolved") {
+    if (fitted.policyTrace?.trim()) {
+      console.info(
+        "[weather-geo] unresolved",
+        JSON.stringify({
+          place,
+          status: fitted.status,
+          kind: fitted.kind,
+          policyTrace: fitted.policyTrace,
+        }),
+      );
+    }
+    const askText =
+      speakGeographicMatchForUser(fitted) ||
+      (fitted.kind === "region"
+        ? formatWeatherRegionAskCity(fitted.labelHe || place)
+        : formatWeatherPlaceClarifyAsk(place));
+    return { ok: false, askText, needsLocation: true };
+  }
+
+  if (matchAllowsRepresentativePoint(fitted)) {
+    const rp = fitted.representativePoint!;
+    return {
+      ok: true,
+      place: {
+        name: formatWeatherRegionRepresentativeLabel(fitted.labelHe),
+        latitude: rp.lat,
+        longitude: rp.lng,
+      },
+      representativeRegion: true,
+    };
+  }
+
+  const point = fitted.geometry?.point;
+  if (
+    point &&
+    Number.isFinite(point.lat) &&
+    Number.isFinite(point.lng)
+  ) {
+    return {
+      ok: true,
+      place: {
+        name: fitted.labelHe || place,
+        latitude: point.lat,
+        longitude: point.lng,
+      },
+      representativeRegion: false,
+    };
+  }
+
+  return {
+    ok: false,
+    askText: formatWeatherPlaceClarifyAsk(place),
+    needsLocation: true,
   };
 }
 
@@ -393,6 +532,11 @@ export async function fetchWeatherFacts(input: {
   aspects?: WeatherAspect[] | unknown;
   now?: Date;
   fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+  pending?: PendingLocation | null;
+  providers?: GeographicProvider[];
 }): Promise<WeatherFacts | null> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const aspects = parseWeatherAspects(input.aspects);
@@ -413,7 +557,19 @@ export async function fetchWeatherFacts(input: {
     const label = String(input.place ?? "").trim() || "המיקום שלך";
     geo = { name: label, latitude: lat, longitude: lng };
   } else {
-    geo = await geocodePlace(input.place, fetchImpl);
+    const resolved = await resolveWeatherForecastPlace({
+      place: input.place,
+      fetchImpl,
+      apiKey: input.apiKey,
+      snapshot: input.snapshot,
+      contacts: input.contacts,
+      pending: input.pending,
+      providers: input.providers,
+    });
+    if (!resolved.ok) {
+      return null;
+    }
+    geo = resolved.place;
   }
   if (!geo) {
     return null;
@@ -769,6 +925,12 @@ export async function resolveWeatherMessages(input: {
   minWaveM?: number | null;
   now?: Date;
   fetchImpl?: typeof fetch;
+  apiKey?: string | null;
+  /** Saved rows for Core SavedLocationReference (SRP). */
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
+  contacts?: SavedLocationContactRef[] | null;
+  pending?: PendingLocation | null;
+  providers?: GeographicProvider[];
   addressGender?: "male" | "female" | null;
   /** Injected for tests; default loads composeWeatherLiveTip. */
   composeTip?: WeatherTipComposer;
@@ -827,21 +989,44 @@ export async function resolveWeatherMessages(input: {
         needsLocation: false,
       };
     }
+    let forecastPlace = displayPlace;
+    let forecastLat: number | null | undefined = useCoords
+      ? input.latitude
+      : undefined;
+    let forecastLng: number | null | undefined = useCoords
+      ? input.longitude
+      : undefined;
+    if (!useCoords) {
+      const resolved = await resolveWeatherForecastPlace({
+        place,
+        fetchImpl: input.fetchImpl,
+        apiKey: input.apiKey,
+        snapshot: input.snapshot,
+        contacts: input.contacts,
+        pending: input.pending,
+        providers: input.providers,
+      });
+      if (!resolved.ok) {
+        return emptyResult(resolved.askText, { needsLocation: true });
+      }
+      forecastPlace = resolved.place.name;
+      forecastLat = resolved.place.latitude;
+      forecastLng = resolved.place.longitude;
+    }
     const facts = await fetchWeatherFacts({
-      place: displayPlace,
+      place: forecastPlace,
       date: input.date,
       aspects: input.aspects,
       now: input.now,
       fetchImpl: input.fetchImpl,
-      ...(useCoords
-        ? { latitude: input.latitude, longitude: input.longitude }
-        : {}),
+      latitude: forecastLat,
+      longitude: forecastLng,
     });
     if (!facts) {
       const text = useCoords
         ? "לא הצלחתי לשלוף עכשיו את מזג האוויר למיקום ששלחת."
-        : `לא מצאתי מקום בשם «${place}».`;
-      return emptyResult(text);
+        : formatWeatherPlaceClarifyAsk(place);
+      return emptyResult(text, { needsLocation: !useCoords });
     }
     let body = formatWeatherHebrew(facts, input.now);
     const min =

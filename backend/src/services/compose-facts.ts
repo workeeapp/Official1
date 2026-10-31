@@ -16,6 +16,7 @@ import {
   fetchWeatherFacts,
   formatWeatherHebrew,
   parseWeatherAspects,
+  resolveWeatherForecastPlace,
   type WeatherAspect,
 } from "./weather.js";
 import {
@@ -206,8 +207,19 @@ export async function loadComposeFacts(input: {
           ? Math.max(0, Math.round(input.composeCondition.dayOffset ?? 0))
           : 0;
     try {
+      const resolvedPlace = await resolveWeatherForecastPlace({ place });
+      if (!resolvedPlace.ok) {
+        return {
+          kind: "weather",
+          facts: "",
+          factsLabel: "Weather",
+          fixedBody: resolvedPlace.askText,
+        };
+      }
       const weather = await fetchWeatherFacts({
-        place,
+        place: resolvedPlace.place.name,
+        latitude: resolvedPlace.place.latitude,
+        longitude: resolvedPlace.place.longitude,
         aspects,
         now: input.now,
       });
@@ -216,7 +228,7 @@ export async function loadComposeFacts(input: {
           kind: "weather",
           facts: "",
           factsLabel: "Weather",
-          fixedBody: `לא מצאתי מקום בשם «${place}».`,
+          fixedBody: `לא זיהיתי בוודאות את «${place}». באיזו עיר לבדוק את מזג האוויר?`,
         };
       }
       const body = formatWeatherHebrew(weather, input.now);

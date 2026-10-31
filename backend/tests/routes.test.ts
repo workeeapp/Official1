@@ -2103,9 +2103,40 @@ describe("nearest_stop named place geocode", () => {
     expect(text).toMatch(/שלום דורני/);
   });
 
-  it("nearest_stop address-like filing without coords asks and skips geocode", async () => {
-    const fetchImpl = vi.fn();
-    const nearestSpy = vi.spyOn(gtfsQuery, "queryNearestStop");
+  it("nearest_stop saved without coords geocodes addressText then queries GTFS", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("places.googleapis.com")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            places: [
+              {
+                displayName: { text: "הרצל 1" },
+                formattedAddress: "רחוב הרצל 1, פתח תקווה",
+                location: { latitude: 32.091, longitude: 34.887 },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    const nearestSpy = vi.spyOn(gtfsQuery, "queryNearestStop").mockResolvedValue({
+      ok: true,
+      sourceHe: "לוח זמנים רשמי",
+      stops: [
+        {
+          stopCode: "21224",
+          stopName: "שלום דורני / ארנס",
+          distanceMeters: 120,
+          line: "31",
+          directionLabel: "1",
+          agencyName: "דן",
+        },
+      ],
+    });
     const { text } = await resolveRoutesReply({
       origin: "מיקום הבית",
       destination: "",
@@ -2127,9 +2158,21 @@ describe("nearest_stop named place geocode", () => {
         lists: [],
       },
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(nearestSpy).not.toHaveBeenCalled();
-    expect(text).toMatch(/אין קואורדינטות שמורות/);
+    expect(fetchImpl).toHaveBeenCalled();
+    const placesBody = String(
+      (fetchImpl.mock.calls.find((c) =>
+        String(c[0]).includes("places.googleapis.com"),
+      )?.[1] as { body?: string } | undefined)?.body ?? "",
+    );
+    expect(placesBody).toMatch(/הרצל/);
+    expect(nearestSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        lat: 32.091,
+        lng: 34.887,
+        line: "31",
+      }),
+    );
     expect(text).toMatch(/מיקום הבית/);
   });
 });
@@ -2217,8 +2260,11 @@ describe("resolveRoutesEndpoint (shared O/D ladder)", () => {
     }
   });
 
-  it("address-like filing without coords asks before geocode", async () => {
-    const fetchImpl = vi.fn();
+  it("saved without coords geocodes address while preserving saved source", async () => {
+    const { createNamedPlacePointProvider } = await import(
+      "../src/services/providers/named-place-point.provider.js"
+    );
+    const geocodeQueries: string[] = [];
     const result = await resolveRoutesEndpoint({
       label: "מיקום הבית",
       snapshot: {
@@ -2236,13 +2282,55 @@ describe("resolveRoutesEndpoint (shared O/D ladder)", () => {
       },
       speakerMissingPinAsk: speakerAsk,
       onGeocodeEmpty: "continue",
-      fetchImpl: fetchImpl as unknown as typeof fetch,
       apiKey: "test-key",
+      providers: [
+        createNamedPlacePointProvider(async ({ query }) => {
+          geocodeQueries.push(query);
+          return { ok: true, lat: 32.09, lng: 34.88, label: "פתח תקווה" };
+        }),
+      ],
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(geocodeQueries.some((q) => /הרצל|פתח תקווה/.test(q))).toBe(true);
+    expect(result.kind).toBe("coords");
+    if (result.kind === "coords") {
+      expect(result.source).toBe("saved");
+      expect(result.label).toBe("מיקום הבית");
+      expect(result.lat).toBeCloseTo(32.09);
+      expect(result.savedNotice).toMatch(/מיקום הבית/);
+    }
+  });
+
+  it("region endpoint asks — does not invent a representative point", async () => {
+    const result = await resolveRoutesEndpoint({
+      label: "הגליל",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "mock_region",
+          provenance: "geo_area_index",
+          capabilities: {
+            kinds: ["region"],
+            geometries: ["viewport", "polygon"],
+          },
+          resolve: async () => ({
+            kind: "region",
+            labelHe: "הגליל",
+            confidence: "high",
+            provenance: "geo_area_index",
+            viewport: {
+              low: { lat: 32.7, lng: 35.1 },
+              high: { lat: 33.1, lng: 35.6 },
+            },
+          }),
+        },
+      ],
+    });
     expect(result.kind).toBe("ask");
     if (result.kind === "ask") {
-      expect(result.text).toMatch(/אין קואורדינטות שמורות/);
+      expect(result.text).toMatch(/אזור|נקוד|עיר|יעד|מוצא/);
+      expect(result.text).not.toMatch(/יחידה מינהלית|narrow_admin/);
     }
   });
 

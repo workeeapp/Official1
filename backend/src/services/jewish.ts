@@ -8,14 +8,17 @@
  */
 
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
-import type { PendingLocation } from "./pending-location.js";
-import { fromPendingLocation } from "./resolved-location.js";
 import {
-  formatSavedLabelMissingCoordsAsk,
-  formatSavedRouteAmbiguousAsk,
+  adaptMatchForConsumer,
+  JEWISH_CONSUMER_CAPABILITIES,
+} from "./geographic-consumer.js";
+import { speakGeographicMatchForUser } from "./geo-area-user-copy.js";
+import type { GeographicProvider } from "./geographic-provider.js";
+import { resolveGeographic } from "./geographic-resolve.js";
+import type { PendingLocation } from "./pending-location.js";
+import { openMeteoPointProvider } from "./providers/open-meteo-point.provider.js";
+import {
   formatSavedRouteNotice,
-  matchSavedPlaceWithoutCoords,
-  resolveSavedRoutePoint,
   type SavedLocationContactRef,
 } from "./saved-route-location.js";
 
@@ -225,83 +228,115 @@ export type JewishPlaceInputResult =
   | { kind: "named"; place: string };
 
 /**
- * Narrow place ladder for live jewish (not full RAL):
- * speaker+PIN → SRP → address-like without coords → named string for
- * resolveJewishLocation (geonameid / Open-Meteo).
+ * Place ladder for live jewish via Geographic Core (pin / saved / ambiguous),
+ * then named string for resolveJewishLocation (geonameid / Open-Meteo).
+ * skipProviderLadder keeps Hebcal city resolution outside Core.
  *
  * MVP: pin/saved coords use Asia/Jerusalem (Israel-only product assumption).
  */
-export function resolveJewishPlaceInput(input: {
+export async function resolveJewishPlaceInput(input: {
   place: string;
   pending?: PendingLocation | null;
   snapshot?: Pick<EmployeeRecordSnapshot, "lists" | "filing"> | null;
   contacts?: SavedLocationContactRef[] | null;
-}): JewishPlaceInputResult {
+  fetchImpl?: typeof fetch;
+  providers?: GeographicProvider[];
+}): Promise<JewishPlaceInputResult> {
   const q = String(input.place ?? "").trim();
   if (!q) {
     return { kind: "named", place: "" };
   }
 
   const speaker = q.toLowerCase() === "speaker";
-  const pin = fromPendingLocation(input.pending ?? null);
-
-  if (speaker) {
-    if (pin) {
-      return {
-        kind: "location",
-        loc: {
-          label: pin.label || "המיקום שלך",
-          latitude: pin.lat,
-          longitude: pin.lng,
-          // MVP Israel-only: no coords→tzid helper yet.
-          tzid: DEFAULT_TZ,
-        },
-        source: "pin",
-      };
-    }
+  if (speaker && !input.pending) {
     return { kind: "ask", text: JEWISH_SPEAKER_MISSING_PIN_ASK };
   }
 
-  const saved = resolveSavedRoutePoint(q, input.snapshot, input.contacts);
-  if (saved.kind === "ambiguous") {
+  const match = await resolveGeographic({
+    ask: {
+      rawText: speaker ? "" : q,
+      role: "place",
+      deixis: speaker ? "pin" : "none",
+      consumerHint: "jewish",
+    },
+    geometryNeeds: { point: true },
+    pending: input.pending ?? null,
+    snapshot: input.snapshot,
+    contacts: input.contacts,
+    // OM only to geocode saved addressText; cities stay on geonameid path.
+    providers: input.providers ?? [openMeteoPointProvider],
+    geocodeSavedWithoutCoords: true,
+    skipProviderLadder: true,
+    fetchImpl: input.fetchImpl,
+  });
+
+  const fitted = adaptMatchForConsumer(match, JEWISH_CONSUMER_CAPABILITIES);
+
+  if (fitted.status === "ambiguous") {
+    return { kind: "ask", text: speakGeographicMatchForUser(fitted) };
+  }
+
+  if (
+    fitted.status === "needs_clarify" ||
+    fitted.status === "unsupported_for_consumer"
+  ) {
+    if (fitted.policyTrace === "skip_provider_ladder") {
+      return { kind: "named", place: q };
+    }
+    if (fitted.kind === "pin") {
+      return { kind: "ask", text: JEWISH_SPEAKER_MISSING_PIN_ASK };
+    }
     return {
       kind: "ask",
-      text: formatSavedRouteAmbiguousAsk(q, saved.options),
+      text:
+        (fitted.userAskHe?.trim() || speakGeographicMatchForUser(fitted)) ||
+        `לא זיהיתי בוודאות את «${q}». באיזו עיר לבדוק?`,
     };
   }
-  if (saved.kind === "hit") {
+
+  const point = fitted.geometry?.point;
+  if (
+    !point ||
+    !Number.isFinite(point.lat) ||
+    !Number.isFinite(point.lng)
+  ) {
+    if (fitted.policyTrace === "skip_provider_ladder") {
+      return { kind: "named", place: q };
+    }
+    return {
+      kind: "ask",
+      text: `לא זיהיתי בוודאות את «${q}». באיזו עיר לבדוק?`,
+    };
+  }
+
+  if (fitted.kind === "pin") {
     return {
       kind: "location",
       loc: {
-        label: saved.label,
-        latitude: saved.lat,
-        longitude: saved.lng,
-        // MVP Israel-only: no coords→tzid helper yet.
+        label: fitted.labelHe || "המיקום שלך",
+        latitude: point.lat,
+        longitude: point.lng,
         tzid: DEFAULT_TZ,
       },
-      notice: formatSavedRouteNotice(saved.label),
+      source: "pin",
+    };
+  }
+
+  if (fitted.kind === "saved" || fitted.savedRef) {
+    return {
+      kind: "location",
+      loc: {
+        label: fitted.labelHe || q,
+        latitude: point.lat,
+        longitude: point.lng,
+        tzid: DEFAULT_TZ,
+      },
+      notice: formatSavedRouteNotice(fitted.labelHe || q),
       source: "saved",
     };
   }
 
-  const noCoords = matchSavedPlaceWithoutCoords(
-    q,
-    input.snapshot,
-    input.contacts,
-  );
-  if (noCoords.kind === "unique") {
-    return {
-      kind: "ask",
-      text: formatSavedLabelMissingCoordsAsk(noCoords.row.label),
-    };
-  }
-  if (noCoords.kind === "ambiguous") {
-    return {
-      kind: "ask",
-      text: formatSavedRouteAmbiguousAsk(q, noCoords.options),
-    };
-  }
-
+  // Unexpected city hit with skipProviderLadder — defer to named Hebcal path.
   return { kind: "named", place: q };
 }
 
@@ -761,11 +796,12 @@ export async function resolveJewishReply(input: {
 
   const fetchImpl = input.fetchImpl ?? fetch;
   try {
-    const placeInput = resolveJewishPlaceInput({
+    const placeInput = await resolveJewishPlaceInput({
       place,
       pending: input.pending ?? null,
       snapshot: input.snapshot ?? null,
       contacts: input.contacts ?? null,
+      fetchImpl,
     });
     if (placeInput.kind === "ask") {
       return jewishReplyText(placeInput.text);

@@ -4,7 +4,6 @@ import { loadComposeFacts } from "./compose-facts.js";
 import {
   baselineShaForWatch,
   conditionFromReminderJson,
-  idleEdgeShaForHolding,
   isHoldingEdgeSha,
 } from "./compose-condition.js";
 import { fetchBusEtaWatch } from "./routes.js";
@@ -24,10 +23,11 @@ export type WatchBaselineSeedResult = {
  * After creating/updating a conditional watch clock, sample current facts and
  * stamp last_report_sha so the first fire does not treat "current state" as new.
  *
- * Edge (watch_once): if already holding, stamp idle so the *next* scheduled
- * poll can edge-send once — never bump fireAt to now.
- * Level (alertWhileHolding / watch_once:false): stamp holding as-is; next poll
- * sends while true.
+ * Always stamps the raw baseline from baselineShaForWatch (current holding or
+ * not). Edge (watch_once): if already holding, stay holding — quiet until leave
+ * then re-enter; never fire on the next poll merely because create sampled true.
+ * Level (alertWhileHolding / watch_once:false): same stamp; next poll sends
+ * while true via evaluateComposeCondition. Never bump fireAt to now.
  */
 export async function seedWatchBaseline(input: {
   reminderId: string;
@@ -37,7 +37,7 @@ export async function seedWatchBaseline(input: {
   composeAspects?: unknown;
   subjectEmployeeId: string;
   repeat: string;
-  /** Level recurring watch — stamp holding; do not idle-arm. */
+  /** Kept for callers; sha stamp is always raw baseline (edge and level). */
   alertWhileHolding?: boolean;
   now?: Date;
 }): Promise<WatchBaselineSeedResult> {
@@ -46,7 +46,6 @@ export async function seedWatchBaseline(input: {
     return { sha: null, alreadyHolding: false };
   }
   const now = input.now ?? new Date();
-  const alertWhileHolding = input.alertWhileHolding === true;
   try {
     let factsBundle = await loadComposeFacts({
       composeSource: input.composeSource,
@@ -115,12 +114,7 @@ export async function seedWatchBaseline(input: {
       return { sha: null, alreadyHolding: false };
     }
     const alreadyHolding = isHoldingEdgeSha(rawSha);
-    // Level: keep holding. Edge already-holding: idle so next poll edges once.
-    const sha = (
-      alreadyHolding && !alertWhileHolding
-        ? idleEdgeShaForHolding(rawSha)
-        : rawSha
-    ).slice(0, 64);
+    const sha = rawSha.slice(0, 64);
     await prisma.reminder.update({
       where: { id: input.reminderId },
       data: { lastReportSha: sha },

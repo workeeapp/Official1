@@ -36,11 +36,18 @@ import {
   type SiriFetchResult,
 } from "./siri-sm.js";
 import {
-  formatSavedLabelMissingCoordsAsk,
-  formatSavedRouteAmbiguousAsk,
+  adaptMatchForConsumer,
+  ROUTES_ENDPOINT_CONSUMER_CAPABILITIES,
+} from "./geographic-consumer.js";
+import { speakGeographicMatchForUser } from "./geo-area-user-copy.js";
+import type { GeographicProvider } from "./geographic-provider.js";
+import { resolveGeographic } from "./geographic-resolve.js";
+import { googleGeocodeAreaProvider } from "./providers/google-geocode-area.provider.js";
+import { localGeoAreaIndexProvider } from "./providers/local-geo-area-index.provider.js";
+import { createNamedPlacePointProvider } from "./providers/named-place-point.provider.js";
+import { openMeteoPointProvider } from "./providers/open-meteo-point.provider.js";
+import {
   formatSavedRouteNotice,
-  matchSavedPlaceWithoutCoords,
-  resolveSavedRoutePoint,
   type SavedLocationContactRef,
 } from "./saved-route-location.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
@@ -805,10 +812,10 @@ export async function geocodeNamedPlaceForNearestStop(input: {
 }
 
 /**
- * Shared ladder for one routes endpoint (origin or destination):
- * speaker+PIN → SRP → address-like filing without coords (ASK) →
- * Places Text Search → Open-Meteo. Never invents coordinates;
- * never picks arbitrarily on SRP ambiguity.
+ * Shared ladder for one routes endpoint (origin or destination) via
+ * Geographic Core + Routes consumer fit:
+ * speaker+PIN → saved (coords or geocoded address) → Places Text Search /
+ * Open-Meteo → region rejected (no invented representative point).
  */
 export type RoutesEndpointResolveResult =
   | {
@@ -822,6 +829,18 @@ export type RoutesEndpointResolveResult =
   | { kind: "ask"; text: string }
   | { kind: "unresolved"; query: string }
   | { kind: "none" };
+
+/** Places Text Search first, then OM, then area (for region reject via fit). */
+export function routesGeographicProviders(
+  geocodeFn: typeof geocodeNamedPlaceForNearestStop = geocodeNamedPlaceForNearestStop,
+): GeographicProvider[] {
+  return [
+    createNamedPlacePointProvider(geocodeFn),
+    openMeteoPointProvider,
+    localGeoAreaIndexProvider,
+    googleGeocodeAreaProvider,
+  ];
+}
 
 export async function resolveRoutesEndpoint(input: {
   label: string;
@@ -838,6 +857,7 @@ export async function resolveRoutesEndpoint(input: {
    * nearest_stop surfaces the geocode empty ask.
    */
   onGeocodeEmpty: "continue" | "ask";
+  providers?: GeographicProvider[];
 }): Promise<RoutesEndpointResolveResult> {
   const q = String(input.label ?? "").trim();
   if (!q) {
@@ -851,86 +871,114 @@ export async function resolveRoutesEndpoint(input: {
     Number.isFinite(input.pinLat) &&
     Number.isFinite(input.pinLng);
 
-  if (speaker) {
-    if (pinOk) {
-      return {
-        kind: "coords",
-        lat: input.pinLat!,
-        lng: input.pinLng!,
-        label: "המיקום שלך",
-        source: "pin",
-      };
-    }
+  if (speaker && !pinOk) {
     return { kind: "ask", text: input.speakerMissingPinAsk };
   }
 
-  const saved = resolveSavedRoutePoint(q, input.snapshot, input.contacts);
-  if (saved.kind === "ambiguous") {
-    return {
-      kind: "ask",
-      text: formatSavedRouteAmbiguousAsk(q, saved.options),
-    };
-  }
-  if (saved.kind === "hit") {
-    return {
-      kind: "coords",
-      lat: saved.lat,
-      lng: saved.lng,
-      label: saved.label,
-      source: "saved",
-      savedNotice: formatSavedRouteNotice(saved.label),
-    };
-  }
-
-  const noCoords = matchSavedPlaceWithoutCoords(
-    q,
-    input.snapshot,
-    input.contacts,
-  );
-  if (noCoords.kind === "unique") {
-    return {
-      kind: "ask",
-      text: formatSavedLabelMissingCoordsAsk(noCoords.row.label),
-    };
-  }
-  if (noCoords.kind === "ambiguous") {
-    return {
-      kind: "ask",
-      text: formatSavedRouteAmbiguousAsk(q, noCoords.options),
-    };
-  }
-
-  const geo = await geocodeNamedPlaceForNearestStop({
-    query: q,
+  const match = await resolveGeographic({
+    ask: {
+      rawText: speaker ? "" : q,
+      role: "origin",
+      deixis: speaker ? "pin" : "none",
+      consumerHint: "routes",
+    },
+    geometryNeeds: { point: true, area: true },
+    pending: pinOk
+      ? {
+          lat: input.pinLat!,
+          lng: input.pinLng!,
+          name: "",
+          address: "",
+          at: Date.now(),
+        }
+      : null,
+    snapshot: input.snapshot,
+    contacts: input.contacts,
+    providers: input.providers ?? routesGeographicProviders(),
+    geocodeSavedWithoutCoords: true,
     fetchImpl: input.fetchImpl,
     apiKey: input.apiKey,
   });
-  if (!geo.ok && geo.kind === "ambiguous") {
+
+  const fitted = adaptMatchForConsumer(
+    match,
+    ROUTES_ENDPOINT_CONSUMER_CAPABILITIES,
+  );
+
+  if (fitted.status === "ambiguous") {
     return {
       kind: "ask",
-      text: geo.options?.length
-        ? `${geo.messageHe}\n${geo.options.map((o) => `• ${o}`).join("\n")}`
-        : geo.messageHe,
+      text: speakGeographicMatchForUser(fitted),
     };
   }
-  if (geo.ok) {
-    return {
-      kind: "coords",
-      lat: geo.lat,
-      lng: geo.lng,
-      label: geo.label,
-      source: "geocode",
-    };
-  }
-  if (input.onGeocodeEmpty === "ask") {
+
+  if (fitted.status === "unsupported_for_consumer") {
     return {
       kind: "ask",
       text:
-        geo.messageHe ||
-        `לא הצלחתי לזהות את המיקום «${q}». שלח סיכת מיקום או כתובת מדויקת יותר.`,
+        speakGeographicMatchForUser(fitted) ||
+        `«${fitted.labelHe || q}» הוא אזור. לאיזו נקודת מוצא או יעד מדויקת התכוונת?`,
     };
   }
-  return { kind: "unresolved", query: q };
+
+  if (fitted.status === "needs_clarify") {
+    // Saved without coords whose geocode failed → familiar missing-coords ask.
+    if (fitted.kind === "saved" && fitted.userAskHe?.trim()) {
+      return { kind: "ask", text: fitted.userAskHe };
+    }
+    if (input.onGeocodeEmpty === "ask") {
+      return {
+        kind: "ask",
+        text:
+          speakGeographicMatchForUser(fitted) ||
+          `לא הצלחתי לזהות את המיקום «${q}». שלח סיכת מיקום או כתובת מדויקת יותר.`,
+      };
+    }
+    // Trip path: keep spoken string for Google (existing unresolved behavior).
+    return { kind: "unresolved", query: q };
+  }
+
+  const point = fitted.geometry?.point;
+  if (
+    !point ||
+    !Number.isFinite(point.lat) ||
+    !Number.isFinite(point.lng)
+  ) {
+    if (input.onGeocodeEmpty === "ask") {
+      return {
+        kind: "ask",
+        text: `לא הצלחתי לזהות את המיקום «${q}». שלח סיכת מיקום או כתובת מדויקת יותר.`,
+      };
+    }
+    return { kind: "unresolved", query: q };
+  }
+
+  if (fitted.kind === "pin") {
+    return {
+      kind: "coords",
+      lat: point.lat,
+      lng: point.lng,
+      label: fitted.labelHe || "המיקום שלך",
+      source: "pin",
+    };
+  }
+  if (fitted.kind === "saved" || fitted.savedRef) {
+    return {
+      kind: "coords",
+      lat: point.lat,
+      lng: point.lng,
+      label: fitted.labelHe || q,
+      source: "saved",
+      savedNotice: formatSavedRouteNotice(fitted.labelHe || q),
+    };
+  }
+  return {
+    kind: "coords",
+    lat: point.lat,
+    lng: point.lng,
+    label: fitted.labelHe || q,
+    source: "geocode",
+  };
 }
 
 /** Model local / ISO → RFC3339 for Routes API. Empty → null. */
