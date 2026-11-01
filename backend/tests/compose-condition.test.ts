@@ -4,8 +4,13 @@ import {
   evaluateComposeCondition,
   isHoldingEdgeSha,
   mashovContentFingerprint,
+  normalizeMarketPriceForLiveQuote,
   weatherContentFingerprint,
 } from "../src/services/compose-condition.js";
+import {
+  formatMarketPriceWatchFallback,
+  validateMarketPriceComposeText,
+} from "../src/services/market-compose-guard.js";
 import {
   collectConditionFieldRefs,
   compareWatchExpr,
@@ -640,5 +645,164 @@ describe("conditional fire outbound", () => {
     });
     expect(resolved.body).toContain("יורד גשם");
     expect(resolved.lastComposedToSave).toContain("יורד גשם");
+  });
+});
+
+describe("normalizeMarketPriceForLiveQuote", () => {
+  it("target arrival: live 46.70 target 20 → lte (downward)", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 20 },
+      livePrice: 46.7,
+    });
+    expect(out.intent).toBe("target_arrival");
+    expect(out.condition.op).toBe("lte");
+    expect(out.condition.value).toBe(20);
+    expect(out.alreadyHolding).toBe(false);
+  });
+
+  it("target arrival after normalize: no immediate edge send while still above", () => {
+    const normalized = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 20 },
+      livePrice: 46.7,
+    });
+    expect(normalized.condition.op).toBe("lte");
+    const baseline = baselineShaForWatch({
+      condition: normalized.condition,
+      facts: { marketPrice: 46.7 },
+    });
+    expect(baseline).toBe("market:above");
+    expect(isHoldingEdgeSha(baseline)).toBe(false);
+    // Create stamps baseline; next poll while still above must quiet-skip.
+    expect(
+      evaluateComposeCondition({
+        condition: normalized.condition,
+        facts: { marketPrice: 46.7 },
+        lastReportSha: baseline,
+        alertWhileHolding: false,
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("target arrival already at price: baseline holding → no create-time edge send", () => {
+    const normalized = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 20 },
+      livePrice: 20,
+    });
+    expect(normalized.alreadyHolding).toBe(true);
+    const baseline = baselineShaForWatch({
+      condition: normalized.condition,
+      facts: { marketPrice: 20 },
+    });
+    expect(isHoldingEdgeSha(baseline)).toBe(true);
+    expect(
+      evaluateComposeCondition({
+        condition: normalized.condition,
+        facts: { marketPrice: 20 },
+        lastReportSha: baseline,
+        alertWhileHolding: false,
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("target arrival: live 10 target 20 → gte (upward)", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 20 },
+      livePrice: 10,
+    });
+    expect(out.condition.op).toBe("gte");
+    expect(out.alreadyHolding).toBe(false);
+  });
+
+  it("target arrival: live already at target → lte + alreadyHolding (no create-time fire)", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 20 },
+      livePrice: 20,
+    });
+    expect(out.condition.op).toBe("lte");
+    expect(out.alreadyHolding).toBe(true);
+  });
+
+  it("explicit gte while above → preserve op (level or edge)", () => {
+    const level = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "gte", value: 20 },
+      livePrice: 46.7,
+      alertWhileHolding: true,
+    });
+    expect(level.intent).toBe("explicit");
+    expect(level.changed).toBe(false);
+    expect(level.condition.op).toBe("gte");
+    expect(level.alreadyHolding).toBe(true);
+
+    const edge = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "gte", value: 20 },
+      livePrice: 46.7,
+      alertWhileHolding: false,
+    });
+    expect(edge.changed).toBe(false);
+    expect(edge.condition.op).toBe("gte");
+  });
+
+  it("explicit lt / drops-below while above → preserve", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "lt", value: 20 },
+      livePrice: 46.7,
+    });
+    expect(out.changed).toBe(false);
+    expect(out.condition.op).toBe("lt");
+  });
+
+  it("explicit rises-above while below → preserve gte", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "gte", value: 20 },
+      livePrice: 10,
+    });
+    expect(out.changed).toBe(false);
+    expect(out.condition.op).toBe("gte");
+    expect(out.alreadyHolding).toBe(false);
+  });
+
+  it("works for non-SOLT symbols (AAPL)", () => {
+    const out = normalizeMarketPriceForLiveQuote({
+      condition: { type: "market_price", op: "eq", value: 150 },
+      livePrice: 180.25,
+    });
+    expect(out.condition).toEqual({
+      type: "market_price",
+      op: "lte",
+      value: 150,
+    });
+  });
+});
+
+describe("validateMarketPriceComposeText", () => {
+  it("rejects הגיע ל־10 when FACT price is 46.70", () => {
+    const check = validateMarketPriceComposeText({
+      text: "הגיע ל־10 — המחיר כעת 46.70",
+      price: 46.7,
+      threshold: 10,
+      op: "gte",
+      holding: true,
+    });
+    expect(check.ok).toBe(false);
+    const fallback = formatMarketPriceWatchFallback({
+      price: 46.7,
+      threshold: 10,
+      op: "gte",
+      holding: true,
+      symbol: "SOLT",
+    });
+    expect(fallback).toContain("46.7");
+    expect(fallback).not.toMatch(/הגיע ל־10/);
+  });
+
+  it("accepts factual above-threshold copy", () => {
+    const check = validateMarketPriceComposeText({
+      text: "לבקשתך: SOLT עומד כעת על 46.70 — מעל רף ה־20.",
+      price: 46.7,
+      threshold: 20,
+      op: "gte",
+      holding: true,
+    });
+    expect(check.ok).toBe(true);
   });
 });

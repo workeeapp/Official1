@@ -44,9 +44,14 @@ export type ComposeConditionFireGate = {
   shaAfterSend?: string;
 };
 
-function comparePrice(
+export type MarketPriceOp = "lt" | "lte" | "gt" | "gte" | "eq";
+
+/** Absolute tolerance for "price is X" near-equality (not float bit-equality). */
+export const MARKET_PRICE_EQ_EPS = 1e-6;
+
+export function comparePrice(
   price: number,
-  op: "lt" | "lte" | "gt" | "gte" | "eq",
+  op: MarketPriceOp,
   value: number,
 ): boolean {
   switch (op) {
@@ -59,10 +64,89 @@ function comparePrice(
     case "gte":
       return price >= value;
     case "eq":
-      return Math.abs(price - value) < 1e-9;
+      return Math.abs(price - value) <= MARKET_PRICE_EQ_EPS;
     default:
       return false;
   }
+}
+
+/**
+ * Intent from ACTION op only (not user utterance).
+ * - eq → target arrival ("when price is/reaches X"); engine picks lte/gte from live quote.
+ * - directional → explicit condition; preserve op (and caller's watch_once/recurrence).
+ */
+export type MarketPriceIntent = "target_arrival" | "explicit";
+
+export function classifyMarketPriceIntent(op: MarketPriceOp): MarketPriceIntent {
+  return op === "eq" ? "target_arrival" : "explicit";
+}
+
+export type NormalizeMarketPriceResult = {
+  condition: Extract<LlmComposeCondition, { type: "market_price" }>;
+  intent: MarketPriceIntent;
+  changed: boolean;
+  /** True when live price already satisfies the (possibly rewritten) op. */
+  alreadyHolding: boolean;
+};
+
+/**
+ * Normalize market_price against a live quote at create/update.
+ *
+ * Rules (documented):
+ * 1. target_arrival (op eq): live > value → lte; live < value → gte;
+ *    near-equal → lte (reach semantics) + alreadyHolding.
+ * 2. explicit (lt|lte|gt|gte): always preserve op — never rewrite from live
+ *    price (level vs edge stays on watch_once / recurrence).
+ */
+export function normalizeMarketPriceForLiveQuote(input: {
+  condition: Extract<LlmComposeCondition, { type: "market_price" }>;
+  livePrice: number;
+  /** Kept for callers; does not rewrite explicit ops. */
+  alertWhileHolding?: boolean;
+}): NormalizeMarketPriceResult {
+  const live = input.livePrice;
+  const value = input.condition.value;
+  const intent = classifyMarketPriceIntent(input.condition.op);
+
+  if (!Number.isFinite(live) || !Number.isFinite(value)) {
+    return {
+      condition: input.condition,
+      intent,
+      changed: false,
+      alreadyHolding: false,
+    };
+  }
+
+  if (intent === "target_arrival") {
+    let op: MarketPriceOp;
+    if (Math.abs(live - value) <= MARKET_PRICE_EQ_EPS) {
+      op = "lte";
+    } else if (live > value) {
+      op = "lte";
+    } else {
+      op = "gte";
+    }
+    const next = {
+      type: "market_price" as const,
+      op: op as "lt" | "lte" | "gt" | "gte" | "eq",
+      value,
+    };
+    return {
+      condition: next,
+      intent,
+      changed: true,
+      alreadyHolding: comparePrice(live, op, value),
+    };
+  }
+
+  // Explicit directional op — preserve.
+  void input.alertWhileHolding;
+  return {
+    condition: input.condition,
+    intent,
+    changed: false,
+    alreadyHolding: comparePrice(live, input.condition.op, value),
+  };
 }
 
 /** Fingerprint mashov/weather (or any) fixed body for change watches. */

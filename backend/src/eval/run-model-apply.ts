@@ -22,6 +22,7 @@ import {
   applyEmployeeRecords,
   correctAttachmentClaimReply,
   correctDurableSaveClaimReply,
+  correctExecutionTruthReply,
   correctListMutationClaimReply,
   correctShareClaimReply,
   correctUnshareClaimReply,
@@ -264,6 +265,9 @@ export function correctModelApplyTurnResponse(input: {
   listOpResults?: ListOpResult[];
   /** Post-apply live snapshot — used to detect incomplete shopping/tasks unshare. */
   snapshotAfter?: EmployeeRecordSnapshot | null;
+  /** True when applyReminders saved at least one clock this turn. */
+  appliedReminderAdd?: boolean;
+  reminderAddFallback?: string;
 }): string {
   const mutations = input.mutations ?? [];
   const filingMutations = input.filingMutations ?? [];
@@ -365,6 +369,15 @@ export function correctModelApplyTurnResponse(input: {
     appliedListUpdate,
     appliedFilingAdd,
     appliedFilingUpdate,
+    setResponse,
+  });
+  working = correctExecutionTruthReply({
+    reply: working,
+    spoken: spoken(),
+    appliedListAdd,
+    appliedReminderAdd: input.appliedReminderAdd === true,
+    listAddFallback: appliedFallback,
+    reminderAddFallback: input.reminderAddFallback,
     setResponse,
   });
   return working;

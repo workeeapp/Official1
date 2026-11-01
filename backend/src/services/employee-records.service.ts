@@ -542,10 +542,15 @@ export function formatAppliedMutationFallback(
   return "";
 }
 
-const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
+export const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
 export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
 /** Spoken when the model claimed share but apply has no shareOutcome / misses. */
 export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.";
+/** Spoken when a reminder-save claim has no applied reminder this turn. */
+export const REMINDER_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את התזכורת.";
+/** Reminder applied but speaker list/task add did not. */
+export const REMINDER_ONLY_PARTIAL =
+  "שמרתי את התזכורת, אבל לא הצלחתי להוסיף את המטלה לרשימה.";
 
 /** Last-resort spoken line when the model left responses empty. */
 export const EMPTY_REPLY_RETRY =
@@ -571,6 +576,44 @@ export function looksLikeListDeleteClaim(spoken: string): boolean {
     return false;
   }
   return /מחקתי|הסרתי/.test(spoken);
+}
+
+/**
+ * Model past-tense list/task add claim (not user utterance).
+ * Used for execution-truth — does not require metadata.lists add.
+ */
+export function looksLikeListAddClaim(spoken: string): boolean {
+  const text = spoken.trim();
+  if (!text) {
+    return false;
+  }
+  // Durable filing/save verbs are handled by correctDurableSaveClaimReply.
+  if (looksLikeDurableSaveClaim(text) && !/הוספתי/.test(text)) {
+    return false;
+  }
+  return /הוספתי/.test(text);
+}
+
+/**
+ * Model claim that a reminder/clock was saved this turn (Hebrew product copy).
+ * Future-tense «אזכיר» alone is not enough — pair with schedule/reminder cues.
+ */
+export function looksLikeReminderSaveClaim(spoken: string): boolean {
+  const text = spoken.trim();
+  if (!text) {
+    return false;
+  }
+  if (
+    /קבעתי\s+תזכורת|שמרתי\s+תזכורת|הוספתי\s+תזכורת|הגדרתי\s+תזכורת/.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/אזכיר(?:\s+לך)?/.test(text) && /תזכורת|ב־|בשעה|מחר|היום/.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 /** Model past-tense share claim in the spoken reply (not user utterance). */
@@ -917,6 +960,10 @@ export function looksLikeDurableSaveClaim(spoken: string): boolean {
   if (!text || looksLikeAttachClaim(text)) {
     return false;
   }
+  // Reminder-clock claims are execution-truth / reminder apply — not filing.
+  if (looksLikeReminderSaveClaim(text)) {
+    return false;
+  }
   return /תייקתי|שמרתי/.test(text);
 }
 
@@ -948,14 +995,11 @@ export function correctDurableSaveClaimReply(input: {
   if (!looksLikeDurableSaveClaim(input.spoken)) {
     return input.reply;
   }
-  const listOk =
-    (input.requestedListAdd && input.appliedListAdd) ||
-    (input.requestedListUpdate && input.appliedListUpdate);
-  const filingOk =
-    (input.requestedFilingAdd && input.appliedFilingAdd) ||
-    (input.requestedFilingUpdate && input.appliedFilingUpdate);
-  const directoryOk =
-    Boolean(input.requestedDirectory) && Boolean(input.appliedDirectory);
+  // Execution truth: keep only when a durable mutate actually applied.
+  // requested* is informational — omitted ACTION + false claim still misses.
+  const listOk = input.appliedListAdd || input.appliedListUpdate;
+  const filingOk = input.appliedFilingAdd || input.appliedFilingUpdate;
+  const directoryOk = Boolean(input.appliedDirectory);
   if (listOk || filingOk || directoryOk) {
     return input.reply;
   }
@@ -1089,6 +1133,77 @@ export function correctListMutationClaimReply(input: {
   ) {
     return setResponse(input.reply, LIST_FIND_MISS);
   }
+  return input.reply;
+}
+
+/**
+ * Central execution-truth boundary: spoken success claims must match engine
+ * apply evidence. Does not require metadata to have requested the ACTION —
+ * omitted ACTION + false success claim is corrected. Partial apply → accurate
+ * partial wording (e.g. reminder saved, task not).
+ */
+export function correctExecutionTruthReply(input: {
+  reply: string;
+  spoken: string;
+  appliedListAdd: boolean;
+  appliedReminderAdd: boolean;
+  /** Engine template when a list add did apply (optional prefer over miss). */
+  listAddFallback?: string;
+  /** Engine template when a reminder did apply (optional). */
+  reminderAddFallback?: string;
+  setResponse: (reply: string, response: string) => string;
+}): string {
+  const spoken = input.spoken.trim();
+  if (!spoken) {
+    return input.reply;
+  }
+  const claimedListAdd = looksLikeListAddClaim(spoken);
+  const claimedReminder = looksLikeReminderSaveClaim(spoken);
+  if (!claimedListAdd && !claimedReminder) {
+    return input.reply;
+  }
+
+  const listOk = input.appliedListAdd;
+  const reminderOk = input.appliedReminderAdd;
+
+  // Both claimed domains that applied (or unclaimed domains ignored) → keep.
+  if (claimedListAdd && claimedReminder) {
+    if (listOk && reminderOk) {
+      return input.reply;
+    }
+    if (!listOk && reminderOk) {
+      const reminderText =
+        input.reminderAddFallback?.trim() || REMINDER_ONLY_PARTIAL;
+      return input.setResponse(input.reply, reminderText);
+    }
+    if (listOk && !reminderOk) {
+      const listText =
+        input.listAddFallback?.trim() ||
+        "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";
+      return input.setResponse(input.reply, listText);
+    }
+    return input.setResponse(input.reply, LIST_ADD_MISS);
+  }
+
+  if (claimedListAdd && !listOk) {
+    if (reminderOk) {
+      const reminderText =
+        input.reminderAddFallback?.trim() || REMINDER_ONLY_PARTIAL;
+      return input.setResponse(input.reply, reminderText);
+    }
+    return input.setResponse(input.reply, LIST_ADD_MISS);
+  }
+
+  if (claimedReminder && !reminderOk) {
+    if (listOk) {
+      const listText =
+        input.listAddFallback?.trim() ||
+        "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";
+      return input.setResponse(input.reply, listText);
+    }
+    return input.setResponse(input.reply, REMINDER_SAVE_CLAIM_MISS);
+  }
+
   return input.reply;
 }
 

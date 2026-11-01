@@ -6,6 +6,7 @@ import {
   applyTimeToTaskLabel,
   canReuseExistingReminderClock,
   defaultWatchOnceForCondition,
+  resolveWatchOnceForMarketCondition,
   findMatchingActiveReminder,
   formatJerusalemDateTime,
   formatReminderApplyNotice,
@@ -284,6 +285,58 @@ describe("defaultWatchOnceForCondition", () => {
       defaultWatchOnceForCondition({
         hasComposeCondition: false,
         recurrenceFreq: "daily",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resolveWatchOnceForMarketCondition", () => {
+  it("forces watch_once true for target-arrival eq even when model proposed false", () => {
+    expect(
+      resolveWatchOnceForMarketCondition({
+        condition: { type: "market_price", op: "eq" },
+        proposedWatchOnce: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("forces watch_once true for eq even when calendar default would be level", () => {
+    const proposed = defaultWatchOnceForCondition({
+      hasComposeCondition: true,
+      recurrenceFreq: "daily",
+    });
+    expect(proposed).toBe(false);
+    expect(
+      resolveWatchOnceForMarketCondition({
+        condition: { type: "market_price", op: "eq" },
+        proposedWatchOnce: proposed,
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves level for explicit while-above (gte + proposed false)", () => {
+    expect(
+      resolveWatchOnceForMarketCondition({
+        condition: { type: "market_price", op: "gte" },
+        proposedWatchOnce: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves edge for explicit drops-below when proposed true", () => {
+    expect(
+      resolveWatchOnceForMarketCondition({
+        condition: { type: "market_price", op: "lte" },
+        proposedWatchOnce: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves non-market conditions unchanged", () => {
+    expect(
+      resolveWatchOnceForMarketCondition({
+        condition: { type: "weather_rain" },
+        proposedWatchOnce: false,
       }),
     ).toBe(false);
   });

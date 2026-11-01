@@ -7,9 +7,15 @@ import { emptyLlmMetadata, type LlmMetadata } from "@workee/shared";
 import { correctModelApplyTurnResponse } from "../src/eval/run-model-apply.js";
 import {
   DURABLE_SAVE_CLAIM_MISS,
+  LIST_ADD_MISS,
   LIST_FIND_MISS,
+  REMINDER_ONLY_PARTIAL,
+  REMINDER_SAVE_CLAIM_MISS,
+  correctExecutionTruthReply,
   correctUnshareClaimReply,
+  looksLikeListAddClaim,
   looksLikeListDeleteClaim,
+  looksLikeReminderSaveClaim,
   looksLikeUnshareClaim,
   summarizeUnshareApply,
   type EmployeeRecordSnapshot,
@@ -554,5 +560,94 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
       attachmentOutcome: emptyAttachmentOutcome(false),
     });
     expect(out).toBe(reply);
+  });
+
+  it("omitted lists.add + הוספתי למטלות + reminder applied → reminder-only partial", () => {
+    const out = correctModelApplyTurnResponse({
+      response:
+        "הוספתי למטלות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך מחר ב־8 תזכורת.",
+      metadata: meta({ reminders: [] }),
+      mutations: [],
+      appliedReminderAdd: true,
+      reminderAddFallback: "שמרתי תזכורת «להביא 2 בקבוקי מיץ».",
+    });
+    expect(out).not.toMatch(/הוספתי/);
+    expect(out).toMatch(/תזכורת/);
+  });
+
+  it("omitted lists.add + הוספתי with no reminder → LIST_ADD_MISS", () => {
+    const out = correctModelApplyTurnResponse({
+      response: "הוספתי למטלות לקנות חלב.",
+      metadata: meta(),
+      mutations: [],
+      appliedReminderAdd: false,
+    });
+    expect(out).toBe(LIST_ADD_MISS);
+  });
+
+  it("list add + reminder both applied keeps dual success claim", () => {
+    const reply =
+      "הוספתי למטלות לקנות חלב ואזכיר לך מחר ב־9 תזכורת.";
+    const out = correctModelApplyTurnResponse({
+      response: reply,
+      metadata: meta({
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ שם: "לקנות חלב" }],
+            targets: [],
+          },
+        ],
+      }),
+      mutations: [
+        {
+          action: "add",
+          itemId: "t1",
+          employeeId: "emp-1",
+          listType: "tasks",
+          itemKey: "לקנות חלב",
+          itemLabel: "לקנות חלב",
+          listName: "מטלות",
+        },
+      ],
+      appliedReminderAdd: true,
+    });
+    expect(out).toBe(reply);
+  });
+});
+
+describe("correctExecutionTruthReply (structured apply evidence)", () => {
+  const setResponse = (_reply: string, next: string) => next;
+
+  it("detects list-add and reminder-save claims", () => {
+    expect(looksLikeListAddClaim("הוספתי למטלות מיץ")).toBe(true);
+    expect(looksLikeListAddClaim("בסדר")).toBe(false);
+    expect(looksLikeReminderSaveClaim("קבעתי תזכורת למחר")).toBe(true);
+    expect(looksLikeReminderSaveClaim("אזכיר לך מחר ב־8 תזכורת")).toBe(true);
+    expect(looksLikeReminderSaveClaim("שלום")).toBe(false);
+  });
+
+  it("reminder-only when task claim false and reminder applied", () => {
+    const out = correctExecutionTruthReply({
+      reply: "הוספתי למטלות מיץ",
+      spoken: "הוספתי למטלות מיץ",
+      appliedListAdd: false,
+      appliedReminderAdd: true,
+      setResponse,
+    });
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+  });
+
+  it("reminder claim without applied reminder → miss", () => {
+    const out = correctExecutionTruthReply({
+      reply: "קבעתי תזכורת למחר ב־8",
+      spoken: "קבעתי תזכורת למחר ב־8",
+      appliedListAdd: false,
+      appliedReminderAdd: false,
+      setResponse,
+    });
+    expect(out).toBe(REMINDER_SAVE_CLAIM_MISS);
   });
 });

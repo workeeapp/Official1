@@ -46,6 +46,11 @@ import {
 } from "./attachment.service.js";
 import { applyClockRuleToTask } from "./list-recurrence.js";
 import { nextCandleLighting } from "./jewish.js";
+import {
+  conditionFromReminderJson,
+  normalizeMarketPriceForLiveQuote,
+} from "./compose-condition.js";
+import { fetchQuote } from "./market.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import { seedWatchBaseline } from "./watch-baseline.js";
 
@@ -117,6 +122,9 @@ export const SUB_HOURLY_REFUSAL =
  * is set. Calendar recurrence → recurring level (false). Interval/once →
  * one-shot (true) so «כש…» can poll until the first hit. «כל פעם» must emit
  * watch_once:false explicitly (same interval shape as the poll cadence).
+ *
+ * Market target-arrival (`op:"eq"`) is forced to edge via
+ * {@link resolveWatchOnceForMarketCondition} — not this helper alone.
  */
 export function defaultWatchOnceForCondition(input: {
   hasComposeCondition: boolean;
@@ -135,6 +143,28 @@ export function defaultWatchOnceForCondition(input: {
     return false;
   }
   return true;
+}
+
+/**
+ * Separate from op normalization: bare market target-arrival (`op:"eq"`)
+ * always edge one-shot (`watch_once:true`), even if the model emitted false
+ * or calendar recurrence would default to level. Explicit directional ops
+ * (`lt|lte|gt|gte`) keep the proposed watch_once (level vs edge / recurring).
+ */
+export function resolveWatchOnceForMarketCondition(input: {
+  condition: { type: string; op?: string } | null | undefined;
+  proposedWatchOnce: boolean;
+}): boolean {
+  if (input.condition?.type !== "market_price") {
+    return input.proposedWatchOnce;
+  }
+  const op = String(input.condition.op ?? "")
+    .trim()
+    .toLowerCase();
+  if (op === "eq") {
+    return true;
+  }
+  return input.proposedWatchOnce;
 }
 
 /** A new / changed clock that repeats too often (refused). */
@@ -2088,7 +2118,7 @@ export async function applyReminders(input: {
         (typeof reminder.recurrence?.freq === "string"
           ? reminder.recurrence.freq
           : null);
-      const nextWatchOnce =
+      const proposedWatchOnce =
         reminder.watchOnce === true
           ? true
           : reminder.watchOnce === false
@@ -2099,6 +2129,45 @@ export async function applyReminders(input: {
                   hasComposeCondition,
                   recurrenceFreq: recurringFreq,
                 });
+      // market_price: (1) force watch_once for target-arrival eq — separate from
+      // op rewrite; (2) normalize eq→lte/gte from live quote. Explicit ops keep
+      // proposed watch_once. Never WhatsApp on create (baseline only).
+      let resolvedCondition = nextCondition;
+      const rawMarketGate =
+        resolvedCondition !== Prisma.DbNull
+          ? conditionFromReminderJson(resolvedCondition)
+          : null;
+      const nextWatchOnce = resolveWatchOnceForMarketCondition({
+        condition: rawMarketGate,
+        proposedWatchOnce,
+      });
+      if (rawMarketGate?.type === "market_price") {
+        const place = (nextPlace || reminder.composePlace || "")
+          .split(",")[0]
+          ?.trim();
+        if (place) {
+          try {
+            const quote = await fetchQuote(place);
+            const live =
+              quote?.price != null && Number.isFinite(quote.price)
+                ? quote.price
+                : null;
+            if (live != null) {
+              const normalized = normalizeMarketPriceForLiveQuote({
+                condition: rawMarketGate,
+                livePrice: live,
+                alertWhileHolding: nextWatchOnce === false,
+              });
+              if (normalized.changed) {
+                resolvedCondition =
+                  normalized.condition as Prisma.InputJsonValue;
+              }
+            }
+          } catch {
+            // Quote unavailable — keep model op; baseline/fire will retry.
+          }
+        }
+      }
       const existingAspects =
         existing &&
         "composeAspects" in existing &&
@@ -2129,7 +2198,7 @@ export async function applyReminders(input: {
         nextSource === "market" ||
         nextSource === "mashov" ||
         nextSource === "smartschool" ||
-        nextCondition !== Prisma.DbNull;
+        resolvedCondition !== Prisma.DbNull;
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -2148,7 +2217,7 @@ export async function applyReminders(input: {
               composePlace: nextPlace,
               scheduleAnchor: nextScheduleAnchor,
               scheduleOffsetMinutes: nextScheduleOffset,
-              composeCondition: nextCondition,
+              composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
             },
@@ -2173,7 +2242,7 @@ export async function applyReminders(input: {
               composePlace: nextPlace,
               scheduleAnchor: nextScheduleAnchor,
               scheduleOffsetMinutes: nextScheduleOffset,
-              composeCondition: nextCondition,
+              composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
             },
@@ -2212,7 +2281,7 @@ export async function applyReminders(input: {
             ? null
             : undefined,
       });
-      if (nextCondition !== Prisma.DbNull) {
+      if (resolvedCondition !== Prisma.DbNull) {
         const subjectId =
           (Array.isArray(pingIds) && typeof pingIds[0] === "string"
             ? pingIds[0]
@@ -2224,7 +2293,7 @@ export async function applyReminders(input: {
           reminderId: row.id,
           composeSource: nextSource,
           composePlace: nextPlace,
-          composeCondition: nextCondition,
+          composeCondition: resolvedCondition,
           composeAspects: nextAspects,
           subjectEmployeeId: subjectId,
           repeat: nextRepeat,

@@ -29,9 +29,14 @@ import {
 import { composeScheduledOutbound } from "./reminder-compose.js";
 import { loadComposeFacts } from "./compose-facts.js";
 import {
+  comparePrice,
   conditionFromReminderJson,
   evaluateComposeCondition,
 } from "./compose-condition.js";
+import {
+  formatMarketPriceWatchFallback,
+  validateMarketPriceComposeText,
+} from "./market-compose-guard.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
 import {
   BUS_ETA_POLL_FAIL_NOTIFY_AFTER,
@@ -764,6 +769,47 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         continue;
       } else {
         outboundBody = resolved.body;
+      }
+      // market_price: never send compose that contradicts FACT price/threshold.
+      if (
+        condition?.type === "market_price" &&
+        outboundBody.trim() &&
+        factsBundle?.eval?.marketPrice != null &&
+        Number.isFinite(factsBundle.eval.marketPrice)
+      ) {
+        const factPrice = factsBundle.eval.marketPrice;
+        const holding = comparePrice(
+          factPrice,
+          condition.op,
+          condition.value,
+        );
+        const check = validateMarketPriceComposeText({
+          text: outboundBody,
+          price: factPrice,
+          threshold: condition.value,
+          op: condition.op,
+          holding,
+          symbol:
+            typeof reminder.composePlace === "string"
+              ? reminder.composePlace.split(",")[0]?.trim()
+              : "",
+        });
+        if (!check.ok) {
+          recordWhatsAppEvent(
+            "reminder_compose_market_guard",
+            `reason=${check.reason ?? "contradiction"} item=${reminder.itemLabel.slice(0, 40)}`,
+          );
+          outboundBody = formatMarketPriceWatchFallback({
+            price: factPrice,
+            threshold: condition.value,
+            op: condition.op,
+            holding,
+            symbol:
+              typeof reminder.composePlace === "string"
+                ? reminder.composePlace.split(",")[0]?.trim()
+                : "",
+          });
+        }
       }
       if (resolved.lastComposedToSave || (advanceLastReportSha && headSha)) {
         await prisma.reminder.update({
