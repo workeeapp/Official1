@@ -445,17 +445,33 @@ export function listActionMatchesLastNumberedDumpScope(
  * - remove/update without item_id → same domain scope as add
  * Empty dump → no filter.
  */
+export type DumpGuardDroppedItem = {
+  itemId?: string;
+  listType?: string;
+  listName?: string;
+  op?: string;
+  reason: "outside_dump" | "outside_dump_scope";
+};
+
 export function restrictListMutatesToLastNumberedDump(
   lists: LlmListAction[],
   dump: ReadonlyArray<LastNumberedDumpLine>,
-): { lists: LlmListAction[]; droppedOutsideDump: boolean } {
+  options?: { passThroughIds?: ReadonlySet<string> },
+): {
+  lists: LlmListAction[];
+  droppedOutsideDump: boolean;
+  /** Ids/actions dropped by H — for ApplyResult only; policy unchanged. */
+  droppedItems: DumpGuardDroppedItem[];
+} {
   if (dump.length === 0 || lists.length === 0) {
-    return { lists, droppedOutsideDump: false };
+    return { lists, droppedOutsideDump: false, droppedItems: [] };
   }
   const allowedIds = new Set(
     dump.map((row) => row.id.trim()).filter(Boolean),
   );
+  const passThroughIds = options?.passThroughIds;
   let droppedOutsideDump = false;
+  const droppedItems: DumpGuardDroppedItem[] = [];
   const next: LlmListAction[] = [];
   for (const action of lists) {
     if (action.action === "add") {
@@ -467,6 +483,12 @@ export function restrictListMutatesToLastNumberedDump(
       }
       if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
         droppedOutsideDump = true;
+        droppedItems.push({
+          listType: action.listType,
+          listName: action.listName,
+          op: action.action,
+          reason: "outside_dump_scope",
+        });
         continue;
       }
       next.push(action);
@@ -484,6 +506,12 @@ export function restrictListMutatesToLastNumberedDump(
       // No ids — scope by list_type / list_name only.
       if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
         droppedOutsideDump = true;
+        droppedItems.push({
+          listType: action.listType,
+          listName: action.listName,
+          op: action.action,
+          reason: "outside_dump_scope",
+        });
         continue;
       }
       next.push(action);
@@ -491,6 +519,15 @@ export function restrictListMutatesToLastNumberedDump(
     }
     if (allowedIds.size === 0) {
       droppedOutsideDump = true;
+      for (const id of addressedIds) {
+        droppedItems.push({
+          itemId: id,
+          listType: action.listType,
+          listName: action.listName,
+          op: action.action,
+          reason: "outside_dump",
+        });
+      }
       continue;
     }
     const sameBuiltinDomain =
@@ -503,11 +540,24 @@ export function restrictListMutatesToLastNumberedDump(
         kept.push(raw);
         continue;
       }
-      if (allowedIds.has(id) || sameBuiltinDomain) {
+      // passThroughIds: stage-2 intent resolve (dump_line / saved_data) already
+      // validated the id — do not re-drop via legacy dump allowlist.
+      if (
+        allowedIds.has(id) ||
+        sameBuiltinDomain ||
+        passThroughIds?.has(id)
+      ) {
         kept.push(raw);
         continue;
       }
       droppedOutsideDump = true;
+      droppedItems.push({
+        itemId: id,
+        listType: action.listType,
+        listName: action.listName,
+        op: action.action,
+        reason: "outside_dump",
+      });
     }
     if (kept.every((raw) => !actionItemIdFromRaw(raw))) {
       continue;
@@ -518,7 +568,7 @@ export function restrictListMutatesToLastNumberedDump(
       next.push(action);
     }
   }
-  return { lists: next, droppedOutsideDump };
+  return { lists: next, droppedOutsideDump, droppedItems };
 }
 
 /**

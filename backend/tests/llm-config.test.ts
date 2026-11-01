@@ -1,9 +1,57 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { loadLlmConfig, loadLlmResponseFormat } from "../src/config/llm.js";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
+
+type JsonSchemaNode = {
+  type?: unknown;
+  enum?: unknown;
+  minimum?: unknown;
+  properties?: Record<string, JsonSchemaNode>;
+  required?: string[];
+  items?: JsonSchemaNode;
+  additionalProperties?: unknown;
+};
+
+function listsItemSchema(): JsonSchemaNode {
+  const format = loadLlmResponseFormat(repoRoot);
+  const lists = (
+    format?.schema.properties as {
+      metadata?: { properties?: { lists?: JsonSchemaNode } };
+    }
+  )?.metadata?.properties?.lists;
+  const listEntry = lists?.items;
+  const itemProps = listEntry?.properties?.items?.items;
+  if (!itemProps?.properties) {
+    throw new Error("lists[].items[] schema missing");
+  }
+  return itemProps;
+}
+
+function listsEntrySchema(): JsonSchemaNode {
+  const format = loadLlmResponseFormat(repoRoot);
+  const lists = (
+    format?.schema.properties as {
+      metadata?: { properties?: { lists?: JsonSchemaNode } };
+    }
+  )?.metadata?.properties?.lists;
+  const listEntry = lists?.items;
+  if (!listEntry?.properties) {
+    throw new Error("lists[] entry schema missing");
+  }
+  return listEntry;
+}
+
+/** Mirrors stage-1 optional intent fields (schema contract; not engine behavior). */
+const intentItemFields = z.object({
+  mutate_source: z.enum(["dump_line", "saved_data"]).optional(),
+  dump_line: z.number().min(1).optional(),
+  dump_section: z.union([z.string(), z.null()]).optional(),
+  item_id: z.string().optional(),
+});
 
 describe("LLM action schema", () => {
   it("omits emoji from the lists[] skeleton so models do not echo null clears", () => {
@@ -401,5 +449,103 @@ describe("LLM action schema", () => {
     );
     // Offline MODEL_APPLY stubs author the ACTION; they cannot prove a live model
     // asks instead of picking one of two similar tasks. No LIVE run here.
+  });
+});
+
+describe("LLM action schema — stage-1 intent source fields (optional)", () => {
+  it("declares mutate_source / dump_line / dump_section on lists[].items[] without requiring them", () => {
+    const item = listsItemSchema();
+    const props = item.properties!;
+    for (const key of ["mutate_source", "dump_line", "dump_section"] as const) {
+      expect(item.required ?? []).not.toContain(key);
+    }
+    expect(props.mutate_source).toMatchObject({
+      type: "string",
+      enum: ["dump_line", "saved_data"],
+    });
+    expect(String(props.mutate_source?.description ?? "")).toContain(
+      "Absence is NOT saved_data",
+    );
+    expect(props.dump_line).toMatchObject({
+      type: "number",
+      minimum: 1,
+    });
+    expect(props.dump_section?.type).toEqual(["string", "null"]);
+  });
+
+  it("keeps list_id optional on lists[] and documents row-mutate use", () => {
+    const entry = listsEntrySchema();
+    expect(entry.required ?? []).not.toContain("list_id");
+    expect(entry.properties?.list_id?.type).toBe("string");
+    const desc = String(entry.properties?.list_id?.description ?? "");
+    expect(desc).toMatch(/alter_list/);
+    expect(desc).toMatch(/saved_data/);
+    expect(desc).toMatch(/backward compatible/i);
+  });
+
+  it("accepts legacy items without intent fields and valid stage-1 combinations", () => {
+    expect(intentItemFields.safeParse({ item_id: "legacy-uuid" }).success).toBe(
+      true,
+    );
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "dump_line",
+        dump_line: 3,
+        dump_section: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "dump_line",
+        dump_line: 1,
+        dump_section: "2026-11-01",
+      }).success,
+    ).toBe(true);
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "saved_data",
+        item_id: "11111111-1111-1111-1111-111111111111",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects invalid mutate_source / dump_line / dump_section types", () => {
+    expect(
+      intentItemFields.safeParse({ mutate_source: "esd" }).success,
+    ).toBe(false);
+    expect(
+      intentItemFields.safeParse({ mutate_source: "DUMP_LINE" }).success,
+    ).toBe(false);
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "dump_line",
+        dump_line: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "dump_line",
+        dump_line: "3",
+      }).success,
+    ).toBe(false);
+    expect(
+      intentItemFields.safeParse({
+        mutate_source: "dump_line",
+        dump_line: 2,
+        dump_section: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("does not teach mutate_source in systemMessage (prompt unchanged this stage)", () => {
+    const action = JSON.parse(
+      readFileSync(resolve(repoRoot, "LLM.action.json"), "utf8"),
+    ) as { systemMessage: string[] };
+    const system = action.systemMessage.join("\n");
+    // systemMessage may mention show_dump_section; assert the new intent keys are absent.
+    expect(system).not.toContain("mutate_source");
+    expect(system).not.toContain('"dump_line"');
+    expect(system).not.toContain('"dump_section"');
+    expect(system).not.toContain("Absence is NOT saved_data");
   });
 });

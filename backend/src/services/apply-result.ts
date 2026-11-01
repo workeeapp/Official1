@@ -1,0 +1,890 @@
+/**
+ * Result-A: internal ApplyResult contract (no reply renderer).
+ * requested is captured before resolve/H; applied is DB-confirmed only.
+ * Absence of misses never implies success (completeness may be unknown).
+ */
+import type {
+  LlmDirectoryAction,
+  LlmFilingAction,
+  LlmListAction,
+  LlmListOp,
+  LlmReminderAction,
+} from "@workee/shared";
+import type {
+  FilingMutation,
+  ListItemMutation,
+  ShareApplyMiss,
+} from "./employee-records.service.js";
+import type { IntentMiss } from "./list-intent-refs.js";
+import type { ListOpResult } from "./list-ops.service.js";
+
+export type ApplyCompleteness = "complete" | "partial" | "unknown";
+
+export type ApplyResultDomain =
+  | "lists"
+  | "filing"
+  | "reminders"
+  | "directory"
+  | "list_ops";
+
+export type RequestedOp = {
+  domain: ApplyResultDomain;
+  op: string;
+  id?: string;
+  listType?: string;
+  listName?: string;
+  listId?: string;
+  mutateSource?: string;
+};
+
+export type AppliedOp = {
+  domain: ApplyResultDomain;
+  op: string;
+  id?: string;
+  label?: string;
+  listType?: string;
+  listName?: string;
+  listId?: string;
+  employeeId?: string;
+};
+
+export type ApplyMiss = {
+  domain: ApplyResultDomain;
+  reason: string;
+  id?: string;
+  op?: string;
+  listType?: string;
+  listName?: string;
+  detail?: string;
+};
+
+/** Intent / H / show-turn-strip drops. */
+export type ResultIntentMiss = {
+  reason: string;
+  mutateSource?: string;
+  dumpLine?: number;
+  itemId?: string;
+  listId?: string;
+  listType?: string;
+  listName?: string;
+  op?: string;
+  domain?: ApplyResultDomain;
+  source?: "intent" | "dump_guard" | "show_turn_strip";
+};
+
+export type DomainApplyResult = {
+  requested: RequestedOp[];
+  applied: AppliedOp[];
+  intent_misses: ResultIntentMiss[];
+  apply_misses: ApplyMiss[];
+  /**
+   * Requested ops removed before apply without a definite miss reason.
+   * Forces completeness=unknown; never treated as applied.
+   */
+  unclassified_drops?: RequestedOp[];
+  completeness: ApplyCompleteness;
+};
+
+/** Result-C: post-apply engine display from a fresh DB snapshot (not model draft). */
+export type ApplyResultDisplay = {
+  kind: string;
+  snapshot_text: string;
+  lines?: Array<{
+    n: number;
+    id: string;
+    kind: string;
+    title_stem: string;
+    list_name?: string;
+  }>;
+};
+
+export type ApplyResult = {
+  domains: {
+    lists?: DomainApplyResult;
+    filing?: DomainApplyResult;
+    reminders?: DomainApplyResult;
+    directory?: DomainApplyResult;
+    list_ops?: DomainApplyResult;
+  };
+  completeness: ApplyCompleteness;
+  /** Set only when engine dump ran from a post-apply snapshot. */
+  display?: ApplyResultDisplay;
+};
+
+export type CapturedRequested = {
+  lists: LlmListAction[];
+  filing: LlmFilingAction[];
+  reminders: LlmReminderAction[];
+  directory: LlmDirectoryAction[];
+  listOps: LlmListOp[];
+};
+
+export type DumpGuardDrop = {
+  itemId?: string;
+  listType?: string;
+  listName?: string;
+  op?: string;
+  reason: "outside_dump" | "outside_dump_scope";
+};
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function readItemId(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "";
+  }
+  const record = raw as Record<string, unknown>;
+  for (const key of [
+    "item_id",
+    "itemId",
+    "id",
+    "filing_id",
+    "filingId",
+    "reminder_id",
+    "reminderId",
+    "contact_id",
+    "contactId",
+  ]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function readMutateSource(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const value = record.mutate_source ?? record.mutateSource;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** Immutable snapshot of model-requested mutates (call before resolve/H). */
+export function captureRequestedFromMetadata(metadata: {
+  lists?: LlmListAction[];
+  filing?: LlmFilingAction[];
+  reminders?: LlmReminderAction[];
+  directory?: LlmDirectoryAction[];
+  listOps?: LlmListOp[];
+}): CapturedRequested {
+  return {
+    lists: cloneJson(metadata.lists ?? []),
+    filing: cloneJson(metadata.filing ?? []),
+    reminders: cloneJson(metadata.reminders ?? []),
+    directory: cloneJson(metadata.directory ?? []),
+    listOps: cloneJson(metadata.listOps ?? []),
+  };
+}
+
+export function requestedOpsFromLists(lists: LlmListAction[]): RequestedOp[] {
+  const out: RequestedOp[] = [];
+  for (const action of lists) {
+    const items = Array.isArray(action.items) ? action.items : [];
+    if (
+      (action.action === "remove" ||
+        action.action === "update" ||
+        action.action === "add") &&
+      items.length > 0
+    ) {
+      for (const item of items) {
+        out.push({
+          domain: "lists",
+          op: action.action,
+          id: readItemId(item) || undefined,
+          listType: action.listType,
+          listName: action.listName || undefined,
+          listId: action.listId,
+          mutateSource: readMutateSource(item),
+        });
+      }
+      continue;
+    }
+    out.push({
+      domain: "lists",
+      op: action.action,
+      listType: action.listType,
+      listName: action.listName || undefined,
+      listId: action.listId,
+    });
+  }
+  return out;
+}
+
+export function requestedOpsFromFiling(
+  filing: LlmFilingAction[],
+): RequestedOp[] {
+  return filing.map((row) => ({
+    domain: "filing" as const,
+    op: row.action,
+    id: row.filingId || undefined,
+    listType: "filing",
+  }));
+}
+
+export function requestedOpsFromReminders(
+  reminders: LlmReminderAction[],
+): RequestedOp[] {
+  return reminders.map((row) => ({
+    domain: "reminders" as const,
+    op: row.action,
+    id: row.reminderId || undefined,
+    listType: row.listType || undefined,
+  }));
+}
+
+export function requestedOpsFromDirectory(
+  directory: LlmDirectoryAction[],
+): RequestedOp[] {
+  return directory.map((row) => ({
+    domain: "directory" as const,
+    op: row.action,
+    id: row.contactId || undefined,
+  }));
+}
+
+export function requestedOpsFromListOps(ops: LlmListOp[]): RequestedOp[] {
+  return ops.map((row) => ({
+    domain: "list_ops" as const,
+    op: row.action,
+    id: row.listId || undefined,
+    listId: row.listId || undefined,
+  }));
+}
+
+function missMatchesRequested(
+  miss: ResultIntentMiss,
+  req: RequestedOp,
+): boolean {
+  const missId = miss.itemId?.trim() ?? "";
+  const reqId = req.id?.trim() ?? "";
+  if (missId && reqId && missId === reqId) {
+    return true;
+  }
+  if (reqId) {
+    return false;
+  }
+  // Id-less requested: match structured miss on op + shell fields.
+  if (!miss.op || miss.op !== req.op) {
+    return false;
+  }
+  if ((miss.listType ?? "") !== (req.listType ?? "")) {
+    return false;
+  }
+  if ((miss.listName ?? "") !== (req.listName ?? "")) {
+    return false;
+  }
+  if ((miss.listId ?? "") !== (req.listId ?? "")) {
+    return false;
+  }
+  if (miss.domain && miss.domain !== req.domain) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Match an unused applied row to a requested op by shell fields.
+ * Prefer same listName when the request carries one; otherwise op+listType.
+ * Each applied index may be claimed at most once (caller tracks usedApplied).
+ */
+function claimAppliedByShell(
+  req: RequestedOp,
+  applied: AppliedOp[],
+  usedApplied: Set<number>,
+): boolean {
+  const reqName = req.listName?.trim() ?? "";
+  const tryClaim = (requireName: boolean): boolean => {
+    for (let i = 0; i < applied.length; i += 1) {
+      if (usedApplied.has(i)) {
+        continue;
+      }
+      const row = applied[i]!;
+      if (row.op !== req.op) {
+        continue;
+      }
+      if ((row.listType ?? "") !== (req.listType ?? "")) {
+        continue;
+      }
+      if (requireName) {
+        if ((row.listName?.trim() ?? "") !== reqName) {
+          continue;
+        }
+      }
+      usedApplied.add(i);
+      return true;
+    }
+    return false;
+  };
+  if (reqName) {
+    if (tryClaim(true)) {
+      return true;
+    }
+    // Name present but no exact row — fall back to op+listType only.
+  }
+  return tryClaim(false);
+}
+
+/**
+ * complete = every requested op has applied or miss (known fate).
+ * partial = known fate for all, with both applied and misses.
+ * unknown = unaccounted requested, unclassified drops, or reportingIncomplete.
+ *
+ * Id-less adds (typical lists.add before mint): pair 1:1 to unused applied
+ * rows with the same op+listType (+listName when possible). Never reuse one
+ * applied for two requested ops.
+ */
+export function computeDomainCompleteness(input: {
+  requested: RequestedOp[];
+  applied: AppliedOp[];
+  intent_misses: ResultIntentMiss[];
+  apply_misses: ApplyMiss[];
+  unclassified_drops?: RequestedOp[];
+  reportingIncomplete?: boolean;
+}): ApplyCompleteness {
+  const {
+    requested,
+    applied,
+    intent_misses,
+    apply_misses,
+    unclassified_drops,
+    reportingIncomplete,
+  } = input;
+  if (requested.length === 0) {
+    return "complete";
+  }
+  if (reportingIncomplete || (unclassified_drops?.length ?? 0) > 0) {
+    return "unknown";
+  }
+
+  const missIds = new Set<string>();
+  for (const miss of intent_misses) {
+    if (miss.itemId?.trim()) {
+      missIds.add(miss.itemId.trim());
+    }
+  }
+  for (const miss of apply_misses) {
+    if (miss.id?.trim()) {
+      missIds.add(miss.id.trim());
+    }
+  }
+
+  const usedApplied = new Set<number>();
+  const usedIntentMiss = new Set<number>();
+  const usedApplyMiss = new Set<number>();
+
+  let matchedApplied = 0;
+  let matchedMiss = 0;
+  let unaccounted = 0;
+
+  for (const req of requested) {
+    const id = req.id?.trim() ?? "";
+    if (id) {
+      const appliedIdx = applied.findIndex(
+        (row, i) => !usedApplied.has(i) && row.id === id,
+      );
+      if (appliedIdx >= 0) {
+        usedApplied.add(appliedIdx);
+        matchedApplied += 1;
+        continue;
+      }
+      if (missIds.has(id)) {
+        matchedMiss += 1;
+        continue;
+      }
+      // Id requested but not applied/missed — still try shell pairing below
+      // only for id-less path; known id with no fate stays unaccounted.
+      unaccounted += 1;
+      continue;
+    }
+
+    // Id-less (e.g. lists.add before item_id mint): claim applied first so a
+    // successful add is not left unknown while a sibling miss exists.
+    if (claimAppliedByShell(req, applied, usedApplied)) {
+      matchedApplied += 1;
+      continue;
+    }
+
+    const intentIdx = intent_misses.findIndex(
+      (miss, i) =>
+        !usedIntentMiss.has(i) && missMatchesRequested(miss, req),
+    );
+    if (intentIdx >= 0) {
+      usedIntentMiss.add(intentIdx);
+      matchedMiss += 1;
+      continue;
+    }
+
+    const applyMissIdx = apply_misses.findIndex((miss, i) => {
+      if (usedApplyMiss.has(i)) {
+        return false;
+      }
+      if (miss.op !== req.op) {
+        return false;
+      }
+      // Id-less request: prefer id-less miss; miss with id already counted via missIds for id reqs.
+      if (miss.id?.trim()) {
+        return false;
+      }
+      if (req.listType && miss.listType && miss.listType !== req.listType) {
+        return false;
+      }
+      if (req.listName?.trim() && miss.listName?.trim()) {
+        return miss.listName.trim() === req.listName.trim();
+      }
+      return true;
+    });
+    if (applyMissIdx >= 0) {
+      usedApplyMiss.add(applyMissIdx);
+      matchedMiss += 1;
+      continue;
+    }
+
+    unaccounted += 1;
+  }
+
+  if (unaccounted > 0) {
+    return "unknown";
+  }
+  if (matchedApplied > 0 && matchedMiss > 0) {
+    return "partial";
+  }
+  return "complete";
+}
+
+function survivingListKeys(lists: LlmListAction[]): Set<string> {
+  const keys = new Set<string>();
+  for (const action of lists) {
+    const items = Array.isArray(action.items) ? action.items : [];
+    if (items.length === 0) {
+      keys.add(
+        ["lists", action.action, action.listType, action.listName, action.listId ?? "", ""].join(
+          "\0",
+        ),
+      );
+      continue;
+    }
+    for (const item of items) {
+      keys.add(
+        [
+          "lists",
+          action.action,
+          action.listType,
+          action.listName,
+          action.listId ?? "",
+          readItemId(item),
+        ].join("\0"),
+      );
+    }
+  }
+  return keys;
+}
+
+function requestedKey(op: RequestedOp): string {
+  return [
+    op.domain,
+    op.op,
+    op.listType ?? "",
+    op.listName ?? "",
+    op.listId ?? "",
+    op.id ?? "",
+  ].join("\0");
+}
+
+function metadataHasMutates(meta: {
+  lists?: unknown[];
+  listOps?: unknown[];
+  filing?: unknown[];
+  reminders?: unknown[];
+  directory?: unknown[];
+}): boolean {
+  return (
+    (meta.lists?.length ?? 0) > 0 ||
+    (meta.listOps?.length ?? 0) > 0 ||
+    (meta.filing?.length ?? 0) > 0 ||
+    (meta.reminders?.length ?? 0) > 0 ||
+    (meta.directory?.length ?? 0) > 0
+  );
+}
+
+/**
+ * Diff requested vs post-strip metadata. Does not change strip policy.
+ * Known path: show_dump alone clears mutates → reason show_dump_cleared_mutates.
+ * Any other disappearance → unclassified_drops (forces unknown; no invented reason).
+ */
+export function collectShowTurnStripDrops(input: {
+  requested: CapturedRequested;
+  showDumpBefore: string | null | undefined;
+  afterStrip: {
+    lists?: LlmListAction[];
+    listOps?: LlmListOp[];
+    filing?: LlmFilingAction[];
+    reminders?: LlmReminderAction[];
+    directory?: LlmDirectoryAction[];
+  };
+}): {
+  misses: ResultIntentMiss[];
+  unclassified: RequestedOp[];
+} {
+  const showDump = input.showDumpBefore?.trim() ?? "";
+  const allRequested = [
+    ...requestedOpsFromLists(input.requested.lists),
+    ...requestedOpsFromFiling(input.requested.filing),
+    ...requestedOpsFromReminders(input.requested.reminders),
+    ...requestedOpsFromDirectory(input.requested.directory),
+    ...requestedOpsFromListOps(input.requested.listOps),
+  ];
+  if (allRequested.length === 0 || !showDump) {
+    return { misses: [], unclassified: [] };
+  }
+
+  const surviving = new Set<string>();
+  for (const key of survivingListKeys(input.afterStrip.lists ?? [])) {
+    surviving.add(key);
+  }
+  for (const op of requestedOpsFromFiling(input.afterStrip.filing ?? [])) {
+    surviving.add(requestedKey(op));
+  }
+  for (const op of requestedOpsFromReminders(input.afterStrip.reminders ?? [])) {
+    surviving.add(requestedKey(op));
+  }
+  for (const op of requestedOpsFromDirectory(input.afterStrip.directory ?? [])) {
+    surviving.add(requestedKey(op));
+  }
+  for (const op of requestedOpsFromListOps(input.afterStrip.listOps ?? [])) {
+    surviving.add(requestedKey(op));
+  }
+
+  const dropped = allRequested.filter((op) => !surviving.has(requestedKey(op)));
+  if (dropped.length === 0) {
+    return { misses: [], unclassified: [] };
+  }
+
+  // Definite policy branch: show_dump with no remaining mutates cleared them.
+  const clearedForDisplayOnly = !metadataHasMutates(input.afterStrip);
+  if (clearedForDisplayOnly) {
+    return {
+      misses: dropped.map((op) => ({
+        reason: "show_dump_cleared_mutates",
+        itemId: op.id,
+        listId: op.listId,
+        listType: op.listType,
+        listName: op.listName,
+        op: op.op,
+        domain: op.domain,
+        source: "show_turn_strip" as const,
+      })),
+      unclassified: [],
+    };
+  }
+
+  // Should not happen with current strip policy when show+mutates keeps mutates.
+  return { misses: [], unclassified: dropped };
+}
+
+function rollupCompleteness(
+  domains: ApplyResult["domains"],
+): ApplyCompleteness {
+  const values = Object.values(domains).filter(
+    Boolean,
+  ) as DomainApplyResult[];
+  if (values.length === 0) {
+    return "complete";
+  }
+  if (values.some((row) => row.completeness === "unknown")) {
+    return "unknown";
+  }
+  if (values.some((row) => row.completeness === "partial")) {
+    return "partial";
+  }
+  return "complete";
+}
+
+export function buildApplyResult(input: {
+  requested: CapturedRequested;
+  intentMisses?: IntentMiss[];
+  dumpGuardDrops?: DumpGuardDrop[];
+  /** Classified stripShowTurnMutates drops (known reason). */
+  stripMisses?: ResultIntentMiss[];
+  /** Strip removals without a definite reason — force unknown. */
+  unclassifiedStripDrops?: RequestedOp[];
+  listMutations?: ListItemMutation[];
+  filingMutations?: FilingMutation[];
+  shareMisses?: ShareApplyMiss[];
+  listOpResults?: ListOpResult[];
+  reminderResult?: {
+    saved: Array<{ id: string; itemLabel?: string; item?: string }>;
+    /** Cancelled reminder ids. */
+    removed?: string[];
+    /** Requested reminder ids that did not apply. */
+    missed?: string[];
+    skipped?: Array<{ reason?: string; item?: string }>;
+    changes?: Array<{ action: string; label?: string }>;
+  };
+  directoryResult?: {
+    saved: Array<{ id: string; name?: string }>;
+    /** Removed contact ids. */
+    removed: string[];
+  };
+}): ApplyResult {
+  const domains: ApplyResult["domains"] = {};
+  const stripMisses = input.stripMisses ?? [];
+  const unclassifiedStrip = input.unclassifiedStripDrops ?? [];
+
+  const listRequested = requestedOpsFromLists(input.requested.lists);
+  if (listRequested.length > 0) {
+    const intent_misses: ResultIntentMiss[] = [
+      ...(input.intentMisses ?? []).map((miss) => ({
+        reason: miss.reason,
+        mutateSource: miss.mutateSource,
+        dumpLine: miss.dumpLine,
+        itemId: miss.itemId,
+        listId: miss.listId,
+        listType: miss.listType,
+        listName: miss.listName,
+        source: "intent" as const,
+      })),
+      ...(input.dumpGuardDrops ?? []).map((drop) => ({
+        reason: drop.reason,
+        itemId: drop.itemId,
+        listType: drop.listType,
+        listName: drop.listName,
+        op: drop.op,
+        domain: "lists" as const,
+        source: "dump_guard" as const,
+      })),
+      ...stripMisses.filter((miss) => miss.domain === "lists"),
+    ];
+    const applied: AppliedOp[] = (input.listMutations ?? []).map((row) => ({
+      domain: "lists" as const,
+      op: row.action,
+      id: row.itemId,
+      label: row.itemLabel,
+      listType: row.listType,
+      listName: row.listName,
+      employeeId: row.employeeId,
+    }));
+    const apply_misses: ApplyMiss[] = (input.shareMisses ?? []).map((miss) => ({
+      domain: "lists",
+      reason: miss.reason,
+      id: miss.itemId,
+    }));
+    const unclassified_drops = unclassifiedStrip.filter(
+      (op) => op.domain === "lists",
+    );
+    domains.lists = {
+      requested: listRequested,
+      applied,
+      intent_misses,
+      apply_misses,
+      ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
+      completeness: computeDomainCompleteness({
+        requested: listRequested,
+        applied,
+        intent_misses,
+        apply_misses,
+        unclassified_drops,
+      }),
+    };
+  }
+
+  const filingRequested = requestedOpsFromFiling(input.requested.filing);
+  if (filingRequested.length > 0) {
+    const applied: AppliedOp[] = (input.filingMutations ?? []).map((row) => ({
+      domain: "filing" as const,
+      op: row.action,
+      label: row.itemName,
+      listType: "filing",
+    }));
+    const intent_misses = stripMisses.filter((miss) => miss.domain === "filing");
+    const unclassified_drops = unclassifiedStrip.filter(
+      (op) => op.domain === "filing",
+    );
+    const allStripClassified =
+      unclassified_drops.length === 0 &&
+      filingRequested.every((req) =>
+        intent_misses.some((miss) => missMatchesRequested(miss, req)),
+      );
+    domains.filing = {
+      requested: filingRequested,
+      applied,
+      intent_misses,
+      apply_misses: [],
+      ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
+      // Silent filing apply has no miss channel; strip-only fate can be complete.
+      completeness: allStripClassified
+        ? computeDomainCompleteness({
+            requested: filingRequested,
+            applied,
+            intent_misses,
+            apply_misses: [],
+            unclassified_drops,
+          })
+        : "unknown",
+    };
+  }
+
+  const reminderRequested = requestedOpsFromReminders(input.requested.reminders);
+  if (reminderRequested.length > 0) {
+    const rr = input.reminderResult;
+    const applied: AppliedOp[] = [
+      ...(rr?.saved ?? []).map((row) => ({
+        domain: "reminders" as const,
+        op: "add",
+        id: row.id,
+        label: row.itemLabel || row.item,
+      })),
+      ...(rr?.removed ?? []).map((id) => ({
+        domain: "reminders" as const,
+        op: "remove",
+        id,
+      })),
+      ...(rr?.changes ?? []).map((row) => ({
+        domain: "reminders" as const,
+        op: row.action === "remove" ? "remove" : "update",
+        label: row.label,
+      })),
+    ];
+    const intent_misses = stripMisses.filter(
+      (miss) => miss.domain === "reminders",
+    );
+    const unclassified_drops = unclassifiedStrip.filter(
+      (op) => op.domain === "reminders",
+    );
+    const apply_misses: ApplyMiss[] = [
+      ...(rr?.missed ?? []).map((id) => ({
+        domain: "reminders" as const,
+        reason: "missed",
+        id,
+      })),
+      ...(rr?.skipped ?? []).map((row) => ({
+        domain: "reminders" as const,
+        reason: String(row.reason ?? "skipped"),
+        detail: row.item,
+      })),
+    ];
+    domains.reminders = {
+      requested: reminderRequested,
+      applied,
+      intent_misses,
+      apply_misses,
+      ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
+      completeness: computeDomainCompleteness({
+        requested: reminderRequested,
+        applied,
+        intent_misses,
+        apply_misses,
+        unclassified_drops,
+      }),
+    };
+  }
+
+  const directoryRequested = requestedOpsFromDirectory(
+    input.requested.directory,
+  );
+  if (directoryRequested.length > 0) {
+    const dr = input.directoryResult;
+    const applied: AppliedOp[] = [
+      ...(dr?.saved ?? []).map((row) => ({
+        domain: "directory" as const,
+        op: "add",
+        id: row.id,
+        label: row.name,
+      })),
+      ...(dr?.removed ?? []).map((id) => ({
+        domain: "directory" as const,
+        op: "remove",
+        id,
+      })),
+    ];
+    const intent_misses = stripMisses.filter(
+      (miss) => miss.domain === "directory",
+    );
+    const unclassified_drops = unclassifiedStrip.filter(
+      (op) => op.domain === "directory",
+    );
+    const allStripClassified =
+      unclassified_drops.length === 0 &&
+      directoryRequested.every((req) =>
+        intent_misses.some((miss) => missMatchesRequested(miss, req)),
+      );
+    domains.directory = {
+      requested: directoryRequested,
+      applied,
+      intent_misses,
+      apply_misses: [],
+      ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
+      completeness: allStripClassified
+        ? computeDomainCompleteness({
+            requested: directoryRequested,
+            applied,
+            intent_misses,
+            apply_misses: [],
+            unclassified_drops,
+          })
+        : "unknown",
+    };
+  }
+
+  const listOpsRequested = requestedOpsFromListOps(input.requested.listOps);
+  if (listOpsRequested.length > 0) {
+    const applied: AppliedOp[] = [];
+    const apply_misses: ApplyMiss[] = [];
+    for (const row of input.listOpResults ?? []) {
+      if (row.applied) {
+        applied.push({
+          domain: "list_ops",
+          op: row.action,
+          id: row.listId,
+          label: row.listLabel,
+          listType: row.listType,
+          listName: row.listName,
+          listId: row.listId,
+        });
+      } else if (row.refusal) {
+        apply_misses.push({
+          domain: "list_ops",
+          reason: row.refusal.reason,
+          id: row.listId,
+          op: row.action,
+          detail: row.refusal.detail,
+        });
+      }
+    }
+    const intent_misses = stripMisses.filter(
+      (miss) => miss.domain === "list_ops",
+    );
+    const unclassified_drops = unclassifiedStrip.filter(
+      (op) => op.domain === "list_ops",
+    );
+    const accounted =
+      applied.length + apply_misses.length + intent_misses.length;
+    domains.list_ops = {
+      requested: listOpsRequested,
+      applied,
+      intent_misses,
+      apply_misses,
+      ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
+      completeness: computeDomainCompleteness({
+        requested: listOpsRequested,
+        applied,
+        intent_misses,
+        apply_misses,
+        unclassified_drops,
+        reportingIncomplete:
+          unclassified_drops.length === 0 &&
+          accounted < listOpsRequested.length &&
+          intent_misses.length === 0,
+      }),
+    };
+  }
+
+  return {
+    domains,
+    completeness: rollupCompleteness(domains),
+  };
+}

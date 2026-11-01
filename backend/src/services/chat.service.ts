@@ -208,6 +208,28 @@ import {
   restrictListMutatesToLastNumberedDump,
   type LastNumberedDumpLine,
 } from "./show-button-dump.js";
+import {
+  buildThisTurnVisibleRefs,
+  resolveIntentRefs,
+  type IntentMiss,
+} from "./list-intent-refs.js";
+import {
+  buildApplyResult,
+  captureRequestedFromMetadata,
+  collectShowTurnStripDrops,
+  type ApplyResult,
+  type DumpGuardDrop,
+  type ResultIntentMiss,
+  type RequestedOp,
+} from "./apply-result.js";
+import { decideReplyFromApplyResult } from "./apply-result-reply.js";
+import {
+  capturePendingShowDump,
+  combineConfirmAndDump,
+  restorePendingShowDump,
+  withApplyResultDisplay,
+  type PendingShowDump,
+} from "./apply-result-display.js";
 import { resolveWeatherMessages } from "./weather.js";
 import { composeWeatherLiveTip } from "./reminder-compose.js";
 import { resolveMarketReply } from "./market.js";
@@ -2105,22 +2127,25 @@ export async function sendChatMessage(input: {
   const lastLiveLocationCtx = guestSpeaker
     ? null
     : await loadLastLiveLocationForConversation(conversation.id);
+  // Same snapshots injected into EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA — reused
+  // later for stage-2 saved_data membership (thisTurnVisibleRefs), not a fresh DB exists check.
+  const speakerSnapshot = await withAttachmentRefsSafe(
+    await getEmployeeRecordSnapshot(input.employeeId),
+  );
+  const workerSnapshot = guestSpeaker
+    ? null
+    : await withAttachmentRefsSafe(
+        await getEmployeeRecordSnapshot(digital.id, {
+          scopeItemsToViewerId: input.employeeId,
+        }),
+      );
   const context = [
     formatSessionClockContext(),
     guestSpeaker ? "" : formatSpeakerAddressContext(employee.addressGender),
-    formatEmployeeContext(
-      await withAttachmentRefsSafe(await getEmployeeRecordSnapshot(input.employeeId)),
-    ),
+    formatEmployeeContext(speakerSnapshot),
     guestSpeaker
       ? ""
-      : formatEmployeeContext(
-          await withAttachmentRefsSafe(
-            await getEmployeeRecordSnapshot(digital.id, {
-              scopeItemsToViewerId: input.employeeId,
-            }),
-          ),
-          "WORKER_SAVED_DATA",
-        ),
+      : formatEmployeeContext(workerSnapshot!, "WORKER_SAVED_DATA"),
     guestSpeaker
       ? ""
       : formatSpeakerContacts(speakerContacts, contactBookShare),
@@ -2470,19 +2495,69 @@ export async function sendChatMessage(input: {
         };
       }
     }
+    // Result-A: immutable requested AFTER parse shaping, BEFORE strip/resolve/H drops.
+    const applyResultRequested = captureRequestedFromMetadata(metadata);
+    const showDumpBeforeStrip = metadata.showDump;
+    const metadataBeforeStrip = metadata;
     // show_dump: display-only ? drop spurious removes; mutates win over accidental show_dump.
     metadata = stripShowTurnMutates(metadata);
+    // Result-C: mutate+show — strip drops showDump; keep pending for post-apply dump.
+    const pendingShowDump: PendingShowDump | null = capturePendingShowDump({
+      showDumpBefore: showDumpBeforeStrip,
+      before: metadataBeforeStrip,
+      afterStrip: metadata,
+    });
+    const stripDropAccount = collectShowTurnStripDrops({
+      requested: applyResultRequested,
+      showDumpBefore: showDumpBeforeStrip,
+      afterStrip: {
+        lists: metadata.lists,
+        listOps: metadata.listOps,
+        filing: metadata.filing,
+        reminders: metadata.reminders,
+        directory: metadata.directory,
+      },
+    });
+    const stripMissesForResult: ResultIntentMiss[] = stripDropAccount.misses;
+    const unclassifiedStripDropsForResult: RequestedOp[] =
+      stripDropAccount.unclassified;
     // Same-turn blank custom create + unambiguous host linked_lists name ? fill listName.
     metadata = fillBlankCustomListNameFromSameTurnLinks(metadata);
+    // Stage-2 intent gate: explicit mutate_source (dump_line / saved_data) before H.
+    // Missing mutate_source is never inferred as saved_data — those rows stay for H.
+    let intentPassThroughIds: ReadonlySet<string> | undefined;
+    let intentMissesForResult: IntentMiss[] = [];
+    let dumpGuardDropsForResult: DumpGuardDrop[] = [];
+    if (!guestSpeaker) {
+      const intentResolved = resolveIntentRefs(metadata.lists ?? [], {
+        dump: lastNumberedDump,
+        visibleRefs: buildThisTurnVisibleRefs(speakerSnapshot, workerSnapshot),
+      });
+      metadata = { ...metadata, lists: intentResolved.lists };
+      intentMissesForResult = intentResolved.misses;
+      intentPassThroughIds =
+        intentResolved.passThroughIds.size > 0
+          ? intentResolved.passThroughIds
+          : undefined;
+    }
     // Hard guard: with an active LAST_NUMBERED_DUMP, cross-domain mutates are
     // dropped (stale shopping ids after a custom dump). Same-domain shopping/
     // tasks ids may complete live ESD rows outside a date-filtered dump map.
+    // passThroughIds: items already validated by resolveIntentRefs skip re-drop.
     const dumpRestricted = guestSpeaker
-      ? { lists: metadata.lists ?? [], droppedOutsideDump: false }
+      ? {
+          lists: metadata.lists ?? [],
+          droppedOutsideDump: false,
+          droppedItems: [] as DumpGuardDrop[],
+        }
       : restrictListMutatesToLastNumberedDump(
           metadata.lists ?? [],
           lastNumberedDump,
+          intentPassThroughIds
+            ? { passThroughIds: intentPassThroughIds }
+            : undefined,
         );
+    dumpGuardDropsForResult = dumpRestricted.droppedItems ?? [];
     if (dumpRestricted.droppedOutsideDump) {
       metadata = { ...metadata, lists: dumpRestricted.lists };
     }
@@ -2711,6 +2786,32 @@ export async function sendChatMessage(input: {
       attachmentOutcome,
       directoryResult.attachmentOutcome,
     );
+    // Result-A: internal ApplyResult only — does not change user-facing reply.
+    let turnApplyResult: ApplyResult = buildApplyResult({
+      requested: applyResultRequested,
+      intentMisses: intentMissesForResult,
+      dumpGuardDrops: dumpGuardDropsForResult,
+      stripMisses: stripMissesForResult,
+      unclassifiedStripDrops: unclassifiedStripDropsForResult,
+      listMutations,
+      filingMutations,
+      shareMisses,
+      listOpResults,
+      reminderResult: {
+        saved: reminderResult.saved,
+        removed: reminderResult.removed,
+        missed: reminderResult.missed,
+        skipped: reminderResult.skipped,
+        changes: reminderResult.changes,
+      },
+      directoryResult: {
+        saved: directoryResult.saved.map((row) => ({
+          id: row.id,
+          name: row.name,
+        })),
+        removed: directoryResult.removed,
+      },
+    });
     const refreshedContacts =
       directoryResult.saved.length > 0 || directoryResult.removed.length > 0
         ? await listContactsForEmployee(employee.id)
@@ -3158,6 +3259,16 @@ export async function sendChatMessage(input: {
       formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
       scheduleSkipNotice.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
+    // Result-B: gate optimistic success claims against ApplyResult.
+    // Result-D: legacy correctors below stay — domain safety nets (share/unshare/
+    // attach/speaker-vs-worker/list_ops/empty fallback) are not fully covered by B.
+    const decidedReply = decideReplyFromApplyResult({
+      applyResult: turnApplyResult,
+      modelDraft: workingReply,
+    });
+    if (!decidedReply.keepDraft) {
+      workingReply = setEngineResponse(workingReply, decidedReply.spoken);
+    }
     const misaddressed = correctMisaddressedJobReply({
       response: parseLlmReply(workingReply).response,
       relays: outbound.relays
@@ -3408,6 +3519,14 @@ export async function sendChatMessage(input: {
      * Kept aside because the show_dump freeze clears model choice taps.
      */
     let itemDumpShowButtons: Array<{ label: string; command: string }> = [];
+    // Result-C: restore stripped show_dump after apply so dump uses post-apply DB.
+    // Dump always reflects actual DB; Result-B already gated success wording.
+    let mutateThenShowConfirm = "";
+    const restoredPendingShow = pendingShowDump != null;
+    if (restoredPendingShow) {
+      mutateThenShowConfirm = parseLlmReply(workingReply).response;
+      metadata = restorePendingShowDump(metadata, pendingShowDump);
+    }
     const showDumpKind = metadata.showDump?.trim() ?? "";
     if (showDumpKind) {
       const speakerAliases = [
@@ -3823,6 +3942,24 @@ export async function sendChatMessage(input: {
           }
         }
       }
+    }
+    // Result-C: mutate+show — keep Result-B confirm, then engine dump from fresh DB.
+    if (restoredPendingShow && showDumpKind && mutateThenShowConfirm) {
+      const dumpSpoken = parseLlmReply(workingReply).response;
+      const combined = combineConfirmAndDump(
+        mutateThenShowConfirm,
+        dumpSpoken,
+      );
+      if (combined !== dumpSpoken) {
+        workingReply = setEngineResponse(workingReply, combined);
+      }
+    }
+    if (showDumpKind) {
+      turnApplyResult = withApplyResultDisplay(turnApplyResult, {
+        kind: showDumpKind,
+        snapshot_text: parseLlmReply(workingReply).response,
+        lines: turnLastNumberedDump,
+      });
     }
     // WATCH create turn: live sample is a 2nd bubble after the model ack ?
     // preface ???????? ?????? (pure live asks stay unwrapped).

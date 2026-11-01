@@ -62,6 +62,12 @@ export interface LlmListAction {
   action: LlmListActionName;
   listType: LlmListType;
   listName: string;
+  /**
+   * Optional stable shell id from EMPLOYEE_SAVED_DATA lists[].list_id.
+   * Used on custom remove|update with mutate_source=saved_data (intent gate);
+   * alter_list/delete_list still use list_ops[].listId.
+   */
+  listId?: string;
   /** Custom lists: column that names each row; stored only when the list is created. */
   titleField?: string;
   /** Custom lists: declared columns; stored only when the list is created. */
@@ -2096,11 +2102,13 @@ function toListAction(value: unknown): LlmListAction | null {
 
   const createEmojiRaw =
     typeof value.emoji === "string" ? value.emoji.trim().slice(0, SHOW_ICON_MAX).trim() : "";
+  const listId = readText(value, ["list_id", "listId"]);
 
   return {
     action: value.action as LlmListActionName,
     listType,
     listName,
+    ...(listId ? { listId } : {}),
     ...(titleField ? { titleField } : {}),
     ...(columns.length > 0 ? { columns } : {}),
     ...(createEmojiRaw ? { emoji: createEmojiRaw } : {}),

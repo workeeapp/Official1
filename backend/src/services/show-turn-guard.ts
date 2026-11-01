@@ -5,10 +5,6 @@
  */
 import type { LlmMetadata } from "@workee/shared";
 
-export function isReadOnlyShowTurn(showDump?: string | null): boolean {
-  return Boolean(typeof showDump === "string" && showDump.trim());
-}
-
 function hasMutates(metadata: LlmMetadata): boolean {
   return (
     (metadata.lists?.length ?? 0) > 0 ||

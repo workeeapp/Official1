@@ -2,18 +2,10 @@ import { describe, expect, it } from "vitest";
 import { emptyLlmMetadata } from "@workee/shared";
 import {
   clearMutatingMetadata,
-  isReadOnlyShowTurn,
   stripShowTurnMutates,
 } from "../src/services/show-turn-guard.js";
 
 describe("show-turn-guard", () => {
-  it("treats show_dump as read-only — not user utterance text", () => {
-    expect(isReadOnlyShowTurn()).toBe(false);
-    expect(isReadOnlyShowTurn("")).toBe(false);
-    expect(isReadOnlyShowTurn("reminders")).toBe(true);
-    expect(isReadOnlyShowTurn("shopping")).toBe(true);
-  });
-
   it("clearMutatingMetadata empties ACTION mutate arrays and keeps the rest", () => {
     const meta = {
       ...emptyLlmMetadata(),
