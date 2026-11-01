@@ -13,6 +13,7 @@ import {
   looksLikeFreeWrittenNumberedInventory,
   mapShowButtonCommandToDump,
   restrictListMutatesToLastNumberedDump,
+  type LastNumberedDumpLine,
 } from "../src/services/show-button-dump.js";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 
@@ -248,6 +249,45 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     expect(guarded.droppedOutsideDump).toBe(true);
     expect(guarded.lists).toHaveLength(1);
     expect(guarded.lists[0]?.items).toEqual([{ item_id: customId1 }]);
+  });
+
+  it("SERVER GUARD: tasks remove of ESD id outside date-filtered tasks dump still applies", () => {
+    // After «מה יש לי היום» then «ומחר?», LAST_NUMBERED_DUMP is only tomorrow —
+    // completing «דיברתי עם yes» (today's row) must not be dropped.
+    const tomorrowOnlyDump: LastNumberedDumpLine[] = [
+      { n: 1, id: "task-tomorrow-1", kind: "tasks" },
+      { n: 2, id: "task-tomorrow-2", kind: "tasks" },
+    ];
+    const finishTodayTask: LlmListAction = {
+      action: "remove",
+      listType: "tasks",
+      listName: "",
+      items: [{ item_id: "task-today-yes", "שם מטלה": "לדבר עם yes" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [finishTodayTask],
+      tomorrowOnlyDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([finishTodayTask]);
+  });
+
+  it("SERVER GUARD: still drops tasks remove when active dump is custom (cross-domain)", () => {
+    const customDump = formatShowDumpWithLineMap("משימות לטל", snap).lines;
+    const tasksRemove: LlmListAction = {
+      action: "remove",
+      listType: "tasks",
+      listName: "",
+      items: [{ item_id: "task-today-yes" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [tasksRemove],
+      customDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(true);
+    expect(guarded.lists).toEqual([]);
   });
 
   it("SERVER GUARD: drops shopping add while custom dump is active", () => {

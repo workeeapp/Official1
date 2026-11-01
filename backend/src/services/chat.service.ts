@@ -2474,8 +2474,9 @@ export async function sendChatMessage(input: {
     metadata = stripShowTurnMutates(metadata);
     // Same-turn blank custom create + unambiguous host linked_lists name ? fill listName.
     metadata = fillBlankCustomListNameFromSameTurnLinks(metadata);
-    // Hard guard: with an active LAST_NUMBERED_DUMP, remove/update item_ids
-    // outside that map are dropped (stale shopping ids after a custom dump).
+    // Hard guard: with an active LAST_NUMBERED_DUMP, cross-domain mutates are
+    // dropped (stale shopping ids after a custom dump). Same-domain shopping/
+    // tasks ids may complete live ESD rows outside a date-filtered dump map.
     const dumpRestricted = guestSpeaker
       ? { lists: metadata.lists ?? [], droppedOutsideDump: false }
       : restrictListMutatesToLastNumberedDump(

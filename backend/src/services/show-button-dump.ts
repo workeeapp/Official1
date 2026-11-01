@@ -436,7 +436,10 @@ export function listActionMatchesLastNumberedDumpScope(
 /**
  * Hard server guard while LAST_NUMBERED_DUMP is active:
  * - add → only to a list/domain present in that dump (no shopping add after custom dump)
- * - remove/update with item_id → only ids from that dump
+ * - remove/update with item_id → ids from that dump, OR (shopping|tasks only) same
+ *   domain as the dump so a date-filtered agenda dump does not block completing a
+ *   live ESD row that was on a previous day dump («דיברתי עם yes» after «ומחר?»)
+ * - custom/contacts/filing still require dump ids (no silent cross-shell)
  * - remove/update without item_id → same domain scope as add
  * Empty dump → no filter.
  */
@@ -482,6 +485,9 @@ export function restrictListMutatesToLastNumberedDump(
       droppedOutsideDump = true;
       continue;
     }
+    const sameBuiltinDomain =
+      (action.listType === "shopping" || action.listType === "tasks") &&
+      listActionMatchesLastNumberedDumpScope(action, dump);
     const kept: typeof items = [];
     for (const raw of items) {
       const id = actionItemIdFromRaw(raw);
@@ -489,7 +495,7 @@ export function restrictListMutatesToLastNumberedDump(
         kept.push(raw);
         continue;
       }
-      if (allowedIds.has(id)) {
+      if (allowedIds.has(id) || sameBuiltinDomain) {
         kept.push(raw);
         continue;
       }
@@ -1995,6 +2001,17 @@ export function itemHasDumpCalendarDate(item: Record<string, unknown>): boolean 
   return false;
 }
 
+/**
+ * Snapshot standing/recurring signal: withVisibility injects `next_occurrences`
+ * whenever a recurrence rule exists (possibly `[]` when the dump window has no
+ * hit). Empty array ≠ undated.
+ */
+export function itemHasDumpRecurrenceRule(
+  item: Record<string, unknown>,
+): boolean {
+  return Array.isArray(item.next_occurrences);
+}
+
 /** Concise Hebrew note when a dated dump excluded undated tasks. */
 export function formatUndatedTasksExcludedNote(count: number): string {
   if (count <= 0) {
@@ -3163,7 +3180,12 @@ export function countUndatedTasksExcludedByDateRange(
     if (itemMatchesDateRange(row.item, opts?.dateFrom, opts?.dateTo)) {
       continue;
     }
-    if (!itemHasDumpCalendarDate(row.item)) {
+    // Undated = no concrete calendar day AND no standing rule. A recurring
+    // task with next_occurrences: [] (no hit in this dump window) is not undated.
+    if (
+      !itemHasDumpCalendarDate(row.item) &&
+      !itemHasDumpRecurrenceRule(row.item)
+    ) {
       count += 1;
     }
   }

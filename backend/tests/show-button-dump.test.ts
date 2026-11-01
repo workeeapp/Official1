@@ -39,6 +39,7 @@ import {
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
   itemHasDumpCalendarDate,
+  itemHasDumpRecurrenceRule,
   itemMatchesDateRange,
   formatUndatedTasksExcludedNote,
   countUndatedTasksExcludedByDateRange,
@@ -4811,6 +4812,12 @@ describe("LAST_NUMBERED_DUMP line map", () => {
           next_occurrences: ["2026-10-19 09:00"],
         }),
       ).toBe(true);
+      // Standing rule with empty window still has a recurrence signal.
+      expect(itemHasDumpCalendarDate({ next_occurrences: [] })).toBe(false);
+      expect(itemHasDumpRecurrenceRule({ next_occurrences: [] })).toBe(true);
+      expect(itemHasDumpRecurrenceRule({ "שם מטלה": "בלי תאריך" })).toBe(
+        false,
+      );
       expect(formatUndatedTasksExcludedNote(0)).toBe("");
       expect(formatUndatedTasksExcludedNote(1)).toBe(
         "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
@@ -4818,6 +4825,99 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(formatUndatedTasksExcludedNote(3)).toBe(
         "(שים לב: 3 מטלות בלי תאריך לא נכללו בטווח.)",
       );
+    });
+
+    it("7 genuine undated stay 7 for today and tomorrow; empty-window recurrings are not added", () => {
+      const undated = Array.from({ length: 7 }, (_, i) => ({
+        item_id: `u${i + 1}`,
+        "שם מטלה": `בלי תאריך ${i + 1}`,
+      }));
+      const standingOutsideTomorrow = [
+        {
+          item_id: "stand-sun",
+          "שם מטלה": "חוזר רק ביום ראשון",
+          חוזר: "כל יום ראשון ב־09:00",
+          // Dump window for tomorrow injects [] when no occurrence hits.
+          next_occurrences: [] as string[],
+        },
+        {
+          item_id: "stand-wed",
+          "שם מטלה": "חוזר רק ביום רביעי",
+          חוזר: "כל יום רביעי ב־09:00",
+          next_occurrences: [] as string[],
+        },
+      ];
+      const standingInTomorrow = {
+        item_id: "stand-mon",
+        "שם מטלה": "חוזר ביום שני",
+        חוזר: "כל יום שני ב־09:00",
+        next_occurrences: ["2026-11-02 09:00"],
+      };
+      const datedNoTime = {
+        item_id: "dated-no-time",
+        "שם מטלה": "עם תאריך בלי שעה",
+        "תאריך לביצוע": "2026-11-02",
+      };
+      const datedOutside = {
+        item_id: "dated-out",
+        "שם מטלה": "עם תאריך מחוץ לטווח",
+        "תאריך לביצוע": "2026-11-10",
+      };
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "עמית",
+            scope: "personal",
+            items: [
+              ...undated,
+              ...standingOutsideTomorrow,
+              standingInTomorrow,
+              datedNoTime,
+              datedOutside,
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+
+      const todayDump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "עמית",
+        dateFrom: "2026-11-01",
+        dateTo: "2026-11-01",
+      })!;
+      const tomorrowDump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "עמית",
+        dateFrom: "2026-11-02",
+        dateTo: "2026-11-02",
+      })!;
+
+      // 1) Seven genuine undated → count 7 for both day windows.
+      expect(todayDump).toContain(
+        "(שים לב: 7 מטלות בלי תאריך לא נכללו בטווח.)",
+      );
+      expect(tomorrowDump).toContain(
+        "(שים לב: 7 מטלות בלי תאריך לא נכללו בטווח.)",
+      );
+      expect(todayDump).not.toMatch(/9 מטלות בלי תאריך/);
+      expect(tomorrowDump).not.toMatch(/9 מטלות בלי תאריך/);
+
+      // 2) Empty-window recurrings are not added to the undated count.
+      expect(tomorrowDump).not.toContain("חוזר רק ביום ראשון");
+      expect(tomorrowDump).not.toContain("חוזר רק ביום רביעי");
+
+      // 3) Recurring with a hit in the window appears in agenda, not as undated.
+      expect(tomorrowDump).toContain("חוזר ביום שני");
+
+      // 4) Date without time is not undated (appears in tomorrow agenda).
+      expect(tomorrowDump).toContain("עם תאריך בלי שעה");
+      expect(todayDump).not.toContain("עם תאריך בלי שעה");
+
+      // 5) Dated outside the window is not counted as undated.
+      expect(tomorrowDump).not.toContain("עם תאריך מחוץ לטווח");
+      expect(tomorrowDump).not.toMatch(/8 מטלות בלי תאריך/);
     });
 
     it("dated dump with undated tasks discloses count; undated titles stay out of the agenda", () => {
