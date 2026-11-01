@@ -12,6 +12,7 @@ import {
   capturePendingShowDump,
   combineConfirmAndDump,
   restorePendingShowDump,
+  stripInventedListContentForShowDump,
   withApplyResultDisplay,
 } from "../src/services/apply-result-display.js";
 import { decideReplyFromApplyResult } from "../src/services/apply-result-reply.js";
@@ -130,6 +131,133 @@ describe("combineConfirmAndDump", () => {
   it("does not duplicate when dump already starts with confirm", () => {
     const text = "הוספתי.\n\nרשימה";
     expect(combineConfirmAndDump("הוספתי.", text)).toBe(text);
+  });
+
+  it("1. strips a single invented numbered line beside engine dump (QA F)", () => {
+    const dump = "🛒 קניות:\n1. לחם - 1";
+    const out = combineConfirmAndDump(
+      "הוספתי ללחם. הנה הרשימה המלאה שהמצאתי: 1. פריט-בדוי-xyz",
+      dump,
+    );
+    expect(out).toContain(dump);
+    expect(out).toContain("הוספתי ללחם");
+    expect(out).not.toContain("פריט-בדוי-xyz");
+    expect(out).not.toContain("המצאתי");
+  });
+
+  it("2. strips multiple invented numbered lines beside engine dump", () => {
+    const dump = "🛒 קניות:\n1. חלב - 1";
+    const out = combineConfirmAndDump(
+      "הוספתי חלב.\n1. פריט-בדוי-א\n2. פריט-בדוי-ב",
+      dump,
+    );
+    expect(out).toBe(`הוספתי חלב.\n\n${dump}`);
+    expect(out).not.toContain("פריט-בדוי");
+  });
+
+  it("3. keeps a clean conversational confirm + SHOW_DUMP", () => {
+    const dump = "🛒 קניות:\n1. חלב - 1";
+    expect(combineConfirmAndDump("הוספתי חלב, הנה הרשימה.", dump)).toBe(
+      `הוספתי חלב, הנה הרשימה.\n\n${dump}`,
+    );
+  });
+
+  it("4. keeps conversational numbers (does not strip הוספתי 3 / ב־14:30)", () => {
+    const dump = "🛒 קניות:\n1. חלב - 1";
+    const confirm = "הוספתי 3 פריטים. נזכיר ב־14:30.";
+    const out = combineConfirmAndDump(confirm, dump);
+    expect(out.startsWith(confirm)).toBe(true);
+    expect(out).toContain(dump);
+    expect(out).toContain("3 פריטים");
+    expect(out).toContain("14:30");
+  });
+
+  it("5. successful mutation item appears only in engine dump body", () => {
+    const dump = "🛒 קניות:\n1. חלב-QA - 1";
+    const out = combineConfirmAndDump(
+      "הוספתי חלב-QA. 1. פריט-בדוי",
+      dump,
+    );
+    expect(out).toContain("1. חלב-QA - 1");
+    expect(out).not.toContain("פריט-בדוי");
+    // Numbered dump line comes from engine dump, not model invent.
+    expect(out.indexOf("חלב-QA")).toBeLessThan(out.indexOf("1. חלב-QA - 1"));
+  });
+
+  it("6. without dump text, confirm is unchanged (no SHOW_DUMP combine)", () => {
+    const confirm = "הוספתי חלב.\n1. לא-למחוק-בלי-dump";
+    expect(combineConfirmAndDump(confirm, "")).toBe(confirm);
+  });
+
+  it("uses engineConfirmFallback when confirm is only invented inventory", () => {
+    const dump = "🛒 קניות:\n1. חלב - 1";
+    const out = combineConfirmAndDump("1. פריט-בדוי\n2. עוד-בדוי", dump, {
+      engineConfirmFallback: "בוצע.",
+    });
+    expect(out).toBe(`בוצע.\n\n${dump}`);
+    expect(out).not.toContain("בדוי");
+  });
+});
+
+describe("stripInventedListContentForShowDump", () => {
+  it("returns empty for pure inventory so dump-only is safe", () => {
+    expect(stripInventedListContentForShowDump("1. א\n2. ב")).toBe("");
+  });
+});
+
+describe("SHOW_DUMP sanitizer — conversational keep vs invent strip", () => {
+  const dump = "🛒 קניות:\n1. חלב - 1\n2. לחם - 1\n3. גרסה 1.2 - 1";
+
+  it('keeps «נשארו לי 2 דברים לקנות: חלב ולחם.»', () => {
+    const confirm = "נשארו לי 2 דברים לקנות: חלב ולחם.";
+    const out = combineConfirmAndDump(confirm, dump);
+    expect(out.startsWith(confirm)).toBe(true);
+    expect(out).toContain(dump);
+  });
+
+  it('keeps «הוספתי 3 פריטים, הנה הרשימה.»', () => {
+    const confirm = "הוספתי 3 פריטים, הנה הרשימה.";
+    const out = combineConfirmAndDump(confirm, dump);
+    expect(out.startsWith(confirm)).toBe(true);
+    expect(out).toContain("3 פריטים");
+    expect(out).toContain(dump);
+  });
+
+  it('keeps «הפגישה ב־14:30, הנה הרשימה.»', () => {
+    const confirm = "הפגישה ב־14:30, הנה הרשימה.";
+    const out = combineConfirmAndDump(confirm, dump);
+    expect(out.startsWith(confirm)).toBe(true);
+    expect(out).toContain("14:30");
+    expect(out).toContain(dump);
+  });
+
+  it("keeps dump rows whose item names contain digits or dots", () => {
+    const out = combineConfirmAndDump("הוספתי גרסה 1.2.", dump);
+    // Dump line index may be 3.; item name itself has digits/dots.
+    expect(out).toContain("גרסה 1.2 - 1");
+    expect(out).toContain("הוספתי גרסה 1.2.");
+    // Confirm was not treated as inventory because «1.2» is not «1. item».
+    expect(out.startsWith("הוספתי גרסה 1.2.")).toBe(true);
+  });
+
+  it("strips one invented numbered line; keeps confirm; dump is sole list body", () => {
+    const out = combineConfirmAndDump(
+      "הוספתי חלב. 1. מומצא-xyz",
+      dump,
+    );
+    expect(out).toContain("הוספתי חלב");
+    expect(out).not.toContain("מומצא-xyz");
+    expect(out).toContain(dump);
+  });
+
+  it("strips multiple invented numbered lines; keeps confirm", () => {
+    const out = combineConfirmAndDump(
+      "הוספתי חלב.\n1. מומצא-א\n2. מומצא-ב\n3. מומצא-ג",
+      dump,
+    );
+    expect(out).toContain("הוספתי חלב");
+    expect(out).not.toMatch(/מומצא/);
+    expect(out).toContain(dump);
   });
 });
 

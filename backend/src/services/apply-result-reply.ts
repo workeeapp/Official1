@@ -21,13 +21,7 @@ import type {
 } from "./apply-result.js";
 import { looksLikeFreeWrittenNumberedInventory } from "./show-button-dump.js";
 
-export type DecideReplyFromApplyResult = {
-  keepDraft: boolean;
-  /** Spoken Hebrew when keepDraft is false; otherwise mirrors draft spoken. */
-  spoken: string;
-};
-
-type ClaimFlags = {
+export type ClaimFlags = {
   anySuccess: boolean;
   deleteClaim: boolean;
   addClaim: boolean;
@@ -35,6 +29,21 @@ type ClaimFlags = {
   shareClaim: boolean;
   reminderClaim: boolean;
   durableClaim: boolean;
+};
+
+export type DecideReplyFromApplyResult = {
+  keepDraft: boolean;
+  /** Spoken Hebrew when keepDraft is false; otherwise mirrors draft spoken. */
+  spoken: string;
+  /**
+   * True when Result-B replaced the draft because of an operational-claim
+   * mismatch, free inventory on a mutate turn, partial/unknown success claim,
+   * or complete miss. Used by reply-override-policy to skip duplicate legacy
+   * operational-claim correctors — not a global gate for narrow-post-apply.
+   */
+  operationalClaimResolved: boolean;
+  /** Claim flags analyzed on the model draft (before any replacement). */
+  draftClaims: ClaimFlags;
 };
 
 type AppliedCounts = {
@@ -276,9 +285,81 @@ function formatUnknown(result: ApplyResult): string {
   return UNKNOWN_CAUTION;
 }
 
+/** Narrow confirmed ack when model left spoken empty after complete apply. */
+export const ORDINARY_MUTATION_EMPTY_ACK = "בוצע.";
+
+/**
+ * Stage 2A: spoken fill when the model left responses empty but ApplyResult
+ * has requested mutates. Never invents unverified success.
+ * - complete + applied → short confirmed ack (not a detailed model-style confirm)
+ * - complete + no applied → miss line
+ * - partial → applied lines + miss lines
+ * - unknown → caution (+ applied lines if any)
+ * Returns null when there were no requested mutates.
+ */
+export function formatEmptySpokenFromApplyResult(
+  result: ApplyResult,
+): string | null {
+  if (!hasRequestedMutates(result)) {
+    return null;
+  }
+  const applied = flattenApplied(result);
+  if (result.completeness === "unknown") {
+    return formatUnknown(result);
+  }
+  if (result.completeness === "partial") {
+    return formatFromResult(result);
+  }
+  // complete
+  if (applied.length === 0) {
+    const misses = reportableMissLines(result);
+    return misses[0] ?? LIST_FIND_MISS;
+  }
+  return ORDINARY_MUTATION_EMPTY_ACK;
+}
+
+export { UNKNOWN_CAUTION as APPLY_RESULT_UNKNOWN_CAUTION };
+
+function emptyClaims(): ClaimFlags {
+  return {
+    anySuccess: false,
+    deleteClaim: false,
+    addClaim: false,
+    updateClaim: false,
+    shareClaim: false,
+    reminderClaim: false,
+    durableClaim: false,
+  };
+}
+
+function keep(
+  spoken: string,
+  draftClaims: ClaimFlags,
+): DecideReplyFromApplyResult {
+  return {
+    keepDraft: true,
+    spoken,
+    operationalClaimResolved: false,
+    draftClaims,
+  };
+}
+
+function replace(
+  spoken: string,
+  draftClaims: ClaimFlags,
+): DecideReplyFromApplyResult {
+  return {
+    keepDraft: false,
+    spoken,
+    operationalClaimResolved: true,
+    draftClaims,
+  };
+}
+
 /**
  * Decide whether modelDraft spoken may stand, or replace with Result-based text.
  * Does not emit list inventories — show_dump REPLACE remains the display path.
+ * Override class for replacements: operational-claim (see reply-override-policy).
  */
 export function decideReplyFromApplyResult(input: {
   applyResult: ApplyResult;
@@ -288,7 +369,7 @@ export function decideReplyFromApplyResult(input: {
   const result = input.applyResult;
 
   if (!hasRequestedMutates(result)) {
-    return { keepDraft: true, spoken: draftSpoken };
+    return keep(draftSpoken, emptyClaims());
   }
 
   const claims = analyzeClaims(draftSpoken);
@@ -298,41 +379,38 @@ export function decideReplyFromApplyResult(input: {
 
   // Never let mutate-turn draft present a free-written numbered inventory.
   if (looksLikeInventory && claims.anySuccess) {
-    return { keepDraft: false, spoken: formatFromResult(result) };
+    return replace(formatFromResult(result), claims);
   }
   if (looksLikeInventory && counts.total > 0) {
-    return { keepDraft: false, spoken: formatFromResult(result) };
+    return replace(formatFromResult(result), claims);
   }
 
   if (result.completeness === "unknown") {
     if (claims.anySuccess || looksLikeInventory) {
-      return { keepDraft: false, spoken: formatUnknown(result) };
+      return replace(formatUnknown(result), claims);
     }
-    return { keepDraft: true, spoken: draftSpoken };
+    return keep(draftSpoken, claims);
   }
 
   if (result.completeness === "partial") {
     if (claims.anySuccess || looksLikeInventory) {
-      return { keepDraft: false, spoken: formatFromResult(result) };
+      return replace(formatFromResult(result), claims);
     }
-    return { keepDraft: true, spoken: draftSpoken };
+    return keep(draftSpoken, claims);
   }
 
   // complete
   if (counts.total === 0) {
     if (claims.anySuccess) {
       const misses = reportableMissLines(result);
-      return {
-        keepDraft: false,
-        spoken: misses[0] ?? LIST_FIND_MISS,
-      };
+      return replace(misses[0] ?? LIST_FIND_MISS, claims);
     }
-    return { keepDraft: true, spoken: draftSpoken };
+    return keep(draftSpoken, claims);
   }
 
   if (claims.anySuccess && !draftMatchesApplied(claims, counts)) {
-    return { keepDraft: false, spoken: formatFromResult(result) };
+    return replace(formatFromResult(result), claims);
   }
 
-  return { keepDraft: true, spoken: draftSpoken };
+  return keep(draftSpoken, claims);
 }

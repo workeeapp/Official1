@@ -48,12 +48,6 @@ import {
 import {
   alignListTypeInReply,
   applyEmployeeRecords,
-  correctAttachmentClaimReply,
-  correctDurableSaveClaimReply,
-  correctExecutionTruthReply,
-  correctListMutationClaimReply,
-  correctShareClaimReply,
-  correctUnshareClaimReply,
   summarizeUnshareApply,
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
@@ -182,6 +176,7 @@ import {
   deliverWhatsAppRelays,
   formatWhatsAppSkipNotice,
   applyLiveDomainReply,
+  replaceSpokenForExecutionOverride,
   sendWhatsAppText,
   setEngineButtons,
   setEngineNavigateAddress,
@@ -222,7 +217,12 @@ import {
   type ResultIntentMiss,
   type RequestedOp,
 } from "./apply-result.js";
-import { decideReplyFromApplyResult } from "./apply-result-reply.js";
+import {
+  decideReplyFromApplyResult,
+  ORDINARY_MUTATION_EMPTY_ACK,
+} from "./apply-result-reply.js";
+import { applyGatedClaimCorrectors } from "./apply-gated-claim-correctors.js";
+import { decideEmptySpokenFallback } from "./empty-response-policy.js";
 import {
   capturePendingShowDump,
   combineConfirmAndDump,
@@ -3259,15 +3259,21 @@ export async function sendChatMessage(input: {
       formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
       scheduleSkipNotice.length > 0;
     let workingReply = alignListTypeInReply(turn.reply, listMutations);
-    // Result-B: gate optimistic success claims against ApplyResult.
-    // Result-D: legacy correctors below stay — domain safety nets (share/unshare/
-    // attach/speaker-vs-worker/list_ops/empty fallback) are not fully covered by B.
+    // Unified Response Contract Stage 1: Result-B is operational-claim.
+    // Legacy correctors run under reply-override-policy — not a global keepDraft
+    // gate. Skip only operational-claim helpers Result-B already resolved;
+    // narrow-post-apply (share/attach/speaker-worker/…) and engine-display /
+    // delivery-notice stay outside that skip.
     const decidedReply = decideReplyFromApplyResult({
       applyResult: turnApplyResult,
       modelDraft: workingReply,
     });
     if (!decidedReply.keepDraft) {
-      workingReply = setEngineResponse(workingReply, decidedReply.spoken);
+      // Stage 2B: wholesale responses replace — no leftover model bubbles.
+      workingReply = replaceSpokenForExecutionOverride(
+        workingReply,
+        decidedReply.spoken,
+      );
     }
     const misaddressed = correctMisaddressedJobReply({
       response: parseLlmReply(workingReply).response,
@@ -3283,10 +3289,13 @@ export async function sendChatMessage(input: {
       })),
     });
     if (misaddressed) {
-      workingReply = setEngineResponse(workingReply, misaddressed);
+      workingReply = replaceSpokenForExecutionOverride(
+        workingReply,
+        misaddressed,
+      );
     }
     if (jobResult && jobResult.askWhich.length > 1) {
-      workingReply = setEngineResponse(
+      workingReply = replaceSpokenForExecutionOverride(
         workingReply,
         `?? ???? ??????\n${jobResult.askWhich.map((ask) => `? ${ask}`).join("\n")}`,
       );
@@ -3342,112 +3351,81 @@ export async function sendChatMessage(input: {
       (reminderResult.removed?.length ?? 0) > 0
         ? formatReminderDeleteFallback(reminderResult.removed)
         : "";
-    // Empty LLM response must not leak raw JSON / blank bubble to the user.
-    if (!parseLlmReply(workingReply).response.trim()) {
-      const fallback =
-        guestMutationNotice ||
-        (metadata.confirm === false
-          ? "?????? ?? ??????."
-          : metadata.confirm === true
-            ? "????."
-            : "") ||
-        listOpFallback ||
-        (appliedListRemove ||
-        appliedListUpdate ||
-        appliedListAdd ||
-        appliedFilingRemove ||
-        appliedFilingUpdate ||
-        appliedFilingAdd
-          ? appliedFallback
-          : "") ||
-        reminderDeleteFallback ||
-        (!appliedListOps &&
-        !appliedFilingRemove &&
-        !appliedFilingUpdate &&
-        requestedListRemove &&
-        !appliedListRemove
-          ? LIST_FIND_MISS
-          : "") ||
-        (!appliedListOps &&
-        !appliedFilingRemove &&
-        !appliedFilingUpdate &&
-        requestedListUpdate &&
-        !appliedListUpdate
-          ? LIST_FIND_MISS
-          : "");
-      if (fallback) {
-        workingReply = setEngineResponse(workingReply, fallback);
+    // Stage 2A: empty spoken is never a valid intentional model outcome.
+    // Recover via ApplyResult-truthful lines, or defer to show_dump / live display.
+    // Do not invent detailed formatAppliedMutationFallback confirms the model never wrote.
+    {
+      const emptyDecision = decideEmptySpokenFallback({
+        reply: workingReply,
+        applyResult: turnApplyResult,
+        metadata,
+        pendingShowDump,
+        guestMutationNotice,
+        listOpFallback,
+        reminderDeleteFallback,
+      });
+      if (emptyDecision.fallback) {
+        workingReply = setEngineResponse(workingReply, emptyDecision.fallback);
       }
     }
-    workingReply = correctListMutationClaimReply({
+    let unshareSummaryForGate:
+      | ReturnType<typeof summarizeUnshareApply>
+      | null = null;
+    {
+      const preview = summarizeUnshareApply({
+        metadata,
+        mutations: listMutations,
+      });
+      if (
+        preview.partnerLabels.length > 0 ||
+        preview.appliedUnshareCount > 0
+      ) {
+        const afterUnshare = await withoutFailingTurn(
+          "unshare_remainder_failed",
+          () => getEmployeeRecordSnapshot(employee.id),
+        );
+        unshareSummaryForGate = summarizeUnshareApply({
+          metadata,
+          mutations: listMutations,
+          snapshotAfter: afterUnshare ?? null,
+        });
+      }
+    }
+    const appliedReminderAdd = reminderResult.saved.length > 0;
+    const reminderAddFallback =
+      appliedReminderAdd && reminderResult.saved[0]
+        ? `שמרתי תזכורת «${reminderResult.saved[0].itemLabel || reminderResult.saved[0].item}».`
+        : "";
+    workingReply = applyGatedClaimCorrectors({
       reply: workingReply,
+      resultB: decidedReply,
+      // Stage 2B: claim correctors replace the full responses array.
+      setResponse: replaceSpokenForExecutionOverride,
       requestedRemove: requestedListRemove,
       requestedUpdate: requestedListUpdate,
       requestedAdd: requestedListAdd,
       appliedRemove: appliedListRemove,
       appliedUpdate: appliedListUpdate,
       appliedAdd: appliedListAdd,
-      appliedFallback: [listOpFallback, appliedFallback].filter(Boolean).join("\n"),
-      setResponse: setEngineResponse,
-      spoken: parseLlmReply(workingReply).response,
+      appliedSpeakerListAdd,
       appliedListOps,
       appliedFilingRemove,
       appliedFilingUpdate,
-    });
-    workingReply = correctShareClaimReply({
-      reply: workingReply,
-      spoken: parseLlmReply(workingReply).response,
-      mutations: listMutations,
-      misses: shareMisses,
+      appliedFallback: [listOpFallback, appliedFallback]
+        .filter(Boolean)
+        .join("\n"),
+      listMutations,
+      shareMisses,
       filingShareApplied: filingMutations.some(
         (row) =>
           (row.action === "add" || row.action === "update") &&
           row.shared === true,
       ),
-      setResponse: setEngineResponse,
-    });
-    {
-      const unshareSummary = summarizeUnshareApply({
-        metadata,
-        mutations: listMutations,
-      });
-      if (
-        unshareSummary.partnerLabels.length > 0 ||
-        unshareSummary.appliedUnshareCount > 0
-      ) {
-        const afterUnshare = await withoutFailingTurn(
-          "unshare_remainder_failed",
-          () => getEmployeeRecordSnapshot(employee.id),
-        );
-        workingReply = correctUnshareClaimReply({
-          reply: workingReply,
-          spoken: parseLlmReply(workingReply).response,
-          summary: summarizeUnshareApply({
-            metadata,
-            mutations: listMutations,
-            snapshotAfter: afterUnshare ?? null,
-          }),
-          setResponse: setEngineResponse,
-        });
-      }
-    }
-    workingReply = correctAttachmentClaimReply({
-      reply: workingReply,
-      spoken: parseLlmReply(workingReply).response,
-      outcome: attachmentOutcome,
-      setResponse: setEngineResponse,
-    });
-    workingReply = correctDurableSaveClaimReply({
-      reply: workingReply,
-      spoken: parseLlmReply(workingReply).response,
-      requestedListAdd,
-      requestedListUpdate,
+      unshareSummary: unshareSummaryForGate,
+      attachmentOutcome,
       requestedFilingAdd,
       requestedFilingUpdate,
-      appliedListAdd,
-      appliedListUpdate,
       appliedFilingAdd,
-      appliedFilingUpdate,
       requestedDirectory: (metadata.directory ?? []).some(
         (row) =>
           row.action === "add" ||
@@ -3455,31 +3433,19 @@ export async function sendChatMessage(input: {
           row.action === "share_book",
       ),
       appliedDirectory: directoryResult.saved.length > 0,
-      setResponse: setEngineResponse,
-    });
-    {
-      const appliedReminderAdd = reminderResult.saved.length > 0;
-      const reminderAddFallback =
-        appliedReminderAdd && reminderResult.saved[0]
-          ? `שמרתי תזכורת «${reminderResult.saved[0].itemLabel || reminderResult.saved[0].item}».`
-          : "";
-      workingReply = correctExecutionTruthReply({
-        reply: workingReply,
-        spoken: parseLlmReply(workingReply).response,
-        appliedListAdd,
-        appliedSpeakerListAdd,
-        appliedReminderAdd,
-        listAddFallback: appliedFallback,
-        reminderAddFallback,
-        setResponse: setEngineResponse,
-      });
-    }
+      appliedReminderAdd,
+      reminderAddFallback,
+    }).reply;
     if (
       requestedListRemove &&
       appliedListRemove &&
       !parseLlmReply(workingReply).response.trim()
     ) {
-      workingReply = setEngineResponse(workingReply, appliedFallback);
+      // Narrow confirmed ack — same Stage 2A ordinary-mutation empty policy.
+      workingReply = setEngineResponse(
+        workingReply,
+        ORDINARY_MUTATION_EMPTY_ACK,
+      );
     }
     // Clock-only delete (no linked worker task): do not leave LIST_FIND_MISS.
     if (reminderDeleteFallback) {
@@ -3491,9 +3457,11 @@ export async function sendChatMessage(input: {
     // The model already said ???????/?????? ? correct it when the engine refused the list op.
     const listOpRefusal = formatListOpRefusals(listOpResults);
     if (listOpRefusal) {
-      workingReply = setEngineResponse(
+      workingReply = replaceSpokenForExecutionOverride(
         workingReply,
-        [formatListOpFallback(listOpResults), listOpRefusal].filter(Boolean).join("\n"),
+        [formatListOpFallback(listOpResults), listOpRefusal]
+          .filter(Boolean)
+          .join("\n"),
       );
     }
     // Do not append apply-summary lines ? the spoken reply is the model's response only.
@@ -3501,9 +3469,12 @@ export async function sendChatMessage(input: {
       (row) => row.reason === "no_time",
     );
     if (subHourlyRepeat) {
-      workingReply = setEngineResponse(workingReply, SUB_HOURLY_REFUSAL);
+      workingReply = replaceSpokenForExecutionOverride(
+        workingReply,
+        SUB_HOURLY_REFUSAL,
+      );
     } else if (noTimeSkipped || incompleteComposeClocks.length > 0) {
-      workingReply = setEngineResponse(
+      workingReply = replaceSpokenForExecutionOverride(
         workingReply,
         "??? ????? ? ?????, ???? X, ?? ???? ??????",
       );
@@ -3943,12 +3914,22 @@ export async function sendChatMessage(input: {
         }
       }
     }
-    // Result-C: mutate+show — keep Result-B confirm, then engine dump from fresh DB.
+    // Result-C: mutate+show — keep conversational confirm, then engine dump from
+    // fresh DB. Strip any model-written inventory from the confirm so the list
+    // body comes only from the dump (QA F).
     if (restoredPendingShow && showDumpKind && mutateThenShowConfirm) {
       const dumpSpoken = parseLlmReply(workingReply).response;
+      const applySucceeded = Object.values(turnApplyResult.domains).some(
+        (domain) => domain != null && domain.applied.length > 0,
+      );
       const combined = combineConfirmAndDump(
         mutateThenShowConfirm,
         dumpSpoken,
+        {
+          engineConfirmFallback: applySucceeded
+            ? ORDINARY_MUTATION_EMPTY_ACK
+            : "",
+        },
       );
       if (combined !== dumpSpoken) {
         workingReply = setEngineResponse(workingReply, combined);

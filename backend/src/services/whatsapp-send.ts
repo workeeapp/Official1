@@ -790,10 +790,28 @@ function withResponses(
   );
 }
 
-/** Replaces every spoken message of the turn with one engine message. */
+/**
+ * Replaces every spoken message of the turn with one engine message.
+ * Drops all prior `responses` bubbles (text and per-bubble chrome).
+ */
 export function setEngineResponse(reply: string, response: string): string {
   const record = parseReplyRecord(reply);
   return record ? withResponses(record, [response]) : response;
+}
+
+/**
+ * Stage 2B — execution override: when ApplyResult / claim correction decides the
+ * model spoken cannot stand, replace the **entire** `responses` array with the
+ * engine text. Never keep leftover model bubbles.
+ *
+ * Distinct from Stage 2A empty recovery (contract-violation fill) and from
+ * engine-display paths that also call {@link setEngineResponse} for dumps/live.
+ */
+export function replaceSpokenForExecutionOverride(
+  reply: string,
+  engineSpoken: string,
+): string {
+  return setEngineResponse(reply, engineSpoken);
 }
 
 /** Writes per-bubble text + buttons + Waze (and mirrors flat metadata for legacy). */
