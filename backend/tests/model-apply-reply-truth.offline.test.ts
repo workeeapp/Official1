@@ -570,9 +570,32 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
       mutations: [],
       appliedReminderAdd: true,
       reminderAddFallback: "שמרתי תזכורת «להביא 2 בקבוקי מיץ».",
+      speakerEmployeeId: "emp-1",
     });
-    expect(out).not.toMatch(/הוספתי/);
-    expect(out).toMatch(/תזכורת/);
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+  });
+
+  it("worker-only להזכיר add + reminder does not keep speaker task claim", () => {
+    const out = correctModelApplyTurnResponse({
+      response:
+        "הוספתי את המטלה להוסיף קבצי זיפ. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף קבצי זיפ.",
+      metadata: meta(),
+      mutations: [
+        {
+          action: "add",
+          itemId: "w1",
+          employeeId: "lucy-1",
+          listType: "tasks",
+          itemKey: "להזכיר לטל",
+          itemLabel: "להזכיר לטל",
+          listName: "מטלות",
+        },
+      ],
+      appliedReminderAdd: true,
+      reminderAddFallback: "שמרתי תזכורת «להוסיף קבצי זיפ».",
+      speakerEmployeeId: "emp-1",
+    });
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
   });
 
   it("omitted lists.add + הוספתי with no reminder → LIST_ADD_MISS", () => {
@@ -613,6 +636,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
         },
       ],
       appliedReminderAdd: true,
+      speakerEmployeeId: "emp-1",
     });
     expect(out).toBe(reply);
   });
@@ -634,10 +658,41 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
       reply: "הוספתי למטלות מיץ",
       spoken: "הוספתי למטלות מיץ",
       appliedListAdd: false,
+      appliedSpeakerListAdd: false,
       appliedReminderAdd: true,
+      reminderAddFallback: "שמרתי תזכורת «מיץ».",
       setResponse,
     });
     expect(out).toBe(REMINDER_ONLY_PARTIAL);
+  });
+
+  it("worker add alone is not speaker evidence for dual claim", () => {
+    const out = correctExecutionTruthReply({
+      reply:
+        "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
+      spoken:
+        "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
+      appliedListAdd: true,
+      appliedSpeakerListAdd: false,
+      appliedReminderAdd: true,
+      reminderAddFallback: "שמרתי תזכורת «זיפ».",
+      setResponse,
+    });
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+  });
+
+  it("speaker add + reminder keeps dual claim", () => {
+    const reply =
+      "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.";
+    const out = correctExecutionTruthReply({
+      reply,
+      spoken: reply,
+      appliedListAdd: true,
+      appliedSpeakerListAdd: true,
+      appliedReminderAdd: true,
+      setResponse,
+    });
+    expect(out).toBe(reply);
   });
 
   it("reminder claim without applied reminder → miss", () => {
@@ -645,6 +700,7 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
       reply: "קבעתי תזכורת למחר ב־8",
       spoken: "קבעתי תזכורת למחר ב־8",
       appliedListAdd: false,
+      appliedSpeakerListAdd: false,
       appliedReminderAdd: false,
       setResponse,
     });

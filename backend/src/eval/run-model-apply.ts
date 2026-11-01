@@ -268,6 +268,11 @@ export function correctModelApplyTurnResponse(input: {
   /** True when applyReminders saved at least one clock this turn. */
   appliedReminderAdd?: boolean;
   reminderAddFallback?: string;
+  /**
+   * Human speaker employee id — used to detect speaker-book list adds from
+   * applied mutations (worker להזכיר alone must not satisfy task claims).
+   */
+  speakerEmployeeId?: string;
 }): string {
   const mutations = input.mutations ?? [];
   const filingMutations = input.filingMutations ?? [];
@@ -305,6 +310,15 @@ export function correctModelApplyTurnResponse(input: {
   const appliedListAdd = mutations.some(
     (row) => row.action === "add" && !row.listShell,
   );
+  const speakerId = input.speakerEmployeeId?.trim() ?? "";
+  const appliedSpeakerListAdd = speakerId
+    ? mutations.some(
+        (row) =>
+          row.action === "add" &&
+          !row.listShell &&
+          row.employeeId === speakerId,
+      )
+    : appliedListAdd;
   const appliedListOps = listOpResults.some((row) => row.applied);
   const appliedFilingRemove = filingMutations.some(
     (row) => row.action === "remove",
@@ -375,6 +389,7 @@ export function correctModelApplyTurnResponse(input: {
     reply: working,
     spoken: spoken(),
     appliedListAdd,
+    appliedSpeakerListAdd,
     appliedReminderAdd: input.appliedReminderAdd === true,
     listAddFallback: appliedFallback,
     reminderAddFallback: input.reminderAddFallback,
@@ -641,6 +656,7 @@ export async function runModelApplyCase(
         metadata,
         ...applyResult,
         snapshotAfter: snapshot,
+        speakerEmployeeId: account.employeeId,
       });
       const contactNames = (
         await listContactsForEmployee(account.employeeId)

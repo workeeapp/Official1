@@ -3205,6 +3205,13 @@ export async function sendChatMessage(input: {
     const appliedListAdd = listMutations.some(
       (row) => row.action === "add" && !row.listShell,
     );
+    /** Speaker-book add only — worker להזכיר must not satisfy «הוספתי את המטלה». */
+    const appliedSpeakerListAdd = listMutations.some(
+      (row) =>
+        row.action === "add" &&
+        !row.listShell &&
+        row.employeeId === employee.id,
+    );
     const appliedListOps = listOpResults.some((row) => row.applied);
     const appliedFilingRemove = filingMutations.some(
       (row) => row.action === "remove",
@@ -3349,6 +3356,7 @@ export async function sendChatMessage(input: {
         reply: workingReply,
         spoken: parseLlmReply(workingReply).response,
         appliedListAdd,
+        appliedSpeakerListAdd,
         appliedReminderAdd,
         listAddFallback: appliedFallback,
         reminderAddFallback,

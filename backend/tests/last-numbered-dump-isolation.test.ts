@@ -7,7 +7,11 @@ import {
   packAssistantLlmRawForTests,
   pickLastNumberedDumpFromAssistantRaws,
 } from "../src/services/chat.service.js";
-import type { LlmListAction } from "@workee/shared";
+import {
+  emptyLlmMetadata,
+  type LlmListAction,
+  type PublicEmployee,
+} from "@workee/shared";
 import {
   formatShowDumpWithLineMap,
   looksLikeFreeWrittenNumberedInventory,
@@ -16,6 +20,7 @@ import {
   type LastNumberedDumpLine,
 } from "../src/services/show-button-dump.js";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
+import { planTargetedActions } from "../src/services/employee-targets.service.js";
 
 const shoppingId1 = "shop-glida";
 const shoppingId2 = "shop-skazi";
@@ -290,7 +295,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     expect(guarded.lists).toEqual([]);
   });
 
-  it("SERVER GUARD: drops shopping add while custom dump is active", () => {
+  it("SERVER GUARD: allows shopping|tasks add while custom dump is active", () => {
     const customDump = formatShowDumpWithLineMap("משימות לטל", snap).lines;
     expect(customDump.every((row) => row.list_name === "משימות לטל")).toBe(
       true,
@@ -302,12 +307,43 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
       items: [{ "שם פריט": "חלב", כמות: "1" }],
       targets: [],
     };
-    const guarded = restrictListMutatesToLastNumberedDump(
+    const tasksAdd: LlmListAction = {
+      action: "add",
+      listType: "tasks",
+      listName: "",
+      items: [{ "שם מטלה": "קבצי זיפ לאוטומציה" }],
+      targets: [],
+    };
+    const shoppingGuarded = restrictListMutatesToLastNumberedDump(
       [shoppingAdd],
       customDump,
     );
-    expect(guarded.droppedOutsideDump).toBe(true);
-    expect(guarded.lists).toEqual([]);
+    expect(shoppingGuarded.droppedOutsideDump).toBe(false);
+    expect(shoppingGuarded.lists).toEqual([shoppingAdd]);
+    const tasksGuarded = restrictListMutatesToLastNumberedDump(
+      [tasksAdd],
+      customDump,
+    );
+    expect(tasksGuarded.droppedOutsideDump).toBe(false);
+    expect(tasksGuarded.lists).toEqual([tasksAdd]);
+  });
+
+  it("SERVER GUARD: allows tasks add while shopping dump is active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    expect(shoppingDump.every((row) => row.kind === "shopping")).toBe(true);
+    const tasksAdd: LlmListAction = {
+      action: "add",
+      listType: "tasks",
+      listName: "",
+      items: [{ "שם מטלה": "להוסיף קבצי זיפ לאוטומציה בשביל ניר" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [tasksAdd],
+      shoppingDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([tasksAdd]);
   });
 
   it("SERVER GUARD: allows add to the same custom list as the dump", () => {
@@ -339,5 +375,95 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     const guarded = restrictListMutatesToLastNumberedDump([otherAdd], customDump);
     expect(guarded.droppedOutsideDump).toBe(true);
     expect(guarded.lists).toEqual([]);
+  });
+});
+
+describe("LAST_NUMBERED_DUMP builtin add does not rewrite ownership", () => {
+  const speaker: PublicEmployee = {
+    id: "speaker-own-1",
+    name: "עמית",
+    surname: "",
+    nickname: "עמית",
+    email: null,
+    phone: null,
+  };
+  const partner: PublicEmployee = {
+    id: "partner-other-2",
+    name: "טל",
+    surname: "",
+    nickname: "טל",
+    email: null,
+    phone: null,
+  };
+  const humans = [speaker, partner];
+
+  it("empty-target tasks add under foreign dump ids → plan only speaker book", () => {
+    // Dump map ids look like another person's rows — must not become owner ids.
+    const foreignDump: LastNumberedDumpLine[] = [
+      { n: 1, id: partner.id, kind: "custom", list_name: "משימות לטל" },
+      { n: 2, id: "foreign-item-uuid", kind: "custom", list_name: "משימות לטל" },
+    ];
+    const tasksAdd: LlmListAction = {
+      action: "add",
+      listType: "tasks",
+      listName: "",
+      items: [{ "שם מטלה": "קבצי זיפ לאוטומציה" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [tasksAdd],
+      foreignDump,
+    );
+    expect(guarded.lists).toEqual([tasksAdd]);
+
+    const plan = planTargetedActions({
+      actor: speaker,
+      employees: humans,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: guarded.lists,
+      },
+    });
+
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(speaker.id);
+    expect(plan.applications.map((row) => row.employeeId)).not.toContain(
+      partner.id,
+    );
+    // Dump line ids must never become application owners for an add.
+    for (const line of foreignDump) {
+      expect(plan.applications.map((row) => row.employeeId)).not.toContain(
+        line.id,
+      );
+    }
+  });
+
+  it("empty-target shopping add under partner-owned dump → speaker book only", () => {
+    const shoppingDump: LastNumberedDumpLine[] = [
+      { n: 1, id: "shop-on-partner-book", kind: "shopping" },
+    ];
+    const shoppingAdd: LlmListAction = {
+      action: "add",
+      listType: "shopping",
+      listName: "",
+      items: [{ "שם פריט": "חלב", כמות: "1" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [shoppingAdd],
+      shoppingDump,
+    );
+    const plan = planTargetedActions({
+      actor: speaker,
+      employees: humans,
+      metadata: {
+        ...emptyLlmMetadata(),
+        lists: guarded.lists,
+      },
+    });
+    expect(plan.applications).toEqual([
+      expect.objectContaining({ employeeId: speaker.id }),
+    ]);
+    expect(plan.applications).toHaveLength(1);
   });
 });

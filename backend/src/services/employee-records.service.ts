@@ -1141,11 +1141,22 @@ export function correctListMutationClaimReply(input: {
  * apply evidence. Does not require metadata to have requested the ACTION —
  * omitted ACTION + false success claim is corrected. Partial apply → accurate
  * partial wording (e.g. reminder saved, task not).
+ *
+ * «הוספתי את המטלה» requires a speaker-book list add
+ * (`appliedSpeakerListAdd`). A worker-only להזכיר row is not enough.
+ * `appliedListAdd` (any book) stays for other correctors; when speaker
+ * evidence is omitted, it falls back to `appliedListAdd` for older call sites.
  */
 export function correctExecutionTruthReply(input: {
   reply: string;
   spoken: string;
+  /** Any list-item add applied this turn (any owner). Kept for callers. */
   appliedListAdd: boolean;
+  /**
+   * List-item add on the human speaker's own book (from applied mutations).
+   * When omitted, falls back to appliedListAdd.
+   */
+  appliedSpeakerListAdd?: boolean;
   appliedReminderAdd: boolean;
   /** Engine template when a list add did apply (optional prefer over miss). */
   listAddFallback?: string;
@@ -1163,20 +1174,23 @@ export function correctExecutionTruthReply(input: {
     return input.reply;
   }
 
-  const listOk = input.appliedListAdd;
+  const speakerListOk =
+    typeof input.appliedSpeakerListAdd === "boolean"
+      ? input.appliedSpeakerListAdd
+      : input.appliedListAdd;
   const reminderOk = input.appliedReminderAdd;
 
   // Both claimed domains that applied (or unclaimed domains ignored) → keep.
   if (claimedListAdd && claimedReminder) {
-    if (listOk && reminderOk) {
+    if (speakerListOk && reminderOk) {
       return input.reply;
     }
-    if (!listOk && reminderOk) {
-      const reminderText =
-        input.reminderAddFallback?.trim() || REMINDER_ONLY_PARTIAL;
-      return input.setResponse(input.reply, reminderText);
+    if (!speakerListOk && reminderOk) {
+      // Dual claim without speaker task: always surface the partial — do not
+      // hide behind a reminder-only success line.
+      return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
     }
-    if (listOk && !reminderOk) {
+    if (speakerListOk && !reminderOk) {
       const listText =
         input.listAddFallback?.trim() ||
         "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";
@@ -1185,17 +1199,15 @@ export function correctExecutionTruthReply(input: {
     return input.setResponse(input.reply, LIST_ADD_MISS);
   }
 
-  if (claimedListAdd && !listOk) {
+  if (claimedListAdd && !speakerListOk) {
     if (reminderOk) {
-      const reminderText =
-        input.reminderAddFallback?.trim() || REMINDER_ONLY_PARTIAL;
-      return input.setResponse(input.reply, reminderText);
+      return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
     }
     return input.setResponse(input.reply, LIST_ADD_MISS);
   }
 
   if (claimedReminder && !reminderOk) {
-    if (listOk) {
+    if (speakerListOk) {
       const listText =
         input.listAddFallback?.trim() ||
         "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";

@@ -435,7 +435,9 @@ export function listActionMatchesLastNumberedDumpScope(
 
 /**
  * Hard server guard while LAST_NUMBERED_DUMP is active:
- * - add → only to a list/domain present in that dump (no shopping add after custom dump)
+ * - add shopping|tasks → always allowed (self-nudge / day work must not die
+ *   under a shopping/custom/reminders dump); custom/contacts/filing still
+ *   require dump scope match (no silent cross-shell add)
  * - remove/update with item_id → ids from that dump, OR (shopping|tasks only) same
  *   domain as the dump so a date-filtered agenda dump does not block completing a
  *   live ESD row that was on a previous day dump («דיברתי עם yes» after «ומחר?»)
@@ -457,6 +459,12 @@ export function restrictListMutatesToLastNumberedDump(
   const next: LlmListAction[] = [];
   for (const action of lists) {
     if (action.action === "add") {
+      // Builtin shopping/tasks adds are never dump-scoped — only custom /
+      // contacts / filing adds must match the active dump shell.
+      if (action.listType === "shopping" || action.listType === "tasks") {
+        next.push(action);
+        continue;
+      }
       if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
         droppedOutsideDump = true;
         continue;

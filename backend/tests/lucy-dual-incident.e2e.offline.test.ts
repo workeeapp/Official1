@@ -132,10 +132,43 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
       mutations: [],
       appliedReminderAdd: true,
       reminderAddFallback: "שמרתי תזכורת «להביא 2 בקבוקי מיץ».",
+      speakerEmployeeId: speaker.id,
     });
-    expect(out).not.toMatch(/הוספתי/);
-    expect(out).toMatch(/תזכורת/);
-    expect(out === REMINDER_ONLY_PARTIAL || out.includes("תזכורת")).toBe(true);
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+  });
+
+  it("reminder + worker-only להזכיר add → no speaker task claim", () => {
+    const out = correctModelApplyTurnResponse({
+      response:
+        "הוספתי את המטלה להוסיף קבצי זיפ לאוטומציה בשביל ניר. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף את קבצי זיפ לאוטומציה בשביל ניר.",
+      metadata: meta({
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "להזכיר לטל להוסיף קבצי זיפ" }],
+            targets: ["לוסי"],
+          },
+        ],
+      }),
+      mutations: [
+        {
+          action: "add",
+          itemId: "worker-1",
+          employeeId: "lucy-1",
+          listType: "tasks",
+          itemKey: "להזכיר לטל להוסיף קבצי זיפ",
+          itemLabel: "להזכיר לטל להוסיף קבצי זיפ",
+          listName: "מטלות",
+        },
+      ],
+      appliedReminderAdd: true,
+      reminderAddFallback: "שמרתי תזכורת «להוסיף את קבצי זיפ לאוטומציה בשביל ניר».",
+      speakerEmployeeId: speaker.id,
+    });
+    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+    expect(out).not.toMatch(/הוספתי את המטלה/);
   });
 
   it("neither task nor reminder applied + הוספתי → add miss", () => {
@@ -176,6 +209,7 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
         },
       ],
       appliedReminderAdd: true,
+      speakerEmployeeId: speaker.id,
     });
     expect(out).toBe(reply);
   });
