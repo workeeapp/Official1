@@ -3332,8 +3332,80 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toMatch(/ריק/);
     expect(text).not.toContain("ספר הטלפונים:");
     expect(text).not.toContain("ספר הטלפונים אישי:");
-    expect(text).toContain("דני — 0501234567");
+    // Full overview: contacts/filings are counts only (like custom) — no item lines.
+    expect(text).toContain("👤 אנשי קשר: 1 פריט");
+    expect(text).not.toContain("דני — 0501234567");
+    expect(text).not.toContain("0501234567");
     expect(text).toContain("לפירוט רשימה: הצג רשימת …");
+  });
+
+  it("full dump filings and contacts are counts only; single-kind still lists items", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [{ item_id: "t1", "שם מטלה": "להתקשר" }],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [
+        {
+          filing_id: "f1",
+          item_name: "רישיון",
+          item_info: "בתוקף",
+          item_description: "",
+          scope: "personal",
+          shared_with: [],
+          owner: "טל",
+        } as EmployeeRecordSnapshot["filing"][number],
+        {
+          filing_id: "f2",
+          item_name: "קוד שער",
+          item_info: "1234",
+          item_description: "",
+          scope: "personal",
+          shared_with: [],
+          owner: "טל",
+        } as EmployeeRecordSnapshot["filing"][number],
+      ],
+      reminders: [],
+    };
+    const full = formatShowDumpFromKind("full", snap, {
+      viewerName: "טל",
+      phoneBook: [
+        { contact_id: "c1", name: "דני", phone: "0501111111" },
+        { contact_id: "c2", name: "מיכל", phone: "0502222222" },
+      ],
+    })!;
+    expect(full).toMatch(/✅ משימות:[\s\S]*להתקשר/);
+    expect(full).toContain("📁 תיוקים: 2 פריטים");
+    expect(full).toContain("👤 אנשי קשר: 2 פריטים");
+    expect(full).not.toContain("רישיון");
+    expect(full).not.toContain("קוד שער");
+    expect(full).not.toContain("דני");
+    expect(full).not.toContain("מיכל");
+    // Tasks still number items; filings/contacts do not.
+    expect(full).toContain("1. להתקשר");
+    expect(full).not.toMatch(/תיוקים:[\s\S]*1\. /);
+    expect(full).not.toMatch(/אנשי קשר:[\s\S]*1\. /);
+
+    const filingsOnly = formatShowDumpFromKind("filings", snap, {
+      viewerName: "טל",
+    })!;
+    expect(filingsOnly).toContain("1. רישיון");
+    expect(filingsOnly).toContain("2. קוד שער");
+
+    const contactsOnly = formatShowDumpFromKind("phone_book", snap, {
+      viewerName: "טל",
+      phoneBook: [
+        { contact_id: "c1", name: "דני", phone: "0501111111" },
+        { contact_id: "c2", name: "מיכל", phone: "0502222222" },
+      ],
+    })!;
+    expect(contactsOnly).toContain("1. דני");
+    expect(contactsOnly).toContain("2. מיכל");
   });
 
   it("contacts/אנשי קשר dump uses phone_book (not lists.contacts)", () => {
@@ -4036,13 +4108,14 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).toMatch(/🔔 תזכורת:/);
     expect(text).not.toContain("פגישה עם עמית");
     expect(text).not.toMatch(/אנשי קשר אישיים:[\s\S]*דני/);
-    expect(text).toContain("שרה");
-    expect(text).toContain("👤 אנשי קשר:");
+    // Full dump: partner-filtered contacts as counts only (שרה kept, דני out).
+    expect(text).toContain("👤 אנשי קשר: 1 פריט");
+    expect(text).not.toContain("שרה");
+    expect(text).not.toContain("דני");
     expect(text).toContain("(עמית, טל)");
     expect(text).not.toContain("ספר הטלפונים משותף");
     expect(text).not.toContain("ספר הטלפונים אישי:");
     expect(text).not.toContain("ספר הטלפונים:");
-    expect(text).not.toMatch(/👤 אנשי קשר:[\s\S]*דני/);
   });
 });
 

@@ -929,13 +929,13 @@ function emptyFullDumpSentence(opts?: ShowDumpOptions): string {
 }
 
 /**
- * Bare overview («מה יש לי» / הציגי הכל): stitch Stage-2 category dumps.
- * Shopping = counts only; tasks = full item lines; custom = counts; then
- * reminders / filings / contacts / phone book.
+ * Bare overview («הצג רשימות» / הציגי הכל): stitch Stage-2 category dumps.
+ * Item detail only for tasks + reminders. All other shells = counts only
+ * (shopping, custom, filings, phone book / אנשי קשר).
  *
  * Topic / ITEM multi-section (`opts.itemIds` set): only matching row ids;
- * shopping as item lines (not counts); custom lists as filtered item dumps;
- * omit empty sections and the inventory hint; phone book omitted (no opaque ids).
+ * shopping/filings/phone_book/custom as filtered item lines (not counts);
+ * omit empty sections and the inventory hint.
  */
 export function formatFullDump(
   snapshot: EmployeeRecordSnapshot,
@@ -1031,10 +1031,24 @@ export function formatFullDump(
     lines.push(...remBody.lines);
   }
 
-  pushBlock(formatFilingsDump(snapshot.filing ?? [], sharedOpts), "filings");
+  // Bare full inventory: counts only (like shopping/custom). ITEM/topic dump keeps lines.
+  const otherCountsOnly = !itemDump;
+  pushBlock(
+    formatFilingsDump(snapshot.filing ?? [], {
+      ...sharedOpts,
+      countsOnly: otherCountsOnly,
+    }),
+    "filings",
+  );
 
   // Contacts v2: single «אנשי קשר» from SPEAKER_CONTACTS (never lists.contacts).
-  pushBlock(formatPhoneBookDump(sharedOpts?.phoneBook, sharedOpts), "phone_book");
+  pushBlock(
+    formatPhoneBookDump(sharedOpts?.phoneBook, {
+      ...sharedOpts,
+      countsOnly: otherCountsOnly,
+    }),
+    "phone_book",
+  );
 
   if (sections.length === 0) {
     if (opts?.omitEmptySentence === true) {
