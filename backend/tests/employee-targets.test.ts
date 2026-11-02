@@ -18,6 +18,7 @@ import {
   resolveRelayMessages,
   resolveSpokenMetadata,
   buildCollabByListKey,
+  datedDayShowButtonForMutation,
   ensureSpeakerShowButtons,
   isEngineOwnedListNavButton,
   normalizeShowNavCommand,
@@ -26,6 +27,7 @@ import {
   showButtonsForNotify,
   type ListItemOwnerRef,
 } from "../src/services/employee-targets.service.js";
+import { jerusalemYmd } from "../src/utils/relative-date.js";
 
 function ownerRef(
   ownerId: string,
@@ -4558,5 +4560,452 @@ describe("employee targets", () => {
         employeeId: foreignOwnerId,
       }),
     ]);
+  });
+
+  describe("uniform shell share inherit (shopping/tasks)", () => {
+    it("empty targets on shared shopping shell → owner-only item visibleTo (shell inherit)", () => {
+      const plan = planTargetedActions({
+        actor: amit,
+        employees,
+        sharedLists: [
+          {
+            ownerId: amit.id,
+            listName: "",
+            listType: "shopping",
+            scope: "shared",
+            visibleTo: [amit.id, tal.id],
+          },
+        ],
+        metadata: {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              targets: [],
+              items: [{ "שם פריט": "חלב" }],
+            },
+          ],
+        },
+      });
+      expect(plan.applications).toHaveLength(1);
+      expect(plan.applications[0]).toMatchObject({
+        employeeId: amit.id,
+        visibility: {
+          scope: "personal",
+          visibleTo: [amit.id],
+        },
+      });
+      expect(plan.notifications.some((n) => n.employee.id === tal.id)).toBe(
+        true,
+      );
+    });
+
+    it("explicit targets on shopping still use item co-share path (not shell rewrite)", () => {
+      const plan = planTargetedActions({
+        actor: amit,
+        employees,
+        sharedLists: [
+          {
+            ownerId: amit.id,
+            listName: "",
+            listType: "shopping",
+            scope: "shared",
+            visibleTo: [amit.id, tal.id],
+          },
+        ],
+        metadata: {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              targets: ["עמית", "שני"],
+              items: [{ "שם פריט": "לחם" }],
+            },
+          ],
+        },
+      });
+      expect(plan.applications.length).toBeGreaterThanOrEqual(1);
+      const app = plan.applications[0]!;
+      expect(app.visibility.visibleTo).toEqual(
+        expect.arrayContaining([amit.id, shani.id]),
+      );
+      expect(app.visibility.visibleTo).not.toContain(tal.id);
+    });
+  });
+
+  describe("dated-item day-show safety-net", () => {
+    const now = new Date("2026-11-02T10:00:00.000Z");
+    const today = jerusalemYmd(now);
+    const tomorrow = (() => {
+      const [y, m, d] = today.split("-").map(Number);
+      const dt = new Date(Date.UTC(y!, m! - 1, d! + 1));
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+    })();
+    const dayAfter = (() => {
+      const [y, m, d] = today.split("-").map(Number);
+      const dt = new Date(Date.UTC(y!, m! - 1, d! + 2));
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+    })();
+
+    function metaAddTasks() {
+      return {
+        ...emptyLlmMetadata(),
+        lists: [
+          {
+            action: "add" as const,
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם מטלה": "לקנות מתנה" }],
+            targets: [],
+          },
+        ],
+      };
+    }
+
+    it("add dated task → day button + list nav", () => {
+      expect(
+        datedDayShowButtonForMutation(
+          { calendarYmd: tomorrow, listType: "tasks" },
+          now,
+        ),
+      ).toEqual({
+        label: "מה מחר",
+        command: "מה יש לי מחר ברשימת משימות",
+      });
+      const withDay = ensureSpeakerShowButtons(metaAddTasks(), [], {
+        appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+        appliedItems: {
+          lists: [
+            {
+              action: "add",
+              itemId: "i1",
+              itemLabel: "לקנות מתנה",
+              listType: "tasks",
+              calendarYmd: tomorrow,
+            },
+          ],
+          filings: [],
+        },
+        now,
+      });
+      expect(
+        withDay.some((b) => b.command === "מה יש לי מחר ברשימת משימות"),
+      ).toBe(true);
+      expect(withDay.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
+    });
+
+    it("update with new date uses the new day", () => {
+      expect(
+        datedDayShowButtonForMutation(
+          { calendarYmd: dayAfter, listType: "tasks" },
+          now,
+        )?.command,
+      ).toBe("מה יש לי מחרתיים ברשימת משימות");
+    });
+
+    it("update without date change still yields day button for saved ymd", () => {
+      expect(
+        datedDayShowButtonForMutation(
+          { calendarYmd: tomorrow, listType: "tasks" },
+          now,
+        ),
+      ).toEqual({
+        label: "מה מחר",
+        command: "מה יש לי מחר ברשימת משימות",
+      });
+    });
+
+    it("remove dated item keeps pre-delete day button", () => {
+      const buttons = ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "i1" }],
+              targets: [],
+            },
+          ],
+        },
+        [],
+        {
+          appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+          appliedItems: {
+            lists: [
+              {
+                action: "remove",
+                itemId: "i1",
+                itemLabel: "פגישה",
+                listType: "tasks",
+                calendarYmd: tomorrow,
+              },
+            ],
+            filings: [],
+          },
+          now,
+        },
+      );
+      expect(
+        buttons.some((b) => b.command === "מה יש לי מחר ברשימת משימות"),
+      ).toBe(true);
+      expect(buttons.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
+    });
+
+    it("several dated items on different days → one button per day", () => {
+      const buttons = ensureSpeakerShowButtons(metaAddTasks(), [], {
+        appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+        appliedItems: {
+          lists: [
+            {
+              action: "add",
+              itemId: "a",
+              itemLabel: "א",
+              listType: "tasks",
+              calendarYmd: tomorrow,
+            },
+            {
+              action: "add",
+              itemId: "b",
+              itemLabel: "ב",
+              listType: "tasks",
+              calendarYmd: dayAfter,
+            },
+          ],
+          filings: [],
+        },
+        now,
+      });
+      expect(
+        buttons.filter((b) => b.command.startsWith("מה יש לי")),
+      ).toEqual([
+        {
+          label: "מה מחר",
+          command: "מה יש לי מחר ברשימת משימות",
+        },
+        {
+          label: "מה מחרתיים",
+          command: "מה יש לי מחרתיים ברשימת משימות",
+        },
+      ]);
+    });
+
+    it("same day + same list → single day button (no dup)", () => {
+      const buttons = ensureSpeakerShowButtons(metaAddTasks(), [], {
+        appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+        appliedItems: {
+          lists: [
+            {
+              action: "add",
+              itemId: "a",
+              itemLabel: "א",
+              listType: "tasks",
+              calendarYmd: tomorrow,
+            },
+            {
+              action: "add",
+              itemId: "b",
+              itemLabel: "ב",
+              listType: "tasks",
+              calendarYmd: tomorrow,
+            },
+          ],
+          filings: [],
+        },
+        now,
+      });
+      expect(
+        buttons.filter((b) => b.command === "מה יש לי מחר ברשימת משימות")
+          .length,
+      ).toBe(1);
+    });
+
+    it("undated apply and missing appliedItems → no day button", () => {
+      expect(
+        datedDayShowButtonForMutation(
+          { calendarYmd: "", listType: "tasks" },
+          now,
+        ),
+      ).toBeNull();
+      const undated = ensureSpeakerShowButtons(metaAddTasks(), [], {
+        appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+        appliedItems: {
+          lists: [
+            {
+              action: "add",
+              itemId: "i1",
+              itemLabel: "בלי תאריך",
+              listType: "tasks",
+            },
+          ],
+          filings: [],
+        },
+        now,
+      });
+      expect(undated.some((b) => b.command.startsWith("מה יש לי"))).toBe(false);
+      expect(undated).toHaveLength(1);
+      expect(undated[0]!.command).toMatch(/הצג רשימת מ/);
+    });
+
+    it("keeps model scoped day button and still adds list nav", () => {
+      const scoped = "מה יש לי מחר ברשימת משימות";
+      const buttons = ensureSpeakerShowButtons(
+        metaAddTasks(),
+        [{ label: "מה מחר", command: scoped }],
+        {
+          appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+          appliedItems: {
+            lists: [
+              {
+                action: "add",
+                itemId: "i1",
+                itemLabel: "x",
+                listType: "tasks",
+                calendarYmd: tomorrow,
+              },
+            ],
+            filings: [],
+          },
+          now,
+        },
+      );
+      expect(buttons.filter((b) => b.command === scoped).length).toBe(1);
+      expect(buttons.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
+    });
+
+    it("shopping and custom dated applies → no day button (tasks-only)", () => {
+      expect(
+        datedDayShowButtonForMutation(
+          { calendarYmd: tomorrow, listType: "shopping" },
+          now,
+        ),
+      ).toBeNull();
+      expect(
+        datedDayShowButtonForMutation(
+          {
+            calendarYmd: tomorrow,
+            listType: "custom",
+            listName: "אירוע משפחתי",
+          },
+          now,
+        ),
+      ).toBeNull();
+      const buttons = ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: [],
+            },
+            {
+              action: "add",
+              listType: "custom",
+              listName: "אירוע משפחתי",
+              items: [{ שם: "עוגה" }],
+              targets: [],
+            },
+          ],
+        },
+        [],
+        {
+          appliedNav: {
+            listKeys: new Set(["shopping", "custom\0אירוע משפחתי"]),
+            filing: false,
+          },
+          appliedItems: {
+            lists: [
+              {
+                action: "add",
+                itemId: "s1",
+                itemLabel: "חלב",
+                listType: "shopping",
+                calendarYmd: tomorrow,
+              },
+              {
+                action: "add",
+                itemId: "c1",
+                itemLabel: "עוגה",
+                listType: "custom",
+                listName: "אירוע משפחתי",
+                calendarYmd: tomorrow,
+              },
+            ],
+            filings: [],
+          },
+          now,
+        },
+      );
+      expect(buttons.some((b) => b.command.startsWith("מה יש לי"))).toBe(false);
+    });
+
+    it("same day shopping+tasks → day button only for tasks", () => {
+      const buttons = ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "shopping",
+              listName: "",
+              items: [{ "שם פריט": "חלב" }],
+              targets: [],
+            },
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם מטלה": "פגישה" }],
+              targets: [],
+            },
+          ],
+        },
+        [],
+        {
+          appliedNav: {
+            listKeys: new Set(["shopping", "tasks"]),
+            filing: false,
+          },
+          appliedItems: {
+            lists: [
+              {
+                action: "add",
+                itemId: "s1",
+                itemLabel: "חלב",
+                listType: "shopping",
+                calendarYmd: tomorrow,
+              },
+              {
+                action: "add",
+                itemId: "t1",
+                itemLabel: "פגישה",
+                listType: "tasks",
+                calendarYmd: tomorrow,
+              },
+            ],
+            filings: [],
+          },
+          now,
+        },
+      );
+      expect(
+        buttons.filter((b) => b.command.startsWith("מה יש לי")),
+      ).toEqual([
+        {
+          label: "מה מחר",
+          command: "מה יש לי מחר ברשימת משימות",
+        },
+      ]);
+    });
   });
 });

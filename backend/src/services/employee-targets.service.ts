@@ -35,16 +35,22 @@ import type {
   ListItemOwnerRef,
 } from "./employee-records.service.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
+import { formatRelativeDayLabel } from "./show-button-dump.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
-/** Existing custom list the speaker can see / mutate (personal or shared). */
+/**
+ * Existing list shell the speaker can see / mutate (personal or shared).
+ * Custom: matched by listName. Shopping/tasks: matched by listType (empty name).
+ */
 export type SharedListRef = {
   ownerId: string;
   listName: string;
   visibleTo: string[];
   /** Defaults to "shared" when omitted (older call sites / tests). */
   scope?: "personal" | "shared";
+  /** shopping | tasks | custom — omit treated as custom for legacy call sites. */
+  listType?: string;
 };
 
 function listScopeOf(row: SharedListRef): "personal" | "shared" {
@@ -1111,10 +1117,19 @@ export function planTargetedActions(input: {
       input.actor.id,
       input.sharedLists ?? [],
     );
-    if (existingListMatches.length > 0) {
+    const hasExplicitTargetNames = (normalizedList.targets ?? []).some(
+      (name) => String(name ?? "").trim().length > 0,
+    );
+    // Explicit targets → item co-share / assign path below (never rewrite shell).
+    // Empty targets on a known shell → inherit owner book + shell visibility.
+    const useShellMatchPath =
+      existingListMatches.length > 0 && !hasExplicitTargetNames;
+    if (useShellMatchPath) {
       // Removes/updates must hit every duplicate shared list with that name
       // (legacy bugs created one copy per partner). Adds go to one canonical owner.
-      // Audience is always from DB scope/visibleTo — never from this turn's LLM targets.
+      // Empty targets on a shared shell → inherit: partners see via list.scope;
+      // item.visibleTo stays owner-only so shell unshare revokes without
+      // touching explicit item-level co-share rows.
       const mutationTargets =
         normalizedList.action === "remove" ||
         normalizedList.action === "update"
@@ -1131,21 +1146,14 @@ export function planTargetedActions(input: {
         filing: [],
       };
       for (const existingList of mutationTargets) {
-        const scope = listScopeOf(existingList);
-        const visibleTo =
-          scope === "shared"
-            ? uniqueIds([
-                existingList.ownerId,
-                input.actor.id,
-                ...existingList.visibleTo,
-              ])
-            : uniqueIds([existingList.ownerId]);
         applications.push({
           employeeId: existingList.ownerId,
           metadata: {
             lists: [
               {
                 ...normalizedList,
+                listType: (existingList.listType ??
+                  normalizedList.listType) as LlmListAction["listType"],
                 listName: existingList.listName,
                 targets: [],
               },
@@ -1153,14 +1161,12 @@ export function planTargetedActions(input: {
             filing: [],
           },
           visibility: {
-            scope,
+            scope: "personal",
             addedById: input.actor.id,
-            visibleTo,
+            visibleTo: uniqueIds([existingList.ownerId]),
           },
         });
       }
-      // Re-sharing / touching an existing list with no rows is a no-op for partners.
-      // Only notify real shared-list partners from DB (not personal lists, not LLM targets).
       if (normalizedList.items.length > 0 || normalizedList.action !== "add") {
         const notifyIds = uniqueIds(
           mutationTargets
@@ -1718,6 +1724,8 @@ export type AppliedItemEvidence = {
     itemLabel: string;
     listType: string;
     listShell?: boolean;
+    /** YYYY-MM-DD from applied row (post-save / pre-delete). */
+    calendarYmd?: string;
   }>;
   filings: ReadonlyArray<{
     action: "add" | "update" | "remove";
@@ -1749,6 +1757,8 @@ export type SpeakerShowButtonOptions = {
    * Safety-net emits worker inventory when there is no speaker-book tasks mutate.
    */
   appliedWorkerWatchName?: string;
+  /** Clock for relative day labels on dated-item day-show safety-net. */
+  now?: Date;
 };
 
 /** Builtin list_type, or `custom:<normalized name>`. */
@@ -2373,11 +2383,100 @@ function validateModelFixedListNav(
 }
 
 /**
+ * Day-show tap after a dated *tasks* apply (dates are tasks-only for now).
+ * Label = day only («מה מחר» / «מה ביום שלישי»).
+ * Command = day + tasks list («מה יש לי מחר ברשימת משימות»).
+ */
+export function datedDayShowButtonForMutation(
+  input: {
+    calendarYmd: string;
+    listType: string;
+    listName?: string | null;
+  },
+  now = new Date(),
+): LlmReplyButton | null {
+  const ymd = input.calendarYmd.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return null;
+  }
+  const listType = input.listType.trim().toLowerCase();
+  // Product: calendar day is meaningful for tasks only (not shopping/custom).
+  if (listType !== "tasks") {
+    return null;
+  }
+  const listLabel = builtinListHebrew("tasks");
+  if (!listLabel) {
+    return null;
+  }
+  const rel = formatRelativeDayLabel(ymd, now);
+  let label: string;
+  let dayInCommand: string;
+  if (rel === "היום" || rel === "מחר" || rel === "מחרתיים") {
+    label = `מה ${rel}`;
+    dayInCommand = rel;
+  } else if (/^\d/.test(rel)) {
+    label = fitNavButtonLabel(`מה ב־${rel}`);
+    dayInCommand = `ב־${rel}`;
+  } else {
+    label = fitNavButtonLabel(`מה ביום ${rel}`);
+    dayInCommand = `ביום ${rel}`;
+  }
+  return {
+    label: fitNavButtonLabel(label),
+    command: `מה יש לי ${dayInCommand} ברשימת ${listLabel}`,
+  };
+}
+
+/** Deduped day-show buttons from successful dated applies (not listShell). */
+export function datedDayShowSafetyNetButtons(
+  appliedItems: AppliedItemEvidence | undefined,
+  now = new Date(),
+): LlmReplyButton[] {
+  if (!appliedItems) {
+    return [];
+  }
+  const out: LlmReplyButton[] = [];
+  const seen = new Set<string>();
+  for (const row of appliedItems.lists) {
+    if (row.listShell) {
+      continue;
+    }
+    const ymd = row.calendarYmd?.trim().slice(0, 10) ?? "";
+    if (!ymd) {
+      continue;
+    }
+    const listKey = listNavKeyFromMutation(row);
+    const dedupe = `${listKey}\0${ymd}`;
+    if (seen.has(dedupe)) {
+      continue;
+    }
+    const button = datedDayShowButtonForMutation(
+      {
+        calendarYmd: ymd,
+        listType: row.listType,
+        listName: row.listName,
+      },
+      now,
+    );
+    if (!button?.command.trim()) {
+      continue;
+    }
+    seen.add(dedupe);
+    out.push({
+      label: fitNavButtonLabel(button.label),
+      command: button.command.trim(),
+    });
+  }
+  return out;
+}
+
+/**
  * Speaker confirm taps: keep model conversational + validated LIST/collab
  * nav; drop failed item-open; safety-net at most one plain LIST per applied
  * (or metadata) mutate when the model omitted a matching nav. Never invents
  * collab, item-open, or «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
  * «הצג מטלות של <worker>» instead of speaker-book «הצג מטלות».
+ * Dated tasks apply also safety-nets a day-show tap (day + tasks list).
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
@@ -2450,6 +2549,17 @@ export function ensureSpeakerShowButtons(
       continue;
     }
     buttons.push(button);
+  }
+
+  // Dated-item day show: one button per distinct day+list from successful apply.
+  for (const dayBtn of datedDayShowSafetyNetButtons(
+    options?.appliedItems,
+    options?.now,
+  )) {
+    if (!remember(dayBtn.command)) {
+      continue;
+    }
+    buttons.push(dayBtn);
   }
 
   for (const required of plainSafetyNetListShowButtons(
@@ -3235,33 +3345,60 @@ function uniqueIds(ids: Array<string | null | undefined>): string[] {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-/** Exact name match only — substring matching caused wrong-partner notifies. */
+/**
+ * Match an existing shell the actor can see.
+ * Custom: exact name. Shopping/tasks: same listType (builtin empty name).
+ */
 function findExistingCustomListsForActor(
   list: Pick<LlmListAction, "listType" | "listName" | "items">,
   actorId: string,
   knownLists: SharedListRef[],
 ): SharedListRef[] {
-  if (list.listType !== "custom" || knownLists.length === 0) {
+  if (knownLists.length === 0) {
     return [];
   }
-  const needle =
-    list.listName?.trim() ||
-    customListNameOf(list) ||
-    (list.items.length === 1 && looksLikeListTitleOnly(list.items[0])
-      ? llmItemLabel(list.items[0]).trim()
-      : "");
-  if (!needle) {
+  const listType = (list.listType ?? "").trim();
+  const builtinShell =
+    listType === "shopping" || listType === "tasks";
+  if (listType !== "custom" && !builtinShell) {
     return [];
   }
-  const normalizedNeedle = normalizeLoose(needle);
-  const matches = knownLists.filter((row) => {
-    const canSee =
-      row.ownerId === actorId || row.visibleTo.includes(actorId);
-    if (!canSee) {
-      return false;
+
+  let matches: SharedListRef[];
+  if (builtinShell) {
+    matches = knownLists.filter((row) => {
+      const canSee =
+        row.ownerId === actorId || row.visibleTo.includes(actorId);
+      if (!canSee) {
+        return false;
+      }
+      const rowType = (row.listType ?? "").trim();
+      return rowType === listType;
+    });
+  } else {
+    const needle =
+      list.listName?.trim() ||
+      customListNameOf(list) ||
+      (list.items.length === 1 && looksLikeListTitleOnly(list.items[0])
+        ? llmItemLabel(list.items[0]).trim()
+        : "");
+    if (!needle) {
+      return [];
     }
-    return normalizeLoose(row.listName) === normalizedNeedle;
-  });
+    const normalizedNeedle = normalizeLoose(needle);
+    matches = knownLists.filter((row) => {
+      const canSee =
+        row.ownerId === actorId || row.visibleTo.includes(actorId);
+      if (!canSee) {
+        return false;
+      }
+      const rowType = (row.listType ?? "custom").trim();
+      if (rowType !== "custom" && rowType !== "") {
+        return false;
+      }
+      return normalizeLoose(row.listName) === normalizedNeedle;
+    });
+  }
   matches.sort((a, b) => {
     const scopeRank = (row: SharedListRef) =>
       listScopeOf(row) === "shared" ? 0 : 1;

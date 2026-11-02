@@ -205,6 +205,7 @@ import {
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
   restrictListMutatesToLastNumberedDump,
+  undatedTasksOfferButton,
   type DumpNumbering,
   type LastNumberedDumpLine,
 } from "./show-button-dump.js";
@@ -1079,7 +1080,7 @@ function workerTargetingInstructions(
     "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT ??????? ???? ????????? ???? ??3? ? watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING ??????? ?? ??? ???????? ???? ??3? ? watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true ? send then sleep until next interval. (3) RECURRING SCHEDULED ??????? ???? ?? ???? ??8 ?? ???????? ???? ??3? ? watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for ??????? ?????? ??????. mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. smartschool_new recurring: compose_aspects [homework,behavior,messages] when broad. market_change_compare e.g. {type:\"market_change_compare\",left:\"????\",right:\"????\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "MARKET PRICE WATCH INTENT: (A) Target arrival — «תתריעי כשהמחיר 20» / «כש־SOLT מגיע ל־20» / alert when price is/reaches X → compose_condition {type:\"market_price\",op:\"eq\",value:X}. Server FORCES watch_once:true (edge, one-shot) and rewrites eq→lte/gte from the live quote (down vs up). FORBIDDEN emitting already-true gte when the live sample is above the target; FORBIDDEN inventing prices in the ack. (B) Explicit condition — «כל עוד מעל 20» / «כשעולה מעל» / «כשיורד מתחת» → emit the exact op (gte/gt/lte/lt); watch_once:false only when they asked recurring while the condition remains true. Recurrence cadence is separate from op direction.",
     "WATCH EXPR (arithmetic on catalog fields): ????????? ???? ????? ???? 2 = 50? ? compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"??? ?????\"},{const:2}]},right:{const:50}}; compose_source weather. ????? + ???? ??? ???10? ? expr compare approx/lt with market.price fields (symbols ????/????). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (?? ? approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. ???????????? ?????? on a number ? field_changed {field:\"weather.temp_now\",place:?}. FORBIDDEN putting the math only in the brief.",
-    "PLACES (live local): תמצאי לי חשמלאי בפתח תקווה / מסעדות באזור השרון / מה המסעדות באזור שלי / איפה יש חניון ליד הקניון → metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (פתח תקווה / בתי קפה בפתח תקווה) → geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Near a unique saved label from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS («ליד העבודה» / «ליד הבית» / «ליד סבתא») → place=that exact label (or id), near empty — server biases from the saved row; FORBIDDEN inventing nicknames not in saved data; FORBIDDEN near=speaker when they named a saved place. Inside-region (באזור השרון / בתוך גוש דן) → geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me / clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן» meaning the pin) → near=speaker. «שם» / «ליד המקום הזה» after a place named in recent chat (ignore intervening reminder noise) when that place is the clearer referent and no competing pin → re-emit that place in place, near empty — not automatic near=speaker. When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK (places=null) — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place/name cue → act, do not ask. Parking examples: איפה יש חניון ליד הקניון? / תמצא לי חניה קרובה / איפה אפשר להחנות ליד המסעדה? / יש חניון בתשלום באזור?; ordinary business תמצא לי מסעדה ליד הקניון. Parking-place asks → intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): איפה יש חניון ליד הקניון? → { query:\"חניון\", place:\"קניון\"|area, intent:\"parking\" }; תמצא לי חניה קרובה → { query:\"חניה\", near:\"speaker\"|place, intent:\"parking\" }; איפה אפשר להחנות ליד המסעדה? → { query:\"חניה\", place:\"מסעדה\"|area, intent:\"parking\" }; יש חניה חינם באזור? → { query:\"חניה\", place|near, intent:\"parking\", parking_cost:\"free\" }; יש חניון בתשלום באזור? → { query:\"חניון\", place|near, intent:\"parking\", parking_cost:\"paid\" }. מה המסעדות באזור שלי + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for פתוח עכשיו; min_rating 0–5 exact (e.g. 4.1) for דירוג מעל X; parking_cost free|paid for חניה חינם/בתשלום (server local-filters ParkingOptions; FORBIDDEN stuffing חינם/בתשלום only into query); included_type ∈ restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). יש חניה במסעדה? / attribute of a named business → intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/…) are expected to evidence the ask → require_live_select:true; U = cannot verify (e.g. בטיחות/ownership) → NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. חניון חינם ובטוח → parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer → explain BEFORE fetch (places=null). Distinguish אין תוצאה במסננים המבוקשים vs לא ניתן לוודא קריטריון שאינו נתמך. FORBIDDEN presenting results as if an unsupported criterion was checked. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Near-me without pin → ask to share WhatsApp location.",
+    "PLACES (live local): תמצאי לי חשמלאי בפתח תקווה / מסעדות באזור השרון / מה המסעדות באזור שלי / איפה יש חניון ליד הקניון → metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (פתח תקווה / בתי קפה בפתח תקווה) → geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Near a unique saved label from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS («ליד העבודה» / «ליד הבית» / «ליד סבתא») → place=that exact label (or id), near empty — server biases from the saved row; FORBIDDEN inventing nicknames not in saved data; FORBIDDEN near=speaker when they named a saved place. Inside-region (באזור השרון / בתוך גוש דן) → geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me / clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן» meaning the pin) → near=speaker. «שם» / «ליד המקום הזה» after a place named in recent chat (ignore intervening reminder noise) when that place is the clearer referent and no competing pin → re-emit that place in place, near empty — not automatic near=speaker. When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK (places=null) — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place/name cue → act, do not ask. Parking examples: איפה יש חניון ליד הקניון? / תמצא לי חניה קרובה / איפה אפשר להחנות ליד המסעדה? / יש חניון בתשלום באזור?; ordinary business תמצא לי מסעדה ליד הקניון. Parking-place asks → intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): איפה יש חניון ליד הקניון? → { query:\"חניון\", place:\"קניון\"|area, intent:\"parking\" }; תמצא לי חניה קרובה → { query:\"חניה\", near:\"speaker\"|place, intent:\"parking\" }; איפה אפשר להחנות ליד המסעדה? → { query:\"חניה\", place:\"מסעדה\"|area, intent:\"parking\" }; יש חניה חינם באזור? → { query:\"חניה\", place|near, intent:\"parking\", parking_cost:\"free\" }; יש חניון בתשלום באזור? → { query:\"חניון\", place|near, intent:\"parking\", parking_cost:\"paid\" }. מה המסעדות באזור שלי + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for פתוח עכשיו; min_rating 0–5 exact (e.g. 4.1) for דירוג מעל X; parking_cost free|paid for חניה חינם/בתשלום (server local-filters ParkingOptions; FORBIDDEN stuffing חינם/בתשלום only into query); included_type ∈ restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). יש חניה במסעדה? / attribute of a named business → intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/…) are expected to evidence the ask → require_live_select:true; U = cannot verify (e.g. בטיחות/ownership) → NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. חניון חינם ובטוח → parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer → explain BEFORE fetch (places=null). Distinguish אין תוצאה במסננים המבוקשים vs לא ניתן לוודא קריטריון שאינו נתמך. FORBIDDEN presenting results as if an unsupported criterion was checked. Named venue address/phone («מה הכתובת של מסעדת צ'אקרה» / «מה הטלפון של …») → places { query: that venue name (incl. מסעדת/בית קפה when spoken), place:\"\"|known city, aspects:[address]|[phone]|[summary] } THIS turn — city optional (server searches ישראל). FORBIDDEN ack-only «בודקת את הכתובת…» without metadata.places (server cannot append a 2nd bubble). Pure ask → responses may be empty; server fills. WITH ack → ack only + places ACTION; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Category without city («חשמלאי») → ask where OR near=speaker with pin; places=null until place/pin. Near-me without pin → ask to share WhatsApp location.",
     "JEWISH / SHABBAT (live): מתי מדליקים נרות בפתח תקווה / מתי נכנסת שבת כאן / מתי נכנסת שבת בבית / מה פרשת השבוע / מתי יוצאת שבת / איזה חג הבא / מתי ערב פסח → metadata.jewish { place, date:\"\"|YYYY-MM-DD, aspects:[summary|candles|havdalah|parasha|holidays], query? }; lists/no reminders clock. PLACE RESOLUTION: named Israel city → place that city string; clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן»|«לידי» meaning the shared pin) → place:\"speaker\" (server uses PENDING_LOCATION coords); unique saved label from filings/tasks/custom OR SPEAKER_CONTACTS name («בבית» / «מיקום הבית» / work / סבתא) → place=that exact label (server resolves coords from the saved row; FORBIDDEN substituting PENDING/LAST_LIVE when they named a saved place); FORBIDDEN place:\"speaker\" merely because PENDING_LOCATION is AVAILABLE; named city never replaced by pin. «שם» / «ליד המקום» after a prior jewish/weather/places place when THAT label is the clearer referent and no competing pin → re-emit that LAST_LIVE_LOCATION/prior label in place (not speaker). When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK once; jewish=null — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place cue → act, do not ask. Ambiguous saved matches OR pin vs prior/city unclear → ASK once; jewish=null. No pin when they meant כאן → ASK to share WhatsApp location; jewish=null. NAMED HOLIDAY (ערב פסח / חנוכה / פורים) → aspects:[holidays] + query with that name (NOT bare upcoming list — server matches beyond the short window). LIVE CAPABILITY (F/Q/V/U): F/Q = place + date + aspects (+ query for named chag); V = returned candle/Havdalah/parasha/holiday facts — no require_live_select / no Stage B. U = custom minhag / community candle offsets not in Hebcal → disclose; never invent times. Pure ask → responses may be empty; server fills. WITH ack → ack only; server appends Hebcal as 2nd message. FORBIDDEN inventing candle/Havdalah times. Place required for candles/havdalah/summary (ask if missing; jewish=null). Parasha/holidays alone may use empty place. Bare זמני שבת → [summary]; הדלקת נרות → [candles]; מוצאי/יציאת שבת/הבדלה → [havdalah]; פרשה → [parasha]; חגים → [holidays]. FORBIDDEN jewish when they asked תזכיר לי לפני הדלקת נרות — use CANDLE-OFFSET REMINDER.",
     "CANDLE-OFFSET REMINDER: ??????? ?? ?????? ???? 10 ???? ???? ????? ??? ???? ?????? ? Self-nudge + lists add reminders { item:\"?????? ????\", text:\"?????? ????\", ping:[SPEAKER], schedule_anchor:\"jewish_candles\", offset_minutes:-10, compose_place:\"??? ?????\", compose:false }; jewish=null; NO recurrence (one-shot next Shabbat). Server fills fire_at from Hebcal ? FORBIDDEN inventing time/in. Missing city ? ask; no reminders clock jewish=null. ??? ???? / ?? ????? ? same + recurrence:{freq:\"weekly\",interval:1,weekdays:[5]}. Confirm: one-shot ?????? ???????; weekly ???? ?????? ? not live candle times.",
     "ROUTES: Google estimates OR official MOT static GTFS OR MOT SIRI live. Bare ???? ?????? with no mode ? ASK car vs transit (routes=null). Car / ??? ??? ???? ? routes { origin, destination, mode:\"drive\", aspects:[summary|duration|steps] } + navigate_address on the bubble. Transit trip ???? ?????? ?? ??? ? { origin, destination, mode:\"transit\"|omit, aspects:[summary] }. Closest boarding to origin among trip options (closest line from home to a destination) ? prefer:\"closest_board\" + origin + destination + aspects:[summary] (require_live_select:false); WITHOUT destination ? routes=null + disclose U; FORBIDDEN nearest_stop without line for that ask. Residual fewer-transfers/shortest among returned ? require_live_select:true (not other prefer values). Ordinary trip first answer ? aspects:[summary] (engine leads with one recommendation when several alts; steps aspect only when they ask for step-by-step). Follow-up for the saved board (?????? ?????? / ?? ???????? / ????? N) ? routes { open_itinerary:\"recommended\"|\"all\"|1..3 } with empty origin+destination (engine expands the last board; zero Google fetch). New origin/destination or material trip change ? fresh routes ACTION with full O/D (open_itinerary ignored). FORBIDDEN pretending expand works with no saved board; FORBIDDEN forcing a choice when the initial ask can be answered directly. Missed bus/departure (speaker says they missed the bus / did not catch it / asks what now after a prior transit plan ? paraphrases OK ? including after an intervening assistant reminder) ? routes { recalculate:true, origin+destination from history when reliably known OR empty O/D so the engine reuses the last saved board's O/D only, departure empty|SESSION_CLOCK now/ASAP, aspects:[summary] }; FORBIDDEN open_itinerary for missed-bus (that expands a stale board without Google refetch). Present as newly calculated (NOT continued tracking / NOT continuous monitoring). FORBIDDEN claiming prior option N is still available without reliable identity and current validity. Origin or destination not recoverable and no saved board ? ASK only for the missing field (routes=null); FORBIDDEN inventing O/D. Material O/D change in the same ask ? put the new places in origin/destination (recalculate still fresh-fetches). Exact typed board commands alone (??????? ??????? / ??? ????????? / ?????? N?) ? open_itinerary; board wording plus a new place ? fresh O/D (not open). Not a bus_eta watch unless they asked to be reminded. Network disruptions/cancellations-wide ? U: routes=null + disclose (capability not connected) OR disclose_network_disruption:true with empty O/D (engine discloses; no provider fetch); FORBIDDEN inventing SX/alerts; FORBIDDEN claiming you checked the network and found no disruptions. Mixed disruption + trip ask ? full O/D routes ACTION + disclose_network_disruption:true (fetch the trip; append U disclose; do not block the route). Leave-by ? arrival + [summary]. Next-bus Google estimate ???? ??? ??? ?? 51?? ? [eta] (not MOT official). LINE FREQUENCY: numbered line near a place/area + time window (??? ?????? ?? 66 ????? ?????? ??? ??? 8 ??9?) ? prefer MOT: missing stop ? [nearest_stop] + line + origin place; with stop_code/stop name ? [schedule] + line + departure + window_end + service_date (list departures; never invent headway). Google [frequency] only for A?B trip headway when no MOT stop/timetable ask. LINES AT STOP (Google): ambiguous without dest ? ASK; after ??? ?????? ? [lines]. Residual V on trip alternatives / stop lines (e.g. ??? ?????? / ?? ????? ?????? X) ? require_live_select:true after F/Q fields are set; F/Q alone ? false. OFFICIAL MOT timetable (static): ??? ???? ??????? / ?????? ???????? ? { stop_code|stop name, line, aspects:[schedule], departure?, window_end?, service_date? }. NEAREST STOP: [nearest_stop] + line + origin speaker|place. OFFICIAL LIVE arrivals (SIRI): ????? ???? ? [live_arrivals] + stop_code or stop name (+ line + destination/headsign direction) ? FORBIDDEN labeling schedule/Google as SIRI. Ambiguous operator/direction/stop ? ASK. origin \"speaker\" = PENDING_LOCATION. Pure ask ? server fills. FORBIDDEN inventing times or line lists.",
@@ -2482,6 +2483,13 @@ export async function sendChatMessage(input: {
           ...(buttonDump.about
             ? { showDumpAbout: buttonDump.about }
             : {}),
+          ...(buttonDump.dateScope === "undated"
+            ? {
+                showDumpDateScope: "undated" as const,
+                showDumpFrom: null,
+                showDumpTo: null,
+              }
+            : {}),
         };
       }
     }
@@ -3624,6 +3632,7 @@ export async function sendChatMessage(input: {
         lines: LastNumberedDumpLine[];
         snapshot: typeof snapshot;
         validIds: string[];
+        offerUndatedTasksButton?: boolean;
         opts: typeof baseDumpOpts & {
           viewerName: string;
           viewerAliases: string[];
@@ -3665,16 +3674,20 @@ export async function sendChatMessage(input: {
           snapshot,
           validIds,
           opts: dumpOpts,
+          ...(mapped.offerUndatedTasksButton
+            ? { offerUndatedTasksButton: true }
+            : {}),
         };
       };
 
       if (aboutNames.length === 0) {
-        const { text, lines, snapshot, opts, validIds } = await dumpForSubject(
-          speaker,
-          speakerAliases,
-          speakerSnapshot,
-          speakerPhoneBook,
-        );
+        const { text, lines, snapshot, opts, validIds, offerUndatedTasksButton } =
+          await dumpForSubject(
+            speaker,
+            speakerAliases,
+            speakerSnapshot,
+            speakerPhoneBook,
+          );
         turnLastNumberedDump = lines;
         if (text) {
           workingReply = setEngineResponse(workingReply, text);
@@ -3713,6 +3726,10 @@ export async function sendChatMessage(input: {
               itemDumpShowButtons = itemButtons;
               workingReply = setEngineButtons(workingReply, itemButtons);
             }
+          } else if (offerUndatedTasksButton) {
+            workingReply = setEngineButtons(workingReply, [
+              undatedTasksOfferButton(),
+            ]);
           }
         } else if (itemDumpRequested) {
           workingReply = setEngineResponse(
@@ -3739,6 +3756,7 @@ export async function sendChatMessage(input: {
           validId: string;
           titleStem: string;
         } | null = null;
+        let offerUndatedTasksButton = false;
         // One continuous counter across every about-subject block in this dump.
         const turnDumpNumbering: DumpNumbering = { next: 1 };
 
@@ -3803,6 +3821,7 @@ export async function sendChatMessage(input: {
             snapshot,
             opts,
             validIds,
+            offerUndatedTasksButton: subjectOfferUndated,
           } = await dumpForSubject(
             employeeDisplayName(aboutPerson),
             aboutAliases,
@@ -3816,6 +3835,9 @@ export async function sendChatMessage(input: {
               numbering: turnDumpNumbering,
             },
           );
+          if (subjectOfferUndated) {
+            offerUndatedTasksButton = true;
+          }
           const sectionPrefix =
             aboutNames.length > 1
               ? employeeDisplayName(aboutPerson)
@@ -3943,6 +3965,10 @@ export async function sendChatMessage(input: {
                 itemDumpShowButtons = itemButtons;
                 workingReply = setEngineButtons(workingReply, itemButtons);
               }
+            } else if (offerUndatedTasksButton) {
+              workingReply = setEngineButtons(workingReply, [
+                undatedTasksOfferButton(),
+              ]);
             }
           }
         }
@@ -4703,6 +4729,7 @@ export async function sendChatMessage(input: {
                 itemLabel: row.itemLabel,
                 listType: row.listType,
                 listShell: row.listShell,
+                ...(row.calendarYmd ? { calendarYmd: row.calendarYmd } : {}),
               })),
               filings: filingMutations.map((row) => ({
                 action: row.action,
@@ -5156,13 +5183,14 @@ async function continueInviteAfterRegister(input: {
   };
 }
 
+/** Custom + shopping/tasks shells the actor owns or is a shell partner on. */
 async function listSharedCustomListsForActor(
   _userId: string,
   actorId: string,
 ): Promise<SharedListRef[]> {
   const rows = await prisma.employeeList.findMany({
     where: {
-      listType: "custom",
+      listType: { in: ["custom", "shopping", "tasks"] },
       deletedAt: null,
       employee: { kind: "human" },
       OR: [{ employeeId: actorId }, { scope: "shared" }],
@@ -5170,6 +5198,7 @@ async function listSharedCustomListsForActor(
     select: {
       employeeId: true,
       name: true,
+      listType: true,
       visibleTo: true,
       scope: true,
     },
@@ -5183,14 +5212,19 @@ async function listSharedCustomListsForActor(
       return {
         ownerId: row.employeeId,
         listName: row.name,
+        listType: row.listType,
         visibleTo: [...new Set([row.employeeId, ...visibleTo])],
         scope: scope as "personal" | "shared",
       };
     })
-    .filter(
-      (row) =>
-        row.listName.trim() &&
+    .filter((row) => {
+      const builtin =
+        row.listType === "shopping" || row.listType === "tasks";
+      const namedOk = builtin || Boolean(row.listName.trim());
+      return (
+        namedOk &&
         (row.ownerId === actorId ||
-          (row.scope === "shared" && row.visibleTo.includes(actorId))),
-    );
+          (row.scope === "shared" && row.visibleTo.includes(actorId)))
+      );
+    });
 }

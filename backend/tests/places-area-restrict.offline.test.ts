@@ -233,6 +233,20 @@ describe("normalizePlacesGeoMode / parsePlacesAction", () => {
       }),
     ).toBeNull();
   });
+
+  it("named venue address ask: query alone parses (no city / pin required)", () => {
+    const action = parsePlacesAction({
+      places: {
+        query: "מסעדת צ'אקרה",
+        place: "",
+        aspects: ["address"],
+      },
+    });
+    expect(action).not.toBeNull();
+    expect(action!.query).toContain("צ'אקרה");
+    expect(action!.place).toBe("");
+    expect(action!.aspects).toEqual(["address"]);
+  });
 });
 
 describe("places Stage B2a area_restrict", () => {
@@ -730,5 +744,34 @@ describe("places Stage B2a area_restrict", () => {
       (init.headers as Record<string, string>)["X-Goog-FieldMask"] ?? "",
     );
     expect(mask).not.toContain(PLACES_LOCATION_FIELD);
+  });
+});
+
+describe("places named venue without city", () => {
+  it("resolvePlacesReplyDetailed runs Israel-wide search for query-only address ask", async () => {
+    const fetchImpl = placesSearchFetchImpl([
+      {
+        id: "places/chakra",
+        displayName: { text: "צ'אקרה" },
+        formattedAddress: "אבן גבירול 71, תל אביב-יפו",
+        nationalPhoneNumber: "03-1234567",
+      },
+    ]);
+    const result = await resolvePlacesReplyDetailed({
+      query: "מסעדת צ'אקרה",
+      place: "",
+      aspects: ["address"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.needsLocation).toBeFalsy();
+    expect(result.text).toContain("כתובת:");
+    expect(result.text).toContain("אבן גבירול");
+    expect(result.text).not.toMatch(/שלח מיקום/);
+    expect(result.text).not.toMatch(/בודקת/);
+    const body = readPlacesBody(fetchImpl);
+    expect(body.textQuery).toBe("מסעדת צ'אקרה");
+    expect(body.locationBias).toBeUndefined();
+    expect(body.locationRestriction).toBeUndefined();
   });
 });

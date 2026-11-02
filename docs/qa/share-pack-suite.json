@@ -33,7 +33,7 @@
       "id": "SH-SHARE-SHOP",
       "track": "MODEL",
       "contract": "SH-SHARE-SHOP",
-      "description": "SH-SHARE-SHOP",
+      "description": "Whole shopping shell share via alter_list add_participants",
       "tag": "happy",
       "setup": {
         "lists": [
@@ -68,9 +68,13 @@
           "utterance": "תשתפי את הקניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ]
         }
@@ -303,9 +307,13 @@
           "utterance": "תשתפי קניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             },
             {
               "type": "directory_empty"
@@ -353,9 +361,13 @@
           "utterance": "תשתפי קניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             },
             {
               "type": "filing_empty"
@@ -646,9 +658,13 @@
           "utterance": "תשתפי קניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             },
             {
               "type": "no_invented_reminder_add"
@@ -750,9 +766,10 @@
                   "type": "mutations_empty_or_read_only"
                 },
                 {
-                  "type": "lists_has_action",
-                  "action": "update",
-                  "listType": "shopping"
+                  "type": "list_ops_has_action",
+                  "action": "alter_list",
+                  "minCount": 1,
+                  "maxCount": 1
                 }
               ]
             }
@@ -809,7 +826,7 @@
       "id": "SH-SHARE-MT",
       "track": "MODEL_APPLY",
       "contract": "SH-SHARE-MT",
-      "description": "SH-SHARE-MT",
+      "description": "Whole shopping shell share via alter_list add_participants (MODEL_APPLY)",
       "tag": "continuity",
       "setup": {
         "lists": [
@@ -844,9 +861,13 @@
           "utterance": "תשתפי את הקניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ],
           "stateAfter": {
@@ -913,7 +934,7 @@
       "id": "SH-CX-MT",
       "track": "MODEL_APPLY",
       "contract": "SH-CX-MT",
-      "description": "SH-CX-MT",
+      "description": "Shell-share shopping then unshare via alter_list add/remove_participants",
       "tag": "continuity",
       "setup": {
         "lists": [
@@ -948,9 +969,13 @@
           "utterance": "תשתפי קניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ]
         },
@@ -958,9 +983,13 @@
           "utterance": "תפסיקי לשתף עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ]
         }

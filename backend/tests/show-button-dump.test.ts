@@ -46,6 +46,7 @@ import {
   countUndatedTasksExcludedByDateRange,
   isDigitalWorkerReminderAgendaSlot,
   formatTasksDayAgendaDump,
+  undatedTasksOfferButton,
   ymdFromDumpValue,
   mapShowButtonCommandToDump,
   mapShowButtonCommandToDumpTarget,
@@ -59,6 +60,8 @@ import {
 import {
   builtinListHebrew,
   builtinListTypeFromHebrew,
+  SHOW_UNDATED_TASKS_COMMAND,
+  SHOW_UNDATED_TASKS_COMMAND_LEGACY,
   showAllListButtonCommand,
   showAssigneeButtonCommand,
   showListButtonCommand,
@@ -87,6 +90,16 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הציגי את רשימת הקניות")).toBeNull();
     expect(isKnownShowButtonCommand("הצג רשימת קניות")).toBe(true);
     expect(isKnownShowButtonCommand("הצג רשימת קניות אישית")).toBe(false);
+  });
+
+  it("maps משימות כלליות button to tasks + dateScope undated", () => {
+    expect(mapShowButtonCommandToDumpTarget(SHOW_UNDATED_TASKS_COMMAND)).toEqual(
+      { kind: "tasks", dateScope: "undated" },
+    );
+    expect(
+      mapShowButtonCommandToDumpTarget(SHOW_UNDATED_TASKS_COMMAND_LEGACY),
+    ).toEqual({ kind: "tasks", dateScope: "undated" });
+    expect(isKnownShowButtonCommand(SHOW_UNDATED_TASKS_COMMAND)).toBe(true);
   });
 
   it("maps shared-with / assignee / all commands to kind + pure filters", () => {
@@ -755,7 +768,7 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("📄");
   });
 
-  it("ITEM DUMP filters tasks to multiple item ids", () => {
+    it("ITEM DUMP filters tasks to multiple item ids", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -775,6 +788,7 @@ describe("filings flat dump", () => {
       viewerName: "טל",
       itemIds: new Set(["t1", "t3"]),
     })!;
+    expect(dump).toMatch(/^✅ משימות:/m);
     expect(dump).toContain("לשיננית");
     expect(dump).toContain("לחזור מהשיננית");
     expect(dump).not.toContain("לקנות חלב");
@@ -1224,7 +1238,7 @@ describe("filings flat dump", () => {
       expect(text).toMatch(/🛒 קניות:/);
       expect(text).not.toMatch(/אישיות — \d+ פריט/);
       expect(text).toContain("משימות:");
-      expect(text).toContain("תזכורות פעילות:");
+      expect(text).toContain("🔔 תזכורות פעילות:");
       expect(text).toMatch(/תיוקים:/);
       expect(text).toContain("ציוד שיניים");
       // No empty-section leftovers / inventory hint.
@@ -2784,6 +2798,7 @@ describe("formatShowDumpFromKind", () => {
 
   it("dumps only active reminders with relative when", () => {
     const text = formatShowDumpFromKind("reminders", snapshot, { now });
+    expect(text).toMatch(/^🔔 תזכורות פעילות:/m);
     expect(text).toContain("1. לקנות חלב — מחר ב־09:00");
     expect(text).not.toContain("ישן");
     expect(text).not.toContain("2026-10-16 09:00");
@@ -3180,6 +3195,7 @@ describe("formatShowDumpFromKind", () => {
         dateFrom: "2026-10-11",
         dateTo: "2026-10-17",
       })!;
+      expect(dump).toMatch(/^✅ משימות:/m);
       expect(dump).toContain("פגישה עם רואה חשבון");
       expect(dump).toContain("תור לרופא");
       expect(dump).toContain("לאסוף חבילה");
@@ -3194,6 +3210,7 @@ describe("formatShowDumpFromKind", () => {
         dateTo: "2026-10-17",
         itemIds: new Set(["meet-1"]),
       })!;
+      expect(dump).toMatch(/^✅ משימות:/m);
       expect(dump).toContain("פגישה עם רואה חשבון");
       expect(dump).not.toContain("תור לרופא");
       expect(dump).not.toContain("לאסוף חבילה");
@@ -4500,6 +4517,7 @@ describe("uniform standing + ping dump lines", () => {
       dateTo: "2026-10-18",
     })!;
 
+    expect(agenda).toMatch(/^✅ משימות:\nראשון 18\.10:/m);
     expect(agenda).toContain("ראשון 18.10:");
     // Occurrence-effective under the day header: chore time kept, timed 🔔.
     expect(agenda).toMatch(/להוריד את סקאזי לטיול — 08:45 🔔 תזכורת:/);
@@ -4553,6 +4571,7 @@ describe("uniform standing + ping dump lines", () => {
       dateFrom: "2026-10-18",
       dateTo: "2026-10-20",
     })!;
+    expect(text).toMatch(/^✅ משימות:\nמה־18 עד 20\.10:/m);
     expect(text).toContain("מה־18 עד 20.10:");
     expect(text).toContain("ראשון 18.10:");
     expect(text).toContain("שני 19.10:");
@@ -4774,7 +4793,7 @@ describe("partner dump about_ids (birthday event)", () => {
       now,
     })!;
     expect(text).toContain("יום ההולדת של עמית");
-    expect(text).toContain("תזכורות פעילות:");
+    expect(text).toContain("🔔 תזכורות פעילות:");
   });
 });
 
@@ -5261,28 +5280,28 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         reminders: [],
       };
 
-      const todayDump = formatShowDumpFromKind("tasks", snap, {
+      const todayMapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "עמית",
         dateFrom: "2026-11-01",
         dateTo: "2026-11-01",
-      })!;
-      const tomorrowDump = formatShowDumpFromKind("tasks", snap, {
+      });
+      const tomorrowMapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "עמית",
         dateFrom: "2026-11-02",
         dateTo: "2026-11-02",
-      })!;
+      });
+      const todayDump = todayMapped.text!;
+      const tomorrowDump = tomorrowMapped.text!;
 
-      // 1) Seven genuine undated → count 7 for both day windows.
-      expect(todayDump).toContain(
-        "(שים לב: 7 משימות כלליות לא נכללו בטווח.)",
-      );
-      expect(tomorrowDump).toContain(
-        "(שים לב: 7 משימות כלליות לא נכללו בטווח.)",
-      );
-      expect(todayDump).not.toMatch(/9 משימות כלליות/);
-      expect(tomorrowDump).not.toMatch(/9 משימות כלליות/);
+      // 1) Seven genuine undated → offer button; titles stay out of both day windows.
+      expect(todayMapped.offerUndatedTasksButton).toBe(true);
+      expect(tomorrowMapped.offerUndatedTasksButton).toBe(true);
+      expect(todayDump).not.toContain("לא נכללו בטווח");
+      expect(tomorrowDump).not.toContain("לא נכללו בטווח");
+      expect(todayDump).not.toContain("בלי תאריך 1");
+      expect(tomorrowDump).not.toContain("בלי תאריך 1");
 
-      // 2) Empty-window recurrings are not added to the undated count.
+      // 2) Empty-window recurrings are not treated as undated (not listed).
       expect(tomorrowDump).not.toContain("חוזר רק ביום ראשון");
       expect(tomorrowDump).not.toContain("חוזר רק ביום רביעי");
 
@@ -5293,12 +5312,11 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(tomorrowDump).toContain("עם תאריך בלי שעה");
       expect(todayDump).not.toContain("עם תאריך בלי שעה");
 
-      // 5) Dated outside the window is not counted as undated.
+      // 5) Dated outside the window is not treated as undated.
       expect(tomorrowDump).not.toContain("עם תאריך מחוץ לטווח");
-      expect(tomorrowDump).not.toMatch(/8 משימות כלליות/);
     });
 
-    it("dated dump with undated tasks discloses count; undated titles stay out of the agenda", () => {
+    it("dated dump with 2+ undated offers button; undated titles stay out of the agenda", () => {
       const snap: EmployeeRecordSnapshot = {
         lists: [
           {
@@ -5332,20 +5350,67 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         filing: [],
         reminders: [],
       };
-      const dump = formatShowDumpFromKind("tasks", snap, {
+      const mapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "טל",
         dateFrom: "2026-10-17",
         dateTo: "2026-10-20",
-      })!;
+      });
+      const dump = mapped.text!;
       expect(dump).toContain("פגישה בטווח");
       expect(dump).not.toContain("לקנות מתנה בלי תאריך");
       expect(dump).not.toContain("לסדר מגירות");
       expect(dump).not.toContain("מחוץ לטווח עם תאריך");
-      expect(dump).toContain(
-        "(שים לב: 2 משימות כלליות לא נכללו בטווח.)",
-      );
-      // Dated-out-of-range is not undated — count stays 2.
-      expect(dump).not.toMatch(/3 משימות כלליות/);
+      expect(dump).not.toContain("לא נכללו בטווח");
+      expect(mapped.offerUndatedTasksButton).toBe(true);
+      expect(undatedTasksOfferButton()).toEqual({
+        label: "משימות כלליות",
+        command: SHOW_UNDATED_TASKS_COMMAND,
+      });
+    });
+
+    it("dated dump with exactly one undated shows it inline under משימות כלליות", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "dated-1",
+                "שם מטלה": "פגישה בטווח",
+                "תאריך לביצוע": "2026-10-18",
+                "שעה לביצוע": "10:00",
+              },
+              {
+                item_id: "undated-1",
+                "שם מטלה": "לקנות מתנה בלי תאריך",
+              },
+              {
+                item_id: "out-1",
+                "שם מטלה": "מחוץ לטווח עם תאריך",
+                "תאריך לביצוע": "2026-10-25",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const mapped = formatShowDumpWithLineMap("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      });
+      const dump = mapped.text!;
+      expect(dump).toMatch(/^✅ משימות:/m);
+      expect(dump).toContain("פגישה בטווח");
+      expect(dump).toMatch(/משימות כלליות:/);
+      expect(dump).toContain("לקנות מתנה בלי תאריך");
+      expect(dump).not.toContain("מחוץ לטווח עם תאריך");
+      expect(dump).not.toContain("לא נכללה בטווח");
+      expect(mapped.offerUndatedTasksButton).toBeUndefined();
     });
 
     it("dated dump with no undated tasks omits the disclosure note", () => {
@@ -5383,7 +5448,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(dump).not.toContain("בלי תאריך");
     });
 
-    it("empty dated agenda still discloses undated exclusions", () => {
+    it("empty dated agenda with one undated shows that task inline", () => {
       const snap: EmployeeRecordSnapshot = {
         lists: [
           {
@@ -5402,16 +5467,47 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         filing: [],
         reminders: [],
       };
-      const dump = formatShowDumpFromKind("tasks", snap, {
+      const mapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "טל",
         dateFrom: "2026-10-17",
         dateTo: "2026-10-20",
-      })!;
-      expect(dump).toContain("אין משימות בטווח התאריכים.");
-      expect(dump).toContain(
-        "(שים לב: משימה כללית אחת לא נכללה בטווח.)",
+      });
+      const dump = mapped.text!;
+      expect(dump).toMatch(/^✅ משימות:\nמשימות כלליות:/m);
+      expect(dump).toContain("בלי תאריך בכלל");
+      expect(dump).not.toContain("אין משימות בטווח התאריכים.");
+      expect(dump).not.toContain("לא נכללה בטווח");
+      expect(mapped.offerUndatedTasksButton).toBeUndefined();
+    });
+
+    it("empty dated agenda with 2+ undated offers the button", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "u1", "שם מטלה": "כללית א" },
+              { item_id: "u2", "שם מטלה": "כללית ב" },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const mapped = formatShowDumpWithLineMap("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-17",
+        dateTo: "2026-10-20",
+      });
+      expect(mapped.text).toBe(
+        "✅ משימות:\nאין משימות בטווח התאריכים.",
       );
-      expect(dump).not.toContain("בלי תאריך בכלל");
+      expect(mapped.offerUndatedTasksButton).toBe(true);
+      expect(mapped.text).not.toContain("כללית א");
+      expect(mapped.text).not.toContain("כללית ב");
     });
 
     it("undated outside result scope (section/partner) is not counted", () => {
@@ -5452,29 +5548,30 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         filing: [],
         reminders: [],
       };
-      // Personal section: only personal undated counts (1), not the shared undated.
-      const personal = formatShowDumpFromKind("tasks", snap, {
+      // Personal section: sole personal undated → show inline; shared undated ignored.
+      const personalMapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "טל",
         section: "personal",
         dateFrom: "2026-10-17",
         dateTo: "2026-10-20",
-      })!;
+      });
+      const personal = personalMapped.text!;
       expect(personal).toContain("אישית בטווח");
-      expect(personal).toContain(
-        "(שים לב: משימה כללית אחת לא נכללה בטווח.)",
-      );
+      expect(personal).toContain("אישית בלי תאריך");
       expect(personal).not.toContain("משותפת בלי תאריך");
-      expect(personal).not.toContain("אישית בלי תאריך");
+      expect(personal).not.toContain("לא נכללה בטווח");
+      expect(personalMapped.offerUndatedTasksButton).toBeUndefined();
 
-      // itemIds scopes away the undated personal row → no disclosure.
-      const idsOnly = formatShowDumpFromKind("tasks", snap, {
+      // itemIds scopes away the undated personal row → no disclosure / no button.
+      const idsOnlyMapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "טל",
         dateFrom: "2026-10-17",
         dateTo: "2026-10-20",
         itemIds: new Set(["personal-dated"]),
-      })!;
-      expect(idsOnly).toContain("אישית בטווח");
-      expect(idsOnly).not.toContain("בלי תאריך");
+      });
+      expect(idsOnlyMapped.text).toContain("אישית בטווח");
+      expect(idsOnlyMapped.text).not.toContain("בלי תאריך");
+      expect(idsOnlyMapped.offerUndatedTasksButton).toBeUndefined();
     });
 
     it("no date bounds: undated tasks appear; no exclusion note", () => {
@@ -5667,18 +5764,17 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         filing: [],
         reminders: [],
       };
-      const dump = formatShowDumpFromKind("tasks", snap, {
+      const mapped = formatShowDumpWithLineMap("tasks", snap, {
         viewerName: "טל",
         dateFrom: "2024-02-28",
         dateTo: "2024-03-01",
-      })!;
-      expect(dump).toContain("פגישת 29 בפברואר 2024");
-      expect(dump).not.toContain("תאריך בלתי אפשרי");
-      expect(dump).not.toContain("בלי תאריך בכלל");
-      // Impossible YMD counts as undated for exclusion disclosure.
-      expect(dump).toContain(
-        "(שים לב: 2 משימות כלליות לא נכללו בטווח.)",
-      );
+      });
+      expect(mapped.text).toContain("פגישת 29 בפברואר 2024");
+      expect(mapped.text).not.toContain("תאריך בלתי אפשרי");
+      expect(mapped.text).not.toContain("בלי תאריך בכלל");
+      // Impossible YMD counts as undated → 2+ → button, not inline list.
+      expect(mapped.offerUndatedTasksButton).toBe(true);
+      expect(mapped.text).not.toContain("לא נכללו בטווח");
     });
 
     it("no date bounds: impossible YMD still appears (not filtered as out-of-range)", () => {

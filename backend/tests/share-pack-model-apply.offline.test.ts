@@ -97,15 +97,16 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
         metadata: {
           lists: [
             {
-              action: "update",
-              list_type: "shopping",
-              list_name: "",
-              items: [
-                {
-                  item_id: itemIdByLabel(input.snapshot, "חלב", "shopping"),
-                },
-              ],
-              targets: ["טל", "עמית"],
+              action: "alter_list",
+              list_id: "eval-list-shopping-personal",
+              new_name: "",
+              add_columns: [],
+              remove_columns: [],
+              rename_columns: [],
+              add_participants: ["עמית"],
+              remove_participants: [],
+              items: [],
+              targets: [],
             },
           ],
         },
@@ -167,15 +168,16 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
           metadata: {
             lists: [
               {
-                action: "update",
-                list_type: "shopping",
-                list_name: "",
-                items: [
-                  {
-                    item_id: itemIdByLabel(input.snapshot, "חלב", "shopping"),
-                  },
-                ],
-                targets: ["טל", "עמית"],
+                action: "alter_list",
+                list_id: "eval-list-shopping-personal",
+                new_name: "",
+                add_columns: [],
+                remove_columns: [],
+                rename_columns: [],
+                add_participants: ["עמית"],
+                remove_participants: [],
+                items: [],
+                targets: [],
               },
             ],
           },
@@ -186,15 +188,15 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
         metadata: {
           lists: [
             {
-              action: "update",
-              list_type: "shopping",
-              list_name: "",
-              items: [
-                {
-                  item_id: itemIdByLabel(input.snapshot, "חלב", "shopping"),
-                  unshare_with: ["עמית"],
-                },
-              ],
+              action: "alter_list",
+              list_id: "eval-list-shopping-personal",
+              new_name: "",
+              add_columns: [],
+              remove_columns: [],
+              rename_columns: [],
+              add_participants: [],
+              remove_participants: ["עמית"],
+              items: [],
               targets: [],
             },
           ],

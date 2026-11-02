@@ -26,6 +26,7 @@ import { prisma } from "../database/prisma.js";
 import { recordAuditEvent } from "./audit.service.js";
 import {
   collectOverdueFromItems,
+  ymdFromTaskValue,
   type OverdueTaskRow,
 } from "./overdue-tasks.js";
 import {
@@ -1321,7 +1322,7 @@ export function formatEmployeeContext(
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update (incl. list_type filing) / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE WHEN CLEAR (rows): unique target + id → remove NOW with past-tense responses («מחקתי את «title»…»); FORBIDDEN inventing «האם מאשר?» / yes-no when the target is unique; FORBIDDEN empty responses on that remove; FORBIDDEN alter_list/delete_list for a single item. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל / whole-list vs item) → delete mutates empty; ONE responses entry — FORBIDDEN raise/«אגב»; after they pick, remove with ids from THIS turn. WHOLE-LIST: unique list_id → delete_list NOW; several matches → ASK. On לא / בטל while a DELETE CLARIFY is open → remove empty; short ack; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
     "BY LINE NUMBER: after a numbered dump, spoken indices («3» / «ל3» / «תמחק את 3») map to LAST_NUMBERED_DUMP for that n when present (copy id+kind) — else match dump line N's title stem (שם פריט / שם מטלה / item_name / reminder item; strip quantity, marks, urgency wrap) to an id in THIS JSON. FORBIDDEN treating N as JSON array index when that picks a different row than dump line N. Shopping/tasks JSON order is personal → co-share → assign per list only; dump numbering may span several shells. Numbering restarts per header / day / ממתינים; several 1. sequences → ASK which section if ambiguous. Unique → ACTION NOW; ≥2 same stem → ASK.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value), and optional item_description (מידע לחיפוש — find-helper context words). Find the right filing by item_name + item_info + item_description. Use them as background context in later turns. Do not ignore filing when advising.",
-    "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant.",
+    "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Clearing/emptying a shared list must NOT remove participants or unshare — empty shared shells stay shared until an explicit unshare.",
     "scope=shared_items: work the viewer ASSIGNED onto owner X (assigner view) for shopping/tasks/contacts/custom. Flat dumps show those rows under one list header with mark «(באחריות X · מאת <assigner>)». Filings use the same assigned_by field when the row lives on someone else's book. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
     "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list/filing owner. Dump shopping/tasks/contacts/custom/filings: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign within each list shell (dump line N is global — use LAST_NUMBERED_DUMP or title stem, not array index).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
@@ -2539,6 +2540,23 @@ export interface SharedItemEvent {
   addedById?: string | null;
 }
 
+/**
+ * Calendar day (YYYY-MM-DD) from saved item fields — for day-show safety-net.
+ * Add/update: date on the row after apply. Remove: date that was on the row
+ * before soft-delete (must be captured while data is still in memory).
+ */
+export function calendarYmdFromItemData(
+  data: Record<string, unknown>,
+): string | null {
+  for (const key of ["תאריך לביצוע", "תאריך", "date", "day"]) {
+    const ymd = ymdFromTaskValue(data[key]);
+    if (ymd) {
+      return ymd;
+    }
+  }
+  return null;
+}
+
 export interface ListItemMutation {
   action: "add" | "update" | "remove";
   itemId: string;
@@ -2548,6 +2566,11 @@ export interface ListItemMutation {
   /** Hebrew product label for the item (not schema jargon). */
   itemLabel: string;
   listName?: string;
+  /**
+   * YYYY-MM-DD from DB row data at apply time (post-save for add/update;
+   * pre-delete for remove). Absent when the row has no calendar date.
+   */
+  calendarYmd?: string;
   /** Named custom list opened/updated with no real rows (columns only). */
   listShell?: boolean;
   /** Set on a remove/update of a digital-worker task: everyone it involved before the change. */
@@ -3477,6 +3500,8 @@ async function applyListAction(
         existing.list?.name || list.name || listName;
       const removedKey = existing.itemKey;
       const removedTitleField = existing.list?.titleField ?? "";
+      const removedData = asRecord(existing.data);
+      const removedCalendarYmd = calendarYmdFromItemData(removedData);
       const linked = await cancelReminderLinkedToWorkerItem(existing.id);
       if (linked) {
         cancelledReminders.push(linked.label);
@@ -3491,11 +3516,12 @@ async function applyListAction(
         itemLabel:
           ownedItemTitle(
             resolvedAction.listType,
-            asRecord(existing.data),
+            removedData,
             removedKey,
             removedTitleField,
           ) || removedKey,
         listName: targetListName || resolvedAction.listName || undefined,
+        ...(removedCalendarYmd ? { calendarYmd: removedCalendarYmd } : {}),
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
@@ -3739,6 +3765,7 @@ async function applyListAction(
         existing.list?.name || list.name || resolvedAction.listName || undefined;
 
       if (shareNoop) {
+        const shareNoopYmd = calendarYmdFromItemData(nextDataRecord);
         mutations.push({
           action: "update",
           itemId: existing.id,
@@ -3755,6 +3782,7 @@ async function applyListAction(
             nextItemKey ||
             existing.itemKey,
           listName: rowListName,
+          ...(shareNoopYmd ? { calendarYmd: shareNoopYmd } : {}),
           ...(access && existing.reminderId
             ? { workerTaskInvolvedIds: access.involvedIds }
             : {}),
@@ -3844,6 +3872,7 @@ async function applyListAction(
               : `update ${resolvedAction.listType}: ${existing.itemKey}`,
         });
       }
+      const updateYmd = calendarYmdFromItemData(nextDataRecord);
       mutations.push({
         action: "update",
         itemId: existing.id,
@@ -3860,6 +3889,7 @@ async function applyListAction(
           nextItemKey ||
           existing.itemKey,
         listName: rowListName,
+        ...(updateYmd ? { calendarYmd: updateYmd } : {}),
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
@@ -3902,6 +3932,7 @@ async function applyListAction(
         addedById: resolvedVisibility.addedById,
         shareIntent,
       });
+      const addYmd = calendarYmdFromItemData(nextDataRecord);
       mutations.push({
         action: "add",
         itemId: created.id,
@@ -3916,6 +3947,7 @@ async function applyListAction(
             effectiveTitleField,
           ) || nextItemKey,
         listName: list.name || resolvedAction.listName || undefined,
+        ...(addYmd ? { calendarYmd: addYmd } : {}),
         ...(collabApply ? { collabApply } : {}),
       });
       attachmentOutcome = mergeAttachmentOutcomes(
@@ -4428,13 +4460,15 @@ export async function removeVisibleCustomItems(input: {
           where: { id: existing.id },
           data: { deletedAt: new Date(), reminderId: null },
         });
+        const removedData = asRecord(existing.data);
         const label =
           ownedItemTitle(
             "custom",
-            asRecord(existing.data),
+            removedData,
             existing.itemKey,
             list.titleField,
           ) || existing.itemKey;
+        const removedCalendarYmd = calendarYmdFromItemData(removedData);
         mutations.push({
           action: "remove",
           itemId: existing.id,
@@ -4443,6 +4477,7 @@ export async function removeVisibleCustomItems(input: {
           itemKey: existing.itemKey,
           itemLabel: label,
           listName: list.name || action.listName || undefined,
+          ...(removedCalendarYmd ? { calendarYmd: removedCalendarYmd } : {}),
         });
         // FK cascade only (cancelReminderLinkedToWorkerItem). No label/key match.
         const watchers = uniqueIds([

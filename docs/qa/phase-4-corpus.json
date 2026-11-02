@@ -1808,7 +1808,7 @@
         "single-turn",
         "core-pack"
       ],
-      "description": "Item-level share (built-in shopping has no whole-list participants)",
+      "description": "Item-level co-share of milk via lists.update targets (whole-list shell share is separate alter_list)",
       "utterance": "תשתפי את החלב עם עמית",
       "setup": {
         "lists": [

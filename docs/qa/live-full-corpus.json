@@ -827,7 +827,7 @@
         "single-turn",
         "core-pack"
       ],
-      "description": "Whole shopping list share (item co-share fan-out) applies; milk still present",
+      "description": "Whole shopping list share via alter_list add_participants; milk still present",
       "setup": {
         "lists": [
           {
@@ -861,9 +861,13 @@
           "utterance": "תשתפי את הקניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ],
           "stateAfter": {
@@ -885,7 +889,7 @@
         "multi-turn",
         "core-pack"
       ],
-      "description": "Ask partner then whole shopping share (fan-out); milk kept",
+      "description": "Ask partner then whole shopping share via alter_list add_participants; milk kept",
       "setup": {
         "lists": [
           {
@@ -935,9 +939,13 @@
           "utterance": "עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ],
           "stateAfter": {

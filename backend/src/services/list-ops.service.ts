@@ -289,11 +289,11 @@ async function alterList(
   const builtin = list.listType !== "custom";
   const participantsOnly =
     op.addParticipants.length > 0 || op.removeParticipants.length > 0;
-  // Shopping/tasks builtins: never whole-list share (item-level only).
-  // Contacts shells are refused earlier in applyListOp (directory-only).
+  // Shopping/tasks: shell share via participants is allowed (same as custom).
+  // Rename/columns still refused. Contacts shells refused earlier (directory-only).
   // Emoji override is allowed on every list type (including builtins).
   if (list.listType === "shopping" || list.listType === "tasks") {
-    if (structural || participantsOnly) {
+    if (structural) {
       throw new ListOpRefused("builtin");
     }
   } else if (builtin && (structural || participantsOnly)) {
@@ -391,23 +391,22 @@ async function alterList(
         ...(emojiTouched ? { emoji: nextEmoji } : {}),
       },
     });
+    // Shell unshare updates list.visibleTo only. Do not strip partners from
+    // item.visibleTo — that would erase explicit/historical item-level co-share.
+    // Shell-derived access is via list.scope=shared; inherit-on-add keeps new
+    // rows owner-only at the item so remove_participants revokes shell access.
     for (const item of list.items) {
+      if (op.renameColumns.length === 0) {
+        continue;
+      }
       const data = asRecord(item.data);
-      const renamedData =
-        op.renameColumns.length > 0 ? renameDataKeys(data, op.renameColumns) : data;
-      const itemVisibleTo = idList(item.visibleTo);
-      const trimmedVisibleTo = itemVisibleTo.filter((id) => !removedIds.has(id));
-      const dataChanged = renamedData !== data;
-      const visibilityChanged = trimmedVisibleTo.length !== itemVisibleTo.length;
-      if (!dataChanged && !visibilityChanged) {
+      const renamedData = renameDataKeys(data, op.renameColumns);
+      if (renamedData === data) {
         continue;
       }
       await tx.employeeListItem.update({
         where: { id: item.id },
-        data: {
-          ...(dataChanged ? { data: toJsonValue(renamedData) } : {}),
-          ...(visibilityChanged ? { visibleTo: trimmedVisibleTo } : {}),
-        },
+        data: { data: toJsonValue(renamedData) },
       });
     }
   });
@@ -534,7 +533,7 @@ const REFUSAL_TEXT: Record<ListOpRefusalReason, (detail: string, label: string) 
   not_owner: (_detail, label) =>
     `רק הבעלים של הרשימה${label ? ` «${label}»` : ""} יכול לשנות או למחוק אותה.`,
   builtin: (_detail, label) =>
-    `ברשימת «${label}» אי אפשר לשנות שם, עמודות או שיתוף רשימה שלם — שתפי פריט בודד דרך המטלות/קניות.`,
+    `ברשימת «${label}» אי אפשר לשנות שם או עמודות.`,
   empty: (detail) =>
     detail === "attach_failed"
       ? "לא הצלחתי לצרף את הקובץ לרשימה."

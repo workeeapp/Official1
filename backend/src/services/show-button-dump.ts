@@ -23,17 +23,25 @@ import {
   isBuiltinListType,
   SHOW_FILINGS_COMMAND,
   SHOW_REMINDERS_COMMAND,
+  SHOW_UNDATED_TASKS_COMMAND,
+  SHOW_UNDATED_TASKS_COMMAND_LEGACY,
   showListButtonCommand,
   staticShowButtonDumpMap,
 } from "./builtin-lists.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
-import { effectiveListEmoji, FILINGS_LIST_EMOJI } from "./list-emoji.js";
+import {
+  effectiveListEmoji,
+  FILINGS_LIST_EMOJI,
+  REMINDERS_LIST_EMOJI,
+} from "./list-emoji.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
 
 export {
   SHOW_REMINDERS_COMMAND,
   SHOW_FILINGS_COMMAND,
   SHOW_LIST_PREFIX,
+  SHOW_UNDATED_TASKS_COMMAND,
+  SHOW_UNDATED_TASKS_COMMAND_LEGACY,
   showAllListButtonCommand,
   showSharedWithButtonCommand,
   showAssigneeButtonCommand,
@@ -58,6 +66,8 @@ export type ShowButtonDumpTarget = {
   about?: string | null;
   /** Pure co-share vs assign — never conflate the two. */
   collaboration?: "co_share" | "assign" | null;
+  /** Tasks: undated = משימות כלליות (clears from/to on the engine). */
+  dateScope?: "undated" | null;
 };
 
 const TITLE_KEYS: Record<string, string[]> = {
@@ -223,6 +233,12 @@ export function mapShowButtonCommandToDumpTarget(
   const trimmed = text.trim();
   if (!trimmed) {
     return null;
+  }
+  if (
+    trimmed === SHOW_UNDATED_TASKS_COMMAND ||
+    trimmed === SHOW_UNDATED_TASKS_COMMAND_LEGACY
+  ) {
+    return { kind: "tasks", dateScope: "undated" };
   }
   const staticKind = STATIC_SHOW_BUTTON_DUMP[trimmed];
   if (staticKind) {
@@ -700,10 +716,25 @@ export type LastNumberedDumpLine = {
   list_name?: string;
 };
 
-type DumpTextResult = { text: string; lines: LastNumberedDumpLine[] };
+type DumpTextResult = {
+  text: string;
+  lines: LastNumberedDumpLine[];
+  /**
+   * Dated tasks dump excluded 2+ משימות כלליות — engine offers the undated button
+   * (do not list them inline).
+   */
+  offerUndatedTasksButton?: boolean;
+};
 
 function emptyDumpResult(text = ""): DumpTextResult {
   return { text, lines: [] };
+}
+
+export function undatedTasksOfferButton(): { label: string; command: string } {
+  return {
+    label: "משימות כלליות",
+    command: SHOW_UNDATED_TASKS_COMMAND,
+  };
 }
 
 /**
@@ -762,7 +793,11 @@ export function formatShowDumpWithLineMap(
   kind: string,
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): { text: string | null; lines: LastNumberedDumpLine[] } {
+): {
+  text: string | null;
+  lines: LastNumberedDumpLine[];
+  offerUndatedTasksButton?: boolean;
+} {
   const resolved = resolveShowDumpKind(kind);
   if (!resolved) {
     return { text: null, lines: [] };
@@ -779,15 +814,28 @@ function formatResolvedShowDump(
     | { kind: "list"; name: string },
   snapshot: EmployeeRecordSnapshot,
   opts?: ShowDumpOptions,
-): { text: string | null; lines: LastNumberedDumpLine[] } {
+): {
+  text: string | null;
+  lines: LastNumberedDumpLine[];
+  offerUndatedTasksButton?: boolean;
+} {
   if (parsed.kind === "full") {
     const full = formatFullDump(snapshot, opts);
-    return { text: full.text || null, lines: full.lines };
+    return {
+      text: full.text || null,
+      lines: full.lines,
+      ...(full.offerUndatedTasksButton
+        ? { offerUndatedTasksButton: true }
+        : {}),
+    };
   }
   if (parsed.kind === "reminders") {
     const body = formatRemindersDump(snapshot.reminders ?? [], opts);
     if (body.text) {
-      return body;
+      return {
+        text: `${remindersActiveDumpHeader()}\n${body.text}`,
+        lines: body.lines,
+      };
     }
     return {
       text: opts?.omitEmptySentence ? "" : "אין לך תזכורות פעילות כרגע.",
@@ -947,6 +995,7 @@ export function formatFullDump(
   // One counter for the whole stitched dump — never reset between blocks.
   const numbering = ensureDumpNumbering(opts);
   const sharedOpts: ShowDumpOptions = { ...opts, numbering };
+  let offerUndatedTasksButton = false;
 
   const pushBlock = (block: DumpTextResult | string, section?: string) => {
     if (typeof block === "string") {
@@ -955,6 +1004,9 @@ export function formatFullDump(
         sections.push(trimmed);
       }
       return;
+    }
+    if (block.offerUndatedTasksButton) {
+      offerUndatedTasksButton = true;
     }
     const trimmed = block.text.trim();
     if (trimmed) {
@@ -1027,7 +1079,7 @@ export function formatFullDump(
   });
   const remBody = formatRemindersDump(reminderRows, sharedOpts, "reminders");
   if (remBody.text) {
-    sections.push(`תזכורות פעילות:\n${remBody.text}`);
+    sections.push(`${remindersActiveDumpHeader()}\n${remBody.text}`);
     lines.push(...remBody.lines);
   }
 
@@ -1060,7 +1112,11 @@ export function formatFullDump(
   if (!itemDump) {
     sections.push("לפירוט רשימה: הצג רשימת …");
   }
-  return { text: sections.join("\n\n"), lines };
+  return {
+    text: sections.join("\n\n"),
+    lines,
+    ...(offerUndatedTasksButton ? { offerUndatedTasksButton: true } : {}),
+  };
 }
 
 /**
@@ -2025,6 +2081,11 @@ export function formatFilingsDump(
   );
 }
 
+/** Full / standalone reminders section header (emoji + name). */
+function remindersActiveDumpHeader(): string {
+  return `${withListEmoji(REMINDERS_LIST_EMOJI, "תזכורות פעילות")}:`;
+}
+
 function formatRemindersDump(
   rows: ReminderSnapshotRow[],
   opts?: ShowDumpOptions,
@@ -2270,6 +2331,11 @@ export function formatTasksDayAgendaDump(
   opts?: ShowDumpOptions,
   /** reminder_ids already folded into a task line — never list again. */
   linkedReminderIds: Set<string> = new Set(),
+  /**
+   * List name + emoji (e.g. «✅ משימות») above day headers — required for every
+   * date / semantic cut so the dump still names its source list.
+   */
+  listHeader?: string,
 ): DumpTextResult {
   const from = opts?.dateFrom?.trim().slice(0, 10) || null;
   const to = opts?.dateTo?.trim().slice(0, 10) || null;
@@ -2322,7 +2388,8 @@ export function formatTasksDayAgendaDump(
     slots.push(...expandReminderAgendaSlots(rem, from, to, now));
   }
 
-  if (slots.length === 0) {
+  const undatedRows = rows.filter((row) => isUndatedGeneralTask(row.item));
+  if (slots.length === 0 && undatedRows.length === 0) {
     return emptyDumpResult();
   }
 
@@ -2353,7 +2420,11 @@ export function formatTasksDayAgendaDump(
   const mapLines: LastNumberedDumpLine[] = [];
   const numbering = ensureDumpNumbering(opts);
   const dayKeys = [...byDay.keys()].sort();
-  if (from && to && from !== to) {
+  const headerLine = formatDumpListHeaderLine(listHeader);
+  if (headerLine) {
+    textLines.push(headerLine);
+  }
+  if (from && to && from !== to && dayKeys.length > 0) {
     textLines.push(formatAgendaWindowHeader(from, to));
     textLines.push("");
   }
@@ -2375,7 +2446,40 @@ export function formatTasksDayAgendaDump(
     }
     textLines.push("");
   }
+  if (undatedRows.length > 0) {
+    textLines.push("משימות כלליות:");
+    for (const row of undatedRows) {
+      const n = takeDumpLineNumber(numbering);
+      const id = String(row.item.item_id ?? "").trim();
+      const stem = row.title.trim() || "משימה";
+      textLines.push(
+        formatNumberedItem(n, row.title, row.item, "tasks", {
+          responsibilityMark: row.responsibilityMark,
+          now,
+          itemIds: opts?.itemIds,
+        }),
+      );
+      if (id) {
+        mapLines.push({
+          n,
+          id,
+          kind: "tasks",
+          title_stem: stem,
+          section: "undated",
+        });
+      }
+    }
+  }
   return { text: textLines.join("\n").trim(), lines: mapLines };
+}
+
+/** Ensure dump list headers end with «:» (emoji + name already applied). */
+function formatDumpListHeaderLine(listHeader?: string): string {
+  const trimmed = listHeader?.trim() ?? "";
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.endsWith(":") ? trimmed : `${trimmed}:`;
 }
 
 function expandTaskAgendaSlots(
@@ -3306,16 +3410,15 @@ function dumpRowPassesNonDateFilters(
 }
 
 /**
- * Count tasks in scope (after section/partner/assignee/urgency/ids) that are
- * excluded solely because they have no usable calendar date under a range.
- * Does not invent counts when no date range is set.
+ * Undated general tasks in scope (after section/partner/assignee/urgency/ids)
+ * that a date-range dump would otherwise drop. Empty when no date range.
  */
-export function countUndatedTasksExcludedByDateRange(
+export function listUndatedTasksExcludedByDateRange(
   rows: DumpItem[],
   opts?: ShowDumpOptions,
-): number {
+): DumpItem[] {
   if (!hasDumpDateRange(opts)) {
-    return 0;
+    return [];
   }
   const section = opts?.section ?? null;
   const partnerFilters = dumpFilterNames(opts?.partner);
@@ -3328,7 +3431,7 @@ export function countUndatedTasksExcludedByDateRange(
       collaboration !== "assign" &&
       assigneeFilters.length === 0);
   const pureAssign = collaboration === "assign";
-  let count = 0;
+  const out: DumpItem[] = [];
   for (const row of rows) {
     if (
       !dumpRowPassesNonDateFilters(
@@ -3348,10 +3451,21 @@ export function countUndatedTasksExcludedByDateRange(
     // Undated = no concrete calendar day AND no standing rule. A recurring
     // task with next_occurrences: [] (no hit in this dump window) is not undated.
     if (isUndatedGeneralTask(row.item)) {
-      count += 1;
+      out.push(row);
     }
   }
-  return count;
+  return out;
+}
+
+/**
+ * Count tasks in scope that are excluded solely because they have no usable
+ * calendar date under a range. Does not invent counts when no date range is set.
+ */
+export function countUndatedTasksExcludedByDateRange(
+  rows: DumpItem[],
+  opts?: ShowDumpOptions,
+): number {
+  return listUndatedTasksExcludedByDateRange(rows, opts).length;
 }
 
 function filterDumpRows(
@@ -3625,7 +3739,13 @@ function formatSingleHeaderDump(
     );
   }
   if (listType === "tasks" && hasDumpDateRange(opts)) {
-    return formatTasksDayAgendaDump(rows, reminders, opts, linkedReminderIds);
+    return formatTasksDayAgendaDump(
+      rows,
+      reminders,
+      opts,
+      linkedReminderIds,
+      `${label}${paperclipSuffix(headerFiles)}`,
+    );
   }
   if (rows.length === 0) {
     return emptyDumpResult();
@@ -3661,21 +3781,6 @@ function formatSingleHeaderDump(
   return { text, lines };
 }
 
-function appendUndatedTasksExcludedNote(
-  body: DumpTextResult,
-  undatedExcluded: number,
-): DumpTextResult {
-  const note = formatUndatedTasksExcludedNote(undatedExcluded);
-  if (!note) {
-    return body;
-  }
-  const trimmed = body.text.trim();
-  if (!trimmed) {
-    return { text: note, lines: body.lines };
-  }
-  return { text: `${trimmed}\n${note}`, lines: body.lines };
-}
-
 function formatThreeWayDump(
   listType: "shopping" | "tasks",
   /** Product Hebrew label without emoji (🛒/✅ applied from source list). */
@@ -3686,11 +3791,27 @@ function formatThreeWayDump(
   const effective = withEffectiveDumpDateOpts(opts);
   const lists = snapshot.lists.filter((list) => list.list_type === listType);
   const collected = collectListDumpRows(listType, lists, effective);
-  const undatedExcluded =
+  const undatedExcludedRows =
     listType === "tasks" && !hasUndatedDateScope(effective)
-      ? countUndatedTasksExcludedByDateRange(collected, effective)
-      : 0;
-  const kept = filterDumpRows(collected, listType, effective);
+      ? listUndatedTasksExcludedByDateRange(collected, effective)
+      : [];
+  const undatedExcluded = undatedExcludedRows.length;
+  // Dated dump: exactly one משימה כללית → show it inline; 2+ → button (no list).
+  let kept = filterDumpRows(collected, listType, effective);
+  let offerUndatedTasksButton = false;
+  if (listType === "tasks" && hasDumpDateRange(effective)) {
+    if (undatedExcluded === 1) {
+      const sole = undatedExcludedRows[0]!;
+      const soleId = String(sole.item.item_id ?? "").trim();
+      if (
+        !kept.some((row) => String(row.item.item_id ?? "").trim() === soleId)
+      ) {
+        kept = [...kept, sole];
+      }
+    } else if (undatedExcluded > 1) {
+      offerUndatedTasksButton = true;
+    }
+  }
   const label = withListEmoji(dumpHeaderEmoji(kept, listType, lists), bareLabel);
   const body = formatSingleHeaderDump(
     label,
@@ -3702,17 +3823,20 @@ function formatThreeWayDump(
   );
   if (
     !body.text.trim() &&
-    undatedExcluded > 0 &&
+    offerUndatedTasksButton &&
     listType === "tasks" &&
     hasDumpDateRange(effective)
   ) {
-    // Empty dated agenda + known undated exclusions — keep the empty sentence.
     return {
-      text: `אין משימות בטווח התאריכים.\n${formatUndatedTasksExcludedNote(undatedExcluded)}`,
+      text: `${formatDumpListHeaderLine(label)}\nאין משימות בטווח התאריכים.`,
       lines: [],
+      offerUndatedTasksButton: true,
     };
   }
-  return appendUndatedTasksExcludedNote(body, undatedExcluded);
+  return {
+    ...body,
+    ...(offerUndatedTasksButton ? { offerUndatedTasksButton: true } : {}),
+  };
 }
 
 /** Co-share mark: partners then viewer — e.g. «מיכל, טל». */

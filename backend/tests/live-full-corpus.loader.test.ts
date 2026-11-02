@@ -72,7 +72,7 @@ describe("live-full corpus loader", () => {
     }
   });
 
-  it("share shopping FULL cases still require lists.update/shopping (policy: whole list allowed)", () => {
+  it("share shopping FULL cases require alter_list shell share (not item fan-out)", () => {
     const corpus = loadLiveFullCorpus(defaultLiveFullCorpusPath());
     for (const id of [
       "full-share-shop-with-amit",
@@ -84,24 +84,31 @@ describe("live-full corpus loader", () => {
         id === "full-mt-share-ask-then-partner"
           ? row!.turns[1]!
           : row!.turns[0]!;
-      const update = turn.constraints.find(
+      const types = collectConstraintTypes(turn.constraints);
+      expect(types, id).toContain("list_ops_has_action");
+      expect(types, id).toContain("lists_empty");
+      const alter = turn.constraints.find(
+        (c) =>
+          c.type === "list_ops_has_action" && c.action === "alter_list",
+      );
+      expect(alter, id).toBeTruthy();
+      const fanOutUpdate = turn.constraints.find(
         (c) =>
           c.type === "lists_has_action" &&
           c.action === "update" &&
           c.listType === "shopping",
       );
-      expect(update, id).toBeTruthy();
+      expect(fanOutUpdate, id).toBeUndefined();
     }
   });
 
-  it("LLM.config teaches whole shopping-list share via item co-share fan-out", () => {
+  it("LLM.config teaches whole-list share via uniform shell alter_list", () => {
     const configPath = resolve(process.cwd(), "..", "LLM.config.json");
     const raw = readFileSync(configPath, "utf8");
-    expect(raw).toMatch(/sharing the entire list IS allowed/i);
-    expect(raw).toMatch(/item co-share fan-out/i);
-    expect(raw).not.toMatch(
-      /Built-in קניות\/מטלות: no whole-list participants/,
-    );
+    expect(raw).toMatch(/uniform shell model/i);
+    expect(raw).toMatch(/alter_list add_participants/i);
+    expect(raw).toMatch(/FORBIDDEN item fan-out/i);
+    expect(raw).not.toMatch(/item co-share fan-out/i);
   });
 
   it("full-mt-event-clarify-then-link turn1 uses structural create-and-link", () => {

@@ -955,7 +955,7 @@ export async function fetchPlacesFacts(input: {
       ? place || "האזור שלך"
       : areaRestrict
         ? input.areaViewport!.label || place
-        : place,
+        : place || "ישראל",
     nearSpeaker,
     aspects,
     intent,
@@ -968,12 +968,9 @@ export async function fetchPlacesFacts(input: {
     results: [],
     requestedMax,
   };
-  if (
-    !query ||
-    (areaRestrict
-      ? !place
-      : !place && (lat == null || lng == null))
-  ) {
+  // Soft named-venue: query alone → Israel-wide Text (regionCode IL).
+  // Hard area still needs place; pin/nearSpeaker needs coords upstream.
+  if (!query || (areaRestrict && !place)) {
     return facts;
   }
 
@@ -1393,8 +1390,10 @@ function hasRequestSideFiltersOnFacts(facts: PlacesFacts): boolean {
 
 /** Deterministic Hebrew reply from Places facts (engine replaces model response). */
 export function formatPlacesHebrew(facts: PlacesFacts): string {
-  const where = facts.place.trim() || (facts.nearSpeaker ? "האזור שלך" : "");
-  if (!facts.query.trim() || !where) {
+  const where =
+    facts.place.trim() ||
+    (facts.nearSpeaker ? "האזור שלך" : "ישראל");
+  if (!facts.query.trim()) {
     return "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)";
   }
   const filterSummary = formatPlacesFilterSummary(facts);
@@ -1531,7 +1530,7 @@ export async function resolvePlacesReplyDetailed(input: {
       : null;
   let hasPin = lat != null && lng != null;
   let nearSpeaker = areaRestrict ? false : Boolean(input.nearSpeaker);
-  if (!query || (!place && !hasPin && !nearSpeaker)) {
+  if (!query) {
     return {
       text: "מה לחפש ואיפה? (למשל חשמלאי בפתח תקווה — או שלח מיקום לוואטסאפ ל«באזור שלי»)",
       usedPendingPin: false,
@@ -1545,7 +1544,9 @@ export async function resolvePlacesReplyDetailed(input: {
       needsLocation: true,
     };
   }
-  if ((nearSpeaker || !place) && !hasPin) {
+  // near=speaker always needs a pin. Bare query (named venue / address ask)
+  // proceeds Israel-wide without a city.
+  if (nearSpeaker && !hasPin) {
     return {
       text: "שלח מיקום בוואטסאפ (סיכת מיקום) ואחפש באזור שלך.",
       usedPendingPin: false,

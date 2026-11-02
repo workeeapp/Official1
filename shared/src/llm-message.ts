@@ -3933,8 +3933,9 @@ export function parsePlacesAction(
     lat = null;
     lng = null;
   }
-  const hasPin = lat != null && lng != null;
-  if (!query || (!place && near !== "speaker" && !hasPin)) {
+  // Soft / named-venue: query alone is enough (Israel-wide Text).
+  // area_restrict already gated above; near=speaker still needs a pin at resolve.
+  if (!query) {
     return null;
   }
   const aspectsRaw = row.aspects ?? row.aspect ?? row.fields;

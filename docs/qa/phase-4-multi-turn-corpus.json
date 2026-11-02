@@ -657,7 +657,7 @@
         "mt-multi-act",
         "multi-turn"
       ],
-      "description": "Share shopping then add bread in same thread",
+      "description": "Shell-share shopping via alter_list then add bread in same thread",
       "setup": {
         "lists": [
           {
@@ -691,9 +691,13 @@
           "utterance": "תשתפי את הקניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ]
         },
@@ -720,7 +724,7 @@
         "multi-turn",
         "core-pack"
       ],
-      "description": "Item share without who → ask → Amit (built-in shopping is item-level only)",
+      "description": "Item co-share without who → ask → Amit (lists.update targets; not whole-list shell)",
       "setup": {
         "lists": [
           {
@@ -1466,9 +1470,13 @@
           "utterance": "תשתפי את הקניות עם עמית",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "update",
-              "listType": "shopping"
+              "type": "list_ops_has_action",
+              "action": "alter_list",
+              "minCount": 1,
+              "maxCount": 1
+            },
+            {
+              "type": "lists_empty"
             }
           ]
         }

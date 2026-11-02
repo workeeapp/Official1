@@ -38,6 +38,10 @@ export const SHOW_LIST_PREFIX = "הצג רשימת ";
 export const SHOW_FILINGS_ALL_COMMAND = "כל התיוקים";
 /** Full overview («הצג רשימות» / SHOW MY LISTS) — list-shell post-mutate nav. */
 export const SHOW_LISTS_COMMAND = "הצג רשימות";
+/** Dated agenda offer → undated general tasks dump (show_dump_date_scope=undated). */
+export const SHOW_UNDATED_TASKS_COMMAND = "הצג משימות כלליות";
+/** Legacy typed alias for {@link SHOW_UNDATED_TASKS_COMMAND}. */
+export const SHOW_UNDATED_TASKS_COMMAND_LEGACY = "הצג מטלות כלליות";
 
 export function isBuiltinListType(value: string): value is BuiltinListType {
   return (BUILTIN_LIST_TYPES as readonly string[]).includes(value);

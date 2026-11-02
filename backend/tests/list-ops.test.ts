@@ -227,21 +227,40 @@ describe("list ops", () => {
     expect(listUpdate).not.toHaveBeenCalled();
   });
 
-  it("refuses rename and participant changes on shopping/tasks builtins", async () => {
+  it("refuses rename on shopping/tasks but allows shell participants", async () => {
     listFindFirst.mockResolvedValue(
-      bugsList({ listType: "shopping", name: "", titleField: "", columns: [] }),
+      bugsList({
+        listType: "shopping",
+        name: "",
+        titleField: "",
+        columns: [],
+        scope: "personal",
+        visibleTo: [],
+        items: [],
+      }),
     );
 
     const [renamed] = await run([op({ newName: "סופר" })]);
     expect(renamed.refusal?.reason).toBe("builtin");
 
+    listFindFirst.mockResolvedValueOnce(
+      bugsList({
+        listType: "shopping",
+        name: "",
+        titleField: "",
+        columns: [],
+        scope: "personal",
+        visibleTo: [],
+        items: [],
+      }),
+    );
     const [shared] = await run([op({ addParticipants: ["טל"] })]);
-    expect(shared.refusal?.reason).toBe("builtin");
-    expect(shared.applied).toBe(false);
-    expect(listUpdate).not.toHaveBeenCalled();
-
-    const [removed] = await run([op({ removeParticipants: ["טל"] })]);
-    expect(removed.refusal?.reason).toBe("builtin");
+    expect(shared.refusal).toBeUndefined();
+    expect(shared.applied).toBe(true);
+    expect(listUpdate).toHaveBeenCalledWith({
+      where: { id: listId },
+      data: { scope: "shared", visibleTo: [amitId, talId] },
+    });
   });
 
   it("refuses all list ops on contacts builtin (directory-only)", async () => {
@@ -265,7 +284,7 @@ describe("list ops", () => {
     expect(listUpdate).not.toHaveBeenCalled();
   });
 
-  it("removes a participant from the list and from its rows", async () => {
+  it("removes a participant from the shell without stripping item-level visibleTo", async () => {
     listFindFirst.mockResolvedValueOnce(bugsList());
 
     const [result] = await run([op({ removeParticipants: ["טל"] })]);
@@ -274,11 +293,37 @@ describe("list ops", () => {
       where: { id: listId },
       data: { scope: "personal", visibleTo: [] },
     });
-    expect(itemUpdate).toHaveBeenCalledWith({
-      where: { id: "bug-1" },
-      data: { visibleTo: [amitId] },
-    });
+    // Explicit/historical item co-share must survive shell unshare.
+    expect(itemUpdate).not.toHaveBeenCalled();
     expect(result.notices.map((row) => row.employeeId)).toEqual([talId]);
+  });
+
+  it("shopping shell unshare leaves explicit item co-share visibleTo intact", async () => {
+    listFindFirst.mockResolvedValueOnce(
+      bugsList({
+        listType: "shopping",
+        name: "",
+        titleField: "",
+        columns: [],
+        scope: "shared",
+        visibleTo: [amitId, talId],
+        items: [
+          {
+            id: "milk-1",
+            data: { "שם פריט": "חלב" },
+            visibleTo: [amitId, talId],
+          },
+        ],
+      }),
+    );
+
+    const [result] = await run([op({ removeParticipants: ["טל"] })]);
+    expect(result.applied).toBe(true);
+    expect(listUpdate).toHaveBeenCalledWith({
+      where: { id: listId },
+      data: { scope: "personal", visibleTo: [] },
+    });
+    expect(itemUpdate).not.toHaveBeenCalled();
   });
 
   it("adds a partner to a shared list and tells every other partner who joined", async () => {
