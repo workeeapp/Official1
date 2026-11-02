@@ -4984,11 +4984,12 @@ function normalizeSpokenBubble(entry: unknown): LlmSpokenBubble | null {
       navigate_address?: unknown;
       whatsapp_compose_url?: unknown;
     };
-    const text =
-      typeof record.text === "string" ? record.text.trim() : "";
-    if (!text) {
+    // Object bubbles may be empty (engine attachment-only bubble). Plain
+    // strings still require non-empty text above.
+    if (typeof record.text !== "string") {
       return null;
     }
+    const text = record.text.trim();
     const bubble: LlmSpokenBubble = { text };
     if ("buttons" in record) {
       const buttons = parseBubbleButtons(record.buttons);
@@ -5068,7 +5069,7 @@ export function joinSpokenResponses(responses: string[]): string {
   return responses.join("\n\n");
 }
 
-/** Serialize bubbles for JSON replies (objects when any entry has chrome). */
+/** Serialize bubbles for JSON replies (objects when any entry has chrome or empty text). */
 export function serializeSpokenBubbles(
   bubbles: LlmSpokenBubble[],
 ): Array<string | Record<string, unknown>> {
@@ -5078,7 +5079,9 @@ export function serializeSpokenBubbles(
       Boolean(bubble.navigateAddress) ||
       Boolean(bubble.whatsappComposeUrl),
   );
-  if (!anyChrome) {
+  // Empty-text bubbles must stay objects — a bare "" string is dropped on parse.
+  const anyEmpty = bubbles.some((bubble) => !bubble.text.trim());
+  if (!anyChrome && !anyEmpty) {
     return bubbles.map((bubble) => bubble.text);
   }
   return bubbles.map((bubble) => {

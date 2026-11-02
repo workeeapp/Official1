@@ -95,6 +95,15 @@ function usageCards(usage: TeamUsageSummary): UsageCard[] {
       monthsTestId: "dashboard-usage-live-select-months",
     },
     {
+      key: "images",
+      label: "Images",
+      totalUsd: usage.purposes.imageUsd,
+      months: nonZeroMonths(usage.months, (row) => row.purposes.imageUsd),
+      testId: "dashboard-usage-images",
+      monthsTestId: "dashboard-usage-images-months",
+      title: "Images API (purpose=image)",
+    },
+    {
       key: "guests",
       label: "Guests",
       totalUsd: usage.guestsUsd,

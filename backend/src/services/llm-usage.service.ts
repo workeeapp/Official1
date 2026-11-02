@@ -156,6 +156,8 @@ const EMPTY_PURPOSES = (): TeamUsagePurposeBreakdown => ({
   weatherTipUsd: 0,
   reminderComposeUsd: 0,
   liveSelectUsd: 0,
+  deleteCelebrationUsd: 0,
+  imageUsd: 0,
 });
 
 function addPurposeCost(
@@ -175,6 +177,12 @@ function addPurposeCost(
       break;
     case "live_select":
       purposes.liveSelectUsd += cost;
+      break;
+    case "delete_celebration":
+      purposes.deleteCelebrationUsd += cost;
+      break;
+    case "image":
+      purposes.imageUsd += cost;
       break;
     case "chat":
     default:
@@ -284,7 +292,9 @@ export async function getTeamUsageSummary(
         row.purposes.catalogTipUsd !== 0 ||
         row.purposes.weatherTipUsd !== 0 ||
         row.purposes.reminderComposeUsd !== 0 ||
-        row.purposes.liveSelectUsd !== 0,
+        row.purposes.liveSelectUsd !== 0 ||
+        row.purposes.deleteCelebrationUsd !== 0 ||
+        row.purposes.imageUsd !== 0,
     )
     .sort((a, b) => b.month.localeCompare(a.month));
   return { totalUsd, ...totals(perEmployee), guestsUsd, purposes, months };
@@ -296,7 +306,9 @@ export type LlmUsagePurpose =
   | "catalog_tip"
   | "weather_tip"
   | "reminder_compose"
-  | "live_select";
+  | "live_select"
+  | "delete_celebration"
+  | "image";
 
 /** Billing context for ephemeral compose LLM calls (not the main chat turn). */
 export type ComposeLlmBilling = {
@@ -351,6 +363,111 @@ export async function recordLlmUsage(input: {
     recordWhatsAppEvent(
       "llm_usage_failed",
       error instanceof Error ? error.message : "unknown",
+    );
+  }
+}
+
+/** Published Images API rates (USD per 1M tokens) for gpt-image-1-mini. */
+const IMAGE_MINI_RATES = {
+  textInputPer1m: 2,
+  imageInputPer1m: 2.5,
+  outputPer1m: 8,
+} as const;
+
+export type ImageApiUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  input_tokens_details?: {
+    text_tokens?: number;
+    image_tokens?: number;
+  };
+};
+
+/** Cost for Images API token usage (gpt-image-1-mini rates). */
+export function computeImageApiCost(
+  usage: ImageApiUsage,
+  model: string,
+): Prisma.Decimal | null {
+  const name = model.trim().toLowerCase();
+  if (!name.includes("gpt-image")) {
+    return null;
+  }
+  const details = usage.input_tokens_details;
+  const textIn = Math.max(0, Number(details?.text_tokens ?? 0));
+  const imageIn = Math.max(
+    0,
+    Number(
+      details?.image_tokens ??
+        Math.max(0, Number(usage.input_tokens ?? 0) - textIn),
+    ),
+  );
+  const output = Math.max(0, Number(usage.output_tokens ?? 0));
+  if (textIn + imageIn + output <= 0) {
+    return null;
+  }
+  // mini rates; other gpt-image-* use same helper until priced separately
+  const rates = IMAGE_MINI_RATES;
+  return new Prisma.Decimal(textIn)
+    .mul(rates.textInputPer1m)
+    .add(new Prisma.Decimal(imageIn).mul(rates.imageInputPer1m))
+    .add(new Prisma.Decimal(output).mul(rates.outputPer1m))
+    .div(1_000_000);
+}
+
+/**
+ * Bill an Images API call under the speaker (employeeId) with purpose=image.
+ * No OpenAI conversation — openaiConversationId is a synthetic marker.
+ */
+export async function recordImageUsage(input: {
+  conversationId: string;
+  employeeId: string;
+  digitalEmployeeId: string;
+  model: string;
+  usage: ImageApiUsage | null | undefined;
+  raw?: unknown;
+}): Promise<void> {
+  const usage = input.usage;
+  if (!usage) {
+    return;
+  }
+  const inputTokens = Math.max(0, Number(usage.input_tokens ?? 0));
+  const outputTokens = Math.max(0, Number(usage.output_tokens ?? 0));
+  const totalTokens = Math.max(
+    0,
+    Number(usage.total_tokens ?? inputTokens + outputTokens),
+  );
+  if (inputTokens + outputTokens + totalTokens <= 0) {
+    return;
+  }
+  const costUsd = computeImageApiCost(usage, input.model);
+  try {
+    await prisma.llmUsage.create({
+      data: {
+        conversationId: input.conversationId,
+        employeeId: input.employeeId,
+        digitalEmployeeId: input.digitalEmployeeId,
+        openaiConversationId: `images:${input.model}`,
+        responseId: null,
+        model: input.model,
+        inputTokens,
+        outputTokens,
+        cachedTokens: 0,
+        reasoningTokens: 0,
+        totalTokens,
+        costUsd,
+        priceModel: costUsd ? input.model : null,
+        purpose: "image",
+        usage:
+          input.raw === undefined || input.raw === null
+            ? (usage as Prisma.InputJsonValue)
+            : (input.raw as Prisma.InputJsonValue),
+      },
+    });
+  } catch (error) {
+    recordWhatsAppEvent(
+      "llm_usage_failed",
+      error instanceof Error ? error.message : "image_usage",
     );
   }
 }

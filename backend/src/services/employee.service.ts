@@ -20,6 +20,7 @@ import {
   ConflictError,
   isUniqueConstraintError,
   NotFoundError,
+  ValidationError,
 } from "../utils/errors.js";
 import { ensureDefaultTips } from "./tips.service.js";
 
@@ -210,6 +211,8 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     addressGender: publicAddressGender(kind, employee.addressGender),
     shareMirrorEmployeeId:
       kind === "human" ? (employee.shareMirrorEmployeeId ?? null) : null,
+    profileAttachmentId:
+      kind === "human" ? (employee.profileAttachmentId ?? null) : null,
   };
 }
 
@@ -622,4 +625,52 @@ export async function deleteEmployeeForUser(
   await prisma.employee.delete({
     where: { id: employeeId },
   });
+}
+
+/** Link an account-owned image Attachment as this human's profile photo. */
+export async function setEmployeeProfilePhoto(
+  userId: string,
+  employeeId: string,
+  attachmentId: string,
+): Promise<PublicEmployee> {
+  const employee = await findOwnedEmployee(userId, employeeId);
+  if (employee.kind === "digital") {
+    throw new ValidationError("Profile photo is only for people", {
+      kind: "human only",
+    });
+  }
+  const attachment = await prisma.attachment.findFirst({
+    where: {
+      id: attachmentId,
+      userId,
+      deletedAt: null,
+      kind: "image",
+    },
+  });
+  if (!attachment) {
+    throw new NotFoundError();
+  }
+  const updated = await prisma.employee.update({
+    where: { id: employeeId },
+    data: { profileAttachmentId: attachment.id },
+  });
+  return toPublicEmployee(updated);
+}
+
+/** Clear the human's profile photo link (does not delete the Attachment row). */
+export async function clearEmployeeProfilePhoto(
+  userId: string,
+  employeeId: string,
+): Promise<PublicEmployee> {
+  const employee = await findOwnedEmployee(userId, employeeId);
+  if (employee.kind === "digital") {
+    throw new ValidationError("Profile photo is only for people", {
+      kind: "human only",
+    });
+  }
+  const updated = await prisma.employee.update({
+    where: { id: employeeId },
+    data: { profileAttachmentId: null },
+  });
+  return toPublicEmployee(updated);
 }

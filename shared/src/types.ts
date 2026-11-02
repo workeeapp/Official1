@@ -77,6 +77,8 @@ export interface PublicEmployee {
    * on shared lists (visible_to). Null for guests and host-only humans.
    */
   shareMirrorEmployeeId?: string | null;
+  /** Humans only: optional profile photo attachment id (celebration images). */
+  profileAttachmentId?: string | null;
 }
 
 export interface EmployeesResponse {
@@ -151,6 +153,9 @@ export interface TeamUsagePurposeBreakdown {
   weatherTipUsd: number;
   reminderComposeUsd: number;
   liveSelectUsd: number;
+  deleteCelebrationUsd: number;
+  /** Images API (celebration / future image gen), purpose=image. */
+  imageUsd: number;
 }
 
 export interface TeamUsageMonth {

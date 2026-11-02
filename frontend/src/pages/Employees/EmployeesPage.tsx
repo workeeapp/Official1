@@ -45,6 +45,7 @@ export function EmployeesPage() {
     employees,
     status,
     error,
+    reload,
     createEmployee,
     updateEmployee,
     deleteEmployee,
@@ -504,6 +505,9 @@ export function EmployeesPage() {
           error={formError}
           onClose={() => setDialogMode(null)}
           onSubmit={handleSubmit}
+          onEmployeePatched={() => {
+            void reload();
+          }}
         />
       ) : null}
     </>

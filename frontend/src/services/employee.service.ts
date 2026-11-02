@@ -37,6 +37,33 @@ export const employeeApi = {
     });
   },
 
+  async uploadProfilePhoto(
+    id: string,
+    file: File,
+  ): Promise<{ employee: PublicEmployee }> {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return api<{ employee: PublicEmployee }>(`/api/employees/${id}/profile-photo`, {
+      method: "POST",
+      body: JSON.stringify({
+        fileName: file.name,
+        mimeType: file.type || "image/jpeg",
+        contentBase64: btoa(binary),
+      }),
+    });
+  },
+
+  clearProfilePhoto(id: string): Promise<{ employee: PublicEmployee }> {
+    return api<{ employee: PublicEmployee }>(`/api/employees/${id}/profile-photo`, {
+      method: "DELETE",
+    });
+  },
+
   remove(id: string): Promise<{ ok: boolean }> {
     return api<{ ok: boolean }>(`/api/employees/${id}`, {
       method: "DELETE",

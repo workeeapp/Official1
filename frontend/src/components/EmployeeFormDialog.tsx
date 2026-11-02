@@ -17,6 +17,7 @@ import { Button } from "./Button";
 import { Input } from "./Input";
 import { Textarea } from "./Textarea";
 import { employeeApi } from "@/services/employee.service";
+import { attachmentApi } from "@/services/attachment.service";
 
 interface EmployeeFormDialogProps {
   mode: "add" | "update";
@@ -25,6 +26,8 @@ interface EmployeeFormDialogProps {
   error: string | null;
   onClose: () => void;
   onSubmit: (input: EmployeeInput) => Promise<void>;
+  /** After profile photo upload/clear — refresh the employees list. */
+  onEmployeePatched?: (employee: PublicEmployee) => void;
 }
 
 export function EmployeeFormDialog({
@@ -34,6 +37,7 @@ export function EmployeeFormDialog({
   error,
   onClose,
   onSubmit,
+  onEmployeePatched,
 }: EmployeeFormDialogProps) {
   const initialKind = employee ? parseEmployeeKind(employee.kind) : null;
   const [kind, setKind] = useState<EmployeeKind | null>(initialKind);
@@ -48,6 +52,11 @@ export function EmployeeFormDialog({
       ? employee.addressGender
       : "",
   );
+  const [profileAttachmentId, setProfileAttachmentId] = useState<string | null>(
+    employee?.profileAttachmentId ?? null,
+  );
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [model, setModel] = useState(employee?.model ?? "");
   const [temperature, setTemperature] = useState(
     employee?.temperature != null ? String(employee.temperature) : "0",
@@ -517,6 +526,100 @@ export function EmployeeFormDialog({
                     </span>
                   </span>
                 </label>
+                {mode === "update" && employee ? (
+                  <div className="flex w-full flex-col gap-2">
+                    <p className="text-sm font-medium text-text-primary">
+                      Profile photo
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      Used for celebration images after closing shopping or
+                      tasks. Upload a clear face photo.
+                    </p>
+                    {profileAttachmentId ? (
+                      <img
+                        src={attachmentApi.contentUrl(profileAttachmentId)}
+                        alt="Profile"
+                        className="h-24 w-24 rounded-xl object-cover"
+                        data-testid="employee-profile-photo"
+                      />
+                    ) : (
+                      <p
+                        className="text-xs text-text-secondary"
+                        data-testid="employee-profile-photo-empty"
+                      >
+                        No photo yet
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <label className="inline-flex cursor-pointer items-center">
+                        <span className="rounded-xl border border-border bg-background px-3 py-2 text-sm font-medium text-text-primary hover:bg-primary-light">
+                          {photoBusy ? "Uploading…" : "Upload photo"}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          disabled={photoBusy || submitting}
+                          data-testid="employee-profile-photo-input"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (!file || !employee) {
+                              return;
+                            }
+                            setPhotoBusy(true);
+                            setPhotoError(null);
+                            void employeeApi
+                              .uploadProfilePhoto(employee.id, file)
+                              .then(({ employee: next }) => {
+                                setProfileAttachmentId(
+                                  next.profileAttachmentId ?? null,
+                                );
+                                onEmployeePatched?.(next);
+                              })
+                              .catch(() => {
+                                setPhotoError("Could not upload photo.");
+                              })
+                              .finally(() => setPhotoBusy(false));
+                          }}
+                        />
+                      </label>
+                      {profileAttachmentId ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="sm:w-auto"
+                          disabled={photoBusy || submitting}
+                          data-testid="employee-profile-photo-clear"
+                          onClick={() => {
+                            if (!employee) {
+                              return;
+                            }
+                            setPhotoBusy(true);
+                            setPhotoError(null);
+                            void employeeApi
+                              .clearProfilePhoto(employee.id)
+                              .then(({ employee: next }) => {
+                                setProfileAttachmentId(null);
+                                onEmployeePatched?.(next);
+                              })
+                              .catch(() => {
+                                setPhotoError("Could not clear photo.");
+                              })
+                              .finally(() => setPhotoBusy(false));
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
+                    {photoError ? (
+                      <p role="alert" className="text-sm text-error">
+                        {photoError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             )}
             {defaultsError ? (

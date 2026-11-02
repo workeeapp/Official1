@@ -170,6 +170,10 @@ import {
   resolveAndRecordTipsForTurn,
 } from "./tips.service.js";
 import {
+  collectCelebrationRemoves,
+  runDeleteCelebration,
+} from "./delete-celebration.js";
+import {
   appendEngineNotice,
   composeAssistantReply,
   deliverWhatsAppPhones,
@@ -1292,8 +1296,13 @@ async function syncTurnReplies(input: {
   saved: ChatTurnMessageIds & { assistantAt: Date };
   /** Final spoken bubbles (text + per-bubble buttons / Waze). */
   bubbles: LlmSpokenBubble[];
-  /** Files the engine sends with this reply (metadata.send_attachments). */
+  /** Files on bubble 1 (metadata.send_attachments / item dump). */
   attachments?: ChatAttachmentRef[];
+  /**
+   * Optional attachments per bubble index (0 = first). Merged with
+   * `attachments` on index 0. Used for celebration image on bubble 2+.
+   */
+  bubbleAttachments?: Array<ChatAttachmentRef[] | undefined>;
   /** Emoji reaction on the speaker's message (metadata.show_icon). */
   showIcon?: string;
   /** Line map from this turn's show_dump REPLACE (for next-turn BY LINE). */
@@ -1315,6 +1324,13 @@ async function syncTurnReplies(input: {
   const firstNavigate = first?.navigateAddress ?? null;
   const firstComposeUrl = first?.whatsappComposeUrl ?? null;
   const showIcon = input.showIcon?.trim() || null;
+  const attachmentsFor = (index: number): ChatAttachmentRef[] => {
+    const fromMap = input.bubbleAttachments?.[index] ?? [];
+    if (index === 0) {
+      return [...(input.attachments ?? []), ...fromMap];
+    }
+    return fromMap;
+  };
   if (showIcon) {
     await prisma.chatMessage.update({
       where: { id: input.saved.user },
@@ -1357,6 +1373,7 @@ async function syncTurnReplies(input: {
         liveLocToStore,
       )
     : existingAssistant?.raw;
+  const firstAttachments = attachmentsFor(0);
   await prisma.chatMessage.update({
     where: { id: input.saved.assistant },
     data: {
@@ -1366,18 +1383,19 @@ async function syncTurnReplies(input: {
         firstButtons.length > 0 ? toJsonValue(firstButtons) : Prisma.JsonNull,
       navigateAddress: firstNavigate,
       whatsappComposeUrl: firstComposeUrl,
-      ...(input.attachments?.length
-        ? { attachments: toJsonValue(input.attachments) }
+      ...(firstAttachments.length
+        ? { attachments: toJsonValue(firstAttachments) }
         : {}),
       ...(shouldRewriteRaw ? { raw: toJsonValue(nextRaw) } : {}),
     },
   });
   const extra = rest.map((bubble, index) => {
     const entryButtons = bubble.buttons ?? [];
+    const bubbleFiles = attachmentsFor(index + 1);
     return {
       id: randomUUID(),
       conversationId: input.conversationId,
-      author: "assistant",
+      author: "assistant" as const,
       speaker: input.assistantSpeaker,
       text: bubble.text,
       actions: Prisma.JsonNull,
@@ -1385,6 +1403,9 @@ async function syncTurnReplies(input: {
         entryButtons.length > 0 ? toJsonValue(entryButtons) : Prisma.JsonNull,
       navigateAddress: bubble.navigateAddress ?? null,
       whatsappComposeUrl: bubble.whatsappComposeUrl ?? null,
+      ...(bubbleFiles.length
+        ? { attachments: toJsonValue(bubbleFiles) }
+        : {}),
       createdAt: new Date(input.saved.assistantAt.getTime() + index + 1),
     };
   });
@@ -4761,6 +4782,37 @@ export async function sendChatMessage(input: {
             ].slice(0, SEND_ATTACHMENTS_MAX),
           ),
         )) ?? []);
+    let celebrationRef: ChatAttachmentRef | null = null;
+    const celebrationRemoves = guestSpeaker
+      ? []
+      : collectCelebrationRemoves(listMutations);
+    const profileAttachmentId = employee.profileAttachmentId?.trim() ?? "";
+    if (celebrationRemoves.length > 0 && profileAttachmentId) {
+      const celebration = await withoutFailingTurn(
+        "delete_celebration_failed",
+        () =>
+          runDeleteCelebration({
+            userId: input.userId,
+            uploaderId: employee.id,
+            profileAttachmentId,
+            removes: celebrationRemoves,
+            speakerName: employee.nickname?.trim() || employee.name,
+            addressGender: employee.addressGender,
+            billing: {
+              conversationId: conversation.id,
+              employeeId: employee.id,
+              digitalEmployeeId: digital.id,
+            },
+          }),
+      );
+      if (celebration) {
+        celebrationRef = celebration.ref;
+        reply = setEngineSpokenBubbles(reply, [
+          ...parseLlmReply(reply).responseBubbles,
+          { text: "" },
+        ]);
+      }
+    }
     const finalParsed = parseLlmReply(reply);
     const spokenForDumpGuard = finalParsed.responseBubbles
       .map((bubble) => bubble.text ?? "")
@@ -4768,12 +4820,25 @@ export async function sendChatMessage(input: {
     const clearStaleDump =
       turnLastNumberedDump.length === 0 &&
       looksLikeFreeWrittenNumberedInventory(spokenForDumpGuard);
+    const celebrationBubbleIndex =
+      celebrationRef && finalParsed.responseBubbles.length > 1
+        ? finalParsed.responseBubbles.length - 1
+        : -1;
+    const bubbleAttachments: Array<ChatAttachmentRef[] | undefined> =
+      celebrationBubbleIndex >= 0 && celebrationRef
+        ? (() => {
+            const map: Array<ChatAttachmentRef[] | undefined> = [];
+            map[celebrationBubbleIndex] = [celebrationRef];
+            return map;
+          })()
+        : [];
     const turnMessageIds = await syncTurnReplies({
       conversationId: conversation.id,
       assistantSpeaker,
       saved: messageIds,
       bubbles: finalParsed.responseBubbles,
       attachments: outboundAttachments.map(toChatAttachmentRef),
+      ...(bubbleAttachments.length ? { bubbleAttachments } : {}),
       ...(finalParsed.showIcon ? { showIcon: finalParsed.showIcon } : {}),
       ...(turnLastNumberedDump.length > 0
         ? { lastNumberedDump: turnLastNumberedDump }
@@ -4821,6 +4886,10 @@ export async function sendChatMessage(input: {
         });
       }
     }
+    const allOutboundRefs = [
+      ...outboundAttachments.map(toChatAttachmentRef),
+      ...(celebrationRef ? [celebrationRef] : []),
+    ];
     return {
       reply,
       raw: turn.raw,
@@ -4829,8 +4898,8 @@ export async function sendChatMessage(input: {
       answeredBy: digital.name,
       timing: { llmMs, afterLlmMs: Date.now() - afterLlmStarted },
       messageIds: turnMessageIds,
-      outboundAttachmentIds: outboundAttachments.map((row) => row.id),
-      outboundAttachments: outboundAttachments.map(toChatAttachmentRef),
+      outboundAttachmentIds: allOutboundRefs.map((row) => row.id),
+      outboundAttachments: allOutboundRefs,
     };
   } catch (error) {
     const table = missingTableName(error);

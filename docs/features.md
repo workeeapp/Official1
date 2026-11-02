@@ -217,6 +217,20 @@ Speaker-only meetings with an outside party («פגישה עם אלסטיק») s
 
 **Migration:** `prisma/migrations/20261007220000_drop_list_item_key_unique`.
 
+### Delete celebration image (shopping / tasks)
+
+After a successful `lists.remove` on **shopping or tasks** (not custom lists / filings / contacts), when the speaker has a **profile photo** on Employees:
+
+- The engine runs a **separate** cheap copy session (`gpt-4.1-mini`, `LlmUsages.purpose=delete_celebration`) that returns one Hebrew encouragement, an optional tip, and one English scene covering **all** qualifying removes this turn — not Lucy’s chat model.
+- It generates **exactly one** celebration image per chat turn (never one per item) via **`gpt-image-1-mini`** at **`low`** quality, `1024×1024`, with a fixed style bible (comic-book / cartoon superhero, strong likeness to the profile photo). Stored as JPEG ~80 for smaller WhatsApp uploads. Image API cost is billed on the **speaker** as `LlmUsages.purpose=image` (Dashboard → Images).
+- Hebrew text is composited server-side as comic-style title (yellow fill, black stroke, slight tilt) — not drawn by the image model.
+- Reply shape: bubble 1 = delete ack(s); bubble 2 = the celebration image (web + WhatsApp media after texts).
+- No profile photo → skip the image; delete ack still works. Fail-soft: celebration errors never break the delete.
+
+**Profile photo:** Employees → edit human → upload / clear. Stored as `Employees.profile_attachment_id` → `Attachments`.
+
+**Tests:** `backend/tests/delete-celebration.test.ts`.
+
 ---
 
 ## 8. Open jobs (multi, consult, book)

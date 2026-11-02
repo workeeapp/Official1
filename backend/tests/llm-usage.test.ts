@@ -22,10 +22,12 @@ vi.mock("../src/database/prisma.js", () => ({
 }));
 
 import {
+  computeImageApiCost,
   computeLlmCost,
   getEmployeeUsageSummary,
   getTeamUsageSummary,
   priceModelCandidates,
+  recordImageUsage,
   recordLlmUsage,
 } from "../src/services/llm-usage.service.js";
 
@@ -85,6 +87,8 @@ describe("getTeamUsageSummary", () => {
       weatherTipUsd: 0.03,
       reminderComposeUsd: 0.04,
       liveSelectUsd: 0.05,
+      deleteCelebrationUsd: 0,
+      imageUsd: 0,
     });
     expect(summary.totalUsd).toBeCloseTo(0.28);
     expect(summary.guestsUsd).toBeCloseTo(0.12);
@@ -337,5 +341,43 @@ describe("recordLlmUsage", () => {
         },
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("records Images API usage as purpose=image under the speaker", async () => {
+    await recordImageUsage({
+      conversationId: base.conversationId,
+      employeeId: base.employeeId,
+      digitalEmployeeId: base.digitalEmployeeId,
+      model: "gpt-image-1-mini",
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 272,
+        total_tokens: 1272,
+        input_tokens_details: { text_tokens: 50, image_tokens: 950 },
+      },
+    });
+    expect(usageCreate.mock.calls[0][0].data).toMatchObject({
+      purpose: "image",
+      employeeId: base.employeeId,
+      model: "gpt-image-1-mini",
+      inputTokens: 1000,
+      outputTokens: 272,
+    });
+    expect(Number(usageCreate.mock.calls[0][0].data.costUsd)).toBeGreaterThan(0);
+  });
+});
+
+describe("computeImageApiCost", () => {
+  it("prices gpt-image-1-mini from text/image/output tokens", () => {
+    const cost = computeImageApiCost(
+      {
+        input_tokens: 1050,
+        output_tokens: 272,
+        input_tokens_details: { text_tokens: 50, image_tokens: 1000 },
+      },
+      "gpt-image-1-mini",
+    );
+    // 50*2 + 1000*2.5 + 272*8 = 100 + 2500 + 2176 = 4776 / 1e6
+    expect(cost?.toNumber()).toBeCloseTo(0.004776, 6);
   });
 });

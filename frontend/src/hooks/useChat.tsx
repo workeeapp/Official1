@@ -492,7 +492,12 @@ function sameMessages(left: ChatMessage[], right: ChatMessage[]): boolean {
       message.createdAt === other.createdAt &&
       message.llmMs === other.llmMs &&
       message.afterLlmMs === other.afterLlmMs &&
-      JSON.stringify(message.actions ?? []) === JSON.stringify(other.actions ?? [])
+      JSON.stringify(message.actions ?? []) ===
+        JSON.stringify(other.actions ?? []) &&
+      JSON.stringify(message.attachments ?? []) ===
+        JSON.stringify(other.attachments ?? []) &&
+      JSON.stringify(message.buttons ?? []) ===
+        JSON.stringify(other.buttons ?? [])
     );
   });
 }
@@ -607,7 +612,8 @@ export function placeTurnReply(
 
 /**
  * One bubble per spoken response, in send order. Per-bubble buttons / Waze come
- * from parseLlmReply; actions, attachments, and timing stay on the first bubble.
+ * from parseLlmReply; actions + timing stay on the first bubble.
+ * Attachments: last empty bubble when present (celebration image), else first.
  */
 export function buildTurnReplies(input: {
   reply: string;
@@ -625,6 +631,13 @@ export function buildTurnReplies(input: {
     input.messageIds?.assistants ??
     (input.messageIds ? [input.messageIds.assistant] : []);
   const createdAt = new Date().toISOString();
+  const last = bubbles.length - 1;
+  const attachmentIndex =
+    input.attachments?.length &&
+    last > 0 &&
+    !(bubbles[last]?.text ?? "").trim()
+      ? last
+      : 0;
   return bubbles.map((bubble, index): ChatMessage => ({
     id: ids[index] ?? crypto.randomUUID(),
     author: "assistant",
@@ -638,10 +651,12 @@ export function buildTurnReplies(input: {
     ...(bubble.whatsappComposeUrl
       ? { whatsappComposeUrl: bubble.whatsappComposeUrl }
       : {}),
+    ...(index === attachmentIndex && input.attachments?.length
+      ? { attachments: input.attachments }
+      : {}),
     ...(index === 0
       ? {
           actions: parsed.actions,
-          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           llmMs: input.timing?.llmMs,
           afterLlmMs: input.timing?.afterLlmMs,
         }

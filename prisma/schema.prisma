@@ -72,11 +72,14 @@ model Employee {
    * was the WhatsApp guest). Null when not linked.
    */
   shareMirrorEmployeeId String?  @map("share_mirror_employee_id") @db.Uuid
+  /** Optional profile photo (Attachments) — used for delete-celebration images. */
+  profileAttachmentId String?  @map("profile_attachment_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   user                     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
   team                     Team?              @relation(fields: [teamId], references: [id], onDelete: Restrict)
   shareMirrorEmployee      Employee?          @relation("ShareMirror", fields: [shareMirrorEmployeeId], references: [id], onDelete: SetNull)
   mirroredBy               Employee[]         @relation("ShareMirror")
+  profileAttachment        Attachment?        @relation("EmployeeProfilePhoto", fields: [profileAttachmentId], references: [id], onDelete: SetNull)
   chatConversations        ChatConversation[] @relation("ConversationSpeaker")
   digitalChatConversations ChatConversation[] @relation("ConversationPartner")
   lists                    EmployeeList[]
@@ -85,7 +88,7 @@ model Employee {
   actedReminders           Reminder[]         @relation("ReminderActor")
   contacts                 Contact[]
   contactBook              ContactBook?
-  attachments              Attachment[]
+  attachments              Attachment[]       @relation("AttachmentUploader")
   tipsTargeted             Tip[]              @relation("TipDigital")
   tipProgressAsSpeaker     TipProgress[]      @relation("TipProgressSpeaker")
   tipProgressAsDigital     TipProgress[]      @relation("TipProgressDigital")
@@ -93,6 +96,7 @@ model Employee {
   @@index([userId])
   @@index([teamId])
   @@index([shareMirrorEmployeeId])
+  @@index([profileAttachmentId])
   @@map("Employees")
 }
 
@@ -463,7 +467,8 @@ model Attachment {
   waOutboundUploadedAt DateTime? @map("wa_outbound_uploaded_at")
   deletedAt            DateTime? @map("deleted_at")
   createdAt            DateTime  @default(now()) @map("created_at")
-  uploader             Employee  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  uploader             Employee  @relation("AttachmentUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  profileForEmployees  Employee[] @relation("EmployeeProfilePhoto")
   links                AttachmentLink[]
 
   @@index([userId, createdAt])

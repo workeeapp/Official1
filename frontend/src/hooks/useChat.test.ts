@@ -68,6 +68,28 @@ describe("buildTurnReplies", () => {
     expect(replies[2].buttons).toBeUndefined();
   });
 
+  it("puts celebration attachments on the last empty bubble", () => {
+    const replies = buildTurnReplies({
+      reply: JSON.stringify({
+        responses: [
+          { text: "הסרתי מהקניות.", buttons: [] },
+          { text: "", buttons: [] },
+        ],
+        metadata: {},
+      }),
+      messageIds: { user: "u1", assistant: "a1", assistants: ["a1", "a2"] },
+      speaker: "לוסי",
+      attachments: [
+        { id: "att-1", kind: "image", file_name: "celebration.jpg" },
+      ],
+    });
+    expect(replies).toHaveLength(2);
+    expect(replies[0].attachments).toBeUndefined();
+    expect(replies[1].attachments).toEqual([
+      { id: "att-1", kind: "image", file_name: "celebration.jpg" },
+    ]);
+  });
+
   it("puts legacy turn navigate on the first bubble; per-bubble Waze stays put", () => {
     const legacy = buildTurnReplies({
       reply: JSON.stringify({

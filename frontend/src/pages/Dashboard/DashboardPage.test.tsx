@@ -111,6 +111,8 @@ describe("Dashboard page", () => {
         weatherTipUsd: 0.0008,
         reminderComposeUsd: 0.0004,
         liveSelectUsd: 0.0003,
+        deleteCelebrationUsd: 0,
+        imageUsd: 0.0021,
       },
       months: [
         {
@@ -125,6 +127,8 @@ describe("Dashboard page", () => {
             weatherTipUsd: 0.0005,
             reminderComposeUsd: 0.0003,
             liveSelectUsd: 0.0002,
+            deleteCelebrationUsd: 0,
+            imageUsd: 0.0015,
           },
         },
         {
@@ -139,6 +143,8 @@ describe("Dashboard page", () => {
             weatherTipUsd: 0.0003,
             reminderComposeUsd: 0.0001,
             liveSelectUsd: 0.0001,
+            deleteCelebrationUsd: 0,
+            imageUsd: 0.0006,
           },
         },
       ],
@@ -270,6 +276,7 @@ describe("Dashboard page", () => {
     expect(screen.getByTestId("dashboard-usage-live-select")).toHaveTextContent(
       "$0.0003",
     );
+    expect(screen.getByTestId("dashboard-usage-images")).toHaveTextContent("$0.0021");
     expect(screen.getByTestId("dashboard-usage-guests")).toHaveTextContent("$0.0012");
 
     const tipsMonths = screen.getByTestId("dashboard-usage-tips-months");
@@ -277,6 +284,12 @@ describe("Dashboard page", () => {
     expect(tipsMonths).toHaveTextContent("$0.001");
     expect(tipsMonths).toHaveTextContent("09/2026");
     expect(tipsMonths).toHaveTextContent("$0.0005");
+
+    const imageMonths = screen.getByTestId("dashboard-usage-images-months");
+    expect(imageMonths).toHaveTextContent("10/2026");
+    expect(imageMonths).toHaveTextContent("$0.0015");
+    expect(imageMonths).toHaveTextContent("09/2026");
+    expect(imageMonths).toHaveTextContent("$0.0006");
 
     const guestMonths = screen.getByTestId("dashboard-usage-guests-months");
     expect(guestMonths).toHaveTextContent("10/2026");
