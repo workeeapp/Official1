@@ -1221,7 +1221,8 @@ describe("resolveRoutesReply", () => {
     });
     expect(text).toMatch(/קו 51/);
     expect(text).toMatch(/בעוד כ־/);
-    expect(navigateAddress).toBe("תל אביב");
+    // Transit: destination stays in spoken text / board — never Waze CTA.
+    expect(navigateAddress).toBe("");
     expect(fetchImpl).toHaveBeenCalled();
     const body = computeRoutesBody(fetchImpl);
     expect(body.computeAlternativeRoutes).toBe(true);
@@ -2007,7 +2008,7 @@ describe("nearest_stop named place geocode", () => {
     );
     expect(text).toMatch(/שלום דורני/);
     expect(text).toMatch(/חיפוש ליד/);
-    expect(navigateAddress).toMatch(/שלום דורני/);
+    expect(navigateAddress).toBe("");
   });
 
   it("nearest_stop speaker without pin still asks for WhatsApp location", async () => {
@@ -2490,7 +2491,7 @@ describe("origin→destination trip boarding workflow", () => {
         }),
       };
     });
-    const { text } = await resolveRoutesReply({
+    const { text, navigateAddress, board } = await resolveRoutesReply({
       origin: "פתח תקווה",
       destination: "תל אביב",
       aspects: ["summary"],
@@ -2501,6 +2502,10 @@ describe("origin→destination trip boarding workflow", () => {
     expect(text).toMatch(/ברכב/);
     expect(text).toContain(ROUTES_DRIVE_ESTIMATE_DISCLAIMER_HE);
     expect(text).not.toMatch(/מתוזמנות רשמיות|תחבורה ציבורית/);
+    // Drive keeps a Waze target (board mode/destination unchanged for display).
+    expect(navigateAddress.trim().length).toBeGreaterThan(0);
+    expect(board?.mode).toBe("drive");
+    expect((board?.destination ?? "").trim().length).toBeGreaterThan(0);
     const body = computeRoutesBody(fetchImpl);
     expect(body.travelMode).toBe("DRIVE");
     expect(body.routingPreference).toBe("TRAFFIC_AWARE");
@@ -3575,25 +3580,39 @@ describe("Transit UX board open / persist helpers", () => {
       mode: "transit",
       itineraries: [itin1, itin2],
     })!;
+    expect(board.destination).toBe("דיזנגוף");
     const rec = formatOpenItineraryFromBoard(board, "recommended");
     expect(rec.text).toContain("קו 51");
     expect(rec.text).toContain("זאב ברנדה");
     expect(rec.text).not.toContain("קו 66");
+    expect(rec.navigateAddress).toBe("");
 
     const all = formatOpenItineraryFromBoard(board, "all");
     expect(all.text).toContain("1.");
     expect(all.text).toContain("2.");
     expect(all.text).toContain("קו 51");
     expect(all.text).toContain("קו 66");
+    expect(all.navigateAddress).toBe("");
 
     const second = formatOpenItineraryFromBoard(board, 2);
     expect(second.text).toContain("קו 66");
     expect(second.text).toContain("שלום דורני");
     expect(second.text).not.toContain("זאב ברנדה");
+    expect(second.navigateAddress).toBe("");
 
     const miss = formatOpenItineraryFromBoard(board, 3);
     expect(miss.text).toContain(ROUTES_OPEN_INDEX_MISS_HE);
     expect(miss.navigateAddress).toBe("");
+
+    const driveBoard = buildLastRoutesBoard({
+      origin: "ברנדה",
+      destination: "דיזנגוף",
+      mode: "drive",
+      itineraries: [itin1],
+    })!;
+    const driveOpen = formatOpenItineraryFromBoard(driveBoard, "recommended");
+    expect(driveOpen.navigateAddress).toBe("דיזנגוף");
+    expect(driveBoard.destination).toBe("דיזנגוף");
   });
 
   it("parseLastRoutesBoard stays compact and round-trips mapped fields", () => {
@@ -3727,6 +3746,8 @@ describe("Transit UX board open / persist helpers", () => {
     ]);
     expect(ok.board?.itineraries).toHaveLength(2);
     expect(ok.board?.itineraries[0]?.steps[0]?.line).toBe("51");
+    expect(ok.board?.destination).toContain("דיזנגוף");
+    expect(ok.navigateAddress).toBe("");
 
     const fail = await resolveRoutesReply({
       origin: "A",

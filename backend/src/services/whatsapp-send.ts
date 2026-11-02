@@ -179,7 +179,7 @@ export const WHATSAPP_BUTTON_BODY_MAX = 1024;
 const WHATSAPP_BUTTONS_FOLLOWUP_BODY = "לצפייה ברשימה";
 
 /** Hebrew — avoid \\b (JS word chars are ASCII-only even with /u). */
-const ITEM_SHOW_TASK_COMMAND = /^הציגי?\s+את\s+המטלה(?:\s|$)/u;
+const ITEM_SHOW_TASK_COMMAND = /^הציגי?\s+את\s+ה(?:מטלה|משימה)(?:\s|$)/u;
 const ITEM_SHOW_FILING_COMMAND = /^הציגי?\s+את\s+התיוק(?:\s|$)/u;
 
 /**
@@ -194,7 +194,7 @@ export function fitReplyButtonLabel(button: LlmReplyButton): string {
   }
   const command = button.command.trim();
   if (ITEM_SHOW_TASK_COMMAND.test(command)) {
-    return "להצגת המטלה";
+    return "להצגת המשימה";
   }
   if (ITEM_SHOW_FILING_COMMAND.test(command)) {
     return "להצגת התיוק";

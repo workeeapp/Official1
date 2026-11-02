@@ -468,6 +468,20 @@ export function formatAllItinerariesCompareHebrew(
   return lines.join("\n").trim();
 }
 
+/**
+ * Waze only for drive. Transit keeps board.destination for display but never
+ * emits navigateAddress (no Waze CTA).
+ */
+export function routesNavigateAddressForMode(
+  mode: string | null | undefined,
+  destination: string | null | undefined,
+): string {
+  if (mode !== "drive") {
+    return "";
+  }
+  return (destination ?? "").trim();
+}
+
 /** Expand a saved board without a provider fetch. */
 export function formatOpenItineraryFromBoard(
   board: LastRoutesBoard,
@@ -482,10 +496,14 @@ export function formatOpenItineraryFromBoard(
     destination: board.destination,
     mode: board.mode,
   };
+  const navigateAddress = routesNavigateAddressForMode(
+    board.mode,
+    board.destination,
+  );
   if (open === "all") {
     return {
       text: formatAllItinerariesCompareHebrew(options, meta),
-      navigateAddress: board.destination || "",
+      navigateAddress,
     };
   }
   let index = 0;
@@ -511,7 +529,7 @@ export function formatOpenItineraryFromBoard(
         );
   return {
     text: title,
-    navigateAddress: board.destination || "",
+    navigateAddress,
   };
 }
 
@@ -3018,10 +3036,10 @@ async function resolveGtfsRoutesReply(input: {
     const preface = placeLabel
       ? `חיפוש ליד «${placeLabel}»:\n`
       : "";
-    const nearestName = result.stops[0]?.stopName?.trim() || "";
+    // Transit / stop lookup: keep stop name in text only — no Waze CTA.
     return {
       text: `${preface}${body}`,
-      navigateAddress: nearestName,
+      navigateAddress: "",
     };
   }
 
@@ -3416,7 +3434,7 @@ export async function resolveRoutesReply(input: {
       if (!requireLiveSelect || facts.stopLines.length === 0) {
         return {
           text: formatRoutesHebrew(facts),
-          navigateAddress: facts.navigateAddress,
+          navigateAddress: "",
         };
       }
       const outcome = await runSelect({
@@ -3427,7 +3445,7 @@ export async function resolveRoutesReply(input: {
       });
       return {
         text: formatRoutesAfterLiveSelect(facts, outcome, "lines"),
-        navigateAddress: facts.navigateAddress,
+        navigateAddress: "",
       };
     } catch (error) {
       if (error instanceof Error && error.message === ROUTES_API_KEY_MISSING) {
@@ -3617,7 +3635,11 @@ export async function resolveRoutesReply(input: {
     );
     return {
       text: `${preface}${body}`.trim(),
-      navigateAddress: selectedFacts.navigateAddress || facts.navigateAddress,
+      // Drive only — board.destination stays on `board` for transit display.
+      navigateAddress: routesNavigateAddressForMode(
+        travelMode,
+        selectedFacts.navigateAddress || facts.navigateAddress,
+      ),
       ...(board ? { board } : {}),
       ...(choiceButtons.length > 0 ? { choiceButtons } : {}),
     };

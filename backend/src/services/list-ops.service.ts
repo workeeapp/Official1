@@ -37,7 +37,7 @@ export type ListOpRefusalReason =
 export interface ListOpResult {
   action: LlmListOpName;
   listId: string;
-  /** Product label of the list (custom name, or קניות / מטלות / אנשי קשר). */
+  /** Product label of the list (custom name, or קניות / משימות / אנשי קשר). */
   listLabel: string;
   /** When the list was loaded — for POST-MUTATE show nav keys. */
   listType?: string;

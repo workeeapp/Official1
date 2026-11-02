@@ -436,11 +436,15 @@ export function alignSpokenListType(
   const type = types[0];
   if (type === "tasks") {
     return response
-      .replaceAll("מרשימת הקניות", "מרשימת המטלות")
-      .replaceAll("רשימת הקניות", "רשימת המטלות");
+      .replaceAll("מרשימת הקניות", "מרשימת המשימות")
+      .replaceAll("רשימת הקניות", "רשימת המשימות")
+      .replaceAll("מרשימת המטלות", "מרשימת המשימות")
+      .replaceAll("רשימת המטלות", "רשימת המשימות");
   }
   if (type === "shopping") {
     return response
+      .replaceAll("מרשימת המשימות", "מרשימת הקניות")
+      .replaceAll("רשימת המשימות", "רשימת הקניות")
       .replaceAll("מרשימת המטלות", "מרשימת הקניות")
       .replaceAll("רשימת המטלות", "רשימת הקניות");
   }
@@ -498,7 +502,7 @@ export function formatAppliedMutationFallback(
       (row.listType === "shopping"
         ? "קניות"
         : row.listType === "tasks"
-          ? "מטלות"
+          ? "משימות"
           : "הרשימה");
     return `הסרתי את «${row.itemLabel}» מרשימת «${list}».`;
   }
@@ -551,7 +555,7 @@ export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.
 export const REMINDER_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את התזכורת.";
 /** Reminder applied but speaker list/task add did not. */
 export const REMINDER_ONLY_PARTIAL =
-  "שמרתי את התזכורת, אבל לא הצלחתי להוסיף את המטלה לרשימה.";
+  "שמרתי את התזכורת, אבל לא הצלחתי להוסיף את המשימה לרשימה.";
 
 /** Last-resort spoken line when the model left responses empty. */
 export const EMPTY_REPLY_RETRY =

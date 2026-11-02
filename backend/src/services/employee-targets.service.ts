@@ -1737,8 +1737,8 @@ export type SpeakerShowButtonOptions = {
   speakerNames?: string[];
   /**
    * Display names / nicknames of the chat digital worker. Used so WATCH /
-   * להזכיר / לשלוח הודעה tasks (targets = worker) get «הצג מטלות של <worker>»
-   * instead of speaker-book «הצג מטלות».
+   * להזכיר / לשלוח הודעה tasks (targets = worker) get «הצג משימות של <worker>»
+   * instead of speaker-book «הצג משימות».
    */
   workerNames?: string[];
   /**
@@ -1783,8 +1783,19 @@ export function listNavKeyFromAction(list: LlmListAction): string {
  * Normalize show-list / collab nav commands so «הצג רשימת רשימת X» and
  * «הצג רשימת X» share one dedupe key. Conversational commands pass through.
  */
+/** Canonical product Hebrew for tasks — never emit legacy «מטלות» on new taps. */
+function canonicalizeTasksHebrewInCommand(command: string): string {
+  return command
+    .replaceAll("רשימת מטלות", "רשימת משימות")
+    .replaceAll("הצג מטלות", "הצג משימות")
+    .replaceAll("כל המטלות", "כל המשימות")
+    .replaceAll("מטלות כלליות", "משימות כלליות");
+}
+
 export function normalizeShowNavCommand(command: string): string {
-  let cmd = command.trim().replace(/\s+/gu, " ");
+  let cmd = canonicalizeTasksHebrewInCommand(
+    command.trim().replace(/\s+/gu, " "),
+  );
   if (!cmd) {
     return "";
   }
@@ -1794,6 +1805,16 @@ export function normalizeShowNavCommand(command: string): string {
   if (cmd === SHOW_REMINDERS_COMMAND) {
     return cmd;
   }
+  // Bare «הצג משימות» (model shorthand) → opaque list command.
+  if (cmd === "הצג משימות" || cmd === "הצג קניות" || cmd === "הצג אנשי קשר") {
+    const builtin =
+      cmd === "הצג משימות"
+        ? "tasks"
+        : cmd === "הצג קניות"
+          ? "shopping"
+          : "contacts";
+    return showListButtonCommand(builtin);
+  }
   // «הצג רשימת <name>[ משותפות עם X| באחריות X]»
   const listMatch = cmd.match(
     /^(הצג רשימת) (.+?)( משותפות עם .+| באחריות .+)?$/u,
@@ -1801,7 +1822,14 @@ export function normalizeShowNavCommand(command: string): string {
   if (listMatch) {
     const name = stripRepeatedReshimatPrefix(listMatch[2] ?? "");
     const suffix = listMatch[3] ?? "";
-    return name ? `${listMatch[1]} ${name}${suffix}` : cmd;
+    // Legacy name in the opaque command → product Hebrew.
+    const canonicalName =
+      builtinListTypeFromHebrew(name) != null
+        ? builtinListHebrew(builtinListTypeFromHebrew(name)!)
+        : name;
+    return canonicalName
+      ? `${listMatch[1]} ${canonicalName}${suffix}`
+      : cmd;
   }
   return cmd;
 }
@@ -1814,7 +1842,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
   const cmd = button.command.trim();
   const label = button.label.trim();
   if (
-    /^הציגי?\s+את\s+המטלה(?:\s|$)/u.test(cmd) ||
+    /^הציגי?\s+את\s+ה(?:מטלה|משימה)(?:\s|$)/u.test(cmd) ||
     /^הציגי?\s+את\s+התיוק(?:\s|$)/u.test(cmd)
   ) {
     return false;
@@ -1854,7 +1882,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
   return false;
 }
 
-const ITEM_OPEN_TASK_COMMAND = /^הציגי?\s+את\s+המטלה\s+(.+)$/u;
+const ITEM_OPEN_TASK_COMMAND = /^הציגי?\s+את\s+ה(?:מטלה|משימה)\s+(.+)$/u;
 const ITEM_OPEN_FILING_COMMAND = /^הציגי?\s+את\s+התיוק\s+(.+)$/u;
 
 function normalizeItemOpenTitle(value: string): string {
@@ -2205,6 +2233,22 @@ export function parseFixedListNavButton(
     };
   }
 
+  // Bare «הצג משימות|מטלות|קניות|…» (model shorthand without «רשימת»).
+  const bare = cmd.match(/^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים)$/u);
+  if (bare) {
+    const listKey = listKeyFromShowName(bare[1]!);
+    const plainButton = listKey ? plainButtonForListKey(listKey) : null;
+    if (!listKey || !plainButton) {
+      return null;
+    }
+    return {
+      listKey,
+      kind: "plain",
+      partner: null,
+      plainButton,
+    };
+  }
+
   return null;
 }
 
@@ -2301,8 +2345,8 @@ function collabEvidenceAllows(
 /**
  * Keep / normalize / drop a model fixed-nav button.
  * Unproven collab → plain LIST when the target is eligible (never a share label).
- * Plain «הצג מטלות» when the only tasks work was worker-only → rewrite to
- * worker inventory («הצג מטלות של <worker>»).
+ * Plain «הצג משימות» when the only tasks work was worker-only → rewrite to
+ * worker inventory («הצג משימות של <worker>»).
  */
 function validateModelFixedListNav(
   button: LlmReplyButton,
@@ -2347,21 +2391,23 @@ function validateModelFixedListNav(
         listKey: workerInventoryListKey(rewritten.command),
       };
     }
-    const command =
-      normalizeShowNavCommand(button.command) || parsed.plainButton.command;
-    const label = button.label.trim() || parsed.plainButton.label;
-    // Reject share-implying labels on a plain command.
+    // Canonical opaque command always (משימות not מטלות) so legacy + product
+    // twins collapse under remember(). Keep a conversational model label when
+    // it is not share-implying; rewrite מטלות→משימות in the label too.
+    const rawLabel = button.label.trim();
     if (
-      /^משותף עם /u.test(label) ||
-      /^באחריות /u.test(label) ||
-      /^כל ה/u.test(label)
+      /^משותף עם /u.test(rawLabel) ||
+      /^באחריות /u.test(rawLabel) ||
+      /^כל ה/u.test(rawLabel)
     ) {
       return { button: parsed.plainButton, listKey: parsed.listKey };
     }
+    const label =
+      canonicalizeTasksHebrewInCommand(rawLabel) || parsed.plainButton.label;
     return {
       button: {
         label: fitNavButtonLabel(label),
-        command,
+        command: parsed.plainButton.command,
       },
       listKey: parsed.listKey,
     };
@@ -2475,7 +2521,7 @@ export function datedDayShowSafetyNetButtons(
  * nav; drop failed item-open; safety-net at most one plain LIST per applied
  * (or metadata) mutate when the model omitted a matching nav. Never invents
  * collab, item-open, or «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
- * «הצג מטלות של <worker>» instead of speaker-book «הצג מטלות».
+ * «הצג משימות של <worker>» instead of speaker-book «הצג משימות».
  * Dated tasks apply also safety-nets a day-show tap (day + tasks list).
  */
 export function ensureSpeakerShowButtons(

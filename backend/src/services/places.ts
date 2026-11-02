@@ -1474,7 +1474,33 @@ export type PlacesReplyResult = {
   usedPendingPin: boolean;
   /** True when reply only asks for a WhatsApp pin / place (no provider call). */
   needsLocation: boolean;
+  /**
+   * Waze target when the final result set (after filters + live_select) has
+   * exactly one row with valid lat/lng. Never invents; empty when ambiguous.
+   */
+  navigateAddress?: string;
 };
+
+/** Single Places result with coords → Waze `lat,lng`; else empty. */
+export function navigateAddressFromPlacesResults(
+  results: PlaceResult[],
+): string {
+  if (results.length !== 1) {
+    return "";
+  }
+  const row = results[0]!;
+  if (
+    row.lat == null ||
+    row.lng == null ||
+    !Number.isFinite(row.lat) ||
+    !Number.isFinite(row.lng) ||
+    Math.abs(row.lat) > 90 ||
+    Math.abs(row.lng) > 180
+  ) {
+    return "";
+  }
+  return `${row.lat},${row.lng}`;
+}
 
 export async function resolvePlacesReplyDetailed(input: {
   query: string;
@@ -1688,22 +1714,36 @@ export async function resolvePlacesReplyDetailed(input: {
       areaRestrict,
       areaViewport,
     });
-    const text =
-      !input.requireLiveSelect || facts.results.length === 0
-        ? formatPlacesHebrew(facts)
-        : formatPlacesAfterLiveSelect(
-            facts,
-            await (input.runSelect ?? runLivePostSelect)({
-              domain: "places",
-              records: placesToLiveRetrievalRecords(facts),
-              speakerAsk: input.speakerAsk ?? "",
-              billing: input.billing ?? null,
-            }),
-          );
+    let finalFacts = facts;
+    let text: string;
+    if (!input.requireLiveSelect || facts.results.length === 0) {
+      text = formatPlacesHebrew(facts);
+    } else {
+      const outcome = await (input.runSelect ?? runLivePostSelect)({
+        domain: "places",
+        records: placesToLiveRetrievalRecords(facts),
+        speakerAsk: input.speakerAsk ?? "",
+        billing: input.billing ?? null,
+      });
+      text = formatPlacesAfterLiveSelect(facts, outcome);
+      if (outcome.kind === "subset") {
+        finalFacts = filterPlacesFactsByIds(facts, outcome.keptIds);
+      } else if (outcome.kind === "no_match") {
+        finalFacts = { ...facts, results: [] };
+      } else if (outcome.kind === "failure") {
+        // May show unfiltered labeled body — still only Waze when exactly one
+        // row remains in the unfiltered set (same as length check below).
+        finalFacts = facts;
+      }
+    }
+    const navigateAddress = navigateAddressFromPlacesResults(
+      finalFacts.results,
+    );
     return {
       text,
       usedPendingPin: nearSpeaker && hasPin,
       needsLocation: false,
+      ...(navigateAddress ? { navigateAddress } : {}),
     };
   } catch (error) {
     if (error instanceof Error && error.message === PLACES_API_KEY_MISSING) {

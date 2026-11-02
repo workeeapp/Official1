@@ -5480,7 +5480,8 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
     "2",
     "3",
     "קניות",
-    "מטלות",
+    "משימות",
+    "מטלות", // legacy closed-choice token
     "תיוק",
     "תזכורות",
     "כיבוד",
@@ -5488,9 +5489,10 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
     "מה להביא",
     "סגירה",
     "עדכן מועד להיום",
-    "הצג את המטלות",
+    "הצג את המשימות",
+    "הצג את המטלות", // legacy overdue raise
     "להוסיף תאריך",
-    // Do NOT add bare «הצג מטלות» — LIST nav uses that label with a longer
+    // Do NOT add bare «הצג משימות» — LIST nav uses that label with a longer
     // command; stale raise uses label===command which is already closed-choice.
   ].map((token) => token.toLowerCase()),
 );
@@ -5522,7 +5524,7 @@ export function isClosedChoiceReplyButton(button: LlmReplyButton): boolean {
  * is a longer natural ask than the short label (POST-MUTATE SHOW shape).
  */
 export function isShowListReplyButton(button: LlmReplyButton): boolean {
-  // Closed choices (incl. overdue raise «הצג את המטלות» label≈command) stay on
+  // Closed choices (incl. overdue raise «הצג את המשימות» label≈command) stay on
   // the bubble the model assigned — never migrate as confirm LIST chrome.
   if (isClosedChoiceReplyButton(button)) {
     return false;

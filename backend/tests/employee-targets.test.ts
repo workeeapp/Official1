@@ -84,7 +84,7 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה" }],
+            items: [{ "שם משימה": "לקחת מחר בבוקר את הילדים לגינה" }],
             targets: ["טל"],
           },
         ],
@@ -95,7 +95,7 @@ describe("employee targets", () => {
     );
 
     expect(resolved.lists[0]?.targets).toEqual(["טל"]);
-    expect(resolved.lists[0]?.items[0]?.["שם מטלה"]).toBe(
+    expect(resolved.lists[0]?.items[0]?.["שם משימה"]).toBe(
       "לקחת מחר בבוקר את הילדים לגינה",
     );
 
@@ -121,7 +121,7 @@ describe("employee targets", () => {
             listName: "",
             items: [
               {
-                "שם מטלה": "פגישה עם טל",
+                "שם משימה": "פגישה עם טל",
                 "תאריך לביצוע": "יום ראשון",
                 "שעה לביצוע": "10:00",
               },
@@ -145,7 +145,7 @@ describe("employee targets", () => {
 
     const meetingApps = plan.applications.filter((item) =>
       item.metadata.lists.some((list) =>
-        list.items.some((entry) => entry["שם מטלה"] === "פגישה עם טל"),
+        list.items.some((entry) => entry["שם משימה"] === "פגישה עם טל"),
       ),
     );
     expect(meetingApps.map((item) => item.employeeId)).toEqual([amit.id]);
@@ -160,8 +160,8 @@ describe("employee targets", () => {
         item.metadata.lists.some((list) =>
           list.items.some(
             (entry) =>
-              typeof entry["שם מטלה"] === "string" &&
-              String(entry["שם מטלה"]).includes("קיבל מטלה"),
+              typeof entry["שם משימה"] === "string" &&
+              String(entry["שם משימה"]).includes("קיבל מטלה"),
           ),
         ),
       ),
@@ -319,14 +319,14 @@ describe("employee targets", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+          items: [{ "שם משימה": "לשלוח הודעה למיכל" }],
           targets: ["עמית"],
         },
         {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+          items: [{ "שם משימה": "לשלוח הודעה למיכל" }],
           targets: ["לוסי"],
         },
       ],
@@ -348,14 +348,14 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+            items: [{ "שם משימה": "לשלוח הודעה למיכל" }],
             targets: ["עמית"],
           },
           {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לשלוח הודעה למיכל" }],
+            items: [{ "שם משימה": "לשלוח הודעה למיכל" }],
             targets: ["לוסי"],
           },
         ],
@@ -419,7 +419,7 @@ describe("employee targets", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לשתות מים" }],
+          items: [{ "שם משימה": "לשתות מים" }],
           targets: [],
         },
       ],
@@ -465,7 +465,7 @@ describe("employee targets", () => {
           (list) =>
             list.listType === "tasks" &&
             list.items.some((entry) =>
-              String(entry["שם מטלה"] ?? "").includes("צריכים לקנות"),
+              String(entry["שם משימה"] ?? "").includes("צריכים לקנות"),
             ),
         ),
       ),
@@ -544,12 +544,12 @@ describe("employee targets", () => {
             action: "update",
             listType: "tasks",
             listName: "",
-            items: [{ item_id: "2", "שם מטלה": "להתקשר" }],
+            items: [{ item_id: "2", "שם משימה": "להתקשר" }],
             targets: [],
           },
         ],
       }),
-    ).toEqual([{ label: "הצג", command: "הצג רשימת מטלות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג רשימת משימות" }]);
     expect(
       showButtonsForNotify({
         ...emptyLlmMetadata(),
@@ -640,7 +640,7 @@ describe("employee targets", () => {
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("WATCH tasks add gets worker inventory nav (not speaker הצג מטלות)", () => {
+  it("WATCH tasks add gets worker inventory nav (not speaker הצג משימות)", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -650,7 +650,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
+              items: [{ "שם משימה": "לעדכן על מזג אוויר בפתח תקווה" }],
               targets: ["לוסי"],
             },
           ],
@@ -683,7 +683,7 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
   });
 
   it("WATCH: model speaker LIST is rewritten to worker inventory", () => {
@@ -696,15 +696,15 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לבדוק גשם בפתח תקווה" }],
+              items: [{ "שם משימה": "לבדוק גשם בפתח תקווה" }],
               targets: ["לוסי"],
             },
           ],
         },
-        [{ label: "הצג מטלות", command: "הצג רשימת מטלות" }],
+        [{ label: "הצג משימות", command: "הצג רשימת משימות" }],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
   });
 
   it("WATCH cadence update with appliedWorkerWatchName gets worker inventory nav", () => {
@@ -745,7 +745,7 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
   });
 
   it("WATCH cadence update without appliedWorkerWatchName injects nothing", () => {
@@ -831,7 +831,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לעדכן על מזג אוויר בפתח תקווה" }],
+              items: [{ "שם משימה": "לעדכן על מזג אוויר בפתח תקווה" }],
               targets: ["לוסי"],
             },
           ],
@@ -843,7 +843,7 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([{ label: "המטלות שלך", command: "הצג מטלות של לוסי" }]);
+    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
   });
 
   it("chat appliedWorkerWatchName predicate follows saved.hasComposeCondition", () => {
@@ -861,7 +861,7 @@ describe("employee targets", () => {
     expect(resolveName([])).toBeUndefined();
   });
 
-  it("speaker-book tasks + appliedWorkerWatchName still yields speaker הצג מטלות only", () => {
+  it("speaker-book tasks + appliedWorkerWatchName still yields speaker הצג משימות only", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -871,7 +871,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לשתות מים" }],
+              items: [{ "שם משימה": "לשתות מים" }],
               targets: [],
             },
           ],
@@ -883,10 +883,10 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
+    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
   });
 
-  it("speaker tasks + worker להזכיר still gets speaker הצג מטלות (not worker-only rewrite)", () => {
+  it("speaker tasks + worker להזכיר still gets speaker הצג משימות (not worker-only rewrite)", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -896,14 +896,14 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לשתות מים" }],
+              items: [{ "שם משימה": "לשתות מים" }],
               targets: [],
             },
             {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "להזכיר לטל לשתות מים" }],
+              items: [{ "שם משימה": "להזכיר לטל לשתות מים" }],
               targets: ["לוסי"],
             },
           ],
@@ -911,7 +911,7 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
+    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
   });
 
   it("custom list move emits only dest הצג for partner notify (not source + dest)", () => {
@@ -1149,7 +1149,7 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לקנות חלב" }],
+            items: [{ "שם משימה": "לקנות חלב" }],
             targets: ["מיכל"],
           },
         ],
@@ -1157,7 +1157,7 @@ describe("employee targets", () => {
       [
         {
           label: "באחריות מיכל",
-          command: "הצג מטלות באחריות מיכל",
+          command: "הצג משימות באחריות מיכל",
         },
       ],
       {
@@ -1170,7 +1170,7 @@ describe("employee targets", () => {
       },
     );
     expect(assign.map((b) => b.command)).toEqual([
-      "הצג מטלות באחריות מיכל",
+      "הצג משימות באחריות מיכל",
     ]);
     expect(assign[0]?.label).toBe("באחריות מיכל");
 
@@ -1335,7 +1335,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לקנות חלב" }],
+              items: [{ "שם משימה": "לקנות חלב" }],
               targets: ["מיכל"],
             },
           ],
@@ -1343,7 +1343,7 @@ describe("employee targets", () => {
         [
           {
             label: "באחריות מיכל",
-            command: "הצג מטלות באחריות מיכל",
+            command: "הצג משימות באחריות מיכל",
           },
         ],
         {
@@ -1355,7 +1355,7 @@ describe("employee targets", () => {
           },
         },
       ).map((b) => b.command),
-    ).toEqual(["הצג מטלות באחריות מיכל"]);
+    ).toEqual(["הצג משימות באחריות מיכל"]);
 
     // Failed share: model collab without evidence → normalize to plain LIST.
     expect(
@@ -1564,7 +1564,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "בדיקה" }],
+              items: [{ "שם משימה": "בדיקה" }],
               targets: ["טל", "מיכל"],
             },
           ],
@@ -1582,13 +1582,13 @@ describe("employee targets", () => {
           },
         },
       ).map((b) => b.command),
-    ).toEqual(["כן", "לא", "הצג רשימת מטלות"]);
+    ).toEqual(["כן", "לא", "הצג רשימת משימות"]);
   });
 
   it("item-open: keeps existing-row tap without mutate; drops failed save; keeps proven apply", () => {
     const openTask = {
       label: "ללכת לספר",
-      command: "הציגי את המטלה ללכת לספר",
+      command: "הציגי את המשימה ללכת לספר",
     };
     expect(parseItemOpenButton(openTask)).toEqual({
       kind: "tasks",
@@ -1615,7 +1615,7 @@ describe("employee targets", () => {
           action: "add" as const,
           listType: "tasks" as const,
           listName: "",
-          items: [{ "שם מטלה": "ללכת לספר" }],
+          items: [{ "שם משימה": "ללכת לספר" }],
           targets: [] as string[],
         },
       ],
@@ -1646,7 +1646,7 @@ describe("employee targets", () => {
       }),
     ).toEqual([
       openTask,
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
 
     // Prefer item_id when ACTION carries it.
@@ -1657,7 +1657,7 @@ describe("employee targets", () => {
           action: "update" as const,
           listType: "tasks" as const,
           listName: "",
-          items: [{ item_id: "task-9", "שם מטלה": "ללכת לספר" }],
+          items: [{ item_id: "task-9", "שם משימה": "ללכת לספר" }],
           targets: [] as string[],
         },
       ],
@@ -1678,7 +1678,7 @@ describe("employee targets", () => {
       }),
     ).toEqual([
       openTask,
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
     // Wrong id applied → drop.
     expect(
@@ -1788,7 +1788,7 @@ describe("employee targets", () => {
     expect(
       isEngineOwnedListNavButton({
         label: "ללכת לספר",
-        command: "הציגי את המטלה ללכת לספר",
+        command: "הציגי את המשימה ללכת לספר",
       }),
     ).toBe(false);
 
@@ -1829,7 +1829,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "ללכת לספר" }],
+              items: [{ "שם משימה": "ללכת לספר" }],
               targets: [],
             },
           ],
@@ -1837,17 +1837,17 @@ describe("employee targets", () => {
         [
           {
             label: "ללכת לספר",
-            command: "הציגי את המטלה ללכת לספר",
+            command: "הציגי את המשימה ללכת לספר",
           },
-          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
         ],
       ),
     ).toEqual([
       {
         label: "ללכת לספר",
-        command: "הציגי את המטלה ללכת לספר",
+        command: "הציגי את המשימה ללכת לספר",
       },
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
   });
 
@@ -1866,7 +1866,7 @@ describe("employee targets", () => {
           action: "add" as const,
           listType: "tasks" as const,
           listName: "",
-          items: [{ "שם מטלה": "תור לספר" }],
+          items: [{ "שם משימה": "תור לספר" }],
           targets: [] as string[],
         },
       ],
@@ -1881,11 +1881,11 @@ describe("employee targets", () => {
     // Engine preserves model content-aware taps; never synthesizes אצלך/לתור alone.
     expect(ensureSpeakerShowButtons(meta, modelAngles)).toEqual([
       ...modelAngles,
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
     expect(
       ensureSpeakerShowButtons(meta, []).map((b) => b.command),
-    ).toEqual(["הצג רשימת מטלות"]);
+    ).toEqual(["הצג רשימת משימות"]);
     expect(
       ensureSpeakerShowButtons(meta, []).every(
         (b) =>
@@ -2110,12 +2110,86 @@ describe("employee targets", () => {
             action: "remove",
             listType: "tasks",
             listName: "",
-            items: [{ item_id: "6", "שם מטלה": "לשטוף את הרכב" }],
+            items: [{ item_id: "6", "שם משימה": "לשטוף את הרכב" }],
             targets: [],
           },
         ],
       }),
-    ).toEqual([{ label: "הצג מטלות", command: "הצג רשימת מטלות" }]);
+    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
+
+    // (1) Bare + opaque legacy מטלות (+ canonical twin) → one canonical משימות.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "6", "שם משימה": "לשטוף את הרכב" }],
+              targets: [],
+            },
+          ],
+        },
+        [
+          { label: "הצג מטלות", command: "הצג מטלות" },
+          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
+        ],
+      ),
+    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
+
+    // (2) Different listKeys stay separate (tasks + shopping), even with legacy.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "6", "שם משימה": "לשטוף את הרכב" }],
+              targets: [],
+            },
+            {
+              action: "remove",
+              listType: "shopping",
+              listName: "",
+              items: [{ item_id: "1", "שם פריט": "חלב" }],
+              targets: [],
+            },
+          ],
+        },
+        [
+          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          { label: "הצג קניות", command: "הצג רשימת קניות" },
+        ],
+      ),
+    ).toEqual([
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
+      { label: "הצג קניות", command: "הצג רשימת קניות" },
+    ]);
+
+    // (3) Legacy opaque command alone → accepted, user-facing label is משימות.
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "remove",
+              listType: "tasks",
+              listName: "",
+              items: [{ item_id: "6", "שם משימה": "לשטוף את הרכב" }],
+              targets: [],
+            },
+          ],
+        },
+        [{ label: "הצג מטלות", command: "הצג רשימת מטלות" }],
+      ),
+    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
 
     expect(
       ensureSpeakerShowButtons({
@@ -2141,7 +2215,7 @@ describe("employee targets", () => {
               action: "remove",
               listType: "tasks",
               listName: "",
-              items: [{ item_id: "6", "שם מטלה": "לשטוף את הרכב" }],
+              items: [{ item_id: "6", "שם משימה": "לשטוף את הרכב" }],
               targets: [],
             },
           ],
@@ -2150,7 +2224,7 @@ describe("employee targets", () => {
       ),
     ).toEqual([
       { label: "מה יש לי מחר", command: "מה יש לי מחר" },
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
 
     expect(
@@ -2271,7 +2345,7 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "ללכת לקוסמטיקאית" }],
+            items: [{ "שם משימה": "ללכת לקוסמטיקאית" }],
             targets: [],
           },
         ],
@@ -2323,7 +2397,7 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "ללכת לקוסמטיקאית" }],
+            items: [{ "שם משימה": "ללכת לקוסמטיקאית" }],
             targets: ["מיכל"],
           },
         ],
@@ -2404,14 +2478,14 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לקנות תפוחים" }],
+            items: [{ "שם משימה": "לקנות תפוחים" }],
             targets: ["ערן", "עמית"],
           },
           {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לבדוק שזה עובד" }],
+            items: [{ "שם משימה": "לבדוק שזה עובד" }],
             targets: ["ערן"],
           },
         ],
@@ -3268,7 +3342,7 @@ describe("employee targets", () => {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "להזכיר לעמית לקנות חלב ב-08:00" }],
+            items: [{ "שם משימה": "להזכיר לעמית לקנות חלב ב-08:00" }],
             targets: ["לוסי"],
           },
         ],
@@ -3287,7 +3361,7 @@ describe("employee targets", () => {
           row.employeeId === amit.id &&
           row.metadata.lists.some((list) =>
             list.items.some((item) =>
-              String(item["שם מטלה"] ?? "").includes("לוסי"),
+              String(item["שם משימה"] ?? "").includes("לוסי"),
             ),
           ),
       ),
@@ -3591,7 +3665,7 @@ describe("employee targets", () => {
             listType: "tasks",
             listName: "",
             targets: ["טל"],
-            items: [{ "שם מטלה": "לבדוק שמן" }],
+            items: [{ "שם משימה": "לבדוק שמן" }],
           },
         ],
       },
@@ -4122,7 +4196,7 @@ describe("employee targets", () => {
         amit,
         {
           ...metadata,
-          lists: [{ ...metadata.lists[0]!, listType: "tasks", items: [{ "שם מטלה": "לבדוק שמן" }] }],
+          lists: [{ ...metadata.lists[0]!, listType: "tasks", items: [{ "שם משימה": "לבדוק שמן" }] }],
         },
         { shared: true, recipientIsOwner: false, recipientIsPartner: true },
       ),
@@ -4259,7 +4333,7 @@ describe("employee targets", () => {
             items: [
               {
                 item_id: taskId,
-                "שם מטלה": "לקנות עוגה גדולה",
+                "שם משימה": "לקנות עוגה גדולה",
                 "תאריך לביצוע": "2026-10-31",
               },
             ],
@@ -4279,7 +4353,7 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.metadata.lists[0]?.items).toEqual([
       expect.objectContaining({
         item_id: taskId,
-        "שם מטלה": "לקנות עוגה גדולה",
+        "שם משימה": "לקנות עוגה גדולה",
       }),
     ]);
   });
@@ -4661,7 +4735,7 @@ describe("employee targets", () => {
             action: "add" as const,
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "לקנות מתנה" }],
+            items: [{ "שם משימה": "לקנות מתנה" }],
             targets: [],
           },
         ],
@@ -4965,7 +5039,7 @@ describe("employee targets", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "פגישה" }],
+              items: [{ "שם משימה": "פגישה" }],
               targets: [],
             },
           ],

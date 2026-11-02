@@ -1872,8 +1872,7 @@ export function filingDumpAddressText(
 }
 
 /**
- * Parse a bare `lat, lng` pair. Used to decide whether ITEM DUMP may attach
- * a Waze button (option A: coords only — no street-only navigate).
+ * Parse a bare `lat, lng` pair for Waze `navigate_address`.
  */
 export function parseLatLngCoordinates(
   raw: string,
@@ -1898,22 +1897,94 @@ export function parseLatLngCoordinates(
   return { lat, lng };
 }
 
+/** Waze target from finite WGS84 coords, or null. */
+export function navigateTargetFromCoords(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+): string | null {
+  if (
+    lat == null ||
+    lng == null ||
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    Math.abs(lat) > 90 ||
+    Math.abs(lng) > 180
+  ) {
+    return null;
+  }
+  return `${lat},${lng}`;
+}
+
 /**
- * Raw coordinate string for Waze (`navigate_address`), or null when the
- * filing has no valid saved lat/lng.
+ * Allowlisted list-item address fields only (`כתובת` / `address`).
+ * Prefer parseable lat,lng in those fields or numeric lat+lng on the row;
+ * else non-empty street text from those fields. Never title/notes/other columns.
+ */
+export function navigateTargetFromListItem(
+  item: Record<string, unknown>,
+): string | null {
+  const latRaw = item.lat ?? item.latitude;
+  const lngRaw = item.lng ?? item.longitude;
+  const latNum =
+    typeof latRaw === "number"
+      ? latRaw
+      : typeof latRaw === "string"
+        ? Number(latRaw)
+        : NaN;
+  const lngNum =
+    typeof lngRaw === "number"
+      ? lngRaw
+      : typeof lngRaw === "string"
+        ? Number(lngRaw)
+        : NaN;
+  const fromNumeric = navigateTargetFromCoords(latNum, lngNum);
+  if (fromNumeric) {
+    return fromNumeric;
+  }
+  for (const key of ["כתובת", "address"] as const) {
+    const raw = item[key];
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const asCoords = parseLatLngCoordinates(trimmed);
+    if (asCoords) {
+      return `${asCoords.lat},${asCoords.lng}`;
+    }
+    return trimmed;
+  }
+  return null;
+}
+
+/**
+ * Stored place value → Waze target: coords if parseable, else street text (`q=`).
+ * No geocoding.
+ */
+export function navigateTargetFromStoredPlace(
+  raw: string | null,
+): string | null {
+  if (!raw?.trim()) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  const coords = parseLatLngCoordinates(trimmed);
+  if (coords) {
+    return `${coords.lat},${coords.lng}`;
+  }
+  return trimmed;
+}
+
+/**
+ * Navigate target for a filing row: coords preferred, else street from
+ * place-encoded filing address fields.
  */
 export function filingNavigateCoordinates(
   row: EmployeeRecordSnapshot["filing"][number],
 ): string | null {
-  const raw = filingDumpAddressText(row);
-  if (!raw) {
-    return null;
-  }
-  const parsed = parseLatLngCoordinates(raw);
-  if (!parsed) {
-    return null;
-  }
-  return `${parsed.lat},${parsed.lng}`;
+  return navigateTargetFromStoredPlace(filingDumpAddressText(row));
 }
 
 /**
@@ -1979,10 +2050,9 @@ export function visibleFilingsForDump(
 }
 
 /**
- * Waze `navigate_address` for a filings dump (option A).
+ * Waze `navigate_address` for a filings dump.
  * - Inventory / filtered multi-row dumps → null (no Waze under the list).
- * - ITEM DUMP only, when exactly one focused row has valid saved coordinates.
- * - Street-only locations get 📍 in text but no Waze button.
+ * - ITEM DUMP only, when exactly one focused row has coords or street address.
  */
 export function navigateAddressFromFilingsDump(
   rows: EmployeeRecordSnapshot["filing"],
@@ -2001,6 +2071,55 @@ export function navigateAddressFromFilingsDump(
     return null;
   }
   return filingNavigateCoordinates(visible[0]!);
+}
+
+/**
+ * Waze for shopping/tasks/custom ITEM dump: exactly one row kept after the
+ * same dump filters as the spoken body; target from allowlisted address
+ * fields / coords only.
+ */
+export function navigateAddressFromListDump(
+  kind: string,
+  snapshot: EmployeeRecordSnapshot,
+  opts?: ShowDumpOptions,
+): string | null {
+  const itemIds = opts?.itemIds ?? null;
+  if (itemIds == null || itemIds.size === 0) {
+    return null;
+  }
+  const resolved = resolveShowDumpKind(kind);
+  if (!resolved || resolved.kind !== "list") {
+    return null;
+  }
+  const name = normalizeShowDumpListName(resolved.name);
+  const builtin = builtinListTypeFromHebrew(name);
+  if (builtin === "shopping" || builtin === "tasks") {
+    const lists = snapshot.lists.filter((list) => list.list_type === builtin);
+    const collected = collectListDumpRows(builtin, lists, opts);
+    const kept = filterDumpRows(collected, builtin, opts);
+    if (kept.length !== 1) {
+      return null;
+    }
+    return navigateTargetFromListItem(kept[0]!.item);
+  }
+  if (builtin === "contacts") {
+    return null;
+  }
+  // Named custom list.
+  const lists = snapshot.lists.filter(
+    (list) =>
+      list.list_type === "custom" &&
+      normalizeShowDumpListName(list.list_name ?? "") === name,
+  );
+  if (lists.length === 0) {
+    return null;
+  }
+  const collected = collectListDumpRows("custom", lists, opts);
+  const kept = filterDumpRows(collected, "custom", opts);
+  if (kept.length !== 1) {
+    return null;
+  }
+  return navigateTargetFromListItem(kept[0]!.item);
 }
 
 /**

@@ -17,6 +17,8 @@ import {
   placesRequestMaxResults,
   placesUnfilteredMaxResults,
   resolvePlacesReply,
+  resolvePlacesReplyDetailed,
+  navigateAddressFromPlacesResults,
   PLACES_ASPECT_BILLING_NOTES,
   PLACES_BASE_FIELD_MASK,
   PLACES_DEFAULT_BIAS_RADIUS_METERS,
@@ -1384,5 +1386,149 @@ describe("parking_cost local filter", () => {
     expect(text).toContain("*חניון בתשלום*");
     expect(text).toContain("חניה בתשלום");
     expect(text).not.toContain("*חניון חינם*");
+  });
+
+  it("navigateAddressFromPlacesResults: single+coords only", () => {
+    expect(navigateAddressFromPlacesResults([])).toBe("");
+    expect(
+      navigateAddressFromPlacesResults([
+        {
+          id: "a",
+          name: "צ'אקרה",
+          phone: "",
+          address: "King George 41",
+          postalCode: "",
+          rating: null,
+          openNow: null,
+          weekdayHours: [],
+          mapsUrl: "",
+          lat: 31.78,
+          lng: 35.22,
+          parking: null,
+          accessibility: null,
+          outdoorSeating: "unknown",
+          goodForChildren: "unknown",
+          payment: null,
+        },
+        {
+          id: "b",
+          name: "אחר",
+          phone: "",
+          address: "x",
+          postalCode: "",
+          rating: null,
+          openNow: null,
+          weekdayHours: [],
+          mapsUrl: "",
+          lat: 32,
+          lng: 34,
+          parking: null,
+          accessibility: null,
+          outdoorSeating: "unknown",
+          goodForChildren: "unknown",
+          payment: null,
+        },
+      ]),
+    ).toBe("");
+    expect(
+      navigateAddressFromPlacesResults([
+        {
+          id: "a",
+          name: "צ'אקרה",
+          phone: "",
+          address: "King George 41",
+          postalCode: "",
+          rating: null,
+          openNow: null,
+          weekdayHours: [],
+          mapsUrl: "",
+          lat: null,
+          lng: null,
+          parking: null,
+          accessibility: null,
+          outdoorSeating: "unknown",
+          goodForChildren: "unknown",
+          payment: null,
+        },
+      ]),
+    ).toBe("");
+    expect(
+      navigateAddressFromPlacesResults([
+        {
+          id: "a",
+          name: "צ'אקרה",
+          phone: "",
+          address: "King George 41",
+          postalCode: "",
+          rating: null,
+          openNow: null,
+          weekdayHours: [],
+          mapsUrl: "",
+          lat: 31.78,
+          lng: 35.22,
+          parking: null,
+          accessibility: null,
+          outdoorSeating: "unknown",
+          goodForChildren: "unknown",
+          payment: null,
+        },
+      ]),
+    ).toBe("31.78,35.22");
+  });
+
+  it("resolvePlacesReplyDetailed attaches navigate for single result with coords", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        places: [
+          {
+            id: "places/chakra",
+            displayName: { text: "צ'אקרה", languageCode: "he" },
+            formattedAddress: "King George 41, Jerusalem",
+            location: { latitude: 31.781, longitude: 35.217 },
+          },
+        ],
+      }),
+    }));
+    const one = await resolvePlacesReplyDetailed({
+      query: "צ'אקרה",
+      place: "",
+      aspects: ["address"],
+      apiKey: "test-key",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(one.text).toContain("צ'אקרה");
+    expect(one.text).toContain("King George");
+    expect(one.navigateAddress).toBe("31.781,35.217");
+
+    const fetchMulti = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        places: [
+          {
+            id: "places/a",
+            displayName: { text: "א", languageCode: "he" },
+            formattedAddress: "a",
+            location: { latitude: 31.7, longitude: 35.2 },
+          },
+          {
+            id: "places/b",
+            displayName: { text: "ב", languageCode: "he" },
+            formattedAddress: "b",
+            location: { latitude: 32.0, longitude: 34.8 },
+          },
+        ],
+      }),
+    }));
+    const multi = await resolvePlacesReplyDetailed({
+      query: "מסעדה",
+      place: "ירושלים",
+      aspects: ["address"],
+      apiKey: "test-key",
+      fetchImpl: fetchMulti as unknown as typeof fetch,
+    });
+    expect(multi.navigateAddress).toBeUndefined();
   });
 });

@@ -51,6 +51,8 @@ import {
   mapShowButtonCommandToDump,
   mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
+  navigateAddressFromListDump,
+  navigateTargetFromListItem,
   partnerBucketMatches,
   partnersKey,
   restrictListMutatesToLastNumberedDump,
@@ -652,7 +654,7 @@ describe("filings flat dump", () => {
       filingNavigateCoordinates(snap.filing[0]!),
     ).toBe("32.099279,34.8923104");
 
-    // Street-only ITEM DUMP: readable address in body; still 📍; no Waze.
+    // Street-only ITEM DUMP: readable address in body + Waze via street q=.
     expect(
       formatShowDumpFromKind("filings", snap, {
         viewerName: "טל",
@@ -664,7 +666,7 @@ describe("filings flat dump", () => {
         viewerName: "טל",
         itemIds: new Set(["street"]),
       }),
-    ).toBeNull();
+    ).toBe("הרצל 1 תל אביב");
 
     expect(
       filingPlaceMark(
@@ -1418,7 +1420,94 @@ describe("filings flat dump", () => {
     expect(asMichal).not.toContain("(עם ");
   });
 
-  it("sets navigate address only on ITEM DUMP with valid coordinates", () => {
+  it("list ITEM dump: Waze from allowlisted כתובת/coords only after filters", () => {
+    const snap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "t1",
+              "שם מטלה": "פגישה",
+              כתובת: "דיזנגוף 50 תל אביב",
+              הערות: "לא כתובת",
+            },
+            {
+              item_id: "t2",
+              "שם מטלה": "אחרת",
+              כתובת: "הרצל 1",
+            },
+          ],
+        },
+        {
+          list_type: "shopping",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "s1",
+              "שם פריט": "חלב",
+              lat: 32.08,
+              lng: 34.78,
+            },
+          ],
+        },
+        {
+          list_type: "custom",
+          list_name: "אירועים",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            {
+              item_id: "c1",
+              שם: "בר מצווה",
+              address: "31.77,35.22",
+            },
+          ],
+        },
+      ],
+      filing: [],
+    };
+    expect(
+      navigateAddressFromListDump("tasks", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["t1"]),
+      }),
+    ).toBe("דיזנגוף 50 תל אביב");
+    expect(
+      navigateTargetFromListItem({
+        "שם מטלה": "x",
+        הערות: "דיזנגוף 1",
+      }),
+    ).toBeNull();
+    expect(
+      navigateAddressFromListDump("tasks", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["t1", "t2"]),
+      }),
+    ).toBeNull();
+    expect(
+      navigateAddressFromListDump("tasks", snap, { viewerName: "טל" }),
+    ).toBeNull();
+    expect(
+      navigateAddressFromListDump("shopping", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["s1"]),
+      }),
+    ).toBe("32.08,34.78");
+    expect(
+      navigateAddressFromListDump("אירועים", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["c1"]),
+      }),
+    ).toBe("31.77,35.22");
+  });
+
+  it("sets navigate address on ITEM DUMP with coords or street; never multi-row", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -1452,13 +1541,13 @@ describe("filings flat dump", () => {
     expect(
       navigateAddressFromFilingsDump(snap.filing, { viewerName: "טל" }),
     ).toBeNull();
-    // Street-only → no Waze.
+    // Street-only ITEM DUMP → Waze via street q=.
     expect(
       navigateAddressFromFilingsDump(snap.filing, {
         viewerName: "טל",
         itemIds: new Set(["a1"]),
       }),
-    ).toBeNull();
+    ).toBe("יערה אבן יהודה");
     // Valid coords → Waze target.
     expect(
       navigateAddressFromFilingsDump(snap.filing, {

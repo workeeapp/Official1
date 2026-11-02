@@ -229,7 +229,7 @@ function formatAppliedLines(applied: AppliedOp[]): string[] {
       (removes[0].listType === "shopping"
         ? "קניות"
         : removes[0].listType === "tasks"
-          ? "מטלות"
+          ? "משימות"
           : "הרשימה");
     lines.push(`הסרתי את «${removes[0].label}» מרשימת «${list}».`);
   } else if (removes.length > 1) {

@@ -394,7 +394,7 @@ export function formatSavedRouteAmbiguousAsk(
       opt.listType === "filings"
         ? "תיוק"
         : opt.listType === "tasks"
-          ? "מטלות"
+          ? "משימות"
           : opt.listType === "shopping"
             ? "קניות"
             : opt.listType === "contacts" || opt.listType === "phone_book"

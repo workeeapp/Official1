@@ -149,7 +149,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     text: "לידיעתך: אפשר למחוק מהקניות במשפט — «תמחקי את החלב» — או לכתוב «קניתי חלב» כשכבר קנית.",
   },
 
-  // —— Tasks (מטלות) ——
+  // —— Tasks (משימות) ——
   {
     key: "tasks_basic_add",
     for: "lucy",
@@ -178,7 +178,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 201,
-    text: "דרך אגב, «הציגי את המטלות» מראה לך מה פתוח אצלי.",
+    text: "דרך אגב, «הציגי את המשימות» מראה לך מה פתוח אצלי.",
   },
   {
     key: "tasks_mid_done",
@@ -256,7 +256,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     text: "לידיעתך: כשרוצים להסיר לגמרי — «תמחקי את המטלה להתקשר לרופא». לסימון שסיימת להפעם עדיף «סיימתי…».",
   },
 
-  // —— Meetings (פגישות ביומן המטלות) ——
+  // —— Meetings (פגישות ביומן המשימות) ——
   {
     key: "meetings_basic_slot",
     for: "lucy",
@@ -285,7 +285,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 701,
-    text: "דרך אגב, אפשר לשאול «מה יש לי מחר?» ואראה את הפגישות והמטלות לאותו יום.",
+    text: "דרך אגב, אפשר לשאול «מה יש לי מחר?» ואראה את הפגישות והמשימות לאותו יום.",
   },
   {
     key: "meetings_mid_duration",

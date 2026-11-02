@@ -203,6 +203,7 @@ import {
   looksLikeFreeWrittenNumberedInventory,
   mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
+  navigateAddressFromListDump,
   resolveShowDumpKind,
   restrictListMutatesToLastNumberedDump,
   undatedTasksOfferButton,
@@ -3708,6 +3709,18 @@ export async function sendChatMessage(input: {
             if (dumpAddress && !parseLlmReply(workingReply).navigateAddress) {
               workingReply = setEngineNavigateAddress(workingReply, dumpAddress);
             }
+          } else if (
+            resolved?.kind === "list" &&
+            !parseLlmReply(workingReply).navigateAddress
+          ) {
+            const dumpAddress = navigateAddressFromListDump(
+              showDumpKind,
+              snapshot,
+              opts,
+            );
+            if (dumpAddress) {
+              workingReply = setEngineNavigateAddress(workingReply, dumpAddress);
+            }
           }
           if (
             validIds.length === 1 &&
@@ -4253,6 +4266,15 @@ export async function sendChatMessage(input: {
         workingReply = applyLiveDomainReply(workingReply, placesResult.text, {
           watchSample: watchSampleTurn,
         });
+        if (
+          placesResult.navigateAddress &&
+          !parseLlmReply(workingReply).navigateAddress
+        ) {
+          workingReply = setEngineNavigateAddress(
+            workingReply,
+            placesResult.navigateAddress,
+          );
+        }
         if (
           shouldClearPendingAfterSpeakerPinUse({
             usedPendingPin:
