@@ -637,11 +637,11 @@ describe("parseLlmReply", () => {
           buttons: [
             { label: " הצג ", command: " הצג רשימת קניות " },
             { label: "הצג", command: "הצג רשימת קניות" },
-            { label: "", command: "הצג רשימת מטלות" },
+            { label: "", command: "הצג רשימת משימות" },
             { label: "הצג", command: "" },
             "bad",
             { label: "הצג את הרשימה הארוכה מאוד", command: "הצג רשימת בעיות" },
-            { label: "הצג", command: "הצג רשימת מטלות" },
+            { label: "הצג", command: "הצג רשימת משימות" },
             { label: "הצג", command: "הצג רשימת אנשי קשר" },
           ],
         },
@@ -651,7 +651,7 @@ describe("parseLlmReply", () => {
     expect(parsed.buttons).toEqual([
       { label: "הצג", command: "הצג רשימת קניות" },
       { label: "הצג את הרשימה הארוכה", command: "הצג רשימת בעיות" },
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
   });
 
@@ -941,7 +941,7 @@ describe("parseLlmReply", () => {
 
   it("classifies classic and content-aware show taps vs closed choices", () => {
     expect(
-      isShowListReplyButton({ label: "הצג", command: "הצג רשימת מטלות" }),
+      isShowListReplyButton({ label: "הצג", command: "הצג רשימת משימות" }),
     ).toBe(true);
     // POST-MUTATE SHOW: short label + longer natural ask in command.
     expect(
@@ -991,27 +991,27 @@ describe("parseLlmReply", () => {
     // Overdue raise closed choice — not LIST confirm chrome.
     expect(
       isShowListReplyButton({
-        label: "הצג את המטלות",
-        command: "הצג את המטלות",
+        label: "הצג את המשימות",
+        command: "הצג את המשימות",
       }),
     ).toBe(false);
     expect(
       isClosedChoiceReplyButton({
-        label: "הצג את המטלות",
-        command: "הצג את המטלות",
+        label: "הצג את המשימות",
+        command: "הצג את המשימות",
       }),
     ).toBe(true);
     expect(
       isShowListReplyButton({
-        label: "הצג מטלות",
-        command: "הצג רשימת מטלות",
+        label: "הצג משימות",
+        command: "הצג רשימת משימות",
       }),
     ).toBe(true);
     // Stale undated raise: label===command stays on the raise bubble.
     expect(
       isShowListReplyButton({
-        label: "הצג מטלות",
-        command: "הצג מטלות",
+        label: "הצג משימות",
+        command: "הצג משימות",
       }),
     ).toBe(false);
     expect(
@@ -1024,13 +1024,13 @@ describe("parseLlmReply", () => {
 
   it("distributes show buttons to first bubble and choices to last", () => {
     const buttons = [
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
       { label: "כן", command: "כן" },
       { label: "לא", command: "לא" },
     ];
     expect(distributeReplyButtons(1, buttons)).toEqual([buttons]);
     expect(distributeReplyButtons(2, buttons)).toEqual([
-      [{ label: "הצג", command: "הצג רשימת מטלות" }],
+      [{ label: "הצג", command: "הצג רשימת משימות" }],
       [
         { label: "כן", command: "כן" },
         { label: "לא", command: "לא" },
@@ -1055,8 +1055,8 @@ describe("parseLlmReply", () => {
       JSON.stringify({
         responses: [
           {
-            text: "הוספתי מטלה.",
-            buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+            text: "הוספתי משימה.",
+            buttons: [{ label: "הצג", command: "הצג רשימת משימות" }],
           },
           {
             text: "רוצה תזכורת?",
@@ -1077,7 +1077,7 @@ describe("parseLlmReply", () => {
       }),
     );
     expect(parsed.responseBubbles[0]?.buttons).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
     expect(parsed.responseBubbles[1]?.buttons).toEqual([
       { label: "כן", command: "כן" },
@@ -1093,7 +1093,7 @@ describe("parseLlmReply", () => {
         responses: ["אישור", "רוצה תזכורת?"],
         metadata: {
           buttons: [
-            { label: "הצג", command: "הצג רשימת מטלות" },
+            { label: "הצג", command: "הצג רשימת משימות" },
             { label: "כן", command: "כן" },
             { label: "לא", command: "לא" },
           ],
@@ -1101,7 +1101,7 @@ describe("parseLlmReply", () => {
       }),
     );
     expect(parsed.responseBubbles[0]?.buttons).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
     expect(parsed.responseBubbles[1]?.buttons).toEqual([
       { label: "כן", command: "כן" },
@@ -1114,7 +1114,7 @@ describe("parseLlmReply", () => {
       [
         {
           text: "הוספתי",
-          buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+          buttons: [{ label: "הצג", command: "הצג רשימת משימות" }],
         },
         {
           text: "רוצה?",
@@ -1126,13 +1126,13 @@ describe("parseLlmReply", () => {
         { text: "טיפ" },
       ],
       [
-        { label: "הצג", command: "הצג רשימת מטלות" },
+        { label: "הצג", command: "הצג רשימת משימות" },
         { label: "כן", command: "כן" },
         { label: "לא", command: "לא" },
       ],
     );
     expect(bubbles[0]?.buttons).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
     expect(bubbles[1]?.buttons).toEqual([
       { label: "כן", command: "כן" },
@@ -1145,7 +1145,7 @@ describe("parseLlmReply", () => {
     const overdueButtons = [
       { label: "סגירה", command: "סגירה" },
       { label: "עדכן מועד להיום", command: "עדכן מועד להיום" },
-      { label: "הצג את המטלות", command: "הצג את המטלות" },
+      { label: "הצג את המשימות", command: "הצג את המשימות" },
     ];
     const bubbles = applyShowButtonsToBubbles(
       [
@@ -1215,9 +1215,9 @@ describe("parseLlmReply", () => {
             buttons: [
               {
                 label: "ללכת לחבר",
-                command: "הציגי את המטלה ללכת לחבר",
+                command: "הציגי את המשימה ללכת לחבר",
               },
-              { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+              { label: "הצג משימות", command: "הצג רשימת משימות" },
             ],
           },
         ],
@@ -1227,7 +1227,7 @@ describe("parseLlmReply", () => {
               action: "add",
               list_type: "tasks",
               list_name: "",
-              items: [{ "שם מטלה": "ללכת לחבר" }],
+              items: [{ "שם משימה": "ללכת לחבר" }],
             },
             {
               action: "add",
@@ -1241,8 +1241,8 @@ describe("parseLlmReply", () => {
     );
     expect(parsed.responseBubbles).toHaveLength(1);
     expect(parsed.responseBubbles[0]?.buttons?.map((b) => b.command)).toEqual([
-      "הציגי את המטלה ללכת לחבר",
-      "הצג רשימת מטלות",
+      "הציגי את המשימה ללכת לחבר",
+      "הצג רשימת משימות",
     ]);
     expect(
       parsed.responseBubbles.some((bubble) =>
@@ -1257,9 +1257,9 @@ describe("parseLlmReply", () => {
       JSON.stringify({
         responses: [
           {
-            text: "רשמתי את המטלה ללכת לחבר. מתי לשלוח את התזכורת?",
+            text: "רשמתי את המשימה ללכת לחבר. מתי לשלוח את התזכורת?",
             buttons: [
-              { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+              { label: "הצג משימות", command: "הצג רשימת משימות" },
             ],
           },
         ],
@@ -1269,14 +1269,14 @@ describe("parseLlmReply", () => {
               action: "add",
               list_type: "tasks",
               list_name: "",
-              items: [{ "שם מטלה": "ללכת לחבר" }],
+              items: [{ "שם משימה": "ללכת לחבר" }],
             },
           ],
         },
       }),
     );
     expect(parsed.responseBubbles).toHaveLength(1);
-    expect(parsed.responseBubbles[0]?.text).toContain("רשמתי את המטלה");
+    expect(parsed.responseBubbles[0]?.text).toContain("רשמתי את המשימה");
     expect(parsed.responseBubbles[0]?.text).not.toMatch(
       /תיזכרתי|הוספתי תזכורת|קבעתי תזכורת/,
     );
@@ -1291,17 +1291,17 @@ describe("parseLlmReply", () => {
     const raw = JSON.stringify({
       responses: [
         {
-          text: "רשמתי לך מטלה ללכת לחבר מחר ב־20:00.",
+          text: "רשמתי לך משימה ללכת לחבר מחר ב־20:00.",
           buttons: [
             {
               label: "ללכת לחבר",
-              command: "הציגי את המטלה ללכת לחבר",
+              command: "הציגי את המשימה ללכת לחבר",
             },
-            { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+            { label: "הצג משימות", command: "הצג רשימת משימות" },
           ],
         },
         {
-          text: "רוצה שאוסיף גם תזכורת למטלה הזו?",
+          text: "רוצה שאוסיף גם תזכורת למשימה הזו?",
           buttons: [
             { label: "כן", command: "כן" },
             { label: "לא", command: "לא" },
@@ -1316,9 +1316,9 @@ describe("parseLlmReply", () => {
     expect(parsed.responseBubbles[0]?.buttons).toEqual([
       {
         label: "ללכת לחבר",
-        command: "הציגי את המטלה ללכת לחבר",
+        command: "הציגי את המשימה ללכת לחבר",
       },
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
     expect(
       parsed.responseBubbles[0]?.buttons?.some((b) =>
@@ -1341,8 +1341,8 @@ describe("parseLlmReply", () => {
     );
     expect(distributed).toHaveLength(2);
     expect(distributed[0]?.buttons?.map((b) => b.command)).toEqual([
-      "הציגי את המטלה ללכת לחבר",
-      "הצג רשימת מטלות",
+      "הציגי את המשימה ללכת לחבר",
+      "הצג רשימת משימות",
     ]);
     expect(distributed[1]?.buttons?.map((b) => b.command)).toEqual([
       "כן",
@@ -1596,7 +1596,7 @@ describe("parseLlmReply", () => {
               {
                 action: "add",
                 list_type: "tasks",
-                items: [{ "שם מטלה": "לקנות מתנה" }],
+                items: [{ "שם משימה": "לקנות מתנה" }],
               },
             ],
             filing: [
@@ -1622,7 +1622,7 @@ describe("parseLlmReply", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לקנות מתנה" }],
+          items: [{ "שם משימה": "לקנות מתנה" }],
           targets: [],
         },
       ],
@@ -3700,7 +3700,7 @@ describe("parseLlmReply", () => {
                 every_count: 1,
                 every_unit: "days",
                 ping: ["טל"],
-                text: "מה יש לי היום במטלות ובתזכורות",
+                text: "מה יש לי היום במשימות ובתזכורות",
                 compose: true,
                 compose_source: "saved_data",
               },

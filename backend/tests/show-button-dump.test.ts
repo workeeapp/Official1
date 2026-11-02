@@ -81,7 +81,7 @@ describe("closed show button allowlist", () => {
     expect(mapShowButtonCommandToDump("הצג תזכורות")).toBe("reminders");
     expect(mapShowButtonCommandToDump("הצג תיוקים")).toBe("filings");
     expect(mapShowButtonCommandToDump("הצג רשימות")).toBe("full");
-    expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
+    expect(mapShowButtonCommandToDump("הצג רשימת משימות")).toBe("tasks");
     expect(mapShowButtonCommandToDump("הצג רשימת אנשי קשר")).toBe("phone_book");
     expect(mapShowButtonCommandToDump(showAllListButtonCommand("shopping"))).toBe(
       "shopping",
@@ -141,14 +141,14 @@ describe("closed show button allowlist", () => {
     ).toBe(true);
   });
 
-  it("maps worker inventory «הצג מטלות של X» to tasks + about", () => {
-    expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
+  it("maps worker inventory «הצג משימות של X» to tasks + about", () => {
+    expect(mapShowButtonCommandToDumpTarget("הצג משימות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",
     });
-    expect(isKnownShowButtonCommand("הצג מטלות של לוסי")).toBe(true);
+    expect(isKnownShowButtonCommand("הצג משימות של לוסי")).toBe(true);
     // Collab shapes stay distinct from about.
-    expect(mapShowButtonCommandToDumpTarget("הצג מטלות באחריות לוסי")).toEqual({
+    expect(mapShowButtonCommandToDumpTarget("הצג משימות באחריות לוסי")).toEqual({
       kind: "tasks",
       section: "shared",
       assignee: "לוסי",
@@ -778,9 +778,9 @@ describe("filings flat dump", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "t1", "שם מטלה": "לשיננית" },
-            { item_id: "t2", "שם מטלה": "לקנות חלב" },
-            { item_id: "t3", "שם מטלה": "לחזור מהשיננית" },
+            { item_id: "t1", "שם משימה": "לשיננית" },
+            { item_id: "t2", "שם משימה": "לקנות חלב" },
+            { item_id: "t3", "שם משימה": "לחזור מהשיננית" },
           ],
         },
       ],
@@ -804,8 +804,8 @@ describe("filings flat dump", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "t1", "שם מטלה": "ללכת לרופא" },
-            { item_id: "t2", "שם מטלה": "לקנות חלב" },
+            { item_id: "t1", "שם משימה": "ללכת לרופא" },
+            { item_id: "t2", "שם משימה": "לקנות חלב" },
           ],
         },
       ],
@@ -889,9 +889,9 @@ describe("filings flat dump", () => {
             owner: "טל",
             scope: "personal",
             items: [
-              { item_id: "t1", "שם מטלה": "א" },
-              { item_id: "t2", "שם מטלה": "ב" },
-              { item_id: "t3", "שם מטלה": "ג" },
+              { item_id: "t1", "שם משימה": "א" },
+              { item_id: "t2", "שם משימה": "ב" },
+              { item_id: "t3", "שם משימה": "ג" },
             ],
           },
         ],
@@ -1151,8 +1151,8 @@ describe("filings flat dump", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "task-dentist", "שם מטלה": "לשיננית" },
-            { item_id: "task-pkg", "שם מטלה": "לאסוף חבילה" },
+            { item_id: "task-dentist", "שם משימה": "לשיננית" },
+            { item_id: "task-pkg", "שם משימה": "לאסוף חבילה" },
           ],
         },
         {
@@ -1431,13 +1431,13 @@ describe("filings flat dump", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "פגישה",
+              "שם משימה": "פגישה",
               כתובת: "דיזנגוף 50 תל אביב",
               הערות: "לא כתובת",
             },
             {
               item_id: "t2",
-              "שם מטלה": "אחרת",
+              "שם משימה": "אחרת",
               כתובת: "הרצל 1",
             },
           ],
@@ -1480,7 +1480,7 @@ describe("filings flat dump", () => {
     ).toBe("דיזנגוף 50 תל אביב");
     expect(
       navigateTargetFromListItem({
-        "שם מטלה": "x",
+        "שם משימה": "x",
         הערות: "דיזנגוף 1",
       }),
     ).toBeNull();
@@ -1599,25 +1599,25 @@ describe("formatShowDumpFromKind", () => {
         items: [
           {
             item_id: "t1",
-            "שם מטלה": "לבדוק את הבאג הזה",
+            "שם משימה": "לבדוק את הבאג הזה",
             reminder: { reminder_id: "r3", fire_at: "2026-10-15 20:30", repeat: "none" },
           },
           {
             item_id: "t2",
-            "שם מטלה": "ללכת לשוק 🍅",
+            "שם משימה": "ללכת לשוק 🍅",
             חוזר: "שני ושלישי ב־19:00",
             attachments: [{ id: "a1" }],
           },
           {
             item_id: "t3",
-            "שם מטלה": "חתונה של תום",
+            "שם משימה": "חתונה של תום",
             "תאריך לביצוע": "2026-10-12",
             "שעה לביצוע": "19:30",
             attachments: [{ id: "a2" }],
           },
           {
             item_id: "t4",
-            "שם מטלה": "לראות מה קורה עם הביט",
+            "שם משימה": "לראות מה קורה עם הביט",
             reminder: {
               reminder_id: "r4",
               fire_at: "2026-11-15 09:00",
@@ -1635,7 +1635,7 @@ describe("formatShowDumpFromKind", () => {
         items: [
           {
             item_id: "t5",
-            "שם מטלה": "פגישה (טל, עמית)",
+            "שם משימה": "פגישה (טל, עמית)",
             חוזר: "ראשון ורביעי ב־21:30",
           },
         ],
@@ -2272,15 +2272,15 @@ describe("formatShowDumpFromKind", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "tp1", "שם מטלה": "לטפל בעמידר" },
+            { item_id: "tp1", "שם משימה": "לטפל בעמידר" },
             {
               item_id: "ta1",
-              "שם מטלה": "לבדוק שמן",
+              "שם משימה": "לבדוק שמן",
               assigned_by: "עמית",
             },
             {
               item_id: "ts1",
-              "שם מטלה": "פגישה (טל, עמית)",
+              "שם משימה": "פגישה (טל, עמית)",
               shared_with: ["טל", "עמית"],
             },
           ],
@@ -2290,7 +2290,7 @@ describe("formatShowDumpFromKind", () => {
           list_name: "",
           owner: "עמית",
           scope: "shared_items",
-          items: [{ item_id: "tout1", "שם מטלה": "לעשות טסט לרכב" }],
+          items: [{ item_id: "tout1", "שם משימה": "לעשות טסט לרכב" }],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [],
@@ -2326,8 +2326,8 @@ describe("formatShowDumpFromKind", () => {
     expect(tasks).toMatch(
       /1\. לטפל בעמידר\n2\. פגישה \(טל, עמית\)\n3\. לבדוק שמן \(באחריות טל · מאת עמית\)\n4\. לעשות טסט לרכב \(באחריות עמית · מאת טל\)/,
     );
-    expect(tasks).not.toContain("מטלות של ");
-    expect(tasks).not.toContain("מטלות אישיות");
+    expect(tasks).not.toContain("משימות של ");
+    expect(tasks).not.toContain("משימות אישיות");
 
     const sharedOnly = formatShowDumpFromKind("shopping", threeWay, {
       viewerName: "טל",
@@ -2574,7 +2574,7 @@ describe("formatShowDumpFromKind", () => {
           list_type: "tasks",
           owner: "טל",
           scope: "personal",
-          items: [{ item_id: "t1", "שם מטלה": longTask }],
+          items: [{ item_id: "t1", "שם משימה": longTask }],
         },
         {
           list_type: "shopping",
@@ -2857,7 +2857,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("חתונה של תום 📎 — 12.10.2026 ב־19:30");
     expect(text).toContain("לראות מה קורה עם הביט 🔔");
     expect(text).toContain("✅ משימות:");
-    expect(text).not.toContain("מטלות משותפות עם");
+    expect(text).not.toContain("משימות משותפות עם");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
   });
 
@@ -3024,12 +3024,12 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "a1",
-              "שם מטלה": "חלב עליי",
+              "שם משימה": "חלב עליי",
               assigned_by: "מיכל",
             },
             {
               item_id: "s1",
-              "שם מטלה": "קפה משותף",
+              "שם משימה": "קפה משותף",
               shared_with: ["טל", "מיכל"],
             },
           ],
@@ -3039,7 +3039,7 @@ describe("formatShowDumpFromKind", () => {
           list_name: "",
           owner: "מיכל",
           scope: "shared_items",
-          items: [{ item_id: "out1", "שם מטלה": "שמן למיכל" }],
+          items: [{ item_id: "out1", "שם משימה": "שמן למיכל" }],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [],
@@ -3084,18 +3084,18 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "עליי בטווח",
+              "שם משימה": "עליי בטווח",
               "תאריך לביצוע": "2026-10-18",
               assigned_by: "מיכל",
             },
             {
               item_id: "t2",
-              "שם מטלה": "על מיכל בטווח",
+              "שם משימה": "על מיכל בטווח",
               "תאריך לביצוע": "2026-10-19",
             },
             {
               item_id: "t3",
-              "שם מטלה": "עליי מחוץ",
+              "שם משימה": "עליי מחוץ",
               "תאריך לביצוע": "2026-10-25",
               assigned_by: "מיכל",
             },
@@ -3109,7 +3109,7 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "out1",
-              "שם מטלה": "שמן למיכל בטווח",
+              "שם משימה": "שמן למיכל בטווח",
               "תאריך לביצוע": "2026-10-18",
             },
           ],
@@ -3123,7 +3123,7 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "s1",
-              "שם מטלה": "עם עמית",
+              "שם משימה": "עם עמית",
               "תאריך לביצוע": "2026-10-18",
             },
           ],
@@ -3174,19 +3174,19 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "פגישה בטווח",
+              "שם משימה": "פגישה בטווח",
               "תאריך לביצוע": "2026-10-18",
               assigned_by: "מיכל",
             },
             {
               item_id: "t2",
-              "שם מטלה": "מחוץ לטווח",
+              "שם משימה": "מחוץ לטווח",
               "תאריך לביצוע": "2026-10-25",
               assigned_by: "מיכל",
             },
             {
               item_id: "t3",
-              "שם מטלה": "חוזרת",
+              "שם משימה": "חוזרת",
               חוזר: "כל יום שני",
               next_occurrences: ["2026-10-19 09:00", "2026-10-26 09:00"],
               assigned_by: "מיכל",
@@ -3249,25 +3249,25 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "meet-1",
-              "שם מטלה": "פגישה עם רואה חשבון",
+              "שם משימה": "פגישה עם רואה חשבון",
               "תאריך לביצוע": "2026-10-12",
               "שעה לביצוע": "09:00",
             },
             {
               item_id: "doc-1",
-              "שם מטלה": "תור לרופא",
+              "שם משימה": "תור לרופא",
               "תאריך לביצוע": "2026-10-13",
               "שעה לביצוע": "11:00",
             },
             {
               item_id: "pkg-1",
-              "שם מטלה": "לאסוף חבילה",
+              "שם משימה": "לאסוף חבילה",
               "תאריך לביצוע": "2026-10-14",
               "שעה לביצוע": "16:00",
             },
             {
               item_id: "out-1",
-              "שם מטלה": "מטלה מחוץ לטווח",
+              "שם משימה": "משימה מחוץ לטווח",
               "תאריך לביצוע": "2026-10-25",
               "שעה לביצוע": "09:00",
             },
@@ -3288,7 +3288,7 @@ describe("formatShowDumpFromKind", () => {
       expect(dump).toContain("פגישה עם רואה חשבון");
       expect(dump).toContain("תור לרופא");
       expect(dump).toContain("לאסוף חבילה");
-      expect(dump).not.toContain("מטלה מחוץ לטווח");
+      expect(dump).not.toContain("משימה מחוץ לטווח");
     });
 
     // T2: same-kind semantic via ids — only chosen rows.
@@ -3404,7 +3404,7 @@ describe("formatShowDumpFromKind", () => {
           list_name: "",
           owner: "טל",
           scope: "personal",
-          items: [{ item_id: "t1", "שם מטלה": "לטפל בעמידר" }],
+          items: [{ item_id: "t1", "שם משימה": "לטפל בעמידר" }],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [],
@@ -3453,7 +3453,7 @@ describe("formatShowDumpFromKind", () => {
           list_name: "",
           owner: "טל",
           scope: "personal",
-          items: [{ item_id: "t1", "שם מטלה": "להתקשר" }],
+          items: [{ item_id: "t1", "שם משימה": "להתקשר" }],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
       filing: [
@@ -3687,7 +3687,7 @@ describe("formatShowDumpFromKind", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "פגישה (טל, עמית)",
+              "שם משימה": "פגישה (טל, עמית)",
               shared_with: ["טל", "עמית"],
               scope: "shared",
             },
@@ -3725,7 +3725,7 @@ describe("formatShowDumpFromKind", () => {
 describe("worker inventory tasks dump helpers", () => {
   it("recognizes tasks show_dump kinds", () => {
     expect(isTasksShowDumpKind("tasks")).toBe(true);
-    expect(isTasksShowDumpKind("מטלות")).toBe(true);
+    expect(isTasksShowDumpKind("משימות")).toBe(true);
     expect(isTasksShowDumpKind("shopping")).toBe(false);
     expect(isTasksShowDumpKind("full")).toBe(false);
   });
@@ -3739,8 +3739,8 @@ describe("worker inventory tasks dump helpers", () => {
           owner: "לוסי",
           scope: "personal",
           items: [
-            { item_id: "job-shadow", "שם מטלה": "לבדוק עם ערן: אם קנית חלב?" },
-            { item_id: "standing", "שם מטלה": "להזכיר לטל לקנות חלב" },
+            { item_id: "job-shadow", "שם משימה": "לבדוק עם ערן: אם קנית חלב?" },
+            { item_id: "standing", "שם משימה": "להזכיר לטל לקנות חלב" },
           ],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
@@ -3754,7 +3754,7 @@ describe("worker inventory tasks dump helpers", () => {
     expect(text).not.toContain("לבדוק עם ערן");
   });
 
-  it("הצג מטלות (speaker book) dumps speaker tasks — not Lucy OPEN_JOBS follow-ups", () => {
+  it("הצג משימות (speaker book) dumps speaker tasks — not Lucy OPEN_JOBS follow-ups", () => {
     // Speaker ESD snapshot has the human's tasks; worker follow-ups live on Lucy's book.
     // Bare show_dump=tasks must use the speaker snapshot (no about=לוסי).
     const speakerSnap: EmployeeRecordSnapshot = {
@@ -3765,8 +3765,8 @@ describe("worker inventory tasks dump helpers", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "user-1", "שם מטלה": "לקנות חלב" },
-            { item_id: "user-2", "שם מטלה": "להתקשר לרופא" },
+            { item_id: "user-1", "שם משימה": "לקנות חלב" },
+            { item_id: "user-2", "שם משימה": "להתקשר לרופא" },
           ],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
@@ -3782,11 +3782,11 @@ describe("worker inventory tasks dump helpers", () => {
           items: [
             {
               item_id: "job-follow",
-              "שם מטלה": "לבדוק עם טל: אם קנית חלב?",
+              "שם משימה": "לבדוק עם טל: אם קנית חלב?",
             },
             {
               item_id: "nudge",
-              "שם מטלה": "להזכיר לטל לקנות חלב",
+              "שם משימה": "להזכיר לטל לקנות חלב",
             },
           ],
         } as EmployeeRecordSnapshot["lists"][number],
@@ -3799,17 +3799,17 @@ describe("worker inventory tasks dump helpers", () => {
     });
     expect(mapShowButtonCommandToDump("הצג רשימת משימות")).toBe("tasks");
     // Legacy label still allowlisted.
-    expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
+    expect(mapShowButtonCommandToDumpTarget("הצג רשימת משימות")).toEqual({
       kind: "tasks",
     });
-    expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
+    expect(mapShowButtonCommandToDump("הצג רשימת משימות")).toBe("tasks");
     // Label-only «הצג משימות» is NOT the opaque allowlist command (engine uses full command).
     expect(mapShowButtonCommandToDump("הצג משימות")).toBeNull();
     expect(mapShowButtonCommandToDumpTarget("הצג משימות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",
     });
-    expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
+    expect(mapShowButtonCommandToDumpTarget("הצג משימות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",
     });
@@ -3857,7 +3857,7 @@ describe("worker inventory tasks dump helpers", () => {
       title: "לקנות חלב",
       item: {
         item_id: "task-1",
-        "שם מטלה": "לקנות חלב",
+        "שם משימה": "לקנות חלב",
         "תאריך לביצוע": "2026-11-03",
       },
     };
@@ -3935,20 +3935,20 @@ describe("worker inventory tasks dump helpers", () => {
     expect(workerAgenda.text).toContain("לשלוח הודעה לטל");
   });
 
-  it("canonical tasks Hebrew is משימות; legacy מטלות still resolves", () => {
+  it("canonical tasks Hebrew is משימות; legacy משימות still resolves", () => {
     expect(builtinListHebrew("tasks")).toBe("משימות");
     expect(builtinListTypeFromHebrew("משימות")).toBe("tasks");
-    expect(builtinListTypeFromHebrew("מטלות")).toBe("tasks");
+    expect(builtinListTypeFromHebrew("משימות")).toBe("tasks");
     expect(showListButtonCommand("tasks")).toBe("הצג רשימת משימות");
     expect(showAllListButtonCommand("tasks")).toBe("כל המשימות");
     expect(showWorkerTasksButtonCommand("לוסי")).toBe("הצג משימות של לוסי");
-    expect(mapShowButtonCommandToDump("כל המטלות")).toBe("tasks");
+    expect(mapShowButtonCommandToDump("כל המשימות")).toBe("tasks");
     expect(mapShowButtonCommandToDump("כל המשימות")).toBe("tasks");
     expect(resolveShowDumpKind("משימות")).toEqual({
       kind: "list",
       name: "משימות",
     });
-    expect(resolveShowDumpKind("מטלות")).toEqual({
+    expect(resolveShowDumpKind("משימות")).toEqual({
       kind: "list",
       name: "משימות",
     });
@@ -3981,9 +3981,9 @@ describe("worker inventory tasks dump helpers", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "1", "שם מטלה": "רגיל" },
-            { item_id: "2", "שם מטלה": "דחוף", urgency: "urgent" },
-            { item_id: "3", "שם מטלה": "ממש דחוף", urgency: "very_urgent" },
+            { item_id: "1", "שם משימה": "רגיל" },
+            { item_id: "2", "שם משימה": "דחוף", urgency: "urgent" },
+            { item_id: "3", "שם משימה": "ממש דחוף", urgency: "very_urgent" },
           ],
         } as EmployeeRecordSnapshot["lists"][number],
       ],
@@ -4049,7 +4049,7 @@ describe("worker inventory tasks dump helpers", () => {
           items: [
             {
               item_id: "1",
-              "שם מטלה": "להזכיר לטל לבדוק את הביט",
+              "שם משימה": "להזכיר לטל לבדוק את הביט",
               assigned_by: "טל",
               reminder: {
                 reminder_id: "r1",
@@ -4059,7 +4059,7 @@ describe("worker inventory tasks dump helpers", () => {
             },
             {
               item_id: "2",
-              "שם מטלה": "לשלוח למיכל ברכת בוקר",
+              "שם משימה": "לשלוח למיכל ברכת בוקר",
               "שעה לביצוע": "09:00",
               assigned_by: "טל",
             },
@@ -4097,10 +4097,10 @@ describe("worker inventory tasks dump helpers", () => {
           owner: "טל",
           scope: "personal",
           items: [
-            { item_id: "p", "שם מטלה": "פרטי" },
+            { item_id: "p", "שם משימה": "פרטי" },
             {
               item_id: "meet",
-              "שם מטלה": "פגישה (טל, עמית)",
+              "שם משימה": "פגישה (טל, עמית)",
               shared_with: ["טל", "עמית"],
               scope: "shared",
               reminder: {
@@ -4230,7 +4230,7 @@ describe("uniform standing + ping dump lines", () => {
 
   const standingSkazi = {
     item_id: "skazi-am",
-    "שם מטלה": "להוריד את סקאזי לטיול",
+    "שם משימה": "להוריד את סקאזי לטיול",
     חוזר: "כל יום ב־08:45",
     next_occurrences: [
       "2026-10-18 08:45",
@@ -4247,7 +4247,7 @@ describe("uniform standing + ping dump lines", () => {
 
   it("day-agenda standing line matches flat dump schedule suffix (incl. exceptions)", () => {
     const item = {
-      "שם מטלה": "חוג תיאטרון",
+      "שם משימה": "חוג תיאטרון",
       חוזר: "כל שני ורביעי ב־19:00",
       exceptions: ["28.10 ב־18:00"],
       next_occurrences: ["2026-10-28 18:00"],
@@ -4294,7 +4294,7 @@ describe("uniform standing + ping dump lines", () => {
           items: [
             {
               item_id: "chore",
-              "שם מטלה": "לשתות מים",
+              "שם משימה": "לשתות מים",
               "תאריך לביצוע": "2026-10-21",
               "שעה לביצוע": "10:00",
             },
@@ -4394,7 +4394,7 @@ describe("uniform standing + ping dump lines", () => {
           items: [
             {
               item_id: "mashov-watch",
-              "שם מטלה":
+              "שם משימה":
                 "לעקוב במשוב אחרי חיסורים, איחורים וציונים חדשים של יואב ב־21:00",
               חוזר: "כל שעה",
               next_occurrences: hourly,
@@ -4407,7 +4407,7 @@ describe("uniform standing + ping dump lines", () => {
             },
             {
               item_id: "kids",
-              "שם מטלה": "לאסוף את הילדים",
+              "שם משימה": "לאסוף את הילדים",
               חוזר: "כל יום שישי ב־11:45",
               next_occurrences: ["2026-10-24 11:45"],
             },
@@ -4479,7 +4479,7 @@ describe("uniform standing + ping dump lines", () => {
           items: [
             {
               item_id: "water",
-              "שם מטלה": "לשתות מים",
+              "שם משימה": "לשתות מים",
               חוזר: "כל שעתיים",
               next_occurrences: slots,
             },
@@ -4512,13 +4512,13 @@ describe("uniform standing + ping dump lines", () => {
             standingSkazi,
             {
               item_id: "meet",
-              "שם מטלה": "פגישה (טל, עמית)",
+              "שם משימה": "פגישה (טל, עמית)",
               חוזר: "כל ראשון ורביעי ב־21:30",
               next_occurrences: ["2026-10-18 21:30", "2026-10-21 21:30"],
             },
             {
               item_id: "doc",
-              "שם מטלה": "ללכת לרופא",
+              "שם משימה": "ללכת לרופא",
               "תאריך לביצוע": "2026-10-18",
               "שעה לביצוע": "08:00",
               reminder: {
@@ -4682,7 +4682,7 @@ describe("uniform standing + ping dump lines", () => {
           items: [
             {
               item_id: "kids",
-              "שם מטלה": "לאסוף את הילדים",
+              "שם משימה": "לאסוף את הילדים",
               חוזר: "כל יום שישי ב־11:45",
               next_occurrences: ["2027-04-09 11:45"],
             },
@@ -4700,7 +4700,7 @@ describe("uniform standing + ping dump lines", () => {
     })!;
     expect(text).toContain("לאסוף את הילדים");
     expect(text).toContain("11:45");
-    expect(text).not.toContain("אין מטלות");
+    expect(text).not.toContain("אין משימות");
   });
 
   it("reminder cadence paren is always קבוע-family", () => {
@@ -4732,7 +4732,7 @@ describe("partner dump about_ids (birthday event)", () => {
           items: [
             {
               item_id: "bday",
-              "שם מטלה": "יום ההולדת של עמית",
+              "שם משימה": "יום ההולדת של עמית",
               "יום שלם": true,
               חוזר: "כל שנה ב־13.10",
               next_occurrences: ["2027-10-13"],
@@ -4747,7 +4747,7 @@ describe("partner dump about_ids (birthday event)", () => {
             },
             {
               item_id: "private",
-              "שם מטלה": "מטלה פרטית",
+              "שם משימה": "משימה פרטית",
             },
           ],
         } as EmployeeRecordSnapshot["lists"][number],
@@ -4813,9 +4813,9 @@ describe("partner dump about_ids (birthday event)", () => {
     expect(text).toContain("כל שנה ב־13.10");
     expect(text).toMatch(/\(קבוע\) 🔔 תזכורת:/);
     expect(text).not.toMatch(/קבוע \+ תזכורת/);
-    expect(text).not.toContain("מטלות אישיות");
-    expect(text).not.toContain("מטלות משותפות עם");
-    expect(text).not.toContain("מטלה פרטית");
+    expect(text).not.toContain("משימות אישיות");
+    expect(text).not.toContain("משימות משותפות עם");
+    expect(text).not.toContain("משימה פרטית");
     expect(text).not.toContain("לשלוח למיכל ברכת בוקר");
     // Linked clock folded into the task — not a second תזכורות row.
     expect(text).not.toMatch(/תזכורות פעילות:[\s\S]*יום ההולדת של עמית/);
@@ -4826,7 +4826,7 @@ describe("partner dump about_ids (birthday event)", () => {
       1,
       "יום ההולדת של עמית",
       {
-        "שם מטלה": "יום ההולדת של עמית",
+        "שם משימה": "יום ההולדת של עמית",
         "יום שלם": true,
         "תאריך לביצוע": "2027-05-09",
         חוזר: "כל שנה ב־9 במאי",
@@ -4971,7 +4971,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
           items: [
             {
               item_id: "task-1",
-              "שם מטלה": "לשלם לרופא",
+              "שם משימה": "לשלם לרופא",
               "תאריך לביצוע": "2026-10-22",
             },
           ],
@@ -5096,13 +5096,13 @@ describe("LAST_NUMBERED_DUMP line map", () => {
           items: [
             {
               item_id: "d1",
-              "שם מטלה": "מטלה א",
+              "שם משימה": "משימה א",
               "תאריך לביצוע": "2026-10-21",
               "שעה לביצוע": "09:00",
             },
             {
               item_id: "d2",
-              "שם מטלה": "מטלה ב",
+              "שם משימה": "משימה ב",
               "תאריך לביצוע": "2026-10-22",
               "שעה לביצוע": "10:00",
             },
@@ -5146,7 +5146,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             list_name: "",
             owner: "טל",
             scope: "personal",
-            items: [{ item_id: "task-b", "שם מטלה": "להתקשר" }],
+            items: [{ item_id: "task-b", "שם משימה": "להתקשר" }],
           } as EmployeeRecordSnapshot["lists"][number],
         ],
         filing: [],
@@ -5185,8 +5185,8 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             owner: "טל",
             scope: "personal",
             items: [
-              { item_id: "task-1", "שם מטלה": "לשלם" },
-              { item_id: "task-2", "שם מטלה": "להתקשר" },
+              { item_id: "task-1", "שם משימה": "לשלם" },
+              { item_id: "task-2", "שם משימה": "להתקשר" },
             ],
           } as EmployeeRecordSnapshot["lists"][number],
         ],
@@ -5248,13 +5248,13 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "mon",
-                "שם מטלה": "יום א",
+                "שם משימה": "יום א",
                 "תאריך לביצוע": "2026-10-21",
                 "שעה לביצוע": "09:00",
               },
               {
                 item_id: "tue",
-                "שם מטלה": "יום ב",
+                "שם משימה": "יום ב",
                 "תאריך לביצוע": "2026-10-22",
                 "שעה לביצוע": "10:00",
               },
@@ -5289,7 +5289,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
 
   describe("undated-task disclosure on dated show_dump (Phase 3)", () => {
     it("helper: undated = no span and no next_occurrences ymd", () => {
-      expect(itemHasDumpCalendarDate({ "שם מטלה": "בלי תאריך" })).toBe(false);
+      expect(itemHasDumpCalendarDate({ "שם משימה": "בלי תאריך" })).toBe(false);
       expect(
         itemHasDumpCalendarDate({ "תאריך לביצוע": "2026-10-18" }),
       ).toBe(true);
@@ -5301,7 +5301,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       // Standing rule with empty window still has a recurrence signal.
       expect(itemHasDumpCalendarDate({ next_occurrences: [] })).toBe(false);
       expect(itemHasDumpRecurrenceRule({ next_occurrences: [] })).toBe(true);
-      expect(itemHasDumpRecurrenceRule({ "שם מטלה": "בלי תאריך" })).toBe(
+      expect(itemHasDumpRecurrenceRule({ "שם משימה": "בלי תאריך" })).toBe(
         false,
       );
       expect(formatUndatedTasksExcludedNote(0)).toBe("");
@@ -5316,37 +5316,37 @@ describe("LAST_NUMBERED_DUMP line map", () => {
     it("7 genuine undated stay 7 for today and tomorrow; empty-window recurrings are not added", () => {
       const undated = Array.from({ length: 7 }, (_, i) => ({
         item_id: `u${i + 1}`,
-        "שם מטלה": `בלי תאריך ${i + 1}`,
+        "שם משימה": `בלי תאריך ${i + 1}`,
       }));
       const standingOutsideTomorrow = [
         {
           item_id: "stand-sun",
-          "שם מטלה": "חוזר רק ביום ראשון",
+          "שם משימה": "חוזר רק ביום ראשון",
           חוזר: "כל יום ראשון ב־09:00",
           // Dump window for tomorrow injects [] when no occurrence hits.
           next_occurrences: [] as string[],
         },
         {
           item_id: "stand-wed",
-          "שם מטלה": "חוזר רק ביום רביעי",
+          "שם משימה": "חוזר רק ביום רביעי",
           חוזר: "כל יום רביעי ב־09:00",
           next_occurrences: [] as string[],
         },
       ];
       const standingInTomorrow = {
         item_id: "stand-mon",
-        "שם מטלה": "חוזר ביום שני",
+        "שם משימה": "חוזר ביום שני",
         חוזר: "כל יום שני ב־09:00",
         next_occurrences: ["2026-11-02 09:00"],
       };
       const datedNoTime = {
         item_id: "dated-no-time",
-        "שם מטלה": "עם תאריך בלי שעה",
+        "שם משימה": "עם תאריך בלי שעה",
         "תאריך לביצוע": "2026-11-02",
       };
       const datedOutside = {
         item_id: "dated-out",
-        "שם מטלה": "עם תאריך מחוץ לטווח",
+        "שם משימה": "עם תאריך מחוץ לטווח",
         "תאריך לביצוע": "2026-11-10",
       };
       const snap: EmployeeRecordSnapshot = {
@@ -5416,21 +5416,21 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "dated-1",
-                "שם מטלה": "פגישה בטווח",
+                "שם משימה": "פגישה בטווח",
                 "תאריך לביצוע": "2026-10-18",
                 "שעה לביצוע": "10:00",
               },
               {
                 item_id: "undated-1",
-                "שם מטלה": "לקנות מתנה בלי תאריך",
+                "שם משימה": "לקנות מתנה בלי תאריך",
               },
               {
                 item_id: "undated-2",
-                "שם מטלה": "לסדר מגירות",
+                "שם משימה": "לסדר מגירות",
               },
               {
                 item_id: "out-1",
-                "שם מטלה": "מחוץ לטווח עם תאריך",
+                "שם משימה": "מחוץ לטווח עם תאריך",
                 "תאריך לביצוע": "2026-10-25",
               },
             ],
@@ -5468,17 +5468,17 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "dated-1",
-                "שם מטלה": "פגישה בטווח",
+                "שם משימה": "פגישה בטווח",
                 "תאריך לביצוע": "2026-10-18",
                 "שעה לביצוע": "10:00",
               },
               {
                 item_id: "undated-1",
-                "שם מטלה": "לקנות מתנה בלי תאריך",
+                "שם משימה": "לקנות מתנה בלי תאריך",
               },
               {
                 item_id: "out-1",
-                "שם מטלה": "מחוץ לטווח עם תאריך",
+                "שם משימה": "מחוץ לטווח עם תאריך",
                 "תאריך לביצוע": "2026-10-25",
               },
             ],
@@ -5513,12 +5513,12 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "d1",
-                "שם מטלה": "בטווח",
+                "שם משימה": "בטווח",
                 "תאריך לביצוע": "2026-10-18",
               },
               {
                 item_id: "d2",
-                "שם מטלה": "מחוץ לטווח",
+                "שם משימה": "מחוץ לטווח",
                 "תאריך לביצוע": "2026-10-25",
               },
             ],
@@ -5548,7 +5548,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "u1",
-                "שם מטלה": "בלי תאריך בכלל",
+                "שם משימה": "בלי תאריך בכלל",
               },
             ],
           } as EmployeeRecordSnapshot["lists"][number],
@@ -5578,8 +5578,8 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             owner: "טל",
             scope: "personal",
             items: [
-              { item_id: "u1", "שם מטלה": "כללית א" },
-              { item_id: "u2", "שם מטלה": "כללית ב" },
+              { item_id: "u1", "שם משימה": "כללית א" },
+              { item_id: "u2", "שם משימה": "כללית ב" },
             ],
           } as EmployeeRecordSnapshot["lists"][number],
         ],
@@ -5610,12 +5610,12 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "personal-dated",
-                "שם מטלה": "אישית בטווח",
+                "שם משימה": "אישית בטווח",
                 "תאריך לביצוע": "2026-10-18",
               },
               {
                 item_id: "personal-undated",
-                "שם מטלה": "אישית בלי תאריך",
+                "שם משימה": "אישית בלי תאריך",
               },
             ],
           } as EmployeeRecordSnapshot["lists"][number],
@@ -5628,7 +5628,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "shared-undated",
-                "שם מטלה": "משותפת בלי תאריך",
+                "שם משימה": "משותפת בלי תאריך",
                 targets: ["מיכל"],
               },
             ],
@@ -5674,11 +5674,11 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "u1",
-                "שם מטלה": "בלי תאריך גלוי",
+                "שם משימה": "בלי תאריך גלוי",
               },
               {
                 item_id: "d1",
-                "שם מטלה": "עם תאריך",
+                "שם משימה": "עם תאריך",
                 "תאריך לביצוע": "2026-10-18",
               },
             ],
@@ -5699,7 +5699,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
           [
             {
               title: "בלי תאריך גלוי",
-              item: { item_id: "u1", "שם מטלה": "בלי תאריך גלוי" },
+              item: { item_id: "u1", "שם משימה": "בלי תאריך גלוי" },
             },
           ],
           { viewerName: "טל" },
@@ -5718,16 +5718,16 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "u1",
-                "שם מטלה": "לקנות מתנה",
+                "שם משימה": "לקנות מתנה",
               },
               {
                 item_id: "d1",
-                "שם מטלה": "פגישה מחר",
+                "שם משימה": "פגישה מחר",
                 "תאריך לביצוע": "2026-10-19",
               },
               {
                 item_id: "r1",
-                "שם מטלה": "חוזר בלי תאריך עוגן",
+                "שם משימה": "חוזר בלי תאריך עוגן",
                 next_occurrences: [] as string[],
               },
             ],
@@ -5774,7 +5774,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             list_name: "",
             owner: "טל",
             scope: "personal",
-            items: [{ item_id: "t1", "שם מטלה": "מטלה בלי תאריך" }],
+            items: [{ item_id: "t1", "שם משימה": "משימה בלי תאריך" }],
           } as EmployeeRecordSnapshot["lists"][number],
         ],
         filing: [],
@@ -5788,7 +5788,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(shopping).toContain("חלב");
       expect(shopping).toContain("לחם");
       expect(shopping).not.toContain("בלי תאריך");
-      expect(shopping).not.toContain("מטלה בלי תאריך");
+      expect(shopping).not.toContain("משימה בלי תאריך");
     });
   });
 
@@ -5834,18 +5834,18 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "valid-leap",
-                "שם מטלה": "פגישת 29 בפברואר 2024",
+                "שם משימה": "פגישת 29 בפברואר 2024",
                 "תאריך לביצוע": "2024-02-29",
                 "שעה לביצוע": "10:00",
               },
               {
                 item_id: "bad-leap",
-                "שם מטלה": "תאריך בלתי אפשרי",
+                "שם משימה": "תאריך בלתי אפשרי",
                 "תאריך לביצוע": "2025-02-29",
               },
               {
                 item_id: "plain-undated",
-                "שם מטלה": "בלי תאריך בכלל",
+                "שם משימה": "בלי תאריך בכלל",
               },
             ],
           } as EmployeeRecordSnapshot["lists"][number],
@@ -5877,12 +5877,12 @@ describe("LAST_NUMBERED_DUMP line map", () => {
             items: [
               {
                 item_id: "bad-leap",
-                "שם מטלה": "תאריך בלתי אפשרי גלוי",
+                "שם משימה": "תאריך בלתי אפשרי גלוי",
                 "תאריך לביצוע": "2025-02-29",
               },
               {
                 item_id: "ok",
-                "שם מטלה": "עם תאריך תקין",
+                "שם משימה": "עם תאריך תקין",
                 "תאריך לביצוע": "2026-10-18",
               },
             ],
@@ -5906,7 +5906,7 @@ describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
   const now = new Date("2026-10-15T10:00:00.000Z");
   const seriesItem = {
     item_id: "series-1",
-    "שם מטלה": "לקחת אקמול",
+    "שם משימה": "לקחת אקמול",
     חוזר: "כל יום ב־08:45",
     next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
     reminder: {
@@ -6013,7 +6013,7 @@ describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
   it("flat ITEM DUMP: skips cancelled first occurrence for later effective reminder", () => {
     const item = {
       item_id: "skip-cancel",
-      "שם מטלה": "לקחת אקמול",
+      "שם משימה": "לקחת אקמול",
       חוזר: "כל יום ב־08:45",
       next_occurrences: [
         "2026-10-16 08:45",
@@ -6048,7 +6048,7 @@ describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
   it("flat ITEM DUMP: first occurrence moved reminder uses that effective time", () => {
     const item = {
       item_id: "first-moved",
-      "שם מטלה": "לקחת אקמול",
+      "שם משימה": "לקחת אקמול",
       חוזר: "כל יום ב־08:45",
       next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
       reminder: {
@@ -6073,7 +6073,7 @@ describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
   it("flat ITEM DUMP: no upcoming effective reminder → no bell or time", () => {
     const item = {
       item_id: "all-cancel",
-      "שם מטלה": "לקחת אקמול",
+      "שם משימה": "לקחת אקמול",
       חוזר: "כל יום ב־08:45",
       next_occurrences: ["2026-10-16 08:45", "2026-10-17 08:45"],
       reminder: {
@@ -6145,7 +6145,7 @@ describe("reminder display UX — list/agenda timed 🔔 + ITEM DUMP", () => {
             seriesItem,
             {
               item_id: "once-1",
-              "שם מטלה": "לבדוק באג",
+              "שם משימה": "לבדוק באג",
               reminder: {
                 fire_at: "2026-10-15 20:30",
                 repeat: "none",

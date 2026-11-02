@@ -88,9 +88,9 @@ const setupTasks = {
       owner: "טל",
       scope: "personal",
       items: [
-        { item_id: "eval-task-bit", "שם מטלה": "לבדוק ביט" },
-        { item_id: "eval-task-bday", "שם מטלה": "יום ההולדת של עמית" },
-        { item_id: "eval-task-meeting", "שם מטלה": "פגישה" },
+        { item_id: "eval-task-bit", "שם משימה": "לבדוק ביט" },
+        { item_id: "eval-task-bday", "שם משימה": "יום ההולדת של עמית" },
+        { item_id: "eval-task-meeting", "שם משימה": "פגישה" },
       ],
     },
   ],
@@ -287,7 +287,7 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
               owner: "טל",
               scope: "personal",
               items: [
-                { item_id: "eval-task-bday", "שם מטלה": "יום ההולדת של עמית" },
+                { item_id: "eval-task-bday", "שם משימה": "יום ההולדת של עמית" },
               ],
             },
           ],
@@ -367,7 +367,7 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
           owner: "טל",
           scope: "personal" as const,
           items: [
-            { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+            { item_id: "eval-task-unrelated", "שם משימה": "לבדוק עם ערן" },
           ],
         },
       ],
@@ -407,7 +407,7 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
               owner: "טל",
               scope: "personal",
               items: [
-                { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+                { item_id: "eval-task-unrelated", "שם משימה": "לבדוק עם ערן" },
               ],
             },
           ],
@@ -493,7 +493,7 @@ describe("share-by-index MODEL_APPLY (eval-db)", () => {
               owner: "טל",
               scope: "personal",
               items: [
-                { item_id: "eval-task-unrelated", "שם מטלה": "לבדוק עם ערן" },
+                { item_id: "eval-task-unrelated", "שם משימה": "לבדוק עם ערן" },
               ],
             },
           ],

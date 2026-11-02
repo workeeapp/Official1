@@ -76,7 +76,7 @@ export function formatSessionClockContext(now = new Date()): string {
     "Compare date/time fields for the question's subject only: אני/שלי → speaker show_dump without about. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
     "מה את/ה צריך/ה ביום X / what YOU need that day → show_dump=tasks + show_dump_about=YOUR display name + from/to. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
     "WHEN / FULL day plan (no meaning filter) → server dump only with show_dump_ids=null (FORBIDDEN model-written agenda). Semantic day asks («פגישות» / «אילו פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2: show_dump=tasks + show_dump_ids for every clear meeting match (server REPLACE) — FORBIDDEN answering in prose instead of dump+ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח / נדנוד / ברכת בוקר); bare dump without ids expands to every row (not a semantic filter). TIME-OF-DAY (בוקר) is not an engine from/to filter. Bare status answers without show_dump still use matching injected facts.",
-    "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך מטלות או תזכורות בשעה הקרובה) — never jargon like מטלות מתוזמנות.",
+    "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך משימות או תזכורות בשעה הקרובה) — never jargon like משימות מתוזמנות.",
   ].join("\n");
 }
 

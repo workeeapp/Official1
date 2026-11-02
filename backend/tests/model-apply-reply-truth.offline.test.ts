@@ -130,7 +130,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
           listType: "tasks",
           itemKey: "ערב",
           itemLabel: "ערב יום הולדת",
-          listName: "מטלות",
+          listName: "משימות",
         },
       ],
       filingMutations: [],
@@ -562,10 +562,10 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
     expect(out).toBe(reply);
   });
 
-  it("omitted lists.add + הוספתי למטלות + reminder applied → reminder-only partial", () => {
+  it("omitted lists.add + הוספתי למשימות + reminder applied → reminder-only partial", () => {
     const out = correctModelApplyTurnResponse({
       response:
-        "הוספתי למטלות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך מחר ב־8 תזכורת.",
+        "הוספתי למשימות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך מחר ב־8 תזכורת.",
       metadata: meta({ reminders: [] }),
       mutations: [],
       appliedReminderAdd: true,
@@ -578,7 +578,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
   it("worker-only להזכיר add + reminder does not keep speaker task claim", () => {
     const out = correctModelApplyTurnResponse({
       response:
-        "הוספתי את המטלה להוסיף קבצי זיפ. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף קבצי זיפ.",
+        "הוספתי את המשימה להוסיף קבצי זיפ. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף קבצי זיפ.",
       metadata: meta(),
       mutations: [
         {
@@ -588,7 +588,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
           listType: "tasks",
           itemKey: "להזכיר לטל",
           itemLabel: "להזכיר לטל",
-          listName: "מטלות",
+          listName: "משימות",
         },
       ],
       appliedReminderAdd: true,
@@ -600,7 +600,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
 
   it("omitted lists.add + הוספתי with no reminder → LIST_ADD_MISS", () => {
     const out = correctModelApplyTurnResponse({
-      response: "הוספתי למטלות לקנות חלב.",
+      response: "הוספתי למשימות לקנות חלב.",
       metadata: meta(),
       mutations: [],
       appliedReminderAdd: false,
@@ -610,7 +610,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
 
   it("list add + reminder both applied keeps dual success claim", () => {
     const reply =
-      "הוספתי למטלות לקנות חלב ואזכיר לך מחר ב־9 תזכורת.";
+      "הוספתי למשימות לקנות חלב ואזכיר לך מחר ב־9 תזכורת.";
     const out = correctModelApplyTurnResponse({
       response: reply,
       metadata: meta({
@@ -632,7 +632,7 @@ describe("correctModelApplyTurnResponse (LIVE_FULL reply truthfulness)", () => {
           listType: "tasks",
           itemKey: "לקנות חלב",
           itemLabel: "לקנות חלב",
-          listName: "מטלות",
+          listName: "משימות",
         },
       ],
       appliedReminderAdd: true,
@@ -646,7 +646,7 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
   const setResponse = (_reply: string, next: string) => next;
 
   it("detects list-add and reminder-save claims", () => {
-    expect(looksLikeListAddClaim("הוספתי למטלות מיץ")).toBe(true);
+    expect(looksLikeListAddClaim("הוספתי למשימות מיץ")).toBe(true);
     expect(looksLikeListAddClaim("בסדר")).toBe(false);
     expect(looksLikeReminderSaveClaim("קבעתי תזכורת למחר")).toBe(true);
     expect(looksLikeReminderSaveClaim("אזכיר לך מחר ב־8 תזכורת")).toBe(true);
@@ -655,8 +655,8 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
 
   it("reminder-only when task claim false and reminder applied", () => {
     const out = correctExecutionTruthReply({
-      reply: "הוספתי למטלות מיץ",
-      spoken: "הוספתי למטלות מיץ",
+      reply: "הוספתי למשימות מיץ",
+      spoken: "הוספתי למשימות מיץ",
       appliedListAdd: false,
       appliedSpeakerListAdd: false,
       appliedReminderAdd: true,
@@ -669,9 +669,9 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
   it("worker add alone is not speaker evidence for dual claim", () => {
     const out = correctExecutionTruthReply({
       reply:
-        "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
+        "הוספתי את המשימה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
       spoken:
-        "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
+        "הוספתי את המשימה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.",
       appliedListAdd: true,
       appliedSpeakerListAdd: false,
       appliedReminderAdd: true,
@@ -683,7 +683,7 @@ describe("correctExecutionTruthReply (structured apply evidence)", () => {
 
   it("speaker add + reminder keeps dual claim", () => {
     const reply =
-      "הוספתי את המטלה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.";
+      "הוספתי את המשימה. קבעתי תזכורת למחר ב־10:00: תזכורת: זיפ.";
     const out = correctExecutionTruthReply({
       reply,
       spoken: reply,

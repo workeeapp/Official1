@@ -75,7 +75,7 @@ const snap: EmployeeRecordSnapshot = {
       list_type: "tasks",
       owner: "טל",
       scope: "personal",
-      items: [{ item_id: taskId, "שם מטלה": "דיברתי עם yes" }],
+      items: [{ item_id: taskId, "שם משימה": "דיברתי עם yes" }],
     },
   ],
   filing: [],
@@ -550,7 +550,7 @@ describe("computeDomainCompleteness", () => {
           listName: "",
           items: [
             {
-              "שם מטלה": "לשתות מיץ",
+              "שם משימה": "לשתות מיץ",
               item_id: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
             },
           ],
@@ -597,7 +597,7 @@ describe("computeDomainCompleteness", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לשתות מיץ" }],
+          items: [{ "שם משימה": "לשתות מיץ" }],
           targets: [],
         },
       ],

@@ -8,7 +8,7 @@ const ITEM_TEXT_KEYS = [
   "שם",
   "פריט",
   "שם פריט",
-  "שם מטלה",
+  "שם משימה",
   "name",
   "title",
   "item_name",

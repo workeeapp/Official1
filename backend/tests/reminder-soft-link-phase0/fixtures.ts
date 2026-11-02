@@ -172,7 +172,7 @@ export const FIXTURE_LEGACY_ACTION = {
         list_type: "tasks",
         list_name: "",
         targets: ["לוסי"],
-        items: [{ "שם מטלה": "להזכיר לטל: תור לווטרינר" }],
+        items: [{ "שם משימה": "להזכיר לטל: תור לווטרינר" }],
       },
     ],
   },
@@ -192,7 +192,7 @@ export const FIXTURE_NESTED_ADD_LINK_ONLY = {
         list_name: "",
         items: [
           {
-            "שם מטלה": "תור לווטרינר",
+            "שם משימה": "תור לווטרינר",
             remind: {
               date: "2026-11-10",
               time: "09:00",
@@ -220,7 +220,7 @@ export const FIXTURE_NESTED_ADD_ACTION = {
         list_name: "",
         items: [
           {
-            "שם מטלה": "תור לווטרינר",
+            "שם משימה": "תור לווטרינר",
             remind: {
               date: "2026-11-10",
               time: "09:00",
@@ -235,7 +235,7 @@ export const FIXTURE_NESTED_ADD_ACTION = {
         list_type: "tasks",
         list_name: "",
         targets: ["לוסי"],
-        items: [{ "שם מטלה": "להזכיר לטל: תור לווטרינר" }],
+        items: [{ "שם משימה": "להזכיר לטל: תור לווטרינר" }],
       },
     ],
   },
@@ -253,7 +253,7 @@ export const FIXTURE_NESTED_UPDATE_ACTION = {
         items: [
           {
             item_id: ITEM_A,
-            "שם מטלה": "תור לווטרינר — מעודכן",
+            "שם משימה": "תור לווטרינר — מעודכן",
             remind: {
               date: "2026-11-10",
               time: "09:00",
@@ -278,7 +278,7 @@ export const FIXTURE_DUAL_NESTED_AND_TOPLEVEL = {
         list_name: "",
         items: [
           {
-            "שם מטלה": "תור לווטרינר",
+            "שם משימה": "תור לווטרינר",
             item_id: ITEM_A,
             remind: {
               date: "2026-11-10",

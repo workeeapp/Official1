@@ -46,7 +46,7 @@ describe("bridgeListTypeAliasesForParse (harness)", () => {
               action: "add",
               list_type: "tasks",
               list_name: "",
-              items: [{ "שם מטלה": "לבקר את אמא" }],
+              items: [{ "שם משימה": "לבקר את אמא" }],
             },
           ],
         },

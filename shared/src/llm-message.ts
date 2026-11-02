@@ -532,7 +532,7 @@ export interface LlmMetadata {
   /** Inclusive dump date filter end YYYY-MM-DD (Asia/Jerusalem). */
   showDumpTo?: string | null;
   /**
-   * Tasks date-scope: `undated` = מטלות כלליות (no calendar date, no recurrence).
+   * Tasks date-scope: `undated` = משימות כלליות (no calendar date, no recurrence).
    * Wins over showDumpFrom/To.
    */
   showDumpDateScope?: "undated" | null;
@@ -1632,7 +1632,7 @@ export function parseShowDumpUrgency(
   return null;
 }
 
-/** metadata.show_dump_date_scope — undated = מטלות כלליות. */
+/** metadata.show_dump_date_scope — undated = משימות כלליות. */
 export function parseShowDumpDateScope(
   meta: Record<string, unknown>,
 ): LlmShowDumpDateScope | null {
@@ -2235,7 +2235,6 @@ const REPORT_SECTION_ALIASES: Record<string, ReportSection> = {
   tasks: "tasks",
   task: "tasks",
   todos: "tasks",
-  מטלות: "tasks",
   משימות: "tasks",
   shopping: "shopping",
   shop: "shopping",
@@ -2632,7 +2631,7 @@ export function reminderActionFromNestedRemind(
         "title",
         "label",
         "שם פריט",
-        "שם מטלה",
+        "שם משימה",
         "שם משימה",
         "name",
         "text",
@@ -2659,7 +2658,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     "title",
     "label",
     "שם פריט",
-    "שם מטלה",
+    "שם משימה",
     "שם משימה",
     "name",
   ]);
@@ -5510,7 +5509,7 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
     "תחב״צ",
     "תחב\"צ",
     "בתחבורה ציבורית",
-    "המטלה",
+    "המשימה",
     "רק תזכורות",
     "יעד",
     "קווים",
@@ -5519,7 +5518,7 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
     "3",
     "קניות",
     "משימות",
-    "מטלות", // legacy closed-choice token
+    "משימות", // legacy closed-choice token
     "תיוק",
     "תזכורות",
     "כיבוד",
@@ -5528,7 +5527,7 @@ const CLOSED_CHOICE_REPLY_TOKENS = new Set(
     "סגירה",
     "עדכן מועד להיום",
     "הצג את המשימות",
-    "הצג את המטלות", // legacy overdue raise
+    "הצג את המשימות", // legacy overdue raise
     "להוסיף תאריך",
     // Do NOT add bare «הצג משימות» — LIST nav uses that label with a longer
     // command; stale raise uses label===command which is already closed-choice.
@@ -5893,7 +5892,7 @@ function itemLabel(item: unknown): string {
     "name",
     "item_name",
     "שם פריט",
-    "שם מטלה",
+    "שם משימה",
     "שם פרטי",
     "task",
     "תיאור",

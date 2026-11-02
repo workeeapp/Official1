@@ -200,7 +200,7 @@ describe("employee records", () => {
 
   it("builds an identity key from Hebrew shopping and task fields", () => {
     expect(itemIdentity("shopping", { "שם פריט": "חלב", כמות: 1 })).toBe("חלב");
-    expect(itemIdentity("tasks", { "שם מטלה": "לקנות מתנה" })).toBe("לקנות מתנה");
+    expect(itemIdentity("tasks", { "שם משימה": "לקנות מתנה" })).toBe("לקנות מתנה");
     expect(itemIdentity("custom", { "שם החנות": "אדידס" })).toBe("אדידס");
     expect(itemIdentity("custom", { brand: "פומה" })).toBe("פומה");
     expect(
@@ -227,8 +227,8 @@ describe("employee records", () => {
       "יחידת מידה": 'ק"ג',
     });
     expect(
-      ensureShoppingQuantity("tasks", { "שם מטלה": "לקנות מתנה" }),
-    ).toEqual({ "שם מטלה": "לקנות מתנה" });
+      ensureShoppingQuantity("tasks", { "שם משימה": "לקנות מתנה" }),
+    ).toEqual({ "שם משימה": "לקנות מתנה" });
   });
 
   it("collapses update-draft keys onto the real column", () => {
@@ -246,18 +246,18 @@ describe("employee records", () => {
       }),
     ).toEqual({ שם: "חדש", הערה: "נשאר" });
     expect(
-      mergeListItemData({ "שם מטלה": "ישן" }, { "שם מטלה חדש": "חדש" }),
-    ).toEqual({ "שם מטלה": "חדש" });
+      mergeListItemData({ "שם משימה": "ישן" }, { "שם משימה חדש": "חדש" }),
+    ).toEqual({ "שם משימה": "חדש" });
     expect(
       normalizeListItemData({
-        "שם מטלה": "לשתות מים",
+        "שם משימה": "לשתות מים",
         urgency: "urgent",
         דחיפות: "very_urgent",
       }),
-    ).toEqual({ "שם מטלה": "לשתות מים" });
+    ).toEqual({ "שם משימה": "לשתות מים" });
     expect(readItemUrgency({ urgency: "urgent" })).toBe("urgent");
     expect(readItemUrgency({ דחיפות: "very_urgent" })).toBe("very_urgent");
-    expect(readItemUrgency({ "שם מטלה": "לשתות מים" })).toBeUndefined();
+    expect(readItemUrgency({ "שם משימה": "לשתות מים" })).toBeUndefined();
     expect(urgencySnapshotField("normal")).toEqual({});
     expect(urgencySnapshotField("urgent")).toEqual({ urgency: "urgent" });
   });
@@ -479,13 +479,13 @@ describe("employee records", () => {
         listType: "tasks",
         itemKey: "חוג",
         itemLabel: "חוג טיסנים",
-        listName: "מטלות",
+        listName: "משימות",
       },
     ]);
     expect(
       correctListMutationClaimReply({
         reply: JSON.stringify({
-          response: "מחקתי את חוג הטיסנים והוספתי מטלה ב־18:30.",
+          response: "מחקתי את חוג הטיסנים והוספתי משימה ב־18:30.",
           metadata: {},
         }),
         requestedRemove: true,
@@ -503,7 +503,7 @@ describe("employee records", () => {
   it("replaces reply when only lists.add was requested and none applied", () => {
     expect(
       correctListMutationClaimReply({
-        reply: "הוספתי מטלה.",
+        reply: "הוספתי משימה.",
         requestedRemove: false,
         requestedUpdate: false,
         requestedAdd: true,
@@ -654,7 +654,7 @@ describe("employee records", () => {
         appliedRemove: true,
         appliedUpdate: false,
         appliedAdd: false,
-        appliedFallback: 'הסרתי את «להזכיר לטל לקנות חלב» מרשימת «מטלות».',
+        appliedFallback: 'הסרתי את «להזכיר לטל לקנות חלב» מרשימת «משימות».',
         setResponse: (_r, response) => response,
         spoken: reply,
       }),
@@ -974,8 +974,8 @@ describe("employee records", () => {
     ];
     expect(
       correctShareClaimReply({
-        reply: "שיתפתי את כל המטלות.",
-        spoken: "שיתפתי את כל המטלות.",
+        reply: "שיתפתי את כל המשימות.",
+        spoken: "שיתפתי את כל המשימות.",
         mutations,
         misses,
         setResponse: (_r, response) => response,
@@ -1119,7 +1119,7 @@ describe("employee records", () => {
     ).toBe(SHARE_CLAIM_MISS);
   });
 
-  it("formats cascaded worker-task remove as מטלות fallback", () => {
+  it("formats cascaded worker-task remove as משימות fallback", () => {
     expect(
       formatAppliedMutationFallback(
         [
@@ -1134,7 +1134,7 @@ describe("employee records", () => {
         ],
         [],
       ),
-    ).toBe('הסרתי את «להזכיר לטל לקנות חלב» מרשימת «מטלות».');
+    ).toBe('הסרתי את «להזכיר לטל לקנות חלב» מרשימת «משימות».');
   });
 
   it("removes a custom row found on another list name for the same owner", async () => {
@@ -1272,7 +1272,7 @@ describe("employee records", () => {
         id: taskId,
         listId: tasksList.id,
         itemKey: "לקנות עוגה",
-        data: { "שם מטלה": "לקנות עוגה", "תאריך לביצוע": "2026-10-30" },
+        data: { "שם משימה": "לקנות עוגה", "תאריך לביצוע": "2026-10-30" },
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, talId],
@@ -1294,7 +1294,7 @@ describe("employee records", () => {
               items: [
                 {
                   item_id: taskId,
-                  "שם מטלה": "לקנות עוגה גדולה",
+                  "שם משימה": "לקנות עוגה גדולה",
                   "תאריך לביצוע": "2026-10-31",
                 },
               ],
@@ -1311,7 +1311,7 @@ describe("employee records", () => {
           where: { id: taskId },
           data: expect.objectContaining({
             data: expect.objectContaining({
-              "שם מטלה": "לקנות עוגה גדולה",
+              "שם משימה": "לקנות עוגה גדולה",
               "תאריך לביצוע": "2026-10-31",
             }),
             scope: "shared",
@@ -1350,7 +1350,7 @@ describe("employee records", () => {
         id: taskId,
         listId: ownerTasks.id,
         itemKey: "לקנות עוגה",
-        data: { "שם מטלה": "לקנות עוגה" },
+        data: { "שם משימה": "לקנות עוגה" },
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, talId],
@@ -1374,7 +1374,7 @@ describe("employee records", () => {
               action: "update",
               listType: "tasks",
               listName: "",
-              items: [{ item_id: taskId, "שם מטלה": "לקנות עוגה מעודכנת" }],
+              items: [{ item_id: taskId, "שם משימה": "לקנות עוגה מעודכנת" }],
               targets: [],
             },
           ],
@@ -1388,7 +1388,7 @@ describe("employee records", () => {
           where: { id: taskId },
           data: expect.objectContaining({
             data: expect.objectContaining({
-              "שם מטלה": "לקנות עוגה מעודכנת",
+              "שם משימה": "לקנות עוגה מעודכנת",
             }),
             visibleTo: expect.arrayContaining([employeeId, talId]),
           }),
@@ -1415,7 +1415,7 @@ describe("employee records", () => {
               action: "update",
               listType: "tasks",
               listName: "",
-              items: [{ item_id: missingId, "שם מטלה": "לא קיים" }],
+              items: [{ item_id: missingId, "שם משימה": "לא קיים" }],
               targets: [],
             },
           ],
@@ -2225,7 +2225,7 @@ describe("employee records", () => {
             listName: "",
             items: [
               {
-                "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+                "שם משימה": "להזכיר לטל לאסוף את מאיה",
                 "תאריך לביצוע": "היום",
                 "שעה לביצוע": "14:20",
               },
@@ -2247,7 +2247,7 @@ describe("employee records", () => {
       data: expect.objectContaining({
         listId: list.id,
         data: expect.objectContaining({
-          "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+          "שם משימה": "להזכיר לטל לאסוף את מאיה",
           "שעה לביצוע": "14:20",
           "תאריך לביצוע": expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         }),
@@ -2468,7 +2468,7 @@ describe("employee records", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "להתקשר" }],
+          items: [{ "שם משימה": "להתקשר" }],
           targets: [],
         },
       ],
@@ -2502,7 +2502,7 @@ describe("employee records", () => {
       alignSpokenListType("בתיאבון! הסרתי את «להכין חביתה לילדים» מרשימת הקניות שלך.", [
         { action: "remove", listType: "tasks" },
       ]),
-    ).toContain("רשימת המטלות");
+    ).toContain("רשימת המשימות");
   });
 
   it("removes a task even when the model labeled it shopping", async () => {
@@ -2517,7 +2517,7 @@ describe("employee records", () => {
       id: "task-1",
       listId: tasksList.id,
       itemKey: "להכין חביתה לילדים",
-      data: { "שם מטלה": "להכין חביתה לילדים" },
+      data: { "שם משימה": "להכין חביתה לילדים" },
       list: tasksList,
     };
     listFindFirst.mockResolvedValue(tasksList);
@@ -2578,7 +2578,7 @@ describe("employee records", () => {
           items: [
             {
               item_id: "item-gift",
-              "שם מטלה": "לקנות מתנה",
+              "שם משימה": "לקנות מתנה",
               scope: "personal",
               owner: "עמית",
             },
@@ -2683,7 +2683,7 @@ describe("employee records", () => {
           items: [
             {
               item_id: "item-plumber",
-              "שם מטלה": "להתקשר לאינסטלטור",
+              "שם משימה": "להתקשר לאינסטלטור",
               "כתובת": "הרצל 5, תל אביב",
               "טלפון": "050-1234567",
               scope: "personal",
@@ -2726,7 +2726,7 @@ describe("employee records", () => {
           {
             itemKey: "פגישה (עמית, טל)",
             data: {
-              "שם מטלה": "פגישה (עמית, טל)",
+              "שם משימה": "פגישה (עמית, טל)",
               "תאריך לביצוע": "2026-10-20",
               "שעה לביצוע": "10:00",
               "שעת סיום": "12:00",
@@ -2737,7 +2737,7 @@ describe("employee records", () => {
           {
             itemKey: "בחו\"ל",
             data: {
-              "שם מטלה": "בחו\"ל",
+              "שם משימה": "בחו\"ל",
               "תאריך לביצוע": "2026-10-20",
               "תאריך סיום": "2026-10-22",
               "יום שלם": true,
@@ -2777,7 +2777,7 @@ describe("employee records", () => {
         items: [
           {
             itemKey: "פגישה שלי",
-            data: { "שם מטלה": "פגישה שלי", "תאריך לביצוע": "יום שלישי" },
+            data: { "שם משימה": "פגישה שלי", "תאריך לביצוע": "יום שלישי" },
             deletedAt: null,
           },
         ],
@@ -2915,7 +2915,7 @@ describe("employee records", () => {
           {
             id: "item-tal",
             itemKey: "להזכיר לטל לבדוק את התזכורת",
-            data: { "שם מטלה": "להזכיר לטל לבדוק את התזכורת" },
+            data: { "שם משימה": "להזכיר לטל לבדוק את התזכורת" },
             scope: "personal",
             addedById: employeeId,
             visibleTo: [employeeId, workerId],
@@ -2977,7 +2977,7 @@ describe("employee records", () => {
           {
             id: "item-maya",
             itemKey: "להזכיר למאיוש",
-            data: { "שם מטלה": "להזכיר למאיוש לקבוע שיעור" },
+            data: { "שם משימה": "להזכיר למאיוש לקבוע שיעור" },
             scope: "shared",
             addedById: mayaId,
             visibleTo: [mayaId, workerId],
@@ -2987,7 +2987,7 @@ describe("employee records", () => {
           {
             id: "item-tal",
             itemKey: "לשלוח הודעה למיכל",
-            data: { "שם מטלה": "לשלוח הודעה למיכל" },
+            data: { "שם משימה": "לשלוח הודעה למיכל" },
             scope: "personal",
             addedById: employeeId,
             visibleTo: [employeeId],
@@ -3006,7 +3006,7 @@ describe("employee records", () => {
       scopeItemsToViewerId: employeeId,
     });
     const labels = snap.lists.flatMap((list) =>
-      list.items.map((item) => String(item["שם מטלה"] ?? "")),
+      list.items.map((item) => String(item["שם משימה"] ?? "")),
     );
     expect(labels).toEqual(["לשלוח הודעה למיכל"]);
     expect(labels.join(" ")).not.toContain("מאיוש");
@@ -3201,7 +3201,7 @@ describe("employee records", () => {
         id: "lucy-task",
         listId: "lucy-tasks",
         itemKey: "להזכיר לטל לבדוק את התזכורת",
-        data: { "שם מטלה": "להזכיר לטל לבדוק את התזכורת" },
+        data: { "שם משימה": "להזכיר לטל לבדוק את התזכורת" },
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId, lucyId],
@@ -3251,7 +3251,7 @@ describe("employee records", () => {
       id: "task-1",
       listId: list.id,
       itemKey: "להזכיר לעמית לבדוק מייל",
-      data: { "שם מטלה": "להזכיר לעמית לבדוק מייל" },
+      data: { "שם משימה": "להזכיר לעמית לבדוק מייל" },
       scope: "personal",
       addedById: employeeId,
       visibleTo: [employeeId],
@@ -3265,7 +3265,7 @@ describe("employee records", () => {
           action: "update",
           listType: "tasks",
           listName: "",
-          items: [{ item_id: "task-1", "שם מטלה": "להזכיר לטל לבדוק מייל" }],
+          items: [{ item_id: "task-1", "שם משימה": "להזכיר לטל לבדוק מייל" }],
           targets: [],
         },
       ],
@@ -3278,7 +3278,7 @@ describe("employee records", () => {
       data: expect.objectContaining({
         itemKey: "להזכיר לטל לבדוק מייל",
         data: expect.objectContaining({
-          "שם מטלה": "להזכיר לטל לבדוק מייל",
+          "שם משימה": "להזכיר לטל לבדוק מייל",
         }),
       }),
     });
@@ -3291,7 +3291,7 @@ describe("employee records", () => {
       listId: list.id,
       itemKey: "לאסוף את הילדים",
       data: {
-        "שם מטלה": "לאסוף את הילדים",
+        "שם משימה": "לאסוף את הילדים",
         חוזר: "כל יום שישי ב־12:00",
         __recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "12:00", start: "2026-10-10" },
       },
@@ -3359,7 +3359,7 @@ describe("employee records", () => {
     it("writes nothing on a task without a rule", async () => {
       itemFindFirst.mockResolvedValue({
         ...kids,
-        data: { "שם מטלה": "לאסוף את הילדים" },
+        data: { "שם משימה": "לאסוף את הילדים" },
       });
       await updateKids({ date: "2026-10-23", cancel: true });
       expect(itemUpdate).not.toHaveBeenCalled();
@@ -3449,7 +3449,7 @@ describe("employee records", () => {
       reminderId: null,
       linkedReminderId: "r-am",
       data: {
-        "שם מטלה": "להוריד את סקאזי",
+        "שם משימה": "להוריד את סקאזי",
         חוזר: "כל יום ב־09:00",
       },
       list,
@@ -3468,7 +3468,7 @@ describe("employee records", () => {
       reminderId: null,
       linkedReminderId: "r-pm",
       data: {
-        "שם מטלה": "להוריד את סקאזי",
+        "שם משימה": "להוריד את סקאזי",
         חוזר: "כל יום ב־21:00",
       },
       list: { employeeId: talId, listType: "tasks" },
@@ -3477,7 +3477,7 @@ describe("employee records", () => {
       id: "assign-note",
       itemKey: "להזכיר להוריד את סקאזי",
       reminderId: null,
-      data: { "שם מטלה": "להזכיר להוריד את סקאזי" },
+      data: { "שם משימה": "להזכיר להוריד את סקאזי" },
       list: { employeeId: employeeId, listType: "tasks" },
     };
     // Peer evening standing row — same key, must not be cascade-deleted.
@@ -3532,7 +3532,7 @@ describe("employee records", () => {
             action: "remove",
             listType: "tasks",
             listName: "",
-            items: [{ item_id: "skazi-am", "שם מטלה": "להוריד את סקאזי" }],
+            items: [{ item_id: "skazi-am", "שם משימה": "להוריד את סקאזי" }],
             targets: [],
           },
         ],
@@ -3575,7 +3575,7 @@ describe("employee records", () => {
         items: [
           {
             id: "task-gift",
-            data: { "שם מטלה": "לקנות מתנה" },
+            data: { "שם משימה": "לקנות מתנה" },
             scope: "personal",
           },
         ],
@@ -3601,7 +3601,7 @@ describe("employee records", () => {
           items: [
             {
               item_id: "task-gift",
-              "שם מטלה": "לקנות מתנה",
+              "שם משימה": "לקנות מתנה",
               scope: "personal",
               owner: "עמית",
             },
@@ -3633,25 +3633,25 @@ describe("employee records", () => {
         items: [
           {
             id: "task-milk",
-            data: { "שם מטלה": "לקנות חלב" },
+            data: { "שם משימה": "לקנות חלב" },
             scope: "personal",
             reminderId: "rem-milk",
           },
           {
             id: "task-stale",
-            data: { "שם מטלה": "להתקשר לבנק" },
+            data: { "שם משימה": "להתקשר לבנק" },
             scope: "personal",
             reminderId: "rem-gone",
           },
           {
             id: "task-gift",
-            data: { "שם מטלה": "לקנות מתנה" },
+            data: { "שם משימה": "לקנות מתנה" },
             scope: "personal",
             reminderId: null,
           },
           {
             id: "task-speaker",
-            data: { "שם מטלה": "לבדוק שטויות" },
+            data: { "שם משימה": "לבדוק שטויות" },
             scope: "personal",
             reminderId: null,
             linkedReminderId: "rem-milk",
@@ -3715,7 +3715,7 @@ describe("employee records", () => {
         items: [
           {
             id: "task-reverse",
-            data: { "שם מטלה": "לבדוק את הבאג" },
+            data: { "שם משימה": "לבדוק את הבאג" },
             scope: "personal",
             reminderId: null,
             linkedReminderId: null,
@@ -3856,14 +3856,14 @@ describe("employee records", () => {
     itemFindMany.mockResolvedValue([
       {
         id: "t1",
-        data: { "שם מטלה": "לבדוק שטויות" },
+        data: { "שם משימה": "לבדוק שטויות" },
         scope: "shared",
         visibleTo: [employeeId, eranId],
         list: eranTasks,
       },
       {
         id: "t2",
-        data: { "שם מטלה": "לשתות הרבה מים" },
+        data: { "שם משימה": "לשתות הרבה מים" },
         scope: "shared",
         visibleTo: [employeeId, eranId, talId],
         list: eranTasks,
@@ -4214,14 +4214,14 @@ describe("employee records", () => {
           {
             id: "water-1",
             itemKey: "לשתות מים",
-            data: { "שם מטלה": "לשתות מים", "תאריך לביצוע": "2026-10-09" },
+            data: { "שם משימה": "לשתות מים", "תאריך לביצוע": "2026-10-09" },
             urgency: "urgent",
             scope: "personal",
           },
           {
             id: "milk-1",
             itemKey: "לקנות חלב",
-            data: { "שם מטלה": "לקנות חלב" },
+            data: { "שם משימה": "לקנות חלב" },
             urgency: "normal",
             scope: "personal",
           },
@@ -4242,7 +4242,7 @@ describe("employee records", () => {
           listName: "",
           items: [
             {
-              "שם מטלה": "לשתות מים",
+              "שם משימה": "לשתות מים",
               "תאריך לביצוע": "2026-10-09",
               urgency: "urgent",
             },
@@ -4257,7 +4257,7 @@ describe("employee records", () => {
       data: expect.objectContaining({
         itemKey: "לשתות מים",
         data: {
-          "שם מטלה": "לשתות מים",
+          "שם משימה": "לשתות מים",
           "תאריך לביצוע": "2026-10-09",
         },
         urgency: "urgent",
@@ -4266,11 +4266,11 @@ describe("employee records", () => {
 
     const snapshot = await getEmployeeRecordSnapshot(employeeId);
     expect(snapshot.lists[0]?.items[0]).toMatchObject({
-      "שם מטלה": "לשתות מים",
+      "שם משימה": "לשתות מים",
       urgency: "urgent",
     });
     expect(snapshot.lists[0]?.items[1]).toMatchObject({
-      "שם מטלה": "לקנות חלב",
+      "שם משימה": "לקנות חלב",
     });
     expect(snapshot.lists[0]?.items[1]).not.toHaveProperty("urgency");
 
@@ -4348,7 +4348,7 @@ describe("employee records", () => {
           {
             id: "item-book",
             itemKey: "לקרוא ספר",
-            data: { "שם מטלה": "לקרוא ספר" },
+            data: { "שם משימה": "לקרוא ספר" },
             addedById: talId,
             createdAt,
             urgency: "normal",
@@ -4440,7 +4440,7 @@ describe("employee records", () => {
               kind: "list",
               title: "לקרוא ספר",
               details: [],
-              fields: [{ label: "שם מטלה", value: "לקרוא ספר" }],
+              fields: [{ label: "שם משימה", value: "לקרוא ספר" }],
               createdBy: "טל",
               createdAt: createdAt.toISOString(),
               linkedLists: [
@@ -4536,7 +4536,7 @@ describe("employee records", () => {
         items: [
           {
             id: "lucy-apples",
-            data: { "שם מטלה": "להזכיר לעמית שערן צריך לקנות תפוחים" },
+            data: { "שם משימה": "להזכיר לעמית שערן צריך לקנות תפוחים" },
             scope: "shared",
             itemKey: "להזכיר לעמית שערן צריך לקנות תפוחים",
             reminderId: null,
@@ -4551,7 +4551,7 @@ describe("employee records", () => {
     expect(snap.lists[0]?.items).toEqual([
       expect.objectContaining({
         item_id: "lucy-apples",
-        "שם מטלה": "להזכיר לעמית שערן צריך לקנות תפוחים",
+        "שם משימה": "להזכיר לעמית שערן צריך לקנות תפוחים",
       }),
     ]);
     expect(itemUpdateMany).not.toHaveBeenCalled();

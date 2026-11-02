@@ -111,7 +111,7 @@ describe("account owner visibility", () => {
           {
             id: "1",
             itemKey: "חלב",
-            data: { "שם מטלה": "לקנות חלב" },
+            data: { "שם משימה": "לקנות חלב" },
             scope: "personal",
             addedById: amitId,
             visibleTo: [amitId],

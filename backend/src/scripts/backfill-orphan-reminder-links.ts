@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     const userId = row.list.employee.userId;
     const data = (row.data ?? {}) as Record<string, unknown>;
     const itemLabel =
-      (typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()) ||
+      (typeof data["שם משימה"] === "string" && data["שם משימה"].trim()) ||
       (typeof data["שם פריט"] === "string" && data["שם פריט"].trim()) ||
       (typeof data.name === "string" && data.name.trim()) ||
       row.itemKey;

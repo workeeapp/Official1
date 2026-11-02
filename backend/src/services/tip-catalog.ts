@@ -163,7 +163,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 200,
-    text: "לידיעתך: אפשר לבקש ממני מטלה במשפט — למשל «תוסיפי מטלה להתקשר לרופא».",
+    text: "לידיעתך: אפשר לבקש ממני משימה במשפט — למשל «תוסיפי משימה להתקשר לרופא».",
   },
   {
     key: "tasks_basic_show",
@@ -193,7 +193,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 202,
-    text: "אפשר גם לכתוב «סיימתי להתקשר לרופא» — ואסמן או אסיר את המטלה בהתאם.",
+    text: "אפשר גם לכתוב «סיימתי להתקשר לרופא» — ואסמן או אסיר את המשימה בהתאם.",
   },
   {
     key: "tasks_mid_when",
@@ -208,7 +208,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 203,
-    text: "כדאי לנסות להוסיף מתי — «מטלה לפגישה מחר ב־10» — כדי שזה יופיע בזמן הנכון.",
+    text: "כדאי לנסות להוסיף מתי — «משימה לפגישה מחר ב־10» — כדי שזה יופיע בזמן הנכון.",
   },
   {
     key: "tasks_adv_standing",
@@ -223,7 +223,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 204,
-    text: "אני ממליצה: מטלה קבועה («כל שלישי חדר כושר») נשארת אצלי, ואפשר לחבר אליה תזכורת בוואטסאפ אם תרצה.",
+    text: "אני ממליצה: משימה קבועה («כל שלישי חדר כושר») נשארת אצלי, ואפשר לחבר אליה תזכורת בוואטסאפ אם תרצה.",
   },
   {
     key: "tasks_mid_edit",
@@ -238,7 +238,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 205,
-    text: "אפשר גם לעדכן מטלה קיימת — «תשני את השם לפגישה עם עמית» או להזיז את השעה — בלי לפתוח מטלה חדשה.",
+    text: "אפשר גם לעדכן משימה קיימת — «תשני את השם לפגישה עם עמית» או להזיז את השעה — בלי לפתוח משימה חדשה.",
   },
   {
     key: "tasks_mid_delete",
@@ -253,7 +253,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 206,
-    text: "לידיעתך: כשרוצים להסיר לגמרי — «תמחקי את המטלה להתקשר לרופא». לסימון שסיימת להפעם עדיף «סיימתי…».",
+    text: "לידיעתך: כשרוצים להסיר לגמרי — «תמחקי את המשימה להתקשר לרופא». לסימון שסיימת להפעם עדיף «סיימתי…».",
   },
 
   // —— Meetings (פגישות ביומן המשימות) ——
@@ -452,7 +452,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 304,
-    text: "אני ממליצה: כשמתארגנים לערב (פוקר, יום הולדת, קולנוע) אפשר לחבר אליו רשימות מתאימות לאירוע — ואנהל את זה יחד עם המטלה של האירוע.",
+    text: "אני ממליצה: כשמתארגנים לערב (פוקר, יום הולדת, קולנוע) אפשר לחבר אליו רשימות מתאימות לאירוע — ואנהל את זה יחד עם המשימה של האירוע.",
   },
   {
     key: "custom_mid_edit",
@@ -666,7 +666,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 504,
-    text: "אני ממליצה: אפשר תזכורת חוזרת («כל שלישי ב־19») ולחבר אותה למטלה קבועה אם בא לך.",
+    text: "אני ממליצה: אפשר תזכורת חוזרת («כל שלישי ב־19») ולחבר אותה למשימה קבועה אם בא לך.",
   },
   {
     key: "reminders_mid_edit",

@@ -3268,7 +3268,7 @@ describe("saved location origin/destination in resolveRoutesReply", () => {
         items: [
           {
             item_id: "t-work",
-            "שם מטלה": "העבודה",
+            "שם משימה": "העבודה",
             מקום: "32.085, 34.781",
           },
         ],

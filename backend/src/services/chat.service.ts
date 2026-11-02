@@ -3495,7 +3495,7 @@ export async function sendChatMessage(input: {
     const appliedListAdd = listMutations.some(
       (row) => row.action === "add" && !row.listShell,
     );
-    /** Speaker-book add only — worker להזכיר must not satisfy «הוספתי את המטלה». */
+    /** Speaker-book add only — worker להזכיר must not satisfy «הוספתי את המשימה». */
     const appliedSpeakerListAdd = listMutations.some(
       (row) =>
         row.action === "add" &&

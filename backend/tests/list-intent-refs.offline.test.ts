@@ -34,7 +34,7 @@ const speakerSnap: EmployeeRecordSnapshot = {
       list_name: "",
       owner: "טל",
       scope: "personal",
-      items: [{ item_id: taskTodayId, "שם מטלה": "דיברתי עם yes" }],
+      items: [{ item_id: taskTodayId, "שם משימה": "דיברתי עם yes" }],
     },
     {
       list_id: listAId,
@@ -158,7 +158,7 @@ describe("resolveIntentRefs", () => {
       {
         mutate_source: "saved_data",
         item_id: taskTodayId,
-        "שם מטלה": "דיברתי עם yes",
+        "שם משימה": "דיברתי עם yes",
       },
     ]);
     const intent = resolveIntentRefs([esd], {

@@ -95,7 +95,7 @@ describe("collectSavedPlacesWithoutCoords — all sources", () => {
           items: [
             {
               item_id: "t-branch",
-              "שם מטלה": "הסניף הצפוני",
+              "שם משימה": "הסניף הצפוני",
               כתובת: "דרך השלום 1 חיפה",
             },
           ],

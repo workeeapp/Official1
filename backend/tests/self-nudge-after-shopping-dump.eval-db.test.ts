@@ -51,7 +51,7 @@ function tasksTitles(
     if (list.list_type !== "tasks") continue;
     for (const item of list.items) {
       const title =
-        (typeof item["שם מטלה"] === "string" && item["שם מטלה"]) ||
+        (typeof item["שם משימה"] === "string" && item["שם משימה"]) ||
         (typeof item.title === "string" && item.title) ||
         "";
       if (title) out.push(title);
@@ -136,7 +136,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
         {
           responses: [
             {
-              text: `הוספתי את המטלה ${ZIP_TASK}. קבעתי תזכורת למחר ב־10:00: תזכורת: ${ZIP_TASK}.`,
+              text: `הוספתי את המשימה ${ZIP_TASK}. קבעתי תזכורת למחר ב־10:00: תזכורת: ${ZIP_TASK}.`,
             },
           ],
           metadata: {
@@ -147,7 +147,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
                 list_name: "",
                 items: [
                   {
-                    "שם מטלה": ZIP_TASK,
+                    "שם משימה": ZIP_TASK,
                     "תאריך לביצוע": tomorrow,
                     remind: {
                       date: tomorrow,
@@ -163,7 +163,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
                 action: "add",
                 list_type: "tasks",
                 list_name: "",
-                items: [{ "שם מטלה": `להזכיר לטל: ${ZIP_TASK}` }],
+                items: [{ "שם משימה": `להזכיר לטל: ${ZIP_TASK}` }],
                 targets: ["לוסי"],
               },
             ],
@@ -190,7 +190,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
     expect(spoken).toContain("הוספתי");
     expect(spoken).toMatch(/תזכורת/);
     // Must not be rewritten to reminder-only partial.
-    expect(spoken).not.toContain("לא הצלחתי להוסיף את המטלה");
+    expect(spoken).not.toContain("לא הצלחתי להוסיף את המשימה");
 
     expect(whatsappTextSpy).not.toHaveBeenCalled();
     expect(fireDueSpy).not.toHaveBeenCalled();
@@ -210,7 +210,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
     expect(zipClock, "expected nested clock for ZIP task").toBeTruthy();
     const zipTask = after.lists
       .flatMap((l) => (l.list_type === "tasks" ? l.items : []))
-      .find((it) => String(it["שם מטלה"] ?? it.title ?? "") === ZIP_TASK);
+      .find((it) => String(it["שם משימה"] ?? it.title ?? "") === ZIP_TASK);
     expect(zipTask?.item_id, "speaker task id").toBeTruthy();
     const linked =
       String(zipTask?.reminder_id ?? "") === String(zipClock?.reminder_id ?? "") ||

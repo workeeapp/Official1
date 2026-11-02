@@ -40,7 +40,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               {
                 action: "add",
                 list_type: "tasks",
-                items: [{ "שם מטלה": "לשלוח מייל" }],
+                items: [{ "שם משימה": "לשלוח מייל" }],
                 targets: [],
               },
             ],
@@ -69,7 +69,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               {
                 action: "add",
                 list_type: "tasks",
-                items: [{ "שם מטלה": "לקנות מתנה" }],
+                items: [{ "שם משימה": "לקנות מתנה" }],
                 targets: [],
               },
             ],
@@ -98,7 +98,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               {
                 action: "add",
                 list_type: "tasks",
-                items: [{ "שם מטלה": "להתקשר לעורך דין" }],
+                items: [{ "שם משימה": "להתקשר לעורך דין" }],
                 targets: [],
               },
             ],
@@ -115,7 +115,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               items: [
                 {
                   item_id: itemIdByLabel(input.snapshot, "עורך"),
-                  "שם מטלה": 'להתקשר לעו"ד ראובן',
+                  "שם משימה": 'להתקשר לעו"ד ראובן',
                 },
               ],
               targets: [],
@@ -132,7 +132,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               {
                 action: "add",
                 list_type: "tasks",
-                items: [{ "שם מטלה": "לסגור חשבון" }],
+                items: [{ "שם משימה": "לסגור חשבון" }],
                 targets: [],
               },
             ],
@@ -150,7 +150,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
                 items: [
                   {
                     item_id: itemIdByLabel(input.snapshot, "חשבון"),
-                    "שם מטלה": "לסגור חשבון בנק",
+                    "שם משימה": "לסגור חשבון בנק",
                   },
                 ],
                 targets: [],

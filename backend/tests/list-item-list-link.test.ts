@@ -215,14 +215,14 @@ describe("splitItemListLinks", () => {
   it("strips link fields from item data", () => {
     const result = splitItemListLinks({
       item_id: TASK_ITEM,
-      "שם מטלה": "ערב פוקר",
+      "שם משימה": "ערב פוקר",
       linked_list_ids: [SHOP_LIST, CUSTOM_LIST],
       linked_lists: [{ list_type: "custom", list_name: "מי מגיע" }],
       unlink_list_ids: [SHOP_LIST],
     });
     expect(result.item).toEqual({
       item_id: TASK_ITEM,
-      "שם מטלה": "ערב פוקר",
+      "שם משימה": "ערב פוקר",
     });
     expect(result.linkedListIds).toEqual([SHOP_LIST, CUSTOM_LIST]);
     expect(result.linkedLists).toEqual([
@@ -392,7 +392,7 @@ describe("withLinkedListRefs", () => {
         listItem: {
           id: TASK_ITEM,
           itemKey: "ערב פוקר",
-          data: { "שם מטלה": "ערב פוקר" },
+          data: { "שם משימה": "ערב פוקר" },
           list: { listType: "tasks", titleField: "" },
         },
       },
@@ -403,7 +403,7 @@ describe("withLinkedListRefs", () => {
         {
           list_id: HOST_LIST,
           list_type: "tasks",
-          items: [{ item_id: TASK_ITEM, "שם מטלה": "ערב פוקר" }],
+          items: [{ item_id: TASK_ITEM, "שם משימה": "ערב פוקר" }],
         },
         {
           list_id: CUSTOM_LIST,

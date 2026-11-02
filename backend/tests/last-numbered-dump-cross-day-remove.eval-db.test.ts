@@ -71,7 +71,7 @@ function tasksTitles(
     if (list.list_type !== "tasks") continue;
     for (const item of list.items) {
       const title =
-        (typeof item["שם מטלה"] === "string" && item["שם מטלה"]) ||
+        (typeof item["שם משימה"] === "string" && item["שם משימה"]) ||
         (typeof item.title === "string" && item.title) ||
         "";
       if (title) out.push(title);
@@ -129,11 +129,11 @@ describe("LAST_NUMBERED_DUMP cross-day ESD remove (eval-db, stubbed LLM)", () =>
             targets: [],
             items: [
               {
-                "שם מטלה": YES_TASK,
+                "שם משימה": YES_TASK,
                 "תאריך לביצוע": today,
               },
               {
-                "שם מטלה": TOMORROW_TASK,
+                "שם משימה": TOMORROW_TASK,
                 "תאריך לביצוע": tomorrow,
               },
             ],
@@ -189,7 +189,7 @@ describe("LAST_NUMBERED_DUMP cross-day ESD remove (eval-db, stubbed LLM)", () =>
                 action: "remove",
                 list_type: "tasks",
                 list_name: "",
-                items: [{ item_id: yesId, "שם מטלה": YES_TASK }],
+                items: [{ item_id: yesId, "שם משימה": YES_TASK }],
                 targets: [],
               },
             ],

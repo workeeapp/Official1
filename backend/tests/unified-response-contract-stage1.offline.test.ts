@@ -308,7 +308,7 @@ describe("Stage-1 production path (Result-B + gated correctors)", () => {
 
   it("complete successful ACTION + accurate response is preserved", () => {
     const out = runProductionPath({
-      modelDraft: draftJson("הסרתי את «דיברתי עם yes» מהמטלות."),
+      modelDraft: draftJson("הסרתי את «דיברתי עם yes» מהמשימות."),
       applyResult: resultCompleteRemove(),
     });
     expect(out.decided.keepDraft).toBe(true);
@@ -380,7 +380,7 @@ describe("Stage-1 production path (Result-B + gated correctors)", () => {
       requested: captureRequestedFromMetadata({ lists: [] }),
     });
     const out = runProductionPath({
-      modelDraft: draftJson("צרפתי את הקובץ למטלה."),
+      modelDraft: draftJson("צרפתי את הקובץ למשימה."),
       applyResult,
       gated: {
         attachmentOutcome: {
@@ -424,7 +424,7 @@ describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לקנות חלב" }],
+          items: [{ "שם משימה": "לקנות חלב" }],
           targets: [],
         },
       ],
@@ -437,7 +437,7 @@ describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
     expect(applyResult.completeness).toBe("unknown");
 
     const out = runProductionPath({
-      modelDraft: draftJson("הוספתי את המטלה לרשימה."),
+      modelDraft: draftJson("הוספתי את המשימה לרשימה."),
       applyResult,
       gated: {
         appliedAdd: false,
@@ -464,7 +464,7 @@ describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
           action: "add",
           listType: "tasks",
           listName: "",
-          items: [{ "שם מטלה": "לקנות חלב" }],
+          items: [{ "שם משימה": "לקנות חלב" }],
           targets: [],
         },
       ],
@@ -485,7 +485,7 @@ describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
     expect(applyResult.completeness).toBe("complete");
 
     const out = runProductionPath({
-      modelDraft: draftJson("הוספתי את המטלה לרשימה."),
+      modelDraft: draftJson("הוספתי את המשימה לרשימה."),
       applyResult,
       gated: {
         appliedAdd: true,

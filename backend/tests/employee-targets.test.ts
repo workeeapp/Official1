@@ -161,7 +161,7 @@ describe("employee targets", () => {
           list.items.some(
             (entry) =>
               typeof entry["שם משימה"] === "string" &&
-              String(entry["שם משימה"]).includes("קיבל מטלה"),
+              String(entry["שם משימה"]).includes("קיבל משימה"),
           ),
         ),
       ),
@@ -2117,7 +2117,7 @@ describe("employee targets", () => {
       }),
     ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
 
-    // (1) Bare + opaque legacy מטלות (+ canonical twin) → one canonical משימות.
+    // (1) Bare + opaque legacy משימות (+ canonical twin) → one canonical משימות.
     expect(
       ensureSpeakerShowButtons(
         {
@@ -2133,8 +2133,8 @@ describe("employee targets", () => {
           ],
         },
         [
-          { label: "הצג מטלות", command: "הצג מטלות" },
-          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          { label: "הצג משימות", command: "הצג משימות" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
           { label: "הצג משימות", command: "הצג רשימת משימות" },
         ],
       ),
@@ -2163,7 +2163,7 @@ describe("employee targets", () => {
           ],
         },
         [
-          { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
           { label: "הצג קניות", command: "הצג רשימת קניות" },
         ],
       ),
@@ -2187,7 +2187,7 @@ describe("employee targets", () => {
             },
           ],
         },
-        [{ label: "הצג מטלות", command: "הצג רשימת מטלות" }],
+        [{ label: "הצג משימות", command: "הצג רשימת משימות" }],
       ),
     ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
 
@@ -2374,7 +2374,7 @@ describe("employee targets", () => {
         ],
       }),
     ).toBe(
-      "טל הוסיף לך מטלה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
+      "טל הוסיף לך משימה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
     );
   });
 
@@ -2433,7 +2433,7 @@ describe("employee targets", () => {
         recipientIsOwner: true,
       }),
     ).toBe(
-      "טל הוסיף לך מטלה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
+      "טל הוסיף לך משימה: ללכת לקוסמטיקאית, ותזכורת בעוד שעה",
     );
   });
 
@@ -2499,7 +2499,7 @@ describe("employee targets", () => {
     expect(
       fallbackNotificationText(amit, notify!.metadata, { recipientIsOwner: true }),
     ).toBe(
-      "עדכונים מעמית:\n• הוסיף לך מטלה: לקנות תפוחים\n• הוסיף לך מטלה: לבדוק שזה עובד\n• תזכורת אליך בעוד 3 שעות: לבדוק שזה עובד",
+      "עדכונים מעמית:\n• הוסיף לך משימה: לקנות תפוחים\n• הוסיף לך משימה: לבדוק שזה עובד\n• תזכורת אליך בעוד 3 שעות: לבדוק שזה עובד",
     );
   });
 
@@ -4200,7 +4200,7 @@ describe("employee targets", () => {
         },
         { shared: true, recipientIsOwner: false, recipientIsPartner: true },
       ),
-    ).toBe("עמית שיתף איתך מטלה: לבדוק שמן");
+    ).toBe("עמית שיתף איתך משימה: לבדוק שמן");
   });
 
   it("does not call a shared item «של <owner>» when updating it for a partner", () => {

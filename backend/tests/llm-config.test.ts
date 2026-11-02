@@ -150,7 +150,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "show_dump=tasks + show_dump_about=YOUR display name",
     );
-    expect(config.systemMessage).toContain("אין לי מטלות");
+    expect(config.systemMessage).toContain("אין לי משימות");
     expect(config.systemMessage).toContain("FORBIDDEN model-written");
     expect(config.systemMessage).toContain("show_dump_about");
     expect(config.systemMessage).toContain("show_dump_assignee");
@@ -230,7 +230,7 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("LIST BUTTON / COLLAB NAV — MODEL");
     expect(config.systemMessage).toContain("Engine validates against applied save");
     expect(config.systemMessage).toContain("«הצג קניות»");
-    expect(config.systemMessage).toContain("«הצג מטלות»");
+    expect(config.systemMessage).toContain("«הצג משימות»");
     expect(config.systemMessage).toContain("«הצג אנשי קשר»");
     expect(config.systemMessage).toContain("«הצג תיוקים»");
     expect(config.systemMessage).toContain('label «הצג רשימה»');
@@ -265,12 +265,12 @@ describe("LLM action schema", () => {
       "UNIQUELY identifies that row",
     );
     expect(config.systemMessage).toContain(
-      "הציגי את המטלה <exact שם מטלה>",
+      "הציגי את המשימה <exact שם משימה>",
     );
     expect(config.systemMessage).toContain(
       "הציגי את התיוק <exact item_name>",
     );
-    expect(config.systemMessage).toContain("להצגת המטלה");
+    expect(config.systemMessage).toContain("להצגת המשימה");
     expect(config.systemMessage).toContain("להצגת התיוק");
     expect(config.systemMessage).toContain(
       "Shopping / contacts / custom → LIST nav only (no item-open)",
@@ -375,7 +375,7 @@ describe("LLM action schema", () => {
       "NEVER choose between navigation and כן/לא",
     );
     expect(config.systemMessage).toContain(
-      "רוצה שאוסיף גם תזכורת למטלה הזו?",
+      "רוצה שאוסיף גם תזכורת למשימה הזו?",
     );
     expect(config.systemMessage).toContain(
       "כן without a complete reminder schedule → ask schedule only",

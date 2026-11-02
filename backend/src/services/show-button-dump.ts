@@ -72,7 +72,7 @@ export type ShowButtonDumpTarget = {
 
 const TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
-  tasks: ["שם מטלה", "name", "task", "item_name"],
+  tasks: ["שם משימה", "name", "task", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
 };
 
@@ -247,7 +247,7 @@ export function mapShowButtonCommandToDumpTarget(
 
   // Worker inventory (WATCH / להזכיר / לשלוח הודעה) — not collab משותפות/באחריות.
   const workerTasksAbout = trimmed.match(
-    /^הצג (?:משימות|מטלות) של (.+)$/u,
+    /^הצג (?:משימות|משימות) של (.+)$/u,
   );
   if (workerTasksAbout) {
     const person = (workerTasksAbout[1] ?? "").trim();
@@ -257,7 +257,7 @@ export function mapShowButtonCommandToDumpTarget(
   }
 
   const builtinShared = trimmed.match(
-    /^הצג (קניות|משימות|מטלות|אנשי קשר) משותפות עם (.+)$/u,
+    /^הצג (קניות|משימות|משימות|אנשי קשר) משותפות עם (.+)$/u,
   );
   if (builtinShared) {
     const hebrew = builtinShared[1] ?? "";
@@ -286,7 +286,7 @@ export function mapShowButtonCommandToDumpTarget(
     }
   }
   const builtinAssign = trimmed.match(
-    /^הצג (קניות|משימות|מטלות|אנשי קשר) באחריות (.+)$/u,
+    /^הצג (קניות|משימות|משימות|אנשי קשר) באחריות (.+)$/u,
   );
   if (builtinAssign) {
     const hebrew = builtinAssign[1] ?? "";
@@ -407,7 +407,7 @@ export function looksLikeFreeWrittenNumberedInventory(text: string): boolean {
     return false;
   }
   return lines.some((line) =>
-    /רשימת|קניות|משימות|מטלות|אנשי קשר|תיוקים|🛒|✅|📋|👤/u.test(line),
+    /רשימת|קניות|משימות|משימות|אנשי קשר|תיוקים|🛒|✅|📋|👤/u.test(line),
   );
 }
 
@@ -2336,7 +2336,7 @@ export function itemHasDumpRecurrenceRule(
   return Array.isArray(item.next_occurrences);
 }
 
-/** True when a task has no calendar date and no recurrence (מטלה כללית). */
+/** True when a task has no calendar date and no recurrence (משימה כללית). */
 export function isUndatedGeneralTask(item: Record<string, unknown>): boolean {
   return !itemHasDumpCalendarDate(item) && !itemHasDumpRecurrenceRule(item);
 }
@@ -2651,7 +2651,7 @@ function expandTaskAgendaSlots(
       // over the series חוזר clock so moved occurrences display correctly.
       const hm =
         hmFromDumpValue(occ) || extractHmFromText(recurring) || "";
-      const stem = row.title.trim() || "מטלה";
+      const stem = row.title.trim() || "משימה";
       const id = String(item.item_id ?? "").trim();
       slots.push({
         ymd,
@@ -2686,7 +2686,7 @@ function expandTaskAgendaSlots(
   if (!ymdInInclusiveRange(ymd, from, to)) {
     return [];
   }
-  const oneOffStem = row.title.trim() || "מטלה";
+  const oneOffStem = row.title.trim() || "משימה";
   const oneOffId = String(item.item_id ?? "").trim();
   return [
     {
@@ -3829,7 +3829,7 @@ function dumpItemTitleStem(
     );
   }
   if (listType === "tasks") {
-    return readText(item, TITLE_KEYS.tasks) || row.title.trim() || "מטלה";
+    return readText(item, TITLE_KEYS.tasks) || row.title.trim() || "משימה";
   }
   if (listType === "contacts") {
     return readText(item, TITLE_KEYS.contacts) || row.title.trim() || "איש קשר";
@@ -4096,7 +4096,7 @@ export function isTasksShowDumpKind(kind: string): boolean {
   const resolved = resolveShowDumpKind(kind);
   return (
     resolved?.kind === "list" &&
-    (resolved.name === "משימות" || resolved.name === "מטלות")
+    (resolved.name === "משימות" || resolved.name === "משימות")
   );
 }
 
@@ -4370,7 +4370,7 @@ function stripLeadingListEmoji(label: string): string {
 
 /**
  * Drop `ב־HH:mm` from a dump title when it matches chore `שעה לביצוע`
- * (synced into שם מטלה by applyTimeToTaskLabel) so we do not print
+ * (synced into שם משימה by applyTimeToTaskLabel) so we do not print
  * «ב־09:00 — 09:00».
  */
 export function stripMatchingTitleClock(title: string, hm: string): string {

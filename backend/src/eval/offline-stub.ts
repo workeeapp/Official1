@@ -157,10 +157,10 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
       }
       return "ביטלתי";
     case "lists_has_action": {
-      const label = c.itemTextIncludes ?? (c.listType === "tasks" ? "מטלה" : "חלב");
+      const label = c.itemTextIncludes ?? (c.listType === "tasks" ? "משימה" : "חלב");
       const labeledItem =
         c.listType === "tasks"
-          ? { "שם מטלה": label }
+          ? { "שם משימה": label }
           : c.listType === "custom"
             ? { שם: label }
             : { "שם פריט": label };
@@ -200,7 +200,7 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
         items: [
           {
             item_id: "eval-item-host-bday",
-            "שם מטלה": "ערב יום הולדת",
+            "שם משימה": "ערב יום הולדת",
             linked_lists: [{ list_type: "custom", list_name: listName }],
           },
         ],

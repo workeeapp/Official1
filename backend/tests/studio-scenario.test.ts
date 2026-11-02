@@ -115,15 +115,15 @@ describe("Phase 1 Studio scenario validation", () => {
             {
               list_type: "tasks",
               items: [
-                { item_id: "t1", "שם מטלה": "א" },
-                { item_id: "t2", "שם מטלה": "ב" },
+                { item_id: "t1", "שם משימה": "א" },
+                { item_id: "t2", "שם משימה": "ב" },
               ],
             },
           ],
         },
         turns: [
           {
-            utterance: "תמחק מטלה",
+            utterance: "תמחק משימה",
             constraints: [
               { type: "lists_empty" },
               { type: "response_looks_like_ask" },
@@ -136,8 +136,8 @@ describe("Phase 1 Studio scenario validation", () => {
                 {
                   list_type: "tasks",
                   items: [
-                    { item_id: "t1", "שם מטלה": "א" },
-                    { item_id: "t2", "שם מטלה": "ב" },
+                    { item_id: "t1", "שם משימה": "א" },
+                    { item_id: "t2", "שם משימה": "ב" },
                   ],
                 },
               ],

@@ -7,7 +7,7 @@
 import { jerusalemYmd } from "../utils/relative-date.js";
 import { jobMetaFrom } from "./job-meta.js";
 
-const TASK_NAME_KEYS = ["שם מטלה", "name", "task", "item_name"] as const;
+const TASK_NAME_KEYS = ["שם משימה", "name", "task", "item_name"] as const;
 const START_DATE_KEYS = ["תאריך לביצוע", "date"] as const;
 const END_DATE_KEYS = ["תאריך סיום", "end_date"] as const;
 
@@ -100,7 +100,7 @@ export function collectOverdueFromItems(
     const title =
       readText(data, TASK_NAME_KEYS) ||
       (typeof item.itemKey === "string" ? item.itemKey.trim() : "") ||
-      "מטלה";
+      "משימה";
     rows.push({
       itemId: item.id,
       title,
@@ -115,7 +115,7 @@ export function overdueTasksAsk(titles: string[]): string {
   const n = titles.length;
   const detail = titles.join(", ");
   if (n === 1) {
-    return `מטלה אחת שטרם נסגרה שעבר זמנה — ${detail}`;
+    return `משימה אחת שטרם נסגרה שעבר זמנה — ${detail}`;
   }
   return `${n} משימות שטרם נסגרו שעבר זמנן — ${detail}`;
 }

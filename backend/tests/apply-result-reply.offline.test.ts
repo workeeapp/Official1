@@ -160,7 +160,7 @@ describe("decideReplyFromApplyResult", () => {
   it("full success: keeps matching model draft", () => {
     const decided = decideReplyFromApplyResult({
       applyResult: resultFullSuccess(),
-      modelDraft: draftJson("הסרתי את «דיברתי עם yes» מהמטלות."),
+      modelDraft: draftJson("הסרתי את «דיברתי עם yes» מהמשימות."),
     });
     expect(decided.keepDraft).toBe(true);
     expect(decided.spoken).toContain("הסרתי");
@@ -169,7 +169,7 @@ describe("decideReplyFromApplyResult", () => {
   it("full success: rejects draft that claims add when only remove applied", () => {
     const decided = decideReplyFromApplyResult({
       applyResult: resultFullSuccess(),
-      modelDraft: draftJson("הוספתי את המטלה לרשימה."),
+      modelDraft: draftJson("הוספתי את המשימה לרשימה."),
     });
     expect(decided.keepDraft).toBe(false);
     expect(decided.spoken).toContain("הסרתי");
@@ -253,7 +253,7 @@ describe("decideReplyFromApplyResult", () => {
           listName: "",
           items: [
             {
-              "שם מטלה": "לשתות מיץ",
+              "שם משימה": "לשתות מיץ",
               item_id: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
             },
           ],

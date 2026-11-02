@@ -185,7 +185,7 @@ describe("Phase 4 constraint checkers", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לדבר עם אורי בטלפון 0534455366" }],
+              items: [{ "שם משימה": "לדבר עם אורי בטלפון 0534455366" }],
               targets: [],
             },
           ],
@@ -202,7 +202,7 @@ describe("Phase 4 constraint checkers", () => {
               action: "add",
               listType: "tasks",
               listName: "",
-              items: [{ "שם מטלה": "לדבר עם אורי" }],
+              items: [{ "שם משימה": "לדבר עם אורי" }],
               targets: [],
             },
           ],
@@ -232,7 +232,7 @@ describe("Phase 4 constraint checkers", () => {
             items: [
               {
                 item_id: "eval-item-host-bday",
-                "שם מטלה": "ערב יום הולדת",
+                "שם משימה": "ערב יום הולדת",
                 linked_lists: [
                   {
                     list_type: "custom",
@@ -281,7 +281,7 @@ describe("Phase 4 constraint checkers", () => {
               items: [
                 {
                   item_id: "eval-item-host-bday",
-                  "שם מטלה": "ערב יום הולדת",
+                  "שם משימה": "ערב יום הולדת",
                   linked_lists: [
                     { list_type: "custom", list_name: listName },
                   ],
@@ -316,7 +316,7 @@ describe("Phase 4 constraint checkers", () => {
               items: [
                 {
                   item_id: "eval-item-host-bday",
-                  "שם מטלה": "ערב יום הולדת",
+                  "שם משימה": "ערב יום הולדת",
                   linked_lists: [
                     { list_type: "custom", list_name: listName },
                   ],
@@ -350,7 +350,7 @@ describe("Phase 4 constraint checkers", () => {
               items: [
                 {
                   item_id: "eval-item-host-bday",
-                  "שם מטלה": `ערב יום הולדת ${listName}`,
+                  "שם משימה": `ערב יום הולדת ${listName}`,
                 },
               ],
               targets: [],
@@ -458,7 +458,7 @@ describe("Phase 4 constraint checkers", () => {
             action: "remove",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "קוד" }],
+            items: [{ "שם משימה": "קוד" }],
             targets: [],
           },
         ],

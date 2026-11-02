@@ -396,7 +396,7 @@ describe("employees API", () => {
           {
             id: "task-1",
             itemKey: "לקרוא ספר",
-            data: { "שם מטלה": "לקרוא ספר" },
+            data: { "שם משימה": "לקרוא ספר" },
             addedById: employeeId,
             createdAt,
           },

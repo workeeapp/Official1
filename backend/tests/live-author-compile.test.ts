@@ -12,7 +12,7 @@ describe("live-author-compile", () => {
       track: "model",
       turns: [
         {
-          utterance: "תוסיפי מטלה",
+          utterance: "תוסיפי משימה",
           intent: { type: "ask" },
         },
       ],
@@ -23,7 +23,7 @@ describe("live-author-compile", () => {
       "mutations_empty_or_read_only",
       "response_looks_like_ask",
     ]);
-    expect(row.utterance).toBe("תוסיפי מטלה");
+    expect(row.utterance).toBe("תוסיפי משימה");
   });
 
   it("compiles remove_item with listType shopping", () => {
@@ -163,7 +163,7 @@ describe("live-author-compile", () => {
       track: "model",
       turns: [
         {
-          utterance: "מטלה",
+          utterance: "משימה",
           intent: { type: "add_task", itemText: "רופא" },
         },
       ],

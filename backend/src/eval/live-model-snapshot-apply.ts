@@ -13,7 +13,7 @@ export function resetLiveModelItemSeq(): void {
 }
 
 function itemLabel(item: Record<string, unknown>): string {
-  for (const key of ["שם פריט", "שם מטלה", "שם", "name", "item", "title"]) {
+  for (const key of ["שם פריט", "שם משימה", "שם", "name", "item", "title"]) {
     const val = item[key];
     if (typeof val === "string" && val.trim()) return val.trim();
   }

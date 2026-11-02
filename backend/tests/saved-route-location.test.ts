@@ -44,12 +44,12 @@ describe("collectSavedRouteLocationCandidates", () => {
           items: [
             {
               item_id: "t-office",
-              "שם מטלה": "העבודה",
+              "שם משימה": "העבודה",
               מקום: "32.085, 34.781",
             },
             {
               item_id: "t-chore",
-              "שם מטלה": "לקנות חלב",
+              "שם משימה": "לקנות חלב",
               מקום: "סופר ליד הבית",
             },
           ],
@@ -120,7 +120,7 @@ describe("resolveSavedRoutePoint", () => {
         items: [
           {
             item_id: "t-work",
-            "שם מטלה": "העבודה",
+            "שם משימה": "העבודה",
             מקום: "32.085, 34.781",
           },
         ],
@@ -257,7 +257,7 @@ describe("address-like filing without coords", () => {
           items: [
             {
               item_id: "t-work",
-              "שם מטלה": "העבודה",
+              "שם משימה": "העבודה",
               כתובת: "דרך השלום 1 תל אביב",
             },
           ],

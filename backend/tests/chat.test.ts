@@ -815,7 +815,7 @@ describe("chat API", () => {
     expect(instructions).toContain("show_dump=tasks");
     expect(instructions).toContain("show_dump_about=YOUR display name");
     expect(instructions).toContain("BOTH REQUIRED");
-    expect(instructions).toContain("אין לי מטלות");
+    expect(instructions).toContain("אין לי משימות");
     expect(instructions).toMatch(/show_dump=tasks WITHOUT about|SPEAKER's tasks/);
   });
 
@@ -859,7 +859,7 @@ describe("chat API", () => {
     expect(instructions).toContain("FULL DUMP / מה יש לי / הציגי הכל");
     expect(instructions).toContain("FULL DUMP DETAIL RULE");
     expect(instructions).toContain("COUNTS ONLY");
-    expect(instructions).toContain("ONLY מטלות enumerate");
+    expect(instructions).toContain("ONLY משימות enumerate");
     expect(instructions).toContain("SHOW MY LISTS / הציגי את הרשימות שלי");
     expect(instructions).toContain('show_dump="full"');
     expect(instructions).toContain("לפירוט רשימה: הצג רשימת");
@@ -972,7 +972,7 @@ describe("chat API", () => {
               action: "add",
               list_type: "tasks",
               targets: ["לוסי"],
-              items: [{ "שם מטלה": "לשלוח לעמית בוקר טוב" }],
+              items: [{ "שם משימה": "לשלוח לעמית בוקר טוב" }],
             },
           ],
           filing: [],
@@ -1596,7 +1596,7 @@ describe("chat API", () => {
         employee: { name: "עמית", nickname: "עמית" },
         items: [
           {
-            data: { "שם מטלה": "לקנות מתנה" },
+            data: { "שם משימה": "לקנות מתנה" },
             scope: "personal",
             createdAt: new Date(),
           },
@@ -1660,7 +1660,7 @@ describe("chat API", () => {
             {
               action: "add",
               list_type: "tasks",
-              items: [{ "שם מטלה": "לקנות מתנה" }],
+              items: [{ "שם משימה": "לקנות מתנה" }],
             },
           ],
           filing: [
@@ -1700,7 +1700,7 @@ describe("chat API", () => {
       data: {
         listId: "list-1",
         itemKey: "לקנות מתנה",
-        data: { "שם מטלה": "לקנות מתנה" },
+        data: { "שם משימה": "לקנות מתנה" },
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId],
@@ -1771,7 +1771,7 @@ describe("chat API", () => {
   it("saves a task for Tal only when the LLM set targets", async () => {
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
-        response: "הוספתי מטלה: טל צריך לקחת מחר בבוקר את הילדים לגינה.",
+        response: "הוספתי משימה: טל צריך לקחת מחר בבוקר את הילדים לגינה.",
         metadata: {
           lists: [
             {
@@ -1779,7 +1779,7 @@ describe("chat API", () => {
               list_type: "tasks",
               items: [
                 {
-                  "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה",
+                  "שם משימה": "לקחת מחר בבוקר את הילדים לגינה",
                 },
               ],
               targets: ["טל"],
@@ -1808,7 +1808,7 @@ describe("chat API", () => {
       data: {
         listId: "list-1",
         itemKey: "לקחת מחר בבוקר את הילדים לגינה",
-        data: { "שם מטלה": "לקחת מחר בבוקר את הילדים לגינה" },
+        data: { "שם משימה": "לקחת מחר בבוקר את הילדים לגינה" },
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, otherEmployeeId],
@@ -1818,13 +1818,13 @@ describe("chat API", () => {
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(otherEmployeeId);
     expect(response.body.notifications[0].message.text).toBe(
-      "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
+      "עמית הוסיף לך משימה: לקחת מחר בבוקר את הילדים לגינה",
     );
     expect(deliverWhatsAppRelaysMock).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           target: expect.objectContaining({ id: otherEmployeeId }),
-          text: "עמית הוסיף לך מטלה: לקחת מחר בבוקר את הילדים לגינה",
+          text: "עמית הוסיף לך משימה: לקחת מחר בבוקר את הילדים לגינה",
         }),
       ],
       employeeId,
@@ -2110,13 +2110,13 @@ describe("chat API", () => {
             items: [
               {
                 id: "task-real-1",
-                data: { "שם מטלה": taskTitle },
+                data: { "שם משימה": taskTitle },
                 scope: "personal",
                 createdAt: new Date(),
               },
               {
                 id: "task-real-2",
-                data: { "שם מטלה": "לקנות חלב" },
+                data: { "שם משימה": "לקנות חלב" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2127,7 +2127,7 @@ describe("chat API", () => {
     );
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
-        responses: [{ text: "הנה המטלה שביקשת" }],
+        responses: [{ text: "הנה המשימה שביקשת" }],
         metadata: {
           lists: [],
           show_dump: "tasks",
@@ -2143,14 +2143,14 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הציגי את המטלה החסרה", employeeId });
+      .send({ message: "הציגי את המשימה החסרה", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("לא מצאתי את הפריט.");
     expect(response.body.reply).not.toContain(taskTitle);
     expect(response.body.reply).not.toContain("לקנות חלב");
-    expect(response.body.reply).not.toContain("מטלות:");
-    expect(response.body.reply).not.toContain("הנה המטלה שביקשת");
+    expect(response.body.reply).not.toContain("משימות:");
+    expect(response.body.reply).not.toContain("הנה המשימה שביקשת");
   });
 
   // T4 (cross-kind).
@@ -2179,7 +2179,7 @@ describe("chat API", () => {
             items: [
               {
                 id: "task-doctor",
-                data: { "שם מטלה": taskTitle },
+                data: { "שם משימה": taskTitle },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2230,14 +2230,14 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הציגי את המטלה לפי מזהה תיוק", employeeId });
+      .send({ message: "הציגי את המשימה לפי מזהה תיוק", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("לא מצאתי את הפריט.");
     expect(response.body.reply).not.toContain(taskTitle);
     expect(response.body.reply).not.toContain(filingName);
     expect(response.body.reply).not.toContain("1234");
-    expect(response.body.reply).not.toContain("מטלות:");
+    expect(response.body.reply).not.toContain("משימות:");
     expect(response.body.reply).not.toContain("תיוקים:");
   });
 
@@ -2265,7 +2265,7 @@ describe("chat API", () => {
               {
                 id: "task-meet",
                 data: {
-                  "שם מטלה": "פגישה עם רואה חשבון",
+                  "שם משימה": "פגישה עם רואה חשבון",
                   "תאריך לביצוע": "2026-10-12",
                 },
                 scope: "personal",
@@ -2274,7 +2274,7 @@ describe("chat API", () => {
               {
                 id: "task-pkg",
                 data: {
-                  "שם מטלה": "לאסוף חבילה",
+                  "שם משימה": "לאסוף חבילה",
                   "תאריך לביצוע": "2026-10-14",
                 },
                 scope: "personal",
@@ -2341,7 +2341,7 @@ describe("chat API", () => {
             items: [
               {
                 id: "task-about-1",
-                data: { "שם מטלה": "ללכת לספר" },
+                data: { "שם משימה": "ללכת לספר" },
                 reminderId: "r-about-1",
                 linkedReminderId: "r-about-1",
                 scope: "personal",
@@ -2354,7 +2354,7 @@ describe("chat API", () => {
     );
     createResponse.mockResolvedValue({
       reply: JSON.stringify({
-        responses: [{ text: "הנה המטלה" }],
+        responses: [{ text: "הנה המשימה" }],
         metadata: {
           lists: [],
           show_dump: "tasks",
@@ -2371,7 +2371,7 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הציגי את המטלה של עמית", employeeId });
+      .send({ message: "הציגי את המשימה של עמית", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("ללכת לספר");
@@ -2433,13 +2433,13 @@ describe("chat API", () => {
             items: [
               {
                 id: "task-dentist",
-                data: { "שם מטלה": "לשיננית" },
+                data: { "שם משימה": "לשיננית" },
                 scope: "personal",
                 createdAt: new Date(),
               },
               {
                 id: "task-pkg",
-                data: { "שם מטלה": "לאסוף חבילה" },
+                data: { "שם משימה": "לאסוף חבילה" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2534,7 +2534,7 @@ describe("chat API", () => {
             items: [
               {
                 id: "task-keep",
-                data: { "שם מטלה": "משימה קיימת" },
+                data: { "שם משימה": "משימה קיימת" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2595,12 +2595,12 @@ describe("chat API", () => {
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("לפי המידע הזמין עכשיו");
     expect(response.body.reply).toContain("תור לשיננית");
-    expect(response.body.reply).not.toContain("מטלות:");
+    expect(response.body.reply).not.toContain("משימות:");
   });
 
-  // Free-text «הצג מטלות» is NOT allowlisted — depends on stubbed model show_dump=tasks.
+  // Free-text «הצג משימות» is NOT allowlisted — depends on stubbed model show_dump=tasks.
   // Proves production dump REPLACE on speaker book; does not prove live-model behavior.
-  it("free-text הצג מטלות + stubbed show_dump=tasks dumps speaker book — not Lucy follow-ups", async () => {
+  it("free-text הצג משימות + stubbed show_dump=tasks dumps speaker book — not Lucy follow-ups", async () => {
     listFindMany.mockImplementation(
       async ({ where }: { where?: { employeeId?: unknown } }) => {
         if (
@@ -2625,7 +2625,7 @@ describe("chat API", () => {
               items: [
                 {
                   id: "lucy-free-1",
-                  data: { "שם מטלה": "לבדוק עם עמית: אם קנית חלב?" },
+                  data: { "שם משימה": "לבדוק עם עמית: אם קנית חלב?" },
                   addedById: employeeId,
                   visibleTo: [employeeId, lucyId],
                   scope: "personal",
@@ -2646,13 +2646,13 @@ describe("chat API", () => {
             items: [
               {
                 id: "speaker-free-1",
-                data: { "שם מטלה": "לקנות חלב" },
+                data: { "שם משימה": "לקנות חלב" },
                 scope: "personal",
                 createdAt: new Date(),
               },
               {
                 id: "speaker-free-2",
-                data: { "שם מטלה": "להתקשר לרופא" },
+                data: { "שם משימה": "להתקשר לרופא" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2675,7 +2675,7 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הצג מטלות", employeeId });
+      .send({ message: "הצג משימות", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("לקנות חלב");
@@ -2684,8 +2684,8 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("רגע");
   });
 
-  // Critical isolation: opaque «הצג רשימת מטלות» → speaker book (not Lucy follow-ups).
-  it("button הצג רשימת מטלות dumps speaker tasks — not Lucy follow-ups", async () => {
+  // Critical isolation: opaque «הצג רשימת משימות» → speaker book (not Lucy follow-ups).
+  it("button הצג רשימת משימות dumps speaker tasks — not Lucy follow-ups", async () => {
     listFindMany.mockImplementation(
       async ({ where }: { where?: { employeeId?: unknown } }) => {
         if (
@@ -2710,7 +2710,7 @@ describe("chat API", () => {
               items: [
                 {
                   id: "lucy-follow-1",
-                  data: { "שם מטלה": "לבדוק עם עמית: אם קנית חלב?" },
+                  data: { "שם משימה": "לבדוק עם עמית: אם קנית חלב?" },
                   addedById: employeeId,
                   visibleTo: [employeeId, lucyId],
                   scope: "personal",
@@ -2731,13 +2731,13 @@ describe("chat API", () => {
             items: [
               {
                 id: "speaker-task-1",
-                data: { "שם מטלה": "לקנות חלב" },
+                data: { "שם משימה": "לקנות חלב" },
                 scope: "personal",
                 createdAt: new Date(),
               },
               {
                 id: "speaker-task-2",
-                data: { "שם מטלה": "להתקשר לרופא" },
+                data: { "שם משימה": "להתקשר לרופא" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2761,7 +2761,7 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הצג רשימת מטלות", employeeId });
+      .send({ message: "הצג רשימת משימות", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("לקנות חלב");
@@ -2771,7 +2771,7 @@ describe("chat API", () => {
   });
 
   // Lucy follow-ups still work after an intervening automated Lucy bubble.
-  it("הצג מטלות של לוסי after intervening Lucy message dumps worker follow-ups", async () => {
+  it("הצג משימות של לוסי after intervening Lucy message dumps worker follow-ups", async () => {
     listFindMany.mockImplementation(
       async ({ where }: { where?: { employeeId?: unknown } }) => {
         if (
@@ -2796,7 +2796,7 @@ describe("chat API", () => {
               items: [
                 {
                   id: "lucy-nudge-1",
-                  data: { "שם מטלה": "להזכיר לעמית לקנות חלב" },
+                  data: { "שם משימה": "להזכיר לעמית לקנות חלב" },
                   addedById: employeeId,
                   visibleTo: [employeeId, lucyId],
                   scope: "personal",
@@ -2817,7 +2817,7 @@ describe("chat API", () => {
             items: [
               {
                 id: "speaker-only-1",
-                data: { "שם מטלה": "להתקשר לרופא" },
+                data: { "שם משימה": "להתקשר לרופא" },
                 scope: "personal",
                 createdAt: new Date(),
               },
@@ -2856,7 +2856,7 @@ describe("chat API", () => {
     const response = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
-      .send({ message: "הצג מטלות של לוסי", employeeId });
+      .send({ message: "הצג משימות של לוסי", employeeId });
 
     expect(response.status).toBe(200);
     expect(response.body.reply).toContain("להזכיר לעמית לקנות חלב");

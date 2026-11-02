@@ -19,7 +19,7 @@ function snapshotWith(input: {
   }
   const hostItem: Record<string, unknown> = {
     item_id: HOST_ID,
-    "שם מטלה": "ערב יום הולדת",
+    "שם משימה": "ערב יום הולדת",
   };
   if (input.linkedName) {
     hostItem.linked_lists = [

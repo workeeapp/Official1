@@ -107,8 +107,8 @@ async function main(): Promise<void> {
     const prev = (row.data ?? {}) as Record<string, unknown>;
     const data: Record<string, unknown> = {
       ...prev,
-      "שם מטלה":
-        (typeof prev["שם מטלה"] === "string" && prev["שם מטלה"]) ||
+      "שם משימה":
+        (typeof prev["שם משימה"] === "string" && prev["שם משימה"]) ||
         "יום ההולדת של עמית",
       "תאריך לביצוע": "2027-05-09",
       "יום שלם": true,

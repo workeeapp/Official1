@@ -159,7 +159,7 @@ describe("Stage 2B production path — Result-B + gated correctors", () => {
 
   it("Result-B keepDraft preserves all model bubbles", () => {
     const draft = multiBubbleDraft([
-      "הסרתי את המטלה.",
+      "הסרתי את המשימה.",
       "עוד משפט למשתמש.",
     ]);
     const decided = decideReplyFromApplyResult({
@@ -169,7 +169,7 @@ describe("Stage 2B production path — Result-B + gated correctors", () => {
     expect(decided.keepDraft).toBe(true);
     const parsed = parseLlmReply(draft);
     expect(parsed.responses).toEqual([
-      "הסרתי את המטלה.",
+      "הסרתי את המשימה.",
       "עוד משפט למשתמש.",
     ]);
   });

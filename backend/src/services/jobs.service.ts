@@ -32,7 +32,7 @@ import {
   resolveReminderFireAt,
 } from "./reminder.service.js";
 
-const TASK_NAME_KEY = "שם מטלה";
+const TASK_NAME_KEY = "שם משימה";
 const TASK_DATE_KEY = "תאריך לביצוע";
 const TASK_TIME_KEY = "שעה לביצוע";
 
@@ -1012,7 +1012,7 @@ export function meetingListsForAnswers(
       targets,
       items: [
         {
-          "שם מטלה": job.meta.bookTitle || "פגישה",
+          "שם משימה": job.meta.bookTitle || "פגישה",
           "תאריך לביצוע": job.meta.bookDate,
           "שעה לביצוע": job.meta.bookTime,
           ...(job.meta.bookEndTime ? { "שעת סיום": job.meta.bookEndTime } : {}),
@@ -1173,7 +1173,7 @@ export function formatOpenJobsContext(
     "raisable=false means a reminder clock is already set — wait for it, do not raise early. scheduled=true means a deferred check is waiting for its clock — do not ask yet; the server will send at fire; inventory dump still lists it under ממתינים. deferred=true means they said not now, with no clock: still raisable. Raise only when not answering an inventory ask, not while a DELETE CONFIRM («האם מאשר?») is the open yes/no (one responses entry; no «אגב» raise that turn), at the start of a chat, when they switch topic, or once there is room after their own request. Do not raise it again in the same reply where they just said לא כרגע.",
     "urgency (only when not normal): urgent / very_urgent — the server sends the subject follow-ups on its own (follow_ups_sent / follow_ups_left / next_follow_up_at); never schedule them yourself. viewer_is=subject: urgent → raise it FIRST, before answering their own request, and say it is urgent («עמית ביקש בדחיפות…») — still FORBIDDEN in the same turn as DELETE CONFIRM («האם מאשר?»); on «לא כרגע» with no time, offer a short snooze once («אזכיר לך בעוד חצי שעה?»). very_urgent → raise it first in EVERY reply while it is open, even right after «לא כרגע» (one short line), and say it is very urgent — except during DELETE CONFIRM. viewer_is=asker asking about it → say how many follow-ups went out and whether more are coming («שלחתי לערן 2 תזכורות, ואמשיך לנדנד»); when follow_ups_left=0 say he still has not answered.",
     "Answer / decline / progress / counter / snooze / close a job with metadata.jobs using its job_id. Never omit job_id. Never open a second task row for the same job. counter flips who must answer and keeps this one job.",
-    "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם מטלה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time (plus שעת סיום=book_end_time when present). book_window=true → the slot is a window: a reply naming one time inside it is a counter (time + end_time only if they said an end), not an answer. The server also saves that meeting from these fields when you forget the list.",
+    "book_on_yes=true: the person who must answer is approving a meeting/call slot. כן / מאשר / אוקיי / קבע → jobs.answer AND lists add list_type=tasks, targets=[asker, subject], item שם משימה=book_title (or פגישה) with תאריך לביצוע=book_date and שעה לביצוע=book_time (plus שעת סיום=book_end_time when present). book_window=true → the slot is a window: a reply naming one time inside it is a counter (time + end_time only if they said an end), not an answer. The server also saves that meeting from these fields when you forget the list.",
     "overdue_tasks=true: engine-opened self-job for speaker tasks whose last day passed. Raise ONLY when raisable=true (first offer this conversation) with varied Hebrew + buttons סגירה / עדכן מועד להיום (and הצג את המשימות when raise omits some overdue_titles). On סגירה → jobs.answer (report_text \"\") + lists.remove per overdue_item_ids. On עדכן מועד להיום → jobs.answer + lists.update תאריך לביצוע=\"היום\". On הצג את המשימות → show_dump=tasks + show_dump_ids=overdue_item_ids; lists=[]; jobs=[]; do NOT close. If overdue_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN opening another overdue job via messages; FORBIDDEN inventing item ids.",
     "stale_undated=true: engine-opened self-job for undated speaker tasks at a 7/14/28/56… day milestone (only when no overdue_tasks job). Raise ONLY when raisable=true with varied Hebrew (title + age from stale_ages/stale_titles); ask what to do. Buttons always: {label:\"סגירה\",command:\"סגירה\"} and {label:\"להוסיף תאריך\",command:\"להוסיף תאריך\"}. When stale_item_ids.length>1 ALSO {label:\"הצג משימות\",command:\"הצג משימות\"}. On סגירה → jobs.answer + lists.remove per stale_item_ids. On להוסיף תאריך → do NOT close yet: ask for the date(s) (jobs.progress OK); when they give a date → lists.update תאריך לביצוע + jobs.answer. On הצג משימות → show_dump=tasks + show_dump_ids=stale_item_ids; lists=[]; jobs=[]; do NOT close. If stale_offered / raisable=false → FORBIDDEN raise or re-ask; still accept those commands if they volunteer. FORBIDDEN inventing ids.",
     JSON.stringify(rows),

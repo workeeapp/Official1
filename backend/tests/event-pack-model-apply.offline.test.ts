@@ -69,7 +69,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               items: [
                 {
                   item_id: hostItemId(input.snapshot, "ערב יום הולדת"),
-                  "שם מטלה": "ערב יום הולדת",
+                  "שם משימה": "ערב יום הולדת",
                   linked_lists: [
                     { list_name: "כיבוד", list_type: "custom" },
                   ],
@@ -95,7 +95,7 @@ function propose(caseId: string, input: ModelApplyProposeInput) {
               items: [
                 {
                   item_id: hostItemId(input.snapshot, "ערב פוקר"),
-                  "שם מטלה": "ערב משחקים",
+                  "שם משימה": "ערב משחקים",
                 },
               ],
               targets: [],

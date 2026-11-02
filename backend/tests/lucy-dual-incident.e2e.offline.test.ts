@@ -100,7 +100,7 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
   it("reminder applied, lists.add omitted, הוספתי claim → no task success", () => {
     const out = correctModelApplyTurnResponse({
       response:
-        "הוספתי למטלות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך ביום שני ב־8 תזכורת.",
+        "הוספתי למשימות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך ביום שני ב־8 תזכורת.",
       metadata: meta({
         // No lists.add — model claimed success without ACTION.
         lists: [],
@@ -140,14 +140,14 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
   it("reminder + worker-only להזכיר add → no speaker task claim", () => {
     const out = correctModelApplyTurnResponse({
       response:
-        "הוספתי את המטלה להוסיף קבצי זיפ לאוטומציה בשביל ניר. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף את קבצי זיפ לאוטומציה בשביל ניר.",
+        "הוספתי את המשימה להוסיף קבצי זיפ לאוטומציה בשביל ניר. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף את קבצי זיפ לאוטומציה בשביל ניר.",
       metadata: meta({
         lists: [
           {
             action: "add",
             listType: "tasks",
             listName: "",
-            items: [{ "שם מטלה": "להזכיר לטל להוסיף קבצי זיפ" }],
+            items: [{ "שם משימה": "להזכיר לטל להוסיף קבצי זיפ" }],
             targets: ["לוסי"],
           },
         ],
@@ -160,7 +160,7 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
           listType: "tasks",
           itemKey: "להזכיר לטל להוסיף קבצי זיפ",
           itemLabel: "להזכיר לטל להוסיף קבצי זיפ",
-          listName: "מטלות",
+          listName: "משימות",
         },
       ],
       appliedReminderAdd: true,
@@ -168,12 +168,12 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
       speakerEmployeeId: speaker.id,
     });
     expect(out).toBe(REMINDER_ONLY_PARTIAL);
-    expect(out).not.toMatch(/הוספתי את המטלה/);
+    expect(out).not.toMatch(/הוספתי את המשימה/);
   });
 
   it("neither task nor reminder applied + הוספתי → add miss", () => {
     const out = correctModelApplyTurnResponse({
-      response: "הוספתי למטלות לקנות חלב.",
+      response: "הוספתי למשימות לקנות חלב.",
       metadata: meta(),
       mutations: [],
       appliedReminderAdd: false,
@@ -183,7 +183,7 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
 
   it("both list add and reminder applied → keeps dual claim", () => {
     const reply =
-      "הוספתי למטלות לקנות חלב ואזכיר לך מחר ב־9 תזכורת.";
+      "הוספתי למשימות לקנות חלב ואזכיר לך מחר ב־9 תזכורת.";
     const out = correctModelApplyTurnResponse({
       response: reply,
       metadata: meta({
@@ -205,7 +205,7 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
           listType: "tasks",
           itemKey: "לקנות חלב",
           itemLabel: "לקנות חלב",
-          listName: "מטלות",
+          listName: "משימות",
         },
       ],
       appliedReminderAdd: true,

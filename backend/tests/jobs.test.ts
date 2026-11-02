@@ -98,7 +98,7 @@ function jobRow(overrides: Partial<OpenJobRow["meta"]> = {}): OpenJobRow {
 describe("job metadata", () => {
   it("parses overdueItemIds and overdueTitles", () => {
     const meta = jobMetaFrom({
-      "שם מטלה": "לבדוק עם עמית: מטלות",
+      "שם משימה": "לבדוק עם עמית: משימות",
       [JOB_META_KEY]: {
         kind: "job",
         askerId: AMIT,
@@ -118,7 +118,7 @@ describe("job metadata", () => {
 
   it("reads a job row and hides the reserved key from saved data", () => {
     const data = {
-      "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+      "שם משימה": "לבדוק עם ערן אם קנה חלב",
       [JOB_META_KEY]: {
         kind: "job",
         askerId: AMIT,
@@ -132,12 +132,12 @@ describe("job metadata", () => {
     };
     expect(jobMetaFrom(data)?.subjectName).toBe("ערן");
     expect(stripJobMeta(data)).toEqual({
-      "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+      "שם משימה": "לבדוק עם ערן אם קנה חלב",
     });
   });
 
   it("ignores rows that are not jobs", () => {
-    expect(jobMetaFrom({ "שם מטלה": "לקנות חלב" })).toBeNull();
+    expect(jobMetaFrom({ "שם משימה": "לקנות חלב" })).toBeNull();
     expect(jobMetaFrom({ [JOB_META_KEY]: { kind: "job" } })).toBeNull();
   });
 });
@@ -329,7 +329,7 @@ describe("open jobs context", () => {
       AMIT,
     );
     expect(block).toContain("overdue_tasks=true");
-    expect(block).toContain("הצג את המטלות");
+    expect(block).toContain("הצג את המשימות");
     expect(block).toContain("show_dump_ids");
     const [row] = JSON.parse(block.split("\n").at(-1) ?? "[]");
     expect(row.overdue_tasks).toBe(true);
@@ -438,7 +438,7 @@ describe("createJobsFromRelays", () => {
     expect(data.addedById).toBe(AMIT);
     expect(data.visibleTo).toEqual([AMIT, ERAN]);
     expect(data.data[JOB_META_KEY].ask).toBe("אם קנית חלב?");
-    expect(data.data["שם מטלה"]).toContain("ערן");
+    expect(data.data["שם משימה"]).toContain("ערן");
   });
 
   it("falls back to the relayed text when the worker gave no ask summary", async () => {
@@ -457,7 +457,7 @@ describe("createJobsFromRelays", () => {
     });
     const data = itemCreate.mock.calls[0][0].data;
     expect(data.data[JOB_META_KEY].ask).toBe("עמית מבקש לתאם פגישת עבודה ליום שלישי");
-    expect(data.data["שם מטלה"]).toBe(
+    expect(data.data["שם משימה"]).toBe(
       "לבדוק עם ערן: עמית מבקש לתאם פגישת עבודה ליום שלישי",
     );
   });
@@ -467,7 +467,7 @@ describe("createJobsFromRelays", () => {
       {
         id: "job-1",
         data: {
-          "שם מטלה": "לבדוק עם ערן: לתאם פגישה ליום שלישי ב-12:00",
+          "שם משימה": "לבדוק עם ערן: לתאם פגישה ליום שלישי ב-12:00",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
@@ -510,7 +510,7 @@ describe("createJobsFromRelays", () => {
         id: "job-1",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם ערן: לתאם פגישה",
+          "שם משימה": "לבדוק עם ערן: לתאם פגישה",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
@@ -549,7 +549,7 @@ describe("createJobsFromRelays", () => {
       {
         id: "job-1",
         data: {
-          "שם מטלה": "לבדוק עם ערן: לתאם פגישה",
+          "שם משימה": "לבדוק עם ערן: לתאם פגישה",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
@@ -591,7 +591,7 @@ describe("createJobsFromRelays", () => {
         id: "job-1",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: יום שלישי ב-15:00",
+          "שם משימה": "לבדוק עם עמית: יום שלישי ב-15:00",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: ERAN,
@@ -630,7 +630,7 @@ describe("createJobsFromRelays", () => {
       {
         id: "job-1",
         data: {
-          "שם מטלה": "לבדוק עם עמית: יום שלישי ב-15:00",
+          "שם משימה": "לבדוק עם עמית: יום שלישי ב-15:00",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: ERAN,
@@ -772,7 +772,7 @@ describe("createJobsFromRelays", () => {
         id: "job-1",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם ערן: מה שלומך?",
+          "שם משימה": "לבדוק עם ערן: מה שלומך?",
           [JOB_META_KEY]: { ...jobRow().meta, ask: "מה שלומך?" },
         },
       },
@@ -892,7 +892,7 @@ describe("ensureOverdueTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: …",
+          "שם משימה": "לבדוק עם עמית: …",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
@@ -928,14 +928,14 @@ describe("ensureOverdueTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: ישן",
+          "שם משימה": "לבדוק עם עמית: ישן",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
             askerName: "עמית",
             subjectId: AMIT,
             subjectName: "עמית",
-            ask: "מטלה אחת שטרם נסגרה שעבר זמנה — חלב",
+            ask: "משימה אחת שטרם נסגרה שעבר זמנה — חלב",
             state: "open",
             createdAt: "2026-10-26T00:00:00.000Z",
             overdueItemIds: ["t1"],
@@ -966,7 +966,7 @@ describe("ensureOverdueTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: …",
+          "שם משימה": "לבדוק עם עמית: …",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
@@ -1006,14 +1006,14 @@ describe("ensureOverdueTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: …",
+          "שם משימה": "לבדוק עם עמית: …",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
             askerName: "עמית",
             subjectId: AMIT,
             subjectName: "עמית",
-            ask: "מטלה אחת",
+            ask: "משימה אחת",
             state: "open",
             createdAt: "2026-10-26T00:00:00.000Z",
             overdueItemIds: ["t1"],
@@ -1086,14 +1086,14 @@ describe("ensureStaleUndatedTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: …",
+          "שם משימה": "לבדוק עם עמית: …",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
             askerName: "עמית",
             subjectId: AMIT,
             subjectName: "עמית",
-            ask: "מטלה בלי תאריך",
+            ask: "משימה בלי תאריך",
             state: "open",
             createdAt: "2026-10-26T00:00:00.000Z",
             staleUndatedItemIds: ["t1"],
@@ -1128,14 +1128,14 @@ describe("ensureStaleUndatedTasksJob", () => {
         id: "existing",
         urgency: "normal",
         data: {
-          "שם מטלה": "לבדוק עם עמית: …",
+          "שם משימה": "לבדוק עם עמית: …",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: AMIT,
             askerName: "עמית",
             subjectId: AMIT,
             subjectName: "עמית",
-            ask: "מטלה",
+            ask: "משימה",
             state: "open",
             createdAt: "2026-10-26T00:00:00.000Z",
             staleUndatedItemIds: ["t1"],
@@ -1166,7 +1166,7 @@ describe("continueJobAfterNudge", () => {
       deletedAt: null,
       list: { employeeId: LUCY },
       data: {
-        "שם מטלה": "לבדוק עם ערן: מה שלומך?",
+        "שם משימה": "לבדוק עם ערן: מה שלומך?",
         [JOB_META_KEY]: {
           ...jobRow().meta,
           ask: "מה שלומך?",
@@ -1301,18 +1301,18 @@ describe("listOpenJobsForViewer", () => {
       {
         id: "job-1",
         data: {
-          "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+          "שם משימה": "לבדוק עם ערן אם קנה חלב",
           [JOB_META_KEY]: jobRow().meta,
         },
       },
       {
         id: "nudge-1",
         data: {
-          "שם מטלה": "להזכיר לערן אם קנית חלב",
+          "שם משימה": "להזכיר לערן אם קנית חלב",
           [JOB_META_KEY]: { ...jobRow().meta, kind: "nudge", jobItemId: "job-1" },
         },
       },
-      { id: "plain-1", data: { "שם מטלה": "לבדוק מייל" } },
+      { id: "plain-1", data: { "שם משימה": "לבדוק מייל" } },
     ]);
     const forSubject = await listOpenJobsForViewer({
       digitalEmployeeId: LUCY,
@@ -1388,7 +1388,7 @@ describe("applyJobActions", () => {
     itemFindMany.mockResolvedValue([]);
     itemFindUnique.mockResolvedValue({
       id: "job-1",
-      data: { "שם מטלה": "לבדוק עם ערן אם קנה חלב", [JOB_META_KEY]: jobRow().meta },
+      data: { "שם משימה": "לבדוק עם ערן אם קנה חלב", [JOB_META_KEY]: jobRow().meta },
     });
     itemUpdate.mockResolvedValue({});
     itemUpdateMany.mockResolvedValue({ count: 1 });
@@ -1527,7 +1527,7 @@ describe("applyJobActions", () => {
     expect(meta.needsBook).toBe(true);
     expect(meta.bookDate).toBe("2026-10-06");
     expect(meta.bookTime).toBe("15:00");
-    expect(data.data["שם מטלה"]).toBe("לבדוק עם עמית: יום שלישי ב-15:00");
+    expect(data.data["שם משימה"]).toBe("לבדוק עם עמית: יום שלישי ב-15:00");
   });
 
   it("drops the old range end and window when a counter names one time", async () => {
@@ -1729,7 +1729,7 @@ describe("applyJobActions", () => {
         targets: ["ערן", "עמית"],
         items: [
           {
-            "שם מטלה": "פגישה",
+            "שם משימה": "פגישה",
             "תאריך לביצוע": "2026-10-06",
             "שעה לביצוע": "15:00",
             "יום שלם": false,
@@ -1765,7 +1765,7 @@ describe("applyJobActions", () => {
     expect(lists[0]?.targets).toEqual(["עמית", "ערן"]);
     expect(lists[0]?.items).toEqual([
       {
-        "שם מטלה": "פגישה",
+        "שם משימה": "פגישה",
         "תאריך לביצוע": "2026-10-07",
         "שעה לביצוע": "10:00",
         "שעת סיום": "12:00",
@@ -1800,7 +1800,7 @@ describe("applyJobActions", () => {
     expect(lists).toHaveLength(1);
     expect(lists[0].targets).toEqual(["עמית", "ערן"]);
     expect(lists[0].items[0]).toEqual({
-      "שם מטלה": "שיחת עדכון",
+      "שם משימה": "שיחת עדכון",
       "תאריך לביצוע": "2026-10-04",
       "שעה לביצוע": "08:00",
       "יום שלם": false,
@@ -1849,7 +1849,7 @@ describe("applyJobActions", () => {
     });
     expect(result.snoozed).toHaveLength(1);
     const nudgeData = itemCreate.mock.calls[0][0].data;
-    expect(nudgeData.data["שם מטלה"]).toContain("להזכיר לערן");
+    expect(nudgeData.data["שם משימה"]).toContain("להזכיר לערן");
     expect(nudgeData.data[JOB_META_KEY].kind).toBe("nudge");
     expect(nudgeData.data[JOB_META_KEY].jobItemId).toBe("job-1");
     const clock = reminderCreate.mock.calls[0][0].data;
@@ -1873,7 +1873,7 @@ describe("applyJobActions", () => {
     itemFindUnique.mockResolvedValue({
       id: "job-1",
       data: {
-        "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+        "שם משימה": "לבדוק עם ערן אם קנה חלב",
         [JOB_META_KEY]: {
           ...jobRow().meta,
           nudgeReminderId: "clock-1",
@@ -2039,7 +2039,7 @@ describe("applyJobActions", () => {
       {
         id: "job-1",
         data: {
-          "שם מטלה": "לבדוק עם ערן אם קנה חלב",
+          "שם משימה": "לבדוק עם ערן אם קנה חלב",
           [JOB_META_KEY]: jobRow().meta,
         },
       },
@@ -2199,7 +2199,7 @@ describe("activateScheduledJob", () => {
       deletedAt: null,
       urgency: "urgent",
       data: {
-        "שם מטלה": "לבדוק עם עמית: אם קניתי חלב?",
+        "שם משימה": "לבדוק עם עמית: אם קניתי חלב?",
         "תאריך לביצוע": "2026-10-08",
         "שעה לביצוע": "15:00",
         [JOB_META_KEY]: {
@@ -2253,7 +2253,7 @@ describe("closeJobRow via answer resets recurring deferred jobs", () => {
       reminderId: "clock-1",
       urgency: "normal",
       data: {
-        "שם מטלה": "לבדוק עם עמית: אם עשיתי הליכה?",
+        "שם משימה": "לבדוק עם עמית: אם עשיתי הליכה?",
         [JOB_META_KEY]: {
           kind: "job",
           askerId: AMIT,

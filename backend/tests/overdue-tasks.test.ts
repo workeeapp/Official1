@@ -21,14 +21,14 @@ describe("ymdFromTaskValue / taskLastDay", () => {
   it("prefers תאריך סיום over תאריך לביצוע", () => {
     expect(
       taskLastDay({
-        "שם מטלה": "נסיעה",
+        "שם משימה": "נסיעה",
         "תאריך לביצוע": "2026-10-20",
         "תאריך סיום": "2026-10-24",
       }),
     ).toBe("2026-10-24");
     expect(
       taskLastDay({
-        "שם מטלה": "קניות",
+        "שם משימה": "קניות",
         "תאריך לביצוע": "2026-10-20",
       }),
     ).toBe("2026-10-20");
@@ -58,11 +58,11 @@ describe("isTaskOverdue / collectOverdueFromItems", () => {
         TODAY,
       ),
     ).toBe(true);
-    expect(isTaskOverdue({ "שם מטלה": "בלי תאריך" }, TODAY)).toBe(false);
+    expect(isTaskOverdue({ "שם משימה": "בלי תאריך" }, TODAY)).toBe(false);
     expect(
       isTaskOverdue(
         {
-          "שם מטלה": "לבדוק עם עמית: שאלה",
+          "שם משימה": "לבדוק עם עמית: שאלה",
           [JOB_META_KEY]: {
             kind: "job",
             askerId: "a",
@@ -84,19 +84,19 @@ describe("isTaskOverdue / collectOverdueFromItems", () => {
       [
         {
           id: "1",
-          data: { "שם מטלה": "חלב", "תאריך לביצוע": "2026-10-20" },
+          data: { "שם משימה": "חלב", "תאריך לביצוע": "2026-10-20" },
         },
         {
           id: "2",
           data: {
-            "שם מטלה": "נסיעה",
+            "שם משימה": "נסיעה",
             "תאריך לביצוע": "2026-10-20",
             "תאריך סיום": "2026-10-30",
           },
         },
         {
           id: "3",
-          data: { "שם מטלה": "דוח", "תאריך לביצוע": "2026-10-01" },
+          data: { "שם משימה": "דוח", "תאריך לביצוע": "2026-10-01" },
         },
       ],
       TODAY,
@@ -110,7 +110,7 @@ describe("isTaskOverdue / collectOverdueFromItems", () => {
 
 describe("overdueTasksAsk", () => {
   it("builds a stable Hebrew ask with count and titles", () => {
-    expect(overdueTasksAsk(["חלב"])).toContain("מטלה אחת");
+    expect(overdueTasksAsk(["חלב"])).toContain("משימה אחת");
     expect(overdueTasksAsk(["חלב", "דוח"])).toMatch(/^2 משימות/);
     expect(overdueTasksAsk(["חלב", "דוח"])).toContain("חלב, דוח");
   });

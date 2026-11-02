@@ -124,7 +124,7 @@ export function stripInventedListContentForShowDump(confirm: string): string {
       continue;
     }
     if (
-      /^(?:רשימת\s+)?(?:קניות|משימות|מטלות|תיוקים|אנשי\s*קשר|תזכורות)\s*:/u.test(
+      /^(?:רשימת\s+)?(?:קניות|משימות|משימות|תיוקים|אנשי\s*קשר|תזכורות)\s*:/u.test(
         trimmed,
       )
     ) {
@@ -166,12 +166,12 @@ function stripInlineNumberedInventoryTail(line: string): string {
     )
     .trim();
   prefix = prefix
-    .replace(/(?:הנה\s+)?(?:את\s+)?(?:הקניות|המשימות|המטלות)\.?$/iu, "")
+    .replace(/(?:הנה\s+)?(?:את\s+)?(?:הקניות|המשימות|המשימות)\.?$/iu, "")
     .trim();
   prefix = prefix.replace(/[,:：]\s*$/u, "").trim();
   if (
     !prefix ||
-    /^(?:הנה\s+)?(?:את\s+)?(?:הרשימה(?:\s+המלאה)?|הקניות|המשימות|המטלות)\.?$/iu.test(
+    /^(?:הנה\s+)?(?:את\s+)?(?:הרשימה(?:\s+המלאה)?|הקניות|המשימות|המשימות)\.?$/iu.test(
       prefix,
     )
   ) {

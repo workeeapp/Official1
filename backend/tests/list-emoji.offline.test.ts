@@ -283,7 +283,7 @@ describe("list-emoji parse + dump", () => {
           emoji: "📌",
           owner: "עמית",
           scope: "personal",
-          items: [{ item_id: "i2", "שם מטלה": "להתקשר" }],
+          items: [{ item_id: "i2", "שם משימה": "להתקשר" }],
         },
         {
           list_type: "custom",
@@ -325,7 +325,7 @@ describe("list-emoji parse + dump", () => {
           emoji: "✅",
           owner: "עמית",
           scope: "personal",
-          items: [{ item_id: "t1", "שם מטלה": "להתקשר" }],
+          items: [{ item_id: "t1", "שם משימה": "להתקשר" }],
         },
         {
           list_type: "custom",
@@ -402,10 +402,10 @@ describe("list-emoji parse + dump", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "לטפל בעמידר",
+              "שם משימה": "לטפל בעמידר",
               assigned_by: "עמית",
             },
-            { item_id: "t2", "שם מטלה": "אישית" },
+            { item_id: "t2", "שם משימה": "אישית" },
           ],
         },
         {
@@ -493,7 +493,7 @@ describe("list-emoji parse + dump", () => {
           items: [
             {
               item_id: "t1",
-              "שם מטלה": "פגישה",
+              "שם משימה": "פגישה",
               "תאריך לביצוע": "2026-10-18",
               "שעה לביצוע": "10:00",
             },

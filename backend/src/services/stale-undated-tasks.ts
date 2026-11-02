@@ -7,7 +7,7 @@ import { jerusalemYmd } from "../utils/relative-date.js";
 import { jobMetaFrom } from "./job-meta.js";
 import { taskLastDay, ymdFromTaskValue } from "./overdue-tasks.js";
 
-const TASK_NAME_KEYS = ["שם מטלה", "name", "task", "item_name"] as const;
+const TASK_NAME_KEYS = ["שם משימה", "name", "task", "item_name"] as const;
 
 export type StaleUndatedTaskRow = {
   itemId: string;
@@ -88,7 +88,7 @@ export function collectStaleUndatedFromItems(
     const title =
       readText(data, TASK_NAME_KEYS) ||
       (typeof item.itemKey === "string" ? item.itemKey.trim() : "") ||
-      "מטלה";
+      "משימה";
     rows.push({
       itemId: item.id,
       title,
@@ -108,7 +108,7 @@ export function staleUndatedTasksAsk(
   }
   if (rows.length === 1) {
     const row = rows[0]!;
-    return `מטלה בלי תאריך אצלך כבר ${row.ageDays} ימים — ${row.title}`;
+    return `משימה בלי תאריך אצלך כבר ${row.ageDays} ימים — ${row.title}`;
   }
   const detail = rows
     .map((row) => `${row.title} (${row.ageDays} ימים)`)

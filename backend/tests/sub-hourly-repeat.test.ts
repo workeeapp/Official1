@@ -67,7 +67,7 @@ describe("actionRepeatsSubHourly", () => {
               targets: [],
               items: [
                 {
-                  "שם מטלה": "לשתות מים",
+                  "שם משימה": "לשתות מים",
                   recurrence: { freq: "interval", interval: 5, unit: "minutes" },
                 },
               ],
@@ -103,7 +103,7 @@ describe("actionRepeatsSubHourly", () => {
               targets: [],
               items: [
                 {
-                  "שם מטלה": "לשתות מים",
+                  "שם משימה": "לשתות מים",
                   recurrence: { freq: "interval", interval: 2, unit: "minutes" },
                 },
               ],

@@ -210,7 +210,7 @@ describe("saved locations cross-source (eval-db, stub LLM)", () => {
         listId: list.id,
         itemKey: "העבודה",
         data: {
-          "שם מטלה": "העבודה",
+          "שם משימה": "העבודה",
           כתובת: `${WORK_LAT}, ${WORK_LNG}`,
         },
       },

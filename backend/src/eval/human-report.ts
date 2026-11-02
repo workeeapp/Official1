@@ -153,7 +153,7 @@ function truncate(text: string, max = 120): string {
 }
 
 function itemLabel(item: Record<string, unknown>): string {
-  for (const key of ["שם פריט", "שם מטלה", "שם", "item_id", "itemId", "id"]) {
+  for (const key of ["שם פריט", "שם משימה", "שם", "item_id", "itemId", "id"]) {
     const raw = item[key];
     if (typeof raw === "string" && raw.trim()) {
       const s = raw.trim();

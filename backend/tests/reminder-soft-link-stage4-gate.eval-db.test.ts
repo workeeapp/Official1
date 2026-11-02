@@ -169,7 +169,7 @@ async function createTask(itemKey: string) {
     data: {
       listId,
       itemKey,
-      data: { "שם מטלה": itemKey },
+      data: { "שם משימה": itemKey },
       scope: "personal",
       visibleTo: [humanId],
       addedById: humanId,
@@ -219,7 +219,7 @@ describe("Stage 4 Gate — exact-key OFF (workee_test)", () => {
       itemKey,
       itemLabel: itemKey,
       itemCreateData: {
-        data: { "שם מטלה": itemKey },
+        data: { "שם משימה": itemKey },
         scope: "personal",
         addedById: humanId,
         visibleTo: [humanId],
@@ -249,7 +249,7 @@ describe("Stage 4 Gate — exact-key OFF (workee_test)", () => {
       itemKey,
       itemLabel: itemKey,
       itemCreateData: {
-        data: { "שם מטלה": itemKey },
+        data: { "שם משימה": itemKey },
         scope: "personal",
         addedById: humanId,
         visibleTo: [humanId],
@@ -292,7 +292,7 @@ describe("Stage 4 Gate — exact-key OFF (workee_test)", () => {
         itemLabel: itemKey,
         itemCreateData: {
           id: randomUUID(),
-          data: { "שם מטלה": itemKey },
+          data: { "שם משימה": itemKey },
           scope: "personal",
           addedById: humanId,
           visibleTo: [humanId],
@@ -386,7 +386,7 @@ describe("Stage 4 Gate — exact-key OFF (workee_test)", () => {
       data: {
         listId: digitalListId,
         itemKey: key,
-        data: { "שם מטלה": `להזכיר ${key}` },
+        data: { "שם משימה": `להזכיר ${key}` },
         scope: "personal",
         visibleTo: [digitalId],
         addedById: digitalId,

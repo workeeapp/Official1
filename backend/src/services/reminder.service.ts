@@ -594,8 +594,8 @@ export async function syncLinkedWorkerTaskClock(input: {
     const preserveChore =
       Boolean(existingChore) && existingChore !== normalizeTaskClockHm(pingTime);
     const currentName =
-      typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()
-        ? data["שם מטלה"].trim()
+      typeof data["שם משימה"] === "string" && data["שם משימה"].trim()
+        ? data["שם משימה"].trim()
         : item.itemKey;
     const nextName = preserveChore
       ? currentName
@@ -609,7 +609,7 @@ export async function syncLinkedWorkerTaskClock(input: {
       data: {
         data: {
           ...ruled,
-          "שם מטלה": nextName,
+          "שם משימה": nextName,
           ...(preserveChore ? {} : { "שעה לביצוע": pingTime }),
         } as Prisma.InputJsonValue,
         ...(itemKey(nextName) !== item.itemKey
@@ -1808,7 +1808,7 @@ export async function listLiveHumanItemsForReminderLink(input: {
     return rows.map((row) => {
       const data = (row.data ?? {}) as Record<string, unknown>;
       const itemLabel =
-        (typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()) ||
+        (typeof data["שם משימה"] === "string" && data["שם משימה"].trim()) ||
         (typeof data["שם פריט"] === "string" && data["שם פריט"].trim()) ||
         (typeof data.name === "string" && data.name.trim()) ||
         row.itemKey;
@@ -1863,7 +1863,7 @@ export async function removeReminderAndLinkedWorkerTask(match: {
     for (const row of doomed) {
       const data = (row.data ?? {}) as Record<string, unknown>;
       const label =
-        (typeof data["שם מטלה"] === "string" && data["שם מטלה"].trim()) ||
+        (typeof data["שם משימה"] === "string" && data["שם משימה"].trim()) ||
         (typeof data.name === "string" && data.name.trim()) ||
         row.itemKey;
       removedWorkerTasks.push({

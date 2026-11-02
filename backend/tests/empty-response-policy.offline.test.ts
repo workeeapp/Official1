@@ -307,11 +307,11 @@ describe("Stage 2A empty policy — production path", () => {
       ],
     });
     const out = runEmptyPath({
-      reply: draft([{ text: "הסרתי את המטלה מהרשימה." }]),
+      reply: draft([{ text: "הסרתי את המשימה מהרשימה." }]),
       applyResult,
     });
     expect(out.reason).toBe("nonempty");
-    expect(out.spoken).toBe("הסרתי את המטלה מהרשימה.");
+    expect(out.spoken).toBe("הסרתי את המשימה מהרשימה.");
   });
 
   it("partial ApplyResult empty → no false full success (miss lines present)", () => {

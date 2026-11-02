@@ -55,7 +55,7 @@ export type SavedRouteLocationCandidate = {
 
 const LIST_TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
-  tasks: ["שם מטלה", "name", "task", "item_name"],
+  tasks: ["שם משימה", "name", "task", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
 };
 

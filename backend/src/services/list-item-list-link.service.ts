@@ -511,7 +511,7 @@ function taskTitleFromData(
     data && typeof data === "object" && !Array.isArray(data)
       ? (data as Record<string, unknown>)
       : {};
-  for (const key of ["שם מטלה", "name", "task", "item_name", titleField]) {
+  for (const key of ["שם משימה", "name", "task", "item_name", titleField]) {
     const trimmed = key.trim();
     if (!trimmed) {
       continue;
@@ -521,5 +521,5 @@ function taskTitleFromData(
       return value.trim();
     }
   }
-  return fallback.trim() || "מטלה";
+  return fallback.trim() || "משימה";
 }

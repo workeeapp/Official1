@@ -25,12 +25,12 @@ describe("isStaleMilestoneAge", () => {
 
 describe("isUndatedTask / collectStaleUndatedFromItems", () => {
   it("skips dated and job rows", () => {
-    expect(isUndatedTask({ "שם מטלה": "א", "תאריך לביצוע": "2026-10-01" })).toBe(
+    expect(isUndatedTask({ "שם משימה": "א", "תאריך לביצוע": "2026-10-01" })).toBe(
       false,
     );
     expect(
       isUndatedTask({
-        "שם מטלה": "לבדוק",
+        "שם משימה": "לבדוק",
         [JOB_META_KEY]: {
           kind: "job",
           askerId: "a",
@@ -43,7 +43,7 @@ describe("isUndatedTask / collectStaleUndatedFromItems", () => {
         },
       }),
     ).toBe(false);
-    expect(isUndatedTask({ "שם מטלה": "בנק" })).toBe(true);
+    expect(isUndatedTask({ "שם משימה": "בנק" })).toBe(true);
   });
 
   it("collects only undated rows at milestone ages", () => {
@@ -57,22 +57,22 @@ describe("isUndatedTask / collectStaleUndatedFromItems", () => {
       [
         {
           id: "1",
-          data: { "שם מטלה": "בנק" },
+          data: { "שם משימה": "בנק" },
           updatedAt: daysAgo(7),
         },
         {
           id: "2",
-          data: { "שם מטלה": "חלב", "תאריך לביצוע": "2026-10-01" },
+          data: { "שם משימה": "חלב", "תאריך לביצוע": "2026-10-01" },
           updatedAt: daysAgo(7),
         },
         {
           id: "3",
-          data: { "שם מטלה": "דוח" },
+          data: { "שם משימה": "דוח" },
           updatedAt: daysAgo(8),
         },
         {
           id: "4",
-          data: { "שם מטלה": "ביטוח" },
+          data: { "שם משימה": "ביטוח" },
           updatedAt: daysAgo(14),
         },
       ],

@@ -49,7 +49,7 @@ const snap: EmployeeRecordSnapshot = {
       columns: ["שם"],
       items: [
         { item_id: customId1, שם: "תמיכה מלאה באנשי קשר בהתאם לvcard" },
-        { item_id: customId2, שם: "באג לא ניתן לעדכן מטלה משותפת" },
+        { item_id: customId2, שם: "באג לא ניתן לעדכן משימה משותפת" },
         { item_id: customId3, שם: "תמיכה בזיהוי כתובת/עיר לפי קואורדינטות" },
       ],
     },
@@ -112,7 +112,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
           n: 2,
           id: customId2,
           kind: "custom",
-          title_stem: "באג לא ניתן לעדכן מטלה משותפת",
+          title_stem: "באג לא ניתן לעדכן משימה משותפת",
         },
       ],
     });
@@ -128,7 +128,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     const freeWritten = [
       "📋 רשימת משימות לטל:",
       "1. תמיכה מלאה באנשי קשר בהתאם לvcard",
-      "2. באג לא ניתן לעדכן מטלה משותפת",
+      "2. באג לא ניתן לעדכן משימה משותפת",
       "3. תמיכה בזיהוי כתובת/עיר לפי קואורדינטות",
     ].join("\n");
     expect(looksLikeFreeWrittenNumberedInventory(freeWritten)).toBe(true);
@@ -161,7 +161,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
             text: [
               "📋 רשימת משימות לטל:",
               "1. תמיכה מלאה באנשי קשר בהתאם לvcard",
-              "2. באג לא ניתן לעדכן מטלה משותפת",
+              "2. באג לא ניתן לעדכן משימה משותפת",
             ].join("\n"),
           },
         ],
@@ -269,7 +269,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
       action: "remove",
       listType: "tasks",
       listName: "",
-      items: [{ item_id: todayId, "שם מטלה": "לדבר עם yes" }],
+      items: [{ item_id: todayId, "שם משימה": "לדבר עם yes" }],
       targets: [],
     };
     expect(
@@ -320,7 +320,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
       action: "add",
       listType: "tasks",
       listName: "",
-      items: [{ "שם מטלה": "קבצי זיפ לאוטומציה" }],
+      items: [{ "שם משימה": "קבצי זיפ לאוטומציה" }],
       targets: [],
     };
     const shoppingGuarded = restrictListMutatesToLastNumberedDump(
@@ -344,7 +344,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
       action: "add",
       listType: "tasks",
       listName: "",
-      items: [{ "שם מטלה": "להוסיף קבצי זיפ לאוטומציה בשביל ניר" }],
+      items: [{ "שם משימה": "להוסיף קבצי זיפ לאוטומציה בשביל ניר" }],
       targets: [],
     };
     const guarded = restrictListMutatesToLastNumberedDump(
@@ -594,7 +594,7 @@ describe("LAST_NUMBERED_DUMP builtin add does not rewrite ownership", () => {
       action: "add",
       listType: "tasks",
       listName: "",
-      items: [{ "שם מטלה": "קבצי זיפ לאוטומציה" }],
+      items: [{ "שם משימה": "קבצי זיפ לאוטומציה" }],
       targets: [],
     };
     const guarded = restrictListMutatesToLastNumberedDump(

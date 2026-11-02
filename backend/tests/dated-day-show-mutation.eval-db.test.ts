@@ -91,7 +91,7 @@ describe("dated day-show mutation calendarYmd (eval-db)", () => {
           targets: [],
           items: [
             {
-              "שם מטלה": "פגישה-יום",
+              "שם משימה": "פגישה-יום",
               "תאריך לביצוע": tomorrow,
             },
           ],
@@ -230,7 +230,7 @@ describe("dated day-show mutation calendarYmd (eval-db)", () => {
           listType: "tasks",
           listName: "",
           targets: [],
-          items: [{ "שם מטלה": "בלי-תאריך" }],
+          items: [{ "שם משימה": "בלי-תאריך" }],
         },
       ],
     });

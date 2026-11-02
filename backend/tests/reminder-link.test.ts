@@ -210,7 +210,7 @@ describe("reminder worker link", () => {
         id: "existing-maya",
         itemKey: "לאסוף את מאיה",
         data: {
-          "שם מטלה": "לאסוף את מאיה",
+          "שם משימה": "לאסוף את מאיה",
           "תאריך לביצוע": "2026-10-23",
           "שעה לביצוע": "15:00",
         },
@@ -241,7 +241,7 @@ describe("reminder worker link", () => {
       {
         id: "existing-maya",
         itemKey: "לאסוף את מאיה",
-        data: { "שם מטלה": "לאסוף את מאיה" },
+        data: { "שם משימה": "לאסוף את מאיה" },
       },
     ]);
     const sameTurn = itemsFromListMutationsForSoftLink(
@@ -452,7 +452,7 @@ describe("reminder worker link", () => {
       {
         id: "existing-2",
         itemKey: "לבדוק באג",
-        data: { "שם מטלה": "לבדוק באג" },
+        data: { "שם משימה": "לבדוק באג" },
       },
     ]);
     const rows = await listLiveHumanItemsForReminderLink({
@@ -481,7 +481,7 @@ describe("reminder worker link", () => {
       {
         id: "w1",
         itemKey: "להזכיר לעמית לאכול פיצה",
-        data: { "שם מטלה": "להזכיר לעמית לאכול פיצה" },
+        data: { "שם משימה": "להזכיר לעמית לאכול פיצה" },
         list: { employeeId: "lucy", listType: "tasks" },
       },
     ]);
@@ -518,7 +518,7 @@ describe("reminder worker link", () => {
       {
         id: "w1",
         itemKey: "להזכיר לעמית לאכול פיצה",
-        data: { "שם מטלה": "להזכיר לעמית לאכול פיצה" },
+        data: { "שם משימה": "להזכיר לעמית לאכול פיצה" },
         list: { employeeId: "lucy", listType: "tasks" },
       },
     ]);
@@ -726,7 +726,7 @@ describe("reminder worker link", () => {
       id: "w1",
       itemKey: "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־09:00",
       data: {
-        "שם מטלה": "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־09:00",
+        "שם משימה": "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־09:00",
       },
     });
     itemUpdate.mockResolvedValue({});
@@ -739,7 +739,7 @@ describe("reminder worker link", () => {
       where: { id: "w1" },
       data: expect.objectContaining({
         data: expect.objectContaining({
-          "שם מטלה": "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־10:00",
+          "שם משימה": "להזכיר לך לרדת עם הכלב סקאזי לטיול מחר ב־10:00",
           "שעה לביצוע": "10:00",
         }),
       }),
@@ -751,7 +751,7 @@ describe("reminder worker link", () => {
       id: "w1",
       itemKey: "להזכיר לטל לאסוף את מאיה",
       data: {
-        "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+        "שם משימה": "להזכיר לטל לאסוף את מאיה",
         "תאריך לביצוע": "2026-10-21",
         "שעה לביצוע": "15:00",
       },
@@ -767,7 +767,7 @@ describe("reminder worker link", () => {
       where: { id: "w1" },
       data: expect.objectContaining({
         data: expect.objectContaining({
-          "שם מטלה": "להזכיר לטל לאסוף את מאיה",
+          "שם משימה": "להזכיר לטל לאסוף את מאיה",
           "תאריך לביצוע": "2026-10-21",
           "שעה לביצוע": "15:00",
         }),
@@ -785,7 +785,7 @@ describe("reminder worker link", () => {
     itemFindUnique.mockResolvedValue({
       id: "w1",
       itemKey: "להזכיר לעמית לשתות שוקו",
-      data: { "שם מטלה": "להזכיר לעמית לשתות שוקו" },
+      data: { "שם משימה": "להזכיר לעמית לשתות שוקו" },
     });
     itemUpdate.mockResolvedValue({});
     await syncLinkedWorkerTaskClock({

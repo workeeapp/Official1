@@ -50,7 +50,7 @@ describe("withAttachmentRefs has_attachments", () => {
       lists: [
         {
           list_id: listId,
-          items: [{ item_id: itemId, "שם מטלה": "להתקשר" }],
+          items: [{ item_id: itemId, "שם משימה": "להתקשר" }],
         },
       ],
       filing: [],
@@ -79,7 +79,7 @@ describe("withAttachmentRefs has_attachments", () => {
       lists: [
         {
           list_id: listId,
-          items: [{ item_id: itemId, "שם מטלה": "להתקשר" }],
+          items: [{ item_id: itemId, "שם משימה": "להתקשר" }],
         },
       ],
       filing: [],
@@ -139,7 +139,7 @@ describe("collectAttachmentIdsForDumpRows", () => {
     expect(
       collectAttachmentIdsForDumpRows(
         {
-          lists: [{ items: [{ item_id: itemId, "שם מטלה": "x" }] }],
+          lists: [{ items: [{ item_id: itemId, "שם משימה": "x" }] }],
           filing: [],
         },
         [itemId],

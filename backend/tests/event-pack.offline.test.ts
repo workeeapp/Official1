@@ -109,7 +109,7 @@ describe("Event pack loader + E-HOST-CREATE MODEL wire (offline)", () => {
           action: "add" as const,
           listType: "tasks" as const,
           listName: "",
-          items: [{ "שם מטלה": "ערב פוקר" }],
+          items: [{ "שם משימה": "ערב פוקר" }],
           targets: [] as string[],
         },
         {

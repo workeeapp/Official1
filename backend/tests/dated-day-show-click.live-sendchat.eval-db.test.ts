@@ -148,7 +148,7 @@ describe("dated day-show click LIVE sendChat (model path)", () => {
               targets: [],
               items: [
                 {
-                  "שם מטלה": otherDayTask,
+                  "שם משימה": otherDayTask,
                   "תאריך לביצוע": jerusalemYmd(now),
                 },
               ],
@@ -189,7 +189,7 @@ describe("dated day-show click LIVE sendChat (model path)", () => {
                 list_name: "",
                 items: [
                   {
-                    "שם מטלה": target,
+                    "שם משימה": target,
                     "תאריך לביצוע": tomorrow,
                   },
                 ],

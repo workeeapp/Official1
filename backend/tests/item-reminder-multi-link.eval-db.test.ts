@@ -92,7 +92,7 @@ async function createTask(opts?: { id?: string; key?: string }) {
       id,
       listId,
       itemKey,
-      data: { "שם מטלה": itemKey },
+      data: { "שם משימה": itemKey },
       scope: "personal",
       visibleTo: [humanId],
       addedById: humanId,

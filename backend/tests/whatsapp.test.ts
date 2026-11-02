@@ -389,15 +389,15 @@ describe("WhatsApp webhook", () => {
     });
   });
 
-  it("replaces long item-show labels with להצגת המטלה/תיוק instead of mid-cut", () => {
+  it("replaces long item-show labels with להצגת המשימה/תיוק instead of mid-cut", () => {
     const longTask = "להוריד את סקאזי לטיול";
     expect(longTask.length).toBeGreaterThan(20);
     expect(
       fitReplyButtonLabel({
         label: longTask,
-        command: `הציגי את המטלה ${longTask}`,
+        command: `הציגי את המשימה ${longTask}`,
       }),
-    ).toBe("להצגת המטלה");
+    ).toBe("להצגת המשימה");
     expect(
       fitReplyButtonLabel({
         label: "סיסמת וייפיי של הבית של סבתא",
@@ -405,8 +405,8 @@ describe("WhatsApp webhook", () => {
       }),
     ).toBe("להצגת התיוק");
     const body = whatsappButtonsBody("972501234567", "הוספתי", [
-      { label: longTask, command: `הציגי את המטלה ${longTask}` },
-      { label: "הצג מטלות", command: "הצג רשימת מטלות" },
+      { label: longTask, command: `הציגי את המשימה ${longTask}` },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
     const titles = (
       body.interactive as {
@@ -414,10 +414,10 @@ describe("WhatsApp webhook", () => {
       }
     ).action.buttons.map((row) => row.reply);
     expect(titles[0]).toEqual({
-      title: "להצגת המטלה",
-      id: `הציגי את המטלה ${longTask}`.slice(0, 256),
+      title: "להצגת המשימה",
+      id: `הציגי את המשימה ${longTask}`.slice(0, 256),
     });
-    expect(titles[1]?.title).toBe("הצג מטלות");
+    expect(titles[1]?.title).toBe("הצג משימות");
   });
 
   it("dedupes WhatsApp reply titles so interactive send stays valid", () => {
@@ -1019,8 +1019,8 @@ describe("WhatsApp webhook", () => {
       JSON.stringify({
         responses: [
           {
-            text: "הוספתי לשלוח מייל לעירייה למטלות להיום.",
-            buttons: [{ label: "הצג", command: "הצג רשימת מטלות" }],
+            text: "הוספתי לשלוח מייל לעירייה למשימות להיום.",
+            buttons: [{ label: "הצג", command: "הצג רשימת משימות" }],
           },
           {
             text: "רוצה שאוסיף גם תזכורת בוואטסאפ?",
@@ -1037,7 +1037,7 @@ describe("WhatsApp webhook", () => {
     const parsed = parseLlmReply(withTip);
     expect(parsed.responses).toHaveLength(3);
     expect(parsed.responseBubbles[0]?.buttons).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
     expect(parsed.responseBubbles[1]?.buttons).toEqual([
       { label: "כן", command: "כן" },
@@ -1111,10 +1111,10 @@ describe("WhatsApp webhook", () => {
 
   it("freezes legacy turn-level buttons before tip so choices stay off the tip", () => {
     const model = JSON.stringify({
-      responses: ["הוספתי מטלה.", "רוצה שאוסיף גם תזכורת?"],
+      responses: ["הוספתי משימה.", "רוצה שאוסיף גם תזכורת?"],
       metadata: {
         buttons: [
-          { label: "הצג", command: "הצג רשימת מטלות" },
+          { label: "הצג", command: "הצג רשימת משימות" },
           { label: "כן", command: "כן" },
           { label: "לא", command: "לא" },
         ],
@@ -1128,7 +1128,7 @@ describe("WhatsApp webhook", () => {
     const parsed = parseLlmReply(withTip);
     expect(parsed.responses).toHaveLength(3);
     expect(parsed.responseBubbles[0]?.buttons).toEqual([
-      { label: "הצג", command: "הצג רשימת מטלות" },
+      { label: "הצג", command: "הצג רשימת משימות" },
     ]);
     expect(parsed.responseBubbles[1]?.buttons).toEqual([
       { label: "כן", command: "כן" },

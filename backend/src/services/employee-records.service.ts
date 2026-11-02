@@ -145,14 +145,40 @@ export interface EmployeeRecordSnapshot {
   reminders?: ReminderSnapshotRow[];
 }
 
+/** Canonical tasks title field. */
+export const TASK_TITLE_FIELD = "שם משימה";
+/** Old JSON key (שם + space + מטלה) — read/migrate only; never write. */
+const LEGACY_TASK_TITLE_FIELD = "\u05e9\u05dd \u05de\u05d8\u05dc\u05d4";
+
 const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
-  // LLM.action.json examples use «שם משימה»; engine dumps use «שם מטלה».
-  tasks: ["שם מטלה", "שם משימה", "name", "task", "item_name"],
+  tasks: [TASK_TITLE_FIELD, LEGACY_TASK_TITLE_FIELD, "name", "task", "item_name"],
   // Custom lists have dynamic columns — never hardcode field names here.
   custom: [],
 };
+
+/** Rewrite legacy title key → canonical «שם משימה» before persist / ESD emit. */
+export function normalizeTaskTitleFields(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const legacy = data[LEGACY_TASK_TITLE_FIELD];
+  const canonical = data[TASK_TITLE_FIELD];
+  if (typeof legacy === "string" && legacy.trim()) {
+    const next = { ...data };
+    if (!(typeof canonical === "string" && canonical.trim())) {
+      next[TASK_TITLE_FIELD] = legacy.trim();
+    }
+    delete next[LEGACY_TASK_TITLE_FIELD];
+    return next;
+  }
+  if (LEGACY_TASK_TITLE_FIELD in data) {
+    const next = { ...data };
+    delete next[LEGACY_TASK_TITLE_FIELD];
+    return next;
+  }
+  return data;
+}
 
 /** List-level metadata that must never become a custom row identity. */
 const CUSTOM_ITEM_META_KEYS = new Set([
@@ -218,7 +244,7 @@ function customItemDataEntries(
   return Object.entries(item).filter(([key]) => !CUSTOM_ITEM_META_KEYS.has(key));
 }
 
-/** "שם חדש" / "שם מטלה חדש" / "name new" → base column "שם" / "שם מטלה" / "name". */
+/** "שם חדש" / "שם משימה חדש" / "name new" → base column "שם" / "שם משימה" / "name". */
 const DRAFT_FIELD_RE = /^(.+?)\s+(חדש|חדשה|new)$/i;
 
 function draftBaseField(key: string): string | null {
@@ -444,15 +470,15 @@ export function alignSpokenListType(
     return response
       .replaceAll("מרשימת הקניות", "מרשימת המשימות")
       .replaceAll("רשימת הקניות", "רשימת המשימות")
-      .replaceAll("מרשימת המטלות", "מרשימת המשימות")
-      .replaceAll("רשימת המטלות", "רשימת המשימות");
+      .replaceAll("מרשימת המשימות", "מרשימת המשימות")
+      .replaceAll("רשימת המשימות", "רשימת המשימות");
   }
   if (type === "shopping") {
     return response
       .replaceAll("מרשימת המשימות", "מרשימת הקניות")
       .replaceAll("רשימת המשימות", "רשימת הקניות")
-      .replaceAll("מרשימת המטלות", "מרשימת הקניות")
-      .replaceAll("רשימת המטלות", "רשימת הקניות");
+      .replaceAll("מרשימת המשימות", "מרשימת הקניות")
+      .replaceAll("רשימת המשימות", "רשימת הקניות");
   }
   return response;
 }
@@ -1153,7 +1179,7 @@ export function correctListMutationClaimReply(input: {
  * omitted ACTION + false success claim is corrected. Partial apply → accurate
  * partial wording (e.g. reminder saved, task not).
  *
- * «הוספתי את המטלה» requires a speaker-book list add
+ * «הוספתי את המשימה» requires a speaker-book list add
  * (`appliedSpeakerListAdd`). A worker-only להזכיר row is not enough.
  * `appliedListAdd` (any book) stays for other correctors; when speaker
  * evidence is omitted, it falls back to `appliedListAdd` for older call sites.
@@ -1330,13 +1356,13 @@ export function formatEmployeeContext(
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update (incl. list_type filing) / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE WHEN CLEAR (rows): unique target + id → remove NOW with past-tense responses («מחקתי את «title»…»); FORBIDDEN inventing «האם מאשר?» / yes-no when the target is unique; FORBIDDEN empty responses on that remove; FORBIDDEN alter_list/delete_list for a single item. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל / whole-list vs item) → delete mutates empty; ONE responses entry — FORBIDDEN raise/«אגב»; after they pick, remove with ids from THIS turn. WHOLE-LIST: unique list_id → delete_list NOW; several matches → ASK. On לא / בטל while a DELETE CLARIFY is open → remove empty; short ack; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
-    "BY LINE NUMBER: after a numbered dump, spoken indices («3» / «ל3» / «תמחק את 3») map to LAST_NUMBERED_DUMP for that n when present (copy id+kind) — else match dump line N's title stem (שם פריט / שם מטלה / item_name / reminder item; strip quantity, marks, urgency wrap) to an id in THIS JSON. FORBIDDEN treating N as JSON array index when that picks a different row than dump line N. Shopping/tasks JSON order is personal → co-share → assign per list only; dump numbering may span several shells. Numbering restarts per header / day / ממתינים; several 1. sequences → ASK which section if ambiguous. Unique → ACTION NOW; ≥2 same stem → ASK.",
+    "BY LINE NUMBER: after a numbered dump, spoken indices («3» / «ל3» / «תמחק את 3») map to LAST_NUMBERED_DUMP for that n when present (copy id+kind) — else match dump line N's title stem (שם פריט / שם משימה / item_name / reminder item; strip quantity, marks, urgency wrap) to an id in THIS JSON. FORBIDDEN treating N as JSON array index when that picks a different row than dump line N. Shopping/tasks JSON order is personal → co-share → assign per list only; dump numbering may span several shells. Numbering restarts per header / day / ממתינים; several 1. sequences → ASK which section if ambiguous. Unique → ACTION NOW; ≥2 same stem → ASK.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value), and optional item_description (מידע לחיפוש — find-helper context words). Find the right filing by item_name + item_info + item_description. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Clearing/emptying a shared list must NOT remove participants or unshare — empty shared shells stay shared until an explicit unshare.",
     "scope=shared_items: work the viewer ASSIGNED onto owner X (assigner view) for shopping/tasks/contacts/custom. Flat dumps show those rows under one list header with mark «(באחריות X · מאת <assigner>)». Filings use the same assigned_by field when the row lives on someone else's book. «איזה רשימות משותפות יש לי» → only scope=shared entries.",
     "Item fields: shared_with = co-partners; assigned_by = who assigned this row onto the list/filing owner. Dump shopping/tasks/contacts/custom/filings: ONE header per list; co-share «(A, B)» all involved; assign «(באחריות X · מאת Y)» same for both parties; whole scope=shared → no per-line mark. Prefer item shared_with over list shared_with. A scope=personal list can still hold such items. Shopping/tasks items in this JSON are ordered personal → co-share → assign within each list shell (dump line N is global — use LAST_NUMBERED_DUMP or title stem, not array index).",
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
-    "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למטלה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
+    "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למשימה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
     "Each list has list_id (copy into lists alter_list / delete_list — never speak it) and emoji (effective display glyph). Custom lists also show columns (current column names) and title_field (the column that names each row).",
     JSON.stringify({
       lists: listsForEmployeeContext(snapshot.lists),
@@ -3735,10 +3761,14 @@ async function applyListAction(
       done.doneDate && resolvedAction.action === "update"
         ? markOccurrenceDone(ruledRecord, done.doneDate)
         : ruledRecord;
-    const nextDataRecord =
+    const nextDataRecordRaw =
       occurrence.change && resolvedAction.action === "update"
         ? applyOccurrenceChange(doneRecord, occurrence.change)
         : doneRecord;
+    const nextDataRecord =
+      resolvedAction.listType === "tasks"
+        ? normalizeTaskTitleFields(nextDataRecordRaw)
+        : nextDataRecordRaw;
     const occurrenceChanged = nextDataRecord !== doneRecord;
     if (
       occurrence.change &&

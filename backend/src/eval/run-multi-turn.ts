@@ -544,7 +544,7 @@ export async function seedSetup(
         list.list_type === "shopping"
           ? ["שם פריט", "name"]
           : list.list_type === "tasks"
-            ? ["שם מטלה", "name"]
+            ? ["שם משימה", "name"]
             : ["שם", "name", "title"];
       let itemKey = "";
       for (const key of titleKeys) {
@@ -706,7 +706,7 @@ function collectSymbolicAddIds(fixtureRaw: unknown): Array<{
       }
       const labelHint = String(
         item["שם פריט"] ??
-          item["שם מטלה"] ??
+          item["שם משימה"] ??
           item["שם"] ??
           item.name ??
           "",

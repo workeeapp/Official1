@@ -174,7 +174,7 @@ describe("reminder snapshot rule facts", () => {
 describe("recurring tasks", () => {
   const gym = shapeItemRecurrence(
     {
-      "שם מטלה": "ללכת לחדר כושר",
+      "שם משימה": "ללכת לחדר כושר",
       recurrence: { freq: "weekly", interval: 1, weekdays: [2, 4], time: "19:00" },
     },
     NOW,
@@ -204,7 +204,7 @@ describe("recurring tasks", () => {
   it("a ranged rule shows start–end in חוזר and next_occurrences", () => {
     const meeting = shapeItemRecurrence(
       {
-        "שם מטלה": "פגישה (עמית, טל)",
+        "שם משימה": "פגישה (עמית, טל)",
         recurrence: { freq: "weekly", interval: 1, weekdays: [1], time: "10:00", end_time: "12:00" },
       },
       NOW,
@@ -219,7 +219,7 @@ describe("recurring tasks", () => {
 
   it("all-day rule lists dates only, including today", () => {
     const shaped = shapeItemRecurrence(
-      { "שם מטלה": "להשקות", recurrence: { freq: "weekly", weekdays: [3] } },
+      { "שם משימה": "להשקות", recurrence: { freq: "weekly", weekdays: [3] } },
       NOW,
     );
     expect(itemNextOccurrences(shaped.item, NOW)?.slice(0, 2)).toEqual([
@@ -229,9 +229,9 @@ describe("recurring tasks", () => {
   });
 
   it("null recurrence on update clears the rule", () => {
-    const shaped = shapeItemRecurrence({ "שם מטלה": "ללכת לחדר כושר", recurrence: null });
+    const shaped = shapeItemRecurrence({ "שם משימה": "ללכת לחדר כושר", recurrence: null });
     expect(shaped.clear).toBe(true);
-    expect(clearItemRecurrence({ ...gym.item })).toEqual({ "שם מטלה": "ללכת לחדר כושר" });
+    expect(clearItemRecurrence({ ...gym.item })).toEqual({ "שם משימה": "ללכת לחדר כושר" });
   });
 
   it("every two weeks from a stated start keeps the cycle, even after the start passes", () => {
@@ -239,7 +239,7 @@ describe("recurring tasks", () => {
     const saturday = new Date("2026-10-10T03:00:00.000Z");
     const kids = shapeItemRecurrence(
       {
-        "שם מטלה": "לאסוף את הילדים",
+        "שם משימה": "לאסוף את הילדים",
         recurrence: { freq: "weekly", interval: 2, weekdays: [5], time: "11:45", start: "2026-10-20" },
       },
       saturday,
@@ -258,7 +258,7 @@ describe("recurring tasks", () => {
     // 2027-04-09 is a Friday; short horizon (~62d / 6 slots) never reaches it from Oct 2026.
     const kids = shapeItemRecurrence(
       {
-        "שם מטלה": "לאסוף את הילדים",
+        "שם משימה": "לאסוף את הילדים",
         recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "11:45" },
       },
       NOW,
@@ -277,7 +277,7 @@ describe("recurring tasks", () => {
     const saturday = new Date("2026-10-10T03:00:00.000Z");
     const kids = shapeItemRecurrence(
       {
-        "שם מטלה": "לאסוף את הילדים",
+        "שם משימה": "לאסוף את הילדים",
         recurrence: {
           freq: "weekly",
           interval: 2,
@@ -298,7 +298,7 @@ describe("recurring tasks", () => {
 
   it("an update re-sending the rule without start keeps the row's start", () => {
     const previous = {
-      "שם מטלה": "x",
+      "שם משימה": "x",
       [RECURRENCE_META_KEY]: { freq: "weekly", interval: 2, weekdays: [5], start: "2026-10-20" },
     };
     const shaped = shapeItemRecurrence(
@@ -311,7 +311,7 @@ describe("recurring tasks", () => {
   });
 
   it("items without recurrence are untouched", () => {
-    const item = { "שם מטלה": "לקנות חלב" };
+    const item = { "שם משימה": "לקנות חלב" };
     expect(shapeItemRecurrence(item)).toEqual({ item, clear: false, explicitStart: false });
     expect(itemNextOccurrences(item)).toBeNull();
   });
@@ -320,7 +320,7 @@ describe("recurring tasks", () => {
 describe("standing task occurrence done", () => {
   const gym = shapeItemRecurrence(
     {
-      "שם מטלה": "ללכת לחדר כושר",
+      "שם משימה": "ללכת לחדר כושר",
       recurrence: { freq: "weekly", interval: 1, weekdays: [3, 4], time: "19:00" },
     },
     NOW,
@@ -334,7 +334,7 @@ describe("standing task occurrence done", () => {
     expect(extractOccurrenceDone({ occurrence_done: "2026-10-06" }, NOW).doneDate).toBe(
       "2026-10-06",
     );
-    expect(extractOccurrenceDone({ "שם מטלה": "x" }, NOW).doneDate).toBeNull();
+    expect(extractOccurrenceDone({ "שם משימה": "x" }, NOW).doneDate).toBeNull();
   });
 
   it("today's done occurrence leaves next_occurrences, the row stays", () => {
@@ -360,7 +360,7 @@ describe("standing task occurrence done", () => {
   it("keeps every done day and ignores tasks without a rule", () => {
     const both = markOccurrenceDone(markOccurrenceDone(gym, "2026-10-08", NOW), "2026-10-07", NOW);
     expect(itemDoneDates(both)).toEqual(["2026-10-07", "2026-10-08"]);
-    const plain = { "שם מטלה": "לקנות חלב" };
+    const plain = { "שם משימה": "לקנות חלב" };
     expect(markOccurrenceDone(plain, "2026-10-07")).toBe(plain);
   });
 
@@ -381,7 +381,7 @@ describe("standing task occurrence change", () => {
   const saturday = new Date("2026-10-10T03:00:00.000Z");
   const kids = shapeItemRecurrence(
     {
-      "שם מטלה": "לאסוף את הילדים",
+      "שם משימה": "לאסוף את הילדים",
       recurrence: { freq: "weekly", interval: 1, weekdays: [5], time: "12:00" },
     },
     saturday,
@@ -426,13 +426,13 @@ describe("standing task occurrence change", () => {
   it("refuses a day the rule does not land on, a past day, or a task without a rule", () => {
     expect(applyOccurrenceChange(kids, { date: "2026-10-22", cancel: true }, saturday)).toBe(kids);
     expect(applyOccurrenceChange(kids, { date: "2026-10-09", cancel: true }, saturday)).toBe(kids);
-    const plain = { "שם מטלה": "לקנות חלב" };
+    const plain = { "שם משימה": "לקנות חלב" };
     expect(applyOccurrenceChange(plain, { date: "2026-10-23", cancel: true }, saturday)).toBe(plain);
   });
 
   it("an all-day rule shows the moved day with its time", () => {
     const allDay = shapeItemRecurrence(
-      { "שם מטלה": "להשקות", recurrence: { freq: "weekly", weekdays: [5] } },
+      { "שם משימה": "להשקות", recurrence: { freq: "weekly", weekdays: [5] } },
       saturday,
     ).item;
     const next = applyOccurrenceChange(allDay, { date: "2026-10-23", time: "08:00" }, saturday);
@@ -464,7 +464,7 @@ describe("standing task occurrence change", () => {
 describe("worker task mirrors its clock rule", () => {
   it("copies a calendar rule and keeps start / done marks", () => {
     const task = {
-      "שם מטלה": "להזכיר לעמית ללכת לחדר כושר",
+      "שם משימה": "להזכיר לעמית ללכת לחדר כושר",
       [RECURRENCE_META_KEY]: { freq: "daily", interval: 1, start: "2026-10-01", done_through: "2026-10-06" },
     };
     const next = applyClockRuleToTask(
@@ -485,14 +485,14 @@ describe("worker task mirrors its clock rule", () => {
 
   it("drops the rule for one-shot clocks", () => {
     const task = shapeItemRecurrence(
-      { "שם מטלה": "x", recurrence: { freq: "daily", time: "09:00" } },
+      { "שם משימה": "x", recurrence: { freq: "daily", time: "09:00" } },
       NOW,
     ).item;
-    expect(applyClockRuleToTask(task, null)).toEqual({ "שם מטלה": "x" });
+    expect(applyClockRuleToTask(task, null)).toEqual({ "שם משימה": "x" });
   });
 
   it("copies an interval rule anchored at the clock's fire time", () => {
-    const task = { "שם מטלה": "להזכיר לעמית לשתות שוקו" };
+    const task = { "שם משימה": "להזכיר לעמית לשתות שוקו" };
     // Clock fires first at 14:00 Jerusalem, every two hours.
     const fireAt = new Date("2026-10-07T11:00:00.000Z");
     const next = applyClockRuleToTask(
@@ -521,7 +521,7 @@ describe("standing task every X hours", () => {
   // «כל שלוש שעות אני צריך להוריד את הכלב» at 12:00 Wed 2026-10-07.
   const dog = shapeItemRecurrence(
     {
-      "שם מטלה": "להוריד את הכלב",
+      "שם משימה": "להוריד את הכלב",
       recurrence: { freq: "interval", interval: 3, unit: "hours" },
     },
     NOW,
@@ -619,19 +619,19 @@ describe("standing task every X hours", () => {
 
   it("refuses a task that repeats faster than every 5 minutes or in seconds", () => {
     const tooFastMinutes = shapeItemRecurrence(
-      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 3, unit: "minutes" } },
+      { "שם משימה": "לשתות מים", recurrence: { freq: "interval", interval: 3, unit: "minutes" } },
       NOW,
     );
     expect(tooFastMinutes.tooFrequent).toBe(true);
     expect(tooFastMinutes.item[RECURRENCE_META_KEY]).toBeUndefined();
     const seconds = shapeItemRecurrence(
-      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 30, unit: "seconds" } },
+      { "שם משימה": "לשתות מים", recurrence: { freq: "interval", interval: 30, unit: "seconds" } },
       NOW,
     );
     expect(seconds.tooFrequent).toBe(true);
     expect(seconds.item[RECURRENCE_META_KEY]).toBeUndefined();
     const everyFive = shapeItemRecurrence(
-      { "שם מטלה": "לשתות מים", recurrence: { freq: "interval", interval: 5, unit: "minutes" } },
+      { "שם משימה": "לשתות מים", recurrence: { freq: "interval", interval: 5, unit: "minutes" } },
       NOW,
     );
     expect(everyFive.tooFrequent).toBeUndefined();

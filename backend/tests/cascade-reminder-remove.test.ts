@@ -134,7 +134,7 @@ describe("same-turn cascade + reminders.remove", () => {
       {
         id: "worker-task-1",
         itemKey: "להזכיר לטל לקנות חלב",
-        data: { "שם מטלה": "להזכיר לטל לקנות חלב" },
+        data: { "שם משימה": "להזכיר לטל לקנות חלב" },
         list: { employeeId: "lucy-1", listType: "tasks" },
       },
     ]);

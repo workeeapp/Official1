@@ -414,7 +414,7 @@ export function draftFromTemplate(opts: {
         setup: {},
         turns: [
           {
-            utterance: opts.utterance || "תוסיפי מטלה",
+            utterance: opts.utterance || "תוסיפי משימה",
             intent: { type: "ask" },
           },
         ],

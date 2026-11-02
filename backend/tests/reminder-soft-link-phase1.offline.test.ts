@@ -124,10 +124,10 @@ describe("Phase 1 dual-path engine (service integration)", () => {
   describe("schema/parse — nested remind peel + ACTION expansion", () => {
     it("splitItemRemind peels remind without leaving it on the item", () => {
       const { item, reminds } = splitItemRemind({
-        "שם מטלה": "תור לווטרינר",
+        "שם משימה": "תור לווטרינר",
         remind: { date: "2026-11-10", time: "09:00", ping: ["טל"] },
       });
-      expect(item).toEqual({ "שם מטלה": "תור לווטרינר" });
+      expect(item).toEqual({ "שם משימה": "תור לווטרינר" });
       expect(reminds).toHaveLength(1);
       expect(reminds[0]?.date).toBe("2026-11-10");
     });
@@ -289,7 +289,7 @@ describe("Phase 1 dual-path engine (service integration)", () => {
     it("on txn failure restores prior update snapshot", async () => {
       transaction.mockRejectedValue(new Error("boom"));
       itemUpdate.mockResolvedValue({});
-      const prior = { "שם מטלה": "ישן" };
+      const prior = { "שם משימה": "ישן" };
 
       await applyNestedReminderPackages({
         userId: USER,

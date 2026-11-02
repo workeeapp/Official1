@@ -1783,13 +1783,13 @@ export function listNavKeyFromAction(list: LlmListAction): string {
  * Normalize show-list / collab nav commands so «הצג רשימת רשימת X» and
  * «הצג רשימת X» share one dedupe key. Conversational commands pass through.
  */
-/** Canonical product Hebrew for tasks — never emit legacy «מטלות» on new taps. */
+/** Canonical product Hebrew for tasks — never emit legacy «משימות» on new taps. */
 function canonicalizeTasksHebrewInCommand(command: string): string {
   return command
-    .replaceAll("רשימת מטלות", "רשימת משימות")
-    .replaceAll("הצג מטלות", "הצג משימות")
-    .replaceAll("כל המטלות", "כל המשימות")
-    .replaceAll("מטלות כלליות", "משימות כלליות");
+    .replaceAll("רשימת משימות", "רשימת משימות")
+    .replaceAll("הצג משימות", "הצג משימות")
+    .replaceAll("כל המשימות", "כל המשימות")
+    .replaceAll("משימות כלליות", "משימות כלליות");
 }
 
 export function normalizeShowNavCommand(command: string): string {
@@ -1842,7 +1842,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
   const cmd = button.command.trim();
   const label = button.label.trim();
   if (
-    /^הציגי?\s+את\s+ה(?:מטלה|משימה)(?:\s|$)/u.test(cmd) ||
+    /^הציגי?\s+את\s+ה(?:משימה|\u05de\u05d8\u05dc\u05d4)(?:\s|$)/u.test(cmd) ||
     /^הציגי?\s+את\s+התיוק(?:\s|$)/u.test(cmd)
   ) {
     return false;
@@ -1856,15 +1856,15 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
     return true;
   }
   if (
-    /^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
-    /^כל (הקניות|המשימות|המטלות|אנשי הקשר|התיוקים)$/u.test(cmd)
+    /^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
+    /^כל (הקניות|המשימות|המשימות|אנשי הקשר|התיוקים)$/u.test(cmd)
   ) {
     return true;
   }
   if (
     label === "הצג קניות" ||
     label === "הצג משימות" ||
-    label === "הצג מטלות" ||
+    label === "הצג משימות" ||
     label === "הצג אנשי קשר" ||
     label === "הצג רשימה" ||
     label === "הצג רשימות" ||
@@ -1882,7 +1882,7 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
   return false;
 }
 
-const ITEM_OPEN_TASK_COMMAND = /^הציגי?\s+את\s+ה(?:מטלה|משימה)\s+(.+)$/u;
+const ITEM_OPEN_TASK_COMMAND = /^הציגי?\s+את\s+ה(?:משימה|\u05de\u05d8\u05dc\u05d4)\s+(.+)$/u;
 const ITEM_OPEN_FILING_COMMAND = /^הציגי?\s+את\s+התיוק\s+(.+)$/u;
 
 function normalizeItemOpenTitle(value: string): string {
@@ -2164,14 +2164,14 @@ export function parseFixedListNavButton(
   }
 
   const allMatch = cmd.match(
-    /^כל (הקניות|המשימות|המטלות|אנשי הקשר|התיוקים)$/u,
+    /^כל (הקניות|המשימות|המשימות|אנשי הקשר|התיוקים)$/u,
   );
   if (allMatch) {
     const noun = allMatch[1]!;
     const listKey =
       noun === "הקניות"
         ? "shopping"
-        : noun === "המשימות" || noun === "המטלות"
+        : noun === "המשימות" || noun === "המשימות"
           ? "tasks"
           : noun === "אנשי הקשר"
             ? "contacts"
@@ -2184,7 +2184,7 @@ export function parseFixedListNavButton(
   }
 
   const builtinCollab = cmd.match(
-    /^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
+    /^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
   );
   if (builtinCollab) {
     const listKey = listKeyFromShowName(builtinCollab[1]!);
@@ -2233,8 +2233,8 @@ export function parseFixedListNavButton(
     };
   }
 
-  // Bare «הצג משימות|מטלות|קניות|…» (model shorthand without «רשימת»).
-  const bare = cmd.match(/^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים)$/u);
+  // Bare «הצג משימות|משימות|קניות|…» (model shorthand without «רשימת»).
+  const bare = cmd.match(/^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים)$/u);
   if (bare) {
     const listKey = listKeyFromShowName(bare[1]!);
     const plainButton = listKey ? plainButtonForListKey(listKey) : null;
@@ -2391,9 +2391,9 @@ function validateModelFixedListNav(
         listKey: workerInventoryListKey(rewritten.command),
       };
     }
-    // Canonical opaque command always (משימות not מטלות) so legacy + product
+    // Canonical opaque command always (משימות not משימות) so legacy + product
     // twins collapse under remember(). Keep a conversational model label when
-    // it is not share-implying; rewrite מטלות→משימות in the label too.
+    // it is not share-implying; rewrite משימות→משימות in the label too.
     const rawLabel = button.label.trim();
     if (
       /^משותף עם /u.test(rawLabel) ||
@@ -2713,7 +2713,7 @@ function workerInventoryListKey(command: string): string {
   return `tasks:worker:${command}`;
 }
 
-/** Normalize model «הצג משימות של X» / legacy «הצג מטלות של X» to opaque command. */
+/** Normalize model «הצג משימות של X» / legacy «הצג משימות של X» to opaque command. */
 function workerInventoryCommandIfMatch(
   command: string,
   workerNames: string[],
@@ -2723,7 +2723,7 @@ function workerInventoryCommandIfMatch(
     return null;
   }
   const trimmed = command.trim().replace(/\s+/gu, " ");
-  const aboutMatch = trimmed.match(/^הצג (?:משימות|מטלות) של (.+)$/u);
+  const aboutMatch = trimmed.match(/^הצג (?:משימות|משימות) של (.+)$/u);
   if (!aboutMatch?.[1]) {
     return null;
   }
@@ -3164,7 +3164,7 @@ export function fallbackNotificationText(
 
   if (options?.unshared && list?.action === "update") {
     if (list.listType === "tasks") {
-      return `${actorName} הפסיק לשתף איתך מטלה: ${itemText}`;
+      return `${actorName} הפסיק לשתף איתך משימה: ${itemText}`;
     }
     if (list.listType === "shopping") {
       return `${actorName} הפסיק לשתף איתך ${itemText} מרשימת הקניות`;
@@ -3178,7 +3178,7 @@ export function fallbackNotificationText(
       return `${actorName} שיתף איתך ${itemText} ברשימת הקניות`;
     }
     if (list.listType === "tasks") {
-      return `${actorName} שיתף איתך מטלה: ${itemText}`;
+      return `${actorName} שיתף איתך משימה: ${itemText}`;
     }
     const title = customListDerivedName(list) || "רשימה";
     return `${actorName} שיתף איתך ${formatQuotedItems(items)} מרשימת «${title}»`;
@@ -3243,15 +3243,15 @@ export function fallbackNotificationText(
 
   if (list?.listType === "tasks") {
     if (list.action === "remove") {
-      return `${actorName} הסיר מטלה: ${itemText}`;
+      return `${actorName} הסיר משימה: ${itemText}`;
     }
     if (list.action === "update") {
-      return `${actorName} עדכן מטלה: ${itemText}`;
+      return `${actorName} עדכן משימה: ${itemText}`;
     }
     const reminderHint = formatLinkedReminderHint(metadata.reminders ?? []);
     return yours
-      ? `${actorName} הוסיף לך מטלה: ${itemText}${reminderHint}`
-      : `${[actorName, "הוסיף מטלה", ownerList].filter(Boolean).join(" ")}: ${itemText}${reminderHint}`;
+      ? `${actorName} הוסיף לך משימה: ${itemText}${reminderHint}`
+      : `${[actorName, "הוסיף משימה", ownerList].filter(Boolean).join(" ")}: ${itemText}${reminderHint}`;
   }
 
   if (list?.listType === "custom" || (list?.listName && list.listName.trim())) {

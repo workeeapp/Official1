@@ -45,7 +45,7 @@ const emptyCustomCase: ModelApplyCase = {
         items: [
           {
             item_id: "eval-host-birthday",
-            "שם מטלה": "ערב יום הולדת",
+            "שם משימה": "ערב יום הולדת",
           },
         ],
       },
@@ -78,7 +78,7 @@ const namedLinkCase: ModelApplyCase = {
         items: [
           {
             item_id: "eval-host-birthday",
-            "שם מטלה": "ערב יום הולדת",
+            "שם משימה": "ערב יום הולדת",
           },
         ],
       },
@@ -112,7 +112,7 @@ const blankCreateLinkCase: ModelApplyCase = {
         items: [
           {
             item_id: "eval-host-birthday",
-            "שם מטלה": "ערב יום הולדת",
+            "שם משימה": "ערב יום הולדת",
           },
         ],
       },
@@ -269,7 +269,7 @@ function proposeNamedLink(input: ModelApplyProposeInput) {
           items: [
             {
               item_id: hostItemId(input.snapshot, "ערב יום הולדת"),
-              "שם מטלה": "ערב יום הולדת",
+              "שם משימה": "ערב יום הולדת",
               linked_lists: [
                 { list_name: EXACT_LIST_NAME, list_type: "custom" },
               ],

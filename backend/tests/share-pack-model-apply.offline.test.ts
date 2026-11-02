@@ -123,7 +123,7 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
               list_name: "",
               items: [
                 {
-                  "שם מטלה":
+                  "שם משימה":
                     caseId === "SH-ASSIGN-MT"
                       ? "לקנות חלב"
                       : "להתקשר לרופא",
@@ -154,7 +154,7 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
     case "SH-SHARE-ASK":
       return askStub("מה לשתף ועם מי?");
     case "SH-ASSIGN-ASK":
-      return askStub("על מי להטיל ואיזו מטלה?");
+      return askStub("על מי להטיל ואיזו משימה?");
     case "SH-UNSHARE-ASK":
       return askStub("את מה להפסיק לשתף ועם מי?");
     case "SH-TARGETS-EMPTY-ASK":
@@ -212,7 +212,7 @@ async function propose(caseId: string, input: ModelApplyProposeInput) {
                 action: "add",
                 list_type: "tasks",
                 list_name: "",
-                items: [{ "שם מטלה": "לבנק" }],
+                items: [{ "שם משימה": "לבנק" }],
                 targets: ["עמית"],
               },
             ],
