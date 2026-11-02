@@ -53,12 +53,12 @@ const CELEBRATION_SCHEMA: LlmJsonSchemaFormat = {
       encouragement: {
         type: "string",
         description:
-          "Complete short Hebrew comic title (about 8–16 words, never truncated). ALWAYS start with a positive punch (כל הכבוד! / אלוף! / יופי! / מעולה! / מצוין! / סימנת וי! / התקדמות יפה! / יאלה אלוף! — pick one matching the win). Then speaker first name + clear completed action that echoes the closed item label(s) so a stranger understands what was done. Gendered correctly. Forbidden: vague lines, unfinished tails like «כמו»/«ש…», inventing wins not listed. Vary the punch and wording across turns.",
+          "One or two COMPLETE short Hebrew sentences (~6–14 words total). MUST end with . or ! — never a cliffhanger. Start with a positive punch (יופי! / אלוף! / מצוין! / כל הכבוד! / מעולה!). Then a clear finished thought tied to what was closed (shopping/task meaning), gendered correctly. Prefer calm clear phrasing over comic mush. Forbidden: unfinished tails («ועכשיו לסיים את», «כמו», hanging «ש…»), vague praise with no link to the win, inventing wins not listed.",
       },
       tip: {
         type: "string",
         description:
-          "Default empty string. Emit at most one short Hebrew tip ONLY when grounded in the closed items and clearly useful for productivity, necessity, safety, or money/waste. No filler, no generic life advice. Empty most of the time.",
+          "Usually emit one short Hebrew tip (prefer most turns). Ground it in the closed items when possible. Useful categories: productivity, necessity, safety, money/waste, health, healthy lifestyle, recovery, sleep, movement, hydration, posture, stress. Empty string only when nothing useful fits. One sentence max. No empty fluff.",
       },
       scene_prompt: {
         type: "string",
@@ -151,10 +151,15 @@ function escapeXml(text: string): string {
 }
 
 /** Wrap RTL Hebrew into short lines so comic titles stay inside the frame. */
-export function wrapComicLines(text: string, maxCharsPerLine: number): string[] {
+export function wrapComicLines(
+  text: string,
+  maxCharsPerLine: number,
+  maxLines = 4,
+): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
   const max = Math.max(6, maxCharsPerLine);
+  const lineCap = Math.max(1, maxLines);
   const lines: string[] = [];
   let cur = "";
   for (const word of words) {
@@ -177,7 +182,7 @@ export function wrapComicLines(text: string, maxCharsPerLine: number): string[] 
     }
   }
   if (cur) lines.push(cur);
-  return lines.slice(0, 3);
+  return lines.slice(0, lineCap);
 }
 
 function fitComicFontSize(
@@ -348,7 +353,7 @@ export async function overlayCelebrationHebrew(input: {
     ? "CelebrationHebrew, Arial Hebrew, Arial Black, Impact, sans-serif"
     : "Arial Hebrew, Arial Black, Impact, sans-serif";
 
-  const titleLines = wrapComicLines(encouragement, 14);
+  const titleLines = wrapComicLines(encouragement, 16, 4);
   if (titleLines.length === 0) return input.imageBytes;
   const titleLen = Math.max(1, ...titleLines.map((l) => l.length));
   const titleSize = fitComicFontSize(width, titleLen, 0.062, 0.036);
@@ -422,16 +427,24 @@ export async function composeCelebrationCopy(input: {
     const turn = await client.createResponse({
       conversationId: openaiConversationId,
       model: CELEBRATION_COPY_MODEL,
-      temperature: 0.85,
+      temperature: 0.75,
       instructions: [
         "You write one celebration card for a person who just closed shopping items and/or tasks.",
         "Return JSON only matching the schema.",
-        "encouragement MUST be a complete Hebrew sentence/title (~8–16 words). Structure: (1) mandatory positive punch first — pick one that fits the win: כל הכבוד! / אלוף! / יופי! / מעולה! / מצוין! / סימנת וי! / התקדמות יפה! / יאלה אלוף! (2) speaker first name (3) clear completed action that echoes the closed label so anyone understands what was done. Gendered correctly.",
-        "Good examples: «כל הכבוד עמית! יצאת החוצה כמו שהבטחת.» / «אלוף! טל סימנה וי על הקניות.» / «מעולה דני — המוסך מאחוריך!»",
-        "Bad (forbidden): unfinished tails («…כמו» / «…ש»); vague «עמית כל הכבוד» with no task; inventing extra wins; metaphor mush that hides the real label.",
-        "When several items closed, batch clearly (e.g. name the main ones) — not one line per item.",
-        "tip: DEFAULT empty string \"\". Emit a tip ONLY when grounded in the closed items AND clearly useful for productivity, necessity, safety, or money/waste. One short Hebrew sentence max. No filler, no generic life advice. Most turns tip must be empty.",
-        "scene_prompt: one English visual scene that can combine multiple wins in a single image (e.g. holding groceries while leaving a garage). Style: comic-book / cartoon superhero energy, but the person must stay recognizable from their photo. No text in the scene. No multiple panels.",
+        "encouragement: 1–2 COMPLETE Hebrew sentences (~6–14 words). MUST finish cleanly with . or !. Never mid-thought.",
+        "Structure: positive punch (יופי!/אלוף!/מצוין!/כל הכבוד!/מעולה!) + clear finished meaning tied to the closed win. You MAY include the speaker first name but it is optional if the line stays clear. Gender forms must match Address gender.",
+        "Match tone to the kind of win (infer from labels):",
+        "Shopping → «יופי! הסופר מאחוריך, עכשיו אפשר להיות בראש שקט.»",
+        "Sport/self-care → «אלוף! עשית משהו טוב בשביל עצמך היום.»",
+        "Work → «מצוין! עוד משימה מקצועית שהתקדמה לסיום.»",
+        "Phone call you delayed → «כל הכבוד! לפעמים הדבר הכי טוב הוא פשוט לסיים עם זה.»",
+        "Medical → «יופי! חשוב לדאוג גם לעצמך. שמח שהשלמת את זה.»",
+        "Home chore → «מעולה! עוד משהו קטן שעושה סדר בראש ובבית.»",
+        "Going outside / errand → «כל הכבוד! יצאת החוצה וסיימת עם זה.»",
+        "Bad (forbidden): cliffhangers like «קנית חלב ועכשיו לסיים את»; hanging «כמו»/«ש…»; praise with no link to the win; inventing wins not listed; emoji in encouragement.",
+        "When several items closed, one clear batched line — not one sentence per item.",
+        "tip: Prefer emitting a tip on MOST turns (roughly ~3 out of 4). One short Hebrew sentence. Prefer grounding in the closed items. Categories: productivity, necessity, safety, money/waste, health, healthy lifestyle, recovery, sleep, movement, hydration, posture, stress-reduction. Examples: after shopping «שים לב לתאריך התפוגה על החלב.»; after a walk «שתה מים ותן לגוף רגע להתאושף.»; after a desk task «קום לדקה מתיחה — הגב יודה לך.» Empty string ONLY when nothing useful fits. No empty fluff / generic «תהיה חיובי».",
+        "scene_prompt: one English visual scene that can combine multiple wins in a single image. Style: comic-book / cartoon superhero energy, person recognizable from their photo. No text in the scene. No multiple panels.",
         "Do not invent extra wins beyond the listed items.",
       ].join("\n"),
       textFormat: CELEBRATION_SCHEMA,
@@ -440,7 +453,7 @@ export async function composeCelebrationCopy(input: {
         `Address gender: ${gender}`,
         `Closed items this turn:`,
         ...lines,
-        "Write encouragement (punch + clear task), tip (usually empty), and one combined scene_prompt now.",
+        "Write a COMPLETE encouragement (no cliffhangers), a useful tip when you can (prefer most turns; health/lifestyle OK), and one combined scene_prompt now.",
       ].join("\n"),
     });
     if (input.billing) {
