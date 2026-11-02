@@ -133,6 +133,7 @@ export {
   applyShowButtonsToBubbles,
   clearBubbleButtons,
   parseReplyMetadata,
+  reminderActionFromNestedRemind,
   parseReportSections,
   parseReportHistoryKinds,
   parseShowDump,

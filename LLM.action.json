@@ -143,7 +143,7 @@
     "",
     "6. תזכורות / clocks (reminders) — built-in clocks list:",
     "   - list_type:\"reminders\", list_name:\"\". Never invent a custom list titled תזכורות.",
-    "   - items:[{ item, list_type:\"shopping|tasks\" (wrapper), time/in/recurrence, ping, reminder_id?, item_id? }]. Outer list_type is reminders; wrapper shopping|tasks is on the item. Soft-link: item_id = speaker shopping/tasks row (minted same-turn on lists.add or copied from EMPLOYEE_SAVED_DATA). ≥2 clocks on one chore → same item_id on every clock; FORBIDDEN title-only linking.",
+    "   - items:[{ item, list_type:\"shopping|tasks\" (wrapper), time/in/recurrence, ping, reminder_id?, item_id? }]. Outer list_type is reminders; wrapper shopping|tasks is on the item. Soft-link: item_id = EXISTING shopping/tasks row copied from EMPLOYEE_SAVED_DATA (assignee's id when nudging someone else — never invent / mint UUID). NEW chore+clock same turn → prefer/require items[].remind on the shopping|tasks add instead of a duplicate list_type reminders row. ≥2 clocks on one EXISTING chore → same ESD item_id on every clock; FORBIDDEN title-only linking.",
     "",
     "Rules:",
     "- אם חסר מידע – שאל את המשתמש. אל תשמור metadata עד שיש את החובה.",
@@ -282,7 +282,7 @@
     "NO SAVE INTENT: if neither THIS message nor a prior USER turn established save/file/attach/forward intent, a file or forwarded caption alone → empty mutates (FORBIDDEN inventing filing/list attach). Caption/transcript IS the request ONLY when save destination/create intent is already clear. Example: photo + «תוסיפי מיץ לרשימת קניות» → shopping add + attachment_ids. Example: photo + «תצרפי לרשימת הקניות עצמה» → alter_list add_attachments. Example: photo + «תתייקי כרישיון נהיגה» → filing add + attachment_ids. Example: photo + «שמרי לאיש קשר ניר» → directory.update contact_id + attachment_ids (path D). Bare «תתייקי»/«תשמרי»/«תצרפי» + files with no destination: if prior USER turn already named ONE clear target AND THIS USER did not name a NEW destination → attach there (PENDING / new_attachments); else ASK.",
     "MULTI-TURN / DEFERRED FILE: USER said they will send a file to save (named list/item/filing/contact) then later sends attachment-only — complete that save with new_attachments / PENDING_ATTACHMENTS ids even if Lucy messages intervened — unless THIS USER names a NEW destination (THIS-TURN DESTINATION WINS). «תייקי תחת תמונות מהחתונה בתאילנד» → filing add + attachment_ids. «תוסיפי לפגישה עם טל ביום שלישי» → lists update tasks with that meeting's item_id + attachment_ids (missing → ask). «שמרי לאיש קשר ניר» after a prior shopping attach → directory.update for ניר only; lists=[] for that attach (FORBIDDEN re-home onto the prior shopping item). BY LINE attach after a numbered dump: «לפריטים 1–3» / «תצרפי ל־1,2,3» → lists.update with those LAST_NUMBERED_DUMP item_ids + same attachment_ids; missing/stale dump or renumbered list without matching ids in THIS turn → ASK; FORBIDDEN reinterpreting stale numbers against a changed list. STABLE REFS: pronouns («זה» / «אותו») and ordinals («הראשון» / «השני») resolve via active USER topic + LAST_NUMBERED_DUMP id (and live row match) — FORBIDDEN last-mentioned latch alone; unclear → ASK.",
     "EVENT IN THE FILE: a photo / caption describing an event («חתונה ביום שלישי 12.11.2026 באולמי חן») → collect what is missing (time or יום שלם) like any meeting, then OFFER «להוסיף את האירוע עם התמונה?» with lists empty; on כן emit the tasks add with attachment_ids.",
-    "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → the usual self-nudge actions AND the same attachment_ids on the speaker's task and on the lists add reminders (the files are sent with the reminder).",
+    "REMINDER WITH FILES: «תזכירי לי להתקשר לרן בעוד שעתיים» on files → LINK via items[].remind on NEW speaker task (or reminders + ESD item_id on EXISTING) with the same attachment_ids on the speaker task and on the clock; also emit YOUR להזכיר tracking when they asked you to remind (not required for the join). The files are sent with the reminder.",
     "A filing made from files (when create-filing is clear): item_name + attachment_ids; item_info only if they gave a detail; item_description = find-helper if they gave context else \"\" (offer find-helper once when empty — same FIND-HELPER kind rule).",
     "PAPERCLIP: any listed row with non-empty attachments → append 📎 after the title on that numbered line. Same for every saved-row domain (shopping/tasks/custom items, filings, reminders / active_reminders, WORKER tasks, SPEAKER_CONTACTS / phone_book) — e.g. «1. מיץ 📎», «1. דני 📎», «1. רישיון נהיגה 📎», «1. לקנות חלב 📎 — מחר 09:00». EVERY dump: status, הצג רשימה (incl. אנשי קשר), מה התיוקים, הצג תזכורות, WHEN / שבוע / יום, FULL DUMP, inventory. List header 📎 and the files button ONLY when has_attachments is true (list-level, any list_type). FORBIDDEN: header 📎 or that button because items alone have files.",
     "LINK ICON: any tasks item with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). Example: «1. ערב פוקר 🗂️ — מחר 21:00». FORBIDDEN inventing 🗂️ without linked_lists; FORBIDDEN 🗂️ on shopping/custom list headers.",
@@ -514,7 +514,23 @@
                           },
                           "item_id": {
                             "type": "string",
-                            "description": "Shopping/tasks/contacts/custom: copy exactly from EMPLOYEE_SAVED_DATA on remove/update (required — omitting skips the mutate). On lists.add for a NEW speaker shopping/tasks row that same-turn clocks will soft-link: mint a fresh UUID and put it here, then copy that SAME UUID onto each related list_type reminders items[].item_id. list_type reminders add: copy the speaker/shopping item_id (minted same-turn or from facts) so every clock for that chore links to it — required when ≥2 clocks target one task; FORBIDDEN title-only linking."
+                            "description": "Shopping/tasks/contacts/custom: copy exactly from EMPLOYEE_SAVED_DATA on remove/update (required — omitting skips the mutate). list_type reminders add linking to an EXISTING shopping/tasks row: copy that row's item_id from EMPLOYEE_SAVED_DATA (required when linking; ≥2 clocks on one chore → same id on every clock). FORBIDDEN minting UUID on lists.add. FORBIDDEN title-only linking. NEW chore+clock same turn → use items[].remind on the shopping|tasks add (engine creates the id+join)."
+                          },
+                          "remind": {
+                            "description": "Preferred/required nested clock(s) on shopping|tasks add when a NEW row and a ping clock are created THIS turn; also allowed on update of an existing item_id. Object or array of clock fields (date/time/in/ping/text/recurrence/compose*). Engine creates item+clock+join; FORBIDDEN also emitting a duplicate list_type reminders row for the same clock. Legacy list_type reminders + ESD item_id remains for clocks on an EXISTING row (or pure ping with no wrapper).",
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              },
+                              {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              }
+                            ]
                           },
                           "filing_id": {
                             "type": "string",

@@ -129,7 +129,11 @@ import {
 } from "./llm-client.js";
 import { recordLlmUsage } from "./llm-usage.service.js";
 import {
+  applyNestedReminderPackages,
   applyReminders,
+  clocksEligibleForExactKeySoftLink,
+  excludeNestedItemsFromSoftLinkCandidates,
+  filterTopLevelRemindersAgainstNested,
   formatReminderApplyNotice,
   formatReminderDeleteFallback,
   itemsFromListMutationsForSoftLink,
@@ -143,6 +147,7 @@ import {
   type ReminderChange,
   type WorkerTaskRef,
 } from "./reminder.service.js";
+import { isExactKeySoftLinkEnabled } from "./reminder-soft-link.js";
 import {
   formatRecentOutboundContext,
   listRecentReminderOutbounds,
@@ -1052,8 +1057,8 @@ function workerTargetingInstructions(
       : "",
     "One sentence can be several actions. Fill every array that applies.",
     "TASK + REMINDER ? ????? (critical): a timed chore (?????? ?? ???? ??14:20?, ????? ????? ??? ??08:00?) is an ordinary tasks row with ??? ??????. Accepting a WhatsApp reminder on it is reminders + your ?????? job ? NOT Self-nudge and NOT the ????/snooze button. Always save the speaker task with its chore hour; on the ?????? copy that same ?????/??? (chore time, not the ping).",
-    `Self-nudge (?????/? ?? ????? / ????? at a clock ? they asked to be reminded, not ?I have a timed chore?): DECISION & FOCUS ?5 ? REUSE EXISTING WRAPPER. (1) lists add for the speaker ? shopping if buying, else tasks ? ONLY if that work is not already in THIS turn's EMPLOYEE_SAVED_DATA by meaning (match found ? skip speaker lists.add; still emit your ?????? + reminders; several matches ? ASK; ???? ???? ? add allowed). (2) lists tasks add targeting yourself (${workerName}) ? ?????? ?<speaker> <item>. WORKER TASK TIME: when they named HH:mm, that ?????? item MUST include ????? ?????? + ??? ?????? (= that remind-at clock). Pure \`in\` delay with no HH:mm ? date/time optional. (3) lists add list_type reminders with in (seconds) or time HH:mm. ping and reminder targets = the speaker. Do not handoff for a reminder. REMINDER CONTENT DETAIL: reminders[].item + ?????? suffix (+ speaker tasks row) keep the concrete facts they listed ? light paraphrase OK; FORBIDDEN hollow summaries (????? ???? ??????? when they named the bugs). Shopping row stays product-only; that does not strip the clock label. REMINDER-ON-ITEM: ????? ?????? ??X? / ?? X / ?? 3 / tap command ????? ??????: <title>? ? FORBIDDEN lists.add of any product in every case; exist ? ??????+reminder only (copy date/time onto ?????? when the saved row is timed); no schedule yet ? ask schedule only; missing ? not found, lists=[].`,
-    `Remind someone ELSE in Known employees (?????/? ??????): (1) lists add on that person. (2) lists tasks add on yourself ? ?????? ?<name> <item> with ?????/??? when a clock/appointment time applies. (3) lists add reminders, ping/targets = that person's name from Known employees (not digits). Recurring: reminders[].recurrence. NEVER ask for WhatsApp if the name is Known.`,
+    `Self-nudge (תזכירי/י לי / נדנד at a clock — they asked to be reminded, not "I have a timed chore"): DECISION & FOCUS §5 — REUSE EXISTING WRAPPER. LINK CONTRACT only (speaker/assignee item ↔ clock; Worker is NOT required for success): NEW → lists.add shopping|tasks with items[].remind (engine id+join). EXISTING → list_type reminders with REQUIRED ESD item_id (or lists.update item_id + remind). FORBIDDEN minting UUID / title-only / itemKey linking / duplicate top-level for same nested clock. Missing ESD id → ASK; empty reminders. PRODUCT WORKER TRACKING (optional for join; still emit when they asked YOU to remind): lists tasks add targets:[${workerName}] להזכיר ל<speaker> <item>; HH:mm → תאריך/שעה לביצוע (= ping). Pure `in` — date/time optional. FORBIDDEN treating worker emit/omit as the join. Do not handoff. REMINDER-ON-ITEM: EXISTING row only → reminders + ESD item_id (+ YOUR להזכיר tracking when asked); no schedule → ask; missing → lists=[].`,
+    `Remind someone ELSE in Known employees (תזכירי/י למישהו): LINK only = NEW lists.add tasks targets:[name] with items[].remind (ping=[name]), OR EXISTING reminders with assignee ESD item_id (never speaker's; missing ESD → ASK). FORBIDDEN mint UUID / title-only. PRODUCT: still emit YOUR להזכיר ל<name> when they asked you to remind them — not the user-task↔clock join. Recurring: remind.recurrence or reminders[].recurrence. NEVER ask WhatsApp if Known.`,
     "REMIND CLOCK vs APPOINTMENT: ????? ??????? = `in` for the clock. ??? ?? ??? ??22:00? = task context ? put ??? ?????? 22:00 on their task AND on your ?????? when saving that turn ? do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared ?????? ?????? for a remind.",
     "NO META ON LISTS: complaints about your timing/questions ? response only, empty lists. Never dump bug/meta text onto ?????? ?????? or any shared list.",
     "Cancel a nudge / stop pings / ???? ?? ??????? / bare ??????: when they mean stop the WhatsApp clock (????????, ??????? ???????, ????? ?? ????????, ??????? ?? ?????????) and THIS turn's active_reminders has exactly ONE clear active clock (or they named it uniquely) ? lists remove reminders with that reminder_id NOW ? FORBIDDEN asking which clock when only one fits. Leave the speaker shopping/task this turn (lists=[]): do NOT lists.remove the wrapper without their agreement; you MAY ask whether to also remove it (e.g. ???) and wait for ??. The server clears the linked worker ?????? with the clock ? speaker shopping/list and your worker task are separate. Several active clocks or unclear which target ? ASK which; no reminders clock lists=[] while asking. Standing row with ???? / (???? + ??????) / `reminder` ? independent work: do NOT auto-remove it; use STANDING + LINKED CLOCK DELETE ASK when ???? ?? ?????? is ambiguous after a ping. FORBIDDEN: lists.remove of your ?????? / ????? worker alone while the speaker standing row still exists. Raised OPEN_JOBS ???????? on a check ? jobs.close (OPEN JOBS cancel), not this clock path.",
@@ -2654,6 +2659,15 @@ export async function sendChatMessage(input: {
     const listMutations: ListItemMutation[] = [];
     const filingMutations: FilingMutation[] = [];
     const shareMisses: ShareApplyMiss[] = [];
+    const nestedRemindMisses: Array<{
+      reason: string;
+      op: string;
+      listType: string;
+      listName?: string;
+      itemLabel: string;
+      detail?: string;
+      remindLabels?: string[];
+    }> = [];
     let attachmentOutcome = mergeAttachmentOutcomes(
       ...listOpResults.map(
         (row) => row.attachmentOutcome ?? emptyAttachmentOutcome(),
@@ -2674,6 +2688,7 @@ export async function sendChatMessage(input: {
       filingMutations.push(...applied.filingMutations);
       cancelledReminderIds.push(...applied.cancelledReminderIds);
       shareMisses.push(...applied.shareMisses);
+      nestedRemindMisses.push(...applied.nestedRemindMisses);
       attachmentOutcome = mergeAttachmentOutcomes(
         attachmentOutcome,
         applied.attachmentOutcome,
@@ -2754,9 +2769,90 @@ export async function sendChatMessage(input: {
       metadata = redactMetadataSecrets(metadata);
     }
     const incomingReminders = guestSpeaker ? [] : metadata.reminders ?? [];
+    // Nested items[].remind: joins written in atomic/package paths (NEW contract).
+    // Exact-key soft-link is legacy-only — see clocksEligibleForExactKeySoftLink.
+    const atomicNestedSaved = listMutations.flatMap((row) =>
+      row.nestedClocksApplied && row.nestedSavedClocks
+        ? row.nestedSavedClocks
+        : [],
+    );
+    const atomicNestedItemIds = listMutations
+      .filter((row) => row.nestedClocksApplied)
+      .map((row) => row.itemId);
+    // Existing-item nested remind still uses post-list package (unchanged).
+    const nestedPackages = guestSpeaker
+      ? []
+      : listMutations
+          .filter(
+            (row) =>
+              row.action === "update" &&
+              (row.listType === "shopping" || row.listType === "tasks") &&
+              Array.isArray(row.pendingReminds) &&
+              row.pendingReminds.length > 0 &&
+              !row.nestedClocksApplied,
+          )
+          .map((row) => ({
+            itemId: row.itemId,
+            ownerEmployeeId: row.employeeId,
+            listType: row.listType,
+            itemLabel: row.itemLabel || row.itemKey,
+            reminds: row.pendingReminds ?? [],
+            nestedCompensate: row.nestedCompensate,
+          }));
+    const nestedResult =
+      nestedPackages.length > 0
+        ? await applyNestedReminderPackages({
+            userId: input.userId,
+            actor: employee,
+            employees: humansForPlan,
+            contacts: speakerContacts,
+            packages: nestedPackages,
+          })
+        : {
+            saved: [],
+            skipped: [],
+            failedItemIds: [] as string[],
+            nestedItemIds: [] as string[],
+            fingerprintsByReminderId: new Map<string, string>(),
+          };
+    nestedResult.saved.push(...atomicNestedSaved);
+    nestedResult.nestedItemIds.push(...atomicNestedItemIds);
+    // Dual-path dedup: fingerprints of clocks actually saved in the atomic txn.
+    for (const clock of atomicNestedSaved) {
+      const fp =
+        typeof clock.fingerprint === "string" ? clock.fingerprint.trim() : "";
+      if (fp && clock.id) {
+        nestedResult.fingerprintsByReminderId.set(clock.id, fp);
+      }
+    }
+    // Nested package failure compensated the list row — drop that mutation from
+    // success accounting so we never report full success for a rolled-back add.
+    if (nestedResult.failedItemIds.length > 0) {
+      const failed = new Set(nestedResult.failedItemIds);
+      for (let i = listMutations.length - 1; i >= 0; i -= 1) {
+        const row = listMutations[i];
+        if (
+          row &&
+          failed.has(row.itemId) &&
+          Array.isArray(row.pendingReminds) &&
+          row.pendingReminds.length > 0
+        ) {
+          listMutations.splice(i, 1);
+        }
+      }
+    }
+    const filteredIncoming = filterTopLevelRemindersAgainstNested({
+      topLevel: incomingReminders,
+      nestedSaved: nestedResult.saved,
+      nestedFingerprints: nestedResult.fingerprintsByReminderId,
+      nestedItemIds: nestedResult.nestedItemIds,
+      employees: humansForPlan,
+      actorId: employee.id,
+      contacts: speakerContacts,
+    });
     const reminderWrites = [
-      ...incomingReminders.filter((row) => row.action !== "remove"),
-      ...incomingReminders.filter((row) => row.action === "remove"),
+      ...filteredIncoming.filter((row) => row.action !== "remove"),
+      ...filteredIncoming.filter((row) => row.action === "remove"),
     ];
     const incompleteComposeClocks = (metadata.reminders ?? []).filter(
       (row) =>
@@ -2785,6 +2881,14 @@ export async function sendChatMessage(input: {
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
     });
+    // Merge nested clocks into reminder apply accounting (join already written).
+    reminderResult.saved.push(...nestedResult.saved);
+    reminderResult.skipped.push(
+      ...nestedResult.skipped.map((row) => ({
+        item: row.item,
+        reason: "db" as const,
+      })),
+    );
     attachmentOutcome = mergeAttachmentOutcomes(
       attachmentOutcome,
       reminderResult.attachmentOutcome,
@@ -2825,6 +2929,22 @@ export async function sendChatMessage(input: {
       directoryResult.attachmentOutcome,
     );
     // Result-A: internal ApplyResult only — does not change user-facing reply.
+    // Explicit reminder skips for failed NEW task+nested txn (no clocks applied).
+    // One skip per remind in the package — never a single blanket task label only.
+    if (nestedRemindMisses.length > 0) {
+      for (const miss of nestedRemindMisses) {
+        const labels =
+          Array.isArray(miss.remindLabels) && miss.remindLabels.length > 0
+            ? miss.remindLabels
+            : [miss.itemLabel];
+        for (const label of labels) {
+          reminderResult.skipped.push({
+            item: label,
+            reason: "db",
+          });
+        }
+      }
+    }
     let turnApplyResult: ApplyResult = buildApplyResult({
       requested: applyResultRequested,
       intentMisses: intentMissesForResult,
@@ -2834,6 +2954,7 @@ export async function sendChatMessage(input: {
       listMutations,
       filingMutations,
       shareMisses,
+      nestedRemindMisses,
       listOpResults,
       reminderResult: {
         saved: reminderResult.saved,
@@ -2872,30 +2993,41 @@ export async function sendChatMessage(input: {
       itemLabel: row.itemLabel,
     }));
     await linkRemindersToWorkerTasks(savedClocks, workerItems);
-    // Explicit ACTION item_id → join (exact persisted id only; no array zip).
+    // EXISTING: ESD item_id → join (exact persisted id only; no itemKey).
     await linkRemindersByItemId({
       userId: input.userId,
       actorId: employee.id,
       saved: reminderResult.saved,
     });
-    // Soft-link: same-turn human add/update union live shopping/tasks (exact
-    // itemKey later). Join append only — never steals a linked clock.
+    // Legacy exact-key soft-link only: exclude NEW nested + EXISTING item_id clocks.
+    // Flag default remains ON; mechanism unchanged for title-matched legacy clocks.
+    const exactKeyClocks = clocksEligibleForExactKeySoftLink(
+      reminderResult.saved,
+      nestedResult.saved.map((row) => row.id),
+    ).map((row) => ({
+      id: row.id,
+      itemKey: row.itemKey,
+      itemLabel: row.itemLabel,
+    }));
     const humanIds = humans.map((human) => human.id);
     const sameTurnItems = itemsFromListMutationsForSoftLink(
       listMutations,
       humanIds,
     );
     const liveItems =
-      savedClocks.length > 0
+      exactKeyClocks.length > 0
         ? await listLiveHumanItemsForReminderLink({
             userId: input.userId,
             humanIds,
           })
         : [];
-    await linkRemindersToItems(
-      savedClocks,
+    const softLinkCandidates = excludeNestedItemsFromSoftLinkCandidates(
       unionSoftLinkItemCandidates(sameTurnItems, liveItems),
+      nestedResult.nestedItemIds,
     );
+    await linkRemindersToItems(exactKeyClocks, softLinkCandidates, {
+      exactKeyEnabled: isExactKeySoftLinkEnabled(),
+    });
     recordWhatsAppEvent(
       "reminder_apply",
       `worker=${digital.name} incoming=${metadata.reminders?.length ?? 0} apply=${reminderWrites.length} saved=${reminderResult.saved.length} skipped=${reminderResult.skipped.length} ping=${reminderResult.saved.map((row) => row.ping).filter(Boolean).join("|") || "none"}`,

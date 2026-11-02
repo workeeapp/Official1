@@ -132,7 +132,7 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
             show_dump: "shopping",
           },
         },
-        // 2) Self-nudge: speaker tasks + worker להזכיר + reminder.
+        // 2) Self-nudge NEW task: nested items[].remind + worker להזכיר (no top-level duplicate; no mint UUID).
         {
           responses: [
             {
@@ -145,7 +145,18 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
                 action: "add",
                 list_type: "tasks",
                 list_name: "",
-                items: [{ "שם מטלה": ZIP_TASK, "תאריך לביצוע": tomorrow }],
+                items: [
+                  {
+                    "שם מטלה": ZIP_TASK,
+                    "תאריך לביצוע": tomorrow,
+                    remind: {
+                      date: tomorrow,
+                      time: "10:00",
+                      ping: ["טל"],
+                      text: ZIP_TASK,
+                    },
+                  },
+                ],
                 targets: [],
               },
               {
@@ -154,22 +165,6 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
                 list_name: "",
                 items: [{ "שם מטלה": `להזכיר לטל: ${ZIP_TASK}` }],
                 targets: ["לוסי"],
-              },
-            ],
-            reminders: [
-              {
-                action: "add",
-                item: ZIP_TASK,
-                list_type: "tasks",
-                date: tomorrow,
-                time: "10:00",
-                repeat: "once",
-                ping: ["טל"],
-                about: [],
-                targets: [],
-                text: "",
-                confirmed: true,
-                compose: false,
               },
             ],
           },
@@ -203,5 +198,27 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
 
     const after = await getEmployeeRecordSnapshot(account.employeeId);
     expect(tasksTitles(after)).toContain(ZIP_TASK);
+
+    // Nested remind must create a linked clock (not orphan / exact-key-only).
+    const clocks = after.reminders ?? [];
+    expect(clocks.length).toBeGreaterThanOrEqual(1);
+    const zipClock = clocks.find(
+      (r) =>
+        String(r.item ?? r.text ?? "").includes("קבצי זיפ") ||
+        String(r.item ?? r.text ?? "").includes(ZIP_TASK.slice(0, 12)),
+    );
+    expect(zipClock, "expected nested clock for ZIP task").toBeTruthy();
+    const zipTask = after.lists
+      .flatMap((l) => (l.list_type === "tasks" ? l.items : []))
+      .find((it) => String(it["שם מטלה"] ?? it.title ?? "") === ZIP_TASK);
+    expect(zipTask?.item_id, "speaker task id").toBeTruthy();
+    const linked =
+      String(zipTask?.reminder_id ?? "") === String(zipClock?.reminder_id ?? "") ||
+      String(zipClock?.item_id ?? "") === String(zipTask?.item_id ?? "") ||
+      (Array.isArray(zipTask?.reminder_ids) &&
+        zipTask!.reminder_ids.includes(String(zipClock?.reminder_id ?? "")));
+    expect(linked, "clock must soft-link to speaker task via nested remind").toBe(
+      true,
+    );
   });
 });

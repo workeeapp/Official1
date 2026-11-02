@@ -355,11 +355,18 @@ export function computeDomainCompleteness(input: {
     unclassified_drops,
     reportingIncomplete,
   } = input;
-  if (requested.length === 0) {
-    return "complete";
-  }
+  // Nested NEW-task+remind txn misses can surface with empty reminderRequested
+  // (clocks lived only under items[].remind) — still must not report complete.
   if (reportingIncomplete || (unclassified_drops?.length ?? 0) > 0) {
     return "unknown";
+  }
+  if (requested.length === 0) {
+    // Nested-only success: applied clocks, no requested.reminders → complete.
+    // Any miss/unclassified with empty requested must not report complete.
+    if ((apply_misses?.length ?? 0) > 0 || (intent_misses?.length ?? 0) > 0) {
+      return applied.length > 0 ? "partial" : "unknown";
+    }
+    return "complete";
   }
 
   const missIds = new Set<string>();
@@ -616,6 +623,17 @@ export function buildApplyResult(input: {
   listMutations?: ListItemMutation[];
   filingMutations?: FilingMutation[];
   shareMisses?: ShareApplyMiss[];
+  /** NEW task+nested-remind transaction failures (lists apply_miss). */
+  nestedRemindMisses?: Array<{
+    reason: string;
+    op: string;
+    listType: string;
+    listName?: string;
+    itemLabel: string;
+    detail?: string;
+    /** Per-clock labels in the failed package. */
+    remindLabels?: string[];
+  }>;
   listOpResults?: ListOpResult[];
   reminderResult?: {
     saved: Array<{ id: string; itemLabel?: string; item?: string }>;
@@ -669,11 +687,21 @@ export function buildApplyResult(input: {
       listName: row.listName,
       employeeId: row.employeeId,
     }));
-    const apply_misses: ApplyMiss[] = (input.shareMisses ?? []).map((miss) => ({
-      domain: "lists",
-      reason: miss.reason,
-      id: miss.itemId,
-    }));
+    const apply_misses: ApplyMiss[] = [
+      ...(input.shareMisses ?? []).map((miss) => ({
+        domain: "lists" as const,
+        reason: miss.reason,
+        id: miss.itemId,
+      })),
+      ...(input.nestedRemindMisses ?? []).map((miss) => ({
+        domain: "lists" as const,
+        reason: miss.reason,
+        op: miss.op,
+        listType: miss.listType,
+        listName: miss.listName,
+        detail: miss.detail ?? miss.itemLabel,
+      })),
+    ];
     const unclassified_drops = unclassifiedStrip.filter(
       (op) => op.domain === "lists",
     );
@@ -689,6 +717,9 @@ export function buildApplyResult(input: {
         intent_misses,
         apply_misses,
         unclassified_drops,
+        // Nested NEW-task+remind txn failure is an explicit package miss —
+        // never report domain completeness=complete for that fate.
+        reportingIncomplete: (input.nestedRemindMisses?.length ?? 0) > 0,
       }),
     };
   }
@@ -730,8 +761,34 @@ export function buildApplyResult(input: {
   }
 
   const reminderRequested = requestedOpsFromReminders(input.requested.reminders);
-  if (reminderRequested.length > 0) {
-    const rr = input.reminderResult;
+  const nestedReminderMisses: ApplyMiss[] = (input.nestedRemindMisses ?? []).flatMap(
+    (miss) => {
+      const labels =
+        Array.isArray(miss.remindLabels) && miss.remindLabels.length > 0
+          ? miss.remindLabels
+          : [miss.itemLabel];
+      return labels.map((label) => ({
+        domain: "reminders" as const,
+        reason: "nested_remind_txn_failed",
+        op: "add",
+        detail: label,
+      }));
+    },
+  );
+  const rr = input.reminderResult;
+  // Nested-only success: clocks from items[].remind land in reminderResult.saved
+  // even when metadata.reminders was empty — still open the reminders domain.
+  const hasReminderOutcome =
+    (rr?.saved?.length ?? 0) > 0 ||
+    (rr?.removed?.length ?? 0) > 0 ||
+    (rr?.changes?.length ?? 0) > 0 ||
+    (rr?.missed?.length ?? 0) > 0 ||
+    (rr?.skipped?.length ?? 0) > 0;
+  if (
+    reminderRequested.length > 0 ||
+    nestedReminderMisses.length > 0 ||
+    hasReminderOutcome
+  ) {
     const applied: AppliedOp[] = [
       ...(rr?.saved ?? []).map((row) => ({
         domain: "reminders" as const,
@@ -767,6 +824,7 @@ export function buildApplyResult(input: {
         reason: String(row.reason ?? "skipped"),
         detail: row.item,
       })),
+      ...nestedReminderMisses,
     ];
     domains.reminders = {
       requested: reminderRequested,
@@ -780,6 +838,7 @@ export function buildApplyResult(input: {
         intent_misses,
         apply_misses,
         unclassified_drops,
+        reportingIncomplete: nestedReminderMisses.length > 0,
       }),
     };
   }

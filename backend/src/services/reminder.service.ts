@@ -24,10 +24,12 @@ import {
   pruneRecurrenceExceptions,
   recurrenceExceptionEntries,
   recurrenceFromInterval,
+  reminderActionFromNestedRemind,
   serializeRecurrence,
   serializeReminderRepeat,
   withRecurrenceException,
   withinUntil,
+  type LlmListType,
   type Recurrence,
   type RecurrenceException,
   type ReminderInterval,
@@ -53,6 +55,13 @@ import {
 import { fetchQuote } from "./market.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import { seedWatchBaseline } from "./watch-baseline.js";
+import {
+  decideCreateOrReuseClock,
+  decideReuseWithoutSteal,
+  fingerprintFromReminderAction,
+  isExactKeySoftLinkEnabled,
+  type ExistingLinkedClock,
+} from "./reminder-soft-link.js";
 
 export function formatJerusalemDateTime(value: Date): string {
   return formatJerusalemWallTime(value);
@@ -873,7 +882,13 @@ export function pairLinkedItemsToReminders(
 export async function linkRemindersToItems(
   reminders: Array<{ id: string; itemKey: string; itemLabel: string }>,
   items: LinkedItemRef[],
+  options?: { exactKeyEnabled?: boolean },
 ): Promise<void> {
+  const exactKeyOn =
+    options?.exactKeyEnabled ?? isExactKeySoftLinkEnabled();
+  if (!exactKeyOn) {
+    return;
+  }
   if (
     reminders.length === 0 ||
     items.length === 0 ||
@@ -1025,6 +1040,720 @@ export async function linkRemindersByItemId(input: {
   }
 }
 
+export type NestedRemindPackage = {
+  itemId: string;
+  /** Human list owner (speaker book) — becomes Reminders.ownerId. */
+  ownerEmployeeId: string;
+  listType: string;
+  itemLabel: string;
+  reminds: Record<string, unknown>[];
+  nestedCompensate?:
+    | { kind: "soft_delete_item" }
+    | {
+        kind: "restore_data";
+        data: unknown;
+        itemKey: string;
+        urgency: string | null;
+      };
+};
+
+/** Saved clock row returned from nested / atomic create paths. */
+export type NestedSavedClock = {
+  id: string;
+  item: string;
+  itemKey: string;
+  itemLabel: string;
+  fireAt: string;
+  ping?: string;
+  requestedItemId?: string;
+  /** Fingerprint of the clock actually persisted (for same-turn dual-path dedup). */
+  fingerprint?: string;
+};
+
+/**
+ * NEW task + nested remind(s): one Prisma interactive transaction.
+ * Creates list item, every clock, and every join — or rolls all back.
+ * No soft-delete / restore compensation on this path.
+ */
+export async function createItemWithNestedRemindersAtomic(input: {
+  userId: string;
+  actorId: string;
+  ownerEmployeeId: string;
+  listId: string;
+  listType: "shopping" | "tasks";
+  itemKey: string;
+  itemLabel: string;
+  itemCreateData: {
+    id?: string;
+    data: Prisma.InputJsonValue;
+    scope: string;
+    addedById: string;
+    visibleTo: string[];
+    urgency?: string;
+  };
+  reminds: Record<string, unknown>[];
+  employees: PublicEmployee[];
+  contacts?: SpeakerContact[];
+}): Promise<{ itemId: string; saved: NestedSavedClock[] }> {
+  if (!prisma.$transaction) {
+    throw new Error("nested_remind_txn_unavailable");
+  }
+  if (input.reminds.length === 0) {
+    throw new Error("nested_remind_empty");
+  }
+  const contacts = input.contacts ?? [];
+
+  return prisma.$transaction(async (tx) => {
+    if (!tx.employeeListItem?.create || !tx.reminder?.create) {
+      throw new Error("nested_remind_txn_unavailable");
+    }
+    const created = await tx.employeeListItem.create({
+      data: {
+        ...(input.itemCreateData.id ? { id: input.itemCreateData.id } : {}),
+        listId: input.listId,
+        itemKey: input.itemKey,
+        data: input.itemCreateData.data,
+        scope: input.itemCreateData.scope,
+        addedById: input.itemCreateData.addedById,
+        visibleTo: input.itemCreateData.visibleTo,
+        ...(input.itemCreateData.urgency
+          ? { urgency: input.itemCreateData.urgency }
+          : {}),
+      },
+    });
+
+    const saved: NestedSavedClock[] = [];
+    for (const raw of input.reminds) {
+      const reminder = reminderActionFromNestedRemind(raw, {
+        itemLabel: input.itemLabel,
+        listType: input.listType,
+        itemId: created.id,
+      });
+      if (!reminder) {
+        throw new Error("nested_remind_parse_failed");
+      }
+      const interval =
+        reminder.everyCount && reminder.everyUnit
+          ? {
+              count: reminder.everyCount,
+              unit: reminder.everyUnit,
+              weekdays: reminder.weekdays,
+            }
+          : null;
+      const recurring = reminder.recurrence
+        ? resolveRecurringFireAt(
+            reminder.recurrence,
+            reminder.date,
+            reminder.time,
+            new Date(),
+            reminder.inSeconds,
+          )
+        : null;
+      const fireAt = reminder.recurrence
+        ? (recurring?.fireAt ?? null)
+        : resolveReminderFireAt(
+            reminder.date,
+            reminder.time,
+            new Date(),
+            reminder.inSeconds,
+            interval as ReminderInterval | null,
+          );
+      if (!fireAt) {
+        throw new Error("nested_remind_no_time");
+      }
+      const pingIds = resolveReminderPingDestinations(
+        reminder,
+        input.employees,
+        input.actorId,
+        contacts,
+      );
+      const key = reminder.item.trim().slice(0, 255) || "reminder";
+      const label = reminder.item.trim().slice(0, 255) || key;
+      const ruleFields =
+        recurring?.recurrence
+          ? {
+              recurrence: serializeRecurrence(
+                recurring.recurrence,
+              ) as Prisma.InputJsonValue,
+              repeat: legacyRepeatFor(recurring.recurrence),
+            }
+          : reminder.recurrence === null
+            ? { recurrence: Prisma.DbNull, repeat: "once" }
+            : { repeat: reminder.repeat || "once" };
+
+      const row = await tx.reminder.create({
+        data: {
+          userId: input.userId,
+          ownerId: input.ownerEmployeeId,
+          actorId: input.actorId,
+          itemKey: key,
+          itemLabel: label,
+          listType: reminder.listType,
+          fireAt,
+          ...ruleFields,
+          pingIds,
+          aboutIds: [],
+          messageText: reminder.text || "",
+          composeAtFire: Boolean(reminder.compose),
+          composeSource: reminder.composeSource || "",
+          composeLookbackHours: reminder.composeLookbackHours || 0,
+          composePlace: reminder.composePlace || "",
+        },
+      });
+      if (!tx.employeeListItemReminderLink?.create) {
+        throw new Error("nested_remind_join_unavailable");
+      }
+      // Eval-only: force join FK failure after reminder.create to prove txn rollback.
+      const failAfter = String(
+        process.env.WORKEE_TEST_NESTED_FAIL_AFTER ?? "",
+      ).trim();
+      if (failAfter === "reminder") {
+        throw new Error("nested_remind_forced_reminder_fail");
+      }
+      const joinItemId =
+        failAfter === "join"
+          ? "00000000-0000-4000-8000-000000000000"
+          : created.id;
+      await tx.employeeListItemReminderLink.create({
+        data: {
+          listItemId: joinItemId,
+          reminderId: row.id,
+        },
+      });
+      // F of the clock just written — chat dual-path dedup must use this, not a re-parse.
+      const hasExplicitTime = Boolean(String(reminder.time ?? "").trim());
+      const pingKeys = [...pingIds].map(String).sort();
+      const fingerprint =
+        fingerprintFromReminderAction({
+          itemId: created.id,
+          reminder,
+          fireAt,
+          hasExplicitTime,
+          pingKeys,
+        }) ?? undefined;
+      saved.push({
+        id: row.id,
+        item: reminder.item.trim(),
+        itemKey: key,
+        itemLabel: label,
+        fireAt: formatJerusalemDateTime(fireAt),
+        ping: pingIds
+          .map((id) => formatPingLabel(id, input.employees))
+          .join(","),
+        requestedItemId: created.id,
+        ...(fingerprint ? { fingerprint } : {}),
+      });
+    }
+    return { itemId: created.id, saved };
+  }).then((result) => {
+    for (const clock of result.saved) {
+      const parsed = clock.fireAt.match(
+        /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/,
+      );
+      if (parsed) {
+        scheduleSoon(
+          jerusalemWallTimeToDate(
+            Number(parsed[1]),
+            Number(parsed[2]),
+            Number(parsed[3]),
+            Number(parsed[4]),
+            Number(parsed[5]),
+          ),
+        );
+      }
+    }
+    return result;
+  });
+}
+
+export type NestedRemindApplyResult = {
+  saved: Array<{
+    id: string;
+    item: string;
+    itemKey: string;
+    itemLabel: string;
+    fireAt: string;
+    ping?: string;
+    requestedItemId?: string;
+  }>;
+  skipped: Array<{ item: string; reason: string }>;
+  failedItemIds: string[];
+  nestedItemIds: string[];
+  fingerprintsByReminderId: Map<string, string>;
+};
+
+async function loadActiveFingerprintsForItem(
+  itemId: string,
+  userId: string,
+): Promise<ExistingLinkedClock[]> {
+  if (!prisma.employeeListItemReminderLink?.findMany || !prisma.reminder?.findMany) {
+    return [];
+  }
+  try {
+    const links = await prisma.employeeListItemReminderLink.findMany({
+      where: { listItemId: itemId },
+      select: { reminderId: true, listItemId: true },
+    });
+    if (links.length === 0) {
+      return [];
+    }
+    const clocks = await prisma.reminder.findMany({
+      where: {
+        userId,
+        id: { in: links.map((row) => row.reminderId) },
+        status: "active",
+      },
+    });
+    const out: ExistingLinkedClock[] = [];
+    for (const clock of clocks) {
+      const link = links.find((row) => row.reminderId === clock.id);
+      if (!link) {
+        continue;
+      }
+      const rule = storedReminderRule(clock);
+      const hasExplicitTime = Boolean(
+        formatJerusalemDateTime(clock.fireAt).slice(11).match(/^\d{2}:\d{2}$/),
+      );
+      // Rebuild F from stored row (Jerusalem fire + rule + text/compose).
+      const synthetic: LlmReminderAction = {
+        action: "add",
+        item: clock.itemLabel,
+        listType: (clock.listType as LlmListType) || "tasks",
+        date: formatJerusalemDateTime(clock.fireAt).slice(0, 10),
+        time: formatJerusalemDateTime(clock.fireAt).slice(11, 16),
+        repeat: "once",
+        ping: [],
+        targets: [],
+        text: typeof clock.messageText === "string" ? clock.messageText : "",
+        inSeconds: null,
+        everyCount: null,
+        everyUnit: null,
+        weekdays: null,
+        ...(rule ? { recurrence: rule } : {}),
+        confirmed: false,
+        compose: Boolean(clock.composeAtFire),
+        composeSource:
+          (typeof clock.composeSource === "string"
+            ? clock.composeSource
+            : "") as LlmReminderAction["composeSource"],
+        composeLookbackHours: 0,
+        composePlace:
+          typeof clock.composePlace === "string" ? clock.composePlace : "",
+        reminderId: clock.id,
+        itemId: link.listItemId,
+      };
+      const fp = fingerprintFromReminderAction({
+        itemId: link.listItemId,
+        reminder: synthetic,
+        fireAt: clock.fireAt,
+        hasExplicitTime,
+        pingKeys: Array.isArray(clock.pingIds)
+          ? clock.pingIds.map(String)
+          : [],
+      });
+      if (!fp) {
+        continue;
+      }
+      out.push({
+        reminderId: clock.id,
+        itemId: link.listItemId,
+        status: "active",
+        fingerprint: fp,
+      });
+    }
+    return out;
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function compensateNestedPackageFailure(input: {
+  itemId: string;
+  nestedCompensate?: NestedRemindPackage["nestedCompensate"];
+}): Promise<void> {
+  if (!input.nestedCompensate || !prisma.employeeListItem?.update) {
+    return;
+  }
+  try {
+    if (input.nestedCompensate.kind === "soft_delete_item") {
+      await prisma.employeeListItem.update({
+        where: { id: input.itemId },
+        data: { deletedAt: new Date(), reminderId: null },
+      });
+      return;
+    }
+    await prisma.employeeListItem.update({
+      where: { id: input.itemId },
+      data: {
+        data: input.nestedCompensate.data as Prisma.InputJsonValue,
+        itemKey: input.nestedCompensate.itemKey,
+        ...(input.nestedCompensate.urgency != null
+          ? { urgency: input.nestedCompensate.urgency }
+          : {}),
+      },
+    });
+  } catch {
+    // Best-effort compensate; caller already reported miss.
+  }
+}
+
+/**
+ * Phase 1 nested remind: for each list mutation with pendingReminds, create
+ * clock(s)+join atomically (interactive transaction). On failure, compensate
+ * the list row (soft-delete add / restore update snapshot). Never reports
+ * partial success for that item package.
+ */
+export async function applyNestedReminderPackages(input: {
+  userId: string;
+  actor: PublicEmployee;
+  employees: PublicEmployee[];
+  contacts?: SpeakerContact[];
+  packages: NestedRemindPackage[];
+}): Promise<NestedRemindApplyResult> {
+  const saved: NestedRemindApplyResult["saved"] = [];
+  const skipped: NestedRemindApplyResult["skipped"] = [];
+  const failedItemIds: string[] = [];
+  const nestedItemIds: string[] = [];
+  const fingerprintsByReminderId = new Map<string, string>();
+  const contacts = input.contacts ?? [];
+
+  for (const pack of input.packages) {
+    if (
+      pack.reminds.length === 0 ||
+      (pack.listType !== "shopping" && pack.listType !== "tasks")
+    ) {
+      continue;
+    }
+    nestedItemIds.push(pack.itemId);
+    const actions: LlmReminderAction[] = [];
+    for (const raw of pack.reminds) {
+      const action = reminderActionFromNestedRemind(raw, {
+        itemLabel: pack.itemLabel,
+        listType: pack.listType as LlmListType,
+        itemId: pack.itemId,
+      });
+      if (action) {
+        actions.push(action);
+      }
+    }
+    if (actions.length === 0) {
+      failedItemIds.push(pack.itemId);
+      await compensateNestedPackageFailure(pack);
+      continue;
+    }
+
+    try {
+      const existingFp = await loadActiveFingerprintsForItem(
+        pack.itemId,
+        input.userId,
+      );
+      const packageSaved: NestedRemindApplyResult["saved"] = [];
+
+      if (!prisma.$transaction || !prisma.reminder?.create) {
+        throw new Error("nested_remind_txn_unavailable");
+      }
+
+      await prisma.$transaction(async (tx) => {
+        for (const reminder of actions) {
+          const interval =
+            reminder.everyCount && reminder.everyUnit
+              ? {
+                  count: reminder.everyCount,
+                  unit: reminder.everyUnit,
+                  weekdays: reminder.weekdays,
+                }
+              : null;
+          const recurring = reminder.recurrence
+            ? resolveRecurringFireAt(
+                reminder.recurrence,
+                reminder.date,
+                reminder.time,
+                new Date(),
+                reminder.inSeconds,
+              )
+            : null;
+          const fireAt = reminder.recurrence
+            ? (recurring?.fireAt ?? null)
+            : resolveReminderFireAt(
+                reminder.date,
+                reminder.time,
+                new Date(),
+                reminder.inSeconds,
+                interval as ReminderInterval | null,
+              );
+          if (!fireAt) {
+            throw new Error("nested_remind_no_time");
+          }
+          const hasExplicitTime = Boolean(String(reminder.time ?? "").trim());
+          const pingIds = resolveReminderPingDestinations(
+            reminder,
+            input.employees,
+            input.actor.id,
+            contacts,
+          );
+          // F uses resolved ping ids (stable across retry / DB reload).
+          const pingKeys = [...pingIds].map(String).sort();
+          const fp = fingerprintFromReminderAction({
+            itemId: pack.itemId,
+            reminder,
+            fireAt,
+            hasExplicitTime,
+            pingKeys,
+          });
+          const decision = decideCreateOrReuseClock({
+            itemId: pack.itemId,
+            fingerprint: fp,
+            existing: existingFp,
+          });
+          if (decision.action === "miss") {
+            throw new Error("nested_remind_unresolved");
+          }
+          if (decision.action === "reuse") {
+            const joinOwner = tx.employeeListItemReminderLink?.findUnique
+              ? await tx.employeeListItemReminderLink.findUnique({
+                  where: { reminderId: decision.reminderId },
+                  select: { listItemId: true },
+                })
+              : null;
+            const steal = decideReuseWithoutSteal({
+              targetItemId: pack.itemId,
+              reminderId: decision.reminderId,
+              joinOwnerItemId: joinOwner?.listItemId ?? null,
+            });
+            if (steal === "refuse_steal") {
+              throw new Error("nested_remind_steal_refused");
+            }
+            if (steal === "link_orphan" && tx.employeeListItemReminderLink?.create) {
+              await tx.employeeListItemReminderLink.create({
+                data: {
+                  listItemId: pack.itemId,
+                  reminderId: decision.reminderId,
+                },
+              });
+            }
+            if (fp) {
+              fingerprintsByReminderId.set(decision.reminderId, fp);
+            }
+            packageSaved.push({
+              id: decision.reminderId,
+              item: reminder.item.trim(),
+              itemKey: reminder.item.trim().slice(0, 255),
+              itemLabel: reminder.item.trim().slice(0, 255),
+              fireAt: formatJerusalemDateTime(fireAt),
+              ping: pingIds
+                .map((id) => formatPingLabel(id, input.employees))
+                .join(","),
+              requestedItemId: pack.itemId,
+            });
+            continue;
+          }
+
+          const key = reminder.item.trim().slice(0, 255) || "reminder";
+          const label = reminder.item.trim().slice(0, 255) || key;
+          const ruleFields =
+            recurring?.recurrence
+              ? {
+                  recurrence: serializeRecurrence(recurring.recurrence) as Prisma.InputJsonValue,
+                  repeat: legacyRepeatFor(recurring.recurrence),
+                }
+              : reminder.recurrence === null
+                ? { recurrence: Prisma.DbNull, repeat: "once" }
+                : { repeat: reminder.repeat || "once" };
+          const row = await tx.reminder.create({
+            data: {
+              userId: input.userId,
+              ownerId: pack.ownerEmployeeId || input.actor.id,
+              actorId: input.actor.id,
+              itemKey: key,
+              itemLabel: label,
+              listType: reminder.listType,
+              fireAt,
+              ...ruleFields,
+              pingIds,
+              aboutIds: [],
+              messageText: reminder.text || "",
+              composeAtFire: Boolean(reminder.compose),
+              composeSource: reminder.composeSource || "",
+              composeLookbackHours: reminder.composeLookbackHours || 0,
+              composePlace: reminder.composePlace || "",
+            },
+          });
+          if (!tx.employeeListItemReminderLink?.create) {
+            throw new Error("nested_remind_join_unavailable");
+          }
+          await tx.employeeListItemReminderLink.create({
+            data: {
+              listItemId: pack.itemId,
+              reminderId: row.id,
+            },
+          });
+          if (fp) {
+            fingerprintsByReminderId.set(row.id, fp);
+            existingFp.push({
+              reminderId: row.id,
+              itemId: pack.itemId,
+              status: "active",
+              fingerprint: fp,
+            });
+          }
+          packageSaved.push({
+            id: row.id,
+            item: reminder.item.trim(),
+            itemKey: key,
+            itemLabel: label,
+            fireAt: formatJerusalemDateTime(fireAt),
+            ping: pingIds
+              .map((id) => formatPingLabel(id, input.employees))
+              .join(","),
+            requestedItemId: pack.itemId,
+          });
+          scheduleSoon(fireAt);
+        }
+      });
+
+      saved.push(...packageSaved);
+    } catch {
+      failedItemIds.push(pack.itemId);
+      await compensateNestedPackageFailure(pack);
+      skipped.push({ item: pack.itemLabel, reason: "nested_package_failed" });
+    }
+  }
+
+  return {
+    saved,
+    skipped,
+    failedItemIds,
+    nestedItemIds: [...new Set(nestedItemIds)],
+    fingerprintsByReminderId,
+  };
+}
+
+/**
+ * Drop top-level reminders.add that duplicate a nested clock (same item + F).
+ * Never matches by title.
+ */
+export function filterTopLevelRemindersAgainstNested(input: {
+  topLevel: LlmReminderAction[];
+  nestedSaved: NestedRemindApplyResult["saved"];
+  nestedFingerprints: Map<string, string>;
+  nestedItemIds: string[];
+  employees: PublicEmployee[];
+  actorId: string;
+  contacts?: SpeakerContact[];
+  now?: Date;
+}): LlmReminderAction[] {
+  const nestedItemSet = new Set(input.nestedItemIds);
+  const nestedFpByItem = new Map<string, Set<string>>();
+  for (const row of input.nestedSaved) {
+    const itemId = row.requestedItemId?.trim() ?? "";
+    const fp = input.nestedFingerprints.get(row.id);
+    if (!itemId || !fp) {
+      continue;
+    }
+    const set = nestedFpByItem.get(itemId) ?? new Set<string>();
+    set.add(fp);
+    nestedFpByItem.set(itemId, set);
+  }
+  return input.topLevel.filter((reminder) => {
+    if (reminder.action !== "add") {
+      return true;
+    }
+    const itemId = (reminder.itemId ?? "").trim();
+    if (!itemId || !nestedItemSet.has(itemId)) {
+      return true;
+    }
+    const interval =
+      reminder.everyCount && reminder.everyUnit
+        ? {
+            count: reminder.everyCount,
+            unit: reminder.everyUnit,
+            weekdays: reminder.weekdays,
+          }
+        : null;
+    const fireAt = reminder.recurrence
+      ? resolveRecurringFireAt(
+          reminder.recurrence,
+          reminder.date,
+          reminder.time,
+          input.now ?? new Date(),
+          reminder.inSeconds,
+        )?.fireAt ?? null
+      : resolveReminderFireAt(
+          reminder.date,
+          reminder.time,
+          input.now ?? new Date(),
+          reminder.inSeconds,
+          interval as ReminderInterval | null,
+        );
+    if (!fireAt) {
+      return true;
+    }
+    const pingIds = resolveReminderPingDestinations(
+      reminder,
+      input.employees,
+      input.actorId,
+      input.contacts ?? [],
+    );
+    const fp = fingerprintFromReminderAction({
+      itemId,
+      reminder,
+      fireAt,
+      hasExplicitTime: Boolean(String(reminder.time ?? "").trim()),
+      pingKeys: [...pingIds].map(String).sort(),
+    });
+    if (!fp) {
+      return true;
+    }
+    const known = nestedFpByItem.get(itemId);
+    return !known?.has(fp);
+  });
+}
+
+/**
+ * Exact-key candidate filter: items that already received nested clocks this
+ * turn are excluded so an orphan top-level clock cannot soft-link onto them.
+ */
+export function excludeNestedItemsFromSoftLinkCandidates(
+  items: LinkedItemRef[],
+  nestedItemIds: Iterable<string>,
+): LinkedItemRef[] {
+  const blocked = new Set(
+    [...nestedItemIds].map((id) => id.trim()).filter(Boolean),
+  );
+  if (blocked.size === 0) {
+    return items;
+  }
+  return items.filter((row) => !blocked.has(row.id));
+}
+
+/**
+ * Stage 5a — clocks eligible for legacy exact-key soft-link (`linkRemindersToItems`).
+ *
+ * NEW nested clocks already have joins (atomic / package). EXISTING clocks carry
+ * ESD `requestedItemId` and are linked only via `linkRemindersByItemId`.
+ * Those must not fall through to itemKey pairing — even indirectly.
+ * Legacy top-level clocks (no nested id, no item_id) stay eligible when the flag is ON.
+ */
+export function clocksEligibleForExactKeySoftLink<
+  T extends { id: string; requestedItemId?: string },
+>(saved: T[], nestedClockIds?: Iterable<string>): T[] {
+  const nested = new Set(
+    [...(nestedClockIds ?? [])].map((id) => id.trim()).filter(Boolean),
+  );
+  return saved.filter((row) => {
+    if (nested.has(row.id)) {
+      return false;
+    }
+    if ((row.requestedItemId ?? "").trim()) {
+      return false;
+    }
+    return true;
+  });
+}
+
 /**
  * Pure preflight for migration: duplicate live linked_reminder_id values.
  * Non-empty → abort signal (migration RAISE; tests assert this helper).
@@ -1169,6 +1898,12 @@ export async function removeReminderAndLinkedWorkerTask(match: {
         workerItemId: null,
       },
     });
+    // Cancel is status-only (row kept) — still drop join rows so dumps stay clean.
+    if (prisma.employeeListItemReminderLink?.deleteMany) {
+      await prisma.employeeListItemReminderLink.deleteMany({
+        where: { reminderId: match.id },
+      });
+    }
     if (match.userId) {
       await recordAuditEvent({
         userId: match.userId,
@@ -2014,6 +2749,76 @@ export async function applyReminders(input: {
     if (!fireAt) {
       skipped.push({ item: reminder.item.trim(), reason: "no_time" });
       continue;
+    }
+
+    // ESD / explicit item_id: reuse active join+fingerprint instead of a second clock.
+    const softLinkItemId =
+      typeof reminder.itemId === "string" ? reminder.itemId.trim() : "";
+    if (
+      !existing &&
+      reminder.action === "add" &&
+      LINK_UUID_RE.test(softLinkItemId)
+    ) {
+      // Resolve ping first so F matches DB reload (ids, not spoken names).
+      const pingIdsForReuse = resolveReminderPingDestinations(
+        reminder,
+        input.employees,
+        input.actor.id,
+        contacts,
+      );
+      const fp = fingerprintFromReminderAction({
+        itemId: softLinkItemId,
+        reminder,
+        fireAt,
+        hasExplicitTime: Boolean(String(reminder.time ?? "").trim()),
+        pingKeys: [...pingIdsForReuse].map(String).sort(),
+      });
+      const existingFp = await loadActiveFingerprintsForItem(
+        softLinkItemId,
+        input.userId,
+      );
+      const decision = decideCreateOrReuseClock({
+        itemId: softLinkItemId,
+        fingerprint: fp,
+        existing: existingFp,
+      });
+      if (decision.action === "reuse") {
+        const joinOwner = prisma.employeeListItemReminderLink?.findUnique
+          ? await prisma.employeeListItemReminderLink.findUnique({
+              where: { reminderId: decision.reminderId },
+              select: { listItemId: true },
+            })
+          : null;
+        const steal = decideReuseWithoutSteal({
+          targetItemId: softLinkItemId,
+          reminderId: decision.reminderId,
+          joinOwnerItemId: joinOwner?.listItemId ?? null,
+        });
+        if (steal === "refuse_steal") {
+          skipped.push({ item: reminder.item.trim(), reason: "db" });
+          continue;
+        }
+        if (steal === "link_orphan") {
+          await insertItemReminderLink({
+            listItemId: softLinkItemId,
+            reminderId: decision.reminderId,
+          });
+        }
+        const key = reminder.item.trim().slice(0, 255) || "reminder";
+        const label = reminder.item.trim().slice(0, 255) || key;
+        saved.push({
+          id: decision.reminderId,
+          item: reminder.item.trim(),
+          itemKey: key,
+          itemLabel: label,
+          fireAt: formatJerusalemDateTime(fireAt),
+          ping: pingIdsForReuse
+            .map((id) => formatPingLabel(id, input.employees))
+            .join(","),
+          requestedItemId: softLinkItemId,
+        });
+        continue;
+      }
     }
 
     let pingIds = resolveReminderPingDestinations(

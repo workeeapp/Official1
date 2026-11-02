@@ -865,27 +865,24 @@
       "setup": {},
       "constraints": [
         {
-          "type": "reminders_has_action",
-          "action": "add",
-          "recurring": true
+          "type": "mutations_empty_or_read_only"
         },
         {
-          "type": "lists_has_action",
-          "action": "add",
-          "listType": "shopping"
+          "type": "reminders_empty"
         },
         {
           "type": "response_mentions_any",
           "needles": [
-            "שעה",
             "עד",
-            "קנ"
+            "שעה",
+            "?"
           ]
         }
       ],
       "tags": [
         "reminders",
-        "single-turn"
+        "single-turn",
+        "until-done-ambiguous-ask"
       ]
     },
     {

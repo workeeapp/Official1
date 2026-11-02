@@ -69,12 +69,15 @@ import { toPlainJson } from "./llm-client.js";
 import { syncSpeakerAddressGenderFromFiling } from "./speaker-address.js";
 import {
   cancelReminderLinkedToWorkerItem,
+  createItemWithNestedRemindersAtomic,
   formatJerusalemDateTime,
   listReminderRowsForUser,
   reminderRuleSnapshot,
   toReminderSnapshotRow,
+  type NestedSavedClock,
   type ReminderSnapshotRow,
 } from "./reminder.service.js";
+import { splitItemRemind } from "./reminder-soft-link.js";
 import {
   effectiveListEmoji,
   emojiForNewCustomList,
@@ -175,6 +178,8 @@ const CUSTOM_ITEM_META_KEYS = new Set([
   "linkedLists",
   "unlink_list_ids",
   "unlinkListIds",
+  "remind",
+  "reminds",
 ]);
 
 /** Read urgency from an ACTION item; undefined when the model omitted it. */
@@ -2598,12 +2603,48 @@ export interface ListItemMutation {
     mode: "co_share" | "assign";
     partnerIds: string[];
   };
+  /**
+   * Nested items[].remind peeled before persist (Phase 1). Engine expands to
+   * clocks+join after mint; not stored in EmployeeListItem.data.
+   */
+  pendingReminds?: Record<string, unknown>[];
+  /**
+   * Snapshot of item.data before update when nested remind was present —
+   * used to compensate-roll back the update if the nested clock package fails.
+   * (Existing-item path only — NEW add+remind uses a single DB transaction.)
+   */
+  nestedCompensate?:
+    | { kind: "soft_delete_item" }
+    | {
+        kind: "restore_data";
+        data: unknown;
+        itemKey: string;
+        urgency: string | null;
+      };
+  /**
+   * NEW add+remind: clocks already written in the same transaction as the item.
+   * Chat must not re-run applyNestedReminderPackages for this mutation.
+   */
+  nestedClocksApplied?: boolean;
+  nestedSavedClocks?: NestedSavedClock[];
 }
 
 /** Share/update by id that did not apply (missing row or no permission). */
 export type ShareApplyMiss = {
   itemId: string;
   reason: "missing" | "forbidden";
+};
+
+/** NEW task+nested-remind transaction failed — surfaces as lists apply_miss. */
+export type NestedRemindTxnMiss = {
+  reason: "nested_remind_txn_failed";
+  op: "add";
+  listType: string;
+  listName?: string;
+  itemLabel: string;
+  detail?: string;
+  /** One label per remind in the failed package (for reminder apply_misses). */
+  remindLabels: string[];
 };
 
 type WorkerAccessCache = {
@@ -2699,6 +2740,7 @@ export async function applyEmployeeRecords(
   cancelledReminders: string[];
   cancelledReminderIds: string[];
   shareMisses: ShareApplyMiss[];
+  nestedRemindMisses: NestedRemindTxnMiss[];
   attachmentOutcome: AttachmentApplyOutcome;
 }> {
   if (metadata.lists.length === 0 && metadata.filing.length === 0) {
@@ -2709,6 +2751,7 @@ export async function applyEmployeeRecords(
       cancelledReminders: [],
       cancelledReminderIds: [],
       shareMisses: [],
+      nestedRemindMisses: [],
       attachmentOutcome: emptyAttachmentOutcome(),
     };
   }
@@ -2725,6 +2768,7 @@ export async function applyEmployeeRecords(
   const cancelledReminders: string[] = [];
   const cancelledReminderIds: string[] = [];
   const shareMisses: ShareApplyMiss[] = [];
+  const nestedRemindMisses: NestedRemindTxnMiss[] = [];
   let attachmentOutcome = emptyAttachmentOutcome();
 
   for (const action of metadata.lists) {
@@ -2734,6 +2778,7 @@ export async function applyEmployeeRecords(
     cancelledReminders.push(...result.cancelledReminders);
     cancelledReminderIds.push(...result.cancelledReminderIds);
     shareMisses.push(...result.shareMisses);
+    nestedRemindMisses.push(...result.nestedRemindMisses);
     attachmentOutcome = mergeAttachmentOutcomes(
       attachmentOutcome,
       result.attachmentOutcome,
@@ -2999,6 +3044,7 @@ export async function applyEmployeeRecords(
     cancelledReminders,
     cancelledReminderIds,
     shareMisses,
+    nestedRemindMisses,
     attachmentOutcome,
   };
 }
@@ -3284,6 +3330,7 @@ async function applyListAction(
   cancelledReminders: string[];
   cancelledReminderIds: string[];
   shareMisses: ShareApplyMiss[];
+  nestedRemindMisses: NestedRemindTxnMiss[];
   attachmentOutcome: AttachmentApplyOutcome;
 }> {
   const events: SharedItemEvent[] = [];
@@ -3292,6 +3339,7 @@ async function applyListAction(
   const cancelledReminderIds: string[] = [];
   let attachmentOutcome = emptyAttachmentOutcome();
   const shareMisses: ShareApplyMiss[] = [];
+  const nestedRemindMisses: NestedRemindTxnMiss[] = [];
   const accessCache: WorkerAccessCache = {};
   // Contacts v2: refuse lists.* on contacts — phone book mutates via directory only.
   if (action.listType === "contacts") {
@@ -3301,6 +3349,7 @@ async function applyListAction(
       cancelledReminders: [],
       cancelledReminderIds: [],
       shareMisses: [],
+      nestedRemindMisses: [],
       attachmentOutcome: emptyAttachmentOutcome(),
     };
   }
@@ -3308,7 +3357,11 @@ async function applyListAction(
     visibility.scope === "shared" ||
     visibility.visibleTo.some((id) => id !== employeeId);
   const itemAttachments = action.items.map((raw) => splitItemAttachments(asRecord(raw)));
-  const itemListLinks = itemAttachments.map((entry) => splitItemListLinks(entry.item));
+  const itemWithReminds = itemAttachments.map((entry) => {
+    const peeled = splitItemRemind(entry.item);
+    return { attach: entry.attach, detach: entry.detach, ...peeled };
+  });
+  const itemListLinks = itemWithReminds.map((entry) => splitItemListLinks(entry.item));
   const resolvedAction = await resolveListActionAgainstSaved(employeeId, {
     ...action,
     items: itemListLinks.map((entry) => entry.item),
@@ -3379,6 +3432,7 @@ async function applyListAction(
       cancelledReminders: [],
       cancelledReminderIds: [],
       shareMisses: [],
+      nestedRemindMisses: [],
       attachmentOutcome: emptyAttachmentOutcome(),
     };
   }
@@ -3449,7 +3503,16 @@ async function applyListAction(
   const itemMutationsBefore = mutations.length;
   for (const [itemIndex, rawItem] of itemsForApply.entries()) {
     const attachments =
-      itemsForApply === resolvedAction.items ? itemAttachments[itemIndex] : undefined;
+      itemsForApply === resolvedAction.items
+        ? {
+            attach: itemWithReminds[itemIndex]?.attach ?? [],
+            detach: itemWithReminds[itemIndex]?.detach ?? [],
+          }
+        : undefined;
+    const pendingReminds =
+      itemsForApply === resolvedAction.items
+        ? itemWithReminds[itemIndex]?.reminds ?? []
+        : [];
     const listLinks =
       itemsForApply === resolvedAction.items ? itemListLinks[itemIndex] : undefined;
     const item = normalizeRelativeDatesInRecord(asRecord(rawItem));
@@ -3899,6 +3962,18 @@ async function applyListAction(
           : {}),
         ...(shareOutcome ? { shareOutcome } : {}),
         ...(collabApply ? { collabApply } : {}),
+        ...(pendingReminds.length > 0
+          ? {
+              pendingReminds,
+              nestedCompensate: {
+                kind: "restore_data" as const,
+                data: existing.data,
+                itemKey: existing.itemKey,
+                urgency:
+                  typeof existing.urgency === "string" ? existing.urgency : null,
+              },
+            }
+          : {}),
       });
     } else {
       if (!nextItemKey) {
@@ -3919,14 +3994,13 @@ async function applyListAction(
           createId = clientId;
         }
       }
-      const created = await prisma.employeeListItem.create({
-        data: {
-          ...(createId ? { id: createId } : {}),
-          listId: list.id,
-          itemKey: nextItemKey,
-          ...fields,
-        },
-      });
+      const itemLabel =
+        ownedItemTitle(
+          resolvedAction.listType,
+          nextDataRecord,
+          nextItemKey,
+          effectiveTitleField,
+        ) || nextItemKey;
       const collabApply = listCollabApplyFromSave({
         action: "add",
         employeeId,
@@ -3937,20 +4011,130 @@ async function applyListAction(
         shareIntent,
       });
       const addYmd = calendarYmdFromItemData(nextDataRecord);
+      const listNameForMut = list.name || resolvedAction.listName || undefined;
+
+      // NEW task + nested remind(s): single DB transaction (item + clocks + joins).
+      // No soft-delete compensation on this path.
+      if (
+        pendingReminds.length > 0 &&
+        (resolvedAction.listType === "shopping" ||
+          resolvedAction.listType === "tasks") &&
+        listOwner?.userId
+      ) {
+        try {
+          const humans = prisma.employee?.findMany
+            ? await prisma.employee.findMany({
+                where: { userId: listOwner.userId, kind: "human" },
+                select: {
+                  id: true,
+                  name: true,
+                  surname: true,
+                  nickname: true,
+                  email: true,
+                  phone: true,
+                  kind: true,
+                  isOwner: true,
+                },
+              })
+            : [];
+          const atomic = await createItemWithNestedRemindersAtomic({
+            userId: listOwner.userId,
+            actorId,
+            ownerEmployeeId: employeeId,
+            listId: list.id,
+            listType: resolvedAction.listType,
+            itemKey: nextItemKey,
+            itemLabel,
+            itemCreateData: {
+              ...(createId ? { id: createId } : {}),
+              data: fields.data as Prisma.InputJsonValue,
+              scope: fields.scope,
+              addedById: fields.addedById,
+              visibleTo: fields.visibleTo,
+              ...(fields.urgency ? { urgency: String(fields.urgency) } : {}),
+            },
+            reminds: pendingReminds,
+            employees: humans,
+          });
+          mutations.push({
+            action: "add",
+            itemId: atomic.itemId,
+            employeeId,
+            listType: resolvedAction.listType,
+            itemKey: nextItemKey,
+            itemLabel,
+            listName: listNameForMut,
+            ...(addYmd ? { calendarYmd: addYmd } : {}),
+            ...(collabApply ? { collabApply } : {}),
+            pendingReminds,
+            nestedClocksApplied: true,
+            nestedSavedClocks: atomic.saved,
+          });
+          attachmentOutcome = mergeAttachmentOutcomes(
+            attachmentOutcome,
+            await applyAttachmentLinks({
+              actorId,
+              target: { listItemId: atomic.itemId },
+              attachmentIds: attachments?.attach,
+            }),
+          );
+          await applyListItemListLinks({
+            actorId,
+            listItemId: atomic.itemId,
+            hostListId: list.id,
+            hostListType: resolvedAction.listType,
+            linkedListIds: listLinks?.linkedListIds,
+            linkedLists: listLinks?.linkedLists,
+            unlinkListIds: listLinks?.unlinkListIds,
+          });
+          if (listOwner) {
+            await recordAuditEvent({
+              userId: listOwner.userId,
+              actorEmployeeId: actorId,
+              action: "list_add",
+              entityType: "EmployeeListItem",
+              entityId: atomic.itemId,
+              summary: `add ${resolvedAction.listType}: ${nextItemKey}`,
+            });
+          }
+        } catch {
+          nestedRemindMisses.push({
+            reason: "nested_remind_txn_failed",
+            op: "add",
+            listType: resolvedAction.listType,
+            listName: listNameForMut,
+            itemLabel,
+            detail: nextItemKey,
+            remindLabels: pendingReminds.map((raw, index) => {
+              const text =
+                typeof raw.text === "string" && raw.text.trim()
+                  ? raw.text.trim()
+                  : typeof raw.item === "string" && raw.item.trim()
+                    ? raw.item.trim()
+                    : "";
+              return text || `${itemLabel}#${index + 1}`;
+            }),
+          });
+        }
+        continue;
+      }
+
+      const created = await prisma.employeeListItem.create({
+        data: {
+          ...(createId ? { id: createId } : {}),
+          listId: list.id,
+          itemKey: nextItemKey,
+          ...fields,
+        },
+      });
       mutations.push({
         action: "add",
         itemId: created.id,
         employeeId,
         listType: resolvedAction.listType,
         itemKey: nextItemKey,
-        itemLabel:
-          ownedItemTitle(
-            resolvedAction.listType,
-            nextDataRecord,
-            nextItemKey,
-            effectiveTitleField,
-          ) || nextItemKey,
-        listName: list.name || resolvedAction.listName || undefined,
+        itemLabel,
+        listName: listNameForMut,
         ...(addYmd ? { calendarYmd: addYmd } : {}),
         ...(collabApply ? { collabApply } : {}),
       });
@@ -4098,6 +4282,7 @@ async function applyListAction(
     cancelledReminders,
     cancelledReminderIds,
     shareMisses,
+    nestedRemindMisses,
     attachmentOutcome,
   };
 }

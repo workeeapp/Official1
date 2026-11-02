@@ -2606,6 +2606,42 @@ function reminderActionName(value: unknown): LlmReminderActionName | null {
   return null;
 }
 
+/**
+ * Nested items[].remind → reminders.add ACTION (Phase 1 dual-path).
+ * Does not lift into metadata.reminders at parse time — engine expands after list mint.
+ */
+export function reminderActionFromNestedRemind(
+  remind: unknown,
+  opts: { itemLabel: string; listType: LlmListType; itemId: string },
+): LlmReminderAction | null {
+  if (!remind || typeof remind !== "object" || Array.isArray(remind)) {
+    return null;
+  }
+  const record = remind as Record<string, unknown>;
+  const itemLabel = opts.itemLabel.trim();
+  if (!itemLabel || !opts.itemId.trim()) {
+    return null;
+  }
+  return toReminderAction({
+    ...record,
+    action: "add",
+    item:
+      readText(record, [
+        "item",
+        "item_name",
+        "title",
+        "label",
+        "שם פריט",
+        "שם מטלה",
+        "name",
+        "text",
+      ]) || itemLabel,
+    list_type: opts.listType,
+    listType: opts.listType,
+    item_id: opts.itemId.trim(),
+  });
+}
+
 function toReminderAction(value: unknown): LlmReminderAction | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
