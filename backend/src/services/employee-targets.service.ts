@@ -26,6 +26,7 @@ import {
   SHOW_LIST_PREFIX,
   SHOW_LISTS_COMMAND,
   SHOW_REMINDERS_COMMAND,
+  TASKS_HEBREW_LEGACY,
   showListButtonCommand,
   showWorkerTasksButtonCommand,
 } from "./builtin-lists.js";
@@ -1783,13 +1784,14 @@ export function listNavKeyFromAction(list: LlmListAction): string {
  * Normalize show-list / collab nav commands so «הצג רשימת רשימת X» and
  * «הצג רשימת X» share one dedupe key. Conversational commands pass through.
  */
-/** Canonical product Hebrew for tasks — never emit legacy «משימות» on new taps. */
+/** Canonical product Hebrew for tasks — never emit legacy «מטלות» on new taps. */
 function canonicalizeTasksHebrewInCommand(command: string): string {
+  const legacy = TASKS_HEBREW_LEGACY; // מטלות
   return command
-    .replaceAll("רשימת משימות", "רשימת משימות")
-    .replaceAll("הצג משימות", "הצג משימות")
-    .replaceAll("כל המשימות", "כל המשימות")
-    .replaceAll("משימות כלליות", "משימות כלליות");
+    .replaceAll(`רשימת ${legacy}`, "רשימת משימות")
+    .replaceAll(`הצג ${legacy}`, "הצג משימות")
+    .replaceAll(`כל ה${legacy}`, "כל המשימות")
+    .replaceAll(`${legacy} כלליות`, "משימות כלליות");
 }
 
 export function normalizeShowNavCommand(command: string): string {
@@ -1856,15 +1858,21 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
     return true;
   }
   if (
-    /^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
-    /^כל (הקניות|המשימות|המשימות|אנשי הקשר|התיוקים)$/u.test(cmd)
+    new RegExp(
+      `^הצג (קניות|משימות|${TASKS_HEBREW_LEGACY}|אנשי קשר|תיוקים) (משותפ|באחריות)`,
+      "u",
+    ).test(cmd) ||
+    new RegExp(
+      `^כל (הקניות|המשימות|ה${TASKS_HEBREW_LEGACY}|אנשי הקשר|התיוקים)$`,
+      "u",
+    ).test(cmd)
   ) {
     return true;
   }
   if (
     label === "הצג קניות" ||
     label === "הצג משימות" ||
-    label === "הצג משימות" ||
+    label === `הצג ${TASKS_HEBREW_LEGACY}` ||
     label === "הצג אנשי קשר" ||
     label === "הצג רשימה" ||
     label === "הצג רשימות" ||
@@ -2164,14 +2172,17 @@ export function parseFixedListNavButton(
   }
 
   const allMatch = cmd.match(
-    /^כל (הקניות|המשימות|המשימות|אנשי הקשר|התיוקים)$/u,
+    new RegExp(
+      `^כל (הקניות|המשימות|ה${TASKS_HEBREW_LEGACY}|אנשי הקשר|התיוקים)$`,
+      "u",
+    ),
   );
   if (allMatch) {
     const noun = allMatch[1]!;
     const listKey =
       noun === "הקניות"
         ? "shopping"
-        : noun === "המשימות" || noun === "המשימות"
+        : noun === "המשימות" || noun === `ה${TASKS_HEBREW_LEGACY}`
           ? "tasks"
           : noun === "אנשי הקשר"
             ? "contacts"
@@ -2184,7 +2195,10 @@ export function parseFixedListNavButton(
   }
 
   const builtinCollab = cmd.match(
-    /^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
+    new RegExp(
+      `^הצג (קניות|משימות|${TASKS_HEBREW_LEGACY}|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$`,
+      "u",
+    ),
   );
   if (builtinCollab) {
     const listKey = listKeyFromShowName(builtinCollab[1]!);
@@ -2233,8 +2247,13 @@ export function parseFixedListNavButton(
     };
   }
 
-  // Bare «הצג משימות|משימות|קניות|…» (model shorthand without «רשימת»).
-  const bare = cmd.match(/^הצג (קניות|משימות|משימות|אנשי קשר|תיוקים)$/u);
+  // Bare «הצג משימות|מטלות|קניות|…» (model shorthand without «רשימת»).
+  const bare = cmd.match(
+    new RegExp(
+      `^הצג (קניות|משימות|${TASKS_HEBREW_LEGACY}|אנשי קשר|תיוקים)$`,
+      "u",
+    ),
+  );
   if (bare) {
     const listKey = listKeyFromShowName(bare[1]!);
     const plainButton = listKey ? plainButtonForListKey(listKey) : null;
@@ -2372,28 +2391,27 @@ function validateModelFixedListNav(
   }
 
   if (parsed.kind === "plain") {
+    // Rewrite speaker LIST → worker inventory only when THIS turn actually
+    // mutated a worker-only tasks row (WATCH / להזכיר alone) — not on
+    // reminder-only follow-ups with no list mutate.
+    const workerOnlyName = workerOnlyTasksDisplayName(
+      metadata,
+      speakerNames,
+      workerNames,
+    );
     if (
       parsed.listKey === "tasks" &&
-      workerNames.length > 0 &&
+      workerOnlyName &&
       !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames)
     ) {
-      const worker = workerOnlyTasksDisplayName(
-        metadata,
-        speakerNames,
-        workerNames,
-      );
-      if (!worker) {
-        return null;
-      }
-      const rewritten = workerInventoryButton(worker);
+      const rewritten = workerInventoryButton(workerOnlyName);
       return {
         button: rewritten,
         listKey: workerInventoryListKey(rewritten.command),
       };
     }
-    // Canonical opaque command always (משימות not משימות) so legacy + product
-    // twins collapse under remember(). Keep a conversational model label when
-    // it is not share-implying; rewrite משימות→משימות in the label too.
+    // Canonical opaque command always so bare «הצג משימות» and
+    // «הצג רשימת משימות» collapse under remember().
     const rawLabel = button.label.trim();
     if (
       /^משותף עם /u.test(rawLabel) ||
@@ -2517,12 +2535,52 @@ export function datedDayShowSafetyNetButtons(
 }
 
 /**
+ * Model day-angle that addresses the digital worker («אצלך» / «מה יש לך») —
+ * dumps worker WATCH inventory, not the speaker's book. Drop on speaker confirm.
+ */
+export function isWorkerPerspectiveDayButton(button: LlmReplyButton): boolean {
+  const label = button.label.trim();
+  const cmd = button.command.trim().replace(/\s+/gu, " ");
+  if (!label && !cmd) {
+    return false;
+  }
+  if (/(?:^|[\s])אצלך(?:[\s]|$)/u.test(label) || /לתור/u.test(label)) {
+    return true;
+  }
+  // Second-person dump aimed at the worker (not «מה יש לי …»).
+  // Avoid \\b — JS word boundaries are ASCII-only and miss Hebrew.
+  if (/^מה יש לך(?:\s|$)/u.test(cmd)) {
+    return true;
+  }
+  return false;
+}
+
+/** Speaker day-agenda taps — deferred after LIST so they cannot crowd max-3. */
+function isSpeakerDayAngleButton(button: LlmReplyButton): boolean {
+  const label = button.label.trim();
+  const cmd = button.command.trim().replace(/\s+/gu, " ");
+  if (/^מה יש לי(?:\s|$)/u.test(cmd)) {
+    return true;
+  }
+  if (
+    label === "היום שלי" ||
+    /^מה (היום|מחר|מחרתיים)(?:\s|$)/u.test(label) ||
+    /^מה ביום(?:\s|$)/u.test(label) ||
+    /^מה ב־/u.test(label)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Speaker confirm taps: keep model conversational + validated LIST/collab
  * nav; drop failed item-open; safety-net at most one plain LIST per applied
  * (or metadata) mutate when the model omitted a matching nav. Never invents
- * collab, item-open, or «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
- * «הצג משימות של <worker>» instead of speaker-book «הצג משימות».
- * Dated tasks apply also safety-nets a day-show tap (day + tasks list).
+ * collab, item-open, or worker-perspective «אצלך»/«מה יש לך». Reminder mutates
+ * safety-net «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
+ * «הצג משימות של <worker>» instead of speaker-book «הצג משימות». Dated tasks
+ * apply also safety-nets a day-show tap (day + tasks list).
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
@@ -2550,6 +2608,18 @@ export function ensureSpeakerShowButtons(
     return true;
   };
 
+  // Reminder mutates: reserve «הצג תזכורות» first (REPLY_BUTTON_MAX=3) so
+  // conversational day taps cannot crowd it out.
+  if (reminderMutates(metadata) && remember(SHOW_REMINDERS_COMMAND)) {
+    buttons.push({
+      label: "הצג תזכורות",
+      command: SHOW_REMINDERS_COMMAND,
+    });
+  }
+
+  // Pass 1: engine LIST/collab, worker inventory, item-open. Defer speaker
+  // day-angle conversational taps so they cannot crowd out LIST (max 3).
+  const deferredConversational: LlmReplyButton[] = [];
   for (const button of existing) {
     if (isEngineOwnedListNavButton(button)) {
       const validated = validateModelFixedListNav(
@@ -2571,12 +2641,21 @@ export function ensureSpeakerShowButtons(
       coveredListKeys.add(validated.listKey);
       continue;
     }
-    // Model already emitted worker inventory nav — mark covered.
+    // Model worker inventory: keep only when this turn is worker-only tasks
+    // (no speaker-book tasks mutate). Otherwise drop — speaker LIST wins.
     const workerCmd = workerInventoryCommandIfMatch(
       button.command,
       workerNames,
     );
     if (workerCmd) {
+      const workerOnly =
+        !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames) &&
+        Boolean(
+          workerOnlyTasksDisplayName(metadata, speakerNames, workerNames),
+        );
+      if (!workerOnly) {
+        continue;
+      }
       if (!remember(workerCmd)) {
         coveredListKeys.add(workerInventoryListKey(workerCmd));
         continue;
@@ -2588,7 +2667,29 @@ export function ensureSpeakerShowButtons(
       coveredListKeys.add(workerInventoryListKey(workerCmd));
       continue;
     }
+    // Model «הצג תזכורות» — canonicalize label; command is already opaque.
+    if (normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND) {
+      if (!remember(SHOW_REMINDERS_COMMAND)) {
+        continue;
+      }
+      buttons.push({
+        label: "הצג תזכורות",
+        command: SHOW_REMINDERS_COMMAND,
+      });
+      continue;
+    }
+    // Drop worker-addressed day dumps («יום ב׳ אצלך» / «מה יש לך…») — those
+    // open Lucy WATCH inventory, not the speaker's reminders/tasks.
+    if (isWorkerPerspectiveDayButton(button)) {
+      continue;
+    }
     if (!shouldKeepItemOpenButton(button, metadata, options?.appliedItems)) {
+      continue;
+    }
+    // Speaker day angles defer to pass 2 (after LIST safety-net). כן/לא,
+    // item-open, and other soft taps stay in pass 1.
+    if (isSpeakerDayAngleButton(button)) {
+      deferredConversational.push(button);
       continue;
     }
     if (!remember(button.command)) {
@@ -2622,6 +2723,15 @@ export function ensureSpeakerShowButtons(
     }
     buttons.push(required);
   }
+
+  // Pass 2: speaker day angles / soft taps — only if slots remain.
+  for (const button of deferredConversational) {
+    if (!remember(button.command)) {
+      continue;
+    }
+    buttons.push(button);
+  }
+
   return buttons;
 }
 
@@ -2723,7 +2833,9 @@ function workerInventoryCommandIfMatch(
     return null;
   }
   const trimmed = command.trim().replace(/\s+/gu, " ");
-  const aboutMatch = trimmed.match(/^הצג (?:משימות|משימות) של (.+)$/u);
+  const aboutMatch = trimmed.match(
+    new RegExp(`^הצג (?:משימות|${TASKS_HEBREW_LEGACY}) של (.+)$`, "u"),
+  );
   if (!aboutMatch?.[1]) {
     return null;
   }

@@ -272,6 +272,23 @@ describe("Stage-1 override catalog", () => {
     expect(mayRunReplyCorrector("shareClaim", resolvedAdd)).toBe(true);
   });
 
+  it("skips executionTruth when Result-B resolved a durable (filing) claim", () => {
+    const resolvedDurable = {
+      keepDraft: false,
+      operationalClaimResolved: true,
+      draftClaims: {
+        anySuccess: true,
+        deleteClaim: false,
+        addClaim: false,
+        updateClaim: false,
+        shareClaim: false,
+        reminderClaim: false,
+        durableClaim: true,
+      },
+    };
+    expect(mayRunReplyCorrector("executionTruth", resolvedDurable)).toBe(false);
+  });
+
   it("does not use keepDraft alone — uncovered correctors run after keep", () => {
     const kept = {
       keepDraft: true,
@@ -315,6 +332,130 @@ describe("Stage-1 production path (Result-B + gated correctors)", () => {
     expect(out.decided.operationalClaimResolved).toBe(false);
     expect(out.spoken).toContain("הסרתי");
     expect(out.skipped).not.toContain("shareClaim");
+  });
+
+  it("regression: saved filing בלו keeps תייקתי (not LIST_ADD_MISS)", () => {
+    const applyResult = buildApplyResult({
+      requested: captureRequestedFromMetadata({
+        filing: [
+          {
+            action: "add_filing",
+            filingId: "",
+            itemName: "בלו",
+            itemInfo: "משקה אנרגיה",
+            itemDescription: "",
+            targets: [],
+          },
+        ],
+      }),
+      filingMutations: [
+        {
+          action: "add",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+        },
+      ],
+    });
+    expect(applyResult.completeness).toBe("complete");
+    const out = runProductionPath({
+      modelDraft: draftJson("תייקתי את *בלו* כמשקה אנרגיה."),
+      applyResult,
+      gated: {
+        requestedFilingAdd: true,
+        appliedFilingAdd: true,
+        requestedAdd: false,
+        appliedAdd: false,
+        appliedSpeakerListAdd: false,
+      },
+    });
+    expect(out.decided.keepDraft).toBe(true);
+    expect(out.spoken).toBe("תייקתי את *בלו* כמשקה אנרגיה.");
+    expect(out.spoken).not.toBe(LIST_ADD_MISS);
+    expect(out.spoken).not.toMatch(/לא הצלחתי/);
+  });
+
+  it("failed lists.add still yields LIST_ADD_MISS; filing-only success does not", () => {
+    // No ApplyResult mutate → Result-B keeps draft; executionTruth catches false list add.
+    const listMiss = runProductionPath({
+      modelDraft: draftJson("הוספתי את הקולה לקניות."),
+      applyResult: buildApplyResult({
+        requested: captureRequestedFromMetadata({}),
+      }),
+      gated: {
+        requestedAdd: true,
+        appliedAdd: false,
+        appliedSpeakerListAdd: false,
+        appliedFilingAdd: false,
+      },
+    });
+    expect(listMiss.decided.keepDraft).toBe(true);
+    expect(listMiss.spoken).toBe(LIST_ADD_MISS);
+
+    const filingOnly = correctExecutionTruthReply({
+      reply: draftJson("הוספתי את «בלו» לרשימת «הרשימה»."),
+      spoken: "הוספתי את «בלו» לרשימת «הרשימה».",
+      appliedListAdd: false,
+      appliedSpeakerListAdd: false,
+      appliedReminderAdd: false,
+      appliedFilingAdd: true,
+      setResponse: setEngineResponse,
+    });
+    expect(parseLlmReply(filingOnly).response).toContain("הוספתי את «בלו»");
+    expect(parseLlmReply(filingOnly).response).not.toBe(LIST_ADD_MISS);
+  });
+
+  it("same turn: successful filing + failed lists.add — separate truth", () => {
+    const applyResult = buildApplyResult({
+      requested: captureRequestedFromMetadata({
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "קולה" }],
+            targets: [],
+          },
+        ],
+        filing: [
+          {
+            action: "add_filing",
+            filingId: "",
+            itemName: "בלו",
+            itemInfo: "משקה אנרגיה",
+            itemDescription: "",
+            targets: [],
+          },
+        ],
+      }),
+      filingMutations: [
+        {
+          action: "add",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+        },
+      ],
+      listMutations: [],
+    });
+    // Filing accounted; shopping add unaccounted → overall unknown/partial mix.
+    expect(applyResult.domains.filing?.completeness).toBe("complete");
+    expect(applyResult.domains.lists?.completeness).toBe("unknown");
+
+    const dualClaim = runProductionPath({
+      modelDraft: draftJson("תייקתי את בלו והוספתי קולה."),
+      applyResult,
+      gated: {
+        requestedFilingAdd: true,
+        appliedFilingAdd: true,
+        requestedAdd: true,
+        appliedAdd: false,
+        appliedSpeakerListAdd: false,
+      },
+    });
+    // Optimistic dual success must not survive unverified list add.
+    expect(dualClaim.decided.keepDraft).toBe(false);
+    expect(dualClaim.spoken).not.toMatch(/תייקתי.*הוספתי/);
   });
 
   it("Result-B operational correction is not duplicated by listMutationClaim", () => {

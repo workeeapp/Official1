@@ -595,7 +595,7 @@ describe("employee targets", () => {
     expect(showButtonsForNotify(emptyLlmMetadata())).toEqual([]);
   });
 
-  it("speaker show buttons keep model taps; reminder-only still injects nothing", () => {
+  it("speaker show buttons keep model taps; reminder-only safety-nets הצג תזכורות", () => {
     const reminderAdd: LlmReminderAction = {
       action: "update",
       item: "לקחת אקמול",
@@ -623,21 +623,75 @@ describe("employee targets", () => {
         ...emptyLlmMetadata(),
         reminders: [reminderAdd],
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
         [{ label: "הצג", command: "הצג תזכורות" }],
       ),
-    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
-    // Model commands are kept as-is (no allowlist replace / inject).
+    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    // תזכורות reserved first; conversational model taps fill remaining slots.
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
         [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
-    ).toEqual([{ label: "מה יש לי מחר", command: "מה יש לי מחר" }]);
+    ).toEqual([
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "מה יש לי מחר", command: "מה יש לי מחר" },
+    ]);
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
+  });
+
+  it("speaker-book tasks + reminder gets הצג משימות + הצג תזכורות", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם משימה": "לקנות קולה" }],
+              targets: [],
+            },
+          ],
+          reminders: [
+            {
+              action: "add",
+              item: "קולה",
+              listType: "tasks",
+              date: "",
+              time: "18:00",
+              repeat: "none",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: false,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "",
+            },
+          ],
+        },
+        [
+          { label: "המשימות שלך", command: "הצג משימות של לוסי" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
+        ],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
+    ]);
   });
 
   it("WATCH tasks add gets worker inventory nav (not speaker הצג משימות)", () => {
@@ -683,7 +737,10 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
+    ).toEqual([
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "המשימות שלך", command: "הצג משימות של לוסי" },
+    ]);
   });
 
   it("WATCH: model speaker LIST is rewritten to worker inventory", () => {
@@ -707,7 +764,7 @@ describe("employee targets", () => {
     ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
   });
 
-  it("WATCH cadence update with appliedWorkerWatchName gets worker inventory nav", () => {
+  it("WATCH cadence update with appliedWorkerWatchName gets worker inventory + תזכורות", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -745,10 +802,13 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
+    ).toEqual([
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "המשימות שלך", command: "הצג משימות של לוסי" },
+    ]);
   });
 
-  it("WATCH cadence update without appliedWorkerWatchName injects nothing", () => {
+  it("WATCH cadence update without appliedWorkerWatchName still safety-nets תזכורות", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -782,10 +842,10 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
   });
 
-  it("ordinary reminder update without apply proof injects nothing", () => {
+  it("ordinary reminder update safety-nets הצג תזכורות", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -818,7 +878,7 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
   });
 
   it("WATCH create + appliedWorkerWatchName dedupes to one worker inventory button", () => {
@@ -1851,23 +1911,40 @@ describe("employee targets", () => {
     ]);
   });
 
-  it("keeps model reminder day-angle taps; does not invent אצלך/לתור; adds LIST BUTTON", () => {
+  it("drops worker-perspective אצלך/מה יש לך; keeps speaker day angle + LIST", () => {
     const meta = {
       ...emptyLlmMetadata(),
       lists: [
-        {
-          action: "add" as const,
-          listType: "reminders" as const,
-          listName: "",
-          items: [{ item: "תור לספר", time: "09:00" }],
-          targets: [] as string[],
-        },
         {
           action: "add" as const,
           listType: "tasks" as const,
           listName: "",
           items: [{ "שם משימה": "תור לספר" }],
           targets: [] as string[],
+        },
+      ],
+      reminders: [
+        {
+          action: "add" as const,
+          item: "תור לספר",
+          listType: "tasks" as const,
+          date: "",
+          time: "09:00",
+          repeat: "once",
+          ping: [],
+          about: [],
+          targets: [] as string[],
+          text: "",
+          inSeconds: null,
+          everyCount: null,
+          everyUnit: null,
+          weekdays: null,
+          confirmed: false,
+          compose: false,
+          composeSource: "",
+          composeLookbackHours: 0,
+          composePlace: "",
+          reminderId: "",
         },
       ],
     };
@@ -1877,23 +1954,70 @@ describe("employee targets", () => {
         command: "מה יש לך ביום רביעי",
       },
       { label: "התור", command: "מה יש לי ביום רביעי" },
+      { label: "היום שלי", command: "מה יש לי היום" },
     ];
-    // Engine preserves model content-aware taps; never synthesizes אצלך/לתור alone.
+    // Priority: תזכורות → הצג משימות → speaker day (max 3); drop אצלך.
+    // Model day angles deferred after LIST; first day fills the last slot.
     expect(ensureSpeakerShowButtons(meta, modelAngles)).toEqual([
-      ...modelAngles,
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
       { label: "הצג משימות", command: "הצג רשימת משימות" },
+      { label: "התור", command: "מה יש לי ביום רביעי" },
     ]);
     expect(
       ensureSpeakerShowButtons(meta, []).map((b) => b.command),
-    ).toEqual(["הצג רשימת משימות"]);
+    ).toEqual(["הצג תזכורות", "הצג רשימת משימות"]);
     expect(
-      ensureSpeakerShowButtons(meta, []).every(
+      ensureSpeakerShowButtons(meta, modelAngles).every(
         (b) =>
           !b.label.includes("אצלך") &&
           !b.label.includes("לתור") &&
           !b.command.includes("מה יש לך"),
       ),
     ).toBe(true);
+  });
+
+  it("water reminder cadence: drops אצלך; תזכורות + speaker day (no worker dump)", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          reminders: [
+            {
+              action: "add",
+              item: "לשתות מים",
+              listType: "tasks",
+              date: "",
+              time: "",
+              repeat: "10:minutes",
+              ping: [],
+              about: [],
+              targets: [],
+              text: "",
+              inSeconds: 1800,
+              everyCount: 10,
+              everyUnit: "minutes",
+              weekdays: null,
+              confirmed: false,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "r-water",
+            },
+          ],
+        },
+        [
+          { label: "היום שלי", command: "מה יש לי היום" },
+          { label: "יום ב׳ אצלך", command: "מה יש לך ביום שני" },
+          { label: "הצג משימות", command: "הצג רשימת משימות" },
+        ],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([
+      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "היום שלי", command: "מה יש לי היום" },
+      // Model LIST kept only when eligible; reminder-only → dropped (no tasks mutate).
+    ]);
   });
 
   it("LIST BUTTON: appliedNav empty → no fixed nav even if metadata has remove", () => {
@@ -2223,8 +2347,8 @@ describe("employee targets", () => {
         [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
     ).toEqual([
-      { label: "מה יש לי מחר", command: "מה יש לי מחר" },
       { label: "הצג משימות", command: "הצג רשימת משימות" },
+      { label: "מה יש לי מחר", command: "מה יש לי מחר" },
     ]);
 
     expect(
@@ -2305,7 +2429,7 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג אנשי קשר", command: "הצג רשימת אנשי קשר" }]);
   });
 
-  it("LIST BUTTON: does not invent הצג תזכורות on reminder-only turns", () => {
+  it("LIST BUTTON: reminder-only turns safety-net הצג תזכורות", () => {
     expect(
       ensureSpeakerShowButtons({
         ...emptyLlmMetadata(),
@@ -2333,7 +2457,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([]);
+    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
   });
 
   it("appends a linked reminder clock to a task notification", () => {

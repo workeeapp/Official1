@@ -210,6 +210,67 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).toMatch(/לא הצלחתי לאמת/);
   });
 
+  it("successful filing add: keeps תייקתי draft (not list-add / unknown)", () => {
+    const requested = captureRequestedFromMetadata({
+      filing: [
+        {
+          action: "add_filing",
+          filingId: "",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      filingMutations: [
+        {
+          action: "add",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+        },
+      ],
+    });
+    expect(result.completeness).toBe("complete");
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("תייקתי את *בלו* כמשקה אנרגיה."),
+    });
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("תייקתי את *בלו* כמשקה אנרגיה.");
+    expect(decided.spoken).not.toMatch(/לא הצלחתי/);
+    expect(decided.spoken).not.toContain("הוספתי");
+  });
+
+  it("unverified filing remove: blocks תייקתי/מחקתי success claim", () => {
+    const requested = captureRequestedFromMetadata({
+      filing: [
+        {
+          action: "remove_filing",
+          filingId: "f-missing",
+          itemName: "",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      filingMutations: [],
+    });
+    expect(result.completeness).toBe("unknown");
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("מחקתי את התיוק."),
+    });
+    expect(decided.keepDraft).toBe(false);
+    expect(decided.spoken).toMatch(/לא הצלחתי לאמת/);
+  });
+
   it("successful id-less lists.add: complete — no unknown caution", () => {
     const requested = captureRequestedFromMetadata({
       lists: [

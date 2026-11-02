@@ -205,6 +205,42 @@ describe("buildApplyResult accounting", () => {
     expect(result.completeness).toBe("unknown");
   });
 
+  it("successful filing add is complete (not unknown) with add_filing applied op", () => {
+    const requested = captureRequestedFromMetadata({
+      filing: [
+        {
+          action: "add_filing",
+          filingId: "",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      filingMutations: [
+        {
+          action: "add",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+        },
+      ],
+    });
+    expect(result.domains.filing?.completeness).toBe("complete");
+    expect(result.domains.filing?.applied).toEqual([
+      {
+        domain: "filing",
+        op: "add_filing",
+        label: "בלו",
+        listType: "filing",
+      },
+    ]);
+    expect(result.completeness).toBe("complete");
+  });
+
   it("omits domains with empty requested", () => {
     const result = buildApplyResult({
       requested: captureRequestedFromMetadata({}),

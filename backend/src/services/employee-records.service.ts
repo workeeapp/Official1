@@ -1195,6 +1195,12 @@ export function correctExecutionTruthReply(input: {
    */
   appliedSpeakerListAdd?: boolean;
   appliedReminderAdd: boolean;
+  /**
+   * Filing add applied this turn. A list-add claim alone must not wipe the
+   * reply when the only successful durable mutate was filing (Result-B may
+   * have rewritten «תייקתי» into an «הוספתי…» line).
+   */
+  appliedFilingAdd?: boolean;
   /** Engine template when a list add did apply (optional prefer over miss). */
   listAddFallback?: string;
   /** Engine template when a reminder did apply (optional). */
@@ -1216,6 +1222,7 @@ export function correctExecutionTruthReply(input: {
       ? input.appliedSpeakerListAdd
       : input.appliedListAdd;
   const reminderOk = input.appliedReminderAdd;
+  const filingOk = Boolean(input.appliedFilingAdd);
 
   // Both claimed domains that applied (or unclaimed domains ignored) → keep.
   if (claimedListAdd && claimedReminder) {
@@ -1239,6 +1246,10 @@ export function correctExecutionTruthReply(input: {
   if (claimedListAdd && !speakerListOk) {
     if (reminderOk) {
       return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
+    }
+    // Filing success is not a lists.add — do not emit LIST_ADD_MISS over it.
+    if (filingOk) {
+      return input.reply;
     }
     return input.setResponse(input.reply, LIST_ADD_MISS);
   }

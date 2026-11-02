@@ -133,7 +133,7 @@ export const REPLY_CORRECTOR_CATALOG: readonly CorrectorPolicyEntry[] = [
     class: "narrow-post-apply",
     skipWhenResultBResolvedOperational: false,
     responsibility:
-      "Speaker-book vs worker-only add / reminder dual claims — not covered by ApplyResult counts alone. Skipped only when Result-B already resolved an add/reminder operational claim (avoid rewriting B's corrected text that contains הוספתי).",
+      "Speaker-book vs worker-only add / reminder dual claims — not covered by ApplyResult counts alone. Skipped when Result-B already resolved an add/reminder/durable operational claim (avoid rewriting B's corrected text that contains הוספתי, including filing-format lines).",
   },
   {
     id: "appliedRemoveEmptyFallback",
@@ -225,13 +225,16 @@ export function mayRunReplyCorrector(
 
   // Narrow residual: Result-B formatFromResult / formatUnknown often contains
   // «הוספתי…». correctExecutionTruthReply would treat that as a fresh model
-  // add claim and can wipe B's miss/caution lines when speaker-book add is false.
-  // Only skip when B already resolved an add/reminder operational claim —
-  // keep running when B kept the draft (speaker-vs-worker still needed).
+  // add claim and can wipe B's miss/caution lines when speaker-book add is false
+  // (same wipe hit filing durable claims after B rewrote תייקתי → הוספתי).
+  // Skip when B already resolved add/reminder/durable — keep running when B
+  // kept the draft (speaker-vs-worker still needed).
   if (id === "executionTruth") {
     if (
       resultB.operationalClaimResolved &&
-      (resultB.draftClaims?.addClaim || resultB.draftClaims?.reminderClaim)
+      (resultB.draftClaims?.addClaim ||
+        resultB.draftClaims?.reminderClaim ||
+        resultB.draftClaims?.durableClaim)
     ) {
       return false;
     }

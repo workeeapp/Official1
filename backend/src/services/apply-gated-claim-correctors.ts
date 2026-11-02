@@ -158,6 +158,7 @@ export function applyGatedClaimCorrectors(
       appliedListAdd: input.appliedAdd,
       appliedSpeakerListAdd: input.appliedSpeakerListAdd,
       appliedReminderAdd: input.appliedReminderAdd,
+      appliedFilingAdd: input.appliedFilingAdd,
       listAddFallback: input.appliedFallback,
       reminderAddFallback: input.reminderAddFallback,
       setResponse: input.setResponse,

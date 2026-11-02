@@ -17,8 +17,8 @@ const BUILTIN_LIST_HEBREW: Record<BuiltinListType, string> = {
   contacts: "אנשי קשר",
 };
 
-/** Legacy user-facing Hebrew for tasks (still accepted on resolve). */
-export const TASKS_HEBREW_LEGACY = "משימות";
+/** Legacy list noun (מטלות) — still accepted on resolve; never emit. */
+export const TASKS_HEBREW_LEGACY = "\u05de\u05d8\u05dc\u05d5\u05ea";
 
 /** Noun used in «כל ה…» labels (with definite article where natural). */
 const BUILTIN_ALL_NOUN: Record<BuiltinListType, string> = {
@@ -27,9 +27,9 @@ const BUILTIN_ALL_NOUN: Record<BuiltinListType, string> = {
   contacts: "אנשי הקשר",
 };
 
-/** Legacy «כל המשימות» still accepted. */
+/** Legacy «כל המטלות» still accepted. */
 const BUILTIN_ALL_NOUN_LEGACY: Partial<Record<BuiltinListType, string>> = {
-  tasks: "המשימות",
+  tasks: "ה\u05de\u05d8\u05dc\u05d5\u05ea",
 };
 
 export const SHOW_REMINDERS_COMMAND = "הצג תזכורות";
@@ -41,7 +41,8 @@ export const SHOW_LISTS_COMMAND = "הצג רשימות";
 /** Dated agenda offer → undated general tasks dump (show_dump_date_scope=undated). */
 export const SHOW_UNDATED_TASKS_COMMAND = "הצג משימות כלליות";
 /** Legacy typed alias for {@link SHOW_UNDATED_TASKS_COMMAND}. */
-export const SHOW_UNDATED_TASKS_COMMAND_LEGACY = "הצג משימות כלליות";
+export const SHOW_UNDATED_TASKS_COMMAND_LEGACY =
+  "הצג \u05de\u05d8\u05dc\u05d5\u05ea כלליות";
 
 export function isBuiltinListType(value: string): value is BuiltinListType {
   return (BUILTIN_LIST_TYPES as readonly string[]).includes(value);

@@ -726,9 +726,16 @@ export function buildApplyResult(input: {
 
   const filingRequested = requestedOpsFromFiling(input.requested.filing);
   if (filingRequested.length > 0) {
+    // FilingMutation uses short add|update|remove; requested/ApplyResult ops
+    // are add_filing|update_filing|remove_filing — map so shell pairing works.
     const applied: AppliedOp[] = (input.filingMutations ?? []).map((row) => ({
       domain: "filing" as const,
-      op: row.action,
+      op:
+        row.action === "add"
+          ? "add_filing"
+          : row.action === "update"
+            ? "update_filing"
+            : "remove_filing",
       label: row.itemName,
       listType: "filing",
     }));
@@ -736,27 +743,22 @@ export function buildApplyResult(input: {
     const unclassified_drops = unclassifiedStrip.filter(
       (op) => op.domain === "filing",
     );
-    const allStripClassified =
-      unclassified_drops.length === 0 &&
-      filingRequested.every((req) =>
-        intent_misses.some((miss) => missMatchesRequested(miss, req)),
-      );
+    // No apply_miss channel for silent filing failures → unaccounted request
+    // stays unknown. Successful applied rows pair via computeDomainCompleteness
+    // (id-less add_filing ↔ applied add_filing) and must NOT force unknown.
     domains.filing = {
       requested: filingRequested,
       applied,
       intent_misses,
       apply_misses: [],
       ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
-      // Silent filing apply has no miss channel; strip-only fate can be complete.
-      completeness: allStripClassified
-        ? computeDomainCompleteness({
-            requested: filingRequested,
-            applied,
-            intent_misses,
-            apply_misses: [],
-            unclassified_drops,
-          })
-        : "unknown",
+      completeness: computeDomainCompleteness({
+        requested: filingRequested,
+        applied,
+        intent_misses,
+        apply_misses: [],
+        unclassified_drops,
+      }),
     };
   }
 
