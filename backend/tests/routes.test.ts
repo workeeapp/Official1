@@ -2443,6 +2443,206 @@ describe("resolveRoutesEndpoint (shared O/D ladder)", () => {
       expect(result.query).toBe("מקום_שלא_קיים_xyz_12345");
     }
   });
+
+  it("action lat,lng origin → action_coords point; never calls area geocode", async () => {
+    const areaCalls: string[] = [];
+    const fetchImpl = vi.fn();
+    const origin = await resolveRoutesEndpoint({
+      label: "31.7683, 35.2137",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "must_not_run_area",
+          provenance: "google_geocode",
+          capabilities: {
+            kinds: ["region"],
+            geometries: ["viewport", "polygon"],
+          },
+          resolve: async (ask) => {
+            areaCalls.push(ask.rawText);
+            throw new Error("area geocode must not run for valid lat,lng");
+          },
+        },
+      ],
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(areaCalls).toEqual([]);
+    expect(origin).toEqual({
+      kind: "coords",
+      lat: 31.7683,
+      lng: 35.2137,
+      label: "31.7683, 35.2137",
+      source: "action_coords",
+    });
+  });
+
+  it("origin coords + destination ים המלח: origin ok; dest region may ask (not origin blame)", async () => {
+    const originLabel = "31.7683, 35.2137";
+    const origin = await resolveRoutesEndpoint({
+      label: originLabel,
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "must_not_run",
+          provenance: "google_geocode",
+          capabilities: {
+            kinds: ["region"],
+            geometries: ["viewport"],
+          },
+          resolve: async () => {
+            throw new Error("must not geocode valid action coords");
+          },
+        },
+      ],
+    });
+    expect(origin.kind).toBe("coords");
+    if (origin.kind === "coords") {
+      expect(origin.source).toBe("action_coords");
+    }
+
+    const destination = await resolveRoutesEndpoint({
+      label: "ים המלח",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "mock_dead_sea_region",
+          provenance: "geo_area_index",
+          capabilities: {
+            kinds: ["region"],
+            geometries: ["viewport", "polygon"],
+          },
+          resolve: async () => ({
+            kind: "region",
+            labelHe: "ים המלח",
+            confidence: "high",
+            provenance: "geo_area_index",
+            viewport: {
+              low: { lat: 31.0, lng: 35.2 },
+              high: { lat: 31.8, lng: 35.6 },
+            },
+          }),
+        },
+      ],
+    });
+    expect(destination.kind).toBe("ask");
+    if (destination.kind === "ask") {
+      expect(destination.text).toMatch(/ים המלח|אזור|נקוד|יעד|מוצא/);
+      expect(destination.text).not.toMatch(/31\.7683|קואורדינט/);
+    }
+  });
+
+  it("origin coords + destination נתב״ג רמון → both coords; origin action_coords", async () => {
+    const { createNamedPlacePointProvider } = await import(
+      "../src/services/providers/named-place-point.provider.js"
+    );
+    const origin = await resolveRoutesEndpoint({
+      label: "30.5, 34.9",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      apiKey: "test-key",
+      providers: [],
+    });
+    expect(origin.kind).toBe("coords");
+    if (origin.kind === "coords") {
+      expect(origin.source).toBe("action_coords");
+      expect(origin.lat).toBeCloseTo(30.5);
+      expect(origin.lng).toBeCloseTo(34.9);
+    }
+
+    const destination = await resolveRoutesEndpoint({
+      label: "נתב״ג רמון",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      apiKey: "test-key",
+      providers: [
+        createNamedPlacePointProvider(async ({ query }) => {
+          if (/רמון|נתב/.test(query)) {
+            return {
+              ok: true,
+              lat: 29.7237,
+              lng: 35.0114,
+              label: "נמל התעופה רמון",
+            };
+          }
+          return { ok: false, kind: "empty", messageHe: "לא נמצא" };
+        }),
+      ],
+    });
+    expect(destination.kind).toBe("coords");
+    if (destination.kind === "coords") {
+      expect(destination.source).toBe("geocode");
+      expect(destination.lat).toBeCloseTo(29.7237);
+      expect(destination.lng).toBeCloseTo(35.0114);
+      expect(destination.label).toMatch(/רמון/);
+    }
+  });
+
+  it("invalid lat,lng does not resolve as action_coords", async () => {
+    const result = await resolveRoutesEndpoint({
+      label: "91, 34",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "continue",
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "empty",
+          provenance: "google_geocode",
+          capabilities: {
+            kinds: ["point"],
+            geometries: ["point"],
+          },
+          resolve: async () => null,
+        },
+      ],
+    });
+    expect(result.kind).not.toBe("coords");
+    if (result.kind === "coords") {
+      expect(result.source).not.toBe("action_coords");
+    }
+  });
+
+  it("region hit that also carries a concrete point is accepted for Routes", async () => {
+    const result = await resolveRoutesEndpoint({
+      label: "נקודה עם viewport",
+      speakerMissingPinAsk: speakerAsk,
+      onGeocodeEmpty: "ask",
+      apiKey: "test-key",
+      providers: [
+        {
+          id: "point_plus_viewport",
+          provenance: "google_geocode",
+          capabilities: {
+            kinds: ["region", "point"],
+            geometries: ["point", "viewport"],
+          },
+          resolve: async () => ({
+            kind: "region",
+            labelHe: "נקודה עם viewport",
+            confidence: "high",
+            provenance: "google_geocode",
+            point: { lat: 32.1, lng: 34.8 },
+            viewport: {
+              low: { lat: 32.05, lng: 34.75 },
+              high: { lat: 32.15, lng: 34.85 },
+            },
+          }),
+        },
+      ],
+    });
+    expect(result.kind).toBe("coords");
+    if (result.kind === "coords") {
+      expect(result.lat).toBeCloseTo(32.1);
+      expect(result.lng).toBeCloseTo(34.8);
+      expect(result.source).toBe("geocode");
+    }
+  });
 });
 
 describe("origin→destination trip boarding workflow", () => {

@@ -10,6 +10,7 @@ import {
   WEATHER_CONSUMER_CAPABILITIES_EXAMPLE,
 } from "../src/services/geographic-consumer.js";
 import {
+  geographicResolvedPoint,
   geographicResolvedRegion,
   type GeographicAsk,
 } from "../src/services/geographic-match.js";
@@ -368,6 +369,81 @@ describe("Consumer fit + representative policy", () => {
     );
     expect(fitted.status).toBe("unsupported_for_consumer");
     expect(fitted.userAskHe).toBeTruthy();
+  });
+
+  it("routes caps: region with concrete point → prefer point (not unsupported)", () => {
+    const region = geographicResolvedRegion({
+      asked: ask("32.1, 34.8"),
+      labelHe: "32.1, 34.8",
+      provenance: "google_geocode",
+      point: { lat: 32.1, lng: 34.8 },
+      viewport: {
+        low: { lat: 32.05, lng: 34.75 },
+        high: { lat: 32.15, lng: 34.85 },
+      },
+    });
+    const fitted = adaptMatchForConsumer(
+      region,
+      ROUTES_ENDPOINT_CONSUMER_CAPABILITIES_EXAMPLE,
+    );
+    expect(fitted.status).toBe("resolved");
+    expect(fitted.kind).toBe("point");
+    expect(fitted.geometry?.point).toEqual({ lat: 32.1, lng: 34.8 });
+    expect(fitted.policyTrace).toMatch(/prefer_concrete_point/);
+  });
+
+  it("routes caps: plain point without viewport stays resolved point", () => {
+    const point = geographicResolvedPoint({
+      asked: ask("32.1, 34.8"),
+      labelHe: "32.1, 34.8",
+      provenance: "action_coords",
+      point: { lat: 32.1, lng: 34.8 },
+    });
+    const fitted = adaptMatchForConsumer(
+      point,
+      ROUTES_ENDPOINT_CONSUMER_CAPABILITIES_EXAMPLE,
+    );
+    expect(fitted.status).toBe("resolved");
+    expect(fitted.kind).toBe("point");
+    expect(fitted.provenance).toBe("action_coords");
+    expect(fitted.geometry?.viewport).toBeUndefined();
+  });
+
+  it("hitToMatch: point kind with accompanying viewport stays point (not region)", async () => {
+    const match = await resolveGeographic({
+      ask: ask("32.099, 34.892"),
+      geometryNeeds: { point: true, area: true },
+      providers: [
+        {
+          id: "point_with_vp",
+          provenance: "google_geocode",
+          capabilities: {
+            kinds: ["point"],
+            geometries: ["point", "viewport"],
+          },
+          resolve: async () => ({
+            kind: "point",
+            labelHe: "32.099, 34.892",
+            confidence: "high",
+            provenance: "action_coords",
+            point: { lat: 32.099, lng: 34.892 },
+            viewport: {
+              low: { lat: 32.09, lng: 34.88 },
+              high: { lat: 32.11, lng: 34.9 },
+            },
+          }),
+        } satisfies GeographicProvider,
+      ],
+    });
+    expect(match.status).toBe("resolved");
+    expect(match.kind).toBe("point");
+    expect(match.geometry?.point).toEqual({ lat: 32.099, lng: 34.892 });
+    const fitted = adaptMatchForConsumer(
+      match,
+      ROUTES_ENDPOINT_CONSUMER_CAPABILITIES_EXAMPLE,
+    );
+    expect(fitted.status).toBe("resolved");
+    expect(fitted.kind).toBe("point");
   });
 
   it("places area caps accept region viewport without representative point", () => {

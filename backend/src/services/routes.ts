@@ -51,6 +51,7 @@ import {
   type SavedLocationContactRef,
 } from "./saved-route-location.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
+import { parseLatLngCoordinates } from "./show-button-dump.js";
 import { geocodePlace as geocodePlaceOpenMeteo } from "./weather.js";
 
 export type RoutesAspect =
@@ -841,7 +842,7 @@ export type RoutesEndpointResolveResult =
       lat: number;
       lng: number;
       label: string;
-      source: "pin" | "saved" | "geocode";
+      source: "pin" | "saved" | "geocode" | "action_coords";
       savedNotice?: string;
     }
   | { kind: "ask"; text: string }
@@ -880,6 +881,18 @@ export async function resolveRoutesEndpoint(input: {
   const q = String(input.label ?? "").trim();
   if (!q) {
     return { kind: "none" };
+  }
+
+  // Model/action lat,lng string → point immediately (no area geocode → region).
+  const actionCoords = parseLatLngCoordinates(q);
+  if (actionCoords) {
+    return {
+      kind: "coords",
+      lat: actionCoords.lat,
+      lng: actionCoords.lng,
+      label: q,
+      source: "action_coords",
+    };
   }
 
   const speaker = q.toLowerCase() === "speaker";

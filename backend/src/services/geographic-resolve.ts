@@ -83,6 +83,35 @@ function hitToMatch(
           : `מצאתי כמה אפשרויות ל«${ask.rawText}». לאיזה התכוונת?`,
     });
   }
+  // Prefer a concrete point when present — even if a viewport came along
+  // (common for reverse-geocode of lat,lng). Named area hits without a usable
+  // point still resolve as region below.
+  if (
+    hit.point &&
+    Number.isFinite(hit.point.lat) &&
+    Number.isFinite(hit.point.lng) &&
+    Math.abs(hit.point.lat) <= 90 &&
+    Math.abs(hit.point.lng) <= 180 &&
+    hit.kind !== "region"
+  ) {
+    return geographicResolvedPoint({
+      asked: ask,
+      kind:
+        hit.kind === "city" ||
+        hit.kind === "poi" ||
+        hit.kind === "neighborhood" ||
+        hit.kind === "pin" ||
+        hit.kind === "airport"
+          ? hit.kind
+          : "point",
+      labelHe: hit.labelHe,
+      confidence: hit.confidence,
+      provenance: hit.provenance,
+      coordinateProvenance: hit.provenance,
+      point: hit.point,
+      policyTrace: hit.policyTrace,
+    });
+  }
   if (hit.kind === "region" || hit.viewport || hit.polygon) {
     return geographicResolvedRegion({
       asked: ask,

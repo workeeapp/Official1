@@ -5,6 +5,7 @@
 
 import {
   geographicNeedsClarify,
+  geographicResolvedPoint,
   geographicUnsupportedForConsumer,
   type GeographicKind,
   type GeographicMatch,
@@ -38,6 +39,36 @@ export function adaptMatchForConsumer(
 
   const accepts = new Set(capabilities.accepts);
   if (!accepts.has(match.kind)) {
+    // Routes / point consumers: a concrete geometry.point must win over an
+    // unaccepted kind (e.g. region+viewport from reverse-geocode) — never
+    // invent a centroid; only reuse an existing validated point.
+    const pt = match.geometry?.point;
+    if (
+      capabilities.requiresExactPoint &&
+      accepts.has("point") &&
+      pt &&
+      Number.isFinite(pt.lat) &&
+      Number.isFinite(pt.lng) &&
+      Math.abs(pt.lat) <= 90 &&
+      Math.abs(pt.lng) <= 180
+    ) {
+      return geographicResolvedPoint({
+        asked: match.asked,
+        kind: "point",
+        labelHe: match.labelHe,
+        confidence: match.confidence,
+        provenance: match.provenance,
+        coordinateProvenance: match.coordinateProvenance ?? match.provenance,
+        point: { lat: pt.lat, lng: pt.lng },
+        ...(match.savedRef ? { savedRef: match.savedRef } : {}),
+        policyTrace: [
+          match.policyTrace,
+          "prefer_concrete_point_over_unaccepted_kind",
+        ]
+          .filter(Boolean)
+          .join(";"),
+      });
+    }
     return geographicUnsupportedForConsumer({
       asked: match.asked,
       kind: match.kind,
