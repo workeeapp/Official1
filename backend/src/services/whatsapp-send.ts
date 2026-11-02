@@ -873,7 +873,11 @@ export function setEngineButtons(
   return JSON.stringify({ ...record, metadata });
 }
 
-/** Patches navigate_address (Waze) onto the first bubble without one, plus metadata. */
+/**
+ * Patches navigate_address (Waze) onto a spoken bubble without one, plus metadata.
+ * Prefers the **last** empty bubble so live facts appended after an ack
+ * (e.g. Places address) carry the CTA, not the short «בודקת…» line.
+ */
 export function setEngineNavigateAddress(
   reply: string,
   address: string | null,
@@ -885,6 +889,16 @@ export function setEngineNavigateAddress(
   const trimmed = address?.trim() ?? "";
   const bubbles = readSpokenBubbles(record);
   if (bubbles && bubbles.length > 0) {
+    let target = -1;
+    for (let i = bubbles.length - 1; i >= 0; i -= 1) {
+      if (!bubbles[i]?.navigateAddress) {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) {
+      target = 0;
+    }
     const next = bubbles.map((bubble, index) => {
       if (!trimmed) {
         const { navigateAddress: _drop, ...rest } = bubble;
@@ -893,8 +907,7 @@ export function setEngineNavigateAddress(
       if (bubble.navigateAddress) {
         return bubble;
       }
-      const firstEmpty = bubbles.findIndex((row) => !row.navigateAddress);
-      if (index === (firstEmpty >= 0 ? firstEmpty : 0)) {
+      if (index === target) {
         return { ...bubble, navigateAddress: trimmed };
       }
       return bubble;

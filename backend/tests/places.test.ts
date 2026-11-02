@@ -75,6 +75,7 @@ describe("buildPlacesFieldMask (Phase C)", () => {
   it("keeps summary FieldMask as base only (no Atmosphere fields)", () => {
     const mask = buildPlacesFieldMask(["summary"]);
     expect(mask).toBe(PLACES_BASE_FIELD_MASK.join(","));
+    expect(mask).toContain("places.location");
     expect(mask).not.toContain("parkingOptions");
     expect(mask).not.toContain("accessibilityOptions");
     expect(mask).not.toContain("outdoorSeating");
@@ -1388,7 +1389,7 @@ describe("parking_cost local filter", () => {
     expect(text).not.toContain("*חניון חינם*");
   });
 
-  it("navigateAddressFromPlacesResults: single+coords only", () => {
+  it("navigateAddressFromPlacesResults: single coords preferred; address fallback", () => {
     expect(navigateAddressFromPlacesResults([])).toBe("");
     expect(
       navigateAddressFromPlacesResults([
@@ -1430,13 +1431,14 @@ describe("parking_cost local filter", () => {
         },
       ]),
     ).toBe("");
+    // No coords → street address for Waze q= (same as filings street path).
     expect(
       navigateAddressFromPlacesResults([
         {
           id: "a",
           name: "צ'אקרה",
           phone: "",
-          address: "King George 41",
+          address: "המלך ג'ורג' 41, ירושלים",
           postalCode: "",
           rating: null,
           openNow: null,
@@ -1451,7 +1453,7 @@ describe("parking_cost local filter", () => {
           payment: null,
         },
       ]),
-    ).toBe("");
+    ).toBe("המלך ג'ורג' 41, ירושלים");
     expect(
       navigateAddressFromPlacesResults([
         {
@@ -1501,6 +1503,34 @@ describe("parking_cost local filter", () => {
     expect(one.text).toContain("צ'אקרה");
     expect(one.text).toContain("King George");
     expect(one.navigateAddress).toBe("31.781,35.217");
+    const maskHeader = String(
+      (fetchImpl.mock.calls[0]?.[1] as { headers?: Record<string, string> })
+        ?.headers?.["X-Goog-FieldMask"] ?? "",
+    );
+    expect(maskHeader).toContain("places.location");
+
+    // Address-only API row (no location object) → street fallback for Waze.
+    const fetchAddrOnly = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        places: [
+          {
+            id: "places/chakra2",
+            displayName: { text: "צ'אקרה", languageCode: "he" },
+            formattedAddress: "המלך ג'ורג' 41, ירושלים",
+          },
+        ],
+      }),
+    }));
+    const addrOnly = await resolvePlacesReplyDetailed({
+      query: "צ'אקרה",
+      place: "",
+      aspects: ["address"],
+      apiKey: "test-key",
+      fetchImpl: fetchAddrOnly as unknown as typeof fetch,
+    });
+    expect(addrOnly.navigateAddress).toBe("המלך ג'ורג' 41, ירושלים");
 
     const fetchMulti = vi.fn(async () => ({
       ok: true,

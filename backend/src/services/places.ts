@@ -299,7 +299,7 @@ const ASPECT_SET = new Set<PlacesAspect>([
 /** Places API (New) — Text Search. */
 const SEARCH_TEXT_URL = "https://places.googleapis.com/v1/places:searchText";
 
-/** Default / summary FieldMask — unchanged SKU baseline from Phase A. */
+/** Default / summary FieldMask — includes location for Waze + area filter. */
 export const PLACES_BASE_FIELD_MASK = [
   "places.displayName",
   "places.id",
@@ -311,15 +311,16 @@ export const PLACES_BASE_FIELD_MASK = [
   "places.currentOpeningHours",
   "places.regularOpeningHours",
   "places.googleMapsUri",
+  // Always: Waze navigate_address + area_restrict point-in-polygon.
+  "places.location",
 ] as const;
 
-/** Required for area_restrict point-in-polygon post-filter. */
+/** WGS84 coords — in base mask; kept as named export for callers/tests. */
 export const PLACES_LOCATION_FIELD = "places.location";
 
 /**
- * Build FieldMask: base always; Atmosphere/Pro attribute fields only when asked.
- * Parking intent also requests parkingOptions (without changing the base mask).
- * areaRestrict adds places.location for polygon filtering (Places-specific).
+ * Build FieldMask: base always (incl. location for Waze); Atmosphere/Pro
+ * attribute fields only when asked. Parking intent also requests parkingOptions.
  */
 export function buildPlacesFieldMask(
   aspects: PlacesAspect[],
@@ -1481,7 +1482,10 @@ export type PlacesReplyResult = {
   navigateAddress?: string;
 };
 
-/** Single Places result with coords → Waze `lat,lng`; else empty. */
+/**
+ * Single Places result → Waze target: prefer `lat,lng` when present; else the
+ * formatted street address (q= search). Empty when ambiguous or no location.
+ */
 export function navigateAddressFromPlacesResults(
   results: PlaceResult[],
 ): string {
@@ -1490,16 +1494,16 @@ export function navigateAddressFromPlacesResults(
   }
   const row = results[0]!;
   if (
-    row.lat == null ||
-    row.lng == null ||
-    !Number.isFinite(row.lat) ||
-    !Number.isFinite(row.lng) ||
-    Math.abs(row.lat) > 90 ||
-    Math.abs(row.lng) > 180
+    row.lat != null &&
+    row.lng != null &&
+    Number.isFinite(row.lat) &&
+    Number.isFinite(row.lng) &&
+    Math.abs(row.lat) <= 90 &&
+    Math.abs(row.lng) <= 180
   ) {
-    return "";
+    return `${row.lat},${row.lng}`;
   }
-  return `${row.lat},${row.lng}`;
+  return row.address.trim();
 }
 
 export async function resolvePlacesReplyDetailed(input: {
