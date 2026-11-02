@@ -38,24 +38,32 @@ import {
   liveDumpRowIdsFromSnapshot,
   isKnownShowButtonCommand,
   isTasksShowDumpKind,
+  resolveShowDumpKind,
   itemHasDumpCalendarDate,
   itemHasDumpRecurrenceRule,
   itemMatchesDateRange,
   formatUndatedTasksExcludedNote,
   countUndatedTasksExcludedByDateRange,
+  isDigitalWorkerReminderAgendaSlot,
+  formatTasksDayAgendaDump,
   ymdFromDumpValue,
   mapShowButtonCommandToDump,
   mapShowButtonCommandToDumpTarget,
   navigateAddressFromFilingsDump,
   partnerBucketMatches,
   partnersKey,
+  restrictListMutatesToLastNumberedDump,
   shortCadenceParen,
   titleAlreadyListsPartners,
 } from "../src/services/show-button-dump.js";
 import {
+  builtinListHebrew,
+  builtinListTypeFromHebrew,
   showAllListButtonCommand,
   showAssigneeButtonCommand,
+  showListButtonCommand,
   showSharedWithButtonCommand,
+  showWorkerTasksButtonCommand,
 } from "../src/services/builtin-lists.js";
 import {
   formatWhatsAppReplyContext,
@@ -804,7 +812,7 @@ describe("filings flat dump", () => {
     expect(dump).toBe("");
     expect(dump).not.toContain("קוד שער");
     expect(dump).not.toContain("ללכת לרופא");
-    expect(dump).not.toContain("✅ מטלות:");
+    expect(dump).not.toContain("✅ משימות:");
   });
 
   describe("ITEM DUMP id filter — all kinds (1 / many / wrong / empty)", () => {
@@ -1215,7 +1223,7 @@ describe("filings flat dump", () => {
       // Shopping: item lines, not counts-only overview.
       expect(text).toMatch(/🛒 קניות:/);
       expect(text).not.toMatch(/אישיות — \d+ פריט/);
-      expect(text).toContain("מטלות:");
+      expect(text).toContain("משימות:");
       expect(text).toContain("תזכורות פעילות:");
       expect(text).toMatch(/תיוקים:/);
       expect(text).toContain("ציוד שיניים");
@@ -2206,7 +2214,7 @@ describe("formatShowDumpFromKind", () => {
     const tasks = formatShowDumpFromKind("tasks", threeWay, {
       viewerName: "טל",
     })!;
-    expect(tasks).toMatch(/^✅ מטלות:/m);
+    expect(tasks).toMatch(/^✅ משימות:/m);
     expect(tasks).toContain("לטפל בעמידר");
     expect(tasks).toContain("לבדוק שמן (באחריות טל · מאת עמית)");
     expect(tasks).toContain("פגישה (טל, עמית)");
@@ -2745,7 +2753,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("ללכת לשוק 🍅 📎 — שני ושלישי ב־19:00 (קבוע)");
     expect(text).toContain("חתונה של תום 📎 — 12.10.2026 ב־19:30");
     expect(text).toContain("לראות מה קורה עם הביט 🔔");
-    expect(text).toContain("✅ מטלות:");
+    expect(text).toContain("✅ משימות:");
     expect(text).not.toContain("מטלות משותפות עם");
     expect(text).toContain("פגישה (טל, עמית) — ראשון ורביעי ב־21:30 (קבוע)");
   });
@@ -3313,7 +3321,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).not.toContain("לחם");
 
     // Tasks still enumerate under one header.
-    expect(text).toMatch(/✅ מטלות:[\s\S]*לטפל בעמידר/);
+    expect(text).toMatch(/✅ משימות:[\s\S]*לטפל בעמידר/);
 
     // Empty categories omitted (no ריק/ריקה headers).
     expect(text).not.toContain("רשימות אחרות:");
@@ -3607,13 +3615,22 @@ describe("worker inventory tasks dump helpers", () => {
       ],
       filing: [],
     };
-    // Bare button → kind=tasks (speaker book). Worker path is «הצג מטלות של לוסי» (+ about).
+    // Bare button → kind=tasks (speaker book). Worker path is «הצג משימות של לוסי» (+ about).
+    expect(mapShowButtonCommandToDumpTarget("הצג רשימת משימות")).toEqual({
+      kind: "tasks",
+    });
+    expect(mapShowButtonCommandToDump("הצג רשימת משימות")).toBe("tasks");
+    // Legacy label still allowlisted.
     expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
       kind: "tasks",
     });
     expect(mapShowButtonCommandToDump("הצג רשימת מטלות")).toBe("tasks");
-    // Label-only «הצג מטלות» is NOT the opaque allowlist command (engine uses full command).
-    expect(mapShowButtonCommandToDump("הצג מטלות")).toBeNull();
+    // Label-only «הצג משימות» is NOT the opaque allowlist command (engine uses full command).
+    expect(mapShowButtonCommandToDump("הצג משימות")).toBeNull();
+    expect(mapShowButtonCommandToDumpTarget("הצג משימות של לוסי")).toEqual({
+      kind: "tasks",
+      about: "לוסי",
+    });
     expect(mapShowButtonCommandToDumpTarget("הצג מטלות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",
@@ -3625,6 +3642,7 @@ describe("worker inventory tasks dump helpers", () => {
     expect(speakerDump).toContain("להתקשר לרופא");
     expect(speakerDump).not.toContain("לבדוק עם טל");
     expect(speakerDump).not.toContain("להזכיר לטל");
+    expect(speakerDump).toMatch(/משימות/);
     // Contrast: worker inventory path uses Lucy's book (+ about), not bare speaker dump.
     const workerDump = formatShowDumpFromKind("tasks", lucyFollowUps, {
       viewerName: "לוסי",
@@ -3633,33 +3651,147 @@ describe("worker inventory tasks dump helpers", () => {
     expect(workerDump).toContain("לבדוק עם טל");
     expect(workerDump).toContain("להזכיר לטל");
     expect(workerDump).not.toContain("להתקשר לרופא");
-    // Intervening automated Lucy text does not change button→kind mapping.
     expect(
-      mapShowButtonCommandToDumpTarget(
-        "הצג מטלות של לוסי",
-      ),
+      mapShowButtonCommandToDumpTarget("הצג משימות של לוסי"),
     ).toEqual({ kind: "tasks", about: "לוסי" });
-    expect(mapShowButtonCommandToDumpTarget("הצג רשימת מטלות")).toEqual({
+    expect(mapShowButtonCommandToDumpTarget("הצג רשימת משימות")).toEqual({
       kind: "tasks",
+    });
+  });
+
+  it("speaker day agenda hides digital-worker-owned and worker_item_id reminder slots", () => {
+    expect(
+      isDigitalWorkerReminderAgendaSlot({ owner_is_digital: true }),
+    ).toBe(true);
+    expect(
+      isDigitalWorkerReminderAgendaSlot({
+        worker_item_id: "worker-task-1",
+      }),
+    ).toBe(true);
+    expect(
+      isDigitalWorkerReminderAgendaSlot({
+        owner_id: "human-1",
+        owner_is_digital: false,
+      }),
+    ).toBe(false);
+
+    const speakerTask = {
+      title: "לקנות חלב",
+      item: {
+        item_id: "task-1",
+        "שם מטלה": "לקנות חלב",
+        "תאריך לביצוע": "2026-11-03",
+      },
+    };
+    const speakerOwnedReminder = {
+      reminder_id: "rem-speaker",
+      item: "תזכורת אישית",
+      list_type: "reminders",
+      fire_at: "2026-11-03 09:00",
+      repeat: "none",
+      ping: ["טל"],
+      ping_ids: ["tal"],
+      owner: "טל",
+      owner_id: "tal",
+      owner_is_digital: false,
+      text: "תזכורת אישית",
+      last_composed_text: "",
+      sent_text: "תזכורת אישית",
+      compose_at_fire: false,
+      compose_source: "",
+      compose_lookback_hours: 0,
+      status: "active",
+      send_status: "pending" as const,
+      sent: false,
+      sent_at: null,
+    };
+    const workerOwnedReminder = {
+      ...speakerOwnedReminder,
+      reminder_id: "rem-lucy",
+      item: "להזכיר לטל לקנות חלב",
+      owner: "לוסי",
+      owner_id: "lucy",
+      owner_is_digital: true,
+      text: "להזכיר לטל לקנות חלב",
+      sent_text: "להזכיר לטל לקנות חלב",
+      fire_at: "2026-11-03 10:00",
+    };
+    const workerLinkedReminder = {
+      ...speakerOwnedReminder,
+      reminder_id: "rem-linked",
+      item: "לשלוח הודעה לטל",
+      owner: "טל",
+      owner_id: "tal",
+      owner_is_digital: false,
+      worker_item_id: "lucy-job-1",
+      text: "לשלוח הודעה לטל",
+      sent_text: "לשלוח הודעה לטל",
+      fire_at: "2026-11-03 11:00",
+    };
+
+    const speakerAgenda = formatTasksDayAgendaDump(
+      [speakerTask],
+      [speakerOwnedReminder, workerOwnedReminder, workerLinkedReminder],
+      {
+        viewerName: "טל",
+        dateFrom: "2026-11-03",
+        dateTo: "2026-11-03",
+      },
+    );
+    expect(speakerAgenda.text).toContain("לקנות חלב");
+    expect(speakerAgenda.text).toContain("תזכורת אישית");
+    expect(speakerAgenda.text).not.toContain("להזכיר לטל לקנות חלב");
+    expect(speakerAgenda.text).not.toContain("לשלוח הודעה לטל");
+
+    const workerAgenda = formatTasksDayAgendaDump(
+      [],
+      [workerOwnedReminder, workerLinkedReminder],
+      {
+        viewerName: "לוסי",
+        flatLayout: true,
+        dateFrom: "2026-11-03",
+        dateTo: "2026-11-03",
+      },
+    );
+    expect(workerAgenda.text).toContain("להזכיר לטל לקנות חלב");
+    expect(workerAgenda.text).toContain("לשלוח הודעה לטל");
+  });
+
+  it("canonical tasks Hebrew is משימות; legacy מטלות still resolves", () => {
+    expect(builtinListHebrew("tasks")).toBe("משימות");
+    expect(builtinListTypeFromHebrew("משימות")).toBe("tasks");
+    expect(builtinListTypeFromHebrew("מטלות")).toBe("tasks");
+    expect(showListButtonCommand("tasks")).toBe("הצג רשימת משימות");
+    expect(showAllListButtonCommand("tasks")).toBe("כל המשימות");
+    expect(showWorkerTasksButtonCommand("לוסי")).toBe("הצג משימות של לוסי");
+    expect(mapShowButtonCommandToDump("כל המטלות")).toBe("tasks");
+    expect(mapShowButtonCommandToDump("כל המשימות")).toBe("tasks");
+    expect(resolveShowDumpKind("משימות")).toEqual({
+      kind: "list",
+      name: "משימות",
+    });
+    expect(resolveShowDumpKind("מטלות")).toEqual({
+      kind: "list",
+      name: "משימות",
     });
   });
 
   it("stitches ממתינים after tasks; empty tasks string skips tasks block", () => {
     expect(
-      composeTasksDumpWithWaiting("", "ממתינים לתשובה:\n1. א"),
-    ).toBe("ממתינים לתשובה:\n1. א");
+      composeTasksDumpWithWaiting("", "ממתינים לתשובה:\n• א"),
+    ).toBe("ממתינים לתשובה:\n• א");
     expect(
-      composeTasksDumpWithWaiting(null, "ממתינים לתשובה:\n1. א"),
-    ).toBe("ממתינים לתשובה:\n1. א");
+      composeTasksDumpWithWaiting(null, "ממתינים לתשובה:\n• א"),
+    ).toBe("ממתינים לתשובה:\n• א");
     expect(
       composeTasksDumpWithWaiting(
-        "מטלות:\n1. להזכיר לטל",
-        "ממתינים לתשובה:\n1. א",
+        "משימות:\n1. להזכיר לטל",
+        "ממתינים לתשובה:\n• א",
       ),
-    ).toBe("מטלות:\n1. להזכיר לטל\n\nממתינים לתשובה:\n1. א");
+    ).toBe("משימות:\n1. להזכיר לטל\n\nממתינים לתשובה:\n• א");
     expect(
-      composeTasksDumpWithWaiting("מטלות:\n1. להזכיר לטל", ""),
-    ).toBe("מטלות:\n1. להזכיר לטל");
+      composeTasksDumpWithWaiting("משימות:\n1. להזכיר לטל", ""),
+    ).toBe("משימות:\n1. להזכיר לטל");
   });
 
   it("filters tasks by urgency", () => {
@@ -3764,7 +3896,7 @@ describe("worker inventory tasks dump helpers", () => {
       now: new Date("2026-10-17T10:00:00.000Z"),
     })!;
     expect(text).toContain("✅ מעקבים של לוסי:");
-    expect(text).not.toContain("✅ מטלות:");
+    expect(text).not.toContain("✅ משימות:");
     expect(text).not.toContain("משותפות");
     expect(text).not.toContain("אישיות");
     expect(text).not.toContain("(לוסי)");
@@ -3774,7 +3906,7 @@ describe("worker inventory tasks dump helpers", () => {
       viewerName: "טל",
       now: new Date("2026-10-17T10:00:00.000Z"),
     })!;
-    expect(speaker).toContain("✅ מטלות:");
+    expect(speaker).toContain("✅ משימות:");
     expect(speaker).not.toContain("מעקבים של לוסי");
   });
 
@@ -4495,7 +4627,7 @@ describe("partner dump about_ids (birthday event)", () => {
       partner: "עמית",
       now,
     })!;
-    expect(text).toContain("✅ מטלות:");
+    expect(text).toContain("✅ משימות:");
     expect(text).toContain("יום ההולדת של עמית");
     expect(text).toContain("כל שנה ב־13.10");
     expect(text).toMatch(/\(קבוע\) 🔔 תזכורת:/);
@@ -4701,12 +4833,15 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       section: "tasks",
       title_stem: "לשלם לרופא",
     });
+    // Continuous dump numbering — reminders continue after tasks (no per-section reset).
     expect(remLine).toMatchObject({
-      n: 1,
+      n: 2,
       kind: "reminders",
       section: "reminders",
       title_stem: "לקנות חלב",
     });
+    expect(resolveDumpLineId(lines, 1)).toBe("task-1");
+    expect(resolveDumpLineId(lines, 2)).toBe("rem-1");
   });
 
   it("formats LAST_NUMBERED_DUMP context for model inject", () => {
@@ -4745,7 +4880,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         kind: "tasks" as const,
         title_stem: "פגישה",
       },
-      { n: 1, id: "rem-1", kind: "reminders" as const, section: "reminders", title_stem: "שעון" },
+      { n: 6, id: "rem-1", kind: "reminders" as const, section: "reminders", title_stem: "שעון" },
     ];
     // «שתף 4 עם עמית» → exact birthday id, never meeting (5) or bit (1).
     expect(resolveDumpLineId(lines, 4)).toBe(
@@ -4753,12 +4888,22 @@ describe("LAST_NUMBERED_DUMP line map", () => {
     );
     expect(resolveDumpLineId(lines, 99)).toBeNull();
     expect(resolveDumpLineId(lines, 0)).toBeNull();
-    // Ambiguous restart at 1 without section → null (do not guess).
-    expect(resolveDumpLineId(lines, 1)).toBeNull();
-    expect(resolveDumpLineId(lines, 1, "reminders")).toBe("rem-1");
+    // Unique continuous n → resolve without section.
+    expect(resolveDumpLineId(lines, 1)).toBe(
+      "8527b7ce-bcd5-48a8-a774-24b7b8f3c269",
+    );
+    expect(resolveDumpLineId(lines, 6)).toBe("rem-1");
+    expect(resolveDumpLineId(lines, 6, "reminders")).toBe("rem-1");
+    // Legacy duplicate-n maps still refuse ambiguous n without section.
+    const legacyRestart = [
+      ...lines.slice(0, 3),
+      { n: 1, id: "rem-legacy", kind: "reminders" as const, section: "reminders", title_stem: "שעון" },
+    ];
+    expect(resolveDumpLineId(legacyRestart, 1)).toBeNull();
+    expect(resolveDumpLineId(legacyRestart, 1, "reminders")).toBe("rem-legacy");
   });
 
-  it("day-agenda lines restart n per day with section=ymd", () => {
+  it("day-agenda lines use continuous n across days with section=ymd", () => {
     const now = new Date("2026-10-20T10:00:00+03:00");
     const snap: EmployeeRecordSnapshot = {
       lists: [
@@ -4793,12 +4938,172 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       now,
     });
     expect(text).toMatch(/1\. /);
-    expect(lines.filter((row) => row.n === 1)).toHaveLength(2);
+    expect(text).toMatch(/2\. /);
+    expect(lines.map((row) => row.n)).toEqual([1, 2]);
+    expect(lines.filter((row) => row.n === 1)).toHaveLength(1);
     expect(lines.map((row) => row.section).sort()).toEqual([
       "2026-10-21",
       "2026-10-22",
     ]);
     expect(lines.find((row) => row.section === "2026-10-22")?.id).toBe("d2");
+    expect(resolveDumpLineId(lines, 2)).toBe("d2");
+  });
+
+  describe("Phase B: global continuous dump numbering", () => {
+    it("ITEM DUMP stitches shopping then tasks with continuous n", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "shopping",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [{ item_id: "shop-a", "שם פריט": "חלב", כמות: 1 }],
+          } as EmployeeRecordSnapshot["lists"][number],
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [{ item_id: "task-b", "שם מטלה": "להתקשר" }],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const { text, lines } = formatShowDumpWithLineMap("full", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["shop-a", "task-b"]),
+      });
+      expect(text).toContain("1. חלב");
+      expect(text).toContain("2. להתקשר");
+      expect(lines.map((row) => ({ n: row.n, id: row.id, kind: row.kind }))).toEqual([
+        { n: 1, id: "shop-a", kind: "shopping" },
+        { n: 2, id: "task-b", kind: "tasks" },
+      ]);
+      expect(resolveDumpLineId(lines, 1)).toBe("shop-a");
+      expect(resolveDumpLineId(lines, 2)).toBe("task-b");
+    });
+
+    it("delete-by-number keeps the correct id when n crosses list kinds", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "shopping",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "shop-1", "שם פריט": "לחם", כמות: 1 },
+              { item_id: "shop-2", "שם פריט": "חמאה", כמות: 1 },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              { item_id: "task-1", "שם מטלה": "לשלם" },
+              { item_id: "task-2", "שם מטלה": "להתקשר" },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const { lines } = formatShowDumpWithLineMap("full", snap, {
+        viewerName: "טל",
+        itemIds: new Set(["shop-1", "shop-2", "task-1", "task-2"]),
+      });
+      expect(lines.map((row) => ({ n: row.n, id: row.id, kind: row.kind }))).toEqual([
+        { n: 1, id: "shop-1", kind: "shopping" },
+        { n: 2, id: "shop-2", kind: "shopping" },
+        { n: 3, id: "task-1", kind: "tasks" },
+        { n: 4, id: "task-2", kind: "tasks" },
+      ]);
+      // «מחק את 2» (shopping) then «מחק את 3» (tasks) — different lists, continuous n.
+      const idFor2 = resolveDumpLineId(lines, 2);
+      const idFor3 = resolveDumpLineId(lines, 3);
+      expect(idFor2).toBe("shop-2");
+      expect(idFor3).toBe("task-1");
+      expect(idFor3).not.toBe("shop-1");
+      const removeBoth: import("@workee/shared").LlmListAction[] = [
+        {
+          action: "remove",
+          listType: "shopping",
+          listName: "",
+          items: [{ item_id: idFor2! }],
+          targets: [],
+        },
+        {
+          action: "remove",
+          listType: "tasks",
+          listName: "",
+          items: [{ item_id: idFor3! }],
+          targets: [],
+        },
+      ];
+      const keep = restrictListMutatesToLastNumberedDump(removeBoth, lines);
+      expect(keep.droppedOutsideDump).toBe(false);
+      expect(keep.lists).toHaveLength(2);
+      expect(
+        (keep.lists[0]!.items![0] as { item_id: string }).item_id,
+      ).toBe("shop-2");
+      expect(
+        (keep.lists[1]!.items![0] as { item_id: string }).item_id,
+      ).toBe("task-1");
+    });
+
+    it("week agenda: delete by n after day boundary hits the later-day item", () => {
+      const now = new Date("2026-10-20T10:00:00+03:00");
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "mon",
+                "שם מטלה": "יום א",
+                "תאריך לביצוע": "2026-10-21",
+                "שעה לביצוע": "09:00",
+              },
+              {
+                item_id: "tue",
+                "שם מטלה": "יום ב",
+                "תאריך לביצוע": "2026-10-22",
+                "שעה לביצוע": "10:00",
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const { lines } = formatShowDumpWithLineMap("tasks", snap, {
+        viewerName: "טל",
+        dateFrom: "2026-10-21",
+        dateTo: "2026-10-22",
+        now,
+      });
+      const idFor2 = resolveDumpLineId(lines, 2);
+      expect(idFor2).toBe("tue");
+      const remove: import("@workee/shared").LlmListAction = {
+        action: "remove",
+        listType: "tasks",
+        listName: "",
+        items: [{ item_id: idFor2! }],
+        targets: [],
+      };
+      const guarded = restrictListMutatesToLastNumberedDump([remove], lines);
+      expect(guarded.droppedOutsideDump).toBe(false);
+      expect(
+        (guarded.lists[0]!.items![0] as { item_id: string }).item_id,
+      ).toBe("tue");
+    });
   });
 
   describe("undated-task disclosure on dated show_dump (Phase 3)", () => {
@@ -4820,10 +5125,10 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       );
       expect(formatUndatedTasksExcludedNote(0)).toBe("");
       expect(formatUndatedTasksExcludedNote(1)).toBe(
-        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+        "(שים לב: משימה כללית אחת לא נכללה בטווח.)",
       );
       expect(formatUndatedTasksExcludedNote(3)).toBe(
-        "(שים לב: 3 מטלות בלי תאריך לא נכללו בטווח.)",
+        "(שים לב: 3 משימות כלליות לא נכללו בטווח.)",
       );
     });
 
@@ -4896,13 +5201,13 @@ describe("LAST_NUMBERED_DUMP line map", () => {
 
       // 1) Seven genuine undated → count 7 for both day windows.
       expect(todayDump).toContain(
-        "(שים לב: 7 מטלות בלי תאריך לא נכללו בטווח.)",
+        "(שים לב: 7 משימות כלליות לא נכללו בטווח.)",
       );
       expect(tomorrowDump).toContain(
-        "(שים לב: 7 מטלות בלי תאריך לא נכללו בטווח.)",
+        "(שים לב: 7 משימות כלליות לא נכללו בטווח.)",
       );
-      expect(todayDump).not.toMatch(/9 מטלות בלי תאריך/);
-      expect(tomorrowDump).not.toMatch(/9 מטלות בלי תאריך/);
+      expect(todayDump).not.toMatch(/9 משימות כלליות/);
+      expect(tomorrowDump).not.toMatch(/9 משימות כלליות/);
 
       // 2) Empty-window recurrings are not added to the undated count.
       expect(tomorrowDump).not.toContain("חוזר רק ביום ראשון");
@@ -4917,7 +5222,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
 
       // 5) Dated outside the window is not counted as undated.
       expect(tomorrowDump).not.toContain("עם תאריך מחוץ לטווח");
-      expect(tomorrowDump).not.toMatch(/8 מטלות בלי תאריך/);
+      expect(tomorrowDump).not.toMatch(/8 משימות כלליות/);
     });
 
     it("dated dump with undated tasks discloses count; undated titles stay out of the agenda", () => {
@@ -4964,10 +5269,10 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(dump).not.toContain("לסדר מגירות");
       expect(dump).not.toContain("מחוץ לטווח עם תאריך");
       expect(dump).toContain(
-        "(שים לב: 2 מטלות בלי תאריך לא נכללו בטווח.)",
+        "(שים לב: 2 משימות כלליות לא נכללו בטווח.)",
       );
       // Dated-out-of-range is not undated — count stays 2.
-      expect(dump).not.toMatch(/3 מטלות בלי תאריך/);
+      expect(dump).not.toMatch(/3 משימות כלליות/);
     });
 
     it("dated dump with no undated tasks omits the disclosure note", () => {
@@ -5029,9 +5334,9 @@ describe("LAST_NUMBERED_DUMP line map", () => {
         dateFrom: "2026-10-17",
         dateTo: "2026-10-20",
       })!;
-      expect(dump).toContain("אין מטלות בטווח התאריכים.");
+      expect(dump).toContain("אין משימות בטווח התאריכים.");
       expect(dump).toContain(
-        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+        "(שים לב: משימה כללית אחת לא נכללה בטווח.)",
       );
       expect(dump).not.toContain("בלי תאריך בכלל");
     });
@@ -5083,7 +5388,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       })!;
       expect(personal).toContain("אישית בטווח");
       expect(personal).toContain(
-        "(שים לב: מטלה אחת בלי תאריך לא נכללה בטווח.)",
+        "(שים לב: משימה כללית אחת לא נכללה בטווח.)",
       );
       expect(personal).not.toContain("משותפת בלי תאריך");
       expect(personal).not.toContain("אישית בלי תאריך");
@@ -5141,6 +5446,51 @@ describe("LAST_NUMBERED_DUMP line map", () => {
           { viewerName: "טל" },
         ),
       ).toBe(0);
+    });
+
+    it("dateScope=undated dumps only משימות כלליות under that header", () => {
+      const snap: EmployeeRecordSnapshot = {
+        lists: [
+          {
+            list_type: "tasks",
+            list_name: "",
+            owner: "טל",
+            scope: "personal",
+            items: [
+              {
+                item_id: "u1",
+                "שם מטלה": "לקנות מתנה",
+              },
+              {
+                item_id: "d1",
+                "שם מטלה": "פגישה מחר",
+                "תאריך לביצוע": "2026-10-19",
+              },
+              {
+                item_id: "r1",
+                "שם מטלה": "חוזר בלי תאריך עוגן",
+                next_occurrences: [] as string[],
+              },
+            ],
+          } as EmployeeRecordSnapshot["lists"][number],
+        ],
+        filing: [],
+        reminders: [],
+      };
+      const dump = formatShowDumpFromKind("tasks", snap, {
+        viewerName: "טל",
+        dateScope: "undated",
+        // Range must be ignored when undated scope wins.
+        dateFrom: "2026-10-18",
+        dateTo: "2026-10-20",
+      })!;
+      expect(dump).toMatch(/משימות כלליות/);
+      expect(dump).toContain("לקנות מתנה");
+      expect(dump).not.toContain("פגישה מחר");
+      expect(dump).not.toContain("חוזר בלי תאריך עוגן");
+      expect(dump).not.toContain("לא נכללה בטווח");
+      expect(dump).not.toContain("לא נכללו בטווח");
+      expect(dump).not.toMatch(/^\s*משימות:/m);
     });
 
     it("shopping dump ignores date bounds and never discloses undated-task note", () => {
@@ -5254,7 +5604,7 @@ describe("LAST_NUMBERED_DUMP line map", () => {
       expect(dump).not.toContain("בלי תאריך בכלל");
       // Impossible YMD counts as undated for exclusion disclosure.
       expect(dump).toContain(
-        "(שים לב: 2 מטלות בלי תאריך לא נכללו בטווח.)",
+        "(שים לב: 2 משימות כלליות לא נכללו בטווח.)",
       );
     });
 

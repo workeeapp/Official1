@@ -13,22 +13,30 @@ export const BUILTIN_LIST_TYPES = [
 
 const BUILTIN_LIST_HEBREW: Record<BuiltinListType, string> = {
   shopping: "קניות",
-  tasks: "מטלות",
+  tasks: "משימות",
   contacts: "אנשי קשר",
 };
+
+/** Legacy user-facing Hebrew for tasks (still accepted on resolve). */
+export const TASKS_HEBREW_LEGACY = "מטלות";
 
 /** Noun used in «כל ה…» labels (with definite article where natural). */
 const BUILTIN_ALL_NOUN: Record<BuiltinListType, string> = {
   shopping: "הקניות",
-  tasks: "המטלות",
+  tasks: "המשימות",
   contacts: "אנשי הקשר",
+};
+
+/** Legacy «כל המטלות» still accepted. */
+const BUILTIN_ALL_NOUN_LEGACY: Partial<Record<BuiltinListType, string>> = {
+  tasks: "המטלות",
 };
 
 export const SHOW_REMINDERS_COMMAND = "הצג תזכורות";
 export const SHOW_FILINGS_COMMAND = "הצג תיוקים";
 export const SHOW_LIST_PREFIX = "הצג רשימת ";
 export const SHOW_FILINGS_ALL_COMMAND = "כל התיוקים";
-/** Full overview («מה יש לי» / SHOW MY LISTS) — list-shell post-mutate nav. */
+/** Full overview («הצג רשימות» / SHOW MY LISTS) — list-shell post-mutate nav. */
 export const SHOW_LISTS_COMMAND = "הצג רשימות";
 
 export function isBuiltinListType(value: string): value is BuiltinListType {
@@ -48,6 +56,9 @@ export function builtinListTypeFromHebrew(
     if (BUILTIN_LIST_HEBREW[listType] === trimmed) {
       return listType;
     }
+  }
+  if (trimmed === TASKS_HEBREW_LEGACY) {
+    return "tasks";
   }
   return null;
 }
@@ -69,7 +80,7 @@ export function showListButtonCommand(
 /** Opaque UI button → digital-worker tasks inventory (show_dump_about). */
 export function showWorkerTasksButtonCommand(workerDisplayName: string): string {
   const name = workerDisplayName.trim();
-  return name ? `הצג מטלות של ${name}` : "";
+  return name ? `הצג משימות של ${name}` : "";
 }
 
 /** «כל ה…» alias for unfiltered dump (same kind as הצג רשימת …). */
@@ -145,10 +156,13 @@ export function staticShowButtonDumpMap(): Readonly<Record<string, string>> {
     [SHOW_LISTS_COMMAND]: "full",
     [showListButtonCommand("shopping")]: "shopping",
     [showListButtonCommand("tasks")]: "tasks",
+    // Legacy tasks label — keep old WhatsApp buttons working.
+    [`${SHOW_LIST_PREFIX}${TASKS_HEBREW_LEGACY}`]: "tasks",
     // Contacts v2: button dumps canonical SPEAKER_CONTACTS (phone_book), not lists.contacts.
     [showListButtonCommand("contacts")]: "phone_book",
     [showAllListButtonCommand("shopping")]: "shopping",
     [showAllListButtonCommand("tasks")]: "tasks",
+    [`כל ${BUILTIN_ALL_NOUN_LEGACY.tasks}`]: "tasks",
     [showAllListButtonCommand("contacts")]: "phone_book",
   };
 }

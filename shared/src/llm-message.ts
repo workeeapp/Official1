@@ -532,6 +532,11 @@ export interface LlmMetadata {
   /** Inclusive dump date filter end YYYY-MM-DD (Asia/Jerusalem). */
   showDumpTo?: string | null;
   /**
+   * Tasks date-scope: `undated` = מטלות כלליות (no calendar date, no recurrence).
+   * Wins over showDumpFrom/To.
+   */
+  showDumpDateScope?: "undated" | null;
+  /**
    * Urgency dump filter: urgent = urgent|very_urgent; very_urgent = only that.
    */
   showDumpUrgency?: "urgent" | "very_urgent" | null;
@@ -1300,6 +1305,8 @@ export function flightsClockHmToMinutes(hm: string): number {
 export type LlmShowDumpSection = "personal" | "shared";
 export type LlmShowDumpUrgency = "urgent" | "very_urgent";
 
+export type LlmShowDumpDateScope = "undated";
+
 const LIST_ACTIONS = new Set<LlmListActionName>(["add", "remove", "update"]);
 const LIST_TYPES = new Set<LlmListType>(["shopping", "contacts", "tasks", "custom"]);
 const FILING_ACTIONS = new Set<LlmFilingActionName>([
@@ -1396,6 +1403,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   );
   const showDumpFrom = parseShowDumpDate(meta, "show_dump_from", "showDumpFrom");
   const showDumpTo = parseShowDumpDate(meta, "show_dump_to", "showDumpTo");
+  const showDumpDateScope = parseShowDumpDateScope(meta);
   const showDumpUrgency = parseShowDumpUrgency(meta);
   const showDumpIdsRaw = meta.show_dump_ids ?? meta.showDumpIds;
   /** Explicit array/string (incl. []) = ITEM DUMP; null/absent = full category dump. */
@@ -1453,6 +1461,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
       : {}),
     ...(showDumpFrom ? { showDumpFrom } : {}),
     ...(showDumpTo ? { showDumpTo } : {}),
+    ...(showDumpDateScope ? { showDumpDateScope } : {}),
     ...(showDumpUrgency ? { showDumpUrgency } : {}),
     ...(showDumpIdsRequested
       ? {
@@ -1621,6 +1630,18 @@ export function parseShowDumpUrgency(
     return trimmed;
   }
   return null;
+}
+
+/** metadata.show_dump_date_scope — undated = מטלות כלליות. */
+export function parseShowDumpDateScope(
+  meta: Record<string, unknown>,
+): LlmShowDumpDateScope | null {
+  const raw = meta.show_dump_date_scope ?? meta.showDumpDateScope;
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed === "undated" ? "undated" : null;
 }
 
 const SHOW_DUMP_ID_MAX = 80;

@@ -2087,7 +2087,13 @@ export async function getEmployeeRecordSnapshot(
     owner
       ? prisma.employee.findMany({
           where: { userId: owner.userId },
-          select: { id: true, name: true, nickname: true, surname: true },
+          select: {
+            id: true,
+            name: true,
+            nickname: true,
+            surname: true,
+            kind: true,
+          },
         })
       : Promise.resolve([]),
   ]);
@@ -2137,10 +2143,21 @@ export async function getEmployeeRecordSnapshot(
     missingNameIds.size > 0
       ? await prisma.employee.findMany({
           where: { id: { in: [...missingNameIds] } },
-          select: { id: true, name: true, nickname: true, surname: true },
+          select: {
+            id: true,
+            name: true,
+            nickname: true,
+            surname: true,
+            kind: true,
+          },
         })
       : [];
   const allPeople = [...people, ...extraPeople];
+  const digitalOwnerIds = new Set(
+    allPeople
+      .filter((person) => person.kind === "digital")
+      .map((person) => person.id),
+  );
 
   const workerViewerId = viewerScope ? options?.scopeItemsToViewerId : undefined;
   const workerReminderLinks = workerViewerId
@@ -2448,7 +2465,14 @@ export async function getEmployeeRecordSnapshot(
             return row.ownerId === employeeId || pings.includes(employeeId);
           })
           .filter((row) => row.status === "active")
-          .map((row) => toReminderSnapshotRow(row, names, occurrenceRange)),
+          .map((row) =>
+            toReminderSnapshotRow(
+              row,
+              names,
+              occurrenceRange,
+              digitalOwnerIds,
+            ),
+          ),
   };
 
   // Registered member: also inject host shared lists via the share mirror.

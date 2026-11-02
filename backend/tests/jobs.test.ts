@@ -70,6 +70,7 @@ import {
   sweepJobNudgesForRemovedItems,
   type OpenJobRow,
 } from "../src/services/jobs.service.js";
+import { composeTasksDumpWithWaiting } from "../src/services/show-button-dump.js";
 import { JOB_META_KEY, jobMetaFrom, stripJobMeta } from "../src/services/job-meta.js";
 
 const AMIT = "amit-id";
@@ -156,10 +157,10 @@ describe("open jobs context", () => {
 
   it("formats ממתינים dump for asker, subject, and self-job", () => {
     expect(formatOpenJobsWaitingDump([jobRow()], AMIT)).toBe(
-      ["ממתינים לתשובה:", "1. לבדוק עם ערן: אם קנית חלב?"].join("\n"),
+      ["ממתינים לתשובה:", "• לבדוק עם ערן: אם קנית חלב?"].join("\n"),
     );
     expect(formatOpenJobsWaitingDump([jobRow()], ERAN)).toBe(
-      ["ממתינים לתשובה:", "1. עמית ביקש ממני אם קנית חלב?"].join("\n"),
+      ["ממתינים לתשובה:", "• עמית ביקש ממני אם קנית חלב?"].join("\n"),
     );
     expect(
       formatOpenJobsWaitingDump(
@@ -177,10 +178,34 @@ describe("open jobs context", () => {
     ).toBe(
       [
         "ממתינים לתשובה:",
-        "1. לבדוק איתך אם קנית שוקו? (מתוזמן — עדיין לא להיום)",
+        "• לבדוק איתך אם קנית שוקו? (מתוזמן — עדיין לא להיום)",
       ].join("\n"),
     );
     expect(formatOpenJobsWaitingDump([], AMIT)).toBe("");
+  });
+
+  it("worker inventory: ממתינים are unnumbered so tasks dump indices stay unique", () => {
+    const waiting = formatOpenJobsWaitingDump(
+      [jobRow(), jobRow({ ask: "אם שלחת הודעה?" })],
+      AMIT,
+    );
+    expect(waiting).toContain("ממתינים לתשובה:");
+    expect(waiting).toContain("• לבדוק עם ערן: אם קנית חלב?");
+    expect(waiting).toContain("• לבדוק עם ערן: אם שלחת הודעה?");
+    // No dump-style line numbers in the waiting block.
+    expect(waiting.split("\n").slice(1).every((line) => !/^\d+\.\s/.test(line))).toBe(
+      true,
+    );
+    const stitched = composeTasksDumpWithWaiting(
+      "משימות:\n1. להזכיר לטל\n2. לבדוק מחר",
+      waiting,
+    );
+    expect(stitched).toContain("1. להזכיר לטל");
+    expect(stitched).toContain("2. לבדוק מחר");
+    expect(stitched).toContain("• לבדוק עם ערן: אם קנית חלב?");
+    // Only the tasks block may use dump indices — waiting must not reintroduce 1./2.
+    const afterWaitingHeader = (stitched ?? "").split("ממתינים לתשובה:")[1] ?? "";
+    expect(afterWaitingHeader).not.toMatch(/^\s*\d+\.\s/m);
   });
 
   it("marks a scheduled job as not raisable and stays empty with no jobs", () => {

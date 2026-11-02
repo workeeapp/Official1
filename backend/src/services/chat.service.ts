@@ -201,6 +201,7 @@ import {
   navigateAddressFromFilingsDump,
   resolveShowDumpKind,
   restrictListMutatesToLastNumberedDump,
+  type DumpNumbering,
   type LastNumberedDumpLine,
 } from "./show-button-dump.js";
 import {
@@ -3508,8 +3509,10 @@ export async function sendChatMessage(input: {
         ),
       ];
       const aboutNames = showDumpNames(metadata.showDumpAbout);
+      const undatedDateScope = metadata.showDumpDateScope === "undated";
       const dumpOccurrenceRange =
-        metadata.showDumpFrom?.trim() || metadata.showDumpTo?.trim()
+        !undatedDateScope &&
+        (metadata.showDumpFrom?.trim() || metadata.showDumpTo?.trim())
           ? {
               from: metadata.showDumpFrom ?? null,
               to: metadata.showDumpTo ?? null,
@@ -3542,8 +3545,9 @@ export async function sendChatMessage(input: {
         partner: dumpPartner,
         assignee: dumpAssignee,
         assigneeSelfNames: speakerAliases,
-        dateFrom: metadata.showDumpFrom ?? null,
-        dateTo: metadata.showDumpTo ?? null,
+        dateFrom: undatedDateScope ? null : (metadata.showDumpFrom ?? null),
+        dateTo: undatedDateScope ? null : (metadata.showDumpTo ?? null),
+        ...(undatedDateScope ? { dateScope: "undated" as const } : {}),
         urgency: metadata.showDumpUrgency ?? null,
         collaboration: dumpCollaboration,
               };
@@ -3589,7 +3593,11 @@ export async function sendChatMessage(input: {
           assigned_by?: string;
           owner?: string;
         }>,
-        extraOpts?: { flatLayout?: boolean; omitEmptySentence?: boolean },
+        extraOpts?: {
+          flatLayout?: boolean;
+          omitEmptySentence?: boolean;
+          numbering?: DumpNumbering;
+        },
       ): Promise<{
         text: string | null;
         lines: LastNumberedDumpLine[];
@@ -3602,6 +3610,7 @@ export async function sendChatMessage(input: {
           flatLayout?: boolean;
           omitEmptySentence?: boolean;
           itemIds?: Set<string>;
+          numbering?: DumpNumbering;
         };
       }> => {
         // Drop unknown ids against THIS snapshot ? never fall back to unfiltered full.
@@ -3619,6 +3628,7 @@ export async function sendChatMessage(input: {
           ...(extraOpts?.omitEmptySentence
             ? { omitEmptySentence: true }
             : {}),
+          ...(extraOpts?.numbering ? { numbering: extraOpts.numbering } : {}),
           ...(itemDumpRequested
             ? { itemIds: new Set(validIds), omitEmptySentence: true }
             : {}),
@@ -3708,6 +3718,8 @@ export async function sendChatMessage(input: {
           validId: string;
           titleStem: string;
         } | null = null;
+        // One continuous counter across every about-subject block in this dump.
+        const turnDumpNumbering: DumpNumbering = { next: 1 };
 
         for (const aboutRaw of aboutNames) {
           const aboutPerson = matchEmployee(aboutRaw, employees);
@@ -3780,6 +3792,7 @@ export async function sendChatMessage(input: {
                 ? { flatLayout: true }
                 : {}),
               ...(inventoryTasks ? { omitEmptySentence: true } : {}),
+              numbering: turnDumpNumbering,
             },
           );
           const sectionPrefix =

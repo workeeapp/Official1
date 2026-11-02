@@ -848,6 +848,31 @@ describe("parseLlmReply", () => {
     expect(bad.showDumpUrgency).toBeUndefined();
   });
 
+  it("reads show_dump_date_scope undated", () => {
+    const meta = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_date_scope: "undated",
+        },
+      }),
+    );
+    expect(meta.showDumpDateScope).toBe("undated");
+    const bad = parseReplyMetadata(
+      JSON.stringify({
+        responses: ["..."],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_date_scope: "dated",
+        },
+      }),
+    );
+    expect(bad.showDumpDateScope).toBeUndefined();
+  });
+
   it("reads show_dump_ids (single, many, empty array; null = full dump)", () => {
     const one = parseReplyMetadata(
       JSON.stringify({

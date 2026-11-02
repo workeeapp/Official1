@@ -1818,13 +1818,14 @@ export function isEngineOwnedListNavButton(button: LlmReplyButton): boolean {
     return true;
   }
   if (
-    /^הצג (קניות|מטלות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
-    /^כל (הקניות|המטלות|אנשי הקשר|התיוקים)$/u.test(cmd)
+    /^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים) (משותפ|באחריות)/u.test(cmd) ||
+    /^כל (הקניות|המשימות|המטלות|אנשי הקשר|התיוקים)$/u.test(cmd)
   ) {
     return true;
   }
   if (
     label === "הצג קניות" ||
+    label === "הצג משימות" ||
     label === "הצג מטלות" ||
     label === "הצג אנשי קשר" ||
     label === "הצג רשימה" ||
@@ -2044,7 +2045,7 @@ function plainButtonForListKey(listKey: string): LlmReplyButton | null {
   }
   if (listKey === "tasks") {
     return {
-      label: "הצג מטלות",
+      label: "הצג משימות",
       command: showListButtonCommand("tasks"),
     };
   }
@@ -2125,14 +2126,14 @@ export function parseFixedListNavButton(
   }
 
   const allMatch = cmd.match(
-    /^כל (הקניות|המטלות|אנשי הקשר|התיוקים)$/u,
+    /^כל (הקניות|המשימות|המטלות|אנשי הקשר|התיוקים)$/u,
   );
   if (allMatch) {
     const noun = allMatch[1]!;
     const listKey =
       noun === "הקניות"
         ? "shopping"
-        : noun === "המטלות"
+        : noun === "המשימות" || noun === "המטלות"
           ? "tasks"
           : noun === "אנשי הקשר"
             ? "contacts"
@@ -2145,7 +2146,7 @@ export function parseFixedListNavButton(
   }
 
   const builtinCollab = cmd.match(
-    /^הצג (קניות|מטלות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
+    /^הצג (קניות|משימות|מטלות|אנשי קשר|תיוקים) (משותפות עם|באחריות) (.+)$/u,
   );
   if (builtinCollab) {
     const listKey = listKeyFromShowName(builtinCollab[1]!);
@@ -2436,7 +2437,7 @@ export function ensureSpeakerShowButtons(
         continue;
       }
       buttons.push({
-        label: fitNavButtonLabel(button.label.trim() || "המטלות שלך"),
+        label: fitNavButtonLabel(button.label.trim() || "המשימות שלך"),
         command: workerCmd,
       });
       coveredListKeys.add(workerInventoryListKey(workerCmd));
@@ -2547,7 +2548,7 @@ function workerOnlyTasksDisplayName(
 
 function workerInventoryButton(workerDisplayName: string): LlmReplyButton {
   return {
-    label: fitNavButtonLabel("המטלות שלך"),
+    label: fitNavButtonLabel("המשימות שלך"),
     command: showWorkerTasksButtonCommand(workerDisplayName),
   };
 }
@@ -2556,7 +2557,7 @@ function workerInventoryListKey(command: string): string {
   return `tasks:worker:${command}`;
 }
 
-/** Normalize model «הצג מטלות של X» / aliases to the opaque allowlist command. */
+/** Normalize model «הצג משימות של X» / legacy «הצג מטלות של X» to opaque command. */
 function workerInventoryCommandIfMatch(
   command: string,
   workerNames: string[],
@@ -2566,7 +2567,7 @@ function workerInventoryCommandIfMatch(
     return null;
   }
   const trimmed = command.trim().replace(/\s+/gu, " ");
-  const aboutMatch = trimmed.match(/^הצג מטלות של (.+)$/u);
+  const aboutMatch = trimmed.match(/^הצג (?:משימות|מטלות) של (.+)$/u);
   if (!aboutMatch?.[1]) {
     return null;
   }
@@ -3044,7 +3045,7 @@ export function fallbackNotificationText(
       (list.listType === "shopping"
         ? "קניות"
         : list.listType === "tasks"
-          ? "מטלות"
+          ? "משימות"
           : "רשימה");
     const openingSharedList =
       list.listType === "custom" && isOpeningCustomList(list);

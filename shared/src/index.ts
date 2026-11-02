@@ -321,6 +321,7 @@ export type {
   LlmMetadata,
   LlmShowDumpSection,
   LlmShowDumpUrgency,
+  LlmShowDumpDateScope,
   LlmReminderAction,
   LlmReminderActionName,
   LlmReminderRepeat,

@@ -70,6 +70,12 @@ export interface ReminderSnapshotRow {
   about?: string[];
   about_ids?: string[];
   owner: string;
+  /** Opaque Employees.id of the clock owner (for digital-worker agenda filtering). */
+  owner_id?: string;
+  /** True when owner employee kind is digital. */
+  owner_is_digital?: boolean;
+  /** Linked digital-worker task row id when this clock is a worker follow-up. */
+  worker_item_id?: string | null;
   text: string;
   /** Final WhatsApp body from the last compose-at-fire (empty when fixed copy). */
   last_composed_text: string;
@@ -2568,13 +2574,18 @@ export async function listVisibleReminders(
 ): Promise<ReminderSnapshotRow[]> {
   const rows = await listReminderRowsForUser(userId);
   const names = new Map(employees.map((employee) => [employee.id, displayName(employee)]));
+  const digitalOwnerIds = new Set(
+    employees
+      .filter((employee) => employee.kind === "digital")
+      .map((employee) => employee.id),
+  );
 
   return rows
     .filter((row) => {
       const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
       return row.ownerId === employeeId || pings.includes(employeeId);
     })
-    .map((row) => toReminderSnapshotRow(row, names));
+    .map((row) => toReminderSnapshotRow(row, names, null, digitalOwnerIds));
 }
 
 export function toReminderSnapshotRow(
@@ -2589,6 +2600,7 @@ export function toReminderSnapshotRow(
     pingIds: unknown;
     aboutIds?: unknown;
     ownerId: string;
+    workerItemId?: string | null;
     messageText: string;
     composeAtFire?: boolean;
     composeSource?: string;
@@ -2605,6 +2617,7 @@ export function toReminderSnapshotRow(
   },
   names: Map<string, string>,
   occurrenceRange?: ReminderOccurrenceRange | null,
+  digitalOwnerIds?: ReadonlySet<string> | null,
 ): ReminderSnapshotRow {
   const pings = Array.isArray(row.pingIds) ? row.pingIds.map(String) : [];
   const abouts = Array.isArray(row.aboutIds) ? row.aboutIds.map(String) : [];
@@ -2628,6 +2641,9 @@ export function toReminderSnapshotRow(
     row.composeLookbackHours > 0
       ? row.composeLookbackHours
       : 0;
+  const ownerId = String(row.ownerId ?? "").trim();
+  const workerItemId =
+    typeof row.workerItemId === "string" ? row.workerItemId.trim() : "";
   return {
     reminder_id: row.id,
     item: row.itemLabel,
@@ -2639,6 +2655,9 @@ export function toReminderSnapshotRow(
     about: abouts.map((id) => names.get(id) ?? id),
     about_ids: abouts,
     owner: names.get(row.ownerId) ?? row.ownerId,
+    ...(ownerId ? { owner_id: ownerId } : {}),
+    ...(digitalOwnerIds?.has(ownerId) ? { owner_is_digital: true } : {}),
+    ...(workerItemId ? { worker_item_id: workerItemId } : {}),
     text,
     last_composed_text: lastComposed,
     sent_text: lastComposed || text,

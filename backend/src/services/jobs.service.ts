@@ -1051,6 +1051,7 @@ function urgencyFields(job: OpenJobRow, clock: string | null): Record<string, un
 /**
  * Spoken ממתינים block for worker inventory (after tasks dump).
  * Phrasing matches OPEN_JOBS inventory rules for this viewer.
+ * Bullets only — never numbered (tasks dump owns dump indices / LAST_NUMBERED_DUMP).
  */
 export function formatOpenJobsWaitingDump(
   jobs: OpenJobRow[],
@@ -1059,7 +1060,7 @@ export function formatOpenJobsWaitingDump(
   if (jobs.length === 0) {
     return "";
   }
-  const lines = jobs.map((job, index) => {
+  const lines = jobs.map((job) => {
     const ask = job.meta.ask.trim();
     const scheduled = Boolean(job.meta.pendingActivation);
     const selfJob = job.meta.askerId === job.meta.subjectId;
@@ -1080,7 +1081,7 @@ export function formatOpenJobsWaitingDump(
         : job.label;
     }
     const suffix = scheduled ? " (מתוזמן — עדיין לא להיום)" : "";
-    return `${index + 1}. ${title}${suffix}`;
+    return `• ${title}${suffix}`;
   });
   return ["ממתינים לתשובה:", ...lines].join("\n");
 }
