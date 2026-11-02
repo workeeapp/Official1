@@ -2762,6 +2762,8 @@ export interface FilingMutation {
   itemName: string;
   itemInfo: string;
   itemDescription: string;
+  /** Persisted filing row id — pairs ApplyResult requested↔applied by id. */
+  filingId?: string;
   /** True when the row landed/stayed shared (co-share or assign audience). */
   shared?: boolean;
 }
@@ -2859,6 +2861,7 @@ export async function applyEmployeeRecords(
         itemName: existing.itemName,
         itemInfo: existing.itemInfo,
         itemDescription: existing.itemDescription ?? "",
+        filingId: existing.id,
       });
       if (filingOwner) {
         await recordAuditEvent({
@@ -2914,6 +2917,7 @@ export async function applyEmployeeRecords(
           itemName: existingFiling.itemName,
           itemInfo: existingFiling.itemInfo,
           itemDescription: existingFiling.itemDescription ?? "",
+          filingId: existingFiling.id,
         });
         continue;
       }
@@ -2988,6 +2992,7 @@ export async function applyEmployeeRecords(
         itemDescription: fieldsOnly
           ? existingFiling.itemDescription ?? ""
           : nextDescription,
+        filingId: existingFiling.id,
         ...(shareFiling ? { shared: true } : {}),
       });
       if (!fieldsOnly) {
@@ -3045,6 +3050,7 @@ export async function applyEmployeeRecords(
         itemName,
         itemInfo: action.itemInfo,
         itemDescription,
+        filingId: created.id,
         ...(shareFiling ? { shared: true } : {}),
       });
       await syncSpeakerAddressGenderFromFiling({

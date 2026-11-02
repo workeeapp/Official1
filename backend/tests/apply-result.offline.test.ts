@@ -226,6 +226,7 @@ describe("buildApplyResult accounting", () => {
           itemName: "בלו",
           itemInfo: "משקה אנרגיה",
           itemDescription: "",
+          filingId: "f-blo-1",
         },
       ],
     });
@@ -234,10 +235,43 @@ describe("buildApplyResult accounting", () => {
       {
         domain: "filing",
         op: "add_filing",
+        id: "f-blo-1",
         label: "בלו",
         listType: "filing",
+        listName: "תיוקים",
       },
     ]);
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("successful filing remove with filing_id is complete (not unknown)", () => {
+    const filingId = "c39f123f-a813-417c-9b8a-97942baded6a";
+    const requested = captureRequestedFromMetadata({
+      filing: [
+        {
+          action: "remove_filing",
+          filingId,
+          itemName: "",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      filingMutations: [
+        {
+          action: "remove",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+          filingId,
+        },
+      ],
+    });
+    expect(result.domains.filing?.completeness).toBe("complete");
+    expect(result.domains.filing?.applied[0]?.id).toBe(filingId);
     expect(result.completeness).toBe("complete");
   });
 

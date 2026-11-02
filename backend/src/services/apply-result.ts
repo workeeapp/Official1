@@ -736,8 +736,10 @@ export function buildApplyResult(input: {
           : row.action === "update"
             ? "update_filing"
             : "remove_filing",
+      id: row.filingId?.trim() || undefined,
       label: row.itemName,
       listType: "filing",
+      listName: "תיוקים",
     }));
     const intent_misses = stripMisses.filter((miss) => miss.domain === "filing");
     const unclassified_drops = unclassifiedStrip.filter(

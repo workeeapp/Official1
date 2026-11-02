@@ -271,6 +271,52 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).toMatch(/לא הצלחתי לאמת/);
   });
 
+  it("regression מחק 2: successful filing remove keeps success, no unknown caution", () => {
+    const filingId = "c39f123f-a813-417c-9b8a-97942baded6a";
+    const requested = captureRequestedFromMetadata({
+      filing: [
+        {
+          action: "remove_filing",
+          filingId,
+          itemName: "",
+          itemInfo: "",
+          itemDescription: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      filingMutations: [
+        {
+          action: "remove",
+          itemName: "בלו",
+          itemInfo: "משקה אנרגיה",
+          itemDescription: "",
+          filingId,
+        },
+      ],
+    });
+    expect(result.completeness).toBe("complete");
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("מחקתי את בלו מהתיוקים."),
+    });
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("מחקתי את בלו מהתיוקים.");
+    expect(decided.spoken).not.toMatch(/לא הצלחתי לאמת/);
+
+    // Mismatched add claim → Result-B formats from applied (filing wording, not «הרשימה»).
+    const replaced = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הוספתי את בלו לרשימה."),
+    });
+    expect(replaced.keepDraft).toBe(false);
+    expect(replaced.spoken).toContain("הסרתי את התיוק «בלו»");
+    expect(replaced.spoken).not.toContain("הרשימה");
+    expect(replaced.spoken).not.toMatch(/לא הצלחתי לאמת/);
+  });
+
   it("successful id-less lists.add: complete — no unknown caution", () => {
     const requested = captureRequestedFromMetadata({
       lists: [

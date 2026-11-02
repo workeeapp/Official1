@@ -224,28 +224,43 @@ function formatAppliedLines(applied: AppliedOp[]): string[] {
   );
 
   if (removes.length === 1 && removes[0]?.label) {
-    const list =
-      removes[0].listName?.trim() ||
-      (removes[0].listType === "shopping"
-        ? "קניות"
-        : removes[0].listType === "tasks"
-          ? "משימות"
-          : "הרשימה");
-    lines.push(`הסרתי את «${removes[0].label}» מרשימת «${list}».`);
+    if (removes[0].listType === "filing" || removes[0].op === "remove_filing") {
+      lines.push(`הסרתי את התיוק «${removes[0].label}».`);
+    } else {
+      const list =
+        removes[0].listName?.trim() ||
+        (removes[0].listType === "shopping"
+          ? "קניות"
+          : removes[0].listType === "tasks"
+            ? "משימות"
+            : "הרשימה");
+      lines.push(`הסרתי את «${removes[0].label}» מרשימת «${list}».`);
+    }
   } else if (removes.length > 1) {
     lines.push(`הסרתי ${removes.length} פריטים.`);
   }
 
   if (adds.length === 1 && adds[0]?.label) {
-    const list = adds[0].listName?.trim() || "הרשימה";
-    lines.push(`הוספתי את «${adds[0].label}» לרשימת «${list}».`);
+    if (adds[0].listType === "filing" || adds[0].op === "add_filing") {
+      lines.push(`תייקתי את «${adds[0].label}».`);
+    } else {
+      const list = adds[0].listName?.trim() || "הרשימה";
+      lines.push(`הוספתי את «${adds[0].label}» לרשימת «${list}».`);
+    }
   } else if (adds.length > 1) {
     lines.push(`הוספתי ${adds.length} פריטים.`);
   }
 
   if (updates.length === 1 && updates[0]?.label) {
-    const list = updates[0].listName?.trim() || "הרשימה";
-    lines.push(`עדכנתי את «${updates[0].label}» ברשימת «${list}».`);
+    if (
+      updates[0].listType === "filing" ||
+      updates[0].op === "update_filing"
+    ) {
+      lines.push(`עדכנתי את התיוק «${updates[0].label}».`);
+    } else {
+      const list = updates[0].listName?.trim() || "הרשימה";
+      lines.push(`עדכנתי את «${updates[0].label}» ברשימת «${list}».`);
+    }
   } else if (updates.length > 1) {
     lines.push(`עדכנתי ${updates.length} פריטים.`);
   }
