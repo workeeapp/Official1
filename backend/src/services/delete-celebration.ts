@@ -196,37 +196,96 @@ function fitComicFontSize(
   return size;
 }
 
+/** Classic comic lettering: shout bubble + multi-stroke fill (POW-style). */
 function comicTextBlock(input: {
   lines: string[];
   cx: number;
   baselineY: number;
   fontSize: number;
   fill: string;
-  outerStroke: string;
-  innerStroke: string;
-  outerWidth: number;
-  innerWidth: number;
+  bubbleFill: string;
   rotateDeg: number;
   fontFamily: string;
+  /** Shout bubble points up toward the hero; caption plate has no tail. */
+  kind: "shout" | "caption";
+  canvasWidth: number;
 }): string {
-  const lineH = Math.round(input.fontSize * 1.12);
+  const lineH = Math.round(input.fontSize * 1.18);
+  const longest = Math.max(1, ...input.lines.map((l) => l.length));
+  const textW = Math.min(
+    input.canvasWidth * 0.86,
+    longest * input.fontSize * 0.78,
+  );
+  const padX = Math.round(input.fontSize * 0.55);
+  const padY = Math.round(input.fontSize * 0.42);
+  const boxW = Math.min(
+    input.canvasWidth * 0.9,
+    Math.max(textW + padX * 2, input.fontSize * 4),
+  );
+  const textBlockH = input.lines.length * lineH;
+  const boxH = textBlockH + padY * 2;
+  const boxX = input.cx - boxW / 2;
+  const boxY = input.baselineY - boxH / 2;
+  const r = Math.round(Math.min(boxH * 0.28, input.fontSize * 0.55));
+  const border = Math.max(4, Math.round(input.fontSize * 0.12));
+  const shadowDx = Math.round(input.fontSize * 0.08);
+  const shadowDy = Math.round(input.fontSize * 0.1);
+
+  // Soft rectangle shadow under the bubble (hard comic offset).
+  const shadowRect = `<rect x="${boxX + shadowDx}" y="${boxY + shadowDy}" width="${boxW}" height="${boxH}" rx="${r}" ry="${r}" fill="#111111" opacity="0.85"/>`;
+  const plate = `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${r}" ry="${r}" fill="${input.bubbleFill}" stroke="#111111" stroke-width="${border}"/>`;
+
+  let tail = "";
+  if (input.kind === "shout") {
+    // Pointy shout-tail toward the character above the plate.
+    const mid = input.cx;
+    const tipY = boxY - Math.round(input.fontSize * 0.55);
+    const left = mid - Math.round(input.fontSize * 0.55);
+    const right = mid + Math.round(input.fontSize * 0.55);
+    const baseY = boxY + border;
+    tail = `
+      <polygon points="${left},${baseY} ${right},${baseY} ${mid},${tipY}" fill="${input.bubbleFill}" stroke="#111111" stroke-width="${border}" stroke-linejoin="round"/>
+      <polygon points="${left + border},${baseY + 1} ${right - border},${baseY + 1} ${mid},${tipY + border * 1.2}" fill="${input.bubbleFill}"/>
+    `;
+  }
+
   const startY =
-    input.baselineY - ((input.lines.length - 1) * lineH) / 2;
+    input.baselineY - ((input.lines.length - 1) * lineH) / 2 + input.fontSize * 0.32;
   const tspans = input.lines
     .map((line, i) => {
       const y = startY + i * lineH;
-      const dy = i === 0 ? 0 : lineH;
-      // First tspan keeps absolute y; following use dy for reliable spacing.
       return i === 0
         ? `<tspan x="${input.cx}" y="${y}">${escapeXml(line)}</tspan>`
-        : `<tspan x="${input.cx}" dy="${dy}">${escapeXml(line)}</tspan>`;
+        : `<tspan x="${input.cx}" dy="${lineH}">${escapeXml(line)}</tspan>`;
     })
     .join("");
-  const common = `x="${input.cx}" text-anchor="middle" class="comic" font-size="${input.fontSize}" font-weight="900" font-family="${input.fontFamily}" transform="rotate(${input.rotateDeg} ${input.cx} ${input.baselineY})"`;
-  // Layered strokes = comic "pop" (thick outer color, then black, then fill).
+
+  const blackW = Math.max(8, Math.round(input.fontSize * 0.22));
+  const whiteW = Math.max(4, Math.round(input.fontSize * 0.1));
+  const common = [
+    `x="${input.cx}"`,
+    `text-anchor="middle"`,
+    `class="comic"`,
+    `font-size="${input.fontSize}"`,
+    `font-weight="900"`,
+    `font-family="${input.fontFamily}"`,
+    `letter-spacing="0.02em"`,
+  ].join(" ");
+
+  // Triple comic outline: fat black → white halo → colored fill (logo / POW lettering).
+  const lettering = `
+    <text ${common} fill="none" stroke="#111111" stroke-width="${blackW}" paint-order="stroke">${tspans}</text>
+    <text ${common} fill="none" stroke="#FFFFFF" stroke-width="${whiteW}" paint-order="stroke">${tspans}</text>
+    <text ${common} fill="${input.fill}" stroke="#111111" stroke-width="${Math.max(2, Math.round(input.fontSize * 0.04))}" paint-order="stroke fill">${tspans}</text>
+  `;
+
   return `
-    <text ${common} fill="none" stroke="${input.outerStroke}" stroke-width="${input.outerWidth}" paint-order="stroke">${tspans}</text>
-    <text ${common} fill="${input.fill}" stroke="${input.innerStroke}" stroke-width="${input.innerWidth}" paint-order="stroke fill" filter="url(#comicShadow)">${tspans}</text>
+    <g transform="rotate(${input.rotateDeg} ${input.cx} ${input.baselineY})">
+      ${shadowRect}
+      ${plate}
+      ${tail}
+      ${lettering}
+    </g>
   `;
 }
 
@@ -252,29 +311,30 @@ export async function overlayCelebrationHebrew(input: {
     ? "CelebrationHebrew, Arial Hebrew, Arial Black, Impact, sans-serif"
     : "Arial Hebrew, Arial Black, Impact, sans-serif";
 
-  // ~12–16 chars/line keeps titles inside after stroke + tilt.
+  // ~12–16 chars/line keeps titles inside after stroke + bubble padding.
   const titleLines = wrapComicLines(encouragement, 14);
   const tipLines = tip ? wrapComicLines(tip, 22) : [];
   const titleLen = Math.max(1, ...titleLines.map((l) => l.length));
   const tipLen = tipLines.length
     ? Math.max(1, ...tipLines.map((l) => l.length))
     : 1;
-  const titleSize = fitComicFontSize(width, titleLen, 0.07, 0.04);
-  const tipSize = fitComicFontSize(width, tipLen, 0.036, 0.026);
-  const titleStrokeOuter = Math.max(10, Math.round(titleSize * 0.28));
-  const titleStrokeInner = Math.max(5, Math.round(titleSize * 0.14));
-  const tipStrokeOuter = Math.max(7, Math.round(tipSize * 0.26));
-  const tipStrokeInner = Math.max(3, Math.round(tipSize * 0.12));
-  const titleBlockH = titleLines.length * titleSize * 1.12;
-  const tipBlockH = tipLines.length * tipSize * 1.12;
-  const gap = tipLines.length ? Math.round(height * 0.02) : 0;
-  const bottomPad = Math.round(height * 0.06);
+  const titleSize = fitComicFontSize(width, titleLen, 0.062, 0.036);
+  const tipSize = fitComicFontSize(width, tipLen, 0.032, 0.024);
+  const titleLineH = titleSize * 1.18;
+  const tipLineH = tipSize * 1.18;
+  const titleBoxH =
+    titleLines.length * titleLineH + titleSize * 0.84 + titleSize * 0.55;
+  const tipBoxH = tipLines.length
+    ? tipLines.length * tipLineH + tipSize * 0.84
+    : 0;
+  const gap = tipLines.length ? Math.round(height * 0.018) : 0;
+  const bottomPad = Math.round(height * 0.045);
   const tipBaseline = tipLines.length
-    ? height - bottomPad - tipBlockH / 2
+    ? height - bottomPad - tipBoxH / 2
     : 0;
   const titleBaseline = tipLines.length
-    ? tipBaseline - tipBlockH / 2 - gap - titleBlockH / 2
-    : height - bottomPad - titleBlockH / 2;
+    ? tipBaseline - tipBoxH / 2 - gap - titleBoxH / 2
+    : height - bottomPad - titleBoxH / 2;
   const cx = width / 2;
 
   const svg = Buffer.from(
@@ -290,10 +350,6 @@ export async function overlayCelebrationHebrew(input: {
             stroke-linecap: round;
           }
         </style>
-        <filter id="comicShadow" x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="${Math.round(width * 0.004)}" dy="${Math.round(width * 0.006)}"
-            stdDeviation="0" flood-color="#000000" flood-opacity="0.9"/>
-        </filter>
       </defs>
       ${
         titleLines.length
@@ -303,12 +359,11 @@ export async function overlayCelebrationHebrew(input: {
               baselineY: Math.round(titleBaseline),
               fontSize: titleSize,
               fill: "#FFE600",
-              outerStroke: "#E10600",
-              innerStroke: "#111111",
-              outerWidth: titleStrokeOuter,
-              innerWidth: titleStrokeInner,
-              rotateDeg: -1.5,
+              bubbleFill: "#FFF8E7",
+              rotateDeg: -2,
               fontFamily,
+              kind: "shout",
+              canvasWidth: width,
             })
           : ""
       }
@@ -319,13 +374,12 @@ export async function overlayCelebrationHebrew(input: {
               cx,
               baselineY: Math.round(tipBaseline),
               fontSize: tipSize,
-              fill: "#FFFFFF",
-              outerStroke: "#1D4ED8",
-              innerStroke: "#111111",
-              outerWidth: tipStrokeOuter,
-              innerWidth: tipStrokeInner,
-              rotateDeg: -1,
+              fill: "#1E3A8A",
+              bubbleFill: "#FFFFFF",
+              rotateDeg: 1.5,
               fontFamily,
+              kind: "caption",
+              canvasWidth: width,
             })
           : ""
       }
