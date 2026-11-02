@@ -130,7 +130,7 @@ describe("list ops", () => {
       detached: 0,
       attachRequested: false,
     });
-    cancelReminderLinkedToWorkerItem.mockReset().mockResolvedValue(null);
+    cancelReminderLinkedToWorkerItem.mockReset().mockResolvedValue([]);
     cancelActiveRemindersMatchingWork
       .mockReset()
       .mockResolvedValue({

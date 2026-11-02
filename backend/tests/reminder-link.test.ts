@@ -7,9 +7,12 @@ const {
   itemUpdateMany,
   reminderUpdate,
   reminderFindFirst,
+  reminderFindMany,
   employeeFindMany,
   linkCreate,
   linkFindUnique,
+  linkFindMany,
+  linkDeleteMany,
 } = vi.hoisted(() => ({
   itemUpdate: vi.fn(),
   itemFindUnique: vi.fn(),
@@ -17,9 +20,12 @@ const {
   itemUpdateMany: vi.fn(),
   reminderUpdate: vi.fn(),
   reminderFindFirst: vi.fn(),
+  reminderFindMany: vi.fn(),
   employeeFindMany: vi.fn(),
   linkCreate: vi.fn(),
   linkFindUnique: vi.fn(),
+  linkFindMany: vi.fn(),
+  linkDeleteMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -36,10 +42,13 @@ vi.mock("../src/database/prisma.js", () => ({
     employeeListItemReminderLink: {
       create: linkCreate,
       findUnique: linkFindUnique,
+      findMany: linkFindMany,
+      deleteMany: linkDeleteMany,
     },
     reminder: {
       update: reminderUpdate,
       findFirst: reminderFindFirst,
+      findMany: reminderFindMany,
     },
   },
 }));
@@ -70,10 +79,16 @@ describe("reminder worker link", () => {
     itemUpdateMany.mockReset();
     reminderUpdate.mockReset();
     reminderFindFirst.mockReset();
+    reminderFindMany.mockReset();
     employeeFindMany.mockReset();
     linkCreate.mockReset();
     linkFindUnique.mockReset();
+    linkFindMany.mockReset();
+    linkDeleteMany.mockReset();
     linkFindUnique.mockResolvedValue(null);
+    linkFindMany.mockResolvedValue([]);
+    linkDeleteMany.mockResolvedValue({ count: 0 });
+    reminderFindMany.mockResolvedValue([]);
     linkCreate.mockResolvedValue({});
   });
 
@@ -492,6 +507,7 @@ describe("reminder worker link", () => {
 
   it("cancels the clock when the worker task is removed", async () => {
     itemFindUnique.mockResolvedValue({ id: "w1", reminderId: "r1" });
+    reminderFindMany.mockResolvedValue([{ id: "r1" }]);
     reminderFindFirst.mockResolvedValue({
       id: "r1",
       workerItemId: "w1",
@@ -509,10 +525,12 @@ describe("reminder worker link", () => {
     itemUpdateMany.mockResolvedValue({ count: 1 });
     reminderUpdate.mockResolvedValue({});
     const linked = await cancelReminderLinkedToWorkerItem("w1");
-    expect(linked).toEqual({
-      reminderId: "r1",
-      label: "להזכיר לעמית לאכול פיצה",
-    });
+    expect(linked).toEqual([
+      {
+        reminderId: "r1",
+        label: "להזכיר לעמית לאכול פיצה",
+      },
+    ]);
     expect(itemUpdateMany).toHaveBeenCalled();
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "r1" },
@@ -541,25 +559,166 @@ describe("reminder worker link", () => {
       reminderId: null,
       linkedReminderId: "r-soft",
     });
-    reminderFindFirst
-      .mockResolvedValueOnce({
-        id: "r-soft",
-        workerItemId: null,
-        itemLabel: "לקנות חלב",
-        status: "active",
-      })
-      .mockResolvedValueOnce(null);
+    reminderFindFirst.mockResolvedValue({
+      id: "r-soft",
+      workerItemId: null,
+      itemLabel: "לקנות חלב",
+      status: "active",
+    });
     itemFindMany.mockResolvedValue([]);
     itemUpdateMany.mockResolvedValue({ count: 0 });
     reminderUpdate.mockResolvedValue({});
     const linked = await cancelReminderLinkedToWorkerItem("speaker-1");
-    expect(linked).toEqual({ reminderId: "r-soft", label: "לקנות חלב" });
+    expect(linked).toEqual([{ reminderId: "r-soft", label: "לקנות חלב" }]);
     expect(reminderFindFirst).toHaveBeenCalledWith({
+      where: { id: "r-soft", status: "active" },
+    });
+    expect(linkDeleteMany).toHaveBeenCalled();
+  });
+
+  it("cancels join-only linked clock when the speaker task is removed", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "d13a6b9f",
+      reminderId: null,
+      linkedReminderId: null,
+    });
+    linkFindMany.mockResolvedValue([{ reminderId: "199ef86b" }]);
+    reminderFindMany.mockResolvedValue([]);
+    reminderFindFirst.mockResolvedValue({
+      id: "199ef86b",
+      workerItemId: null,
+      itemLabel: "להתחיל את קורס הבינה המלאכותית",
+      status: "active",
+    });
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 0 });
+    reminderUpdate.mockResolvedValue({});
+    const linked = await cancelReminderLinkedToWorkerItem("d13a6b9f");
+    expect(linked).toEqual([
+      {
+        reminderId: "199ef86b",
+        label: "להתחיל את קורס הבינה המלאכותית",
+      },
+    ]);
+    expect(reminderUpdate).toHaveBeenCalledTimes(1);
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "199ef86b" },
+      data: { status: "cancelled", workerItemId: null },
+    });
+    // Join-only: no worker FK — להזכיר row is not soft-deleted here.
+    expect(itemUpdateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["c1a30c12"] } },
+      }),
+    );
+    expect(linkDeleteMany).toHaveBeenCalledWith({
       where: {
-        status: "active",
-        OR: [{ workerItemId: "speaker-1" }, { id: { in: ["r-soft"] } }],
+        OR: [
+          { listItemId: "d13a6b9f" },
+          { reminderId: { in: ["199ef86b"] } },
+        ],
       },
     });
+  });
+
+  it("cancels every join-linked clock on one item (deduped)", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "speaker-1",
+      reminderId: "r-a",
+      linkedReminderId: "r-a",
+    });
+    linkFindMany.mockResolvedValue([
+      { reminderId: "r-a" },
+      { reminderId: "r-b" },
+    ]);
+    reminderFindMany.mockResolvedValue([]);
+    reminderFindFirst.mockImplementation(async (args: { where: { id: string } }) => {
+      const id = args.where.id;
+      return {
+        id,
+        workerItemId: null,
+        itemLabel: id === "r-a" ? "בוקר" : "ערב",
+        status: "active",
+      };
+    });
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 0 });
+    reminderUpdate.mockResolvedValue({});
+    const linked = await cancelReminderLinkedToWorkerItem("speaker-1");
+    expect(linked).toEqual([
+      { reminderId: "r-a", label: "בוקר" },
+      { reminderId: "r-b", label: "ערב" },
+    ]);
+    expect(reminderUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("item with no links cancels nothing (other clocks untouched)", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "lonely",
+      reminderId: null,
+      linkedReminderId: null,
+    });
+    linkFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([]);
+    const linked = await cancelReminderLinkedToWorkerItem("lonely");
+    expect(linked).toEqual([]);
+    expect(reminderUpdate).not.toHaveBeenCalled();
+    expect(reminderFindFirst).not.toHaveBeenCalled();
+    expect(linkDeleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ listItemId: "lonely" }] },
+    });
+  });
+
+  it("does not cancel a clock join-linked only to a different item", async () => {
+    itemFindUnique.mockResolvedValue({
+      id: "item-A",
+      reminderId: null,
+      linkedReminderId: null,
+    });
+    // Only item-A's joins are loaded — item-B's clock r-other is absent.
+    linkFindMany.mockResolvedValue([]);
+    reminderFindMany.mockResolvedValue([]);
+    const linked = await cancelReminderLinkedToWorkerItem("item-A");
+    expect(linked).toEqual([]);
+    expect(reminderUpdate).not.toHaveBeenCalled();
+    expect(linkFindMany).toHaveBeenCalledWith({
+      where: { listItemId: "item-A" },
+      select: { reminderId: true },
+    });
+  });
+
+  it("regression: speaker delete cancels join clock while להזכיר stays", async () => {
+    // Real incident: speaker d13a6b9f ↔ join ↔ 199ef86b; Lucy c1a30c12 not deleted.
+    itemFindUnique.mockResolvedValue({
+      id: "d13a6b9f",
+      reminderId: null,
+      linkedReminderId: null,
+    });
+    linkFindMany.mockResolvedValue([{ reminderId: "199ef86b" }]);
+    reminderFindMany.mockResolvedValue([]);
+    reminderFindFirst.mockResolvedValue({
+      id: "199ef86b",
+      workerItemId: null,
+      itemLabel: "להתחיל את קורס הבינה המלאכותית",
+      status: "active",
+    });
+    itemFindMany.mockResolvedValue([]);
+    itemUpdateMany.mockResolvedValue({ count: 0 });
+    reminderUpdate.mockResolvedValue({});
+    const linked = await cancelReminderLinkedToWorkerItem("d13a6b9f");
+    expect(linked.map((row) => row.reminderId)).toEqual(["199ef86b"]);
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "199ef86b" },
+      data: { status: "cancelled", workerItemId: null },
+    });
+    // Worker להזכיר c1a30c12 must not be soft-deleted in this path.
+    expect(itemUpdateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining(["c1a30c12"]) },
+        }),
+      }),
+    );
   });
 
   it("rewrites the linked worker task clock when the reminder time changes", async () => {

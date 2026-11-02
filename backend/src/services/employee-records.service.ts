@@ -3106,7 +3106,7 @@ async function deleteOwnedListItem(
       summary: `remove ${listType}: ${existing.itemKey}`,
     });
   }
-  // Cascade clocks only via FK (cancelReminderLinkedToWorkerItem above).
+  // Cascade clocks via FK + join (cancelReminderLinkedToWorkerItem above).
   // Never soft-delete sibling tasks or cancel clocks by itemKey/label.
   return mutationEvents({
     ownerId: existing.list.employeeId,
@@ -3507,9 +3507,9 @@ async function applyListAction(
       const removedData = asRecord(existing.data);
       const removedCalendarYmd = calendarYmdFromItemData(removedData);
       const linked = await cancelReminderLinkedToWorkerItem(existing.id);
-      if (linked) {
-        cancelledReminders.push(linked.label);
-        cancelledReminderIds.push(linked.reminderId);
+      for (const row of linked) {
+        cancelledReminders.push(row.label);
+        cancelledReminderIds.push(row.reminderId);
       }
       mutations.push({
         action: "remove",
@@ -3548,7 +3548,7 @@ async function applyListAction(
           summary: `remove ${resolvedAction.listType}: ${removedKey}`,
         });
       }
-      // FK-linked clock already handled by cancelReminderLinkedToWorkerItem.
+      // FK + join-linked clocks already handled by cancelReminderLinkedToWorkerItem.
       // Do not cancel other clocks or soft-delete tasks by key/label contains.
       const watchers = await resolveWatchers({
         existing,
@@ -4456,9 +4456,9 @@ export async function removeVisibleCustomItems(input: {
           continue;
         }
         const linked = await cancelReminderLinkedToWorkerItem(existing.id);
-        if (linked) {
-          cancelledReminders.push(linked.label);
-          cancelledReminderIds.push(linked.reminderId);
+        for (const row of linked) {
+          cancelledReminders.push(row.label);
+          cancelledReminderIds.push(row.reminderId);
         }
         await prisma.employeeListItem.update({
           where: { id: existing.id },
@@ -4483,7 +4483,7 @@ export async function removeVisibleCustomItems(input: {
           listName: list.name || action.listName || undefined,
           ...(removedCalendarYmd ? { calendarYmd: removedCalendarYmd } : {}),
         });
-        // FK cascade only (cancelReminderLinkedToWorkerItem). No label/key match.
+        // FK + join cascade (cancelReminderLinkedToWorkerItem). No label/key match.
         const watchers = uniqueIds([
           ...idList(list.visibleTo),
           ...idList(existing.visibleTo),

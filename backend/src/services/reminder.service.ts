@@ -1188,84 +1188,135 @@ export async function removeReminderAndLinkedWorkerTask(match: {
   return removedWorkerTasks;
 }
 
+/**
+ * Cancel every clock linked to this list item via any supported link:
+ * item.reminderId, item.linkedReminderId (legacy), Reminders.workerItemId,
+ * and EmployeeListItemReminderLinks (join). Never matches by key/label.
+ * Returns one entry per cancelled clock (deduped).
+ */
 export async function cancelReminderLinkedToWorkerItem(
-  workerItemId: string,
-): Promise<{ reminderId: string; label: string } | null> {
-  if (!prisma.reminder?.findFirst && !prisma.employeeListItem?.findUnique) {
-    return null;
+  listItemId: string,
+): Promise<Array<{ reminderId: string; label: string }>> {
+  if (
+    !prisma.reminder?.findFirst &&
+    !prisma.reminder?.findMany &&
+    !prisma.employeeListItem?.findUnique
+  ) {
+    return [];
   }
   try {
     const item = prisma.employeeListItem?.findUnique
       ? await prisma.employeeListItem.findUnique({
-          where: { id: workerItemId },
+          where: { id: listItemId },
         })
       : null;
     const reminderId =
       item && "reminderId" in item && typeof item.reminderId === "string"
-        ? item.reminderId
-        : null;
+        ? item.reminderId.trim()
+        : "";
     const softLinkedId =
       item &&
       "linkedReminderId" in item &&
       typeof item.linkedReminderId === "string"
-        ? item.linkedReminderId
-        : null;
-    const idCandidates = [
-      ...new Set(
-        [reminderId, softLinkedId].filter(
-          (id): id is string => typeof id === "string" && id.length > 0,
-        ),
-      ),
-    ];
-    // Prefer an active clock; fall back to any matching row.
-    const clock = prisma.reminder?.findFirst
-      ? ((await prisma.reminder.findFirst({
-          where: {
-            status: "active",
-            OR: [
-              { workerItemId },
-              ...(idCandidates.length > 0
-                ? [{ id: { in: idCandidates } }]
-                : []),
-            ],
-          },
-        })) ??
-        (await prisma.reminder.findFirst({
-          where: {
-            OR: [
-              { workerItemId },
-              ...(idCandidates.length > 0
-                ? [{ id: { in: idCandidates } }]
-                : []),
-            ],
-          },
-        })))
-      : null;
-    const id = clock?.id ?? reminderId ?? softLinkedId;
-    if (!id) {
-      return null;
+        ? item.linkedReminderId.trim()
+        : "";
+
+    const joinRows =
+      prisma.employeeListItemReminderLink?.findMany
+        ? await prisma.employeeListItemReminderLink.findMany({
+            where: { listItemId },
+            select: { reminderId: true },
+          })
+        : [];
+
+    const workerClocks = prisma.reminder?.findMany
+      ? await prisma.reminder.findMany({
+          where: { workerItemId: listItemId },
+          select: { id: true },
+        })
+      : [];
+
+    const idSet = new Set<string>();
+    if (reminderId) {
+      idSet.add(reminderId);
     }
-    const linkedWorkerId =
-      clock && "workerItemId" in clock && typeof clock.workerItemId === "string"
-        ? clock.workerItemId
-        : workerItemId;
-    const label =
-      (clock &&
-        "itemLabel" in clock &&
-        typeof clock.itemLabel === "string" &&
-        clock.itemLabel.trim()) ||
-      id;
-    await removeReminderAndLinkedWorkerTask({
-      id,
-      workerItemId: linkedWorkerId,
-      label,
-    });
-    return { reminderId: id, label };
+    if (softLinkedId) {
+      idSet.add(softLinkedId);
+    }
+    for (const row of joinRows) {
+      const id = typeof row.reminderId === "string" ? row.reminderId.trim() : "";
+      if (id) {
+        idSet.add(id);
+      }
+    }
+    for (const row of workerClocks) {
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      if (id) {
+        idSet.add(id);
+      }
+    }
+
+    const cancelled: Array<{ reminderId: string; label: string }> = [];
+    for (const id of idSet) {
+      const clock = prisma.reminder?.findFirst
+        ? ((await prisma.reminder.findFirst({
+            where: { id, status: "active" },
+          })) ??
+          (await prisma.reminder.findFirst({
+            where: { id },
+          })))
+        : null;
+      // Already settled — do not cancel again (avoids double-cancel on dup ids).
+      if (clock && typeof clock.status === "string" && clock.status !== "active") {
+        continue;
+      }
+      const label =
+        (clock &&
+          "itemLabel" in clock &&
+          typeof clock.itemLabel === "string" &&
+          clock.itemLabel.trim()) ||
+        id;
+      const clockWorkerId =
+        clock &&
+        "workerItemId" in clock &&
+        typeof clock.workerItemId === "string" &&
+        clock.workerItemId.trim()
+          ? clock.workerItemId.trim()
+          : null;
+      // Prefer the clock's worker FK (להזכיר). Join-only speaker deletes pass
+      // null so we do not re-target the speaker row as a worker task.
+      const linkedWorkerId =
+        clockWorkerId ??
+        (reminderId === id || softLinkedId === id ? listItemId : null);
+      await removeReminderAndLinkedWorkerTask({
+        id,
+        workerItemId: linkedWorkerId,
+        label,
+      });
+      cancelled.push({ reminderId: id, label });
+    }
+
+    // Drop join rows for this item (and any clocks we just cancelled).
+    if (prisma.employeeListItemReminderLink?.deleteMany) {
+      const cancelledIds = cancelled.map((row) => row.reminderId);
+      await prisma.employeeListItemReminderLink.deleteMany({
+        where: {
+          OR: [
+            { listItemId },
+            ...(cancelledIds.length > 0
+              ? [{ reminderId: { in: cancelledIds } }]
+              : []),
+          ],
+        },
+      });
+    }
+
+    return cancelled;
   } catch (error) {
     if (!isMissingTableError(error)) {
       throw error;
     }
-    return null;
+    return [];
   }
 }
 

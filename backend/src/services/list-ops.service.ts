@@ -218,9 +218,9 @@ async function deleteList(
   const cancelledReminderIds: string[] = [];
   for (const item of list.items) {
     const linked = await cancelReminderLinkedToWorkerItem(item.id);
-    if (linked) {
-      cancelledReminders.push(linked.label);
-      cancelledReminderIds.push(linked.reminderId);
+    for (const row of linked) {
+      cancelledReminders.push(row.label);
+      cancelledReminderIds.push(row.reminderId);
     }
   }
   await prisma.$transaction(async (tx) => {
