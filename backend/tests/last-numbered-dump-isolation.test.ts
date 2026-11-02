@@ -258,21 +258,30 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
 
   it("SERVER GUARD: tasks remove of ESD id outside date-filtered tasks dump still applies", () => {
     // After «מה יש לי היום» then «ומחר?», LAST_NUMBERED_DUMP is only tomorrow —
-    // completing «דיברתי עם yes» (today's row) must not be dropped.
+    // completing «דיברתי עם yes» (today's row) must not be dropped when the id
+    // is grounded in this turn's ESD (not merely same list_type as the dump).
     const tomorrowOnlyDump: LastNumberedDumpLine[] = [
       { n: 1, id: "task-tomorrow-1", kind: "tasks" },
       { n: 2, id: "task-tomorrow-2", kind: "tasks" },
     ];
+    const todayId = "task-today-yes";
     const finishTodayTask: LlmListAction = {
       action: "remove",
       listType: "tasks",
       listName: "",
-      items: [{ item_id: "task-today-yes", "שם מטלה": "לדבר עם yes" }],
+      items: [{ item_id: todayId, "שם מטלה": "לדבר עם yes" }],
       targets: [],
     };
+    expect(
+      restrictListMutatesToLastNumberedDump(
+        [finishTodayTask],
+        tomorrowOnlyDump,
+      ).lists,
+    ).toEqual([]);
     const guarded = restrictListMutatesToLastNumberedDump(
       [finishTodayTask],
       tomorrowOnlyDump,
+      { groundedIds: new Set([todayId]) },
     );
     expect(guarded.droppedOutsideDump).toBe(false);
     expect(guarded.lists).toEqual([finishTodayTask]);
@@ -363,7 +372,7 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     expect(guarded.lists).toEqual([customAdd]);
   });
 
-  it("SERVER GUARD: drops add to a different custom list than the dump", () => {
+  it("SERVER GUARD: allows explicit add to a different named custom than the dump", () => {
     const customDump = formatShowDumpWithLineMap("משימות לטל", snap).lines;
     const otherAdd: LlmListAction = {
       action: "add",
@@ -373,8 +382,186 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
       targets: [],
     };
     const guarded = restrictListMutatesToLastNumberedDump([otherAdd], customDump);
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([otherAdd]);
+  });
+
+  it("SERVER GUARD: allows named custom create+item while shopping dump is active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    expect(shoppingDump.every((row) => row.kind === "shopping")).toBe(true);
+    const createCars: LlmListAction = {
+      action: "add",
+      listType: "custom",
+      listName: "מכוניות",
+      titleField: "יצרן",
+      columns: ["יצרן", "מודל"],
+      items: [{ יצרן: "מאזדה", מודל: "2026" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [createCars],
+      shoppingDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([createCars]);
+  });
+
+  it("SERVER GUARD: allows empty custom shell create while shopping dump is active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const emptyShell: LlmListAction = {
+      action: "add",
+      listType: "custom",
+      listName: "מכוניות",
+      items: [],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [emptyShell],
+      shoppingDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([emptyShell]);
+  });
+
+  it("SERVER GUARD: allows plain item add to named custom while shopping dump is active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const plainAdd: LlmListAction = {
+      action: "add",
+      listType: "custom",
+      listName: "מכוניות",
+      items: [{ יצרן: "מאזדה", מודל: "2026" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [plainAdd],
+      shoppingDump,
+    );
+    expect(guarded.droppedOutsideDump).toBe(false);
+    expect(guarded.lists).toEqual([plainAdd]);
+  });
+
+  it("SERVER GUARD: drops custom add without list_name while shopping dump is active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const unnamed: LlmListAction = {
+      action: "add",
+      listType: "custom",
+      listName: "",
+      items: [{ שם: "בלי שם רשימה" }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [unnamed],
+      shoppingDump,
+    );
     expect(guarded.droppedOutsideDump).toBe(true);
     expect(guarded.lists).toEqual([]);
+  });
+
+  it("SERVER GUARD: contacts/filing explicit adds pass under shopping dump", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const contactsAdd: LlmListAction = {
+      action: "add",
+      listType: "contacts",
+      listName: "",
+      items: [{ "שם פרטי": "דני" }],
+      targets: [],
+    };
+    const filingAdd: LlmListAction = {
+      action: "add",
+      listType: "filing",
+      listName: "",
+      items: [{ item_name: "כתובת", item_info: "הרצל 1" }],
+      targets: [],
+    };
+    const contactsGuarded = restrictListMutatesToLastNumberedDump(
+      [contactsAdd],
+      shoppingDump,
+    );
+    const filingGuarded = restrictListMutatesToLastNumberedDump(
+      [filingAdd],
+      shoppingDump,
+    );
+    expect(contactsGuarded.droppedOutsideDump).toBe(false);
+    expect(contactsGuarded.lists).toEqual([contactsAdd]);
+    expect(filingGuarded.droppedOutsideDump).toBe(false);
+    expect(filingGuarded.lists).toEqual([filingAdd]);
+  });
+
+  it("SERVER GUARD: ESD-grounded item_id remove passes under other-domain dump", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const taskId = "task-live-esd-1";
+    const remove: LlmListAction = {
+      action: "remove",
+      listType: "tasks",
+      listName: "",
+      items: [{ item_id: taskId }],
+      targets: [],
+    };
+    const blocked = restrictListMutatesToLastNumberedDump([remove], shoppingDump);
+    expect(blocked.droppedOutsideDump).toBe(true);
+    expect(blocked.lists).toEqual([]);
+    expect(blocked.droppedItems).toEqual([
+      expect.objectContaining({ itemId: taskId, reason: "outside_dump" }),
+    ]);
+
+    const allowed = restrictListMutatesToLastNumberedDump(
+      [remove],
+      shoppingDump,
+      { groundedIds: new Set([taskId]) },
+    );
+    expect(allowed.droppedOutsideDump).toBe(false);
+    expect(allowed.lists).toEqual([remove]);
+  });
+
+  it("SERVER GUARD: invented item_id is still dropped even with dump active", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const fakeId = "invented-not-in-esd-or-dump";
+    const remove: LlmListAction = {
+      action: "remove",
+      listType: "shopping",
+      listName: "",
+      items: [{ item_id: fakeId }],
+      targets: [],
+    };
+    const guarded = restrictListMutatesToLastNumberedDump(
+      [remove],
+      shoppingDump,
+      { groundedIds: new Set([shoppingId1]) },
+    );
+    expect(guarded.droppedOutsideDump).toBe(true);
+    expect(guarded.lists).toEqual([]);
+    expect(guarded.droppedItems).toEqual([
+      expect.objectContaining({ itemId: fakeId, reason: "outside_dump" }),
+    ]);
+  });
+
+  it("SERVER GUARD: dump-line id still kept; Stage-2 passThrough kept", () => {
+    const shoppingDump = formatShowDumpWithLineMap("shopping", snap).lines;
+    const dumpId = shoppingDump[0]!.id;
+    const removeDump: LlmListAction = {
+      action: "remove",
+      listType: "shopping",
+      listName: "",
+      items: [{ item_id: dumpId }],
+      targets: [],
+    };
+    expect(
+      restrictListMutatesToLastNumberedDump([removeDump], shoppingDump).lists,
+    ).toEqual([removeDump]);
+
+    const otherId = "saved-data-pass-through";
+    const removeSaved: LlmListAction = {
+      action: "remove",
+      listType: "tasks",
+      listName: "",
+      items: [{ item_id: otherId }],
+      targets: [],
+    };
+    expect(
+      restrictListMutatesToLastNumberedDump([removeSaved], shoppingDump, {
+        passThroughIds: new Set([otherId]),
+      }).lists,
+    ).toEqual([removeSaved]);
   });
 });
 

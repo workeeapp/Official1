@@ -468,27 +468,39 @@ export function listActionMatchesLastNumberedDumpScope(
     return kinds.has("filings") || kinds.has("filing");
   }
   if (listType === "custom") {
+    // Other-domain dumps do not match custom scope. Explicit named custom
+    // adds bypass H via isExplicitListAddTarget; this helper is for
+    // non-explicit mutates (no list_name / no item_id).
+    if (!kinds.has("custom")) {
+      return false;
+    }
     const name = normalizeDumpListName(action.listName);
     if (name && customNames.has(name)) {
       return true;
     }
     // Pre-list_name dump maps: allow any custom rather than lock the session.
-    return legacyCustomWithoutName && kinds.has("custom");
+    return legacyCustomWithoutName;
   }
   return false;
 }
 
 /**
- * Hard server guard while LAST_NUMBERED_DUMP is active:
- * - add shopping|tasks → always allowed (self-nudge / day work must not die
- *   under a shopping/custom/reminders dump); custom/contacts/filing still
- *   require dump scope match (no silent cross-shell add)
- * - remove/update with item_id → ids from that dump, OR (shopping|tasks only) same
- *   domain as the dump so a date-filtered agenda dump does not block completing a
- *   live ESD row that was on a previous day dump («דיברתי עם yes» after «ומחר?»)
- * - custom/contacts/filing still require dump ids (no silent cross-shell)
- * - remove/update without item_id → same domain scope as add
- * Empty dump → no filter.
+ * Hard server guard while LAST_NUMBERED_DUMP is active.
+ *
+ * Model owns intent + explicit target; H only:
+ * - resolves dump-bound line refs (ids on the dump / dump_line pass-through)
+ * - drops ungrounded / stale ids and non-explicit mutates outside dump scope
+ *
+ * Explicit `lists.add` (shopping|tasks|contacts|filing, or custom with
+ * non-empty list_name) is never dump-scoped — apply still validates existence
+ * and permissions.
+ *
+ * `lists.update`/`remove` with item_id: keep when id is on the dump, Stage-2
+ * passThrough (dump_line|saved_data), or grounded in this turn's visible ESD
+ * ids. Format-only ids that are not grounded are dropped.
+ *
+ * Without item_id and without an explicit add target → dump scope match
+ * (strict). Empty dump → no filter.
  */
 export type DumpGuardDroppedItem = {
   itemId?: string;
@@ -498,10 +510,33 @@ export type DumpGuardDroppedItem = {
   reason: "outside_dump" | "outside_dump_scope";
 };
 
+/** Model-supplied add destination — not a dump line reference. */
+function isExplicitListAddTarget(action: LlmListAction): boolean {
+  if (
+    action.listType === "shopping" ||
+    action.listType === "tasks" ||
+    action.listType === "contacts" ||
+    action.listType === "filing"
+  ) {
+    return true;
+  }
+  if (
+    action.listType === "custom" &&
+    Boolean(normalizeDumpListName(action.listName))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function restrictListMutatesToLastNumberedDump(
   lists: LlmListAction[],
   dump: ReadonlyArray<LastNumberedDumpLine>,
-  options?: { passThroughIds?: ReadonlySet<string> },
+  options?: {
+    passThroughIds?: ReadonlySet<string>;
+    /** Opaque ids present in this turn's injected ESD/WORKER facts. */
+    groundedIds?: ReadonlySet<string>;
+  },
 ): {
   lists: LlmListAction[];
   droppedOutsideDump: boolean;
@@ -515,14 +550,13 @@ export function restrictListMutatesToLastNumberedDump(
     dump.map((row) => row.id.trim()).filter(Boolean),
   );
   const passThroughIds = options?.passThroughIds;
+  const groundedIds = options?.groundedIds;
   let droppedOutsideDump = false;
   const droppedItems: DumpGuardDroppedItem[] = [];
   const next: LlmListAction[] = [];
   for (const action of lists) {
     if (action.action === "add") {
-      // Builtin shopping/tasks adds are never dump-scoped — only custom /
-      // contacts / filing adds must match the active dump shell.
-      if (action.listType === "shopping" || action.listType === "tasks") {
+      if (isExplicitListAddTarget(action)) {
         next.push(action);
         continue;
       }
@@ -548,7 +582,7 @@ export function restrictListMutatesToLastNumberedDump(
       .map((raw) => actionItemIdFromRaw(raw))
       .filter(Boolean);
     if (addressedIds.length === 0) {
-      // No ids — scope by list_type / list_name only.
+      // No ids — not an explicit item target; keep dump scope (strict).
       if (!listActionMatchesLastNumberedDumpScope(action, dump)) {
         droppedOutsideDump = true;
         droppedItems.push({
@@ -562,22 +596,6 @@ export function restrictListMutatesToLastNumberedDump(
       next.push(action);
       continue;
     }
-    if (allowedIds.size === 0) {
-      droppedOutsideDump = true;
-      for (const id of addressedIds) {
-        droppedItems.push({
-          itemId: id,
-          listType: action.listType,
-          listName: action.listName,
-          op: action.action,
-          reason: "outside_dump",
-        });
-      }
-      continue;
-    }
-    const sameBuiltinDomain =
-      (action.listType === "shopping" || action.listType === "tasks") &&
-      listActionMatchesLastNumberedDumpScope(action, dump);
     const kept: typeof items = [];
     for (const raw of items) {
       const id = actionItemIdFromRaw(raw);
@@ -585,12 +603,12 @@ export function restrictListMutatesToLastNumberedDump(
         kept.push(raw);
         continue;
       }
-      // passThroughIds: stage-2 intent resolve (dump_line / saved_data) already
-      // validated the id — do not re-drop via legacy dump allowlist.
+      // Dump line id, Stage-2 validated id, or this-turn ESD/WORKER grounded id.
+      // Never keep on format alone.
       if (
         allowedIds.has(id) ||
-        sameBuiltinDomain ||
-        passThroughIds?.has(id)
+        passThroughIds?.has(id) ||
+        groundedIds?.has(id)
       ) {
         kept.push(raw);
         continue;

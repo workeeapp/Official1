@@ -2559,10 +2559,13 @@ export async function sendChatMessage(input: {
     let intentPassThroughIds: ReadonlySet<string> | undefined;
     let intentMissesForResult: IntentMiss[] = [];
     let dumpGuardDropsForResult: DumpGuardDrop[] = [];
+    const turnVisibleRefs = guestSpeaker
+      ? null
+      : buildThisTurnVisibleRefs(speakerSnapshot, workerSnapshot);
     if (!guestSpeaker) {
       const intentResolved = resolveIntentRefs(metadata.lists ?? [], {
         dump: lastNumberedDump,
-        visibleRefs: buildThisTurnVisibleRefs(speakerSnapshot, workerSnapshot),
+        visibleRefs: turnVisibleRefs!,
       });
       metadata = { ...metadata, lists: intentResolved.lists };
       intentMissesForResult = intentResolved.misses;
@@ -2571,10 +2574,9 @@ export async function sendChatMessage(input: {
           ? intentResolved.passThroughIds
           : undefined;
     }
-    // Hard guard: with an active LAST_NUMBERED_DUMP, cross-domain mutates are
-    // dropped (stale shopping ids after a custom dump). Same-domain shopping/
-    // tasks ids may complete live ESD rows outside a date-filtered dump map.
-    // passThroughIds: items already validated by resolveIntentRefs skip re-drop.
+    // Hard guard H: dump binds line refs; explicit add + ESD-grounded ids pass.
+    // Stale/invented ids (not on dump, not Stage-2 passThrough, not this-turn
+    // visible refs) are dropped. Apply still owns existence/permissions.
     const dumpRestricted = guestSpeaker
       ? {
           lists: metadata.lists ?? [],
@@ -2584,9 +2586,14 @@ export async function sendChatMessage(input: {
       : restrictListMutatesToLastNumberedDump(
           metadata.lists ?? [],
           lastNumberedDump,
-          intentPassThroughIds
-            ? { passThroughIds: intentPassThroughIds }
-            : undefined,
+          {
+            ...(intentPassThroughIds
+              ? { passThroughIds: intentPassThroughIds }
+              : {}),
+            ...(turnVisibleRefs && turnVisibleRefs.size > 0
+              ? { groundedIds: new Set(turnVisibleRefs.keys()) }
+              : {}),
+          },
         );
     dumpGuardDropsForResult = dumpRestricted.droppedItems ?? [];
     if (dumpRestricted.droppedOutsideDump) {
