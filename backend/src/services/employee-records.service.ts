@@ -148,7 +148,8 @@ export interface EmployeeRecordSnapshot {
 const ITEM_NAME_KEYS: Record<LlmListType, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
   contacts: ["שם פרטי", "first_name", "name"],
-  tasks: ["שם מטלה", "name", "task", "item_name"],
+  // LLM.action.json examples use «שם משימה»; engine dumps use «שם מטלה».
+  tasks: ["שם מטלה", "שם משימה", "name", "task", "item_name"],
   // Custom lists have dynamic columns — never hardcode field names here.
   custom: [],
 };

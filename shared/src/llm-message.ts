@@ -2633,6 +2633,7 @@ export function reminderActionFromNestedRemind(
         "label",
         "שם פריט",
         "שם מטלה",
+        "שם משימה",
         "name",
         "text",
       ]) || itemLabel,
@@ -2659,6 +2660,7 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     "label",
     "שם פריט",
     "שם מטלה",
+    "שם משימה",
     "name",
   ]);
   const reminderId = readText(record, ["reminder_id", "reminderId", "id"]);
