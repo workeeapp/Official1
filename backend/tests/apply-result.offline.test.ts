@@ -2,13 +2,14 @@
  * Result-A: ApplyResult builders — internal only, no reply renderer.
  */
 import { describe, expect, it } from "vitest";
-import type { LlmListAction } from "@workee/shared";
+import type { LlmListAction, LlmReminderAction } from "@workee/shared";
 import {
   buildApplyResult,
   captureRequestedFromMetadata,
   collectShowTurnStripDrops,
   computeDomainCompleteness,
   requestedOpsFromLists,
+  requestedOpsFromReminders,
 } from "../src/services/apply-result.js";
 import { resolveIntentRefs } from "../src/services/list-intent-refs.js";
 import {
@@ -19,6 +20,36 @@ import { stripShowTurnMutates } from "../src/services/show-turn-guard.js";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
 import { buildThisTurnVisibleRefs } from "../src/services/list-intent-refs.js";
 import { emptyLlmMetadata } from "@workee/shared";
+
+/** Minimal reminder add — listType is soft-link wrapper only. */
+function reminderAdd(
+  listType: LlmReminderAction["listType"],
+  overrides: Partial<LlmReminderAction> = {},
+): LlmReminderAction {
+  return {
+    action: "add",
+    item: "לשתות מיץ",
+    listType,
+    date: "",
+    time: "",
+    repeat: "once",
+    ping: ["עמית"],
+    targets: [],
+    text: "",
+    inSeconds: 300,
+    everyCount: null,
+    everyUnit: null,
+    weekdays: null,
+    confirmed: false,
+    compose: false,
+    composeSource: "",
+    composeLookbackHours: 0,
+    composePlace: "",
+    reminderId: "",
+    itemId: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+    ...overrides,
+  };
+}
 
 const shoppingId = "shop-1";
 const taskId = "task-1";
@@ -423,6 +454,186 @@ describe("computeDomainCompleteness", () => {
     expect(result.domains.lists?.completeness).toBe("complete");
     expect(result.completeness).toBe("complete");
   });
+
+  it("reminder add with wrapper listType tasks: saved → complete (not unknown)", () => {
+    const requested = captureRequestedFromMetadata({
+      reminders: [reminderAdd("tasks")],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [
+          {
+            id: "b1a32a41-0bcb-4ea6-b99d-962f5442af88",
+            item: "לשתות מיץ",
+            itemLabel: "לשתות מיץ",
+          },
+        ],
+        removed: [],
+        missed: [],
+        skipped: [],
+        changes: [],
+      },
+    });
+    expect(result.domains.reminders?.requested[0]?.listType).toBeUndefined();
+    expect(result.domains.reminders?.applied).toEqual([
+      expect.objectContaining({
+        domain: "reminders",
+        op: "add",
+        id: "b1a32a41-0bcb-4ea6-b99d-962f5442af88",
+      }),
+    ]);
+    expect(result.domains.reminders?.completeness).toBe("complete");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("reminder add with wrapper listType shopping: saved → complete", () => {
+    const requested = captureRequestedFromMetadata({
+      reminders: [reminderAdd("shopping")],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [
+          {
+            id: "clock-shop-1",
+            item: "לקנות חלב",
+            itemLabel: "לקנות חלב",
+          },
+        ],
+        removed: [],
+        missed: [],
+        skipped: [],
+        changes: [],
+      },
+    });
+    expect(result.domains.reminders?.requested[0]?.listType).toBeUndefined();
+    expect(result.domains.reminders?.completeness).toBe("complete");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("reminder add wrapper tasks: skip/miss → never counted as applied", () => {
+    const requested = captureRequestedFromMetadata({
+      reminders: [reminderAdd("tasks")],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: [],
+        missed: [],
+        skipped: [{ item: "לשתות מיץ", reason: "no_time" }],
+        changes: [],
+      },
+    });
+    expect(result.domains.reminders?.applied).toEqual([]);
+    expect(result.domains.reminders?.apply_misses).toEqual([
+      expect.objectContaining({
+        domain: "reminders",
+        reason: "no_time",
+        detail: "לשתות מיץ",
+      }),
+    ]);
+    // Real failure must not look like a successful apply.
+    expect(result.domains.reminders?.applied).toHaveLength(0);
+    expect(
+      (result.domains.reminders?.applied ?? []).some((row) => row.op === "add"),
+    ).toBe(false);
+  });
+
+  it("mixed lists.add + reminder tasks wrapper: both saved → complete", () => {
+    const requested = captureRequestedFromMetadata({
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              "שם מטלה": "לשתות מיץ",
+              item_id: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+            },
+          ],
+          targets: [],
+        },
+      ],
+      reminders: [reminderAdd("tasks")],
+    });
+    const result = buildApplyResult({
+      requested,
+      listMutations: [
+        {
+          action: "add",
+          itemId: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k",
+          itemLabel: "לשתות מיץ",
+        },
+      ],
+      reminderResult: {
+        saved: [
+          {
+            id: "b1a32a41-0bcb-4ea6-b99d-962f5442af88",
+            item: "לשתות מיץ",
+            itemLabel: "לשתות מיץ",
+          },
+        ],
+        removed: [],
+        missed: [],
+        skipped: [],
+        changes: [],
+      },
+    });
+    expect(result.domains.lists?.completeness).toBe("complete");
+    expect(result.domains.reminders?.completeness).toBe("complete");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("mixed: list saved + reminder skip → reminder not applied; rollup not full success", () => {
+    const requested = captureRequestedFromMetadata({
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [{ "שם מטלה": "לשתות מיץ" }],
+          targets: [],
+        },
+      ],
+      reminders: [reminderAdd("tasks")],
+    });
+    const result = buildApplyResult({
+      requested,
+      listMutations: [
+        {
+          action: "add",
+          itemId: "minted-juice",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k",
+          itemLabel: "לשתות מיץ",
+        },
+      ],
+      reminderResult: {
+        saved: [],
+        removed: [],
+        missed: [],
+        skipped: [{ item: "לשתות מיץ", reason: "no_time" }],
+        changes: [],
+      },
+    });
+    expect(result.domains.lists?.completeness).toBe("complete");
+    expect(result.domains.reminders?.applied).toEqual([]);
+    expect(result.domains.reminders?.apply_misses).toEqual([
+      expect.objectContaining({
+        domain: "reminders",
+        reason: "no_time",
+        detail: "לשתות מיץ",
+      }),
+    ]);
+    expect(result.completeness).not.toBe("complete");
+  });
 });
 
 describe("requestedOpsFromLists", () => {
@@ -435,6 +646,17 @@ describe("requestedOpsFromLists", () => {
         ]),
       ]),
     ).toHaveLength(2);
+  });
+});
+
+describe("requestedOpsFromReminders", () => {
+  it("omits wrapper listType from pairing ops", () => {
+    expect(requestedOpsFromReminders([reminderAdd("tasks")])).toEqual([
+      { domain: "reminders", op: "add", id: undefined },
+    ]);
+    expect(requestedOpsFromReminders([reminderAdd("shopping")])).toEqual([
+      { domain: "reminders", op: "add", id: undefined },
+    ]);
   });
 });
 

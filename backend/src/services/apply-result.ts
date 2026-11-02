@@ -233,7 +233,8 @@ export function requestedOpsFromReminders(
     domain: "reminders" as const,
     op: row.action,
     id: row.reminderId || undefined,
-    listType: row.listType || undefined,
+    // Reminder.listType is a soft-link wrapper (shopping|tasks|…), not the
+    // clock domain. Applied reminder rows omit listType — never pair on it.
   }));
 }
 

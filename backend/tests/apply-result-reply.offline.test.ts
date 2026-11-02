@@ -9,15 +9,47 @@ import {
   type ApplyResult,
 } from "../src/services/apply-result.js";
 import {
+  APPLY_RESULT_UNKNOWN_CAUTION,
   decideReplyFromApplyResult,
   draftMatchesApplied,
 } from "../src/services/apply-result-reply.js";
 import { LIST_FIND_MISS } from "../src/services/employee-records.service.js";
 import { stripShowTurnMutates } from "../src/services/show-turn-guard.js";
-import { emptyLlmMetadata, type LlmListAction } from "@workee/shared";
+import {
+  emptyLlmMetadata,
+  type LlmListAction,
+  type LlmReminderAction,
+} from "@workee/shared";
 
 const shoppingId = "shop-1";
 const taskId = "task-1";
+
+function reminderAdd(
+  listType: LlmReminderAction["listType"],
+): LlmReminderAction {
+  return {
+    action: "add",
+    item: "לשתות מיץ",
+    listType,
+    date: "",
+    time: "",
+    repeat: "once",
+    ping: ["עמית"],
+    targets: [],
+    text: "",
+    inSeconds: 300,
+    everyCount: null,
+    everyUnit: null,
+    weekdays: null,
+    confirmed: false,
+    compose: false,
+    composeSource: "",
+    composeLookbackHours: 0,
+    composePlace: "",
+    reminderId: "",
+    itemId: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+  };
+}
 
 function remove(
   listType: LlmListAction["listType"],
@@ -210,6 +242,86 @@ describe("decideReplyFromApplyResult", () => {
     });
     expect(decided.keepDraft).toBe(true);
     expect(decided.spoken).not.toMatch(/לא הצלחתי לאמת/);
+  });
+
+  it("self-nudge reminder with wrapper listType tasks: keeps model confirm (no verify caution)", () => {
+    const requested = captureRequestedFromMetadata({
+      lists: [
+        {
+          action: "add",
+          listType: "tasks",
+          listName: "",
+          items: [
+            {
+              "שם מטלה": "לשתות מיץ",
+              item_id: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+            },
+          ],
+          targets: [],
+        },
+      ],
+      reminders: [reminderAdd("tasks")],
+    });
+    const result = buildApplyResult({
+      requested,
+      listMutations: [
+        {
+          action: "add",
+          itemId: "2c8e09a5-4a3d-4a55-bfc7-50ab892e07d2",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k",
+          itemLabel: "לשתות מיץ",
+        },
+      ],
+      reminderResult: {
+        saved: [
+          {
+            id: "b1a32a41-0bcb-4ea6-b99d-962f5442af88",
+            item: "לשתות מיץ",
+            itemLabel: "לשתות מיץ",
+          },
+        ],
+        removed: [],
+        missed: [],
+        skipped: [],
+        changes: [],
+      },
+    });
+    expect(result.completeness).toBe("complete");
+    const modelText =
+      "הוספתי *לשתות מיץ* למשימות, ותזכורת לעוד חמש דקות.";
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson(modelText),
+    });
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe(modelText);
+    expect(decided.spoken).not.toContain(APPLY_RESULT_UNKNOWN_CAUTION);
+    expect(decided.spoken).not.toMatch(/לא הצלחתי לאמת/);
+  });
+
+  it("reminder wrapper shopping save fail: does not keep optimistic success as verified", () => {
+    const requested = captureRequestedFromMetadata({
+      reminders: [reminderAdd("shopping")],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: [],
+        missed: [],
+        skipped: [{ item: "לשתות מיץ", reason: "no_time" }],
+        changes: [],
+      },
+    });
+    expect(result.domains.reminders?.applied).toEqual([]);
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("שמרתי תזכורת לשתות מיץ."),
+    });
+    expect(decided.keepDraft).toBe(false);
+    expect(result.domains.reminders?.applied).toHaveLength(0);
   });
 
   it("id-less add success + sibling add miss: partial, not complete/unknown", () => {
