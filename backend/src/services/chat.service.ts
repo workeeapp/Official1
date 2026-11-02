@@ -4834,9 +4834,10 @@ export async function sendChatMessage(input: {
       );
       if (celebration) {
         celebrationRef = celebration.ref;
+        const tipText = celebration.tip.trim();
         reply = setEngineSpokenBubbles(reply, [
           ...parseLlmReply(reply).responseBubbles,
-          { text: "" },
+          { text: tipText },
         ]);
       }
     }

@@ -222,9 +222,10 @@ Speaker-only meetings with an outside party («פגישה עם אלסטיק») s
 After a successful `lists.remove` on **shopping or tasks** (not custom lists / filings / contacts), when the speaker has a **profile photo** on Employees:
 
 - The engine runs a **separate** cheap copy session (`gpt-4.1-mini`, `LlmUsages.purpose=delete_celebration`) that returns one Hebrew encouragement, an optional tip, and one English scene covering **all** qualifying removes this turn — not Lucy’s chat model.
+- Encouragement always opens with a positive punch (כל הכבוד! / אלוף! / …) and clearly names the closed task/shopping win. Tip defaults to empty; emitted only when grounded and useful for productivity / necessity / safety / money — never filler.
 - It generates **exactly one** celebration image per chat turn (never one per item) via **`gpt-image-1-mini`** at **`low`** quality, `1024×1024`, with a fixed style bible (comic-book / cartoon superhero, strong likeness to the profile photo). Stored as JPEG ~80 for smaller WhatsApp uploads. Image API cost is billed on the **speaker** as `LlmUsages.purpose=image` (Dashboard → Images).
-- Hebrew text is composited server-side as comic-style title (yellow fill, black stroke, slight tilt) — not drawn by the image model.
-- Reply shape: bubble 1 = delete ack(s); bubble 2 = the celebration image (web + WhatsApp media after texts).
+- Encouragement is composited server-side as stroke-only POW lettering (no white bubble plate), placed in a calmer region of the generated image (edge-energy scan) — tip is **never** drawn on the image; tip appears only as celebration bubble text / media caption when present.
+- Reply shape: bubble 1 = delete ack(s); bubble 2 = celebration image (+ tip text only when a selective tip was returned).
 - No profile photo → skip the image; delete ack still works. Fail-soft: celebration errors never break the delete.
 
 **Profile photo:** Employees → edit human → upload / clear. Stored as `Employees.profile_attachment_id` → `Attachments`.

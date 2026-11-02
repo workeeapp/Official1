@@ -53,12 +53,12 @@ const CELEBRATION_SCHEMA: LlmJsonSchemaFormat = {
       encouragement: {
         type: "string",
         description:
-          "Short Hebrew encouragement including the speaker name, gendered correctly. Covers the whole batch of wins.",
+          "Complete short Hebrew comic title (about 8–16 words, never truncated). ALWAYS start with a positive punch (כל הכבוד! / אלוף! / יופי! / מעולה! / מצוין! / סימנת וי! / התקדמות יפה! / יאלה אלוף! — pick one matching the win). Then speaker first name + clear completed action that echoes the closed item label(s) so a stranger understands what was done. Gendered correctly. Forbidden: vague lines, unfinished tails like «כמו»/«ש…», inventing wins not listed. Vary the punch and wording across turns.",
       },
       tip: {
         type: "string",
         description:
-          "Optional short Hebrew tip grounded in the scene. Empty string when none fits.",
+          "Default empty string. Emit at most one short Hebrew tip ONLY when grounded in the closed items and clearly useful for productivity, necessity, safety, or money/waste. No filler, no generic life advice. Empty most of the time.",
       },
       scene_prompt: {
         type: "string",
@@ -196,61 +196,106 @@ function fitComicFontSize(
   return size;
 }
 
-/** Classic comic lettering: shout bubble + multi-stroke fill (POW-style). */
+export type CelebrationTextAnchor = {
+  /** Horizontal center of the title block, 0–1 of image width. */
+  cxRatio: number;
+  /** Vertical center of the title block, 0–1 of image height. */
+  cyRatio: number;
+  rotateDeg: number;
+};
+
+/**
+ * Pick a calmer region for comic lettering (low edge energy) so placement
+ * follows the generated image instead of a fixed bottom band.
+ */
+export async function pickCelebrationTextAnchor(
+  imageBytes: Buffer,
+): Promise<CelebrationTextAnchor> {
+  const sampleW = 64;
+  const sampleH = 64;
+  let data: Buffer;
+  try {
+    const raw = await sharp(imageBytes)
+      .resize(sampleW, sampleH, { fit: "fill" })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    data = raw.data;
+  } catch {
+    return { cxRatio: 0.5, cyRatio: 0.88, rotateDeg: -1.5 };
+  }
+
+  const bands = [
+    { y0: 0.08, y1: 0.28 },
+    { y0: 0.28, y1: 0.48 },
+    { y0: 0.52, y1: 0.72 },
+    { y0: 0.72, y1: 0.92 },
+  ];
+  const cols = [
+    { x0: 0.12, x1: 0.4 },
+    { x0: 0.3, x1: 0.7 },
+    { x0: 0.6, x1: 0.88 },
+  ];
+
+  let best = {
+    score: Number.POSITIVE_INFINITY,
+    cxRatio: 0.5,
+    cyRatio: 0.88,
+  };
+
+  for (const band of bands) {
+    for (const col of cols) {
+      const xStart = Math.floor(col.x0 * sampleW);
+      const xEnd = Math.min(sampleW - 1, Math.ceil(col.x1 * sampleW));
+      const yStart = Math.floor(band.y0 * sampleH);
+      const yEnd = Math.min(sampleH - 1, Math.ceil(band.y1 * sampleH));
+      let edge = 0;
+      let n = 0;
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          const i = y * sampleW + x;
+          const right = data[i + 1] ?? data[i]!;
+          const down = data[i + sampleW] ?? data[i]!;
+          const v = data[i]!;
+          edge += Math.abs(v - right) + Math.abs(v - down);
+          n += 1;
+        }
+      }
+      if (n === 0) continue;
+      const score = edge / n;
+      if (score < best.score) {
+        best = {
+          score,
+          cxRatio: (col.x0 + col.x1) / 2,
+          cyRatio: (band.y0 + band.y1) / 2,
+        };
+      }
+    }
+  }
+
+  // Mild tilt varies with the chosen cell so repeats don't look glued.
+  const tiltSeed = Math.round(best.cxRatio * 17 + best.cyRatio * 31);
+  const rotateDeg = ((tiltSeed % 7) - 3) * 0.7; // about -2.1 … +2.1
+  return {
+    cxRatio: best.cxRatio,
+    cyRatio: best.cyRatio,
+    rotateDeg,
+  };
+}
+
+/** Compact POW lettering only — no bubble plate so the art stays visible. */
 function comicTextBlock(input: {
   lines: string[];
   cx: number;
   baselineY: number;
   fontSize: number;
   fill: string;
-  bubbleFill: string;
   rotateDeg: number;
   fontFamily: string;
-  /** Shout bubble points up toward the hero; caption plate has no tail. */
-  kind: "shout" | "caption";
-  canvasWidth: number;
 }): string {
   const lineH = Math.round(input.fontSize * 1.18);
-  const longest = Math.max(1, ...input.lines.map((l) => l.length));
-  const textW = Math.min(
-    input.canvasWidth * 0.86,
-    longest * input.fontSize * 0.78,
-  );
-  const padX = Math.round(input.fontSize * 0.55);
-  const padY = Math.round(input.fontSize * 0.42);
-  const boxW = Math.min(
-    input.canvasWidth * 0.9,
-    Math.max(textW + padX * 2, input.fontSize * 4),
-  );
-  const textBlockH = input.lines.length * lineH;
-  const boxH = textBlockH + padY * 2;
-  const boxX = input.cx - boxW / 2;
-  const boxY = input.baselineY - boxH / 2;
-  const r = Math.round(Math.min(boxH * 0.28, input.fontSize * 0.55));
-  const border = Math.max(4, Math.round(input.fontSize * 0.12));
-  const shadowDx = Math.round(input.fontSize * 0.08);
-  const shadowDy = Math.round(input.fontSize * 0.1);
-
-  // Soft rectangle shadow under the bubble (hard comic offset).
-  const shadowRect = `<rect x="${boxX + shadowDx}" y="${boxY + shadowDy}" width="${boxW}" height="${boxH}" rx="${r}" ry="${r}" fill="#111111" opacity="0.85"/>`;
-  const plate = `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${r}" ry="${r}" fill="${input.bubbleFill}" stroke="#111111" stroke-width="${border}"/>`;
-
-  let tail = "";
-  if (input.kind === "shout") {
-    // Pointy shout-tail toward the character above the plate.
-    const mid = input.cx;
-    const tipY = boxY - Math.round(input.fontSize * 0.55);
-    const left = mid - Math.round(input.fontSize * 0.55);
-    const right = mid + Math.round(input.fontSize * 0.55);
-    const baseY = boxY + border;
-    tail = `
-      <polygon points="${left},${baseY} ${right},${baseY} ${mid},${tipY}" fill="${input.bubbleFill}" stroke="#111111" stroke-width="${border}" stroke-linejoin="round"/>
-      <polygon points="${left + border},${baseY + 1} ${right - border},${baseY + 1} ${mid},${tipY + border * 1.2}" fill="${input.bubbleFill}"/>
-    `;
-  }
-
   const startY =
-    input.baselineY - ((input.lines.length - 1) * lineH) / 2 + input.fontSize * 0.32;
+    input.baselineY - ((input.lines.length - 1) * lineH) / 2;
   const tspans = input.lines
     .map((line, i) => {
       const y = startY + i * lineH;
@@ -272,32 +317,24 @@ function comicTextBlock(input: {
     `letter-spacing="0.02em"`,
   ].join(" ");
 
-  // Triple comic outline: fat black → white halo → colored fill (logo / POW lettering).
-  const lettering = `
-    <text ${common} fill="none" stroke="#111111" stroke-width="${blackW}" paint-order="stroke">${tspans}</text>
-    <text ${common} fill="none" stroke="#FFFFFF" stroke-width="${whiteW}" paint-order="stroke">${tspans}</text>
-    <text ${common} fill="${input.fill}" stroke="#111111" stroke-width="${Math.max(2, Math.round(input.fontSize * 0.04))}" paint-order="stroke fill">${tspans}</text>
-  `;
-
+  // Triple comic outline: fat black → white halo → colored fill.
   return `
     <g transform="rotate(${input.rotateDeg} ${input.cx} ${input.baselineY})">
-      ${shadowRect}
-      ${plate}
-      ${tail}
-      ${lettering}
+      <text ${common} fill="none" stroke="#111111" stroke-width="${blackW}" paint-order="stroke">${tspans}</text>
+      <text ${common} fill="none" stroke="#FFFFFF" stroke-width="${whiteW}" paint-order="stroke">${tspans}</text>
+      <text ${common} fill="${input.fill}" stroke="#111111" stroke-width="${Math.max(2, Math.round(input.fontSize * 0.04))}" paint-order="stroke fill">${tspans}</text>
     </g>
   `;
 }
 
-/** Composite Hebrew encouragement (+ optional tip) onto a PNG. Exported for tests. */
+/** Composite Hebrew encouragement onto a PNG (tip stays message-only). Exported for tests. */
 export async function overlayCelebrationHebrew(input: {
   imageBytes: Buffer;
   encouragement: string;
-  tip?: string;
+  anchor?: CelebrationTextAnchor;
 }): Promise<Buffer> {
   const encouragement = input.encouragement.trim();
-  const tip = (input.tip ?? "").trim();
-  if (!encouragement && !tip) {
+  if (!encouragement) {
     return input.imageBytes;
   }
   const meta = await sharp(input.imageBytes).metadata();
@@ -311,31 +348,24 @@ export async function overlayCelebrationHebrew(input: {
     ? "CelebrationHebrew, Arial Hebrew, Arial Black, Impact, sans-serif"
     : "Arial Hebrew, Arial Black, Impact, sans-serif";
 
-  // ~12–16 chars/line keeps titles inside after stroke + bubble padding.
   const titleLines = wrapComicLines(encouragement, 14);
-  const tipLines = tip ? wrapComicLines(tip, 22) : [];
+  if (titleLines.length === 0) return input.imageBytes;
   const titleLen = Math.max(1, ...titleLines.map((l) => l.length));
-  const tipLen = tipLines.length
-    ? Math.max(1, ...tipLines.map((l) => l.length))
-    : 1;
   const titleSize = fitComicFontSize(width, titleLen, 0.062, 0.036);
-  const tipSize = fitComicFontSize(width, tipLen, 0.032, 0.024);
-  const titleLineH = titleSize * 1.18;
-  const tipLineH = tipSize * 1.18;
-  const titleBoxH =
-    titleLines.length * titleLineH + titleSize * 0.84 + titleSize * 0.55;
-  const tipBoxH = tipLines.length
-    ? tipLines.length * tipLineH + tipSize * 0.84
-    : 0;
-  const gap = tipLines.length ? Math.round(height * 0.018) : 0;
-  const bottomPad = Math.round(height * 0.045);
-  const tipBaseline = tipLines.length
-    ? height - bottomPad - tipBoxH / 2
-    : 0;
-  const titleBaseline = tipLines.length
-    ? tipBaseline - tipBoxH / 2 - gap - titleBoxH / 2
-    : height - bottomPad - titleBoxH / 2;
-  const cx = width / 2;
+  const titleBlockH = titleLines.length * titleSize * 1.18;
+  const halfH = titleBlockH / 2;
+  const marginY = Math.max(titleSize * 0.6, height * 0.04);
+  const marginX = width * 0.12;
+
+  const anchor =
+    input.anchor ?? (await pickCelebrationTextAnchor(input.imageBytes));
+  let cx = width * anchor.cxRatio;
+  let titleBaseline = height * anchor.cyRatio;
+  cx = Math.min(width - marginX, Math.max(marginX, cx));
+  titleBaseline = Math.min(
+    height - marginY - halfH,
+    Math.max(marginY + halfH, titleBaseline),
+  );
 
   const svg = Buffer.from(
     `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -351,38 +381,15 @@ export async function overlayCelebrationHebrew(input: {
           }
         </style>
       </defs>
-      ${
-        titleLines.length
-          ? comicTextBlock({
-              lines: titleLines,
-              cx,
-              baselineY: Math.round(titleBaseline),
-              fontSize: titleSize,
-              fill: "#FFE600",
-              bubbleFill: "#FFF8E7",
-              rotateDeg: -2,
-              fontFamily,
-              kind: "shout",
-              canvasWidth: width,
-            })
-          : ""
-      }
-      ${
-        tipLines.length
-          ? comicTextBlock({
-              lines: tipLines,
-              cx,
-              baselineY: Math.round(tipBaseline),
-              fontSize: tipSize,
-              fill: "#1E3A8A",
-              bubbleFill: "#FFFFFF",
-              rotateDeg: 1.5,
-              fontFamily,
-              kind: "caption",
-              canvasWidth: width,
-            })
-          : ""
-      }
+      ${comicTextBlock({
+        lines: titleLines,
+        cx: Math.round(cx),
+        baselineY: Math.round(titleBaseline),
+        fontSize: titleSize,
+        fill: "#FFE600",
+        rotateDeg: anchor.rotateDeg,
+        fontFamily,
+      })}
     </svg>`,
   );
   return sharp(input.imageBytes)
@@ -415,12 +422,15 @@ export async function composeCelebrationCopy(input: {
     const turn = await client.createResponse({
       conversationId: openaiConversationId,
       model: CELEBRATION_COPY_MODEL,
-      temperature: 0.7,
+      temperature: 0.85,
       instructions: [
         "You write one celebration card for a person who just closed shopping items and/or tasks.",
         "Return JSON only matching the schema.",
-        "encouragement: short Hebrew, include the speaker first name, gendered correctly, covers the whole batch (not one line per item).",
-        "tip: optional short Hebrew tip that fits the scene (one tip max). Empty string if none.",
+        "encouragement MUST be a complete Hebrew sentence/title (~8–16 words). Structure: (1) mandatory positive punch first — pick one that fits the win: כל הכבוד! / אלוף! / יופי! / מעולה! / מצוין! / סימנת וי! / התקדמות יפה! / יאלה אלוף! (2) speaker first name (3) clear completed action that echoes the closed label so anyone understands what was done. Gendered correctly.",
+        "Good examples: «כל הכבוד עמית! יצאת החוצה כמו שהבטחת.» / «אלוף! טל סימנה וי על הקניות.» / «מעולה דני — המוסך מאחוריך!»",
+        "Bad (forbidden): unfinished tails («…כמו» / «…ש»); vague «עמית כל הכבוד» with no task; inventing extra wins; metaphor mush that hides the real label.",
+        "When several items closed, batch clearly (e.g. name the main ones) — not one line per item.",
+        "tip: DEFAULT empty string \"\". Emit a tip ONLY when grounded in the closed items AND clearly useful for productivity, necessity, safety, or money/waste. One short Hebrew sentence max. No filler, no generic life advice. Most turns tip must be empty.",
         "scene_prompt: one English visual scene that can combine multiple wins in a single image (e.g. holding groceries while leaving a garage). Style: comic-book / cartoon superhero energy, but the person must stay recognizable from their photo. No text in the scene. No multiple panels.",
         "Do not invent extra wins beyond the listed items.",
       ].join("\n"),
@@ -430,7 +440,7 @@ export async function composeCelebrationCopy(input: {
         `Address gender: ${gender}`,
         `Closed items this turn:`,
         ...lines,
-        "Write encouragement, tip, and one combined scene_prompt now.",
+        "Write encouragement (punch + clear task), tip (usually empty), and one combined scene_prompt now.",
       ].join("\n"),
     });
     if (input.billing) {
@@ -585,7 +595,6 @@ export async function runDeleteCelebration(input: {
     composited = await overlayCelebrationHebrew({
       imageBytes: sceneBytes,
       encouragement: copy.encouragement,
-      tip: copy.tip,
     });
   } catch (error) {
     recordWhatsAppEvent(

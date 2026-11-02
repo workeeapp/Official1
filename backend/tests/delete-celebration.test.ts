@@ -93,6 +93,7 @@ import {
   collectCelebrationRemoves,
   overlayCelebrationHebrew,
   parseCelebrationCopy,
+  pickCelebrationTextAnchor,
   runDeleteCelebration,
   setCelebrationImageGenForTests,
   wrapComicLines,
@@ -159,7 +160,48 @@ describe("delete celebration", () => {
     expect(wrapComicLines("קצר", 14)).toEqual(["קצר"]);
   });
 
-  it("overlays Hebrew onto a PNG buffer", async () => {
+  it("picks a calmer band for text placement", async () => {
+    // Flat light top + noisy bottom → prefer upper cy.
+    const top = await sharp({
+      create: {
+        width: 128,
+        height: 64,
+        channels: 3,
+        background: { r: 220, g: 230, b: 240 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const bottomNoise = Buffer.alloc(128 * 64 * 3);
+    for (let i = 0; i < bottomNoise.length; i++) {
+      bottomNoise[i] = (i * 37) % 256;
+    }
+    const bottom = await sharp(bottomNoise, {
+      raw: { width: 128, height: 64, channels: 3 },
+    })
+      .png()
+      .toBuffer();
+    const stacked = await sharp({
+      create: {
+        width: 128,
+        height: 128,
+        channels: 3,
+        background: { r: 0, g: 0, b: 0 },
+      },
+    })
+      .composite([
+        { input: top, top: 0, left: 0 },
+        { input: bottom, top: 64, left: 0 },
+      ])
+      .png()
+      .toBuffer();
+    const anchor = await pickCelebrationTextAnchor(stacked);
+    expect(anchor.cyRatio).toBeLessThan(0.5);
+    expect(anchor.cxRatio).toBeGreaterThan(0.1);
+    expect(anchor.cxRatio).toBeLessThan(0.9);
+  });
+
+  it("overlays Hebrew onto a PNG buffer without tip on pixels", async () => {
     const base = await sharp({
       create: {
         width: 256,
@@ -172,8 +214,8 @@ describe("delete celebration", () => {
       .toBuffer();
     const out = await overlayCelebrationHebrew({
       imageBytes: base,
-      encouragement: "כל הכבוד טל על הרשימה הארוכה הזאת!",
-      tip: "טיפ קצר להמשך היום",
+      encouragement: "כל הכבוד עמית! יצאת החוצה כמו שהבטחת.",
+      anchor: { cxRatio: 0.5, cyRatio: 0.2, rotateDeg: 1 },
     });
     expect(out.length).toBeGreaterThan(base.length / 2);
     const meta = await sharp(out).metadata();
