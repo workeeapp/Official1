@@ -2610,11 +2610,10 @@ export function ensureSpeakerShowButtons(
 
   // Reminder mutates: reserve «הצג תזכורות» first (REPLY_BUTTON_MAX=3) so
   // conversational day taps cannot crowd it out.
+  // Use SHOW_REMINDERS_BUTTON (label «הצג») — label===command is classified as
+  // closed-choice and dropped by applyShowButtonsToBubbles.
   if (reminderMutates(metadata) && remember(SHOW_REMINDERS_COMMAND)) {
-    buttons.push({
-      label: "הצג תזכורות",
-      command: SHOW_REMINDERS_COMMAND,
-    });
+    buttons.push(SHOW_REMINDERS_BUTTON);
   }
 
   // Pass 1: engine LIST/collab, worker inventory, item-open. Defer speaker
@@ -2667,15 +2666,12 @@ export function ensureSpeakerShowButtons(
       coveredListKeys.add(workerInventoryListKey(workerCmd));
       continue;
     }
-    // Model «הצג תזכורות» — canonicalize label; command is already opaque.
+    // Model «הצג תזכורות» — canonicalize to SHOW_REMINDERS_BUTTON (label «הצג»).
     if (normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND) {
       if (!remember(SHOW_REMINDERS_COMMAND)) {
         continue;
       }
-      buttons.push({
-        label: "הצג תזכורות",
-        command: SHOW_REMINDERS_COMMAND,
-      });
+      buttons.push(SHOW_REMINDERS_BUTTON);
       continue;
     }
     // Drop worker-addressed day dumps («יום ב׳ אצלך» / «מה יש לך…») — those

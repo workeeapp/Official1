@@ -6,6 +6,8 @@ export const RECENT_OUTBOUND_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 export const RECENT_OUTBOUND_LIMIT = 1;
 
 export interface RecentOutboundRow {
+  /** Clock series id — use for STOP SERIES right after this ping (do not invent). */
+  reminder_id: string;
   sent_at: string;
   item: string;
   text: string;
@@ -48,6 +50,7 @@ export async function listRecentReminderOutbounds(input: {
       orderBy: { sentAt: "desc" },
       take: 40,
       select: {
+        id: true,
         itemLabel: true,
         messageText: true,
         lastComposedText: true,
@@ -72,6 +75,7 @@ export async function listRecentReminderOutbounds(input: {
       continue;
     }
     out.push({
+      reminder_id: row.id,
       sent_at: formatJerusalemDateTime(row.sentAt),
       item: row.itemLabel,
       text: text.slice(0, 4000),
@@ -91,7 +95,7 @@ export function formatRecentOutboundContext(
   }
   return [
     "RECENT_OUTBOUND:",
-    "Messages YOU already sent to this speaker via scheduled reminders (WhatsApp / clock fire). Only the latest delivery is listed. When they refer to מה ששלחת / הסיכום / ההודעה האחרונה, answer from this text. Do NOT resend unless they explicitly ask to send again. Do NOT invent a different recipient for a follow-up send.",
+    "Messages YOU already sent to this speaker via scheduled reminders (WhatsApp / clock fire). Only the latest delivery is listed. reminder_id is that clock's series id in active_reminders. When they refer to מה ששלחת / הסיכום / ההודעה האחרונה, answer from this text. Bare STOP SERIES right after («אל תזכירי לי» / «תפסיקי» / «את זה») → reminders.remove with THIS reminder_id — copy it; never invent or title-guess. Do NOT resend unless they explicitly ask to send again. Do NOT invent a different recipient for a follow-up send.",
     JSON.stringify(rows),
   ].join("\n");
 }

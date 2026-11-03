@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyShowButtonsToBubbles,
   emptyLlmMetadata,
   type LlmReminderAction,
   type PublicEmployee,
@@ -623,13 +624,13 @@ describe("employee targets", () => {
         ...emptyLlmMetadata(),
         reminders: [reminderAdd],
       }),
-    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
     expect(
       ensureSpeakerShowButtons(
         { ...emptyLlmMetadata(), reminders: [reminderAdd] },
         [{ label: "הצג", command: "הצג תזכורות" }],
       ),
-    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
     // תזכורות reserved first; conversational model taps fill remaining slots.
     expect(
       ensureSpeakerShowButtons(
@@ -637,10 +638,48 @@ describe("employee targets", () => {
         [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
     ).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "מה יש לי מחר", command: "מה יש לי מחר" },
     ]);
     expect(ensureSpeakerShowButtons(emptyLlmMetadata())).toEqual([]);
+  });
+
+  it("reminders.remove safety-net survives applyShowButtonsToBubbles", () => {
+    const buttons = ensureSpeakerShowButtons({
+      ...emptyLlmMetadata(),
+      reminders: [
+        {
+          action: "remove",
+          item: "לשתות מים",
+          listType: "tasks",
+          date: "",
+          time: "",
+          repeat: "none",
+          ping: [],
+          about: [],
+          targets: [],
+          text: "",
+          inSeconds: null,
+          everyCount: null,
+          everyUnit: null,
+          weekdays: null,
+          confirmed: false,
+          compose: false,
+          composeSource: "",
+          composeLookbackHours: 0,
+          composePlace: "",
+          reminderId: "r-water",
+        },
+      ],
+    });
+    expect(buttons).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
+    const bubbles = applyShowButtonsToBubbles(
+      [{ text: "ביטלתי את התזכורת לשתות מים." }],
+      buttons,
+    );
+    expect(bubbles[0]?.buttons).toEqual([
+      { label: "הצג", command: "הצג תזכורות" },
+    ]);
   });
 
   it("speaker-book tasks + reminder gets הצג משימות + הצג תזכורות", () => {
@@ -689,7 +728,7 @@ describe("employee targets", () => {
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
     ).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
   });
@@ -738,7 +777,7 @@ describe("employee targets", () => {
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
     ).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "המשימות שלך", command: "הצג משימות של לוסי" },
     ]);
   });
@@ -803,7 +842,7 @@ describe("employee targets", () => {
         },
       ),
     ).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "המשימות שלך", command: "הצג משימות של לוסי" },
     ]);
   });
@@ -842,7 +881,7 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
   it("ordinary reminder update safety-nets הצג תזכורות", () => {
@@ -878,7 +917,7 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
   it("WATCH create + appliedWorkerWatchName dedupes to one worker inventory button", () => {
@@ -1959,7 +1998,7 @@ describe("employee targets", () => {
     // Priority: תזכורות → הצג משימות → speaker day (max 3); drop אצלך.
     // Model day angles deferred after LIST; first day fills the last slot.
     expect(ensureSpeakerShowButtons(meta, modelAngles)).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "הצג משימות", command: "הצג רשימת משימות" },
       { label: "התור", command: "מה יש לי ביום רביעי" },
     ]);
@@ -2014,7 +2053,7 @@ describe("employee targets", () => {
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
     ).toEqual([
-      { label: "הצג תזכורות", command: "הצג תזכורות" },
+      { label: "הצג", command: "הצג תזכורות" },
       { label: "היום שלי", command: "מה יש לי היום" },
       // Model LIST kept only when eligible; reminder-only → dropped (no tasks mutate).
     ]);
@@ -2457,7 +2496,7 @@ describe("employee targets", () => {
           },
         ],
       }),
-    ).toEqual([{ label: "הצג תזכורות", command: "הצג תזכורות" }]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
   it("appends a linked reminder clock to a task notification", () => {

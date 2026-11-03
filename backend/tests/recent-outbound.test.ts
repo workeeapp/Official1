@@ -26,6 +26,7 @@ describe("listRecentReminderOutbounds", () => {
     const now = new Date("2026-10-02T00:00:00.000Z");
     reminderFindMany.mockResolvedValue([
       {
+        id: "rem-summary",
         itemLabel: "לשלוח סיכום שינויי קוד לטל",
         messageText: "brief",
         lastComposedText: "היי טל, סיכום…",
@@ -33,6 +34,7 @@ describe("listRecentReminderOutbounds", () => {
         sentAt: new Date("2026-10-01T22:00:00.000Z"),
       },
       {
+        id: "rem-old",
         itemLabel: "לשלוח ברכה",
         messageText: "older",
         lastComposedText: "בוקר טוב ישן",
@@ -40,6 +42,7 @@ describe("listRecentReminderOutbounds", () => {
         sentAt: new Date("2026-10-01T09:00:00.000Z"),
       },
       {
+        id: "rem-other",
         itemLabel: "לשלוח לעמית",
         messageText: "other",
         lastComposedText: "היי עמית",
@@ -55,6 +58,7 @@ describe("listRecentReminderOutbounds", () => {
     });
 
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.reminder_id).toBe("rem-summary");
     expect(rows[0]?.item).toContain("סיכום");
     expect(rows[0]?.text).toBe("היי טל, סיכום…");
     expect(rows[0]?.sent_at).toBeTruthy();
@@ -63,6 +67,7 @@ describe("listRecentReminderOutbounds", () => {
   it("falls back to messageText when lastComposedText is empty", async () => {
     reminderFindMany.mockResolvedValue([
       {
+        id: "rem-msg",
         itemLabel: "לשלוח הודעה",
         messageText: "בוקר טוב",
         lastComposedText: "",
@@ -88,13 +93,17 @@ describe("formatRecentOutboundContext", () => {
   it("formats a RECENT_OUTBOUND facts block", () => {
     const text = formatRecentOutboundContext([
       {
+        reminder_id: "rem-summary",
         sent_at: "2026-10-01 22:00",
         item: "לשלוח סיכום",
         text: "היי טל, סיכום…",
       },
     ]);
     expect(text).toContain("RECENT_OUTBOUND:");
+    expect(text).toContain("reminder_id");
+    expect(text).toContain("rem-summary");
     expect(text).toContain("Do NOT resend");
     expect(text).toContain("היי טל, סיכום…");
+    expect(text).toContain("STOP SERIES");
   });
 });

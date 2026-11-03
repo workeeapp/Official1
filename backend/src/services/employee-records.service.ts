@@ -1366,7 +1366,7 @@ export function formatEmployeeContext(
     `${label}:`,
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
-    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update (incl. list_type filing) / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE WHEN CLEAR (rows): unique target + id → remove NOW with past-tense responses («מחקתי את «title»…»); FORBIDDEN inventing «האם מאשר?» / yes-no when the target is unique; FORBIDDEN empty responses on that remove; FORBIDDEN alter_list/delete_list for a single item. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל / whole-list vs item) → delete mutates empty; ONE responses entry — FORBIDDEN raise/«אגב»; after they pick, remove with ids from THIS turn. WHOLE-LIST: unique list_id → delete_list NOW; several matches → ASK. On לא / בטל while a DELETE CLARIFY is open → remove empty; short ack; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
+    "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update (incl. list_type filing) / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE WHEN CLEAR (rows): unique target + id → remove NOW with past-tense responses («מחקתי את «title»…»); FORBIDDEN inventing «האם מאשר?» / yes-no when the target is unique; FORBIDDEN empty responses on that remove; FORBIDDEN alter_list/delete_list for a single item. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל / whole-list vs item) → delete mutates empty; ONE responses entry — FORBIDDEN raise/«אגב»; after they pick, remove with ids from THIS turn. CLOCK TITLE COLLISIONS: active_reminders may list several rows with the same item — distinguish by fire_at / repeat / recurrence_text. If clock_title_collisions is non-empty for that item and they cancel by title only (no RECENT_OUTBOUND.reminder_id bind) → ASK which (name those distinctions); reminders=[] — FORBIDDEN removing the first id or every matching id. WHOLE-LIST: unique list_id → delete_list NOW; several matches → ASK. On לא / בטל while a DELETE CLARIFY is open → remove empty; short ack; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
     "BY LINE NUMBER: after a numbered dump, spoken indices («3» / «ל3» / «תמחק את 3») map to LAST_NUMBERED_DUMP for that n when present (copy id+kind) — else match dump line N's title stem (שם פריט / שם משימה / item_name / reminder item; strip quantity, marks, urgency wrap) to an id in THIS JSON. FORBIDDEN treating N as JSON array index when that picks a different row than dump line N. Shopping/tasks JSON order is personal → co-share → assign per list only; dump numbering may span several shells. Numbering restarts per header / day / ממתינים; several 1. sequences → ASK which section if ambiguous. Unique → ACTION NOW; ≥2 same stem → ASK.",
     "filing = durable personal facts / memory (family, preferences, IDs, notes). Each row has filing_id, item_name (שם), optional item_info (product תיאור — the detail/value), and optional item_description (מידע לחיפוש — find-helper context words). Find the right filing by item_name + item_info + item_description. Use them as background context in later turns. Do not ignore filing when advising.",
     "lists may include scope=personal|shared|shared_items. When scope=shared, shared_with lists partner names — say the list is shared with those people; never call it only the owner's private list. Empty items=[] means the list exists but has no rows — say it is empty when relevant. Clearing/emptying a shared list must NOT remove participants or unshare — empty shared shells stay shared until an explicit unshare.",
@@ -1378,15 +1378,55 @@ export function formatEmployeeContext(
     JSON.stringify({
       lists: listsForEmployeeContext(snapshot.lists),
       filing: snapshot.filing,
-      active_reminders: (snapshot.reminders ?? [])
-        .filter((row) => row.status === "active")
-        .map((row) => ({
-          reminder_id: row.reminder_id,
-          item: row.item,
-        })),
+      ...activeRemindersFacts(snapshot.reminders ?? []),
       reminders: snapshot.reminders ?? [],
     }),
   ].join("\n");
+}
+
+/**
+ * Compact live clocks for MUTATE BY ID. Include schedule fields so duplicate
+ * item titles are distinguishable (prompt ASK when ≥2 share an item).
+ */
+function activeRemindersFacts(
+  rows: ReminderSnapshotRow[],
+): {
+  active_reminders: Array<Record<string, unknown>>;
+  clock_title_collisions: Array<{
+    item: string;
+    count: number;
+    reminder_ids: string[];
+  }>;
+} {
+  const active = rows.filter((row) => row.status === "active");
+  const active_reminders = active.map((row) => {
+    const out: Record<string, unknown> = {
+      reminder_id: row.reminder_id,
+      item: row.item,
+      fire_at: row.fire_at,
+      repeat: row.repeat,
+    };
+    if (row.recurrence_text?.trim()) {
+      out.recurrence_text = row.recurrence_text.trim();
+    }
+    return out;
+  });
+  const byItem = new Map<string, string[]>();
+  for (const row of active) {
+    const key = row.item.trim();
+    if (!key) continue;
+    const list = byItem.get(key) ?? [];
+    list.push(row.reminder_id);
+    byItem.set(key, list);
+  }
+  const clock_title_collisions = [...byItem.entries()]
+    .filter(([, ids]) => ids.length >= 2)
+    .map(([item, reminder_ids]) => ({
+      item,
+      count: reminder_ids.length,
+      reminder_ids,
+    }));
+  return { active_reminders, clock_title_collisions };
 }
 
 export interface TeamScheduleEntry {

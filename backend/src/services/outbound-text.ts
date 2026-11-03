@@ -19,6 +19,11 @@ function asInfinitive(value: string): string {
 
 export const REMINDER_SNOOZE_MINUTES = 10;
 
+/** Strip leading «תזכורת:» + infinitive — same chore shape as reminderLine. */
+function normalizePlainPingChore(raw: string): string {
+  return asInfinitive(raw.trim().replace(/^(תזכורת:\s*)+/u, "").trim());
+}
+
 /** Shared gate + chore label for plain-ping fire buttons (נדנד / סמן כבוצע). */
 function plainPingContent(input: {
   item: string;
@@ -28,12 +33,16 @@ function plainPingContent(input: {
   if (input.composeAtFire) {
     return "";
   }
-  const dictated = input.text.trim();
-  const label = input.item.trim();
+  const label = normalizePlainPingChore(input.item);
+  const dictated = normalizePlainPingChore(input.text);
+  // Empty text OR same chore as item (incl. «תזכורת: לשתות מים» vs «לשתות מים»).
   if (dictated && dictated !== label) {
     return "";
   }
-  return reminderLine(label, input.text).replace(/^תזכורת:\s*/u, "");
+  return reminderLine(label || input.item.trim(), dictated ? label : "").replace(
+    /^תזכורת:\s*/u,
+    "",
+  );
 }
 
 /**

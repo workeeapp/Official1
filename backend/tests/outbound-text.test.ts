@@ -87,6 +87,25 @@ describe("reminderFireButtons", () => {
     ]);
   });
 
+  it("keeps both buttons when text has leading תזכורת: matching the item", () => {
+    expect(
+      reminderFireButtons({
+        item: "לשתות מים",
+        text: "תזכורת: לשתות מים",
+        composeAtFire: false,
+      }),
+    ).toEqual([
+      {
+        label: "נדנד",
+        command: "נדנדי לי לשתות מים בעוד 10 דקות",
+      },
+      {
+        label: "סמן כבוצע",
+        command: "סמן כבוצע: לשתות מים",
+      },
+    ]);
+  });
+
   it("emits no buttons for compose-at-fire or dictated send", () => {
     expect(
       reminderFireButtons({
@@ -99,6 +118,16 @@ describe("reminderFireButtons", () => {
       reminderFireButtons({
         item: "לשלוח הודעה לערן",
         text: "ערן, אל תשכח את הפגישה",
+        composeAtFire: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it("emits no buttons when text is a mismatched personal message", () => {
+    expect(
+      reminderFireButtons({
+        item: "לשתות מים",
+        text: "היי טל, זכור לקנות חלב",
         composeAtFire: false,
       }),
     ).toEqual([]);

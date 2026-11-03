@@ -2611,11 +2611,69 @@ describe("employee records", () => {
     expect(context).toContain("DELETE WHEN CLEAR");
     expect(context).toContain("BY LINE NUMBER");
     expect(context).toContain("LAST_NUMBERED_DUMP");
+    expect(context).toContain("CLOCK TITLE COLLISIONS");
     expect(context).not.toContain("DELETE CONFIRM (rows): empty remove + ask «האם מאשר?»");
     expect(context).toContain("item_id");
     expect(context).toContain("filing_id");
     expect(context).toContain("personal → co-share → assign");
     expect(context).toContain("FORBIDDEN answering AFTER ASSIGN");
+  });
+
+  it("active_reminders expose schedule fields + clock_title_collisions for duplicate titles", () => {
+    const context = formatEmployeeContext({
+      lists: [],
+      filing: [],
+      reminders: [
+        {
+          reminder_id: "r-hour",
+          item: "לשתות מים",
+          list_type: "tasks",
+          fire_at: "2026-11-03 11:00",
+          repeat: "1:hours",
+          recurrence_text: "כל שעה",
+          ping: [],
+          ping_ids: [],
+          owner: "טל",
+          text: "לשתות מים",
+          last_composed_text: "",
+          sent_text: "לשתות מים",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+        {
+          reminder_id: "r-2h",
+          item: "לשתות מים",
+          list_type: "tasks",
+          fire_at: "2026-11-03 12:00",
+          repeat: "2:hours",
+          recurrence_text: "כל שעתיים",
+          ping: [],
+          ping_ids: [],
+          owner: "טל",
+          text: "לשתות מים",
+          last_composed_text: "",
+          sent_text: "לשתות מים",
+          compose_at_fire: false,
+          compose_source: "",
+          compose_lookback_hours: 0,
+          status: "active",
+          send_status: "pending",
+          sent: false,
+          sent_at: null,
+        },
+      ],
+    });
+    expect(context).toContain("r-hour");
+    expect(context).toContain("r-2h");
+    expect(context).toContain("fire_at");
+    expect(context).toContain("recurrence_text");
+    expect(context).toContain("clock_title_collisions");
+    expect(context).toContain('"count":2');
   });
 
   it("orders shopping/tasks in context personal then co-share then assign", () => {

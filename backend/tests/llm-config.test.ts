@@ -412,6 +412,46 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("סמן כבוצע");
   });
 
+  it("teaches interval habit Done as ack-only and snooze Option B one-shot", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("INTERVAL HABIT OCCURRENCE DONE");
+    expect(config.systemMessage).toContain("שתיתי");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN lists.remove / reminders.remove (series stays",
+    );
+    expect(config.systemMessage).toContain("Option B — separate one-shot");
+    expect(config.systemMessage).toContain(
+      "NEVER reminders.update / change fireAt or recurrence on the source interval",
+    );
+    expect(config.systemMessage).toContain("reschedule in place");
+    expect(config.systemMessage).toContain("within 2 minutes of the next fireAt");
+  });
+
+  it("teaches STOP SERIES CLOCK CANCEL vs Done vs blanket stop-all", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain("STOP SERIES CLOCK CANCEL");
+    expect(config.systemMessage).toContain("תפסיקי להזכיר לי");
+    expect(config.systemMessage).toContain("אל תזכירי לי יותר");
+    expect(config.systemMessage).toContain("תבטלי את התזכורת");
+    expect(config.systemMessage).toContain(
+      "אל תשלחי לי יותר הודעות תזכורת",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN reminders.remove of any clock",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN treating Done as STOP SERIES",
+    );
+    expect(config.systemMessage).toContain("MUST EMIT ACTION");
+    expect(config.systemMessage).toContain("אל תזכירי לי יותר לשתות מים");
+    expect(config.systemMessage).toContain("RIGHT AFTER A REMINDER PING");
+    expect(config.systemMessage).toContain("RECENT_OUTBOUND.reminder_id");
+    expect(config.systemMessage).toContain("תפסיקי להזכיר לי את זה");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN inventing an id",
+    );
+  });
+
   it("teaches item dump with server-attached task reminder buttons", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("ITEM DUMP");
