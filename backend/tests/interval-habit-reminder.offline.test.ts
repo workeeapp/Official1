@@ -48,7 +48,7 @@ describe("interval habit reminder contracts (offline)", () => {
     expect(config.systemMessage).toContain("אל תזכירי לי יותר");
     expect(config.systemMessage).toContain("אל תשלחי לי יותר הודעות תזכורת");
     expect(config.systemMessage).toContain(
-      "FORBIDDEN reminders.remove of any clock",
+      "FORBIDDEN reminders.remove of even one clock",
     );
     expect(config.systemMessage).toContain("MUST EMIT ACTION");
     expect(config.systemMessage).toContain("אל תזכירי לי יותר לשתות מים");
@@ -92,6 +92,61 @@ describe("interval habit reminder contracts (offline)", () => {
       /NEVER reminders\.update \/ change fireAt or recurrence on the source interval/,
     );
     expect(config.systemMessage).toContain("ONE new one-shot reminders add");
-    expect(config.systemMessage).toContain("no speaker wrapper");
+    expect(config.systemMessage).toContain("No speaker-book wrapper for the snooze");
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN emitting only the worker task without the one-shot clock",
+    );
+    expect(config.systemMessage).toContain(
+      "נדנדי לי להוריד את סקאזי לטיול ערב בעוד 10 דקות",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN putting «לשלוח נדנוד» into reminders.add item/text/itemLabel",
+    );
+    expect(config.systemMessage).toContain(
+      "item/text = the ORIGINAL chore only",
+    );
+  });
+
+  it("prompt + extras: Mark-done is Done path — FORBIDDEN Option B snooze", () => {
+    const config = loadLlmConfig(repoRoot);
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN converting Mark-done / «סמן כבוצע» into Option B snooze",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN treating Done as Option B snooze",
+    );
+    expect(config.systemMessage).toContain(
+      "appointment/תור/פגישה already on tasks",
+    );
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN a standalone «להזכיר ל…» clock instead of linking that item_id",
+    );
+    const src = readFileSync(
+      resolve(repoRoot, "backend/src/services/chat.service.ts"),
+      "utf8",
+    );
+    expect(src).toContain(
+      "Option B ONLY: YOUR «לשלוח נדנוד…» task + ONE new one-shot reminders.add",
+    );
+    expect(src).toContain(
+      "CRITICAL EXCLUSION: «סמן כבוצע» / «סמן כבוצע: <title>» after that outbound is Done",
+    );
+    expect(src).toContain(
+      "FORBIDDEN treating Mark-done as Option B snooze",
+    );
+    expect(src).toContain(
+      "FORBIDDEN orphan «להזכיר ל…» clock instead of that item_id link",
+    );
+  });
+
+  it("whatsapp: fire-button commands skip reply-context wrap", () => {
+    const src = readFileSync(
+      resolve(repoRoot, "backend/src/services/whatsapp.service.ts"),
+      "utf8",
+    );
+    expect(src).toContain("isReminderFireButtonCommand");
+    expect(src).toContain("!isReminderFireButtonCommand(spoken)");
+    expect(src).toContain('t.startsWith("סמן כבוצע:")');
+    expect(src).toContain('t.startsWith("נדנדי לי ")');
   });
 });

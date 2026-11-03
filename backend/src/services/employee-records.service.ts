@@ -1194,6 +1194,12 @@ export function correctExecutionTruthReply(input: {
    * When omitted, falls back to appliedListAdd.
    */
   appliedSpeakerListAdd?: boolean;
+  /**
+   * Whether THIS turn's ACTION requested a list add onto the speaker's book
+   * (empty targets / speaker in targets — not worker-only «לשלוח נדנוד» / להזכיר).
+   * When omitted, assumed true so legacy call sites keep PARTIAL behavior.
+   */
+  requestedSpeakerListAdd?: boolean;
   appliedReminderAdd: boolean;
   /**
    * Filing add applied this turn. A list-add claim alone must not wipe the
@@ -1223,6 +1229,12 @@ export function correctExecutionTruthReply(input: {
       : input.appliedListAdd;
   const reminderOk = input.appliedReminderAdd;
   const filingOk = Boolean(input.appliedFilingAdd);
+  const speakerAddRequested =
+    typeof input.requestedSpeakerListAdd === "boolean"
+      ? input.requestedSpeakerListAdd
+      : true;
+  const reminderSuccessLine = () =>
+    input.reminderAddFallback?.trim() || "שמרתי את התזכורת.";
 
   // Both claimed domains that applied (or unclaimed domains ignored) → keep.
   if (claimedListAdd && claimedReminder) {
@@ -1230,9 +1242,12 @@ export function correctExecutionTruthReply(input: {
       return input.reply;
     }
     if (!speakerListOk && reminderOk) {
-      // Dual claim without speaker task: always surface the partial — do not
-      // hide behind a reminder-only success line.
-      return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
+      // Speaker-book add was requested and missed → PARTIAL.
+      // Worker-only / no speaker add requested → clock success is enough (Option B).
+      if (speakerAddRequested) {
+        return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
+      }
+      return input.setResponse(input.reply, reminderSuccessLine());
     }
     if (speakerListOk && !reminderOk) {
       const listText =
@@ -1245,7 +1260,10 @@ export function correctExecutionTruthReply(input: {
 
   if (claimedListAdd && !speakerListOk) {
     if (reminderOk) {
-      return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
+      if (speakerAddRequested) {
+        return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
+      }
+      return input.setResponse(input.reply, reminderSuccessLine());
     }
     // Filing success is not a lists.add — do not emit LIST_ADD_MISS over it.
     if (filingOk) {

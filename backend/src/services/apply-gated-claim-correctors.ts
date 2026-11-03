@@ -32,6 +32,11 @@ export type GatedClaimCorrectorsInput = {
   appliedUpdate: boolean;
   appliedAdd: boolean;
   appliedSpeakerListAdd: boolean;
+  /**
+   * ACTION requested a speaker-book list add (not worker-only tracking).
+   * When omitted, executionTruth keeps legacy PARTIAL behavior.
+   */
+  requestedSpeakerListAdd?: boolean;
   appliedListOps: boolean;
   appliedFilingRemove: boolean;
   appliedFilingUpdate: boolean;
@@ -157,6 +162,9 @@ export function applyGatedClaimCorrectors(
       spoken: spoken(),
       appliedListAdd: input.appliedAdd,
       appliedSpeakerListAdd: input.appliedSpeakerListAdd,
+      ...(typeof input.requestedSpeakerListAdd === "boolean"
+        ? { requestedSpeakerListAdd: input.requestedSpeakerListAdd }
+        : {}),
       appliedReminderAdd: input.appliedReminderAdd,
       appliedFilingAdd: input.appliedFilingAdd,
       listAddFallback: input.appliedFallback,

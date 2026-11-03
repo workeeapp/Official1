@@ -41,6 +41,16 @@ import {
 } from "./whatsapp-outbound-memory.js";
 import { isKnownShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
+
+/** Fire-button commands already carry the full ACTION text — skip reply-context wrap. */
+function isReminderFireButtonCommand(text: string): boolean {
+  const t = text.trim();
+  return (
+    t.startsWith("סמן כבוצע:") ||
+    t.startsWith("נדנדי לי ") ||
+    t === "סמן כבוצע"
+  );
+}
 import {
   bindInboundToInvite,
   findPendingInviteByPhone,
@@ -798,7 +808,9 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       employeeId: speaker.employeeId,
       digitalEmployeeId: digital.id,
       message:
-        replyToText && !isKnownShowButtonCommand(spoken)
+        replyToText &&
+        !isKnownShowButtonCommand(spoken) &&
+        !isReminderFireButtonCommand(spoken)
           ? formatWhatsAppReplyContext(replyToText, spoken)
           : spoken,
       ...(attachments ? { attachments } : {}),

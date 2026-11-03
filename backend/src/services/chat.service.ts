@@ -97,6 +97,7 @@ import {
   resolveSpokenMetadata,
   buildCollabByListKey,
   ensureSpeakerShowButtons,
+  isWorkerOnlyTasksList,
   listNavKeyFromMutation,
   showButtonsForNotify,
   type SharedListRef,
@@ -1057,7 +1058,7 @@ function workerTargetingInstructions(
       : "",
     "One sentence can be several actions. Fill every array that applies.",
     "TASK + REMINDER ? ????? (critical): a timed chore (?????? ?? ???? ??14:20?, ????? ????? ??? ??08:00?) is an ordinary tasks row with ??? ??????. Accepting a WhatsApp reminder on it is reminders + your ?????? job ? NOT Self-nudge and NOT the ????/snooze button. Always save the speaker task with its chore hour; on the ?????? copy that same ?????/??? (chore time, not the ping).",
-    `Self-nudge (תזכירי/י לי / נדנד at a clock — they asked to be reminded, not "I have a timed chore"): DECISION & FOCUS §5 — REUSE EXISTING WRAPPER. LINK CONTRACT only (speaker/assignee item ↔ clock; Worker is NOT required for success): NEW → lists.add shopping|tasks with items[].remind (engine id+join). EXISTING → list_type reminders with REQUIRED ESD item_id (or lists.update item_id + remind). FORBIDDEN minting UUID / title-only / itemKey linking / duplicate top-level for same nested clock. Missing ESD id → ASK; empty reminders. PRODUCT WORKER TRACKING (optional for join; still emit when they asked YOU to remind): lists tasks add targets:[${workerName}] להזכיר ל<speaker> <item>; HH:mm → תאריך/שעה לביצוע (= ping). Pure \`in\` — date/time optional. FORBIDDEN treating worker emit/omit as the join. Do not handoff. REMINDER-ON-ITEM: EXISTING row only → reminders + ESD item_id (+ YOUR להזכיר tracking when asked); no schedule → ask; missing → lists=[].`,
+    `Self-nudge (תזכירי/י לי / נדנד at a clock — they asked to be reminded, not "I have a timed chore"): DECISION & FOCUS §5 — REUSE EXISTING WRAPPER. LINK CONTRACT only (speaker/assignee item ↔ clock; Worker is NOT required for success): NEW → lists.add shopping|tasks with items[].remind (engine id+join). EXISTING appointment/תור/פגישה/task → list_type reminders with REQUIRED ESD item_id (or lists.update item_id + remind); FORBIDDEN lists.add duplicate of that row; FORBIDDEN orphan «להזכיר ל…» clock instead of that item_id link (YOUR להזכיר tracking may add in addition). FORBIDDEN minting UUID / title-only / itemKey linking / duplicate top-level for same nested clock. Missing ESD id → ASK; empty reminders. PRODUCT WORKER TRACKING (optional for join; still emit when they asked YOU to remind): lists tasks add targets:[${workerName}] להזכיר ל<speaker> <item>; HH:mm → תאריך/שעה לביצוע (= ping). Pure \`in\` — date/time optional. FORBIDDEN treating worker emit/omit as the join. Do not handoff. REMINDER-ON-ITEM: EXISTING row only → reminders + ESD item_id (+ YOUR להזכיר tracking when asked); no schedule → ask; missing → lists=[].`,
     `Remind someone ELSE in Known employees (תזכירי/י למישהו): LINK only = NEW lists.add tasks targets:[name] with items[].remind (ping=[name]), OR EXISTING reminders with assignee ESD item_id (never speaker's; missing ESD → ASK). FORBIDDEN mint UUID / title-only. PRODUCT: still emit YOUR להזכיר ל<name> when they asked you to remind them — not the user-task↔clock join. Recurring: remind.recurrence or reminders[].recurrence. NEVER ask WhatsApp if Known.`,
     "REMIND CLOCK vs APPOINTMENT: ????? ??????? = `in` for the clock. ??? ?? ??? ??22:00? = task context ? put ??? ?????? 22:00 on their task AND on your ?????? when saving that turn ? do NOT ask what 22:00 means; do NOT treat it as a second fire time. Never also lists.add onto shared ?????? ?????? for a remind.",
     "NO META ON LISTS: complaints about your timing/questions ? response only, empty lists. Never dump bug/meta text onto ?????? ?????? or any shared list.",
@@ -1118,7 +1119,7 @@ function workerTargetingInstructions(
     "Status / ??? / what someone needs to buy or do / show a list: LIVE DATA ONLY ? never resurrect titles from earlier chat after a delete. Bare ??? ?? ??? / ?????? ???? / ????? ??? / ?? ?? ????? ? metadata.show_dump=full; lists=[]; server replaces response (FORBIDDEN model-written overview; shopping COUNTS + tasks detail + phone book). SHAREABLE STATUS ASK / ABOUT X / ???? ????? ?????|??????: metadata.show_dump = shopping|tasks|?; one flat dump header + row marks (co-share (A, B); assign (??????? X ? ??? Y)); filings two-section; about X = speaker?X co-share. Current field values only ? never dump ?? ??? / update drafts. Inventory dump lines are server-owned ? do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap ???:?). Urgency: wrap the whole item line in ???; very_urgent also appends ?? after the closing guillemet. FORBIDDEN to write ???? / ???? ???? on that line. Shared lists: use scope/shared_with. Custom list titles follow LIST NAME MATCH. APPLY FEEDBACK: name object+list after mutates.",
     "Answer in your response from this turn's saved data. The server does not write that answer ? except known false delivery / list-type wording fixes. It does not append a mutation summary.",
     "After any save/send/remove, state clearly in response what you did ? that text is what the user sees.",
-    "If the speaker says they bought or already have a shopping item, remove it from shopping. Finished chore / past-tense Done (סיימתי / הלכתי / שתיתי / לקחתי / סידרתי / tap «סמן כבוצע: <title>»): look up THIS turn's EMPLOYEE_SAVED_DATA + active_reminders. Unique active interval-habit clock (recurrence.freq=interval / every-N) matching that title → short ack ONLY; lists=[] reminders=[] — FORBIDDEN lists.remove / reminders.remove (series stays). Unique one-off task/shopping → lists.remove that item_id (cascade linked one-shot). Standing חוזר/next_occurrences → occurrence_done (not remove). Several matches → ASK; empty mutates. Mark-done button = same path. Never call a tasks item תזכורת בוואטסאפ.",
+    "If the speaker says they bought or already have a shopping item, remove it from shopping. Finished chore / past-tense Done (סיימתי / הלכתי / שתיתי / לקחתי / סידרתי / tap «סמן כבוצע: <title>» / bare «סמן כבוצע» right after RECENT_OUTBOUND): look up THIS turn's EMPLOYEE_SAVED_DATA + active_reminders. Unique active interval-habit clock (recurrence.freq=interval / every-N) matching that title → short ack ONLY; lists=[] reminders=[] — FORBIDDEN lists.remove / reminders.remove (series stays). Unique one-off task/shopping → lists.remove that item_id (cascade linked one-shot). Standing חוזר/next_occurrences → occurrence_done (not remove). Several matches → ASK; empty mutates. Mark-done button = same path. FORBIDDEN treating Mark-done as Option B snooze (נדנדי לי / לשלוח נדנוד / reminders.add one-shot / REMINDER_SNOOZE). Never call a tasks item תזכורת בוואטסאפ.",
     "STANDING TASK DONE: if that task row has ???? / next_occurrences, ??????? / ????? / ?????? OR ???? ?????: <that title>? means done for THIS occurrence ? never lists.remove (it would delete the whole series and its clock). Emit lists.update list_type tasks with that item_id and occurrence_done = YYYY-MM-DD of the occurrence they did (true = today; ?????? ?????? ? yesterday from calendar); nothing else on the item. Response: acknowledge and name the next occurrence AFTER that day from next_occurrences. done_dates on the row = already marked; do not list those occurrences again. lists.remove only on an explicit delete of the standing task (?????? ?? ???????, ???? ??? ?? ?????). Unclear ? ask ????? ?????? ?????, ?? ????? ?? ?????? ???????? with lists empty. Tasks without ????: remove as usual.",
     "STANDING TASK ? ONE DATE CHANGED: cancelling or moving a single occurrence (???23.10 ??? ?? ???? ?????? / ???23.10 ????? ??11:00?) ? lists.update list_type tasks with that item_id and occurrence_change { date: YYYY-MM-DD (one of next_occurrences), cancel: true } or { date, time: \"HH:mm\" }; nothing else on the item. A linked repeating clock for the same work ? same turn lists update reminders with its reminder_id and the same occurrence_change. Never occurrence_done, lists.remove, a recurrence change, or a new one-off task for this. Only that date vs. every week unclear ? ask ??? ??<date> ?? ??? <weekday>?? with lists empty. Response names the date and that the other occurrences stay.",
     "list_type: shopping = things to buy (????? ???). tasks = work to do (????? ?????, ????? ???, ???? ?????). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say ????? for tasks and ????? for shopping.",
@@ -2263,7 +2264,7 @@ export async function sendChatMessage(input: {
           : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
         guestSpeaker
           ? ""
-          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker (includes reminder_id of that clock series). If they ask about מה ששלחת / הסיכום / ההודעה האחרונה / מה שכתבת about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent דני (or any other person) as who to ask/send — example names are not real; only message someone the speaker named this turn. Snooze / תזכירי לי בעוד / עוד פעם / בעוד X about that block → NEW self-nudge for this speaker from RECENT_OUTBOUND.item/text (three ACTIONS). Bare נדנדי לי שוב right after that outbound = snooze the same item. Do not revive the old done clock — add a new one. Missing delay → ASK כמה. STOP SERIES right after that outbound: bare «אל תזכירי לי» / «אל תזכירי לי יותר» / «תפסיקי» / «תפסיקי להזכיר לי את זה» / «בטלי» / «את זה» (no other chore named) → reminders.remove with RECENT_OUTBOUND.reminder_id copied exactly (see STOP SERIES / RIGHT AFTER PING) — FORBIDDEN inventing an id or guessing by title; FORBIDDEN blanket ASK when reminder_id is present.",
+          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker (includes reminder_id of that clock series). If they ask about מה ששלחת / הסיכום / ההודעה האחרונה / מה שכתבת about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent דני (or any other person) as who to ask/send — example names are not real; only message someone the speaker named this turn. Snooze / תזכירי לי בעוד / עוד פעם / בעוד X / «נדנדי לי…» about that block → Option B ONLY: YOUR «לשלוח נדנוד…» task + ONE new one-shot reminders.add (in≈10 minutes / REMINDER_SNOOZE) ping=speaker; reminders.add item/text = RECENT_OUTBOUND.item / original chore ONLY (FORBIDDEN «לשלוח נדנוד» inside the clock title) — FORBIDDEN mutating the source series fireAt/recurrence; FORBIDDEN speaker-wrapper lists.add for the chore. Bare נדנדי לי שוב right after that outbound = same Option B for that item. Do not revive a done clock — add a new one-shot. Missing delay → ASK כמה. CRITICAL EXCLUSION: «סמן כבוצע» / «סמן כבוצע: <title>» after that outbound is Done (occurrence_done / interval ack / lists.remove) — FORBIDDEN routing Mark-done into snooze / לשלוח נדנוד / reminders.add one-shot / REMINDER_SNOOZE. STOP SERIES right after that outbound: bare «אל תזכירי לי» / «אל תזכירי לי יותר» / «תפסיקי» / «תפסיקי להזכיר לי את זה» / «בטלי» / «את זה» (no other chore named) → reminders.remove with RECENT_OUTBOUND.reminder_id copied exactly (see STOP SERIES / RIGHT AFTER PING) — FORBIDDEN inventing an id or guessing by title; FORBIDDEN blanket ASK when reminder_id is present.",
         guestSpeaker
           ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
           : employee.isOwner
@@ -3502,6 +3503,24 @@ export async function sendChatMessage(input: {
         !row.listShell &&
         row.employeeId === employee.id,
     );
+    const speakerNameList = [
+      speakerName(employee),
+      employeeDisplayName(employee),
+      employee.nickname?.trim() ?? "",
+      employee.name?.trim() ?? "",
+    ].filter(Boolean);
+    const workerNameList = [
+      speakerName(digital),
+      employeeDisplayName(digital),
+      digital.nickname?.trim() ?? "",
+      digital.name?.trim() ?? "",
+    ].filter(Boolean);
+    /** ACTION asked for a speaker-book list add (not worker-only tracking). */
+    const requestedSpeakerListAdd = (metadata.lists ?? []).some(
+      (list) =>
+        list.action === "add" &&
+        !isWorkerOnlyTasksList(list, speakerNameList, workerNameList),
+    );
     const appliedListOps = listOpResults.some((row) => row.applied);
     const appliedFilingRemove = filingMutations.some(
       (row) => row.action === "remove",
@@ -3578,6 +3597,7 @@ export async function sendChatMessage(input: {
       appliedUpdate: appliedListUpdate,
       appliedAdd: appliedListAdd,
       appliedSpeakerListAdd,
+      requestedSpeakerListAdd,
       appliedListOps,
       appliedFilingRemove,
       appliedFilingUpdate,

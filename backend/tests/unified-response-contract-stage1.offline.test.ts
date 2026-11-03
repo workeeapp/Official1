@@ -631,6 +631,8 @@ describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
       gated: {
         appliedAdd: true,
         appliedSpeakerListAdd: false,
+        // Empty targets = speaker-book request even if apply landed on worker.
+        requestedSpeakerListAdd: true,
         appliedReminderAdd: true,
         reminderAddFallback: "שמרתי תזכורת «לקנות חלב».",
       },
