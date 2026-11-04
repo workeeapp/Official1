@@ -10,7 +10,7 @@
  *
  * Layers THIS path skips (not sendChatMessage):
  * - LLM / prompt composition / tips
- * - correctShareClaimReply / alignListTypeInReply / dump REPLACE
+ * - reply failure overrides (apply-failure-overrides) / dump REPLACE
  * - ensureSpeakerShowButtons / applyShowButtonsToBubbles
  * - WhatsApp outbound, reminder fire ticker, relays/jobs
  * - Guest mutation block on actor (covered in sendChat E2E; SH-GUEST-VIEW is ask-only)
@@ -339,30 +339,6 @@ describe("share-pack MODEL_APPLY (eval-db)", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("documents harness layers (include vs skip)", () => {
-    const includes = [
-      "assertApprovedEvalDatabaseUrl",
-      "planTargetedActions",
-      "applyEmployeeRecords",
-      "applyListOps",
-      "applyReminders",
-      "applyDirectoryActions",
-      "seedSetup + snapshot reinject",
-    ];
-    const skips = [
-      "sendChatMessage",
-      "correctShareClaimReply",
-      "show_dump REPLACE",
-      "ensureSpeakerShowButtons / applyShowButtonsToBubbles",
-      "OpenAI / LIVE",
-      "WhatsApp outbound",
-      "reminder fire ticker",
-      "guest mutation gate (tested separately via planTargetedActions + chat)",
-    ];
-    expect(includes.length).toBeGreaterThan(0);
-    expect(skips).toContain("sendChatMessage");
   });
 
   it.each(ASK_CASES)("ask/safety read-only %s", async (caseId) => {

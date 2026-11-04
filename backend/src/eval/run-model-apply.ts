@@ -20,13 +20,6 @@ import {
 } from "../services/attachment.service.js";
 import {
   applyEmployeeRecords,
-  correctAttachmentClaimReply,
-  correctDurableSaveClaimReply,
-  correctExecutionTruthReply,
-  correctListMutationClaimReply,
-  correctShareClaimReply,
-  correctUnshareClaimReply,
-  formatAppliedMutationFallback,
   formatEmployeeContext,
   getEmployeeRecordSnapshot,
   loadFilingOwners,
@@ -57,6 +50,15 @@ import {
   planTargetedActions,
 } from "../services/employee-targets.service.js";
 import { evaluateConstraints } from "./constraints.js";
+import {
+  buildApplyResult,
+  captureRequestedFromMetadata,
+} from "../services/apply-result.js";
+import { decideReplyFromApplyResult } from "../services/apply-result-reply.js";
+import {
+  applySideFailureOverrides,
+  sideFailureLines,
+} from "../services/apply-failure-overrides.js";
 import type { ModelEvalConstraint } from "./constraints.js";
 import type { StudioTurn } from "./corpus.js";
 import { assertApprovedEvalDatabaseUrl } from "./studio-db-guard.js";
@@ -251,9 +253,10 @@ export type ModelApplyTurnApplyResult = {
 };
 
 /**
- * Align spoken reply with apply evidence (same correctors / order as chat.service).
- * Pure: used after apply, and when apply is skipped (empty outcomes).
- * Does not invent success from requested ACTION or appliedViaProduction alone.
+ * Same reply contract as chat.service: the model's response stands unless
+ * apply proves a failure (ApplyResult misses / share / attach / unshare).
+ * The model's text is never analyzed. Reminders/directory are not applied by
+ * this harness, so they are excluded from the requested capture.
  */
 export function correctModelApplyTurnResponse(input: {
   response: string;
@@ -265,137 +268,42 @@ export function correctModelApplyTurnResponse(input: {
   listOpResults?: ListOpResult[];
   /** Post-apply live snapshot — used to detect incomplete shopping/tasks unshare. */
   snapshotAfter?: EmployeeRecordSnapshot | null;
-  /** True when applyReminders saved at least one clock this turn. */
-  appliedReminderAdd?: boolean;
-  reminderAddFallback?: string;
-  /**
-   * Human speaker employee id — used to detect speaker-book list adds from
-   * applied mutations (worker להזכיר alone must not satisfy task claims).
-   */
-  speakerEmployeeId?: string;
 }): string {
   const mutations = input.mutations ?? [];
-  const filingMutations = input.filingMutations ?? [];
   const shareMisses = input.shareMisses ?? [];
-  const attachmentOutcome =
-    input.attachmentOutcome ?? emptyAttachmentOutcome();
-  const listOpResults = input.listOpResults ?? [];
-  const metadata = input.metadata;
-
-  const setResponse = (_reply: string, next: string) => next;
-  let working = input.response;
-  const spoken = () => working;
-
-  const requestedListRemove = (metadata.lists ?? []).some(
-    (row) => row.action === "remove",
-  );
-  const requestedListUpdate = (metadata.lists ?? []).some(
-    (row) => row.action === "update",
-  );
-  const requestedListAdd = (metadata.lists ?? []).some(
-    (row) => row.action === "add",
-  );
-  const requestedFilingAdd = (metadata.filing ?? []).some(
-    (row) => row.action === "add_filing",
-  );
-  const requestedFilingUpdate = (metadata.filing ?? []).some(
-    (row) => row.action === "update_filing",
-  );
-  const appliedListRemove = mutations.some(
-    (row) => row.action === "remove" && !row.listShell,
-  );
-  const appliedListUpdate = mutations.some(
-    (row) => row.action === "update" && !row.listShell,
-  );
-  const appliedListAdd = mutations.some(
-    (row) => row.action === "add" && !row.listShell,
-  );
-  const speakerId = input.speakerEmployeeId?.trim() ?? "";
-  const appliedSpeakerListAdd = speakerId
-    ? mutations.some(
-        (row) =>
-          row.action === "add" &&
-          !row.listShell &&
-          row.employeeId === speakerId,
-      )
-    : appliedListAdd;
-  const appliedListOps = listOpResults.some((row) => row.applied);
-  const appliedFilingRemove = filingMutations.some(
-    (row) => row.action === "remove",
-  );
-  const appliedFilingUpdate = filingMutations.some(
-    (row) => row.action === "update",
-  );
-  const appliedFilingAdd = filingMutations.some(
-    (row) => row.action === "add",
-  );
-  const appliedFallback = formatAppliedMutationFallback(
-    mutations,
-    filingMutations,
-  );
-
-  working = correctListMutationClaimReply({
-    reply: working,
-    requestedRemove: requestedListRemove,
-    requestedUpdate: requestedListUpdate,
-    requestedAdd: requestedListAdd,
-    appliedRemove: appliedListRemove,
-    appliedUpdate: appliedListUpdate,
-    appliedAdd: appliedListAdd,
-    appliedFallback,
-    setResponse,
-    spoken: spoken(),
-    appliedListOps,
-    appliedFilingRemove,
-    appliedFilingUpdate,
+  const requested = captureRequestedFromMetadata({
+    ...input.metadata,
+    reminders: [],
+    directory: [],
   });
-  working = correctShareClaimReply({
-    reply: working,
-    spoken: spoken(),
-    mutations,
-    misses: shareMisses,
-    setResponse,
+  const applyResult = buildApplyResult({
+    requested,
+    listMutations: mutations,
+    filingMutations: input.filingMutations ?? [],
+    shareMisses,
+    listOpResults: input.listOpResults ?? [],
   });
-  working = correctUnshareClaimReply({
+  const decided = decideReplyFromApplyResult({
+    applyResult,
+    modelDraft: input.response,
+  });
+  const working = decided.keepDraft ? input.response : decided.spoken;
+  const unshareSummary = summarizeUnshareApply({
+    metadata: input.metadata,
+    mutations,
+    snapshotAfter: input.snapshotAfter ?? null,
+  });
+  return applySideFailureOverrides({
     reply: working,
-    spoken: spoken(),
-    summary: summarizeUnshareApply({
-      metadata,
-      mutations,
-      snapshotAfter: input.snapshotAfter ?? null,
+    resultBReplaced: !decided.keepDraft,
+    lines: sideFailureLines({
+      listMutations: mutations,
+      shareMisses,
+      attachmentOutcome: input.attachmentOutcome ?? emptyAttachmentOutcome(),
+      unshareSummary,
     }),
-    setResponse,
+    setResponse: (_reply, next) => next,
   });
-  working = correctAttachmentClaimReply({
-    reply: working,
-    spoken: spoken(),
-    outcome: attachmentOutcome,
-    setResponse,
-  });
-  working = correctDurableSaveClaimReply({
-    reply: working,
-    spoken: spoken(),
-    requestedListAdd,
-    requestedListUpdate,
-    requestedFilingAdd,
-    requestedFilingUpdate,
-    appliedListAdd,
-    appliedListUpdate,
-    appliedFilingAdd,
-    appliedFilingUpdate,
-    setResponse,
-  });
-  working = correctExecutionTruthReply({
-    reply: working,
-    spoken: spoken(),
-    appliedListAdd,
-    appliedSpeakerListAdd,
-    appliedReminderAdd: input.appliedReminderAdd === true,
-    listAddFallback: appliedFallback,
-    reminderAddFallback: input.reminderAddFallback,
-    setResponse,
-  });
-  return working;
 }
 
 /**
@@ -656,7 +564,6 @@ export async function runModelApplyCase(
         metadata,
         ...applyResult,
         snapshotAfter: snapshot,
-        speakerEmployeeId: account.employeeId,
       });
       const contactNames = (
         await listContactsForEmployee(account.employeeId)

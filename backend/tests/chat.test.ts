@@ -288,6 +288,7 @@ vi.mock("../src/database/prisma.js", () => ({
 
 import { createApp } from "../src/app.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
+import { parseLlmReply } from "@workee/shared";
 
 const PASSWORD = "ChangeMe123!";
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -932,6 +933,75 @@ describe("chat API", () => {
     });
   });
 
+  it("regression (Tal): soft-offer «כן» → model asks for a time; engine never overrides it", async () => {
+    // 2026-11-04: «אני צריך להוריד את הזבל מחר» → «רוצה שאוסיף גם תזכורת?» →
+    // «כן». The model correctly asked when (no ACTION). The engine replaced the
+    // reply with «לא הצלחתי לשמור את התזכורת.» from a text heuristic.
+    // Contract: the model always answers; the engine overrides only on a
+    // proven apply failure.
+    const cookie = await login();
+    mockOwnedEmployee();
+    const question =
+      "באיזו שעה תרצה שאזכיר לך? אפשר גם לומר „בעוד שעה” או לקבוע תזכורת חוזרת.";
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: question }],
+        metadata: {
+          lists: [],
+          filing: [],
+          messages: [],
+          reminders: [],
+          jobs: [],
+          directory: [],
+        },
+      }),
+      raw: {},
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({
+        message: '[בתשובה להודעה: "רוצה שאוסיף גם תזכורת למשימה הזו?"] כן',
+        employeeId,
+      });
+
+    expect(response.status).toBe(200);
+    const spoken = parseLlmReply(response.body.reply).response;
+    expect(spoken).toBe(question);
+    expect(spoken).not.toMatch(/לא הצלחתי/);
+    const saved = messageCreateMany.mock.calls[0][0].data as Array<{
+      author: string;
+      text: string;
+    }>;
+    expect(saved[1]).toMatchObject({ author: "assistant", text: question });
+  });
+
+  it("model claim with no ACTION is not rewritten by the engine", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    for (const text of [
+      "קבעתי תזכורת למחר ב־9.",
+      "הוספתי את החלב לקניות.",
+      "שיתפתי את הרשימה עם דני.",
+      "תייקתי את הקוד.",
+    ]) {
+      createResponse.mockResolvedValueOnce({
+        reply: JSON.stringify({
+          responses: [{ text }],
+          metadata: { lists: [], filing: [], messages: [], reminders: [] },
+        }),
+        raw: {},
+      });
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "כן", employeeId });
+      expect(response.status).toBe(200);
+      expect(parseLlmReply(response.body.reply).response).toBe(text);
+    }
+  });
+
   it("lets Lucy save a reminder without handing off to David", async () => {
     const cookie = await login();
     mockOwnedEmployee();
@@ -956,7 +1026,8 @@ describe("chat API", () => {
     expect(response.status).toBe(200);
     expect(createResponse).toHaveBeenCalledOnce();
     expect(createResponse.mock.calls[0][0].instructions).toContain(
-      "Do not handoff for a reminder",
+      // Self-nudge rule (reminders) — rewritten in d9271bc; no-handoff kept.
+      "Do not handoff. REMINDER-ON-ITEM",
     );
   });
 
@@ -1581,44 +1652,73 @@ describe("chat API", () => {
   });
 
   it("includes current employee records in every LLM turn", async () => {
-    listFindMany.mockResolvedValue([
-      {
-        listType: "shopping",
-        name: "",
-        employee: { name: "עמית", nickname: "עמית" },
-        items: [
-          { data: { "שם פריט": "חלב" }, scope: "personal", createdAt: new Date() },
-        ],
-      },
-      {
-        listType: "tasks",
-        name: "",
-        employee: { name: "עמית", nickname: "עמית" },
-        items: [
-          {
-            data: { "שם משימה": "לקנות מתנה" },
-            scope: "personal",
-            createdAt: new Date(),
-          },
-        ],
-      },
-    ]);
-    filingFindMany.mockResolvedValue([
-      {
-        itemName: "מספר רכב",
-        itemInfo: "3434343",
-        itemDescription: "רכב",
-        employee: { name: "עמית", nickname: "עמית" },
-      },
-    ]);
+    // Own rows only — partner/shared queries (employeeId: { not }) return [].
+    const ownOnly = <T,>(rows: T[]) =>
+      async ({ where }: { where?: { employeeId?: unknown } }) =>
+        where?.employeeId &&
+        typeof where.employeeId === "object" &&
+        where.employeeId !== null &&
+        "not" in (where.employeeId as object)
+          ? []
+          : rows;
+    listFindMany.mockImplementation(
+      ownOnly([
+        {
+          id: "list-shop-records",
+          listType: "shopping",
+          name: "",
+          employeeId,
+          scope: "personal",
+          employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+          items: [
+            {
+              id: "rec-milk",
+              data: { "שם פריט": "חלב", כמות: 1 },
+              scope: "personal",
+              createdAt: new Date(),
+            },
+          ],
+        },
+        {
+          id: "list-tasks-records",
+          listType: "tasks",
+          name: "",
+          employeeId,
+          scope: "personal",
+          employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+          items: [
+            {
+              id: "rec-gift",
+              data: { "שם משימה": "לקנות מתנה" },
+              scope: "personal",
+              createdAt: new Date(),
+            },
+          ],
+        },
+      ]),
+    );
+    filingFindMany.mockImplementation(
+      ownOnly([
+        {
+          id: "rec-car",
+          itemName: "מספר רכב",
+          itemInfo: "3434343",
+          itemDescription: "רכב",
+          employeeId,
+          scope: "personal",
+          employee: { name: "עמית", nickname: "עמית" },
+        },
+      ]),
+    );
 
     const cookie = await login();
     mockOwnedEmployee();
 
-    await request(app)
+    const first = await request(app)
       .post("/api/chat/messages")
       .set("Cookie", cookie)
       .send({ message: "hi", employeeId });
+    expect(first.status, JSON.stringify(first.body).slice(0, 500)).toBe(200);
 
     const firstInstructions = createResponse.mock.calls[0][0].instructions as string;
     const firstMessage = createResponse.mock.calls[0][0].message as string;
@@ -1689,7 +1789,7 @@ describe("chat API", () => {
       data: {
         listId: "list-1",
         itemKey: "חלב",
-        data: { "שם פריט": "חלב" },
+        data: { "שם פריט": "חלב", כמות: 1 },
         scope: "personal",
         addedById: employeeId,
         visibleTo: [employeeId],
@@ -1753,7 +1853,7 @@ describe("chat API", () => {
       data: {
         listId: "list-1",
         itemKey: "חלב",
-        data: { "שם פריט": "חלב" },
+        data: { "שם פריט": "חלב", כמות: 1 },
         scope: "shared",
         addedById: employeeId,
         visibleTo: [employeeId, otherEmployeeId],
@@ -1884,17 +1984,12 @@ describe("chat API", () => {
       where: { id: "tuna-1" },
       data: { deletedAt: expect.any(Date), reminderId: null },
     });
-    expect(itemUpdateMany).toHaveBeenCalledWith({
-      where: {
-        itemKey: { contains: "קופסת טונה" },
-        deletedAt: null,
-        list: {
-          listType: "tasks",
-          employeeId: { in: [otherEmployeeId, employeeId] },
-        },
-      },
-      data: { deletedAt: expect.any(Date), reminderId: null },
-    });
+    // 6016491: rows are never mutated by name/label match (no itemKey-contains cascade).
+    expect(itemUpdateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ itemKey: expect.anything() }),
+      }),
+    );
     expect(response.body.notifications).toHaveLength(1);
     expect(response.body.notifications[0].employeeId).toBe(employeeId);
     expect(response.body.notifications[0].message.text).toBe(

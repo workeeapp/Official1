@@ -482,24 +482,6 @@ export function matchesCustomListShowCommand(
   );
 }
 
-/**
- * Model-written numbered inventory (no show_dump REPLACE) — used to invalidate
- * a stale LAST_NUMBERED_DUMP so «מחק את 1,2» cannot hit a previous list.
- */
-export function looksLikeFreeWrittenNumberedInventory(text: string): boolean {
-  const lines = text
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const numbered = lines.filter((line) => /^\d+\.\s+/u.test(line));
-  if (numbered.length < 2) {
-    return false;
-  }
-  return lines.some((line) =>
-    /רשימת|קניות|משימות|משימות|אנשי קשר|תיוקים|🛒|✅|📋|👤/u.test(line),
-  );
-}
-
 function actionItemIdFromRaw(raw: unknown): string {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return "";

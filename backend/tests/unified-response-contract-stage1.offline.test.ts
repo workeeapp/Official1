@@ -1,6 +1,8 @@
 /**
- * Unified Response Contract — Stage 1: override classes + gated correctors.
- * Exercises the production decision path (decideReply + applyGatedClaimCorrectors).
+ * Reply contract (production path): the model always answers. The engine
+ * replaces the reply ONLY when apply proves a failure — ApplyResult misses /
+ * partial / unknown, share misses, failed attach, incomplete unshare. The
+ * model's text is never analyzed; replacement text is engine-built.
  */
 import { describe, expect, it } from "vitest";
 import { parseLlmReply } from "@workee/shared";
@@ -15,20 +17,20 @@ import {
   restorePendingShowDump,
 } from "../src/services/apply-result-display.js";
 import { decideReplyFromApplyResult } from "../src/services/apply-result-reply.js";
-import { applyGatedClaimCorrectors } from "../src/services/apply-gated-claim-correctors.js";
 import {
-  catalogByOverrideClass,
-  mayRunReplyCorrector,
-  REPLY_CORRECTOR_CATALOG,
-} from "../src/services/reply-override-policy.js";
+  ATTACH_APPLY_MISS,
+  applySideFailureOverrides,
+  sideFailureLines,
+} from "../src/services/apply-failure-overrides.js";
 import {
   LIST_ADD_MISS,
   LIST_FIND_MISS,
-  REMINDER_ONLY_PARTIAL,
-  SHARE_CLAIM_MISS,
-  correctExecutionTruthReply,
+  type ShareApplyMiss,
 } from "../src/services/employee-records.service.js";
-import { emptyAttachmentOutcome } from "../src/services/attachment.service.js";
+import {
+  emptyAttachmentOutcome,
+  type AttachmentApplyOutcome,
+} from "../src/services/attachment.service.js";
 import { setEngineResponse } from "../src/services/whatsapp-send.js";
 import { stripShowTurnMutates } from "../src/services/show-turn-guard.js";
 import { emptyLlmMetadata, type LlmListAction } from "@workee/shared";
@@ -147,7 +149,8 @@ function resultUnknownFiling(): ApplyResult {
 function runProductionPath(input: {
   modelDraft: string;
   applyResult: ApplyResult;
-  gated?: Partial<Parameters<typeof applyGatedClaimCorrectors>[0]>;
+  shareMisses?: ShareApplyMiss[];
+  attachmentOutcome?: AttachmentApplyOutcome;
 }) {
   const decided = decideReplyFromApplyResult({
     applyResult: input.applyResult,
@@ -157,184 +160,71 @@ function runProductionPath(input: {
   if (!decided.keepDraft) {
     reply = setEngineResponse(reply, decided.spoken);
   }
-  const listsDomain = input.applyResult.domains.lists;
-  const requestedRemove = (listsDomain?.requested ?? []).some(
-    (r) => r.op === "remove",
-  );
-  const requestedAdd = (listsDomain?.requested ?? []).some(
-    (r) => r.op === "add",
-  );
-  const appliedRemove = (listsDomain?.applied ?? []).some(
-    (r) => r.op === "remove",
-  );
-  const appliedAdd = (listsDomain?.applied ?? []).some((r) => r.op === "add");
-  const gated = applyGatedClaimCorrectors({
+  reply = applySideFailureOverrides({
     reply,
-    resultB: decided,
+    resultBReplaced: !decided.keepDraft,
+    lines: sideFailureLines({
+      listMutations: [],
+      shareMisses: input.shareMisses ?? [],
+      attachmentOutcome: input.attachmentOutcome ?? emptyAttachmentOutcome(false),
+      unshareSummary: null,
+    }),
     setResponse: setEngineResponse,
-    requestedRemove,
-    requestedUpdate: false,
-    requestedAdd,
-    appliedRemove,
-    appliedUpdate: false,
-    appliedAdd,
-    appliedSpeakerListAdd: appliedAdd,
-    appliedListOps: false,
-    appliedFilingRemove: false,
-    appliedFilingUpdate: false,
-    appliedFallback: "",
-    listMutations: [],
-    shareMisses: [],
-    filingShareApplied: false,
-    unshareSummary: null,
-    attachmentOutcome: emptyAttachmentOutcome(false),
-    requestedFilingAdd: false,
-    requestedFilingUpdate: false,
-    appliedFilingAdd: false,
-    requestedDirectory: false,
-    appliedDirectory: false,
-    appliedReminderAdd: false,
-    reminderAddFallback: "",
-    ...input.gated,
   });
-  return {
-    decided,
-    reply: gated.reply,
-    spoken: parseLlmReply(gated.reply).response,
-    ran: gated.ran,
-    skipped: gated.skipped,
-  };
+  return { decided, reply, spoken: parseLlmReply(reply).response };
 }
 
-describe("Stage-1 override catalog", () => {
-  it("classifies every catalog entry into one of four classes", () => {
-    const by = catalogByOverrideClass();
-    expect(by["operational-claim"]).toEqual(
-      expect.arrayContaining(["resultB", "listMutationClaim", "durableSaveClaim"]),
-    );
-    expect(by["engine-display"]).toEqual(
-      expect.arrayContaining([
-        "showDumpReplace",
-        "combineConfirmAndDump",
-        "liveDomainFill",
-      ]),
-    );
-    expect(by["delivery-notice"]).toContain("deliveryCompose");
-    expect(by["narrow-post-apply"]).toEqual(
-      expect.arrayContaining([
-        "shareClaim",
-        "attachmentClaim",
-        "executionTruth",
-      ]),
-    );
-    expect(REPLY_CORRECTOR_CATALOG.length).toBeGreaterThanOrEqual(15);
-  });
+const noActions = () =>
+  buildApplyResult({ requested: captureRequestedFromMetadata({ lists: [] }) });
 
-  it("skips only Result-B-overlapped operational-claim correctors when resolved", () => {
-    const resolved = {
-      keepDraft: false,
-      operationalClaimResolved: true,
-      draftClaims: {
-        anySuccess: true,
-        deleteClaim: true,
-        addClaim: false,
-        updateClaim: false,
-        shareClaim: false,
-        reminderClaim: false,
-        durableClaim: false,
-      },
-    };
-    expect(mayRunReplyCorrector("listMutationClaim", resolved)).toBe(false);
-    expect(mayRunReplyCorrector("durableSaveClaim", resolved)).toBe(false);
-    expect(mayRunReplyCorrector("shareClaim", resolved)).toBe(true);
-    expect(mayRunReplyCorrector("attachmentClaim", resolved)).toBe(true);
-    // Delete-only resolve: executionTruth still eligible (no add/reminder in draft).
-    expect(mayRunReplyCorrector("executionTruth", resolved)).toBe(true);
-    expect(mayRunReplyCorrector("showDumpReplace", resolved)).toBe(true);
-    expect(mayRunReplyCorrector("deliveryCompose", resolved)).toBe(true);
-  });
-
-  it("skips executionTruth when Result-B resolved an add/reminder claim", () => {
-    const resolvedAdd = {
-      keepDraft: false,
-      operationalClaimResolved: true,
-      draftClaims: {
-        anySuccess: true,
-        deleteClaim: false,
-        addClaim: true,
-        updateClaim: false,
-        shareClaim: false,
-        reminderClaim: false,
-        durableClaim: false,
-      },
-    };
-    expect(mayRunReplyCorrector("executionTruth", resolvedAdd)).toBe(false);
-    expect(mayRunReplyCorrector("shareClaim", resolvedAdd)).toBe(true);
-  });
-
-  it("skips executionTruth when Result-B resolved a durable (filing) claim", () => {
-    const resolvedDurable = {
-      keepDraft: false,
-      operationalClaimResolved: true,
-      draftClaims: {
-        anySuccess: true,
-        deleteClaim: false,
-        addClaim: false,
-        updateClaim: false,
-        shareClaim: false,
-        reminderClaim: false,
-        durableClaim: true,
-      },
-    };
-    expect(mayRunReplyCorrector("executionTruth", resolvedDurable)).toBe(false);
-  });
-
-  it("does not use keepDraft alone — uncovered correctors run after keep", () => {
-    const kept = {
-      keepDraft: true,
-      operationalClaimResolved: false,
-      draftClaims: {
-        anySuccess: true,
-        deleteClaim: false,
-        addClaim: true,
-        updateClaim: false,
-        shareClaim: false,
-        reminderClaim: false,
-        durableClaim: false,
-      },
-    };
-    expect(mayRunReplyCorrector("listMutationClaim", kept)).toBe(true);
-    expect(mayRunReplyCorrector("shareClaim", kept)).toBe(true);
-    expect(mayRunReplyCorrector("executionTruth", kept)).toBe(true);
-  });
-});
-
-describe("Stage-1 production path (Result-B + gated correctors)", () => {
+describe("reply contract — no failure: the model's reply always stands", () => {
   it("no ACTION + non-empty response is preserved", () => {
-    const applyResult = buildApplyResult({
-      requested: captureRequestedFromMetadata({ lists: [] }),
-    });
     const out = runProductionPath({
       modelDraft: draftJson("היי טל, איך אפשר לעזור?"),
-      applyResult,
+      applyResult: noActions(),
     });
     expect(out.decided.keepDraft).toBe(true);
-    expect(out.decided.operationalClaimResolved).toBe(false);
     expect(out.spoken).toBe("היי טל, איך אפשר לעזור?");
   });
 
-  it("complete successful ACTION + accurate response is preserved", () => {
+  it("regression (Tal): soft-offer «כן» → model asks for a time; never «לא הצלחתי לשמור»", () => {
+    const question =
+      "באיזו שעה תרצה שאזכיר לך? אפשר גם לומר „בעוד שעה” או לקבוע תזכורת חוזרת.";
     const out = runProductionPath({
-      modelDraft: draftJson("הסרתי את «דיברתי עם yes» מהמשימות."),
+      modelDraft: draftJson(question),
+      applyResult: noActions(),
+    });
+    expect(out.reply).toBe(draftJson(question));
+    expect(out.spoken).toBe(question);
+    expect(out.spoken).not.toMatch(/לא הצלחתי/);
+  });
+
+  it("claims without actions are not policed by the engine (prompt/eval concern)", () => {
+    for (const text of [
+      "הוספתי את הקולה לקניות.",
+      "שיתפתי את החלב עם דני.",
+      "צרפתי את הקובץ למשימה.",
+      "שמרתי תזכורת למחר.",
+      "תייקתי את *בלו* כמשקה אנרגיה.",
+    ]) {
+      const out = runProductionPath({
+        modelDraft: draftJson(text),
+        applyResult: noActions(),
+      });
+      expect(out.spoken).toBe(text);
+    }
+  });
+
+  it("complete successful ACTION keeps the model's wording verbatim", () => {
+    const out = runProductionPath({
+      modelDraft: draftJson("סיימתי, מחקתי לך את זה 🙂"),
       applyResult: resultCompleteRemove(),
     });
     expect(out.decided.keepDraft).toBe(true);
-    expect(out.decided.operationalClaimResolved).toBe(false);
-    expect(out.spoken).toContain("הסרתי");
-    expect(out.skipped).not.toContain("shareClaim");
+    expect(out.spoken).toBe("סיימתי, מחקתי לך את זה 🙂");
   });
 
-  it("regression: saved filing בלו keeps תייקתי (not LIST_ADD_MISS)", () => {
+  it("saved filing keeps תייקתי (complete apply)", () => {
     const applyResult = buildApplyResult({
       requested: captureRequestedFromMetadata({
         filing: [
@@ -361,51 +251,89 @@ describe("Stage-1 production path (Result-B + gated correctors)", () => {
     const out = runProductionPath({
       modelDraft: draftJson("תייקתי את *בלו* כמשקה אנרגיה."),
       applyResult,
-      gated: {
-        requestedFilingAdd: true,
-        appliedFilingAdd: true,
-        requestedAdd: false,
-        appliedAdd: false,
-        appliedSpeakerListAdd: false,
-      },
     });
-    expect(out.decided.keepDraft).toBe(true);
     expect(out.spoken).toBe("תייקתי את *בלו* כמשקה אנרגיה.");
-    expect(out.spoken).not.toBe(LIST_ADD_MISS);
-    expect(out.spoken).not.toMatch(/לא הצלחתי/);
   });
 
-  it("failed lists.add still yields LIST_ADD_MISS; filing-only success does not", () => {
-    // No ApplyResult mutate → Result-B keeps draft; executionTruth catches false list add.
-    const listMiss = runProductionPath({
-      modelDraft: draftJson("הוספתי את הקולה לקניות."),
-      applyResult: buildApplyResult({
-        requested: captureRequestedFromMetadata({}),
-      }),
-      gated: {
-        requestedAdd: true,
-        appliedAdd: false,
-        appliedSpeakerListAdd: false,
-        appliedFilingAdd: false,
+  it("attachment that linked (or was already linked) is not a failure", () => {
+    const out = runProductionPath({
+      modelDraft: draftJson("צירפתי."),
+      applyResult: noActions(),
+      attachmentOutcome: {
+        linked: 0,
+        alreadyLinked: 1,
+        detached: 0,
+        attachRequested: true,
       },
     });
-    expect(listMiss.decided.keepDraft).toBe(true);
-    expect(listMiss.spoken).toBe(LIST_ADD_MISS);
+    expect(out.spoken).toBe("צירפתי.");
+  });
+});
 
-    const filingOnly = correctExecutionTruthReply({
-      reply: draftJson("הוספתי את «בלו» לרשימת «הרשימה»."),
-      spoken: "הוספתי את «בלו» לרשימת «הרשימה».",
-      appliedListAdd: false,
-      appliedSpeakerListAdd: false,
-      appliedReminderAdd: false,
-      appliedFilingAdd: true,
-      setResponse: setEngineResponse,
-    });
-    expect(parseLlmReply(filingOnly).response).toContain("הוספתי את «בלו»");
-    expect(parseLlmReply(filingOnly).response).not.toBe(LIST_ADD_MISS);
+describe("reply contract — proven failure: engine text replaces the reply", () => {
+  it("complete miss → LIST_FIND_MISS regardless of what the model wrote", () => {
+    for (const draft of ["מחקתי את החלב.", "רוצה שאמחק עוד משהו?"]) {
+      const out = runProductionPath({
+        modelDraft: draftJson(draft),
+        applyResult: resultCompleteMiss(),
+      });
+      expect(out.decided.keepDraft).toBe(false);
+      expect(out.spoken).toBe(LIST_FIND_MISS);
+    }
   });
 
-  it("same turn: successful filing + failed lists.add — separate truth", () => {
+  it("partial → applied lines + miss line", () => {
+    const out = runProductionPath({
+      modelDraft: draftJson("מחקתי את שני הפריטים."),
+      applyResult: resultPartial(),
+    });
+    expect(out.decided.keepDraft).toBe(false);
+    expect(out.spoken).toContain("דיברתי עם yes");
+    expect(out.spoken).toContain(LIST_FIND_MISS);
+  });
+
+  it("unknown → verify caution", () => {
+    const out = runProductionPath({
+      modelDraft: draftJson("מחקתי את התיוק."),
+      applyResult: resultUnknownFiling(),
+    });
+    expect(out.decided.keepDraft).toBe(false);
+    expect(out.spoken).toMatch(/לא הצלחתי לאמת/);
+  });
+
+  it("failed lists.add (apply miss) → engine add-miss text", () => {
+    const applyResult = buildApplyResult({
+      requested: captureRequestedFromMetadata({
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "קולה" }],
+            targets: [],
+          },
+        ],
+      }),
+      nestedRemindMisses: [
+        {
+          reason: "nested_remind_txn_failed",
+          op: "add",
+          listType: "shopping",
+          itemLabel: "קולה",
+        },
+      ],
+      listMutations: [],
+    });
+    const out = runProductionPath({
+      modelDraft: draftJson("הוספתי את הקולה לקניות."),
+      applyResult,
+    });
+    expect(out.decided.keepDraft).toBe(false);
+    expect(out.spoken).not.toBe("הוספתי את הקולה לקניות.");
+    expect(out.spoken).toMatch(/לא הצלחתי/);
+  });
+
+  it("successful filing + unverified lists.add → not a full-success reply", () => {
     const applyResult = buildApplyResult({
       requested: captureRequestedFromMetadata({
         lists: [
@@ -438,226 +366,47 @@ describe("Stage-1 production path (Result-B + gated correctors)", () => {
       ],
       listMutations: [],
     });
-    // Filing accounted; shopping add unaccounted → overall unknown/partial mix.
-    expect(applyResult.domains.filing?.completeness).toBe("complete");
     expect(applyResult.domains.lists?.completeness).toBe("unknown");
-
-    const dualClaim = runProductionPath({
+    const out = runProductionPath({
       modelDraft: draftJson("תייקתי את בלו והוספתי קולה."),
       applyResult,
-      gated: {
-        requestedFilingAdd: true,
-        appliedFilingAdd: true,
-        requestedAdd: true,
-        appliedAdd: false,
-        appliedSpeakerListAdd: false,
-      },
-    });
-    // Optimistic dual success must not survive unverified list add.
-    expect(dualClaim.decided.keepDraft).toBe(false);
-    expect(dualClaim.spoken).not.toMatch(/תייקתי.*הוספתי/);
-  });
-
-  it("Result-B operational correction is not duplicated by listMutationClaim", () => {
-    const out = runProductionPath({
-      modelDraft: draftJson("מחקתי את החלב."),
-      applyResult: resultCompleteMiss(),
     });
     expect(out.decided.keepDraft).toBe(false);
-    expect(out.decided.operationalClaimResolved).toBe(true);
-    expect(out.spoken).toBe(LIST_FIND_MISS);
-    expect(out.skipped).toContain("listMutationClaim");
-    expect(out.skipped).toContain("durableSaveClaim");
-    expect(out.ran).toContain("shareClaim");
-    expect(out.ran).toContain("attachmentClaim");
-    expect(out.ran).toContain("executionTruth");
-  });
-
-  it("partial still prevents false full-success claim", () => {
-    const out = runProductionPath({
-      modelDraft: draftJson("מחקתי את שני הפריטים."),
-      applyResult: resultPartial(),
-    });
-    expect(out.decided.keepDraft).toBe(false);
-    expect(out.decided.operationalClaimResolved).toBe(true);
-    expect(out.spoken).toContain("דיברתי עם yes");
-    expect(out.spoken).toContain(LIST_FIND_MISS);
-    expect(out.skipped).toContain("listMutationClaim");
-  });
-
-  it("unknown still blocks unverified success claim", () => {
-    const out = runProductionPath({
-      modelDraft: draftJson("מחקתי את התיוק."),
-      applyResult: resultUnknownFiling(),
-    });
-    expect(resultUnknownFiling().completeness).toBe("unknown");
-    expect(out.decided.keepDraft).toBe(false);
+    expect(out.spoken).toContain("בלו");
     expect(out.spoken).toMatch(/לא הצלחתי לאמת/);
-    expect(out.skipped).toContain("listMutationClaim");
   });
 
-  it("uncovered share claim still corrects when Result-B kept draft", () => {
-    // No list requested mutates in ApplyResult → Result-B keeps draft; share
-    // corrector (narrow-post-apply) must still rewrite false שיתפתי.
-    const applyResult = buildApplyResult({
-      requested: captureRequestedFromMetadata({ lists: [] }),
-    });
+  it("share miss → engine share text replaces the reply", () => {
     const out = runProductionPath({
       modelDraft: draftJson("שיתפתי את החלב עם דני."),
-      applyResult,
-      gated: {
-        listMutations: [],
-        shareMisses: [],
-      },
+      applyResult: noActions(),
+      shareMisses: [{ itemId: "x", reason: "forbidden" }],
     });
-    expect(out.decided.keepDraft).toBe(true);
-    expect(out.decided.operationalClaimResolved).toBe(false);
-    expect(out.ran).toContain("shareClaim");
-    expect(out.spoken).toBe(SHARE_CLAIM_MISS);
+    expect(out.spoken).toBe("אין הרשאה לשתף את הפריטים האלה.");
   });
 
-  it("uncovered attachment claim still corrects when Result-B kept draft", () => {
-    const applyResult = buildApplyResult({
-      requested: captureRequestedFromMetadata({ lists: [] }),
-    });
+  it("attach requested but nothing linked → engine attach-miss text", () => {
     const out = runProductionPath({
       modelDraft: draftJson("צרפתי את הקובץ למשימה."),
-      applyResult,
-      gated: {
-        attachmentOutcome: {
-          linked: 0,
-          alreadyLinked: 0,
-          detached: 0,
-          attachRequested: true,
-        },
+      applyResult: noActions(),
+      attachmentOutcome: {
+        linked: 0,
+        alreadyLinked: 0,
+        detached: 0,
+        attachRequested: true,
       },
     });
-    expect(out.decided.keepDraft).toBe(true);
-    expect(out.ran).toContain("attachmentClaim");
-    expect(out.spoken).toBe("לא הצלחתי לצרף את הקובץ.");
-  });
-});
-
-describe("Stage-1 executionTruth vs Result-B (residual risk)", () => {
-  it("proves ungated executionTruth can rewrite Result-B text that contains הוספתי", () => {
-    // Result-B-shaped spoken after replace (applied add line + caution/miss).
-    const resultBSpoken =
-      "הוספתי את «לקנות חלב» לרשימת «הרשימה».\nלא הצלחתי לאמת את כל הפעולות — נסי שוב או בדקי את הרשימה.";
-    const reply = draftJson(resultBSpoken);
-    const interfered = correctExecutionTruthReply({
-      reply,
-      spoken: resultBSpoken,
-      appliedListAdd: true,
-      appliedSpeakerListAdd: false,
-      appliedReminderAdd: false,
-      setResponse: setEngineResponse,
-    });
-    // Without the gate, speaker-vs-worker logic treats B's «הוספתי» as a fresh
-    // claim and collapses the caution into LIST_ADD_MISS.
-    expect(parseLlmReply(interfered).response).toBe(LIST_ADD_MISS);
-    expect(parseLlmReply(interfered).response).not.toContain("לא הצלחתי לאמת");
+    expect(out.spoken).toBe(ATTACH_APPLY_MISS);
   });
 
-  it("Result-B resolved add claim → production path skips executionTruth; B text preserved", () => {
-    const requested = captureRequestedFromMetadata({
-      lists: [
-        {
-          action: "add",
-          listType: "tasks",
-          listName: "",
-          items: [{ "שם משימה": "לקנות חלב" }],
-          targets: [],
-        },
-      ],
-    });
-    // Requested add, nothing applied → complete miss / success claim replaced.
-    const applyResult = buildApplyResult({
-      requested,
-      listMutations: [],
-    });
-    expect(applyResult.completeness).toBe("unknown");
-
+  it("ApplyResult failure + side failure → both engine lines, no model text", () => {
     const out = runProductionPath({
-      modelDraft: draftJson("הוספתי את המשימה לרשימה."),
-      applyResult,
-      gated: {
-        appliedAdd: false,
-        appliedSpeakerListAdd: false,
-        // Worker add evidence false — would interfere if executionTruth ran on
-        // a B line that still said הוספתי; here B should emit miss/caution.
-      },
-    });
-    expect(out.decided.operationalClaimResolved).toBe(true);
-    expect(out.decided.draftClaims.addClaim).toBe(true);
-    expect(out.skipped).toContain("executionTruth");
-    expect(out.ran).not.toContain("executionTruth");
-    // Whatever Result-B chose must stand after the gated chain.
-    expect(out.spoken).toBe(out.decided.spoken);
-    expect(out.spoken).not.toBe(REMINDER_ONLY_PARTIAL);
-  });
-
-  it("Result-B kept draft + worker-only add → executionTruth still corrects", () => {
-    // ApplyResult sees an add applied (any book) so Result-B keeps «הוספתי».
-    // Speaker-book did not get the row — executionTruth must still rewrite.
-    const requested = captureRequestedFromMetadata({
-      lists: [
-        {
-          action: "add",
-          listType: "tasks",
-          listName: "",
-          items: [{ "שם משימה": "לקנות חלב" }],
-          targets: [],
-        },
-      ],
-    });
-    const applyResult = buildApplyResult({
-      requested,
-      listMutations: [
-        {
-          action: "add",
-          itemId: "worker-1",
-          employeeId: "lucy-worker",
-          listType: "tasks",
-          itemKey: "k",
-          itemLabel: "לקנות חלב",
-        },
-      ],
-    });
-    expect(applyResult.completeness).toBe("complete");
-
-    const out = runProductionPath({
-      modelDraft: draftJson("הוספתי את המשימה לרשימה."),
-      applyResult,
-      gated: {
-        appliedAdd: true,
-        appliedSpeakerListAdd: false,
-        // Empty targets = speaker-book request even if apply landed on worker.
-        requestedSpeakerListAdd: true,
-        appliedReminderAdd: true,
-        reminderAddFallback: "שמרתי תזכורת «לקנות חלב».",
-      },
-    });
-    expect(out.decided.keepDraft).toBe(true);
-    expect(out.decided.operationalClaimResolved).toBe(false);
-    expect(out.ran).toContain("executionTruth");
-    expect(out.spoken).toBe(REMINDER_ONLY_PARTIAL);
-  });
-
-  it("Result-B resolved delete-only → executionTruth may run but does not change LIST_FIND_MISS", () => {
-    const out = runProductionPath({
-      modelDraft: draftJson("מחקתי את החלב."),
+      modelDraft: draftJson("מחקתי ושיתפתי."),
       applyResult: resultCompleteMiss(),
-      gated: {
-        appliedSpeakerListAdd: false,
-        appliedReminderAdd: false,
-      },
+      shareMisses: [{ itemId: "x", reason: "missing" }],
     });
-    expect(out.decided.operationalClaimResolved).toBe(true);
-    expect(out.decided.draftClaims.deleteClaim).toBe(true);
-    expect(out.decided.draftClaims.addClaim).toBe(false);
-    // Delete-only: gate still allows executionTruth; spoken has no add claim.
-    expect(out.ran).toContain("executionTruth");
-    expect(out.spoken).toBe(LIST_FIND_MISS);
+    expect(out.spoken).toContain(LIST_FIND_MISS);
+    expect(out.spoken).not.toContain("מחקתי ושיתפתי");
   });
 });
 
@@ -692,30 +441,5 @@ describe("Stage-1 engine-display exceptions remain", () => {
     );
     expect(combined).toContain("הוספתי חלב");
     expect(combined).toContain("🛒 קניות:");
-    // Gate always allows engine-display even after operational resolve
-    expect(
-      mayRunReplyCorrector("showDumpReplace", {
-        keepDraft: false,
-        operationalClaimResolved: true,
-      }),
-    ).toBe(true);
-    expect(
-      mayRunReplyCorrector("combineConfirmAndDump", {
-        keepDraft: false,
-        operationalClaimResolved: true,
-      }),
-    ).toBe(true);
-    expect(
-      mayRunReplyCorrector("liveDomainFill", {
-        keepDraft: false,
-        operationalClaimResolved: true,
-      }),
-    ).toBe(true);
-    expect(
-      mayRunReplyCorrector("deliveryCompose", {
-        keepDraft: false,
-        operationalClaimResolved: true,
-      }),
-    ).toBe(true);
   });
 });

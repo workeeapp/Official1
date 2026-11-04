@@ -311,7 +311,7 @@
           "responses": {
             "type": "array",
             "minItems": 1,
-            "description": "Spoken messages to the speaker in send order. Each entry is its own bubble (WhatsApp/web). Prefer objects {text, buttons?, navigate_address?} so chrome stays on the right bubble. Plain strings still work with turn-level metadata.buttons (legacy). Usually one entry; an open-job raise is always its own entry.",
+            "description": "Spoken messages to the speaker in send order — every entry speaks TO the speaker; never the body written for someone else (that lives in messages[].text / report_text). Each entry is its own bubble (WhatsApp/web). Prefer objects {text, buttons?, navigate_address?} so chrome stays on the right bubble. Plain strings still work with turn-level metadata.buttons (legacy). Usually one entry; an open-job raise is always its own entry.",
             "items": {
               "type": "object",
               "properties": {
@@ -503,7 +503,7 @@
                           "dump_line": {
                             "type": "number",
                             "minimum": 1,
-                            "description": "Optional 1-based line index into THIS turn's LAST_NUMBERED_DUMP when mutate_source is dump_line. Server is the authority that maps n→id (engine wiring later). Do not treat a model-supplied item_id as authoritative for this path."
+                            "description": "Optional 1-based line index into THIS turn's LAST_NUMBERED_DUMP when mutate_source is dump_line. Only when the spoken number refers to that server dump — FORBIDDEN when it answers your own numbered candidate question (use that candidate's item_id). Server is the authority that maps n→id (engine wiring later). Do not treat a model-supplied item_id as authoritative for this path."
                           },
                           "dump_section": {
                             "type": [

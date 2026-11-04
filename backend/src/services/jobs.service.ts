@@ -1313,46 +1313,6 @@ function addReport(
   result.reports.push({ employeeId, text: body });
 }
 
-function spokenEchoes(response: string, body: string, extra: string): boolean {
-  const spoken = response.trim();
-  const quoted = body.trim();
-  if (!spoken || !quoted) {
-    return false;
-  }
-  if (spoken === quoted) {
-    return true;
-  }
-  return spoken.includes(quoted) && spoken.length <= quoted.length + extra.length + 8;
-}
-
-/**
- * The speaker must not hear a line that was written for someone else:
- * the relay body (ask), or the report that the server delivers to the asker.
- */
-export function correctMisaddressedJobReply(input: {
-  response: string;
-  relays: Array<{ targetName: string; text: string }>;
-  reports: Array<{ toName: string; text: string }>;
-}): string | null {
-  const spoken = input.response.trim();
-  if (!spoken) {
-    return null;
-  }
-  const report = input.reports.find(
-    (row) => row.toName.trim() && spokenEchoes(spoken, row.text, row.toName),
-  );
-  if (report) {
-    return `אעדכן את ${report.toName.trim()}.`;
-  }
-  const relay = input.relays.find(
-    (row) => row.targetName.trim() && spokenEchoes(spoken, row.text, row.targetName),
-  );
-  if (relay) {
-    return `שלחתי ל${relay.targetName.trim()}.`;
-  }
-  return null;
-}
-
 function defaultReport(job: OpenJobRow, outcome: string, said: string): string {
   const quoted = job.meta.ask ? ` בקשר ל«${job.meta.ask}»` : "";
   const detail = said.trim() ? `: ${said.trim()}` : "";

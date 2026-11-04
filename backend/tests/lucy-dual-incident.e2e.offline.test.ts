@@ -7,10 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyLlmMetadata, type LlmMetadata, type LlmReminderAction, type PublicEmployee } from "@workee/shared";
 import { correctModelApplyTurnResponse } from "../src/eval/run-model-apply.js";
 import {
-  LIST_ADD_MISS,
-  REMINDER_ONLY_PARTIAL,
-} from "../src/services/employee-records.service.js";
-import {
   baselineShaForWatch,
   evaluateComposeCondition,
   normalizeMarketPriceForLiveQuote,
@@ -96,11 +92,12 @@ function marketAddAction(
   } as LlmReminderAction;
 }
 
-describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
-  it("reminder applied, lists.add omitted, הוספתי claim → no task success", () => {
+describe("Incident 1 e2e — reply contract: no apply failure → model reply stands", () => {
+  it("reminder applied, lists.add omitted: no failure → reply stands (prompt/eval owns the claim)", () => {
+    const response =
+        "הוספתי למשימות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך ביום שני ב־8 תזכורת.";
     const out = correctModelApplyTurnResponse({
-      response:
-        "הוספתי למשימות להביא 2 בקבוקי מיץ לבית הספר עבור יואב, ואזכיר לך ביום שני ב־8 תזכורת.",
+      response,
       metadata: meta({
         // No lists.add — model claimed success without ACTION.
         lists: [],
@@ -130,17 +127,15 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
         ],
       }),
       mutations: [],
-      appliedReminderAdd: true,
-      reminderAddFallback: "שמרתי תזכורת «להביא 2 בקבוקי מיץ».",
-      speakerEmployeeId: speaker.id,
     });
-    expect(out).toBe(REMINDER_ONLY_PARTIAL);
+    expect(out).toBe(response);
   });
 
-  it("reminder + worker-only להזכיר add → no speaker task claim", () => {
+  it("reminder + worker-only להזכיר add applied: no failure → reply stands", () => {
+    const response =
+        "הוספתי את המשימה להוסיף קבצי זיפ לאוטומציה בשביל ניר. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף את קבצי זיפ לאוטומציה בשביל ניר.";
     const out = correctModelApplyTurnResponse({
-      response:
-        "הוספתי את המשימה להוסיף קבצי זיפ לאוטומציה בשביל ניר. קבעתי תזכורת למחר ב־10:00: תזכורת: להוסיף את קבצי זיפ לאוטומציה בשביל ניר.",
+      response,
       metadata: meta({
         lists: [
           {
@@ -163,22 +158,17 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
           listName: "משימות",
         },
       ],
-      appliedReminderAdd: true,
-      reminderAddFallback: "שמרתי תזכורת «להוסיף את קבצי זיפ לאוטומציה בשביל ניר».",
-      speakerEmployeeId: speaker.id,
     });
-    expect(out).toBe(REMINDER_ONLY_PARTIAL);
-    expect(out).not.toMatch(/הוספתי את המשימה/);
+    expect(out).toBe(response);
   });
 
-  it("neither task nor reminder applied + הוספתי → add miss", () => {
+  it("nothing requested + הוספתי: no failure → reply stands", () => {
     const out = correctModelApplyTurnResponse({
       response: "הוספתי למשימות לקנות חלב.",
       metadata: meta(),
       mutations: [],
-      appliedReminderAdd: false,
     });
-    expect(out).toBe(LIST_ADD_MISS);
+    expect(out).toBe("הוספתי למשימות לקנות חלב.");
   });
 
   it("both list add and reminder applied → keeps dual claim", () => {
@@ -208,8 +198,6 @@ describe("Incident 1 e2e — execution truth (model-apply pipeline)", () => {
           listName: "משימות",
         },
       ],
-      appliedReminderAdd: true,
-      speakerEmployeeId: speaker.id,
     });
     expect(out).toBe(reply);
   });

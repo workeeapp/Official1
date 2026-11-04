@@ -1705,6 +1705,66 @@
           }
         }
       ]
+    },
+    {
+      "id": "full-relay-ack-to-speaker",
+      "tag": "happy",
+      "tags": [
+        "messages",
+        "relay",
+        "single-turn",
+        "full-live",
+        "reply-contract"
+      ],
+      "description": "Relay ask to עמית: the body lives only in messages[]; responses confirm to the speaker (engine no longer rewrites misaddressed replies)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-shared-relay",
+            "list_type": "shopping",
+            "list_name": "קניות משותפת",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-relay-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשאלי את עמית אם הוא קנה חלב",
+          "constraints": [
+            {
+              "type": "messages_has",
+              "targetIncludes": "עמית"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "טל שואל",
+                "טל שואלת",
+                "טל רוצה לדעת"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

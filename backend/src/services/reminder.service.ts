@@ -46,7 +46,7 @@ import {
   mergeAttachmentOutcomes,
   type AttachmentApplyOutcome,
 } from "./attachment.service.js";
-import { applyClockRuleToTask } from "./list-recurrence.js";
+import { applyClockRuleToTask, itemRecurrence } from "./list-recurrence.js";
 import { nextCandleLighting } from "./jewish.js";
 import {
   conditionFromReminderJson,
@@ -2053,6 +2053,271 @@ export async function cancelReminderLinkedToWorkerItem(
     }
     return [];
   }
+}
+
+const TASK_DATE_FIELD = "תאריך לביצוע";
+const TASK_TIME_FIELD = "שעה לביצוע";
+
+function readYmd(value: unknown): string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
+    ? value.trim()
+    : "";
+}
+
+function readMinutes(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : null;
+}
+
+function ymdDayNumber(ymd: string): number {
+  return Date.UTC(
+    Number(ymd.slice(0, 4)),
+    Number(ymd.slice(5, 7)) - 1,
+    Number(ymd.slice(8, 10)),
+  ) / 86_400_000;
+}
+
+export interface TaskMoveDelta {
+  oldYmd: string;
+  newYmd: string;
+  dayDelta: number;
+  minuteDelta: number;
+}
+
+/**
+ * How far a one-off task moved (תאריך/שעה לביצוע), or null when it did not
+ * move, has no date before, or is a standing (recurring) task. Time-only
+ * deltas count only when both sides carry a time.
+ */
+export function taskMoveDelta(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): TaskMoveDelta | null {
+  if (itemRecurrence(before) || itemRecurrence(after)) {
+    return null;
+  }
+  const oldYmd = readYmd(before[TASK_DATE_FIELD]);
+  if (!oldYmd) {
+    return null;
+  }
+  const newYmd = readYmd(after[TASK_DATE_FIELD]) || oldYmd;
+  const oldMinutes = readMinutes(before[TASK_TIME_FIELD]);
+  const newMinutes = readMinutes(after[TASK_TIME_FIELD]);
+  const dayDelta = Math.round(ymdDayNumber(newYmd) - ymdDayNumber(oldYmd));
+  const minuteDelta =
+    oldMinutes !== null && newMinutes !== null ? newMinutes - oldMinutes : 0;
+  if (dayDelta === 0 && minuteDelta === 0) {
+    return null;
+  }
+  return { oldYmd, newYmd, dayDelta, minuteDelta };
+}
+
+function dayMonthPattern(ymd: string): RegExp {
+  const day = Number(ymd.slice(8, 10));
+  const month = Number(ymd.slice(5, 7));
+  return new RegExp(
+    `(?<![\\d./])0?${day}([./])0?${month}(\\1(?:20)?${ymd.slice(2, 4)})?(?![\\d]|[./]\\d)`,
+    "g",
+  );
+}
+
+/** Rewrite «5.11» / «05/11» / «5.11.26» / «2026-11-05» from old to new date. */
+export function shiftDateTokens(text: string, oldYmd: string, newYmd: string): string {
+  if (!text || oldYmd === newYmd) {
+    return text;
+  }
+  const newDay = Number(newYmd.slice(8, 10));
+  const newMonth = Number(newYmd.slice(5, 7));
+  return text
+    .split(oldYmd)
+    .join(newYmd)
+    .replace(dayMonthPattern(oldYmd), (_match, sep: string, year?: string) => {
+      const nextYear = !year
+        ? ""
+        : `${sep}${year.length > 3 ? newYmd.slice(0, 4) : newYmd.slice(2, 4)}`;
+      return `${newDay}${sep}${newMonth}${nextYear}`;
+    });
+}
+
+function isOneShotClock(row: { repeat?: unknown; recurrence?: unknown; scheduleAnchor?: unknown }): boolean {
+  const rule = row.recurrence;
+  const ruleIsNone =
+    rule === null ||
+    rule === undefined ||
+    (typeof rule === "object" && !Array.isArray(rule) && (rule as { freq?: unknown }).freq === "none");
+  return (
+    ruleIsNone &&
+    (row.repeat ?? "once") === "once" &&
+    !(typeof row.scheduleAnchor === "string" && row.scheduleAnchor.trim())
+  );
+}
+
+export interface ShiftedLinkedClock {
+  reminderId: string;
+  label: string;
+  previousFireAt: Date;
+  fireAt: Date;
+}
+
+/**
+ * A human one-off task moved (date and/or time) → move every active one-shot
+ * clock linked to it (join table / legacy linked_reminder_id) by the same
+ * wall-clock delta, so «ערב לפני» stays the evening before the new date.
+ * Also rewrites the date in the clock's label/message and in its worker
+ * «להזכיר ל…» task. A clock whose moved time is already past stays put.
+ */
+export async function shiftLinkedClocksForTaskMove(input: {
+  listItemId: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  userId?: string;
+  actorEmployeeId?: string;
+  now?: Date;
+}): Promise<ShiftedLinkedClock[]> {
+  const delta = taskMoveDelta(input.before, input.after);
+  if (!delta || !prisma.reminder?.findMany || !prisma.reminder?.update) {
+    return [];
+  }
+  const now = input.now ?? new Date();
+  try {
+    const item = prisma.employeeListItem?.findUnique
+      ? await prisma.employeeListItem.findUnique({
+          where: { id: input.listItemId },
+          select: { linkedReminderId: true },
+        })
+      : null;
+    const joinRows = prisma.employeeListItemReminderLink?.findMany
+      ? await prisma.employeeListItemReminderLink.findMany({
+          where: { listItemId: input.listItemId },
+          select: { reminderId: true },
+        })
+      : [];
+    const ids = new Set<string>(
+      [
+        item?.linkedReminderId ?? "",
+        ...joinRows.map((row) => row.reminderId ?? ""),
+      ]
+        .map((id) => id.trim())
+        .filter(Boolean),
+    );
+    if (ids.size === 0) {
+      return [];
+    }
+    const clocks = await prisma.reminder.findMany({
+      where: { id: { in: [...ids] }, status: "active" },
+    });
+    const shifted: ShiftedLinkedClock[] = [];
+    for (const clock of clocks) {
+      if (!isOneShotClock(clock)) {
+        continue;
+      }
+      const fireAt = new Date(
+        addJerusalemDays(clock.fireAt, delta.dayDelta).getTime() +
+          delta.minuteDelta * 60_000,
+      );
+      if (fireAt.getTime() <= now.getTime()) {
+        continue;
+      }
+      const itemLabel = shiftDateTokens(clock.itemLabel, delta.oldYmd, delta.newYmd);
+      const nextKey = itemKey(shiftDateTokens(clock.itemKey, delta.oldYmd, delta.newYmd));
+      await prisma.reminder.update({
+        where: { id: clock.id },
+        data: {
+          fireAt,
+          sendStatus: "pending",
+          itemLabel: itemLabel.slice(0, 255),
+          itemKey: nextKey,
+          messageText: shiftDateTokens(clock.messageText ?? "", delta.oldYmd, delta.newYmd),
+        },
+      });
+      await shiftWorkerTaskDate({
+        reminderId: clock.id,
+        workerItemId: clock.workerItemId,
+        delta,
+        fireAt,
+      });
+      if (input.userId) {
+        await recordAuditEvent({
+          userId: input.userId,
+          actorEmployeeId: input.actorEmployeeId,
+          action: "reminder_save",
+          entityType: "Reminder",
+          entityId: clock.id,
+          summary: `follow task move ${delta.oldYmd}→${delta.newYmd} (${delta.minuteDelta}m) reminder: ${itemLabel}`,
+        });
+      }
+      shifted.push({
+        reminderId: clock.id,
+        label: itemLabel,
+        previousFireAt: clock.fireAt,
+        fireAt,
+      });
+    }
+    return shifted;
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function shiftWorkerTaskDate(input: {
+  reminderId: string;
+  workerItemId?: string | null;
+  delta: TaskMoveDelta;
+  fireAt: Date;
+}): Promise<void> {
+  if (input.workerItemId && prisma.employeeListItem?.findUnique && prisma.employeeListItem?.update) {
+    const worker = await prisma.employeeListItem.findUnique({
+      where: { id: input.workerItemId },
+    });
+    if (worker && !worker.deletedAt) {
+      const data =
+        worker.data && typeof worker.data === "object" && !Array.isArray(worker.data)
+          ? { ...(worker.data as Record<string, unknown>) }
+          : {};
+      const workerYmd = readYmd(data[TASK_DATE_FIELD]);
+      if (workerYmd) {
+        data[TASK_DATE_FIELD] = formatJerusalemWallTime(
+          addJerusalemDays(
+            jerusalemWallTimeToDate(
+              Number(workerYmd.slice(0, 4)),
+              Number(workerYmd.slice(5, 7)),
+              Number(workerYmd.slice(8, 10)),
+              12,
+              0,
+            ),
+            input.delta.dayDelta,
+          ),
+        ).slice(0, 10);
+      }
+      const name =
+        typeof data["שם משימה"] === "string" ? data["שם משימה"] : worker.itemKey;
+      const nextName = shiftDateTokens(name, input.delta.oldYmd, input.delta.newYmd);
+      data["שם משימה"] = nextName;
+      await prisma.employeeListItem.update({
+        where: { id: worker.id },
+        data: {
+          data: data as Prisma.InputJsonValue,
+          ...(itemKey(nextName) !== worker.itemKey ? { itemKey: itemKey(nextName) } : {}),
+        },
+      });
+    }
+  }
+  await syncLinkedWorkerTaskClock({
+    reminderId: input.reminderId,
+    workerItemId: input.workerItemId,
+    fireAt: input.fireAt,
+  });
 }
 
 /**

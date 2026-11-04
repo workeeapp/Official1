@@ -9,7 +9,10 @@ import {
   captureRequestedFromMetadata,
 } from "../src/services/apply-result.js";
 import { decideReplyFromApplyResult } from "../src/services/apply-result-reply.js";
-import { applyGatedClaimCorrectors } from "../src/services/apply-gated-claim-correctors.js";
+import {
+  applySideFailureOverrides,
+  sideFailureLines,
+} from "../src/services/apply-failure-overrides.js";
 import { emptyAttachmentOutcome } from "../src/services/attachment.service.js";
 import {
   LIST_FIND_MISS,
@@ -120,36 +123,19 @@ describe("Stage 2B production path — Result-B + gated correctors", () => {
       modelDraft: draft,
     });
     expect(decided.keepDraft).toBe(false);
-    expect(decided.operationalClaimResolved).toBe(true);
 
     let reply = replaceSpokenForExecutionOverride(draft, decided.spoken);
-    const gated = applyGatedClaimCorrectors({
+    reply = applySideFailureOverrides({
       reply,
-      resultB: decided,
+      resultBReplaced: true,
+      lines: sideFailureLines({
+        listMutations: [],
+        shareMisses: [],
+        attachmentOutcome: emptyAttachmentOutcome(false),
+      }),
       setResponse: replaceSpokenForExecutionOverride,
-      requestedRemove: true,
-      requestedUpdate: false,
-      requestedAdd: false,
-      appliedRemove: false,
-      appliedUpdate: false,
-      appliedAdd: false,
-      appliedSpeakerListAdd: false,
-      appliedListOps: false,
-      appliedFilingRemove: false,
-      appliedFilingUpdate: false,
-      appliedFallback: "",
-      listMutations: [],
-      shareMisses: [],
-      filingShareApplied: false,
-      attachmentOutcome: emptyAttachmentOutcome(false),
-      requestedFilingAdd: false,
-      requestedFilingUpdate: false,
-      appliedFilingAdd: false,
-      requestedDirectory: false,
-      appliedDirectory: false,
-      appliedReminderAdd: false,
-      reminderAddFallback: "",
     });
+    const gated = { reply };
     const parsed = parseLlmReply(gated.reply);
     expect(parsed.responses).toHaveLength(1);
     expect(parsed.responses[0]).toBe(LIST_FIND_MISS);
@@ -174,7 +160,7 @@ describe("Stage 2B production path — Result-B + gated correctors", () => {
     ]);
   });
 
-  it("narrow-post-apply share correction also replaces all bubbles", () => {
+  it("share claim with no share requested and no miss: model bubbles stand", () => {
     const draft = multiBubbleDraft([
       "שיתפתי את החלב עם דני.",
       "תודה ולהתראות.",
@@ -187,36 +173,37 @@ describe("Stage 2B production path — Result-B + gated correctors", () => {
       modelDraft: draft,
     });
     expect(decided.keepDraft).toBe(true);
-
-    const gated = applyGatedClaimCorrectors({
+    const reply = applySideFailureOverrides({
       reply: draft,
-      resultB: decided,
+      resultBReplaced: false,
+      lines: sideFailureLines({
+        listMutations: [],
+        shareMisses: [],
+        attachmentOutcome: emptyAttachmentOutcome(false),
+      }),
       setResponse: replaceSpokenForExecutionOverride,
-      requestedRemove: false,
-      requestedUpdate: false,
-      requestedAdd: false,
-      appliedRemove: false,
-      appliedUpdate: false,
-      appliedAdd: false,
-      appliedSpeakerListAdd: false,
-      appliedListOps: false,
-      appliedFilingRemove: false,
-      appliedFilingUpdate: false,
-      appliedFallback: "",
-      listMutations: [],
-      shareMisses: [],
-      filingShareApplied: false,
-      attachmentOutcome: emptyAttachmentOutcome(false),
-      requestedFilingAdd: false,
-      requestedFilingUpdate: false,
-      appliedFilingAdd: false,
-      requestedDirectory: false,
-      appliedDirectory: false,
-      appliedReminderAdd: false,
-      reminderAddFallback: "",
     });
-    const parsed = parseLlmReply(gated.reply);
-    expect(parsed.responses).toEqual([SHARE_CLAIM_MISS]);
+    expect(reply).toBe(draft);
+  });
+
+  it("real share miss replaces all bubbles with engine text", () => {
+    const draft = multiBubbleDraft([
+      "שיתפתי את החלב עם דני.",
+      "תודה ולהתראות.",
+    ]);
+    const reply = applySideFailureOverrides({
+      reply: draft,
+      resultBReplaced: false,
+      lines: sideFailureLines({
+        listMutations: [],
+        shareMisses: [{ itemId: "x", reason: "forbidden" }],
+        attachmentOutcome: emptyAttachmentOutcome(false),
+      }),
+      setResponse: replaceSpokenForExecutionOverride,
+    });
+    const parsed = parseLlmReply(reply);
+    expect(parsed.responses).toHaveLength(1);
+    expect(parsed.responses[0]).not.toBe("שיתפתי את החלב עם דני.");
     expect(parsed.response).not.toContain("תודה ולהתראות");
   });
 });

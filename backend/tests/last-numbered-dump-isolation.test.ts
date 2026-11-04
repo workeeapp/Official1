@@ -14,7 +14,6 @@ import {
 } from "@workee/shared";
 import {
   formatShowDumpWithLineMap,
-  looksLikeFreeWrittenNumberedInventory,
   mapShowButtonCommandToDump,
   restrictListMutatesToLastNumberedDump,
   type LastNumberedDumpLine,
@@ -122,19 +121,6 @@ describe("LAST_NUMBERED_DUMP isolation after intervening custom dump", () => {
     ]);
     expect(picked.map((row) => row.id)).toEqual([customId1, customId2]);
     expect(picked.map((row) => row.id)).not.toContain(shoppingId1);
-  });
-
-  it("detects model-written custom inventory without server guillemets", () => {
-    const freeWritten = [
-      "📋 רשימת משימות לטל:",
-      "1. תמיכה מלאה באנשי קשר בהתאם לvcard",
-      "2. באג לא ניתן לעדכן משימה משותפת",
-      "3. תמיכה בזיהוי כתובת/עיר לפי קואורדינטות",
-    ].join("\n");
-    expect(looksLikeFreeWrittenNumberedInventory(freeWritten)).toBe(true);
-    expect(
-      looksLikeFreeWrittenNumberedInventory("מחקתי את הגלידה מרשימת הקניות."),
-    ).toBe(false);
   });
 
   it("free-written inventory tombstone clears stale shopping LAST_NUMBERED_DUMP", () => {

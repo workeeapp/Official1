@@ -73,6 +73,7 @@ import {
   formatJerusalemDateTime,
   listReminderRowsForUser,
   reminderRuleSnapshot,
+  shiftLinkedClocksForTaskMove,
   toReminderSnapshotRow,
   type NestedSavedClock,
   type ReminderSnapshotRow,
@@ -455,67 +456,6 @@ export function chooseSavedListType(
   return unique[0] as LlmListType;
 }
 
-/** Fix spoken list names when mutations prove shopping vs tasks. */
-export function alignSpokenListType(
-  response: string,
-  mutations: Array<{ action: string; listType: string }>,
-): string {
-  const removes = mutations.filter((row) => row.action === "remove");
-  const types = [...new Set(removes.map((row) => row.listType))];
-  if (types.length !== 1) {
-    return response;
-  }
-  const type = types[0];
-  if (type === "tasks") {
-    return response
-      .replaceAll("מרשימת הקניות", "מרשימת המשימות")
-      .replaceAll("רשימת הקניות", "רשימת המשימות")
-      .replaceAll("מרשימת המשימות", "מרשימת המשימות")
-      .replaceAll("רשימת המשימות", "רשימת המשימות");
-  }
-  if (type === "shopping") {
-    return response
-      .replaceAll("מרשימת המשימות", "מרשימת הקניות")
-      .replaceAll("רשימת המשימות", "רשימת הקניות")
-      .replaceAll("מרשימת המשימות", "מרשימת הקניות")
-      .replaceAll("רשימת המשימות", "רשימת הקניות");
-  }
-  return response;
-}
-
-export function alignListTypeInReply(
-  llmReply: string,
-  mutations: Array<{ action: string; listType: string }>,
-): string {
-  try {
-    const parsed: unknown = JSON.parse(llmReply);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return llmReply;
-    }
-    const record = parsed as Record<string, unknown>;
-    if (Array.isArray(record.responses)) {
-      const current = record.responses;
-      const next = current.map((entry) =>
-        typeof entry === "string" ? alignSpokenListType(entry, mutations) : entry,
-      );
-      if (next.every((entry, index) => entry === current[index])) {
-        return llmReply;
-      }
-      return JSON.stringify({ ...record, responses: next });
-    }
-    if (typeof record.response !== "string") {
-      return llmReply;
-    }
-    const next = alignSpokenListType(record.response, mutations);
-    if (next === record.response) {
-      return llmReply;
-    }
-    return JSON.stringify({ ...record, response: next });
-  } catch {
-    return alignSpokenListType(llmReply, mutations);
-  }
-}
-
 /**
  * When the model leaves response empty after a successful apply, give the
  * speaker a short Hebrew confirmation so WhatsApp/UI are not blank.
@@ -583,80 +523,10 @@ export const LIST_ADD_MISS = "לא הצלחתי להוסיף את הפריט.";
 export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
 /** Spoken when the model claimed share but apply has no shareOutcome / misses. */
 export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.";
-/** Spoken when a reminder-save claim has no applied reminder this turn. */
-export const REMINDER_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את התזכורת.";
-/** Reminder applied but speaker list/task add did not. */
-export const REMINDER_ONLY_PARTIAL =
-  "שמרתי את התזכורת, אבל לא הצלחתי להוסיף את המשימה לרשימה.";
 
 /** Last-resort spoken line when the model left responses empty. */
 export const EMPTY_REPLY_RETRY =
   "לא הצלחתי לבצע את זה — נסי שוב.";
-
-/**
- * Model past-tense unshare claim in the spoken reply (not user utterance).
- * Checked before delete-claim so «הסרתי את השיתוף…» is not treated as a delete.
- */
-export function looksLikeUnshareClaim(spoken: string): boolean {
-  const text = spoken.trim();
-  if (!text) {
-    return false;
-  }
-  return /(?:הסרתי|הפסקתי|ביטלתי|הורדתי)\s+את\s+השיתוף|הפסקתי\s+לשתף/.test(
-    text,
-  );
-}
-
-/** Model past-tense delete claim in the spoken reply (not user utterance). */
-export function looksLikeListDeleteClaim(spoken: string): boolean {
-  if (looksLikeUnshareClaim(spoken)) {
-    return false;
-  }
-  return /מחקתי|הסרתי/.test(spoken);
-}
-
-/**
- * Model past-tense list/task add claim (not user utterance).
- * Used for execution-truth — does not require metadata.lists add.
- */
-export function looksLikeListAddClaim(spoken: string): boolean {
-  const text = spoken.trim();
-  if (!text) {
-    return false;
-  }
-  // Durable filing/save verbs are handled by correctDurableSaveClaimReply.
-  if (looksLikeDurableSaveClaim(text) && !/הוספתי/.test(text)) {
-    return false;
-  }
-  return /הוספתי/.test(text);
-}
-
-/**
- * Model claim that a reminder/clock was saved this turn (Hebrew product copy).
- * Future-tense «אזכיר» alone is not enough — pair with schedule/reminder cues.
- */
-export function looksLikeReminderSaveClaim(spoken: string): boolean {
-  const text = spoken.trim();
-  if (!text) {
-    return false;
-  }
-  if (
-    /קבעתי\s+תזכורת|שמרתי\s+תזכורת|הוספתי\s+תזכורת|הגדרתי\s+תזכורת/.test(
-      text,
-    )
-  ) {
-    return true;
-  }
-  if (/אזכיר(?:\s+לך)?/.test(text) && /תזכורת|ב־|בשעה|מחר|היום/.test(text)) {
-    return true;
-  }
-  return false;
-}
-
-/** Model past-tense share claim in the spoken reply (not user utterance). */
-export function looksLikeShareClaim(spoken: string): boolean {
-  return /שיתפתי|שיתפנו|שיתפתי את|שיתפתי עם/.test(spoken);
-}
 
 export type UnshareApplySummary = {
   /** Shopping/tasks item updates that requested unshare_with and applied. */
@@ -800,33 +670,6 @@ export function formatUnshareOutcomeReply(
   return "";
 }
 
-/**
- * When the model claimed a completed unshare, align the spoken reply with
- * post-apply evidence: remaining shopping/tasks shares with the same partners
- * mean the claim was incomplete (model omitted item_ids or some updates missed).
- */
-export function correctUnshareClaimReply(input: {
-  reply: string;
-  spoken: string;
-  summary: UnshareApplySummary;
-  setResponse: (reply: string, response: string) => string;
-}): string {
-  if (!looksLikeUnshareClaim(input.spoken)) {
-    return input.reply;
-  }
-  if (
-    input.summary.partnerLabels.length === 0 &&
-    input.summary.appliedUnshareCount === 0
-  ) {
-    return input.reply;
-  }
-  const corrected = formatUnshareOutcomeReply(input.summary);
-  if (corrected) {
-    return input.setResponse(input.reply, corrected);
-  }
-  return input.reply;
-}
-
 export type ShareApplySummary = {
   /** Rows that recorded a shareOutcome (share intent on update). */
   shareIntentCount: number;
@@ -933,356 +776,6 @@ export function formatShareOutcomeReply(summary: ShareApplySummary): string {
     return `${parts[0]} (${parts.slice(1).join(", ")}).`;
   }
   return "";
-}
-
-/**
- * When the model claimed share, align the spoken reply with apply evidence:
- * - full new-share success → keep model text
- * - already-shared / partial / miss → formatShareOutcomeReply
- * - claim with no shareOutcome and no misses → SHARE_CLAIM_MISS
- * Never treat newlySharedCount===0 alone as failure when alreadySharedCount>0.
- */
-export function correctShareClaimReply(input: {
-  reply: string;
-  spoken: string;
-  mutations: ListItemMutation[];
-  misses?: ShareApplyMiss[];
-  /** Filing add/update landed shared this turn (no list shareOutcome). */
-  filingShareApplied?: boolean;
-  setResponse: (reply: string, response: string) => string;
-}): string {
-  if (!looksLikeShareClaim(input.spoken)) {
-    return input.reply;
-  }
-  const summary = summarizeShareApply(input.mutations, input.misses ?? []);
-  // Proven full new-share success — keep the model's confirm.
-  if (
-    summary.newlySharedCount > 0 &&
-    summary.alreadySharedCount === 0 &&
-    summary.missCount === 0
-  ) {
-    return input.reply;
-  }
-  // Filing co-share is proven outside list shareOutcome.
-  if (
-    input.filingShareApplied &&
-    summary.missCount === 0 &&
-    summary.newlySharedCount === 0 &&
-    summary.alreadySharedCount === 0
-  ) {
-    return input.reply;
-  }
-  const corrected = formatShareOutcomeReply(summary);
-  if (corrected) {
-    return input.setResponse(input.reply, corrected);
-  }
-  // No formatable outcome and no proven new share → deny false success.
-  // (already-shared is handled above via formatShareOutcomeReply.)
-  return input.setResponse(input.reply, SHARE_CLAIM_MISS);
-}
-
-function looksLikeAttachClaim(spoken: string): boolean {
-  const text = spoken.trim();
-  if (!text) {
-    return false;
-  }
-  return /(?:צרפתי|תייקתי|שמרתי).{0,40}(?:קובץ|תמונ|מסמך|סרטון|הקלטה|קבצים|תמונות)|(?:צרפתי|תייקתי) את (?:ה)?(?:קובץ|תמונ)/u.test(
-    text,
-  );
-}
-
-/** Spoken past-tense durable save claim (filing/list), not file-attach wording. */
-export function looksLikeDurableSaveClaim(spoken: string): boolean {
-  const text = spoken.trim();
-  if (!text || looksLikeAttachClaim(text)) {
-    return false;
-  }
-  // Reminder-clock claims are execution-truth / reminder apply — not filing.
-  if (looksLikeReminderSaveClaim(text)) {
-    return false;
-  }
-  return /תייקתי|שמרתי/.test(text);
-}
-
-/** When the model claimed תייקתי/שמרתי without a matching applied list/filing mutate. */
-export const DURABLE_SAVE_CLAIM_MISS = "לא הצלחתי לשמור את זה.";
-
-/**
- * Align spoken «תייקתי»/«שמרתי» with apply evidence for list/filing/directory
- * mutates. Attach claims stay with correctAttachmentClaimReply. Keep the reply
- * only when a requested durable save also applied this turn.
- */
-export function correctDurableSaveClaimReply(input: {
-  reply: string;
-  spoken: string;
-  requestedListAdd: boolean;
-  requestedListUpdate: boolean;
-  requestedFilingAdd: boolean;
-  requestedFilingUpdate: boolean;
-  appliedListAdd: boolean;
-  appliedListUpdate: boolean;
-  appliedFilingAdd: boolean;
-  appliedFilingUpdate: boolean;
-  /** directory add/update requested this turn (metadata.directory). */
-  requestedDirectory?: boolean;
-  /** At least one contact saved/updated this turn. */
-  appliedDirectory?: boolean;
-  setResponse: (reply: string, response: string) => string;
-}): string {
-  if (!looksLikeDurableSaveClaim(input.spoken)) {
-    return input.reply;
-  }
-  // Execution truth: keep only when a durable mutate actually applied.
-  // requested* is informational — omitted ACTION + false claim still misses.
-  const listOk = input.appliedListAdd || input.appliedListUpdate;
-  const filingOk = input.appliedFilingAdd || input.appliedFilingUpdate;
-  const directoryOk = Boolean(input.appliedDirectory);
-  if (listOk || filingOk || directoryOk) {
-    return input.reply;
-  }
-  return input.setResponse(input.reply, DURABLE_SAVE_CLAIM_MISS);
-}
-
-/**
- * When the model claimed a file attach but no attach succeeded this turn
- * (new link or already-linked), replace the spoken reply. Detach-only success
- * does not count as attach success. alreadyLinked counts as success.
- */
-export function correctAttachmentClaimReply(input: {
-  reply: string;
-  spoken: string;
-  outcome: AttachmentApplyOutcome;
-  setResponse: (reply: string, response: string) => string;
-}): string {
-  if (!input.outcome.attachRequested) {
-    return input.reply;
-  }
-  if (!looksLikeAttachClaim(input.spoken)) {
-    return input.reply;
-  }
-  if (input.outcome.linked + input.outcome.alreadyLinked > 0) {
-    return input.reply;
-  }
-  return input.setResponse(
-    input.reply,
-    "לא הצלחתי לצרף את הקובץ.",
-  );
-}
-
-/**
- * When metadata requested a list mutate kind that did not apply, replace the
- * spoken reply so it does not keep a false past-tense claim. Partial success
- * (e.g. remove applied, add did not) keeps an applied fallback + add miss.
- * Also corrects «מחקתי…» when no remove was requested/applied (bad ACTION shape).
- * Successful list_ops (delete_list / alter_list) skip item-level LIST_FIND_MISS
- * so a parallel failed lists.remove does not overwrite a real list delete.
- * Successful item update (e.g. unshare) is never wiped by a parallel failed
- * lists.remove — keep success text and append LIST_FIND_MISS only when remove
- * was actually requested and missed.
- */
-export function correctListMutationClaimReply(input: {
-  reply: string;
-  requestedRemove: boolean;
-  requestedUpdate: boolean;
-  requestedAdd: boolean;
-  appliedRemove: boolean;
-  appliedUpdate: boolean;
-  appliedAdd: boolean;
-  appliedFallback: string;
-  setResponse: (reply: string, response: string) => string;
-  /** Spoken text already parsed from the reply (optional). */
-  spoken?: string;
-  /** True when any metadata.list_ops row applied this turn. */
-  appliedListOps?: boolean;
-  /** True when remove_filing / update_filing applied this turn. */
-  appliedFilingRemove?: boolean;
-  appliedFilingUpdate?: boolean;
-}): string {
-  const {
-    requestedRemove,
-    requestedUpdate,
-    requestedAdd,
-    appliedRemove,
-    appliedUpdate,
-    appliedAdd,
-    appliedFallback,
-    setResponse,
-    appliedListOps,
-    appliedFilingRemove,
-    appliedFilingUpdate,
-  } = input;
-  const filingApplied = Boolean(appliedFilingRemove || appliedFilingUpdate);
-  const fallback = appliedFallback.trim();
-  const spoken = (input.spoken ?? "").trim();
-  const successBase = () => fallback || spoken;
-  if (appliedListOps) {
-    if (requestedAdd && !appliedAdd) {
-      if (appliedRemove || appliedUpdate || fallback) {
-        const parts = [fallback, LIST_ADD_MISS].filter(Boolean);
-        return setResponse(input.reply, parts.join("\n"));
-      }
-      return setResponse(input.reply, LIST_ADD_MISS);
-    }
-    return input.reply;
-  }
-  // Successful filing mutate — never overwrite with list-item miss (e.g. «מחקי 15»).
-  if (filingApplied) {
-    return input.reply;
-  }
-  const removeMiss = requestedRemove && !appliedRemove;
-  const updateMiss = requestedUpdate && !appliedUpdate;
-  const anyItemApplied =
-    appliedRemove || appliedUpdate || appliedAdd || Boolean(fallback);
-  if (removeMiss || updateMiss) {
-    if (!anyItemApplied) {
-      return setResponse(input.reply, LIST_FIND_MISS);
-    }
-    // Parallel failed remove must not wipe a successful update/unshare (or add).
-    if (removeMiss && (appliedUpdate || appliedAdd || Boolean(fallback))) {
-      const base = successBase();
-      if (base) {
-        return setResponse(input.reply, `${base}\n${LIST_FIND_MISS}`);
-      }
-      return input.reply;
-    }
-    // Update missed but another item mutate applied — keep success + find miss.
-    if (updateMiss && (appliedRemove || appliedAdd || Boolean(fallback))) {
-      const base = successBase();
-      return base
-        ? setResponse(input.reply, `${base}\n${LIST_FIND_MISS}`)
-        : input.reply;
-    }
-    return input.reply;
-  }
-  if (requestedAdd && !appliedAdd) {
-    if (appliedRemove || appliedUpdate) {
-      const parts = [fallback, LIST_ADD_MISS].filter(Boolean);
-      return setResponse(input.reply, parts.join("\n"));
-    }
-    return setResponse(input.reply, LIST_ADD_MISS);
-  }
-  if (
-    !appliedRemove &&
-    !requestedRemove &&
-    !appliedUpdate &&
-    !appliedAdd &&
-    looksLikeListDeleteClaim(input.spoken ?? "")
-  ) {
-    return setResponse(input.reply, LIST_FIND_MISS);
-  }
-  return input.reply;
-}
-
-/**
- * Central execution-truth boundary: spoken success claims must match engine
- * apply evidence. Does not require metadata to have requested the ACTION —
- * omitted ACTION + false success claim is corrected. Partial apply → accurate
- * partial wording (e.g. reminder saved, task not).
- *
- * «הוספתי את המשימה» requires a speaker-book list add
- * (`appliedSpeakerListAdd`). A worker-only להזכיר row is not enough.
- * `appliedListAdd` (any book) stays for other correctors; when speaker
- * evidence is omitted, it falls back to `appliedListAdd` for older call sites.
- */
-export function correctExecutionTruthReply(input: {
-  reply: string;
-  spoken: string;
-  /** Any list-item add applied this turn (any owner). Kept for callers. */
-  appliedListAdd: boolean;
-  /**
-   * List-item add on the human speaker's own book (from applied mutations).
-   * When omitted, falls back to appliedListAdd.
-   */
-  appliedSpeakerListAdd?: boolean;
-  /**
-   * Whether THIS turn's ACTION requested a list add onto the speaker's book
-   * (empty targets / speaker in targets — not worker-only «לשלוח נדנוד» / להזכיר).
-   * When omitted, assumed true so legacy call sites keep PARTIAL behavior.
-   */
-  requestedSpeakerListAdd?: boolean;
-  appliedReminderAdd: boolean;
-  /**
-   * Filing add applied this turn. A list-add claim alone must not wipe the
-   * reply when the only successful durable mutate was filing (Result-B may
-   * have rewritten «תייקתי» into an «הוספתי…» line).
-   */
-  appliedFilingAdd?: boolean;
-  /** Engine template when a list add did apply (optional prefer over miss). */
-  listAddFallback?: string;
-  /** Engine template when a reminder did apply (optional). */
-  reminderAddFallback?: string;
-  setResponse: (reply: string, response: string) => string;
-}): string {
-  const spoken = input.spoken.trim();
-  if (!spoken) {
-    return input.reply;
-  }
-  const claimedListAdd = looksLikeListAddClaim(spoken);
-  const claimedReminder = looksLikeReminderSaveClaim(spoken);
-  if (!claimedListAdd && !claimedReminder) {
-    return input.reply;
-  }
-
-  const speakerListOk =
-    typeof input.appliedSpeakerListAdd === "boolean"
-      ? input.appliedSpeakerListAdd
-      : input.appliedListAdd;
-  const reminderOk = input.appliedReminderAdd;
-  const filingOk = Boolean(input.appliedFilingAdd);
-  const speakerAddRequested =
-    typeof input.requestedSpeakerListAdd === "boolean"
-      ? input.requestedSpeakerListAdd
-      : true;
-  const reminderSuccessLine = () =>
-    input.reminderAddFallback?.trim() || "שמרתי את התזכורת.";
-
-  // Both claimed domains that applied (or unclaimed domains ignored) → keep.
-  if (claimedListAdd && claimedReminder) {
-    if (speakerListOk && reminderOk) {
-      return input.reply;
-    }
-    if (!speakerListOk && reminderOk) {
-      // Speaker-book add was requested and missed → PARTIAL.
-      // Worker-only / no speaker add requested → clock success is enough (Option B).
-      if (speakerAddRequested) {
-        return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
-      }
-      return input.setResponse(input.reply, reminderSuccessLine());
-    }
-    if (speakerListOk && !reminderOk) {
-      const listText =
-        input.listAddFallback?.trim() ||
-        "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";
-      return input.setResponse(input.reply, listText);
-    }
-    return input.setResponse(input.reply, LIST_ADD_MISS);
-  }
-
-  if (claimedListAdd && !speakerListOk) {
-    if (reminderOk) {
-      if (speakerAddRequested) {
-        return input.setResponse(input.reply, REMINDER_ONLY_PARTIAL);
-      }
-      return input.setResponse(input.reply, reminderSuccessLine());
-    }
-    // Filing success is not a lists.add — do not emit LIST_ADD_MISS over it.
-    if (filingOk) {
-      return input.reply;
-    }
-    return input.setResponse(input.reply, LIST_ADD_MISS);
-  }
-
-  if (claimedReminder && !reminderOk) {
-    if (speakerListOk) {
-      const listText =
-        input.listAddFallback?.trim() ||
-        "הוספתי לרשימה, אבל לא הצלחתי לשמור את התזכורת.";
-      return input.setResponse(input.reply, listText);
-    }
-    return input.setResponse(input.reply, REMINDER_SAVE_CLAIM_MISS);
-  }
-
-  return input.reply;
 }
 
 export function listItemLabels(
@@ -4024,6 +3517,21 @@ async function applyListAction(
             : {}),
         },
       });
+      // A one-off task moved → its linked one-shot clocks move with it.
+      if (
+        resolvedAction.action === "update" &&
+        resolvedAction.listType === "tasks" &&
+        !access &&
+        !occurrence.change
+      ) {
+        await shiftLinkedClocksForTaskMove({
+          listItemId: existing.id,
+          before: asRecord(existing.data),
+          after: nextDataRecord,
+          userId: listOwner?.userId,
+          actorEmployeeId: actorId,
+        });
+      }
       if (listOwner) {
         const occurrenceDone =
           Boolean(done.doneDate) && doneRecord !== ruledRecord;

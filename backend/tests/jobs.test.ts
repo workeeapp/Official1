@@ -56,7 +56,6 @@ import {
   activateScheduledJob,
   applyJobActions,
   continueJobAfterNudge,
-  correctMisaddressedJobReply,
   createJobsFromRelays,
   createScheduledJobsFromRelays,
   ensureOverdueTasksJob,
@@ -1324,51 +1323,6 @@ describe("listOpenJobsForViewer", () => {
       viewerId: "someone-else",
     });
     expect(forOutsider).toEqual([]);
-  });
-});
-
-describe("correctMisaddressedJobReply", () => {
-  it("replaces a reply that is the line written to the other person", () => {
-    expect(
-      correctMisaddressedJobReply({
-        response: "ערן, עמית שואל אם קנית חלב?",
-        relays: [{ targetName: "ערן", text: "עמית שואל אם קנית חלב?" }],
-        reports: [],
-      }),
-    ).toBe("שלחתי לערן.");
-  });
-
-  it("replaces a reply that is the report meant for the asker", () => {
-    const report = "ערן מוסר שקנה חלב — בקשר לשאלה שביקשת ממני לשאול אותו «אם קנית חלב?»";
-    expect(
-      correctMisaddressedJobReply({
-        response: report,
-        relays: [],
-        reports: [{ toName: "עמית", text: report }],
-      }),
-    ).toBe("אעדכן את עמית.");
-  });
-
-  it("leaves a real confirmation and a real ack alone", () => {
-    expect(
-      correctMisaddressedJobReply({
-        response: "שלחתי לערן שאתה שואל אם קנית חלב.",
-        relays: [{ targetName: "ערן", text: "עמית שואל אם קנית חלב?" }],
-        reports: [],
-      }),
-    ).toBeNull();
-    expect(
-      correctMisaddressedJobReply({
-        response: "אעדכן את עמית.",
-        relays: [],
-        reports: [
-          {
-            toName: "עמית",
-            text: "ערן מוסר שקנה חלב — בקשר לשאלה «אם קנית חלב?»",
-          },
-        ],
-      }),
-    ).toBeNull();
   });
 });
 

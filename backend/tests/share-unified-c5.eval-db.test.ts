@@ -2,6 +2,11 @@
  * C5: contacts / filings / custom-list co-share on approved workee_test.
  * Run: npm run test:eval-db -- tests/share-unified-c5.eval-db.test.ts
  */
+import {
+  applySideFailureOverrides,
+  sideFailureLines,
+} from "../src/services/apply-failure-overrides.js";
+import { emptyAttachmentOutcome } from "../src/services/attachment.service.js";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   applyShowButtonsToBubbles,
@@ -11,7 +16,6 @@ import {
 } from "@workee/shared";
 import {
   applyEmployeeRecords,
-  correctShareClaimReply,
   getEmployeeRecordSnapshot,
   loadFilingOwners,
   loadListItemOwners,
@@ -88,11 +92,15 @@ function finalize(input: {
     responses: [input.claim],
     metadata: input.metadata,
   });
-  reply = correctShareClaimReply({
+  // Reply contract: only a real share miss overrides the model's reply.
+  reply = applySideFailureOverrides({
     reply,
-    spoken: parseLlmReply(reply).response,
-    mutations: input.mutations,
-    misses: input.shareMisses,
+    resultBReplaced: false,
+    lines: sideFailureLines({
+      listMutations: input.mutations,
+      shareMisses: input.shareMisses,
+      attachmentOutcome: emptyAttachmentOutcome(false),
+    }),
     setResponse: setEngineResponse,
   });
   const spoken = parseLlmReply(reply).response.trim();

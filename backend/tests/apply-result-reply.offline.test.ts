@@ -1,5 +1,6 @@
 /**
- * Result-B: decideReplyFromApplyResult — gates optimistic drafts vs ApplyResult.
+ * Result-B: decideReplyFromApplyResult — the model draft stands unless
+ * ApplyResult proves a failure. The model's text is never analyzed.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -11,7 +12,6 @@ import {
 import {
   APPLY_RESULT_UNKNOWN_CAUTION,
   decideReplyFromApplyResult,
-  draftMatchesApplied,
 } from "../src/services/apply-result-reply.js";
 import { LIST_FIND_MISS } from "../src/services/employee-records.service.js";
 import { stripShowTurnMutates } from "../src/services/show-turn-guard.js";
@@ -166,14 +166,50 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).toContain("הסרתי");
   });
 
-  it("full success: rejects draft that claims add when only remove applied", () => {
+  it("full success: model wording is never second-guessed (no text analysis)", () => {
     const decided = decideReplyFromApplyResult({
       applyResult: resultFullSuccess(),
       modelDraft: draftJson("הוספתי את המשימה לרשימה."),
     });
-    expect(decided.keepDraft).toBe(false);
-    expect(decided.spoken).toContain("הסרתי");
-    expect(decided.spoken).not.toContain("הוספתי");
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("הוספתי את המשימה לרשימה.");
+  });
+
+  it("no requested mutates: soft-offer «כן» → model asks for a time; reply stands", () => {
+    // Regression (Tal, 2026-11-04): task without a time, «רוצה שאוסיף גם תזכורת?» →
+    // «כן» → model correctly asks when. Engine replaced it with «לא הצלחתי
+    // לשמור את התזכורת.» because a text heuristic saw «אזכיר» + «תזכורת».
+    const question =
+      "באיזו שעה תרצה שאזכיר לך? אפשר גם לומר „בעוד שעה” או לקבוע תזכורת חוזרת.";
+    const result = buildApplyResult({
+      requested: captureRequestedFromMetadata(emptyLlmMetadata()),
+    });
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson(question),
+    });
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe(question);
+  });
+
+  it("no requested mutates: even a past-tense claim is the model's to own", () => {
+    const result = buildApplyResult({
+      requested: captureRequestedFromMetadata(emptyLlmMetadata()),
+    });
+    for (const text of [
+      "קבעתי תזכורת למחר ב־9.",
+      "הוספתי את החלב לקניות.",
+      "מחקתי את המשימה.",
+      "שיתפתי את הרשימה עם דני.",
+      "תייקתי את הקוד.",
+    ]) {
+      const decided = decideReplyFromApplyResult({
+        applyResult: result,
+        modelDraft: draftJson(text),
+      });
+      expect(decided.keepDraft).toBe(true);
+      expect(decided.spoken).toBe(text);
+    }
   });
 
   it("partial: replaces optimistic full-success draft; reports applied only + miss", () => {
@@ -306,15 +342,12 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).toBe("מחקתי את בלו מהתיוקים.");
     expect(decided.spoken).not.toMatch(/לא הצלחתי לאמת/);
 
-    // Mismatched add claim → Result-B formats from applied (filing wording, not «הרשימה»).
-    const replaced = decideReplyFromApplyResult({
+    // Any wording stands on a complete apply — the engine does not read it.
+    const other = decideReplyFromApplyResult({
       applyResult: result,
       modelDraft: draftJson("הוספתי את בלו לרשימה."),
     });
-    expect(replaced.keepDraft).toBe(false);
-    expect(replaced.spoken).toContain("הסרתי את התיוק «בלו»");
-    expect(replaced.spoken).not.toContain("הרשימה");
-    expect(replaced.spoken).not.toMatch(/לא הצלחתי לאמת/);
+    expect(other.keepDraft).toBe(true);
   });
 
   it("successful id-less lists.add: complete — no unknown caution", () => {
@@ -481,33 +514,26 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).toMatch(/אורז|הוספתי/);
   });
 
-  it("does not emit numbered list inventory (engine display path remains)", () => {
+  it("complete apply: a numbered draft stands (model owns the reply)", () => {
     const decided = decideReplyFromApplyResult({
       applyResult: resultFullSuccess(),
       modelDraft: draftJson("מחקתי.\nקניות:\n1. חלב\n2. לחם"),
     });
-    expect(decided.keepDraft).toBe(false);
-    expect(decided.spoken).not.toMatch(/\n1\.\s/);
-    expect(decided.spoken).not.toContain("קניות:");
+    expect(decided.keepDraft).toBe(true);
   });
-});
 
-describe("draftMatchesApplied", () => {
-  it("rejects delete claim without removes", () => {
-    expect(
-      draftMatchesApplied(
-        {
-          anySuccess: true,
-          deleteClaim: true,
-          addClaim: false,
-          updateClaim: false,
-          shareClaim: false,
-          reminderClaim: false,
-          durableClaim: false,
-        },
-        { total: 1, removes: 0, adds: 1, updates: 0 },
-      ),
-    ).toBe(false);
+  it("failure replacement text comes from ApplyResult, not from the draft", () => {
+    const a = decideReplyFromApplyResult({
+      applyResult: resultFullFailure(),
+      modelDraft: draftJson("מחקתי את החלב."),
+    });
+    const b = decideReplyFromApplyResult({
+      applyResult: resultFullFailure(),
+      modelDraft: draftJson("שאלה כלשהי?"),
+    });
+    expect(a.keepDraft).toBe(false);
+    expect(b.keepDraft).toBe(false);
+    expect(a.spoken).toBe(b.spoken);
   });
 });
 

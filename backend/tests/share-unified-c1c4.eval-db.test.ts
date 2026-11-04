@@ -9,6 +9,11 @@
  *
  * Run: npm run test:eval-db -- tests/share-unified-c1c4.eval-db.test.ts
  */
+import {
+  applySideFailureOverrides,
+  sideFailureLines,
+} from "../src/services/apply-failure-overrides.js";
+import { emptyAttachmentOutcome } from "../src/services/attachment.service.js";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   applyShowButtonsToBubbles,
@@ -20,7 +25,6 @@ import {
 } from "@workee/shared";
 import {
   applyEmployeeRecords,
-  correctShareClaimReply,
   getEmployeeRecordSnapshot,
   loadListItemOwners,
   readItemId,
@@ -131,11 +135,15 @@ function finalizeUserFacing(input: {
   listKeys: Set<string>;
 } {
   let reply = spokenReply(input.claim, input.metadata);
-  reply = correctShareClaimReply({
+  // Reply contract: only a real share miss overrides the model's reply.
+  reply = applySideFailureOverrides({
     reply,
-    spoken: parseLlmReply(reply).response,
-    mutations: input.mutations,
-    misses: input.shareMisses,
+    resultBReplaced: false,
+    lines: sideFailureLines({
+      listMutations: input.mutations,
+      shareMisses: input.shareMisses,
+      attachmentOutcome: emptyAttachmentOutcome(false),
+    }),
     setResponse: setEngineResponse,
   });
   const spoken = parseLlmReply(reply).response.trim();
@@ -506,9 +514,8 @@ describe("unified share C1–C4 (eval-db integration)", () => {
       speakerNames: [SPEAKER, "Tal"],
       account,
     });
-    expect(facing.spoken).toBe(
-      "הפריטים כבר משותפים — לא נוסף שיתוף חדש.",
-    );
+    // Already shared is not an apply failure — the model's reply stands.
+    expect(facing.spoken).toBe("שיתפתי את שני הפריטים עם עמית.");
     expect(facing.bubbles[0]?.text).toBe(facing.spoken);
     expect(facing.bubbles[0]?.buttons?.length ?? 0).toBeGreaterThan(0);
   });

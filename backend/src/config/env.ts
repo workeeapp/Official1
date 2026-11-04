@@ -6,16 +6,20 @@ import { resolve } from "node:path";
 // DATABASE_URL=workee_test:5436 and WhatsApp inbound then hit the wrong DB).
 // Exception: eval harness that locked `.env.live-full-eval` must not be
 // overwritten by product `.env` (see load-live-full-eval-env.ts).
+// Also: a test process (NODE_ENV=test set by tests/setup.ts) keeps its own
+// env — product `.env` must not flip it to development (that re-enabled the
+// login rate limiter mid-suite and turned chat.test into a 401 cascade).
 const evalEnvLocked = process.env.WORKEE_EVAL_ENV_LOCKED === "1";
+const keepProcessEnv = evalEnvLocked || process.env.NODE_ENV === "test";
 loadEnv({
   path: resolve(process.cwd(), ".env"),
   quiet: true,
-  override: !evalEnvLocked,
+  override: !keepProcessEnv,
 });
 loadEnv({
   path: resolve(process.cwd(), "../.env"),
   quiet: true,
-  override: !evalEnvLocked,
+  override: !keepProcessEnv,
 });
 
 const envSchema = z.object({
