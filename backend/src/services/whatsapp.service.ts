@@ -696,6 +696,8 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
     return;
   }
   const from = last.from;
+  /** Set once sendChatMessage returned — after that the turn has a real reply. */
+  let turnAnswered = false;
   // Read receipt only — typing waits until after show_icon reaction (or LLM if none).
   await sendWhatsAppMarkRead(last.messageId);
   let stopTyping: () => void = () => {};
@@ -816,6 +818,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       ...(attachments ? { attachments } : {}),
       ...(pendingInvite ? { pendingInvite } : {}),
     });
+    turnAnswered = true;
     const handoff =
       parseReplyMetadata(turn.reply).handoff?.worker ?? turn.answeredBy;
     applyWhatsAppHandoff(from, handoff, digitals);
@@ -898,13 +901,40 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       );
     }
   } catch (error) {
-    recordWhatsAppEvent(
-      "reply_failed",
-      error instanceof Error ? error.message : "unknown",
-    );
+    await handleWhatsAppTurnFailure({ from, error, turnAnswered });
   } finally {
     stopTyping();
   }
+}
+
+/** Sent when a WhatsApp turn failed before the model produced a reply. */
+export const WHATSAPP_TURN_FAILED_NOTICE =
+  "משהו השתבש אצלי ולא הצלחתי לטפל בהודעה הזו. אפשר לשלוח אותה שוב?";
+
+/**
+ * A WhatsApp turn threw. Log it; when it failed before the model produced a
+ * reply (proven failure, nothing sent yet), tell the speaker instead of
+ * leaving them in silence. After a reply exists, never add a second message.
+ */
+export async function handleWhatsAppTurnFailure(input: {
+  from: string;
+  error: unknown;
+  turnAnswered: boolean;
+  send?: typeof sendWhatsAppText;
+}): Promise<"sent_notice" | "skipped"> {
+  recordWhatsAppEvent(
+    "reply_failed",
+    input.error instanceof Error ? input.error.message : "unknown",
+  );
+  if (input.turnAnswered) {
+    return "skipped";
+  }
+  const send = input.send ?? sendWhatsAppText;
+  const notice = await send(input.from, WHATSAPP_TURN_FAILED_NOTICE, {
+    ignoreSession: true,
+  }).catch(() => "failed" as const);
+  recordWhatsAppEvent("failure_notice", `result=${notice}`);
+  return "sent_notice";
 }
 
 export function applyWhatsAppHandoff(

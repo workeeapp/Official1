@@ -376,9 +376,19 @@ if (-not $npm) {
 }
 $logDir = Join-Path $env:TEMP "workee-refresh"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$outLog = Join-Path $logDir "dev-out.log"
-$errLog = Join-Path $logDir "dev-err.log"
-Remove-Item $outLog, $errLog -ErrorAction SilentlyContinue
+# One log pair per run (a restart must never erase the previous run's evidence).
+# Keep the last 10 runs; latest-run.txt holds the newest run stamp.
+$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$outLog = Join-Path $logDir "dev-out-$runStamp.log"
+$errLog = Join-Path $logDir "dev-err-$runStamp.log"
+foreach ($pattern in @("dev-out-*.log", "dev-err-*.log")) {
+  Get-ChildItem -Path $logDir -Filter $pattern -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
+    Select-Object -Skip 9 |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+}
+Set-Content -Path (Join-Path $logDir "latest-run.txt") -Value $runStamp -ErrorAction SilentlyContinue
+Write-Step "Dev logs: $outLog"
 
 $dev = Start-Process -FilePath $npm.Source `
   -ArgumentList @("run", "dev") `

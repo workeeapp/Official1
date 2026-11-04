@@ -60,7 +60,27 @@ export function isPrismaConnectionError(error: unknown): boolean {
   return false;
 }
 
+/** OpenAI error codes meaning "this conversation/request no longer fits". */
+const CONTEXT_TOO_LARGE_CODES = new Set(["context_length_exceeded"]);
+
+function openAiErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+  const record = error as { code?: unknown; error?: { code?: unknown } };
+  const code = record.code ?? record.error?.code;
+  return typeof code === "string" ? code : "";
+}
+
+/**
+ * True when the OpenAI request must start a fresh conversation: structured
+ * context-window overflow (`context_length_exceeded`) or the legacy
+ * request-too-large / TPM provider errors.
+ */
 export function isContextTooLargeError(error: unknown): boolean {
+  if (CONTEXT_TOO_LARGE_CODES.has(openAiErrorCode(error))) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : String(error);
   return /request too large|tokens per min \(TPM\)/i.test(message);
 }
