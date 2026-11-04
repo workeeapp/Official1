@@ -782,7 +782,7 @@ describe("employee targets", () => {
     ]);
   });
 
-  it("WATCH: model speaker LIST is rewritten to worker inventory", () => {
+  it("WATCH: model speaker LIST is dropped; worker inventory safety-net fills", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -1564,7 +1564,7 @@ describe("employee targets", () => {
           },
         },
       ).map((b) => b.command),
-    ).toEqual(["כן", "הצג רשימת קניות"]);
+    ).toEqual(["הצג רשימת קניות", "כן"]);
 
     // Bulk co-share: model emits shared-with + כל — both kept with evidence.
     const bulkMap = buildCollabByListKey(
@@ -1681,7 +1681,7 @@ describe("employee targets", () => {
           },
         },
       ).map((b) => b.command),
-    ).toEqual(["כן", "לא", "הצג רשימת משימות"]);
+    ).toEqual(["הצג רשימת משימות", "כן", "לא"]);
   });
 
   it("item-open: keeps existing-row tap without mutate; drops failed save; keeps proven apply", () => {
@@ -1914,8 +1914,33 @@ describe("employee targets", () => {
         ],
       ),
     ).toEqual([
-      { label: "הצג רשימה", command: "הצג רשימת דברים שעלו לשרת" },
+      // Model command preserved exactly; doubled «רשימת» resolved at click only.
+      {
+        label: "הצג רשימה",
+        command: "הצג רשימת רשימת דברים שעלו לשרת",
+      },
     ]);
+  });
+
+  it("LIST BUTTON: after Apply OK keeps model label+command exactly (no normalize)", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם משימה": "לשטוף" }],
+              targets: [],
+            },
+          ],
+        },
+        [{ label: "הצג משימות", command: "הצג משימות" }],
+        { appliedNav: { listKeys: new Set(["tasks"]), filing: false } },
+      ),
+    ).toEqual([{ label: "הצג משימות", command: "הצג משימות" }]);
   });
 
   it("LIST BUTTON: keeps conversational כן/לא; keeps model list nav once (no double)", () => {
@@ -1995,12 +2020,12 @@ describe("employee targets", () => {
       { label: "התור", command: "מה יש לי ביום רביעי" },
       { label: "היום שלי", command: "מה יש לי היום" },
     ];
-    // Priority: תזכורות → הצג משימות → speaker day (max 3); drop אצלך.
-    // Model day angles deferred after LIST; first day fills the last slot.
+    // Priority: תזכורות → model speaker day (drop אצלך) → LIST net if slots remain.
+    // Model-emitted day angles keep priority over plain LIST safety-net under max-3.
     expect(ensureSpeakerShowButtons(meta, modelAngles)).toEqual([
       { label: "הצג", command: "הצג תזכורות" },
-      { label: "הצג משימות", command: "הצג רשימת משימות" },
       { label: "התור", command: "מה יש לי ביום רביעי" },
+      { label: "היום שלי", command: "מה יש לי היום" },
     ]);
     expect(
       ensureSpeakerShowButtons(meta, []).map((b) => b.command),
@@ -2301,7 +2326,7 @@ describe("employee targets", () => {
           { label: "הצג משימות", command: "הצג רשימת משימות" },
         ],
       ),
-    ).toEqual([{ label: "הצג משימות", command: "הצג רשימת משימות" }]);
+    ).toEqual([{ label: "הצג משימות", command: "הצג משימות" }]);
 
     // (2) Different listKeys stay separate (tasks + shopping), even with legacy.
     expect(
@@ -2386,8 +2411,8 @@ describe("employee targets", () => {
         [{ label: "מה יש לי מחר", command: "מה יש לי מחר" }],
       ),
     ).toEqual([
-      { label: "הצג משימות", command: "הצג רשימת משימות" },
       { label: "מה יש לי מחר", command: "מה יש לי מחר" },
+      { label: "הצג משימות", command: "הצג רשימת משימות" },
     ]);
 
     expect(
@@ -4913,7 +4938,7 @@ describe("employee targets", () => {
         ),
       ).toEqual({
         label: "מה מחר",
-        command: "מה יש לי מחר ברשימת משימות",
+        command: `מה יש לי ב־${tomorrow} ברשימת משימות`,
       });
       const withDay = ensureSpeakerShowButtons(metaAddTasks(), [], {
         appliedNav: { listKeys: new Set(["tasks"]), filing: false },
@@ -4932,7 +4957,7 @@ describe("employee targets", () => {
         now,
       });
       expect(
-        withDay.some((b) => b.command === "מה יש לי מחר ברשימת משימות"),
+        withDay.some((b) => b.command === `מה יש לי ב־${tomorrow} ברשימת משימות`),
       ).toBe(true);
       expect(withDay.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
     });
@@ -4943,7 +4968,7 @@ describe("employee targets", () => {
           { calendarYmd: dayAfter, listType: "tasks" },
           now,
         )?.command,
-      ).toBe("מה יש לי מחרתיים ברשימת משימות");
+      ).toBe(`מה יש לי ב־${dayAfter} ברשימת משימות`);
     });
 
     it("update without date change still yields day button for saved ymd", () => {
@@ -4954,7 +4979,7 @@ describe("employee targets", () => {
         ),
       ).toEqual({
         label: "מה מחר",
-        command: "מה יש לי מחר ברשימת משימות",
+        command: `מה יש לי ב־${tomorrow} ברשימת משימות`,
       });
     });
 
@@ -4991,7 +5016,7 @@ describe("employee targets", () => {
         },
       );
       expect(
-        buttons.some((b) => b.command === "מה יש לי מחר ברשימת משימות"),
+        buttons.some((b) => b.command === `מה יש לי ב־${tomorrow} ברשימת משימות`),
       ).toBe(true);
       expect(buttons.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
     });
@@ -5025,11 +5050,11 @@ describe("employee targets", () => {
       ).toEqual([
         {
           label: "מה מחר",
-          command: "מה יש לי מחר ברשימת משימות",
+          command: `מה יש לי ב־${tomorrow} ברשימת משימות`,
         },
         {
           label: "מה מחרתיים",
-          command: "מה יש לי מחרתיים ברשימת משימות",
+          command: `מה יש לי ב־${dayAfter} ברשימת משימות`,
         },
       ]);
     });
@@ -5059,8 +5084,9 @@ describe("employee targets", () => {
         now,
       });
       expect(
-        buttons.filter((b) => b.command === "מה יש לי מחר ברשימת משימות")
-          .length,
+        buttons.filter(
+          (b) => b.command === `מה יש לי ב־${tomorrow} ברשימת משימות`,
+        ).length,
       ).toBe(1);
     });
 
@@ -5114,7 +5140,111 @@ describe("employee targets", () => {
         },
       );
       expect(buttons.filter((b) => b.command === scoped).length).toBe(1);
+      // Model already covered tomorrow — no competing absolute engine day button.
+      expect(
+        buttons.some(
+          (b) => b.command === `מה יש לי ב־${tomorrow} ברשימת משימות`,
+        ),
+      ).toBe(false);
       expect(buttons.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
+    });
+
+    it("model weekday day button covers same YMD — no competing engine day", () => {
+      // now=2026-11-02 Monday → tomorrow=שלישי.
+      const buttons = ensureSpeakerShowButtons(
+        metaAddTasks(),
+        [{ label: "יום שלישי", command: "מה יש לי ביום שלישי" }],
+        {
+          appliedNav: { listKeys: new Set(["tasks"]), filing: false },
+          appliedItems: {
+            lists: [
+              {
+                action: "add",
+                itemId: "i1",
+                itemLabel: "וטרינר",
+                listType: "tasks",
+                calendarYmd: tomorrow,
+              },
+            ],
+            filings: [],
+          },
+          now,
+        },
+      );
+      expect(
+        buttons.filter((b) => b.command === "מה יש לי ביום שלישי"),
+      ).toEqual([{ label: "יום שלישי", command: "מה יש לי ביום שלישי" }]);
+      expect(
+        buttons.some(
+          (b) => b.command === `מה יש לי ב־${tomorrow} ברשימת משימות`,
+        ),
+      ).toBe(false);
+      expect(buttons.some((b) => /הצג רשימת מ/.test(b.command))).toBe(true);
+    });
+
+    it("preserves model reminders label; no competing engine reminders", () => {
+      const reminderAdd: LlmReminderAction = {
+        action: "add",
+        item: "אקמול",
+        listType: "tasks",
+        date: "",
+        time: "14:50",
+        repeat: "none",
+        ping: [],
+        about: [],
+        targets: [],
+        text: "",
+        inSeconds: null,
+        everyCount: null,
+        everyUnit: null,
+        weekdays: null,
+        confirmed: false,
+        compose: false,
+        composeSource: "",
+        composeLookbackHours: 0,
+        composePlace: "",
+        reminderId: "",
+      };
+      const buttons = ensureSpeakerShowButtons(
+        { ...emptyLlmMetadata(), reminders: [reminderAdd] },
+        [{ label: "הצג תזכורות", command: "הצג תזכורות" }],
+        { appliedReminders: { saved: 1, removed: 0 } },
+      );
+      expect(buttons).toEqual([
+        { label: "הצג תזכורות", command: "הצג תזכורות" },
+      ]);
+    });
+
+    it("reminder Apply miss → no reminders safety-net", () => {
+      const reminderAdd: LlmReminderAction = {
+        action: "add",
+        item: "אקמול",
+        listType: "tasks",
+        date: "",
+        time: "14:50",
+        repeat: "none",
+        ping: [],
+        about: [],
+        targets: [],
+        text: "",
+        inSeconds: null,
+        everyCount: null,
+        everyUnit: null,
+        weekdays: null,
+        confirmed: false,
+        compose: false,
+        composeSource: "",
+        composeLookbackHours: 0,
+        composePlace: "",
+        reminderId: "",
+      };
+      expect(
+        ensureSpeakerShowButtons(
+          { ...emptyLlmMetadata(), reminders: [reminderAdd] },
+          [],
+          { appliedReminders: { saved: 0, removed: 0 } },
+        ),
+      ).toEqual([]);
     });
 
     it("shopping and custom dated applies → no day button (tasks-only)", () => {
@@ -5240,7 +5370,7 @@ describe("employee targets", () => {
       ).toEqual([
         {
           label: "מה מחר",
-          command: "מה יש לי מחר ברשימת משימות",
+          command: `מה יש לי ב־${tomorrow} ברשימת משימות`,
         },
       ]);
     });

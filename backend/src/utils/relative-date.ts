@@ -162,7 +162,7 @@ export function remainingThisWeek(now = new Date()): { from: string; to: string 
   return { from: jerusalemYmd(now), to: weekRange(now, 0).to };
 }
 
-function shiftJerusalemYmd(now: Date, dayDelta: number): string {
+export function shiftJerusalemYmd(now: Date, dayDelta: number): string {
   const [year, month, day] = jerusalemYmd(now).split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + dayDelta));
   const pad = (n: number) => String(n).padStart(2, "0");

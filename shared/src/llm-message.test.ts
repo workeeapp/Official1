@@ -1007,6 +1007,19 @@ describe("parseLlmReply", () => {
         command: "הצג רשימת משימות",
       }),
     ).toBe(true);
+    // Reminder show with label===command is still show chrome (not כן/לא).
+    expect(
+      isClosedChoiceReplyButton({
+        label: "הצג תזכורות",
+        command: "הצג תזכורות",
+      }),
+    ).toBe(false);
+    expect(
+      isShowListReplyButton({
+        label: "הצג תזכורות",
+        command: "הצג תזכורות",
+      }),
+    ).toBe(true);
     // Stale undated raise: label===command stays on the raise bubble.
     expect(
       isShowListReplyButton({

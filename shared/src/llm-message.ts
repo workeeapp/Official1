@@ -5547,6 +5547,21 @@ export function isClosedChoiceReplyButton(button: LlmReplyButton): boolean {
   ) {
     return true;
   }
+  // Known show-nav / day-agenda commands are follow-up chrome even when the
+  // model used label===command (e.g. «הצג תזכורות») — never treat as כן/לא.
+  // Do NOT blanket-match every «הצג …» — overdue/undated raise
+  // «הצג את המשימות» / bare «הצג משימות» stay closed-choice on the raise bubble.
+  const rawCommand = button.command.trim();
+  if (
+    rawCommand === "הצג תזכורות" ||
+    rawCommand === "הצג תיוקים" ||
+    rawCommand === "הצג רשימות" ||
+    rawCommand.startsWith("הצג רשימת ") ||
+    rawCommand.startsWith("הצג משימות של ") ||
+    /^מה יש לי(?:\s|$)/u.test(rawCommand)
+  ) {
+    return false;
+  }
   // Invented parallel choices (complex-event axes): short label equals command.
   return (
     label.length > 0 &&

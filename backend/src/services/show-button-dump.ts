@@ -68,6 +68,10 @@ export type ShowButtonDumpTarget = {
   collaboration?: "co_share" | "assign" | null;
   /** Tasks: undated = משימות כלליות (clears from/to on the engine). */
   dateScope?: "undated" | null;
+  /** Inclusive YYYY-MM-DD — absolute day-agenda button taps. */
+  dateFrom?: string | null;
+  /** Inclusive YYYY-MM-DD — absolute day-agenda button taps. */
+  dateTo?: string | null;
 };
 
 const TITLE_KEYS: Record<string, string[]> = {
@@ -226,11 +230,92 @@ function partnerFilterLabel(partners: string[]): string {
  * Closed allowlist: exact UI button command → dump target (kind + filters).
  * Custom lists: «הצג רשימת <list_name>» (+ optional משותפות עם / באחריות).
  */
+/**
+ * Absolute day-agenda show commands («מה יש לי ב־2026-11-12 ברשימת משימות»
+ * or D.M.YYYY). Relative weekday-only commands stay on the model path.
+ */
+export function mapAbsoluteDayAgendaCommandToDumpTarget(
+  text: string,
+): ShowButtonDumpTarget | null {
+  const trimmed = text.trim().replace(/\s+/gu, " ");
+  if (!trimmed) {
+    return null;
+  }
+  const iso = trimmed.match(
+    /^מה יש לי ב[־\-](\d{4}-\d{2}-\d{2})(?:\s+ברשימת משימות)?$/u,
+  );
+  if (iso?.[1] && isValidCalendarYmd(iso[1])) {
+    return { kind: "tasks", dateFrom: iso[1], dateTo: iso[1] };
+  }
+  const dmy = trimmed.match(
+    /^מה יש לי ב[־\-](\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+ברשימת משימות)?$/u,
+  );
+  if (dmy) {
+    const dd = Number(dmy[1]);
+    const mm = Number(dmy[2]);
+    const yyyy = Number(dmy[3]);
+    const ymd = `${String(yyyy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    if (isValidCalendarYmd(ymd)) {
+      return { kind: "tasks", dateFrom: ymd, dateTo: ymd };
+    }
+  }
+  return null;
+}
+
+/**
+ * Click-path aliases only — expand bare «הצג משימות» / strip doubled «רשימת»
+ * for allowlist match. Never used to rewrite a stored model button after Apply.
+ */
+function expandShowNavClickAliases(command: string): string[] {
+  const trimmed = command.trim().replace(/\s+/gu, " ");
+  if (!trimmed) {
+    return [];
+  }
+  const out = [trimmed];
+  if (trimmed === "הצג משימות") {
+    out.push(showListButtonCommand("tasks"));
+  } else if (trimmed === "הצג קניות") {
+    out.push(showListButtonCommand("shopping"));
+  } else if (trimmed === "הצג אנשי קשר") {
+    out.push(showListButtonCommand("contacts"));
+  }
+  const listMatch = trimmed.match(
+    /^(הצג רשימת) (.+?)( משותפות עם .+| באחריות .+)?$/u,
+  );
+  if (listMatch) {
+    const name = (listMatch[2] ?? "").replace(/^(?:רשימת\s+)+/u, "").trim();
+    const suffix = listMatch[3] ?? "";
+    if (name) {
+      const canonical = `${listMatch[1]} ${name}${suffix}`;
+      if (canonical !== trimmed) {
+        out.push(canonical);
+      }
+    }
+  }
+  return out;
+}
+
 export function mapShowButtonCommandToDumpTarget(
   text: string,
   snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
 ): ShowButtonDumpTarget | null {
-  const trimmed = text.trim();
+  const candidates = expandShowNavClickAliases(text);
+  if (candidates.length === 0) {
+    return null;
+  }
+  for (const trimmed of candidates) {
+    const hit = mapShowButtonCommandToDumpTargetExact(trimmed, snapshot);
+    if (hit) {
+      return hit;
+    }
+  }
+  return null;
+}
+
+function mapShowButtonCommandToDumpTargetExact(
+  trimmed: string,
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
+): ShowButtonDumpTarget | null {
   if (!trimmed) {
     return null;
   }
@@ -239,6 +324,10 @@ export function mapShowButtonCommandToDumpTarget(
     trimmed === SHOW_UNDATED_TASKS_COMMAND_LEGACY
   ) {
     return { kind: "tasks", dateScope: "undated" };
+  }
+  const absoluteDay = mapAbsoluteDayAgendaCommandToDumpTarget(trimmed);
+  if (absoluteDay) {
+    return absoluteDay;
   }
   const staticKind = STATIC_SHOW_BUTTON_DUMP[trimmed];
   if (staticKind) {

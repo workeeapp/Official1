@@ -104,6 +104,53 @@ describe("closed show button allowlist", () => {
     expect(isKnownShowButtonCommand(SHOW_UNDATED_TASKS_COMMAND)).toBe(true);
   });
 
+  it("click-path aliases: bare LIST + doubled רשימת resolve without rewriting buttons", () => {
+    expect(mapShowButtonCommandToDumpTarget("הצג משימות")).toEqual({
+      kind: "tasks",
+    });
+    expect(mapShowButtonCommandToDumpTarget("הצג קניות")).toEqual({
+      kind: "shopping",
+    });
+    expect(isKnownShowButtonCommand("הצג משימות")).toBe(true);
+    const snap = {
+      lists: [
+        {
+          list_type: "custom" as const,
+          list_name: "דברים שעלו לשרת",
+          items: [],
+        },
+      ],
+    };
+    expect(
+      mapShowButtonCommandToDumpTarget(
+        "הצג רשימת רשימת דברים שעלו לשרת",
+        snap,
+      ),
+    ).toEqual({ kind: "דברים שעלו לשרת" });
+  });
+
+  it("maps absolute day-agenda commands to tasks + fixed from/to", () => {
+    expect(
+      mapShowButtonCommandToDumpTarget("מה יש לי ב־2026-11-12 ברשימת משימות"),
+    ).toEqual({
+      kind: "tasks",
+      dateFrom: "2026-11-12",
+      dateTo: "2026-11-12",
+    });
+    expect(
+      mapShowButtonCommandToDumpTarget("מה יש לי ב־12.11.2026 ברשימת משימות"),
+    ).toEqual({
+      kind: "tasks",
+      dateFrom: "2026-11-12",
+      dateTo: "2026-11-12",
+    });
+    expect(isKnownShowButtonCommand("מה יש לי ב־2026-11-12 ברשימת משימות")).toBe(
+      true,
+    );
+    // Relative weekday-only stays off the allowlist (model + SESSION_CLOCK path).
+    expect(isKnownShowButtonCommand("מה יש לי ביום חמישי")).toBe(false);
+  });
+
   it("maps shared-with / assignee / all commands to kind + pure filters", () => {
     const shared = mapShowButtonCommandToDumpTarget(
       showSharedWithButtonCommand("shopping", "מיכל"),

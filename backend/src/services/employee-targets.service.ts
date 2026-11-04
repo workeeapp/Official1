@@ -37,6 +37,10 @@ import type {
 } from "./employee-records.service.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { formatRelativeDayLabel } from "./show-button-dump.js";
+import {
+  shiftJerusalemYmd,
+  upcomingWeekdayDates,
+} from "../utils/relative-date.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
@@ -1631,6 +1635,79 @@ function reminderMutates(metadata: LlmMetadata): boolean {
   );
 }
 
+/** True when reminder Apply proved saved/removed; else metadata mutate fallback. */
+function reminderApplySucceeded(
+  metadata: LlmMetadata,
+  appliedReminders?: { saved?: number; removed?: number },
+): boolean {
+  if (appliedReminders) {
+    return (
+      (appliedReminders.saved ?? 0) > 0 || (appliedReminders.removed ?? 0) > 0
+    );
+  }
+  return reminderMutates(metadata);
+}
+
+/** Semantic follow-up key for a tasks day agenda (`day:tasks:YYYY-MM-DD`). */
+export function dayAgendaFollowUpKey(ymd: string): string {
+  return `day:tasks:${ymd.trim().slice(0, 10)}`;
+}
+
+/**
+ * Resolve an absolute calendar day from a speaker day-agenda button.
+ * Prefers embedded YYYY-MM-DD / D.M.YYYY; else maps היום/מחר/weekday via
+ * SESSION_CLOCK-equivalent weekday_dates for `now` (coverage only — never
+ * rewrites the button).
+ */
+export function resolveDayAgendaYmdFromButton(
+  button: LlmReplyButton,
+  now = new Date(),
+): string | null {
+  const cmd = button.command.trim().replace(/\s+/gu, " ");
+  const label = button.label.trim().replace(/\s+/gu, " ");
+  const haystack = `${cmd} ${label}`;
+  const iso = haystack.match(/\b(\d{4}-\d{2}-\d{2})\b/u);
+  if (iso?.[1]) {
+    return iso[1];
+  }
+  const dmy = haystack.match(/\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b/u);
+  if (dmy) {
+    const dd = Number(dmy[1]);
+    const mm = Number(dmy[2]);
+    const yyyy = Number(dmy[3]);
+    if (
+      dd >= 1 &&
+      dd <= 31 &&
+      mm >= 1 &&
+      mm <= 12 &&
+      yyyy >= 2000 &&
+      yyyy <= 2100
+    ) {
+      return `${String(yyyy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    }
+  }
+  const weekdays: Record<string, string> = {
+    ...upcomingWeekdayDates(now),
+    מחרתיים: shiftJerusalemYmd(now, 2),
+  };
+  const tokens = Object.keys(weekdays).sort((a, b) => b.length - a.length);
+  for (const token of tokens) {
+    const ymd = weekdays[token];
+    if (!token || !ymd) {
+      continue;
+    }
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const re = new RegExp(
+      `(?:^|[\\s־\\-])(?:ב)?${escaped}(?:[\\s־\\-]|$)`,
+      "u",
+    );
+    if (re.test(haystack)) {
+      return ymd;
+    }
+  }
+  return null;
+}
+
 /** Proven collab for one list nav key — names already resolved for buttons. */
 export type AppliedCollabEvidence = {
   mode: "co_share" | "assign";
@@ -1758,6 +1835,11 @@ export type SpeakerShowButtonOptions = {
    * Safety-net emits worker inventory when there is no speaker-book tasks mutate.
    */
   appliedWorkerWatchName?: string;
+  /**
+   * When set, reminder safety-net gates on Apply proof (saved/removed counts).
+   * Omit in unit tests that assert metadata→reminder safety-net only.
+   */
+  appliedReminders?: { saved: number; removed: number };
   /** Clock for relative day labels on dated-item day-show safety-net. */
   now?: Date;
 };
@@ -2362,10 +2444,11 @@ function collabEvidenceAllows(
 }
 
 /**
- * Keep / normalize / drop a model fixed-nav button.
- * Unproven collab → plain LIST when the target is eligible (never a share label).
- * Plain «הצג משימות» when the only tasks work was worker-only → rewrite to
- * worker inventory («הצג משימות של <worker>»).
+ * Keep / drop a model fixed-nav button after Apply success.
+ * Unproven collab → plain LIST (false share claim). Worker-only turns: drop
+ * speaker-book LIST so the worker-inventory safety-net can fill — never rewrite
+ * the model button into a different command after success.
+ * Valid plain/collab buttons are kept with the model's own label + command.
  */
 function validateModelFixedListNav(
   button: LlmReplyButton,
@@ -2391,9 +2474,6 @@ function validateModelFixedListNav(
   }
 
   if (parsed.kind === "plain") {
-    // Rewrite speaker LIST → worker inventory only when THIS turn actually
-    // mutated a worker-only tasks row (WATCH / להזכיר alone) — not on
-    // reminder-only follow-ups with no list mutate.
     const workerOnlyName = workerOnlyTasksDisplayName(
       metadata,
       speakerNames,
@@ -2404,28 +2484,24 @@ function validateModelFixedListNav(
       workerOnlyName &&
       !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames)
     ) {
-      const rewritten = workerInventoryButton(workerOnlyName);
-      return {
-        button: rewritten,
-        listKey: workerInventoryListKey(rewritten.command),
-      };
+      // Drop — worker inventory safety-net covers the real action.
+      return null;
     }
-    // Canonical opaque command always so bare «הצג משימות» and
-    // «הצג רשימת משימות» collapse under remember().
     const rawLabel = button.label.trim();
     if (
       /^משותף עם /u.test(rawLabel) ||
       /^באחריות /u.test(rawLabel) ||
       /^כל ה/u.test(rawLabel)
     ) {
+      // False share/assign claim on a plain LIST command → plain LIST only.
       return { button: parsed.plainButton, listKey: parsed.listKey };
     }
-    const label =
-      canonicalizeTasksHebrewInCommand(rawLabel) || parsed.plainButton.label;
+    // After Apply OK: keep the model button exactly (label + command).
+    // Bare/opaque aliases and «רשימת רשימת» are resolved at click time only.
     return {
       button: {
-        label: fitNavButtonLabel(label),
-        command: parsed.plainButton.command,
+        label: rawLabel || parsed.plainButton.label,
+        command: button.command.trim() || parsed.plainButton.command,
       },
       listKey: parsed.listKey,
     };
@@ -2435,9 +2511,8 @@ function validateModelFixedListNav(
   if (collabEvidenceAllows(parsed, evidence)) {
     return {
       button: {
-        label: fitNavButtonLabel(button.label.trim() || parsed.plainButton.label),
-        command:
-          normalizeShowNavCommand(button.command) || button.command.trim(),
+        label: button.label.trim() || parsed.plainButton.label,
+        command: button.command.trim(),
       },
       listKey: parsed.listKey,
     };
@@ -2448,8 +2523,9 @@ function validateModelFixedListNav(
 
 /**
  * Day-show tap after a dated *tasks* apply (dates are tasks-only for now).
- * Label = day only («מה מחר» / «מה ביום שלישי»).
- * Command = day + tasks list («מה יש לי מחר ברשימת משימות»).
+ * Label = natural relative day («מה מחר» / «מה ביום שלישי»).
+ * Command = absolute YMD so a late tap opens the same calendar day
+ * («מה יש לי ב־2026-11-12 ברשימת משימות»).
  */
 export function datedDayShowButtonForMutation(
   input: {
@@ -2474,20 +2550,16 @@ export function datedDayShowButtonForMutation(
   }
   const rel = formatRelativeDayLabel(ymd, now);
   let label: string;
-  let dayInCommand: string;
   if (rel === "היום" || rel === "מחר" || rel === "מחרתיים") {
     label = `מה ${rel}`;
-    dayInCommand = rel;
   } else if (/^\d/.test(rel)) {
-    label = fitNavButtonLabel(`מה ב־${rel}`);
-    dayInCommand = `ב־${rel}`;
+    label = `מה ב־${rel}`;
   } else {
-    label = fitNavButtonLabel(`מה ביום ${rel}`);
-    dayInCommand = `ביום ${rel}`;
+    label = `מה ביום ${rel}`;
   }
   return {
     label: fitNavButtonLabel(label),
-    command: `מה יש לי ${dayInCommand} ברשימת ${listLabel}`,
+    command: `מה יש לי ב־${ymd} ברשימת ${listLabel}`,
   };
 }
 
@@ -2575,12 +2647,12 @@ function isSpeakerDayAngleButton(button: LlmReplyButton): boolean {
 
 /**
  * Speaker confirm taps: keep model conversational + validated LIST/collab
- * nav; drop failed item-open; safety-net at most one plain LIST per applied
- * (or metadata) mutate when the model omitted a matching nav. Never invents
- * collab, item-open, or worker-perspective «אצלך»/«מה יש לך». Reminder mutates
- * safety-net «הצג תזכורות». Worker-only tasks (WATCH / להזכיר) →
- * «הצג משימות של <worker>» instead of speaker-book «הצג משימות». Dated tasks
- * apply also safety-nets a day-show tap (day + tasks list).
+ * nav (label+command unchanged after Apply OK); drop failed item-open;
+ * safety-net only when the model omitted that semantic action. Never invents
+ * collab, item-open, or worker-perspective «אצלך»/«מה יש לך». Reminder /
+ * day / LIST nets are fallback-only (semantic coverage, not command-string
+ * equality). Worker-only tasks → worker inventory safety-net (not rewrite of
+ * a speaker LIST the model already emitted).
  */
 export function ensureSpeakerShowButtons(
   metadata: LlmMetadata,
@@ -2590,6 +2662,9 @@ export function ensureSpeakerShowButtons(
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
   const coveredListKeys = new Set<string>();
+  const coveredDayKeys = new Set<string>();
+  let coveredReminders = false;
+  const now = options?.now ?? new Date();
   const listMutates = metadata.lists.filter(
     (row) =>
       row.action === "add" ||
@@ -2607,18 +2682,32 @@ export function ensureSpeakerShowButtons(
     seen.add(key);
     return true;
   };
+  const markDayCoverage = (button: LlmReplyButton): void => {
+    const ymd = resolveDayAgendaYmdFromButton(button, now);
+    if (ymd) {
+      coveredDayKeys.add(dayAgendaFollowUpKey(ymd));
+    }
+  };
 
-  // Reminder mutates: reserve «הצג תזכורות» first (REPLY_BUTTON_MAX=3) so
-  // conversational day taps cannot crowd it out.
-  // Use SHOW_REMINDERS_BUTTON (label «הצג») — label===command is classified as
-  // closed-choice and dropped by applyShowButtonsToBubbles.
-  if (reminderMutates(metadata) && remember(SHOW_REMINDERS_COMMAND)) {
+  // Pre-scan: model already offered reminders → do not reserve engine net.
+  coveredReminders = existing.some(
+    (button) =>
+      normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND,
+  );
+  // Reserve reminder early (max-3) when omitted — Apply-gated when provided.
+  if (
+    !coveredReminders &&
+    reminderApplySucceeded(metadata, options?.appliedReminders) &&
+    remember(SHOW_REMINDERS_COMMAND)
+  ) {
     buttons.push(SHOW_REMINDERS_BUTTON);
+    coveredReminders = true;
   }
 
-  // Pass 1: engine LIST/collab, worker inventory, item-open. Defer speaker
-  // day-angle conversational taps so they cannot crowd out LIST (max 3).
-  const deferredConversational: LlmReplyButton[] = [];
+  // Pass 1: model LIST/collab, worker inventory, reminders, item-open,
+  // content-aware. Defer speaker day + כן/לא so day keeps priority under max-3.
+  const deferredDay: LlmReplyButton[] = [];
+  const deferredChoices: LlmReplyButton[] = [];
   for (const button of existing) {
     if (isEngineOwnedListNavButton(button)) {
       const validated = validateModelFixedListNav(
@@ -2640,8 +2729,6 @@ export function ensureSpeakerShowButtons(
       coveredListKeys.add(validated.listKey);
       continue;
     }
-    // Model worker inventory: keep only when this turn is worker-only tasks
-    // (no speaker-book tasks mutate). Otherwise drop — speaker LIST wins.
     const workerCmd = workerInventoryCommandIfMatch(
       button.command,
       workerNames,
@@ -2659,33 +2746,42 @@ export function ensureSpeakerShowButtons(
         coveredListKeys.add(workerInventoryListKey(workerCmd));
         continue;
       }
+      // Keep the model button; workerCmd only proves the turn is worker inventory.
       buttons.push({
-        label: fitNavButtonLabel(button.label.trim() || "המשימות שלך"),
-        command: workerCmd,
+        label: button.label.trim() || "המשימות שלך",
+        command: button.command.trim() || workerCmd,
       });
       coveredListKeys.add(workerInventoryListKey(workerCmd));
       continue;
     }
-    // Model «הצג תזכורות» — canonicalize to SHOW_REMINDERS_BUTTON (label «הצג»).
+    // Model reminders: keep label+command exactly; do not remap to engine label.
     if (normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND) {
       if (!remember(SHOW_REMINDERS_COMMAND)) {
         continue;
       }
-      buttons.push(SHOW_REMINDERS_BUTTON);
+      buttons.push({
+        label: button.label.trim() || SHOW_REMINDERS_BUTTON.label,
+        command: button.command.trim() || SHOW_REMINDERS_COMMAND,
+      });
       continue;
     }
-    // Drop worker-addressed day dumps («יום ב׳ אצלך» / «מה יש לך…») — those
-    // open Lucy WATCH inventory, not the speaker's reminders/tasks.
     if (isWorkerPerspectiveDayButton(button)) {
       continue;
     }
     if (!shouldKeepItemOpenButton(button, metadata, options?.appliedItems)) {
       continue;
     }
-    // Speaker day angles defer to pass 2 (after LIST safety-net). כן/לא,
-    // item-open, and other soft taps stay in pass 1.
     if (isSpeakerDayAngleButton(button)) {
-      deferredConversational.push(button);
+      deferredDay.push(button);
+      continue;
+    }
+    const label = button.label.trim();
+    const cmd = button.command.trim();
+    if (
+      (label === "כן" || label === "לא" || cmd === "כן" || cmd === "לא") &&
+      label === cmd
+    ) {
+      deferredChoices.push(button);
       continue;
     }
     if (!remember(button.command)) {
@@ -2694,17 +2790,18 @@ export function ensureSpeakerShowButtons(
     buttons.push(button);
   }
 
-  // Dated-item day show: one button per distinct day+list from successful apply.
-  for (const dayBtn of datedDayShowSafetyNetButtons(
-    options?.appliedItems,
-    options?.now,
-  )) {
-    if (!remember(dayBtn.command)) {
+  // Model day before LIST/day safety-nets: preserve exactly, mark coverage so
+  // the day net cannot compete, and keep priority over כן/לא under max-3.
+  for (const button of deferredDay) {
+    markDayCoverage(button);
+    if (!remember(button.command)) {
       continue;
     }
-    buttons.push(dayBtn);
+    buttons.push(button);
   }
 
+  // LIST safety-net — only uncovered listKeys; after model day so content-aware
+  // day taps the model already offered are not crowded out by plain LIST.
   for (const required of plainSafetyNetListShowButtons(
     metadata,
     options?.appliedNav,
@@ -2720,8 +2817,26 @@ export function ensureSpeakerShowButtons(
     buttons.push(required);
   }
 
-  // Pass 2: speaker day angles / soft taps — only if slots remain.
-  for (const button of deferredConversational) {
+  // Dated-item day show: only for days the model did not already cover.
+  for (const dayBtn of datedDayShowSafetyNetButtons(
+    options?.appliedItems,
+    now,
+  )) {
+    const ymd = resolveDayAgendaYmdFromButton(dayBtn, now);
+    if (ymd && coveredDayKeys.has(dayAgendaFollowUpKey(ymd))) {
+      continue;
+    }
+    if (!remember(dayBtn.command)) {
+      continue;
+    }
+    if (ymd) {
+      coveredDayKeys.add(dayAgendaFollowUpKey(ymd));
+    }
+    buttons.push(dayBtn);
+  }
+
+  // Soft כן/לא last — never crowd out day / LIST / reminders.
+  for (const button of deferredChoices) {
     if (!remember(button.command)) {
       continue;
     }

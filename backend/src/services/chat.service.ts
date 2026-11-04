@@ -2497,6 +2497,12 @@ export async function sendChatMessage(input: {
                 showDumpTo: null,
               }
             : {}),
+          ...(buttonDump.dateFrom
+            ? {
+                showDumpFrom: buttonDump.dateFrom,
+                showDumpTo: buttonDump.dateTo ?? buttonDump.dateFrom,
+              }
+            : {}),
         };
       }
     }
@@ -4853,6 +4859,10 @@ export async function sendChatMessage(input: {
             )
               ? employeeDisplayName(digital)
               : undefined,
+            appliedReminders: {
+              saved: reminderResult.saved.length,
+              removed: reminderResult.removed?.length ?? 0,
+            },
             // Validate model LIST/collab against real apply ? not bare ACTION emit.
             // Collab kept only when mutation.collabApply proves it; else plain LIST.
             appliedNav: {
