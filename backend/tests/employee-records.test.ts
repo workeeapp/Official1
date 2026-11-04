@@ -374,6 +374,7 @@ describe("employee records", () => {
           employee: { id: guestId, name: "אורח", nickname: "מיכל" },
           items: [
             {
+              id: "guest-eggs",
               data: { "שם פריט": "ביצים" },
               scope: "personal",
               itemKey: "ביצים",
@@ -392,6 +393,7 @@ describe("employee records", () => {
           employee: { id: talId, name: "טל", nickname: "טל" },
           items: [
             {
+              id: "maya-lesson-1",
               data: { שם: "שיעור 1" },
               scope: "shared",
               itemKey: "שיעור 1",
@@ -411,6 +413,8 @@ describe("employee records", () => {
         ownerId: guestId,
         status: "active",
         item: "לקנות ביצים",
+        itemKey: "לקנות ביצים",
+        itemLabel: "לקנות ביצים",
         pingIds: [guestId],
       },
     ]);
@@ -2899,7 +2903,7 @@ describe("employee records", () => {
     itemUpdate.mockResolvedValue({ id: "skazi-am" });
     itemUpdateMany.mockResolvedValue({ count: 1 });
     reminderUpdate.mockResolvedValue({});
-    reminderFindMany.mockResolvedValue([
+    const twinClocks = [
       {
         id: "r-am",
         itemKey: "להוריד את סקאזי",
@@ -2914,7 +2918,18 @@ describe("employee records", () => {
         workerItemId: null,
         status: "active",
       },
-    ]);
+    ];
+    // Honour the where clause like the DB would: a lookup by workerItemId
+    // (cancelReminderLinkedToWorkerItem) must not return unrelated clocks.
+    reminderFindMany.mockImplementation(
+      async (args?: { where?: { workerItemId?: string; id?: { in?: string[] } } }) =>
+        twinClocks.filter(
+          (row) =>
+            (args?.where?.workerItemId === undefined ||
+              row.workerItemId === args.where.workerItemId) &&
+            (!args?.where?.id?.in || args.where.id.in.includes(row.id)),
+        ),
+    );
 
     await applyEmployeeMetadata(
       talId,
@@ -3676,6 +3691,8 @@ describe("employee records", () => {
   it("derives list_name from שם הרשימה when the list row name is empty", async () => {
     listFindMany.mockResolvedValue([
       {
+        id: "list-work",
+        employeeId,
         listType: "custom",
         name: "",
         scope: "shared",
@@ -3683,6 +3700,8 @@ describe("employee records", () => {
         employee: { id: employeeId, name: "עמית", nickname: "עמית" },
         items: [
           {
+            id: "work-1",
+            itemKey: "לטפל באורח",
             data: { "שם הרשימה": "משימות לעבודה", שם: "לטפל באורח" },
             scope: "shared",
           },

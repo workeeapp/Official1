@@ -165,10 +165,10 @@ describe("LLM action schema", () => {
     );
     expect(config.systemMessage).toContain("היום/מחר/אתמול");
     expect(config.systemMessage).toContain("RETRIEVAL CONTRACT");
-    expect(config.systemMessage).toContain("FULL INVENTORY / date-window agenda");
+    expect(config.systemMessage).toContain("SPEAKER TASKS / date-window agenda");
     expect(config.systemMessage).toContain("show_dump_from/to");
     expect(config.systemMessage).toContain(
-      "FORBIDDEN model-written agenda for this path",
+      "FORBIDDEN model-written agenda.",
     );
     expect(config.systemMessage).toContain("SAME-KIND SEMANTIC");
     expect(config.systemMessage).toContain("no free-built inventory/agenda");
@@ -303,7 +303,7 @@ describe("LLM action schema", () => {
   it("T7: teaches RETRIEVAL CONTRACT — full vs same-kind semantic vs cross-kind vs time-of-day", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain("RETRIEVAL CONTRACT");
-    expect(config.systemMessage).toContain("FULL INVENTORY / date-window agenda");
+    expect(config.systemMessage).toContain("SPEAKER TASKS / date-window agenda");
     expect(config.systemMessage).toContain("SAME-KIND SEMANTIC");
     expect(config.systemMessage).toContain("INTENT→ACTION");
     expect(config.systemMessage).toContain("focused single-record lookup");
@@ -437,7 +437,7 @@ describe("LLM action schema", () => {
       "אל תשלחי לי יותר הודעות תזכורת",
     );
     expect(config.systemMessage).toContain(
-      "FORBIDDEN reminders.remove of any clock",
+      "FORBIDDEN reminders.remove of even one clock",
     );
     expect(config.systemMessage).toContain(
       "FORBIDDEN treating Done as STOP SERIES",
