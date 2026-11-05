@@ -213,8 +213,8 @@ function mockTwoTransitAlternativesPayload(): RoutesPayload {
 }
 
 /**
- * Leave-first puts the transfer option first (itin:0); direct קו 238 is itin:1.
- * Stage B residual «בלי החלפות» should keep only itin:1.
+ * Ranking (fewest transfers first) puts direct קו 238 first (itin:0); the
+ * transfer option is itin:1. Stage B residual «בלי החלפות» keeps only itin:0.
  */
 function mockTransferVsDirectPayload(): RoutesPayload {
   return {
@@ -714,7 +714,8 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
   /**
    * Capability #8 residual V: require_live_select Stage B among Google alts.
    * First LLM turn emits routes + require_live_select; second turn (live_select)
-   * keeps only itin:1 (direct קו 238) from the ranked board — never invents lines.
+   * keeps only itin:0 (direct קו 238 — ranks first since 2026-11-05: fewest
+   * transfers lead) from the ranked board — never invents lines.
    */
   it("Stage B require_live_select: keeps subset of Google alts (fewer transfers)", async () => {
     const before = await assertEvalDbAndGtfsUntouched();
@@ -728,7 +729,7 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
     installOutboundGuards();
     const turns = stubRequireLiveSelectTurns({
       domain: "routes",
-      live_record_ids: ["itin:1"],
+      live_record_ids: ["itin:0"],
     });
 
     const result = await sendChatMessage({
@@ -745,7 +746,7 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
     expect(mock.computeBodies[0]!.computeAlternativeRoutes).toBe(true);
 
     const spoken = parseLlmReply(result.reply).response;
-    // Selected subset = direct קו 238 from Google fixture (itin:1).
+    // Selected subset = direct קו 238 from Google fixture (itin:0 after ranking).
     expect(spoken).toContain("קו 238");
     expect(spoken).toMatch(/40 דקות|מסלול בתחבורה ציבורית|תחנה ישירה/);
     // Rejected transfer option must not appear; no invented lines.
@@ -840,8 +841,9 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
     expect(failAt).toBeGreaterThanOrEqual(0);
     expect(labelAt).toBeGreaterThan(failAt);
     // Unfiltered board may list Google alts — labeled, not as a successful filter.
+    // Recommended lead = direct קו 238 (fewest transfers rank first).
     expect(spoken).toContain("מצאתי 2 אפשרויות");
-    expect(spoken).toContain("קו 50");
+    expect(spoken).toContain("קו 238");
     // Not a clean subset success (failure precedes board; no invented lines).
     expect(spoken.startsWith("מסלול בתחבורה ציבורית")).toBe(false);
     expect(spoken.indexOf("מסלול בתחבורה ציבורית")).toBe(-1);
