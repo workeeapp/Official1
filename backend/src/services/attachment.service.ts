@@ -531,6 +531,79 @@ export function attachmentIdsFromSavedRefs(raw: unknown): string[] {
 }
 
 /**
+ * List-level files of the list(s) a list dump shows («הצג רשימת X» / «הצג
+ * קניות»), so the engine sends them with the dump. `listName` is the resolved
+ * show_dump list name: a builtin's Hebrew name (קניות / משימות) or the exact
+ * custom list_name. Only files on the list itself (has_attachments) — item
+ * files stay with ITEM DUMP.
+ *
+ * Regression (2026-11-05): since 176e745 (2026-10-22) show_dump turns strip
+ * model buttons, so the model's «📎 קבצים מצורפים» tap vanished and showing a
+ * list with list-level images stopped showing them.
+ */
+export function collectListLevelAttachmentIdsForDump(
+  snapshot: {
+    lists: Array<{
+      list_type?: string;
+      list_name?: string;
+      has_attachments?: boolean;
+      attachments?: unknown;
+    }>;
+  },
+  listName: string,
+  builtinHebrew: (listType: string) => string | null | undefined,
+  max = SEND_ATTACHMENTS_MAX,
+): string[] {
+  const name = listName.trim();
+  if (!name || max <= 0) {
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const list of snapshot.lists) {
+    const listType = (list.list_type ?? "").trim();
+    const matches =
+      listType === "custom"
+        ? (list.list_name ?? "").trim() === name
+        : Boolean(listType) && builtinHebrew(listType) === name;
+    if (!matches || list.has_attachments !== true) {
+      continue;
+    }
+    for (const id of attachmentIdsFromSavedRefs(list.attachments)) {
+      if (seen.has(id) || out.length >= max) {
+        continue;
+      }
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** Command a list-files tap sends back as the speaker's next message. */
+export function listFilesTapCommand(listName: string): string {
+  return `שלחי את הקבצים של רשימת ${listName.trim()}`;
+}
+
+/**
+ * Engine tap on a list dump whose list has files on the list itself
+ * («📎 קבצי הרשימה (N)»). Null when there are none. The tap is an ordinary
+ * message to the model, which decides send_attachments.
+ */
+export function listFilesTapButton(
+  listName: string,
+  fileCount: number,
+): { label: string; command: string } | null {
+  if (!listName.trim() || fileCount <= 0) {
+    return null;
+  }
+  return {
+    label: `📎 קבצי הרשימה (${fileCount})`,
+    command: listFilesTapCommand(listName),
+  };
+}
+
+/**
  * Collect file ids from ITEM DUMP target rows (items / filings / reminders).
  * Used so showing a row with files also sends those files (max SEND_ATTACHMENTS_MAX).
  */

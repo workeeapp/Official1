@@ -190,6 +190,7 @@ import {
   setEngineNavigateAddress,
   setEngineResponse,
   setEngineSpokenBubbles,
+  itemOpenButtonLabel,
   setEngineWhatsappComposeUrl,
   type WhatsAppDeliverySkip,
 } from "./whatsapp-send.js";
@@ -301,9 +302,12 @@ import {
   resolveUsableAttachments,
   toChatAttachmentRef,
   collectAttachmentIdsForDumpRows,
+  collectListLevelAttachmentIdsForDump,
+  listFilesTapButton,
   withAttachmentRefs,
   type TurnAttachments,
 } from "./attachment.service.js";
+import { builtinListHebrew, isBuiltinListType } from "./builtin-lists.js";
 import {
   fillBlankCustomListNameFromSameTurnLinks,
   withLinkedListRefs,
@@ -2293,7 +2297,7 @@ export async function sendChatMessage(input: {
         "WHEN / TODAY / SOON — FULL agenda only (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים with NO meaning filter): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה תורים יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. MEETING ≠ NUDGE: exclude להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / YOUR worker send rows from those ids (person+date alone ≠ meeting). TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
         "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח הודעה / נדנוד / ברכת בוקר). (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
         "SHOW MY LISTS / הציגי את הרשימות שלי / הצג רשימות: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact «הצג רשימת X» stays category/custom dump.",
-        "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list / delete_list (list shell only — NOT item add|update|remove), emit confirm button label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN this button after item-level lists mutates alone.",
+        "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list (share, unshare, emoji, rename, columns, files) → confirm button for THAT list («הצג רשימת <name>» / «הצג קניות» / «הצג משימות»); after delete_list → label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN «הצג רשימות» after create/alter_list; FORBIDDEN list-shell nav after item-level lists mutates alone.",
         "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY משימות enumerate items (1. 2. 3. under one «משימות:» header; assign «(באחריות X · מאת Y)»; co-share «(A, B)»; LINKED REMINDER on task lines). קניות COUNTS ONLY breakdown under «קניות:» — אישיות / «(A, B)» / «(באחריות X · מאת Y)» (all involved on co-share); רשימות אחרות = «*name* (A, B) — N פריטים» (all involved, e.g. «(מיכל, טל)»; no «עם»). תזכורות פעילות: NUMBERED 1. 2. 3. (never •) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. Hint once: לפירוט רשימה: הצג רשימת …. תיוקים (one «תיוקים:» + «(A, B)»); אנשי קשר (one «אנשי קשר:» from EMPLOYEE_SAVED_DATA only — not SPEAKER_CONTACTS); ספר הטלפונים (one «ספר הטלפונים:» from SPEAKER_CONTACTS; co-share «(A, B)»; empty → ריק). FORBIDDEN: skipping ספר הטלפונים when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ספר הטלפונים from list_type contacts or calling the phone book «אנשי קשר». No schema jargon.",
         "PHONE BOOK / אנשי קשר / ספר הטלפונים / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
         "Show a named list / הציגי את רשימת X / «שיעורי נהיגה» / «שיעורי נהיגה של מאיה»: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written • inventory for named lists (breaks «הציגי 6»). items=[] → server empty sentence. Speak Hebrew only — never list_name / list_type / metadata. After that dump, «הציגי 6» / «את 3» → ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range → ASK, not invent ids.",
@@ -3586,6 +3590,8 @@ export async function sendChatMessage(input: {
      * Kept aside because the show_dump freeze clears model choice taps.
      */
     let itemDumpShowButtons: Array<{ label: string; command: string }> = [];
+    /** «📎 קבצי הרשימה (N)» on a list dump whose list has list-level files. */
+    let listFilesButton: { label: string; command: string } | null = null;
     // Result-C: restore stripped show_dump after apply so dump uses post-apply DB.
     // Dump always reflects actual DB; Result-B already gated success wording.
     let mutateThenShowConfirm = "";
@@ -3765,6 +3771,17 @@ export async function sendChatMessage(input: {
               undefined,
               phoneBookAttachExtra,
             );
+          } else if (resolved?.kind === "list") {
+            // The model chose to show this list; the engine renders the whole
+            // display, incl. a files tap when the list itself has files. The
+            // tap goes back to the model (it decides send_attachments).
+            const listFileCount = collectListLevelAttachmentIdsForDump(
+              snapshot,
+              resolved.name,
+              (listType) =>
+                isBuiltinListType(listType) ? builtinListHebrew(listType) : null,
+            ).length;
+            listFilesButton = listFilesTapButton(resolved.name, listFileCount);
           }
           if (resolved?.kind === "filings") {
             const dumpAddress = navigateAddressFromFilingsDump(
@@ -4731,9 +4748,13 @@ export async function sendChatMessage(input: {
         // show_dump is display-only → strip model choice taps on a bare dump.
         // Re-attach engine single-task ITEM DUMP taps (סמן כבוצע / reminder twin).
         bubbles = clearBubbleButtons(bubbles);
-        if (itemDumpShowButtons.length > 0 && bubbles[0]) {
+        const engineDumpTaps = [
+          ...itemDumpShowButtons,
+          ...(listFilesButton ? [listFilesButton] : []),
+        ];
+        if (engineDumpTaps.length > 0 && bubbles[0]) {
           bubbles = [
-            { ...bubbles[0], buttons: [...itemDumpShowButtons] },
+            { ...bubbles[0], buttons: engineDumpTaps },
             ...bubbles.slice(1),
           ];
         }
@@ -4770,10 +4791,13 @@ export async function sendChatMessage(input: {
                   listMutations.map((row) => listNavKeyFromMutation(row)),
                 );
                 for (const row of listOpResults) {
-                  // Attachment-only alter_list: specific list show, not overview.
+                  // Any applied alter_list (share / unshare / emoji / rename /
+                  // columns / files) → show THAT list, whose header now proves
+                  // the change («· משותפת עם X»). Only delete_list keeps the
+                  // «הצג רשימות» overview (the list is gone).
                   if (
                     !row.applied ||
-                    !row.attachmentsOnly ||
+                    row.action !== "alter_list" ||
                     !row.listType
                   ) {
                     continue;
@@ -4794,13 +4818,11 @@ export async function sendChatMessage(input: {
                 return keys;
               })(),
               filing: filingMutations.length > 0,
-              // List shell only (create empty / rename|columns|participants /
-              // delete_list) → never item mutate, never attachment-only alter.
-              listsOverview:
-                listOpResults.some(
-                  (row) => row.applied && !row.attachmentsOnly,
-                ) ||
-                listMutations.some((row) => row.listShell === true),
+              // Overview only after delete_list (the shown list no longer
+              // exists). alter_list / empty create → that list's own nav.
+              listsOverview: listOpResults.some(
+                (row) => row.applied && row.action === "delete_list",
+              ),
               collabByListKey: buildCollabByListKey(
                 listMutations,
                 new Map(
@@ -4829,6 +4851,18 @@ export async function sendChatMessage(input: {
           }),
         );
       }
+      // One deterministic item-open label (title ≤20, else «להצגת המשימה»).
+      bubbles = bubbles.map((bubble) =>
+        bubble.buttons?.length
+          ? {
+              ...bubble,
+              buttons: bubble.buttons.map((button) => {
+                const label = itemOpenButtonLabel(button);
+                return label ? { ...button, label } : button;
+              }),
+            }
+          : bubble,
+      );
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);
     }
     const tipTurn =

@@ -2465,7 +2465,8 @@ describe("formatShowDumpFromKind", () => {
       section: "shared",
       partner: "מיכל",
     });
-    expect(text).toContain("🛒 קניות:");
+    // Whole shared shell → its header says so (distinct from item «(A, B)»).
+    expect(text).toContain("🛒 קניות · משותפת עם מיכל:");
     expect(text).toContain("קמח מלא - 2");
     expect(text).not.toContain("ספוג אדום");
     expect(text).not.toContain("משותפות עם טל");
@@ -2980,7 +2981,7 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
       section: "shared",
     });
-    expect(shared).toContain("🛒 קניות:");
+    expect(shared).toContain("🛒 קניות · משותפת עם מיכל:");
     expect(shared).toContain("קמח מלא");
     expect(shared).not.toContain("ספוג אדום");
 
@@ -2989,7 +2990,7 @@ describe("formatShowDumpFromKind", () => {
       section: "shared",
       partner: "מיכל",
     });
-    expect(onlyMichal).toContain("🛒 קניות:");
+    expect(onlyMichal).toContain("🛒 קניות · משותפת עם מיכל:");
     expect(onlyMichal).toContain("קמח מלא");
     expect(onlyMichal).not.toContain("ספוג אדום");
 

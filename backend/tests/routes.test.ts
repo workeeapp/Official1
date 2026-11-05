@@ -1481,9 +1481,10 @@ describe("resolveRoutesReply", () => {
     expect(text).toContain("מצאתי 2 אפשרויות");
     expect(text).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
     expect(text).toContain("המלצה:");
-    // Compact multi: primary only (earlier leave 66 @ 08:10); secondary deferred.
-    expect(text).toContain("קו 66");
-    expect(text).not.toContain("קו 51");
+    // Compact multi: primary only. Same arrival 08:55, no transfers → the
+    // shorter trip (51, leaves later) leads — not «leaves earliest» (66).
+    expect(text).toContain("קו 51");
+    expect(text).not.toContain("קו 66");
     expect(text).toContain("עלייה משוערת");
     expectMultiAltsCue(text, 1);
     expect(result.choiceButtons?.map((b) => b.command)).toEqual([
@@ -1496,7 +1497,8 @@ describe("resolveRoutesReply", () => {
     );
     const body = computeRoutesBody(fetchImpl);
     expect(body.computeAlternativeRoutes).toBe(true);
-    expect(body.transitPreferences).toBeUndefined();
+    // Trips ask Google for few-change options up front (product order).
+    expect(body.transitPreferences).toEqual({ routingPreference: "FEWER_TRANSFERS" });
   });
 
   it("keeps single-route summary when Google returns one alternative", async () => {
@@ -2812,9 +2814,11 @@ describe("origin→destination trip boarding workflow", () => {
   it("closest_board ranks by boarding walk, not earliest leave", () => {
     const earlierFar = walkThenBoard(900, "50", "תחנה רחוקה", "08:00");
     const laterNear = walkThenBoard(180, "238", "תחנה קרובה", "08:40");
+    // Default rank (2026-11-05): same transfers + same arrival → less walking
+    // wins, not «leaves earliest» — both rankings agree on 238 here.
     const defaultRank = rankTripItineraries([earlierFar, laterNear]);
-    expect(defaultRank[0]?.leaveByText).toBe("08:00");
-    expect(defaultRank[0]?.steps.find((s) => s.line)?.line).toBe("50");
+    expect(defaultRank[0]?.leaveByText).toBe("08:40");
+    expect(defaultRank[0]?.steps.find((s) => s.line)?.line).toBe("238");
 
     const closest = rankTripItinerariesByClosestBoard([earlierFar, laterNear]);
     expect(closest[0]?.steps.find((s) => s.line)?.line).toBe("238");

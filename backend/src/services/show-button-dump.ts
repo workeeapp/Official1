@@ -3332,6 +3332,12 @@ type DumpItem = {
   listEmoji?: string;
   /** True when row is assign / co-share / shared list / shared_items. */
   isShared?: boolean;
+  /**
+   * Whole-list share of this row's source shell (scope=shared): all involved
+   * «עמית, טל». Rendering only — header mark when every row shares it, else
+   * the row's mark. Never used by section/partner/assignee filters.
+   */
+  shellShareMark?: string;
   /** Partner filter key (assigner, co-share partners, list owner, …). */
   partnerFilterKey?: string;
   /** Sole assignee when this is an assign row (for באחריות filter). */
@@ -3479,6 +3485,11 @@ function collectListDumpRows(
   for (const list of lists) {
     const listFiles = listHasListLevelFiles(list);
     const listEmoji = listDumpEmoji(list);
+    const shellMark =
+      !skipMarks && list.scope === "shared"
+        ? shellShareNames(list.shared_with ?? [], viewer, aliases)
+        : "";
+    const shellShare = shellMark.trim() ? { shellShareMark: shellMark } : {};
     for (const item of list.items) {
       if (listType === "custom") {
         const titleField = resolveCustomTitleField(
@@ -3515,6 +3526,7 @@ function collectListDumpRows(
           listFiles,
           listEmoji,
           isShared,
+          ...shellShare,
           titleStem: nameTitle,
           ...(listDetailText ? { listDetailText } : {}),
           ...(partnerFilterKey ? { partnerFilterKey } : {}),
@@ -3540,6 +3552,7 @@ function collectListDumpRows(
           item,
           listFiles,
           listEmoji,
+          ...shellShare,
           ...meta,
         });
         continue;
@@ -3558,11 +3571,54 @@ function collectListDumpRows(
         item,
         listFiles,
         listEmoji,
+        ...shellShare,
         ...meta,
       });
     }
   }
   return rows;
+}
+
+/**
+ * Partners of a shared shell other than the viewer («עמית» / «מיכל, עמית») —
+ * empty when nobody else is on it (a viewer-only share says nothing).
+ */
+function shellShareNames(
+  sharedWith: string[],
+  viewer: string,
+  aliases: string[],
+): string {
+  const partners = partnersKey(sharedWith, viewer, aliases);
+  return !partners || partners === "משותף" ? "" : partners;
+}
+
+/** List-share header suffix — distinct from an item co-share «(A, B)» line mark. */
+export function listShareHeaderSuffix(partners: string): string {
+  const names = partners.trim();
+  return names ? ` · משותפת עם ${names}` : "";
+}
+
+/**
+ * Whole-list share indication (scope=shared shells), kept apart from item
+ * co-share marks: a LIST share is said on its own header («🛒 קניות · משותפת
+ * עם מיכל:»), an ITEM share stays the «(A, B)» line mark. Rows from shells
+ * with different share audiences never mix under one header: personal first,
+ * then each shared audience as its own header (numbering stays continuous).
+ */
+function shellShareGroups(
+  rows: DumpItem[],
+): Array<{ partners: string; rows: DumpItem[] }> {
+  const groups = new Map<string, DumpItem[]>();
+  groups.set("", []);
+  for (const row of rows) {
+    const key = row.shellShareMark?.trim() ?? "";
+    const bucket = groups.get(key) ?? [];
+    bucket.push(row);
+    groups.set(key, bucket);
+  }
+  return [...groups.entries()]
+    .filter(([, bucket]) => bucket.length > 0)
+    .map(([partners, bucket]) => ({ partners, rows: bucket }));
 }
 
 /** Non-date dump filters shared by keep + undated-exclusion counting. */
@@ -3946,13 +4002,17 @@ function formatSingleHeaderDump(
         : `${label}${paperclipSuffix(headerFiles)}: ${hebrewItemCount(n)}`,
     );
   }
+  const groups = shellShareGroups(rows);
   if (listType === "tasks" && hasDumpDateRange(opts)) {
+    // Day agenda is grouped by date: mark the list header only when every row
+    // shares one audience (mixed shells keep the plain header).
+    const soleShare = groups.length === 1 ? groups[0]!.partners : "";
     return formatTasksDayAgendaDump(
       rows,
       reminders,
       opts,
       linkedReminderIds,
-      `${label}${paperclipSuffix(headerFiles)}`,
+      `${label}${listShareHeaderSuffix(soleShare)}${paperclipSuffix(headerFiles)}`,
     );
   }
   if (rows.length === 0) {
@@ -3964,9 +4024,11 @@ function formatSingleHeaderDump(
     listType === "custom"
       ? normalizeDumpListName(opts?.dumpListName) || undefined
       : undefined;
-  const text = [
-    `${label}${paperclipSuffix(headerFiles)}:`,
-    ...rows.map((row) => {
+  const blocks = groups.map((group) => [
+    `${label}${listShareHeaderSuffix(group.partners)}${paperclipSuffix(
+      group.rows.some((row) => row.listFiles),
+    )}:`,
+    ...group.rows.map((row) => {
       const n = takeDumpLineNumber(numbering);
       const id = dumpItemId(listType, row.item);
       if (id) {
@@ -3985,8 +4047,8 @@ function formatSingleHeaderDump(
         listDetailText: row.listDetailText,
       });
     }),
-  ].join("\n");
-  return { text, lines };
+  ].join("\n"));
+  return { text: blocks.join("\n\n"), lines };
 }
 
 function formatThreeWayDump(
@@ -4274,7 +4336,8 @@ export function partnerBucketMatches(
 
 /**
  * Row mark for a custom-list item: assign `(באחריות X · מאת Y)` or co-share
- * `(A, B)`. Whole-list scope=shared → no per-line mark.
+ * `(A, B)`. Whole-list scope=shared → no per-line mark (its header says
+ * «· משותפת עם X» via shellShareGroups).
  */
 export function customItemCoShareMark(
   list: EmployeeRecordSnapshot["lists"][number],
@@ -4371,7 +4434,19 @@ function emptyCustomListSentence(
   const emoji = lists.length > 0
     ? listDumpEmoji(lists[0]!)
     : effectiveListEmoji({ listType: "custom", storedEmoji: null });
-  const labeled = withListEmoji(emoji, `רשימת «${name}»`);
+  // Shared shell → same «(עמית, טל)» header mark as a non-empty dump.
+  const sharedShell = lists.find((list) => list.scope === "shared");
+  const shellMark = sharedShell
+    ? shellShareNames(
+        sharedShell.shared_with ?? [],
+        opts?.viewerName?.trim() ?? "",
+        (opts?.viewerAliases ?? []).map((alias) => alias.trim()),
+      )
+    : "";
+  const labeled = withListEmoji(
+    emoji,
+    `רשימת «${name}»${listShareHeaderSuffix(shellMark)}`,
+  );
   const section = opts?.section ?? null;
   const partnerNeedles = dumpFilterNames(opts?.partner);
   if (section === "shared" || partnerNeedles.length > 0) {

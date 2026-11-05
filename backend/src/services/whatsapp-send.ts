@@ -188,18 +188,37 @@ const ITEM_SHOW_FILING_COMMAND = /^הציגי?\s+את\s+התיוק(?:\s|$)/u;
  * task/filing title on the label (full ask stays in command).
  */
 export function fitReplyButtonLabel(button: LlmReplyButton): string {
+  const itemOpen = itemOpenButtonLabel(button);
+  if (itemOpen) {
+    return itemOpen;
+  }
   const label = button.label.trim();
   if (label.length <= REPLY_BUTTON_LABEL_MAX) {
     return label;
   }
-  const command = button.command.trim();
-  if (ITEM_SHOW_TASK_COMMAND.test(command)) {
-    return "להצגת המשימה";
-  }
-  if (ITEM_SHOW_FILING_COMMAND.test(command)) {
-    return "להצגת התיוק";
-  }
   return label.slice(0, REPLY_BUTTON_LABEL_MAX);
+}
+
+/**
+ * Item-open taps («הציגי את המשימה <title>» / «הציגי את התיוק <title>») get ONE
+ * deterministic label: the exact title when it fits a WhatsApp button (≤20),
+ * else «להצגת המשימה» / «להצגת התיוק». Rendering only — the model's label is
+ * ignored so the same row always looks the same (web chat and WhatsApp).
+ * Null for any other button.
+ */
+export function itemOpenButtonLabel(button: LlmReplyButton): string | null {
+  const command = button.command.trim();
+  const task = command.match(ITEM_SHOW_TASK_COMMAND);
+  const filing = task ? null : command.match(ITEM_SHOW_FILING_COMMAND);
+  const hit = task ?? filing;
+  if (!hit) {
+    return null;
+  }
+  const title = command.slice(hit[0].length).trim();
+  if (title && title.length <= REPLY_BUTTON_LABEL_MAX) {
+    return title;
+  }
+  return task ? "להצגת המשימה" : "להצגת התיוק";
 }
 
 export function whatsappButtonsBody(

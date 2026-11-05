@@ -1722,20 +1722,71 @@ export function itineraryClosestBoardComparable(
   return boardingWalkSecondsBeforeTransit(opt.steps) != null;
 }
 
+/** Bus/train changes in an itinerary (transit legs − 1, never negative). */
+export function itineraryTransferCount(steps: RouteStepFact[]): number {
+  const legs = steps.filter(
+    (step) => String(step.travelMode ?? "").toUpperCase() === "TRANSIT",
+  ).length;
+  return Math.max(0, legs - 1);
+}
+
 /**
- * Rank Google trip alternatives by practical leave time, walk, arrive, duration.
- * Does not invent values — missing fields sort last within that key.
- * Default ranking when prefer is omitted — do not change without regressing tests.
+ * «Mostly walking» trip: the ride is under a quarter of the walking (e.g. a
+ * 2-minute bus then a 20-minute walk). Riding barely helps — such an option
+ * never leads when a real ride exists. Unknown durations → not flagged.
+ */
+export function itineraryMostlyWalking(steps: RouteStepFact[]): boolean {
+  let ride = 0;
+  let rideKnown = false;
+  for (const step of steps) {
+    if (String(step.travelMode ?? "").toUpperCase() !== "TRANSIT") {
+      continue;
+    }
+    if (step.durationSeconds != null && step.durationSeconds > 0) {
+      ride += step.durationSeconds;
+      rideKnown = true;
+    }
+  }
+  const walk = walkSecondsFromSteps(steps);
+  if (!rideKnown || walk == null || walk <= 0) {
+    return false;
+  }
+  return ride * 4 < walk;
+}
+
+/**
+ * Rank Google trip alternatives (product, 2026-11-05): a transfer is the worse
+ * trade for most riders, especially inside a city. Order: real rides before
+ * «mostly walking» options; then fewest transfers; then the time that
+ * matters for the ask (depart-at → earliest arrival; arrive-by → latest
+ * leave); then less walking; then duration.
+ *
+ * Regression: the old first key was «leaves earliest», which recommended a
+ * 2-minute ride + 20-minute walk over a 6-minute ride + 16-minute walk that
+ * arrives at the same time (Ramon school, 2026-11-05).
+ * Missing fields sort last within that key; never invents values.
  */
 export function rankTripItineraries(
   options: RouteItineraryOption[],
+  anchor: "depart" | "arrive" = "depart",
 ): RouteItineraryOption[] {
-  const score = (opt: RouteItineraryOption): [number, number, number, number] => [
-    parseHmToMinutes(opt.leaveByText) ?? Number.POSITIVE_INFINITY,
-    walkSecondsFromSteps(opt.steps) ?? Number.POSITIVE_INFINITY,
-    parseHmToMinutes(opt.arriveByText) ?? Number.POSITIVE_INFINITY,
-    opt.durationSeconds ?? Number.POSITIVE_INFINITY,
-  ];
+  const score = (
+    opt: RouteItineraryOption,
+  ): [number, number, number, number, number] => {
+    const leave = parseHmToMinutes(opt.leaveByText);
+    const arrive = parseHmToMinutes(opt.arriveByText);
+    return [
+      itineraryMostlyWalking(opt.steps) ? 1 : 0,
+      itineraryTransferCount(opt.steps),
+      anchor === "arrive"
+        ? leave == null
+          ? Number.POSITIVE_INFINITY
+          : -leave
+        : arrive ?? Number.POSITIVE_INFINITY,
+      walkSecondsFromSteps(opt.steps) ?? Number.POSITIVE_INFINITY,
+      opt.durationSeconds ?? Number.POSITIVE_INFINITY,
+    ];
+  };
   return [...options].sort((a, b) => {
     const sa = score(a);
     const sb = score(b);
@@ -2201,6 +2252,10 @@ export async function fetchRoutesFacts(input: {
   }
   if (lineEtaAsk) {
     body.transitPreferences = { allowedTravelModes: ["BUS"] };
+  } else if (travelMode !== "drive") {
+    // Ask Google for few-change trips up front (same product order as
+    // rankTripItineraries) — not only re-rank whatever it returned.
+    body.transitPreferences = { routingPreference: "FEWER_TRANSFERS" };
   }
 
   const departureRfc = toRoutesRfc3339(departure);
@@ -2277,16 +2332,18 @@ export async function fetchRoutesFacts(input: {
         departureRfc: departureRfc,
       }),
     );
+    const rankAnchor: "depart" | "arrive" =
+      arrivalRfc && !departureRfc ? "arrive" : "depart";
     if (prefer === "closest_board") {
       const usable = mapped.filter(itineraryClosestBoardComparable);
       if (usable.length === 0) {
         facts.closestBoardInsufficient = true;
-        facts.itineraries = rankTripItineraries(mapped);
+        facts.itineraries = rankTripItineraries(mapped, rankAnchor);
       } else {
         facts.itineraries = rankTripItinerariesByClosestBoard(mapped);
       }
     } else {
-      facts.itineraries = rankTripItineraries(mapped);
+      facts.itineraries = rankTripItineraries(mapped, rankAnchor);
     }
     // Keep primary summary fields aligned with the best ranked option.
     const best = facts.itineraries[0];

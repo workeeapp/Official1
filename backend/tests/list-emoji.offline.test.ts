@@ -469,7 +469,8 @@ describe("list-emoji parse + dump", () => {
       omitEmptySentence: true,
       viewerName: "עמית",
     })!;
-    expect(theirs).toMatch(/^🛍️ קניות:/m);
+    // Source shell is shared with מיכל → its header says so.
+    expect(theirs).toMatch(/^🛍️ קניות · משותפת עם מיכל:/m);
     expect(theirs).toContain("יין");
     expect(theirs).not.toContain("חלב");
 

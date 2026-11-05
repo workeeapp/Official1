@@ -135,7 +135,8 @@ function mockSingleTransitPayload(): RoutesPayload {
 
 /**
  * Two distinct alts for leave-first vs closest_board:
- * - Line 50: earlier leave, long boarding walk (default rank winner)
+ * - Line 50: earlier leave AND earlier arrival (08:45), long boarding walk
+ *   (default rank winner: no transfers → earliest arrival)
  * - Line 238: later leave, short boarding walk (closest_board winner)
  */
 function mockTwoTransitAlternativesPayload(): RoutesPayload {
@@ -546,7 +547,7 @@ describe("Routes transit A→B sendChat E2E (eval-db, mocked Google)", () => {
     expect(spoken).toContain("מצאתי 2 אפשרויות");
     expect(spoken).toContain(ROUTES_MULTI_ESTIMATE_DISCLAIMER_HE);
     expect(spoken).toContain("המלצה:");
-    // Default leave-first rank → קו 50 (earlier board), not 238.
+    // Default rank: no transfers → earliest arrival → קו 50 (08:45), not 238.
     expect(spoken).toContain("קו 50");
     expect(spoken).toContain("משך משוער *45 דקות*");
     expect(spoken).toMatch(/עוד 1 אפשרויות/);

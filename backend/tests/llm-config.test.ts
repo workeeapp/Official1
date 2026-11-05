@@ -349,6 +349,11 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "FORBIDDEN this button after item-level lists.add|update|remove alone",
     );
+    // 2026-11-05: share/alter/create → THAT list (header proves the share);
+    // overview only after delete_list.
+    expect(config.systemMessage).toContain(
+      "FORBIDDEN «הצג רשימות» after create/alter_list",
+    );
     // Phone book parity: path 2 uses phone_book + SPEAKER_CONTACTS; path 3 includes contacts.
     expect(config.systemMessage).toContain("phone_book|filings|reminders");
     expect(config.systemMessage).toContain(

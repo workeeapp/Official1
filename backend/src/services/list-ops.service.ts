@@ -452,6 +452,8 @@ async function alterList(
   return {
     ...base,
     listLabel: renaming ? newName : oldLabel,
+    // Nav after a rename must open the list under its NEW name.
+    ...(renaming && list.listType === "custom" ? { listName: newName } : {}),
     applied: true,
     notices: audience.map((employeeId) => ({ employeeId, text })),
   };
