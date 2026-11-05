@@ -16,20 +16,29 @@ import {
 } from "../src/services/gtfs-query.js";
 import { gtfsTimeToSeconds } from "../src/services/gtfs-time.js";
 import { buildMiniGtfsFeed } from "./gtfs-fixture.js";
+import {
+  deleteTestGtfsGenerations,
+  restoreGtfsGenerations,
+  snapshotGtfsGenerations,
+  type GtfsGenerationSnapshot,
+} from "./helpers/gtfs-preserve.js";
 
 const prisma = new PrismaClient();
+let preExisting: GtfsGenerationSnapshot = [];
 
 describe("gtfs query schedule + nearest_stop (eval-db)", () => {
   let generationId = "";
 
-  beforeAll(() => {
+  beforeAll(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+    // The validated MOT day-slice (and anything else) must survive this file.
+    preExisting = await snapshotGtfsGenerations(prisma);
   });
 
   beforeEach(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
     process.env.GTFS_ENABLED = "1";
-    await prisma.gtfsFeedGeneration.deleteMany({});
+    await deleteTestGtfsGenerations(prisma, preExisting);
     const loaded = await ingestParsedFeed(prisma, buildMiniGtfsFeed(), {
       sourceLabel: "query-mini",
     });
@@ -37,7 +46,7 @@ describe("gtfs query schedule + nearest_stop (eval-db)", () => {
   });
 
   afterAll(async () => {
-    await prisma.gtfsFeedGeneration.deleteMany({}).catch(() => undefined);
+    await restoreGtfsGenerations(prisma, preExisting).catch(() => undefined);
     await prisma.$disconnect();
   });
 

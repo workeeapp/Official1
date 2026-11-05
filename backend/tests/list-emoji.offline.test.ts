@@ -297,7 +297,7 @@ describe("list-emoji parse + dump", () => {
       filing: [],
     };
     expect(formatShowDumpFromKind("shopping", snap)).toMatch(/^🛒 קניות:/m);
-    expect(formatShowDumpFromKind("tasks", snap)).toMatch(/^📌 מטלות:/m);
+    expect(formatShowDumpFromKind("tasks", snap)).toMatch(/^📌 משימות:/m);
     expect(formatShowDumpFromKind("בעיות", snap)).toMatch(/^🐛 רשימת «בעיות»:/m);
   });
 
@@ -342,7 +342,7 @@ describe("list-emoji parse + dump", () => {
       phoneBook: [{ contact_id: "p1", name: "דני", phone: "050" }],
     })!;
     expect(full).toMatch(/^🛍️ קניות:/m);
-    expect(full).toMatch(/^✅ מטלות:/m);
+    expect(full).toMatch(/^✅ משימות:/m);
     expect(full).toContain("🐛 *בעיות*");
     expect(full).toMatch(/^👤 אנשי קשר:/m);
   });
@@ -428,7 +428,7 @@ describe("list-emoji parse + dump", () => {
       collaboration: "assign",
       viewerName: "מיכל",
     })!;
-    expect(assign).toMatch(/^📌 מטלות:/m);
+    expect(assign).toMatch(/^📌 משימות:/m);
     expect(assign).toContain("לטפל בעמידר");
     expect(assign).toContain("(באחריות מיכל · מאת עמית)");
     expect(assign).not.toContain("אישית");
@@ -482,7 +482,9 @@ describe("list-emoji parse + dump", () => {
     expect(mine).toContain("חלב");
   });
 
-  it("day-agenda tasks dump has no list header today (date headers only)", () => {
+  // bb64f96: the day agenda keeps the list header, then date headers
+  // (same contract as show-button-dump «✅ משימות:\nראשון 18.10:»).
+  it("day-agenda tasks dump: list header then date headers", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [
         {
@@ -507,8 +509,7 @@ describe("list-emoji parse + dump", () => {
       dateTo: "2026-10-18",
       viewerName: "עמית",
     })!;
-    expect(agenda).not.toMatch(/📌 מטלות:/);
-    expect(agenda).not.toMatch(/^מטלות:/m);
+    expect(agenda).toMatch(/^📌 משימות:\nראשון 18\.10:/m);
     expect(agenda).toContain("פגישה");
   });
 });

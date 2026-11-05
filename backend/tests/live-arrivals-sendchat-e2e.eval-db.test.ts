@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLlmReply, readSpokenBubbles } from "@workee/shared";
 import { prisma } from "../src/database/prisma.js";
 import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
@@ -20,6 +20,13 @@ import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
 import { ingestParsedFeed } from "../src/services/gtfs-ingest.js";
 import { buildMiniGtfsFeed } from "./gtfs-fixture.js";
+import {
+  deleteTestGtfsGenerations,
+  restoreGtfsGenerations,
+  snapshotGtfsGenerations,
+  type GtfsGenerationSnapshot,
+} from "./helpers/gtfs-preserve.js";
+let preExisting: GtfsGenerationSnapshot = [];
 import * as whatsappSend from "../src/services/whatsapp-send.js";
 import * as reminderFire from "../src/services/reminder-fire.js";
 
@@ -134,11 +141,17 @@ describe("sendChatMessage live_arrivals E2E (eval-db, mocked SIRI)", () => {
   let fireDueSpy: ReturnType<typeof vi.spyOn> | null = null;
   let scheduleSoonSpy: ReturnType<typeof vi.spyOn> | null = null;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+    // The validated MOT day-slice must survive this file (see gtfs-preserve).
+    preExisting = await snapshotGtfsGenerations(prisma);
     expect(process.env.WORKEE_EVAL_ENV_LOCKED).toBe("1");
     expect(process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND).toBe("1");
     expect(process.env.WORKEE_DISABLE_REMINDER_FIRE).toBe("1");
+  });
+
+  afterAll(async () => {
+    await restoreGtfsGenerations(prisma, preExisting).catch(() => undefined);
   });
 
   beforeEach(async () => {
@@ -147,7 +160,7 @@ describe("sendChatMessage live_arrivals E2E (eval-db, mocked SIRI)", () => {
     process.env.SIRI_ENABLED = "1";
     process.env.SIRI_SM_BASE_URL = "https://example.test/siri";
     process.env.SIRI_SM_KEY = "TESTKEY-OFFLINE";
-    await prisma.gtfsFeedGeneration.deleteMany({});
+    await deleteTestGtfsGenerations(prisma, preExisting);
     await ingestParsedFeed(prisma, buildMiniGtfsFeed(), {
       sourceLabel: "live-arrivals-e2e-mini",
     });

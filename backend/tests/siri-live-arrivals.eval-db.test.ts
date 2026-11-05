@@ -11,6 +11,13 @@ import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 import { ingestParsedFeed } from "../src/services/gtfs-ingest.js";
 import { resolveRoutesReply } from "../src/services/routes.js";
 import { buildMiniGtfsFeed } from "./gtfs-fixture.js";
+import {
+  deleteTestGtfsGenerations,
+  restoreGtfsGenerations,
+  snapshotGtfsGenerations,
+  type GtfsGenerationSnapshot,
+} from "./helpers/gtfs-preserve.js";
+let preExisting: GtfsGenerationSnapshot = [];
 
 const prisma = new PrismaClient();
 
@@ -40,8 +47,10 @@ function loadFreshSiriFixture(now: Date = new Date()): unknown {
 }
 
 describe("live_arrivals + GTFS fallback (eval-db)", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+    // The validated MOT day-slice must survive this file (see gtfs-preserve).
+    preExisting = await snapshotGtfsGenerations(prisma);
     expect(process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND).toBe("1");
     expect(process.env.WORKEE_DISABLE_REMINDER_FIRE).toBe("1");
   });
@@ -52,14 +61,14 @@ describe("live_arrivals + GTFS fallback (eval-db)", () => {
     delete process.env.SIRI_ENABLED;
     delete process.env.SIRI_SM_BASE_URL;
     delete process.env.SIRI_SM_KEY;
-    await prisma.gtfsFeedGeneration.deleteMany({});
+    await deleteTestGtfsGenerations(prisma, preExisting);
     await ingestParsedFeed(prisma, buildMiniGtfsFeed(), {
       sourceLabel: "siri-fallback-mini",
     });
   });
 
   afterAll(async () => {
-    await prisma.gtfsFeedGeneration.deleteMany({}).catch(() => undefined);
+    await restoreGtfsGenerations(prisma, preExisting).catch(() => undefined);
     await prisma.$disconnect();
   });
 

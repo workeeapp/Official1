@@ -49,6 +49,14 @@ const clock = vi.hoisted(() => ({
 }));
 
 const weather = vi.hoisted(() => ({
+  // Imported at load by routes.ts / open-meteo-point provider.
+  geocodePlace: vi.fn(async () => null),
+  // compose weather resolves the place (geo ladder) before fetching facts.
+  resolveWeatherForecastPlace: vi.fn(async ({ place }: { place: string }) => ({
+    ok: true,
+    place: { name: place, latitude: 32.08, longitude: 34.78 },
+    representativeRegion: false,
+  })),
   fetchWeatherFacts: vi.fn(async () => ({
     place: { name: "תל אביב", latitude: 32.08, longitude: 34.78 },
     requestedDate: "2026-10-20",

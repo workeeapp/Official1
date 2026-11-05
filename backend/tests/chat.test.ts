@@ -853,6 +853,12 @@ describe("chat API", () => {
     expect(instructions).toContain(
       "FORBIDDEN: listing titles from earlier assistant/user messages",
     );
+    // Regression (2026-11-04): «הוספתי תזכורת» with empty ACTION reached the
+    // speaker (engine no longer reads reply text) — SAY = DO is the last rule.
+    expect(instructions).toContain("SAY = DO (final check, critical)");
+    expect(instructions.trimEnd().endsWith(
+      "FORBIDDEN: a past-tense success sentence with empty lists/reminders/filing/directory/messages/jobs.",
+    ) || instructions.lastIndexOf("SAY = DO") > instructions.lastIndexOf("LAST CHECK before you answer")).toBe(true);
     expect(instructions).toContain("SHAREABLE STATUS ASK");
     expect(instructions).toContain("SHAREABLE STATUS ASK ABOUT X");
     expect(instructions).toContain("one flat dump header + row marks");
@@ -1469,7 +1475,9 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].instructions).toContain(
       "EMPLOYEE_SAVED_DATA",
     );
-    expect(createResponse.mock.calls[1][0].message).toContain("EMPLOYEE_SAVED_DATA");
+    // Live facts ride on liveFacts only — never in the stored message.
+    expect(createResponse.mock.calls[1][0].liveFacts).toContain("EMPLOYEE_SAVED_DATA");
+    expect(createResponse.mock.calls[1][0].message).not.toContain("EMPLOYEE_SAVED_DATA");
   });
 
   it("resets an idle conversation when history is loaded", async () => {
@@ -1722,11 +1730,17 @@ describe("chat API", () => {
 
     const firstInstructions = createResponse.mock.calls[0][0].instructions as string;
     const firstMessage = createResponse.mock.calls[0][0].message as string;
+    const firstFacts = createResponse.mock.calls[0][0].liveFacts as string;
     expect(firstInstructions).toContain("EMPLOYEE_SAVED_DATA");
-    expect(firstMessage).toContain("חלב");
-    expect(firstMessage).toContain("לקנות מתנה");
-    expect(firstMessage).toContain("מספר רכב");
+    expect(firstFacts).toContain("EMPLOYEE_SAVED_DATA");
+    expect(firstFacts).toContain("חלב");
+    expect(firstFacts).toContain("לקנות מתנה");
+    expect(firstFacts).toContain("מספר רכב");
     expect(firstMessage).toContain("עמית: hi");
+    // Regression (2026-11-04): facts in the stored user message re-sent every
+    // earlier snapshot each turn (+~28k input tokens per turn, stale rows).
+    expect(firstMessage).not.toContain("EMPLOYEE_SAVED_DATA");
+    expect(firstMessage).not.toContain("חלב");
 
     createResponse.mockResolvedValue({
       reply: "Second reply",
@@ -1744,6 +1758,14 @@ describe("chat API", () => {
     expect(createResponse.mock.calls[1][0].message).toContain(
       "עמית: and another thing",
     );
+    const secondMessage = createResponse.mock.calls[1][0].message as string;
+    const secondFacts = createResponse.mock.calls[1][0].liveFacts as string;
+    expect(secondMessage).not.toContain("EMPLOYEE_SAVED_DATA");
+    expect(secondMessage).not.toContain("SESSION_CLOCK");
+    expect(secondFacts).toContain("EMPLOYEE_SAVED_DATA");
+    expect(secondFacts).toContain("SESSION_CLOCK");
+    // Instructions are identical turn to turn (cacheable prefix): no facts there.
+    expect(createResponse.mock.calls[1][0].instructions).toBe(firstInstructions);
   });
 
   it("saves list, task, and filing actions from the LLM onto the employee", async () => {

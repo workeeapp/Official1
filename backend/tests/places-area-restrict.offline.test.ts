@@ -493,8 +493,10 @@ describe("places Stage B2a area_restrict", () => {
     expect(body.textQuery).toBe("בית קפה");
   });
 
-  it("area_restrict FieldMask includes places.location; soft_place does not", () => {
-    expect(buildPlacesFieldMask(["summary"], "business")).not.toContain(
+  // 8e350a8 (2026-11-02): location is in the base mask (Waze navigate_address),
+  // so every search requests it — soft_place included.
+  it("FieldMask always includes places.location (base + area_restrict)", () => {
+    expect(buildPlacesFieldMask(["summary"], "business")).toContain(
       PLACES_LOCATION_FIELD,
     );
     expect(
@@ -743,7 +745,7 @@ describe("places Stage B2a area_restrict", () => {
     const mask = String(
       (init.headers as Record<string, string>)["X-Goog-FieldMask"] ?? "",
     );
-    expect(mask).not.toContain(PLACES_LOCATION_FIELD);
+    expect(mask).toContain(PLACES_LOCATION_FIELD);
   });
 });
 

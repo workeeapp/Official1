@@ -1765,6 +1765,62 @@
           ]
         }
       ]
+    },
+    {
+      "id": "full-share-already-shared",
+      "tag": "happy",
+      "tags": [
+        "shopping",
+        "share",
+        "single-turn",
+        "full-live",
+        "reply-contract"
+      ],
+      "description": "Re-share a row already shared with עמית: model says it is already shared (engine no longer rewrites the reply); no «שיתפתי»",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-shopping-shared-again",
+            "list_type": "shopping",
+            "list_name": "קניות משותפת",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "עמית"
+            ],
+            "items": [
+              {
+                "item_id": "eval-item-shared-again-bread",
+                "שם פריט": "לחם"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תשתפי את הלחם עם עמית",
+          "constraints": [
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "כבר"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "שיתפתי"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לחם"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

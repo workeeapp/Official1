@@ -66,7 +66,13 @@ describe("contact directory POC", () => {
       contacts,
     );
     expect(deliveries).toEqual([
-      { phone: "972541111111", text: "שלום מטל", label: "מיכל" },
+      {
+        phone: "972541111111",
+        text: "שלום מטל",
+        label: "מיכל",
+        expectsReply: true,
+        askSummary: "",
+      },
     ]);
   });
 

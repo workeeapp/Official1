@@ -3850,8 +3850,8 @@ describe("worker inventory tasks dump helpers", () => {
       kind: "tasks",
     });
     expect(mapShowButtonCommandToDump("הצג רשימת משימות")).toBe("tasks");
-    // Label-only «הצג משימות» is NOT the opaque allowlist command (engine uses full command).
-    expect(mapShowButtonCommandToDump("הצג משימות")).toBeNull();
+    // 3e3b0ca: bare «הצג משימות» click alias expands to the full tasks command.
+    expect(mapShowButtonCommandToDump("הצג משימות")).toBe("tasks");
     expect(mapShowButtonCommandToDumpTarget("הצג משימות של לוסי")).toEqual({
       kind: "tasks",
       about: "לוסי",

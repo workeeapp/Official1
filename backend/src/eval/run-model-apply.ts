@@ -198,7 +198,10 @@ export function isNormalizedLlmMetadata(value: unknown): value is LlmMetadata {
   }
 
   // Empty already-parsed envelope (LIVE ask-only / emptyLlmMetadata).
+  // Parsed metadata is camelCase; any snake_case key (show_dump, list_ops,
+  // show_dump_ids…) means a raw model/stub envelope that still needs parsing.
   if (
+    !Object.keys(meta).some((key) => key.includes("_")) &&
     Array.isArray(meta.lists) &&
     Array.isArray(meta.filing) &&
     Array.isArray(meta.reminders) &&

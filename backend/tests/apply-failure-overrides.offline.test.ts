@@ -277,4 +277,33 @@ describe("applySideFailureOverrides", () => {
       `${LIST_FIND_MISS}\n${ATTACH_APPLY_MISS}`,
     );
   });
+
+  // Regression (eval-db show-dump 7 / qa-e control, 2026-11-04): a remove of a
+  // missing item_id is a shareMiss «missing» AND an ApplyResult apply_miss —
+  // Result-B wrote LIST_FIND_MISS and the share line repeated it.
+  it("never repeats a failure line Result-B already wrote", () => {
+    const out = applySideFailureOverrides({
+      reply: draft(LIST_FIND_MISS),
+      resultBReplaced: true,
+      lines: [LIST_FIND_MISS],
+      setResponse: setEngineResponse,
+    });
+    expect(parseLlmReply(out).response).toBe(LIST_FIND_MISS);
+  });
+
+  it("missing-item share miss + Result-B → exactly one miss line end to end", () => {
+    const lines = sideFailureLines({
+      listMutations: [],
+      shareMisses: [{ itemId: "gone", reason: "missing" }],
+      attachmentOutcome: emptyAttachmentOutcome(false),
+    });
+    expect(lines).toEqual([LIST_FIND_MISS]);
+    const out = applySideFailureOverrides({
+      reply: draft(LIST_FIND_MISS),
+      resultBReplaced: true,
+      lines,
+      setResponse: setEngineResponse,
+    });
+    expect(parseLlmReply(out).responses).toEqual([LIST_FIND_MISS]);
+  });
 });

@@ -380,6 +380,7 @@ const STORED_LAST_LIVE_LOCATION = "lastLiveLocation";
 function buildOpenAiRequest(input: {
   conversationId: string;
   message: string;
+  liveFacts?: string;
   model: string;
   temperature: number;
   reasoningEffort?: ReasoningEffort;
@@ -1127,7 +1128,7 @@ function workerTargetingInstructions(
     "PERSONAL TASK DEFAULT: «תוסיפי לי משימה» / «משימה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal משימות). Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/משימות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL: exactly ONE list_name equals what they said → mutate NOW, no ask. Spoken token in TWO OR MORE titles (באגים / באגים לקוד / …) → NOT unique — treat as (3). (2) VERY SIMILAR but not identical (exactly one near-miss) → lists=[] and ASK once «התכוונת לרשימת «X»?» — never mutate until confirm. (3) Several close candidates, OR spoken token in ≥2 list_name titles, OR none → lists=[] and ASK which as NUMBERED 1. 2. 3. (exact list_name; personal vs משותפת עם X); never pick first/shared/looks-like. Example: «לאיזו רשימה התכוונת?» then «1. באגים» / «2. באגים לקוד (משותפת עם עמית)». After they answer with the title OR a line index («2» / «ל2») → map to the LAST list-pick ask line → exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index → re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone («הוסיפי באג» → a באגים* list). Server will not fix a wrong list_name.",
-    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → ask once «לפנות אליך בלשון זכר או נקבה?» when the turn needs address conjugation and there is no complete durable filing/save this turn; on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. FORBIDDEN: empty actions or deferring a complete same-turn durable filing/save (e.g. «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב») until gender is answered — emit that filing ACTION this turn. Never ignore SPEAKER_ADDRESS.",
+    "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → do what this turn asks FIRST (every complete ACTION — lists / reminders / filing / messages / show_dump — emitted THIS turn, reply phrased gender-neutrally), then you may ask once «לפנות אליך בלשון זכר או נקבה?» as a separate LAST responses entry (skip while another question of yours is open); on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. FORBIDDEN: empty actions or deferring any complete same-turn action (a durable filing/save such as «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב», a reminder on an existing task such as «תזכירי לי מחר ב־09:00 על התור לווטרינר», anything) until gender is answered, and FORBIDDEN asking about the request itself because gender is unknown. Never ignore SPEAKER_ADDRESS.",
     "Durable personal memory — file with lists add list_type filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB (תייקי/תתייקי/תשמרי/תצרפי — text and/or files): follow ATTACHMENTS DESTINATION LADDER — unique custom list_name defaults to ITEM attach (ask which item if unclear; list shell only when explicitly «לרשימה עצמה» / «ברמת הרשימה»); filings only when «לתיוקים» / «תחת…» / «כ…»; FORBIDDEN filing only because «תייקי». LIST NAME MATCH on named lists. TOPIC-ONLY / NO LIST NAMED («הוסיפי באג: …» / «תשמרי את הבאג»): lists=[] — if ≥2 list_names contain באג/באגים → ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a באגים* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description = optional find-helper (מידע לחיפוש) after ANY code/ID/doc/car-number/gate-code/ת.ז/file filing when description empty (bare «מספר הרכב 703…» counts — not only תתייק); never after soft auto-memory (לשון פנייה/משפחה/כתובת…). Find filings by name+info+description. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
@@ -2322,6 +2323,10 @@ export async function sendChatMessage(input: {
         guestSpeaker
           ? ""
           : "LAST CHECK before you answer: every entry in metadata.messages must have all five fields — targets, text, expects_reply, ask_summary, urgency (normal unless the speaker stressed it). expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
+        // The engine never reads the reply text (it only overrides on a proven
+        // apply failure), so a success sentence with no ACTION reaches the
+        // speaker as-is. Last in the prompt on purpose (recency).
+        "SAY = DO (final check, critical): every success you state in responses — added / saved / set a reminder / cancelled / moved / deleted / shared (הוספתי / שמרתי / נשמרה / קבעתי / תזכורת נקבעה / ביטלתי / הזזתי / מחקתי / שיתפתי) — MUST be emitted as that mutation in THIS reply's metadata (lists / reminders / filing / directory / messages / jobs). Example: «תזכירי לי מחר ב־09:00 על התור לווטרינר» with that task in EMPLOYEE_SAVED_DATA → lists.update tasks items:[{ item_id, remind:{ date, time:\"09:00\" } }] AND then «הוספתי תזכורת…». No mutation emitted → do not claim it; ask or say what is missing instead. FORBIDDEN: a past-tense success sentence with empty lists/reminders/filing/directory/messages/jobs.",
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -2339,8 +2344,11 @@ export async function sendChatMessage(input: {
       ]
         .filter(Boolean)
         .join("\n\n");
+  // Live facts go to the model for THIS turn only (llm-client sends them ahead
+  // of the message and stores just the message): the model conversation keeps
+  // what was said, never one stale facts snapshot per earlier turn.
+  const liveFacts = context;
   const message = [
-    context,
     `${turnSpeaker}: ${input.message}`,
     formatNewAttachmentsBlock(input.attachments?.facts ?? []),
   ]
@@ -2354,6 +2362,7 @@ export async function sendChatMessage(input: {
     let openaiRequest = buildOpenAiRequest({
       conversationId: conversation.openaiConversationId,
       message,
+      liveFacts,
       model: config.model,
       temperature: config.temperature,
       reasoningEffort: config.reasoningEffort,
@@ -2364,6 +2373,7 @@ export async function sendChatMessage(input: {
       turn = await client.createResponse({
         conversationId: conversation.openaiConversationId,
         message,
+        liveFacts,
         model: config.model,
         temperature: config.temperature,
         reasoningEffort: config.reasoningEffort,
@@ -2381,6 +2391,7 @@ export async function sendChatMessage(input: {
       openaiRequest = buildOpenAiRequest({
         conversationId: conversation.openaiConversationId,
         message,
+        liveFacts,
         model: config.model,
         temperature: config.temperature,
         reasoningEffort: config.reasoningEffort,
@@ -2390,6 +2401,7 @@ export async function sendChatMessage(input: {
       turn = await client.createResponse({
         conversationId: conversation.openaiConversationId,
         message,
+        liveFacts,
         model: config.model,
         temperature: config.temperature,
         reasoningEffort: config.reasoningEffort,

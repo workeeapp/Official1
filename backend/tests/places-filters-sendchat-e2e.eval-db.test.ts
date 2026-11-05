@@ -28,9 +28,11 @@ import { getActiveGenerationId } from "../src/services/gtfs-query.js";
 import { fetchPlacesFacts } from "../src/services/places.js";
 import * as whatsappSend from "../src/services/whatsapp-send.js";
 import * as reminderFire from "../src/services/reminder-fire.js";
+import { EXPECTED_GTFS_GENERATION_ID } from "./helpers/eval-live-provider-harness.js";
 
 /** Keep the validated MOT day-slice put (this suite must not touch GTFS). */
-const EXPECTED_GENERATION_ID = "22cebd10-1204-47ee-8a7e-80508fbe3e73";
+// Single source of truth for the validated day-slice id (eval-live-provider-harness).
+const EXPECTED_GENERATION_ID = EXPECTED_GTFS_GENERATION_ID;
 const QUERY = "בית קפה";
 const PLACE = "תל אביב";
 const MIN_RATING_EXACT = 4.1;

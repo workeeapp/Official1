@@ -186,7 +186,11 @@ describe("loadLiveFullEvalEnv (fail-closed, no product fallback)", () => {
       "utf8",
     );
     expect(src).toContain("WORKEE_EVAL_ENV_LOCKED");
-    expect(src).toContain("override: !evalEnvLocked");
+    // Locked eval env and NODE_ENV=test both keep process.env authoritative.
+    expect(src).toContain('const evalEnvLocked = process.env.WORKEE_EVAL_ENV_LOCKED === "1";');
+    expect(src).toMatch(/keepProcessEnv = evalEnvLocked \|\|/);
+    expect(src).toContain("override: !keepProcessEnv");
+    expect(src).not.toMatch(/override: true/);
   });
 });
 

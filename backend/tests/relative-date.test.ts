@@ -53,7 +53,7 @@ describe("relative-date", () => {
     expect(text).toContain(`current_date: ${jerusalemYmd(noonUtc)}`);
     expect(text).toContain(`current_time: ${jerusalemHm(noonUtc)}`);
     expect(text).toContain("Asia/Jerusalem");
-    expect(text).toContain("מטלות מתוזמנות");
+    expect(text).toContain("משימות מתוזמנות");
     expect(text).toContain("אני/שלי");
     expect(text).toContain("show_dump_from/to");
     expect(text).toContain("מה את");

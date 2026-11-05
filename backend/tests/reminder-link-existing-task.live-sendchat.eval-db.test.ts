@@ -6,7 +6,7 @@
  *   npm run test:eval-db -- tests/reminder-link-existing-task.live-sendchat.eval-db.test.ts
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseLlmReply, parseReplyMetadata } from "@workee/shared";
@@ -214,6 +214,15 @@ describe("link reminder to existing vet task (real model, eval-db)", () => {
           viewerName: "טל",
         }) ?? "";
 
+      // Evidence for flaky model runs (one JSON line per run; .tmp = untracked).
+      appendFileSync(
+        resolve(process.cwd(), ".tmp-reminder-link-reports.jsonl"),
+        JSON.stringify({
+          at: new Date().toISOString(),
+          spoken,
+          action: { lists: meta.lists ?? [], reminders: meta.reminders ?? [] },
+        }) + "\n",
+      );
       // eslint-disable-next-line no-console
       console.log(
         "REMINDER_LINK_EXISTING_EVAL_REPORT\n" +

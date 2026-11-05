@@ -32,6 +32,12 @@ export type LlmResponseInput = {
   textFormat?: LlmJsonSchemaFormat;
   /** Images (data or https URLs) the model looks at together with `message`. */
   imageUrls?: string[];
+  /**
+   * Live fact blocks for THIS turn only. Sent ahead of `message` but never kept
+   * in the model conversation (only `message` + the reply are stored), so each
+   * turn sees one current snapshot and the history prefix stays cacheable.
+   */
+  liveFacts?: string;
 };
 
 export interface LlmClient {
@@ -45,6 +51,15 @@ export function usesGpt6RequestRules(model: string): boolean {
   return model.trim().toLowerCase().startsWith("gpt-6-");
 }
 
+/** What the model reads as this turn's user text (live facts, then the message). */
+export function turnInputText(input: Pick<LlmResponseInput, "message" | "liveFacts">): string {
+  return [input.liveFacts?.trim() ?? "", input.message].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Request body as stored for debugging: the conversation id plus exactly the
+ * user text the model read this turn (live facts included).
+ */
 export function toResponsesCreateBody(
   input: LlmResponseInput,
 ): Record<string, unknown> {
@@ -52,9 +67,76 @@ export function toResponsesCreateBody(
     model: input.model,
     instructions: input.instructions,
     conversation: input.conversationId,
-    input: toResponsesInput(input.message, input.imageUrls),
+    input: toResponsesInput(turnInputText(input), input.imageUrls),
     truncation: "auto",
   };
+  return withModelSettings(body, input);
+}
+
+/**
+ * Stateless body for a live-facts turn: instructions + replayed history +
+ * this turn's facts and message. Not stored by OpenAI; the caller appends the
+ * plain message and the reply to the conversation itself.
+ */
+export function toStatelessResponsesBody(
+  input: LlmResponseInput,
+  history: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const current = toResponsesInput(turnInputText(input), input.imageUrls);
+  const body: Record<string, unknown> = {
+    model: input.model,
+    instructions: input.instructions,
+    input: [
+      ...history,
+      ...(typeof current === "string" ? [{ role: "user", content: current }] : current),
+    ],
+    store: false,
+    truncation: "auto",
+  };
+  return withModelSettings(body, input);
+}
+
+/**
+ * One stored conversation item → a Responses input message (deterministic, so
+ * the replayed history is a byte-identical prefix turn after turn).
+ */
+export function conversationItemToInput(
+  item: unknown,
+): Record<string, unknown> | null {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  const row = item as { type?: unknown; role?: unknown; content?: unknown };
+  if (row.type !== "message" || !Array.isArray(row.content)) {
+    return null;
+  }
+  const role = row.role === "assistant" ? "assistant" : row.role === "user" ? "user" : null;
+  if (!role) {
+    return null;
+  }
+  const texts: string[] = [];
+  const images: string[] = [];
+  for (const part of row.content as Array<Record<string, unknown>>) {
+    if (typeof part?.text === "string" && part.text) {
+      texts.push(part.text);
+    } else if (part?.type === "input_image" && typeof part.image_url === "string") {
+      images.push(part.image_url);
+    }
+  }
+  const text = texts.join("\n");
+  if (role === "assistant") {
+    return text ? { role, content: text } : null;
+  }
+  if (images.length === 0) {
+    return text ? { role, content: text } : null;
+  }
+  return (toResponsesInput(text, images) as Array<Record<string, unknown>>)[0] ?? null;
+}
+
+function withModelSettings(
+  body: Record<string, unknown>,
+  input: LlmResponseInput,
+): Record<string, unknown> {
   if (input.textFormat) {
     body.text = { format: input.textFormat };
   }
@@ -157,6 +239,9 @@ function createOpenAiClient(apiKey: string): LlmClient {
       return conversation.id;
     },
     async createResponse(input) {
+      if (input.liveFacts?.trim()) {
+        return createLiveFactsResponse(client, input);
+      }
       const response = await client.responses.create(
         toResponsesCreateBody(input) as Parameters<
           OpenAI["responses"]["create"]
@@ -175,6 +260,54 @@ function createOpenAiClient(apiKey: string): LlmClient {
       });
     },
   };
+}
+
+/** Replay the stored conversation (messages only, oldest first). */
+async function loadConversationHistory(
+  client: OpenAI,
+  conversationId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const history: Array<Record<string, unknown>> = [];
+  for await (const item of client.conversations.items.list(conversationId, {
+    order: "asc",
+    limit: 100,
+    include: ["message.input_image.image_url"],
+  })) {
+    const mapped = conversationItemToInput(item);
+    if (mapped) {
+      history.push(mapped);
+    }
+  }
+  return history;
+}
+
+/**
+ * Live-facts turn: history + (facts, message) statelessly, then store only the
+ * message and the reply. Facts never accumulate in the conversation, and the
+ * instructions + history prefix is identical to last turn's (prompt cache).
+ */
+export async function createLiveFactsResponse(
+  client: OpenAI,
+  input: LlmResponseInput,
+): Promise<LlmTurn> {
+  const history = await loadConversationHistory(client, input.conversationId);
+  const response = await client.responses.create(
+    toStatelessResponsesBody(input, history) as Parameters<
+      OpenAI["responses"]["create"]
+    >[0],
+  );
+  const raw = toPlainJson(response);
+  const reply = extractOutputText(response);
+  const stored = toResponsesInput(input.message, input.imageUrls);
+  await client.conversations.items.create(input.conversationId, {
+    items: [
+      typeof stored === "string"
+        ? { type: "message", role: "user", content: stored }
+        : { type: "message", ...(stored[0] as Record<string, unknown>) },
+      { type: "message", role: "assistant", content: reply },
+    ] as Parameters<OpenAI["conversations"]["items"]["create"]>[1]["items"],
+  });
+  return { reply, raw, usage: extractUsage(raw) };
 }
 
 function tokenCount(value: unknown): number {

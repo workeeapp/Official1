@@ -86,8 +86,28 @@ export function applySideFailureOverrides(input: {
   const base = input.resultBReplaced
     ? parseLlmReply(input.reply).response.trim()
     : "";
+  // One failure → one line. The same miss can reach the engine twice
+  // (shareMisses also feed ApplyResult apply_misses, so Result-B already wrote
+  // «לא מצאתי את הפריט ברשימה.»); never repeat an engine line already there.
+  const seen = new Set(
+    base
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  const extra: string[] = [];
+  for (const line of input.lines) {
+    const trimmed = line.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      extra.push(trimmed);
+    }
+  }
+  if (input.resultBReplaced && extra.length === 0) {
+    return input.reply;
+  }
   return input.setResponse(
     input.reply,
-    [base, ...input.lines].filter(Boolean).join("\n"),
+    [base, ...extra].filter(Boolean).join("\n"),
   );
 }

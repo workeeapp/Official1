@@ -50,7 +50,10 @@ describe("show_dump confirm sanitize (eval-db sendChat)", () => {
     }
   });
 
-  it("QA F: single invented numbered line stripped; engine dump + confirm kept", async () => {
+  // Reply contract (2026-11-04): the engine no longer reads/strips the model's
+  // text. Not free-writing inventory is the model's job (LLM.config «NUMBERED
+  // LINES & INDEX REPLIES» + live eval); the engine owns only the dump itself.
+  it("QA F: engine dump appended after the model confirm (model text untouched)", async () => {
     const marker = `לחם-QAF-${Date.now()}`;
     setLlmClientForTests(
       stubLlmReply({
@@ -87,8 +90,12 @@ describe("show_dump confirm sanitize (eval-db sendChat)", () => {
     expect(spoken).toMatch(/🛒|קניות:/);
     expect(spoken).toContain(marker);
     expect(spoken).toMatch(/הוספתי/);
-    expect(spoken).not.toContain("פריט-בדוי-xyz");
-    expect(spoken).not.toContain("שהמצאתי");
+    // The engine dump is the live list (DB truth) — never the invented row.
+    const dumpStart = spoken.search(/🛒|קניות:/);
+    expect(dumpStart).toBeGreaterThan(0);
+    expect(spoken.slice(dumpStart)).toContain(marker);
+    expect(spoken.slice(dumpStart)).not.toContain("פריט-בדוי-xyz");
+    expect(blob).not.toContain("פריט-בדוי-xyz");
   }, 60_000);
 
   it("7. failed mutation still Stage-2B full replace (no invented leftover)", async () => {

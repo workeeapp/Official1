@@ -43,6 +43,8 @@ vi.mock("../src/database/prisma.js", () => ({
     },
     team: {
       findUnique: teamFindUnique,
+      // ensureTeamForUser reads the personal team with findFirst (b865de3).
+      findFirst: teamFindUnique,
       create: teamCreate,
     },
     employee: {

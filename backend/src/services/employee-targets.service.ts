@@ -1122,13 +1122,24 @@ export function planTargetedActions(input: {
       input.actor.id,
       input.sharedLists ?? [],
     );
-    const hasExplicitTargetNames = (normalizedList.targets ?? []).some(
-      (name) => String(name ?? "").trim().length > 0,
+    // The model owns share intent: targets naming someone OUTSIDE the shell's
+    // current audience (DB owner + visible_to + speaker) → item co-share /
+    // assign path below (never rewrite shell). Targets that only restate who
+    // already has the list carry no share change → mutate on the shell.
+    const shellAudience = new Set([
+      input.actor.id,
+      ...existingListMatches.flatMap((row) => [row.ownerId, ...row.visibleTo]),
+    ]);
+    const targetsAddSomeone = namedTargets(normalizedList.targets ?? []).some(
+      (target) => !shellAudience.has(target.id),
     );
-    // Explicit targets → item co-share / assign path below (never rewrite shell).
-    // Empty targets on a known shell → inherit owner book + shell visibility.
+    // An add with no rows on an existing shell carries nothing to co-share or
+    // assign (no-op) — keep it on the shell path so no partner is notified.
+    const emptyAddOnExistingShell =
+      normalizedList.action === "add" && normalizedList.items.length === 0;
     const useShellMatchPath =
-      existingListMatches.length > 0 && !hasExplicitTargetNames;
+      existingListMatches.length > 0 &&
+      (!targetsAddSomeone || emptyAddOnExistingShell);
     if (useShellMatchPath) {
       // Removes/updates must hit every duplicate shared list with that name
       // (legacy bugs created one copy per partner). Adds go to one canonical owner.

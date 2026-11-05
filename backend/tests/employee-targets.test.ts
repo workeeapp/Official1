@@ -2877,10 +2877,10 @@ describe("employee targets", () => {
       },
     });
     expect(plan.applications.map((row) => row.employeeId)).toEqual([tal.id]);
-    expect(plan.applications[0]?.visibility.scope).toBe("shared");
-    expect(plan.applications[0]?.visibility.visibleTo.sort()).toEqual(
-      [tal.id, amit.id].sort(),
-    );
+    // bb64f96: empty targets on a shared shell inherit — partners see the row via
+    // list.scope; item.visibleTo stays owner-only so shell unshare revokes cleanly.
+    expect(plan.applications[0]?.visibility.scope).toBe("personal");
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual([tal.id]);
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
     expect(
       fallbackNotificationText(amit, plan.notifications[0]!.metadata, {
@@ -2963,7 +2963,9 @@ describe("employee targets", () => {
     expect(plan.applications[0]?.employeeId).toBe(amit.id);
   });
 
-  it("does not notify partners when updating a personal custom list even if LLM targets include them", () => {
+  // Model owns share intent (it sees live shared_with): targets naming someone
+  // outside the list's DB audience = share that row with them.
+  it("model targets a teammate on a personal custom list → co-share that row + notify", () => {
     const plan = planTargetedActions({
       actor: tal,
       employees,
@@ -2982,7 +2984,6 @@ describe("employee targets", () => {
             action: "update",
             listType: "custom",
             listName: "שיעורי נהיגה של מאיה",
-            // Model wrongly re-states teammates as targets.
             targets: ["טל", "עמית"],
             items: [{ שיעור: "שיעור 5" }],
           },
@@ -2991,9 +2992,11 @@ describe("employee targets", () => {
     });
     expect(plan.applications).toHaveLength(1);
     expect(plan.applications[0]?.employeeId).toBe(tal.id);
-    expect(plan.applications[0]?.visibility.scope).toBe("personal");
-    expect(plan.applications[0]?.visibility.visibleTo).toEqual([tal.id]);
-    expect(plan.notifications).toHaveLength(0);
+    expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    expect([...plan.applications[0]!.visibility.visibleTo].sort()).toEqual(
+      [tal.id, amit.id].sort(),
+    );
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
   });
 
   it("does not match an unrelated shared list by substring name", () => {
@@ -3027,11 +3030,17 @@ describe("employee targets", () => {
         ],
       },
     });
-    expect(plan.applications[0]?.visibility.scope).toBe("personal");
-    expect(plan.notifications.map((row) => row.employee.id)).toEqual([]);
+    // Exact list only (never the shared «שיעורי» by substring); the model's
+    // targets add עמית to that row → co-share on Tal's book.
+    expect(plan.applications).toHaveLength(1);
+    expect(plan.applications[0]?.employeeId).toBe(tal.id);
+    expect(plan.applications[0]?.metadata.lists[0]?.listName).toBe(
+      "שיעורי נהיגה של מאיה",
+    );
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([amit.id]);
   });
 
-  it("notifies only DB partners of a shared list, ignoring extra LLM targets", () => {
+  it("model adds a new person to a shared-list row → that person is shared + notified too", () => {
     const plan = planTargetedActions({
       actor: tal,
       employees,
@@ -3057,7 +3066,7 @@ describe("employee targets", () => {
       },
     });
     expect(plan.notifications.map((row) => row.employee.id).sort()).toEqual(
-      [amit.id].sort(),
+      [amit.id, shani.id].sort(),
     );
   });
 
@@ -3568,7 +3577,16 @@ describe("employee targets", () => {
         employees,
         amit.id,
       ),
-    ).toEqual([{ phone: "0502222222", text: "היי מהמטה", label: "0502222222" }]);
+    ).toEqual([
+      {
+        phone: "0502222222",
+        text: "היי מהמטה",
+        label: "0502222222",
+        // ae1a483: cold invite — expects_reply defaults true; no ask summary.
+        expectsReply: true,
+        askSummary: "",
+      },
+    ]);
   });
 
   it("does not send a phone target immediately when the message is scheduled for later", () => {
@@ -4264,7 +4282,9 @@ describe("employee targets", () => {
       });
       expect(plan.applications).toHaveLength(1);
       expect(plan.applications[0]?.visibility.itemOnly).toBeUndefined();
-      expect(plan.applications[0]?.visibility.scope).toBe("shared");
+      // bb64f96 inherit: list path, owner-only item visibility (list.scope shares it).
+      expect(plan.applications[0]?.employeeId).toBe(tal.id);
+      expect(plan.applications[0]?.visibility.scope).toBe("personal");
     });
   });
 
@@ -4351,9 +4371,11 @@ describe("employee targets", () => {
       },
     });
     expect(plan.applications).toHaveLength(1);
+    // Targets only restate the list's audience → no share change: edit stays on
+    // the owner's shell (bb64f96 inherit: item visibility owner-only; list.scope shares).
     expect(plan.applications[0]).toMatchObject({
       employeeId: tal.id,
-      visibility: { scope: "shared", visibleTo: [tal.id, amit.id] },
+      visibility: { scope: "personal", visibleTo: [tal.id] },
     });
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
   });

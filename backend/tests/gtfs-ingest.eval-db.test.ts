@@ -16,24 +16,33 @@ import {
 } from "../src/services/gtfs-ingest.js";
 import { getActiveGenerationId } from "../src/services/gtfs-query.js";
 import { buildMiniGtfsFeed } from "./gtfs-fixture.js";
+import {
+  deleteTestGtfsGenerations,
+  restoreGtfsGenerations,
+  snapshotGtfsGenerations,
+  type GtfsGenerationSnapshot,
+} from "./helpers/gtfs-preserve.js";
 
 const prisma = new PrismaClient();
+let preExisting: GtfsGenerationSnapshot = [];
 
 describe("gtfs ingest generation safety (eval-db)", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+    // The validated MOT day-slice (and anything else) must survive this file.
+    preExisting = await snapshotGtfsGenerations(prisma);
     expect(process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND).toBe("1");
     expect(process.env.WORKEE_DISABLE_REMINDER_FIRE).toBe("1");
   });
 
   beforeEach(async () => {
     assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
-    // CASCADE deletes child GTFS rows.
-    await prisma.gtfsFeedGeneration.deleteMany({});
+    // CASCADE deletes child GTFS rows — ONLY generations this file created.
+    await deleteTestGtfsGenerations(prisma, preExisting);
   });
 
   afterAll(async () => {
-    await prisma.gtfsFeedGeneration.deleteMany({}).catch(() => undefined);
+    await restoreGtfsGenerations(prisma, preExisting).catch(() => undefined);
     await prisma.$disconnect();
   });
 

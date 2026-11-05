@@ -51,4 +51,17 @@ describe("formatSpeakerAddressContext", () => {
     // Still keeps the gender ask for turns that need conjugation only.
     expect(unknown).toContain("לפנות אליך בלשון זכר או נקבה");
   });
+
+  // Regression (eval-db reminder-link-existing-task, 2026-11-04): once the
+  // corrupted Hebrew was restored, an unknown-gender speaker asking «תזכירי לי
+  // מחר ב־09:00 על התור לווטרינר» got «לפנות אליך בלשון זכר או נקבה?» and NO
+  // action. The gender ask may only FOLLOW a done action — never replace it.
+  it("unknown gender never blocks ANY complete action (reminders too); ask comes last", () => {
+    const unknown = formatSpeakerAddressContext(null);
+    expect(unknown).toMatch(/FIRST/);
+    expect(unknown).toMatch(/LAST responses entry/);
+    expect(unknown).toContain("reminders");
+    expect(unknown).toContain("תזכירי לי מחר ב־09:00 על התור לווטרינר");
+    expect(unknown).toMatch(/FORBIDDEN asking about the request itself/);
+  });
 });

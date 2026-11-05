@@ -133,7 +133,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
   });
 
   it(
-    "already-shared second turn: full pipeline corrects spoken reply + keeps show on bubble",
+    "already-shared second turn: no DB change, model reply kept + show on bubble",
     async () => {
     account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
     const lucyId = await ensureLucy(account);
@@ -184,7 +184,10 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
       rowAfterFirst?.updatedAt?.getTime(),
     );
     const spoken = parseLlmReply(second.reply).response.trim();
-    expect(spoken).toBe("הפריטים כבר משותפים — לא נוסף שיתוף חדש.");
+    // Reply contract (2026-11-04): already-shared is not an apply failure — the
+    // requested state holds, so the engine keeps the model's reply. Saying
+    // «כבר משותף» is the model's job (it sees shared_with in live facts).
+    expect(spoken).toBe("שיתפתי את החלב עם עמית.");
     const bubbles = readSpokenBubbles(JSON.parse(second.reply));
     expect(bubbles?.[0]?.buttons?.length ?? 0).toBeGreaterThan(0);
   },
