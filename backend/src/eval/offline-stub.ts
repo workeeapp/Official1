@@ -305,6 +305,26 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
     case "live_domain_only":
       // Domain object is filled by the matching *_action constraint.
       return "";
+    case "lists_list_name_includes":
+      meta.lists.push({
+        action: c.action,
+        list_type: c.listType ?? "custom",
+        list_name: c.listNameIncludes,
+        items: [{ שם: "פריט" }],
+        targets: [],
+      });
+      return "עדכנתי";
+    case "lists_targets_include":
+      meta.lists.push({
+        action: c.action,
+        list_type: c.listType ?? "tasks",
+        list_name: "",
+        items: [{ "שם משימה": "משימה" }],
+        targets: [c.targetIncludes],
+      });
+      return "עדכנתי";
+    case "response_max_chars":
+      return "";
     case "show_icon_not_in":
       (meta as unknown as { evalShowIcon?: string }).evalShowIcon = "✅";
       return "";

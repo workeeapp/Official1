@@ -1901,6 +1901,1465 @@
           ]
         }
       ]
+    },
+    {
+      "id": "so-timetable-offer-then-create",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "timetable",
+        "multi-turn"
+      ],
+      "description": "Timetable mentioned (no request) → offer only; «כן» → custom list with the real rows",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "לנועה יש ביום ראשון מתמטיקה בשמונה, ביום שני ביולוגיה בעשר וביום שלישי אנגלית בתשע",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "רשימה",
+                "מערכת"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true,
+              "itemTextIncludes": "ביולוגיה"
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-exam-calendar-offer",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "exams",
+        "single-turn"
+      ],
+      "description": "Exam dates mentioned → offer a structure, no save",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "יש לי מבחן במתמטיקה ב־15.12, בביולוגיה ב־20.12 ובהיסטוריה ב־28.12",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מבחנ"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-cycle-consent-gate",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "health",
+        "sensitive",
+        "multi-turn"
+      ],
+      "description": "Cycle mentioned → no offer, nothing saved; interest in tracking → one offer, still nothing saved; explicit consent → create",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "המחזור שלי התחיל היום, בפעם הקודמת זה היה ב־5 באוקטובר",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "הייתי רוצה לעקוב אחרי זה איכשהו",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-expenses-offer-then-create",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "expenses",
+        "multi-turn"
+      ],
+      "description": "Shared expenses mentioned → offer; «כן» → custom list with the real amounts",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני ודני מתחלקים בהוצאות של הדירה. החודש אני שילמתי 300 על חשמל ודני שילם 150 על אינטרנט",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true,
+              "itemTextIncludes": "חשמל"
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-travel-offer",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "travel",
+        "single-turn"
+      ],
+      "description": "One-time multi-step trip plan → offer a structure; no custom list created unasked",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "בדצמבר אנחנו טסים לרומא לחמישה ימים עם הילדים, יש עוד המון דברים לסגור",
+          "constraints": [
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-household-share-offer",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "household",
+        "share",
+        "multi-turn"
+      ],
+      "description": "Household chore split between people who coordinate → offer; after create, suggest sharing (no share without consent)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-shop-shared",
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "מיכל",
+              "עמית"
+            ],
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "אני, מיכל ועמית מתחלקים בניקיון: אני על הכלים, מיכל על הכביסה ועמית על הזבל",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        },
+        {
+          "utterance": "כן",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true,
+              "itemTextIncludes": "כביסה"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "לשתף",
+                "שיתוף",
+                "משותפת",
+                "אשתף"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-names-no-share",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "share",
+        "single-turn"
+      ],
+      "description": "Explicit create with people's names (doctors) → create directly, no offer step, no share suggestion",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תפתחי לי רשימה של הרופאים של הילדים: ד״ר כהן רופא ילדים, ד״ר לוי רופא שיניים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true,
+              "itemTextIncludes": "כהן"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לשתף"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-explicit-create-direct",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "expenses",
+        "single-turn"
+      ],
+      "description": "Explicit create request with columns → create now (no offer round-trip)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תפתחי לי רשימת הוצאות לשיפוץ עם עמודות סכום ותאריך",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "custom",
+              "requireNonEmptyListName": true
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-chat-no-offer",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Venting / small talk → no save, no list offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "היה לי יום מתיש היום בעבודה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה"
+              ]
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-existing-list-no-reoffer",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "timetable",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Fitting list already exists → use it (or offer adding to it); never propose a new list",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-timetable",
+            "list_type": "custom",
+            "list_name": "מערכת שעות נועה",
+            "title_field": "מקצוע",
+            "columns": [
+              "מקצוע",
+              "יום",
+              "שעה"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-math",
+                "מקצוע": "מתמטיקה",
+                "יום": "ראשון",
+                "שעה": "08:00"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "ביום רביעי יש לנועה היסטוריה באחת עשרה",
+          "constraints": [
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מערכת"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה חדשה",
+                "לפתוח רשימה",
+                "אפתח רשימה",
+                "ליצור רשימה"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-gathering-stays-complex-event",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "event",
+        "single-turn"
+      ],
+      "description": "Gathering with organize intent → existing COMPLEX EVENTS host (no parallel standalone list mechanism)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תעזרי לי לארגן ברביקיו ביום שישי, דני מביא בשר ושרה סלטים",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "ברביקיו"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-retrieval-who-brings",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "retrieval",
+        "single-turn"
+      ],
+      "description": "Question about an existing list's contents → dump of the matching row from that list",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-bring",
+            "list_type": "custom",
+            "list_name": "מה מביאים · ערב פוקר",
+            "title_field": "פריט",
+            "columns": [
+              "פריט",
+              "אחראי"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-drinks",
+                "פריט": "שתייה",
+                "אחראי": "דניאל"
+              },
+              {
+                "item_id": "eval-item-so-snacks",
+                "פריט": "חטיפים",
+                "אחראי": "שרה"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מי מביא את השתייה לערב הפוקר?",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "show_dump_ids_includes",
+              "ids": [
+                "eval-item-so-drinks"
+              ]
+            },
+            {
+              "type": "show_dump_ids_excludes",
+              "ids": [
+                "eval-item-so-snacks"
+              ]
+            }
+          ]
+        }
+      ],
+      "tag": "happy"
+    },
+    {
+      "id": "so-declined-automated-return",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "continuity",
+        "timetable",
+        "multi-turn"
+      ],
+      "description": "Offer → declined → automated Lucy message → speaker returns to the topic: no repeat offer, nothing saved",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "לנועה יש ביום ראשון מתמטיקה בשמונה, ביום שני ביולוגיה בעשר וביום שלישי אנגלית בתשע",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "לא צריך, תודה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ],
+          "injectAssistantAfter": "⏰ תזכורת: לשתות מים 💧"
+        },
+        {
+          "utterance": "אגב, ביום רביעי יש לנועה גם היסטוריה בשתים עשרה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "לרכז",
+                "לסדר לך"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-declined-health-not-reoffered",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "continuity",
+        "health",
+        "sensitive",
+        "multi-turn"
+      ],
+      "description": "Health tracking offer declined → automated message → more cycle info: no repeat offer, nothing saved",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני רוצה לעקוב אחרי המחזור שלי, תמיד שוכחת מתי היה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        },
+        {
+          "utterance": "בעצם לא, עזבי",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ],
+          "injectAssistantAfter": "בוקר טוב! ☀️ יש לך היום 2 משימות."
+        },
+        {
+          "utterance": "אגב היום זה התחיל שוב",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-multi-list-meaning-not-recency",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "multi-list",
+        "timetable",
+        "multi-turn"
+      ],
+      "description": "Two timetables; the other child was just mentioned (non-durable anecdote); add goes to the named child's list",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-tt-noa",
+            "list_type": "custom",
+            "list_name": "מערכת שעות נועה",
+            "title_field": "מקצוע",
+            "columns": [
+              "מקצוע",
+              "יום",
+              "שעה"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-noa-math",
+                "מקצוע": "מתמטיקה",
+                "יום": "ראשון",
+                "שעה": "08:00"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-so-tt-itai",
+            "list_type": "custom",
+            "list_name": "מערכת שעות איתי",
+            "title_field": "מקצוע",
+            "columns": [
+              "מקצוע",
+              "יום",
+              "שעה"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-itai-art",
+                "מקצוע": "אומנות",
+                "יום": "שני",
+                "שעה": "10:00"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "איתי היה היום ממש עייף אחרי הטיול",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "תוסיפי לנועה ביום רביעי היסטוריה באחת עשרה",
+          "constraints": [
+            {
+              "type": "lists_list_name_includes",
+              "action": "add",
+              "listType": "custom",
+              "listNameIncludes": "נועה"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-multi-list-by-content",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "multi-list",
+        "expenses",
+        "multi-turn"
+      ],
+      "description": "Two expense lists; the other was just discussed; the item's meaning (renovation) picks the list",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-exp-home",
+            "list_type": "custom",
+            "list_name": "הוצאות דירה",
+            "title_field": "הוצאה",
+            "columns": [
+              "הוצאה",
+              "סכום"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-exp-arnona",
+                "הוצאה": "ארנונה",
+                "סכום": "600"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-so-exp-reno",
+            "list_type": "custom",
+            "list_name": "הוצאות שיפוץ המטבח",
+            "title_field": "הוצאה",
+            "columns": [
+              "הוצאה",
+              "סכום"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-exp-tiles",
+                "הוצאה": "אריחים",
+                "סכום": "4500"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "את הוצאות הדירה אני ודני מחלקים חצי חצי",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        },
+        {
+          "utterance": "תרשמי שילמתי 3000 לנגר על הארונות החדשים במטבח",
+          "constraints": [
+            {
+              "type": "lists_list_name_includes",
+              "action": "add",
+              "listType": "custom",
+              "listNameIncludes": "שיפוץ"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-multi-list-ambiguous-asks",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "multi-list",
+        "event",
+        "single-turn"
+      ],
+      "description": "Two equally plausible bring-lists, no context → ask which; no save",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-bring-poker",
+            "list_type": "custom",
+            "list_name": "מה מביאים · ערב פוקר",
+            "title_field": "פריט",
+            "columns": [
+              "פריט",
+              "אחראי"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-bp-chips",
+                "פריט": "חטיפים",
+                "אחראי": "שרה"
+              }
+            ]
+          },
+          {
+            "list_id": "eval-list-so-bring-bbq",
+            "list_type": "custom",
+            "list_name": "מה מביאים · ברביקיו",
+            "title_field": "פריט",
+            "columns": [
+              "פריט",
+              "אחראי"
+            ],
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-so-bb-meat",
+                "פריט": "בשר",
+                "אחראי": "דני"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תרשמי שיוסי מביא קרח",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_all",
+              "needles": [
+                "פוקר",
+                "ברביקיו"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-pos-babysitter-payments",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "expenses",
+        "single-turn"
+      ],
+      "description": "Recurring payments they lose track of → a relevant, concise offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני משלמת לבייביסיטר אחרי כל ערב ותמיד מתבלבלת כמה כבר שילמתי החודש",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "תשלומ",
+                "בייביסיטר",
+                "שילמת"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-pos-moving",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "household",
+        "single-turn"
+      ],
+      "description": "One-time plan with many steps → relevant offer, no custom list unasked",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "בעוד חודש אנחנו עוברים דירה עם שלושה ילדים, יש מלא דברים לתאם ואני כבר מאבדת את הראש",
+          "constraints": [
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מעבר",
+                "דירה",
+                "הובלה"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 450
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "|---",
+                "| ---"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-neg-one-off-fact",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "negative",
+        "single-turn"
+      ],
+      "description": "One-off fact (a single expense) → no offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "החניה בקניון עלתה לי היום 25 שקל, איזה שוד",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-neg-general-question",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "negative",
+        "exams",
+        "single-turn"
+      ],
+      "description": "General-knowledge question on a list-prone topic → answer only, no offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "מה ההבדל בין מבחן מתכונת לבגרות?",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-neg-single-meeting",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Single appointment → existing meeting/task path; no new list or list offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "ביום ראשון יש לי אסיפת הורים בשש בערב",
+          "constraints": [
+            {
+              "type": "no_lists_add",
+              "listType": "custom"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה חדשה",
+                "לפתוח רשימה",
+                "רשימה ייעודית",
+                "מעקב"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-neg-health-mention",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "negative",
+        "health",
+        "sensitive",
+        "single-turn"
+      ],
+      "description": "Symptom mentioned (no tracking interest) → no tracking offer, nothing saved",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "יש לי כאב ראש כבר יומיים",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-q-neg-anecdote",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "quality",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Anecdote with people and items → no offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אתמול אצל אמא דני הביא יין ושרה הכינה עוגה, היה ממש כיף",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשימה",
+                "מעקב",
+                "לעקוב",
+                "טבלה"
+              ]
+            },
+            {
+              "type": "filing_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-med-record-not-saved",
+      "tag": "happy",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "health",
+        "sensitive",
+        "medication",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Medication + dosage stated as a fact → sensitive record: nothing saved (no filing / list / reminder), no tracking offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני לוקח אלטרוקסין 50 מק״ג כל בוקר, הרופא העלה לי את המינון בחודש שעבר",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "שמרתי",
+                "תייקתי",
+                "רשמתי",
+                "לעקוב",
+                "מעקב"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-med-practical-buy-still-saves",
+      "tag": "happy",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "health",
+        "medication",
+        "single-turn"
+      ],
+      "description": "Practical medication action (buy) → existing shopping implicit save unchanged",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "נגמר לי האקמול, צריך לקנות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "אקמול"
+            },
+            {
+              "type": "list_ops_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "so-standing-arrangement-no-tasks",
+      "tag": "happy",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "household",
+        "standing-arrangement",
+        "negative",
+        "single-turn"
+      ],
+      "description": "Standing division of responsibilities → information: no tasks, no assignment to others (offer allowed, not required)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-shop-shared",
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "מיכל",
+              "עמית"
+            ],
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "אצלנו בבית כל אחד אחראי על משהו קבוע: אני מבשל, מיכל מקפלת כביסה ועמית שוטף את הרצפה",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "רשמתי",
+                "הוספתי"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "\"assigned_by\"",
+              "\"owner\":\"מיכל\"",
+              "\"owner\":\"עמית\""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "so-explicit-assign-still-works",
+      "tag": "happy",
+      "tags": [
+        "structured-offer",
+        "full-live",
+        "household",
+        "standing-arrangement",
+        "assign",
+        "single-turn"
+      ],
+      "description": "Counter-scenario: concrete new need for a specific person → task assigned to Michal, as today",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-so-shop-shared",
+            "list_type": "shopping",
+            "list_name": "",
+            "owner": "טל",
+            "scope": "shared",
+            "shared_with": [
+              "מיכל",
+              "עמית"
+            ],
+            "items": []
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מיכל צריכה לעשות כביסה היום",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "כביסה"
+            },
+            {
+              "type": "list_ops_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מיכל"
+              ]
+            },
+            {
+              "type": "lists_targets_include",
+              "action": "add",
+              "listType": "tasks",
+              "targetIncludes": "מיכל"
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "לעשות כביסה",
+              "\"owner\":\"מיכל\"",
+              "\"assigned_by\":\"טל\""
+            ]
+          }
+        }
+      ]
     }
   ]
 }

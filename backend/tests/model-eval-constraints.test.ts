@@ -1735,6 +1735,39 @@ describe("Phase 4 constraint checkers", () => {
       ).toBe(false);
     });
 
+    it("lists_list_name_includes checks the targeted list by name", () => {
+      const c: ModelEvalConstraint[] = [
+        { type: "lists_list_name_includes", action: "add", listType: "custom", listNameIncludes: "נועה" },
+      ];
+      const row = (name: string) =>
+        meta({
+          lists: [{ action: "add", listType: "custom", listName: name, items: [{ שם: "היסטוריה" }], targets: [] }],
+        } as unknown as Partial<LlmMetadata>);
+      expect(evaluateConstraints(c, row("מערכת שעות נועה"), "").ok).toBe(true);
+      expect(evaluateConstraints(c, row("מערכת שעות איתי"), "").ok).toBe(false);
+      expect(evaluateConstraints(c, meta({}), "").ok).toBe(false);
+    });
+
+    it("lists_targets_include checks targets on the list action", () => {
+      const c: ModelEvalConstraint[] = [
+        { type: "lists_targets_include", action: "add", listType: "tasks", targetIncludes: "מיכל" },
+      ];
+      const row = (targets: string[]) =>
+        meta({
+          lists: [{ action: "add", listType: "tasks", listName: "", items: [{ "שם משימה": "לעשות כביסה" }], targets }],
+        } as unknown as Partial<LlmMetadata>);
+      expect(evaluateConstraints(c, row(["מיכל"]), "").ok).toBe(true);
+      expect(evaluateConstraints(c, row([]), "").ok).toBe(false);
+      expect(evaluateConstraints(c, row(["טל"]), "").ok).toBe(false);
+      expect(evaluateConstraints(c, meta({}), "").ok).toBe(false);
+    });
+
+    it("response_max_chars bounds the spoken reply", () => {
+      const c: ModelEvalConstraint[] = [{ type: "response_max_chars", maxChars: 10 }];
+      expect(evaluateConstraints(c, meta({}), "קצר").ok).toBe(true);
+      expect(evaluateConstraints(c, meta({}), "ארוך מדי בהרבה מעשרה תווים").ok).toBe(false);
+    });
+
     it("show_icon_not_in checks the runner-captured show_icon", () => {
       const c: ModelEvalConstraint[] = [
         { type: "show_icon_not_in", values: ["👍"] },

@@ -510,6 +510,13 @@ export async function seedSetup(
           employeeId,
           listType: list.list_type,
           name: listName,
+          // Custom shells: seed declared columns + title column when authored.
+          ...(list.list_type === "custom"
+            ? {
+                titleField: String(list.title_field ?? ""),
+                columns: Array.isArray(list.columns) ? list.columns : [],
+              }
+            : {}),
           scope: listShared ? "shared" : "personal",
           visibleTo: listVisibleTo,
         },
@@ -545,7 +552,12 @@ export async function seedSetup(
           ? ["שם פריט", "name"]
           : list.list_type === "tasks"
             ? ["שם משימה", "name"]
-            : ["שם", "name", "title"];
+            : [
+                ...(list.title_field ? [String(list.title_field)] : []),
+                "שם",
+                "name",
+                "title",
+              ];
       let itemKey = "";
       for (const key of titleKeys) {
         const val = item[key];

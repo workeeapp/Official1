@@ -182,6 +182,22 @@ export type ModelEvalConstraint =
   | { type: "live_domain_only"; domain: LiveDomainKey }
   /** No live board domain ACTION (clarify / ASK turn before emitting). */
   | { type: "live_domains_empty" }
+  /** Some lists row (action/listType) targets a list whose list_name contains this text (pick-by-meaning checks). */
+  | {
+      type: "lists_list_name_includes";
+      action: string;
+      listType?: string;
+      listNameIncludes: string;
+    }
+  /** Some lists row (action/listType) carries a target matching targetIncludes (assign / co-share by targets). */
+  | {
+      type: "lists_targets_include";
+      action: string;
+      listType?: string;
+      targetIncludes: string;
+    }
+  /** Spoken reply (all responses joined) stays within maxChars — offer conciseness. */
+  | { type: "response_max_chars"; maxChars: number }
   /** metadata.show_icon must be set and not one of these (eval-only: runner sets meta.evalShowIcon). */
   | { type: "show_icon_not_in"; values: string[] }
   | {
@@ -1037,6 +1053,40 @@ export function checkConstraint(
         return `expected only live domain ${constraint.domain}, got [${active.join(",")}]`;
       }
       return null;
+    }
+    case "lists_list_name_includes": {
+      const rows = (meta.lists ?? []).filter(
+        (row) =>
+          row.action === constraint.action &&
+          (!constraint.listType || row.listType === constraint.listType),
+      );
+      if (rows.length === 0) {
+        return `expected lists.${constraint.action}${constraint.listType ? `/${constraint.listType}` : ""}`;
+      }
+      const names = rows.map((row) => readListActionName(row));
+      return names.some((name) => includesFold(name, constraint.listNameIncludes))
+        ? null
+        : `expected list_name ~${constraint.listNameIncludes}, got [${names.join(" | ")}]`;
+    }
+    case "lists_targets_include": {
+      const rows = (meta.lists ?? []).filter(
+        (row) =>
+          row.action === constraint.action &&
+          (!constraint.listType || row.listType === constraint.listType),
+      );
+      if (rows.length === 0) {
+        return `expected lists.${constraint.action}${constraint.listType ? `/${constraint.listType}` : ""}`;
+      }
+      const targets = rows.flatMap((row) => (row.targets ?? []).map(String));
+      return targets.some((t) => includesFold(t, constraint.targetIncludes))
+        ? null
+        : `expected lists target~${constraint.targetIncludes}, got [${targets.join(",")}]`;
+    }
+    case "response_max_chars": {
+      const length = response.trim().length;
+      return length <= constraint.maxChars
+        ? null
+        : `response ${length} chars > ${constraint.maxChars}`;
     }
     case "show_icon_not_in": {
       const icon = (meta as unknown as { evalShowIcon?: string | null })

@@ -97,6 +97,11 @@ export async function runLiveFullCase(
         instructions: prompt.instructions,
         textFormat: config.responseFormat,
       });
+      const inject =
+        suiteCase.turns[input.turnIndex]?.injectAssistantAfter?.trim();
+      if (inject) {
+        await client.appendAssistantMessage?.(conversationId, inject);
+      }
       // Capture raw lists/filing BEFORE parse/normalize (eval diagnostic only).
       const rawActionDiagnostic = extractEvalRawActionDiagnostic(turn.reply);
       const parsed = parseLlmReply(turn.reply);

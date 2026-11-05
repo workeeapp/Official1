@@ -178,6 +178,12 @@ export interface LiveFullCorpusTurn {
   utterance: string;
   constraints?: ModelEvalConstraint[];
   stateAfter?: RegressionStateAssert;
+  /**
+   * After this turn's reply, append assistant text to the model conversation
+   * (automated Lucy message — reminder fire / raise). Same path as production
+   * rememberInModelConversation; no extra model call, no WhatsApp.
+   */
+  injectAssistantAfter?: string;
 }
 
 export interface LiveFullCorpusCase {
