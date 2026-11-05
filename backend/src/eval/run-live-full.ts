@@ -101,7 +101,10 @@ export async function runLiveFullCase(
       const rawActionDiagnostic = extractEvalRawActionDiagnostic(turn.reply);
       const parsed = parseLlmReply(turn.reply);
       return {
-        metadata: parseReplyMetadata(turn.reply),
+        // evalShowIcon: eval-only carrier for show_icon constraints.
+        metadata: Object.assign(parseReplyMetadata(turn.reply), {
+          evalShowIcon: parsed.showIcon ?? null,
+        }),
         response: parsed.response,
         rawActionDiagnostic,
       };

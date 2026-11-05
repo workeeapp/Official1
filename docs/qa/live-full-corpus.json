@@ -1821,6 +1821,86 @@
           }
         }
       ]
+    },
+    {
+      "id": "full-weather-venue-no-location",
+      "tag": "happy",
+      "tags": [
+        "weather",
+        "venue",
+        "single-turn",
+        "full-live",
+        "reply-contract"
+      ],
+      "description": "Weather near a venue known only from a saved task with no address: no live ACTION; say it's saved without location and ask for 📍/address (no vague «אזור רחב»)",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-chakra",
+                "שם מטלה": "הזמנה למסעדת צ׳אקרה ל־4 סועדים"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "מה מזג האוויר באזור של מסעדת צ'אקרה?",
+          "constraints": [
+            {
+              "type": "live_domains_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מיקום",
+                "כתובת"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "אזור רחב"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-weather-topical-icon",
+      "tag": "happy",
+      "tags": [
+        "weather",
+        "show-icon",
+        "single-turn",
+        "full-live"
+      ],
+      "description": "Weather ask: show_icon is a topical emoji, not the 👍 fallback",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "מה מזג האוויר מחר בחיפה?",
+          "constraints": [
+            {
+              "type": "live_domain_only",
+              "domain": "weather"
+            },
+            {
+              "type": "show_icon_not_in",
+              "values": [
+                "👍"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

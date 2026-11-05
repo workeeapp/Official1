@@ -305,6 +305,9 @@ function applyConstraint(meta: StubMeta, c: ModelEvalConstraint): string {
     case "live_domain_only":
       // Domain object is filled by the matching *_action constraint.
       return "";
+    case "show_icon_not_in":
+      (meta as unknown as { evalShowIcon?: string }).evalShowIcon = "✅";
+      return "";
     case "live_domains_empty":
       meta.weather = null;
       meta.market = null;

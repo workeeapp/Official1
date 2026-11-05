@@ -1735,6 +1735,20 @@ describe("Phase 4 constraint checkers", () => {
       ).toBe(false);
     });
 
+    it("show_icon_not_in checks the runner-captured show_icon", () => {
+      const c: ModelEvalConstraint[] = [
+        { type: "show_icon_not_in", values: ["👍"] },
+      ];
+      const withIcon = (icon: string | null) =>
+        Object.assign(meta({}), { evalShowIcon: icon });
+      expect(evaluateConstraints(c, withIcon("🌧️"), "").ok).toBe(true);
+      expect(evaluateConstraints(c, withIcon("👍"), "").ok).toBe(false);
+      expect(evaluateConstraints(c, withIcon(null), "").ok).toBe(false);
+      expect(evaluateConstraints(c, meta({}), "").failures[0]).toMatch(
+        /not captured/,
+      );
+    });
+
     it("live_domains_empty passes only when no live board ACTION is present", () => {
       const constraints: ModelEvalConstraint[] = [
         { type: "live_domains_empty" },

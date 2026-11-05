@@ -182,6 +182,8 @@ export type ModelEvalConstraint =
   | { type: "live_domain_only"; domain: LiveDomainKey }
   /** No live board domain ACTION (clarify / ASK turn before emitting). */
   | { type: "live_domains_empty" }
+  /** metadata.show_icon must be set and not one of these (eval-only: runner sets meta.evalShowIcon). */
+  | { type: "show_icon_not_in"; values: string[] }
   | {
       type: "weather_action";
       placeIncludes?: string;
@@ -1035,6 +1037,15 @@ export function checkConstraint(
         return `expected only live domain ${constraint.domain}, got [${active.join(",")}]`;
       }
       return null;
+    }
+    case "show_icon_not_in": {
+      const icon = (meta as unknown as { evalShowIcon?: string | null })
+        .evalShowIcon;
+      if (icon === undefined) return "show_icon not captured by this runner";
+      if (!icon) return "expected metadata.show_icon, got null";
+      return constraint.values.includes(icon)
+        ? `expected show_icon not in [${constraint.values.join(",")}], got ${icon}`
+        : null;
     }
     case "live_domains_empty": {
       const active = activeLiveDomains(meta);
