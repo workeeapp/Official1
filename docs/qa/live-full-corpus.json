@@ -3571,7 +3571,7 @@
         "timetable",
         "single-turn"
       ],
-      "description": "Reminder asked «on the row» → explain + offer task+reminder; nothing saved; no fake row reminder",
+      "description": "Reminder asked «on the row» → explain + offer task+reminder; nothing saved; no fake row reminder (task offer matched by the stem «משימ» — any inflection: משימה / משימת / משימות)",
       "setup": {
         "lists": [
           {
@@ -3619,7 +3619,7 @@
             {
               "type": "response_mentions_any",
               "needles": [
-                "משימה"
+                "משימ"
               ]
             }
           ],

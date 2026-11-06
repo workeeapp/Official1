@@ -5,7 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildLucyModelEvalInstructions } from "../src/services/chat.service.js";
+import { buildLucyInstructions } from "../src/services/chat.service.js";
 import {
   buildDefaultEvalFixtures,
   resolveEvalPrompt,
@@ -67,10 +67,14 @@ describe("Batch A prompt align to LIVE_FULL fixtures (offline)", () => {
     const { employees, worker } = buildDefaultEvalFixtures(speaker, {
       includeMichal: false,
     });
-    const liveFullStyle = buildLucyModelEvalInstructions({
+    const liveFullStyle = buildLucyInstructions({
+      digital: worker,
       employees,
       speaker,
-      worker,
+      speakerIsOwner: true,
+      guestSpeaker: false,
+      pendingInvite: null,
+      consultFrom: "",
     });
     expect(batch).toBe(liveFullStyle);
     expect(sha256Hex(batch)).toBe(sha256Hex(liveFullStyle));

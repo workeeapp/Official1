@@ -12,7 +12,7 @@ import {
   type ModelApplyProposeInput,
 } from "../src/eval/run-model-apply.js";
 import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
-import { buildLucyModelEvalInstructions } from "../src/services/chat.service.js";
+import { buildLucyInstructions } from "../src/services/chat.service.js";
 import { buildDefaultEvalFixtures } from "../src/eval/eval-prompt-source.js";
 
 function shoppingItemId(
@@ -182,10 +182,14 @@ describe("P0 multi-shell clear prompt (offline)", () => {
     const { employees, worker } = buildDefaultEvalFixtures("טל", {
       includeMichal: false,
     });
-    const text = buildLucyModelEvalInstructions({
+    const text = buildLucyInstructions({
+      digital: worker,
       employees,
       speaker: "טל",
-      worker,
+      speakerIsOwner: true,
+      guestSpeaker: false,
+      pendingInvite: null,
+      consultFrom: "",
     });
     // Stage B shortened bulk-clear extras to point at system A1; keep structural needles.
     expect(text).toContain("bulk-clear");

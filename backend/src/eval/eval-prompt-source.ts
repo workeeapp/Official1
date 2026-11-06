@@ -2,13 +2,14 @@
  * Evaluation-only prompt source resolution.
  *
  * Sources (env WORKEE_EVAL_PROMPT_SOURCE):
- * - unset / "config" — current LIVE default (fixture worker instructions=null → file via buildLucyModelEvalInstructions)
+ * - unset / "config" — current LIVE default (fixture worker instructions=null → LLM.config.json)
  * - "file" — WORKEE_EVAL_INSTRUCTIONS_FILE into an in-memory worker fixture
  * - "employee" — digital row on approved workee_test only
  *
- * Envelope: shouldAttachLucyRuntimeEngine (same rules as Chat). Not inferred from "file".
- * Intentional eval difference when attach=true: uses buildLucyModelEvalInstructions
- * (existing thin Lucy eval stack), not the full Chat attachLucyEngine catalog.
+ * Instructions: the production builder `buildLucyInstructions` (the exact string
+ * sendChatMessage sends) for the fixture speaker — owner, not a guest, not a
+ * consult turn. Envelope label: shouldAttachLucyRuntimeEngine (same rules as Chat).
+ * Context, saved data and apply are NOT production here — model-in-isolation tracks.
  *
  * Employee path: assertApprovedEvalDatabaseUrl BEFORE any Prisma module import.
  * This module must not statically import chat.service or prisma (both load PrismaClient).
@@ -43,23 +44,12 @@ export interface ResolvedEvalPrompt {
 }
 
 type ChatEvalHelpers = {
-  buildLucyModelEvalInstructions: (input: {
-    employees: PublicEmployee[];
-    speaker: string;
-    worker: PublicEmployee;
-  }) => string;
-  RESPONSES_RULE: string;
+  buildLucyInstructions: (typeof import("../services/chat.service.js"))["buildLucyInstructions"];
   shouldAttachLucyRuntimeEngine: (
     digital: PublicEmployee,
     employees: PublicEmployee[],
     fileSystemMessage: string,
   ) => boolean;
-  thinSessionEnvelope: (input: {
-    employees: PublicEmployee[];
-    speaker: string;
-    worker: PublicEmployee;
-    speakerIsOwner: boolean;
-  }) => string;
 };
 
 export function sha256Hex(input: string): string {
@@ -69,10 +59,8 @@ export function sha256Hex(input: string): string {
 async function loadChatEvalHelpers(): Promise<ChatEvalHelpers> {
   const mod = await import("../services/chat.service.js");
   return {
-    buildLucyModelEvalInstructions: mod.buildLucyModelEvalInstructions,
-    RESPONSES_RULE: mod.RESPONSES_RULE,
+    buildLucyInstructions: mod.buildLucyInstructions,
     shouldAttachLucyRuntimeEngine: mod.shouldAttachLucyRuntimeEngine,
-    thinSessionEnvelope: mod.thinSessionEnvelope,
   };
 }
 
@@ -187,35 +175,21 @@ function composeInstructions(
     input.employees,
     fileSystemMessage,
   );
-  if (attach) {
-    return {
-      instructions: helpers.buildLucyModelEvalInstructions({
-        employees: input.employees,
-        speaker: input.speaker,
-        worker: input.worker,
-      }),
-      envelopeMode: "lucy_eval",
-      attachLucyRuntimeEngine: true,
-    };
-  }
-  const systemMessage =
-    input.worker.instructions?.trim() || fileSystemMessage;
-  const instructions = [
-    systemMessage,
-    helpers.RESPONSES_RULE,
-    helpers.thinSessionEnvelope({
-      employees: input.employees,
-      speaker: input.speaker,
-      worker: input.worker,
-      speakerIsOwner: input.speakerIsOwner,
-    }),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  // One shared production builder — byte-identical to what sendChatMessage
+  // sends for this speaker/worker set (Q1 parity).
+  const instructions = helpers.buildLucyInstructions({
+    digital: input.worker,
+    employees: input.employees,
+    speaker: input.speaker,
+    speakerIsOwner: input.speakerIsOwner,
+    guestSpeaker: false,
+    pendingInvite: null,
+    consultFrom: "",
+  });
   return {
     instructions,
-    envelopeMode: "thin_custom",
-    attachLucyRuntimeEngine: false,
+    envelopeMode: attach ? "lucy_eval" : "thin_custom",
+    attachLucyRuntimeEngine: attach,
   };
 }
 
@@ -405,7 +379,7 @@ export async function resolveEvalPrompt(input?: {
 
   return finishResolved(helpers, {
     kind: "config",
-    promptSource: "config:LLM.config.json+buildLucyModelEvalInstructions",
+    promptSource: "config:LLM.config.json+buildLucyInstructions",
     employees: fixtures.employees,
     worker: fixtures.worker,
     speaker,

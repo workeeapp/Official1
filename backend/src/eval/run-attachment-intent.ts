@@ -10,7 +10,7 @@
  * only. No Prisma apply, WhatsApp, reminder fire, or Lucy DB sync.
  *
  * Intentional vs production Chat:
- * - Prompt = resolveEvalPrompt / buildLucyModelEvalInstructions (lucy_eval),
+ * - Prompt = resolveEvalPrompt / buildLucyInstructions (production builder),
  *   not the full attachLucyEngine catalog on every Chat turn.
  * - Attachment/ PENDING / dump map come from corpus fixtures, not DB / ChatMessage.raw.
  * - Vision imageUrls omitted unless a case supplies them (facts-only is enough for intent).
@@ -329,7 +329,7 @@ export async function runAttachmentIntentCorpus(
     productionApply: false,
     proofKind: "actual-model",
     promptNotes: corpus.promptNotes ?? [
-      "Prompt = resolveEvalPrompt (lucy_eval / buildLucyModelEvalInstructions), not full Chat attachLucyEngine catalog.",
+      "Prompt = resolveEvalPrompt (production buildLucyInstructions); context is corpus fixture JSON, not production context.",
       "new_attachments / PENDING_ATTACHMENTS / LAST_NUMBERED_DUMP are corpus fixtures (not DB).",
       "Intervening Lucy lines use appendAssistantMessage (no model call for that bubble).",
       "No Prisma apply / WhatsApp / reminder fire / Lucy DB sync.",

@@ -974,26 +974,168 @@ export async function requireDigitalChatPartner(
  * speaker (file/DB worker prompt + targeting + filing/contacts runtime lines).
  * No Prisma — corpus injects EMPLOYEE_SAVED_DATA in the user message.
  */
-export function buildLucyModelEvalInstructions(input: {
+/**
+ * The complete instruction string sent to the model for one turn — the single
+ * implementation shared by sendChatMessage and every evaluation runner, so an
+ * eval can never score a different prompt than production sends.
+ * (Extracted verbatim from sendChatMessage; Q1 parity.)
+ */
+export function buildLucyInstructions(input: {
+  digital: PublicEmployee;
   employees: PublicEmployee[];
   speaker: string;
-  worker: PublicEmployee;
+  speakerIsOwner: boolean;
+  guestSpeaker: boolean;
+  pendingInvite: PendingInviteContext | null;
+  /** Consulting digital worker's name ("" when this is not a consult turn). */
+  consultFrom: string;
 }): string {
-  const config = llmConfigForDigital(input.worker);
-  return [
-    config.systemMessage,
-    workerTargetingInstructions(input.employees, input.speaker, input.worker),
-    OPEN_JOBS_RULES,
-    "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
-    "filing inside EMPLOYEE_SAVED_DATA is durable memory + explicit saves. Use memory silently. Do not claim you lack a fact that appears there.",
-    "FILING REMOVE: מחק/תמחק a filing under EMPLOYEE_SAVED_DATA.filing (*תיוקים*) or line N after a תיוקים dump → remove_filing with filing_id from THIS turn (LAST_NUMBERED_DUMP id for that n, or the row's filing_id). lists=[]. Never lists.remove for filings. Never invent ids.",
-    "FILING UPDATE: שנה/עדכני a filing → update_filing with filing_id from THIS turn + new fields. lists=[]. Never lists.update for filings.",
-    "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
-    "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks.",
-    "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const {
+    digital,
+    employees,
+    speaker,
+    speakerIsOwner,
+    guestSpeaker,
+    pendingInvite,
+    consultFrom,
+  } = input;
+  const config = llmConfigForDigital(digital);
+  const consultEnvelope = consultFrom
+    ? [
+        `CONSULT: ${consultFrom} is another digital worker on this team. ${consultFrom} is asking you on behalf of ${speaker}, who is the speaker for permissions and saved data.`,
+        `Answer the question fully and directly in response. Your response is passed back to ${consultFrom} and shown to ${speaker} as your answer — write it so ${speaker} can read it as is.`,
+        `Do not handoff and do not message ${consultFrom} back. If you lack what you need to answer, say what is missing in response.`,
+        `This conversation with ${consultFrom} is shared by everyone ${consultFrom} asks for. Earlier turns may have been on behalf of other people — answer only for ${speaker}, from this turn's data, and never reveal another person's details.`,
+      ].join("\n")
+    : "";
+  const attachLucyEngine = shouldAttachLucyRuntimeEngine(
+    digital,
+    employees,
+    loadLlmConfig().systemMessage,
+  );
+  const guestModeInstructions = guestSpeaker
+    ? [
+        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
+        "Never say אני אורח / אני רק אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
+        pendingInvite
+          ? [
+              "PENDING_INVITE is active this turn.",
+              `First message: tell them ${pendingInvite.askerName} wants to know: ${pendingInvite.askSummary}.`,
+              "Then require registration before continuing that check: collect ONLY (1) first name (2) gender (זכר→male / נקבה→female). Surname optional if volunteered.",
+              "FORBIDDEN until metadata.register succeeds: answering the ask substance, messaging the asker, or claiming the check is done.",
+            ].join(" ")
+          : "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender (זכר→male / נקבה→female). Surname optional if they volunteer it.",
+        "FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password → stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
+        "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
+        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
+        "Off-topic outside shared lists or registration → guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
+        "Add/update/delete/buy/remind/send while guest → say they can only view shared lists until they register. Empty mutate arrays.",
+        "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
+      ].join("\n")
+    : "";
+  return attachLucyEngine
+    ? [
+        config.systemMessage,
+        RESPONSES_RULE,
+        `The user is chatting as ${speaker}.`,
+        guestModeInstructions ||
+          workerTargetingInstructions(employees, speaker, digital),
+        guestSpeaker ? "" : OPEN_JOBS_RULES,
+        consultEnvelope,
+        guestSpeaker
+          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
+          : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
+        "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
+        "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המשימות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המשימות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER — after a numbered dump, spoken indices map dump titles → ids in THIS turn's JSON, then any supported ACTION (תמחק / תשני / הוסף תזכורת / תשלחי את N…); FORBIDDEN show_dump on that turn.",
+        guestSpeaker
+          ? ""
+          : "BY LINE NUMBER: follow system BY LINE NUMBER / DECISION & FOCUS — LAST_NUMBERED_DUMP or dump-line stem → ACTION; filings dump → filing; share-by-index → update + dump ids + targets:[speaker, partner]; FORBIDDEN «שיתפתי» without those updates; FORBIDDEN JSON array index vs dump title; FORBIDDEN show_dump on line-index turns; AFTER a dump «ל3» is a line index not 03:00.",
+        guestSpeaker
+          ? ""
+          : "SPEAKER_ADDRESS is how to address this speaker (male/female/unknown). Always follow it for second-person Hebrew. filing is durable memory + explicit saves — use family/job silently; address gender prefers SPEAKER_ADDRESS. מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
+        guestSpeaker
+          ? ""
+          : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
+        guestSpeaker
+          ? ""
+          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker (includes reminder_id of that clock series). If they ask about מה ששלחת / הסיכום / ההודעה האחרונה / מה שכתבת about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent דני (or any other person) as who to ask/send — example names are not real; only message someone the speaker named this turn. Snooze / תזכירי לי בעוד / עוד פעם / בעוד X / «נדנדי לי…» about that block → Option B ONLY: YOUR «לשלוח נדנוד…» task + ONE new one-shot reminders.add (in≈10 minutes / REMINDER_SNOOZE) ping=speaker; reminders.add item/text = RECENT_OUTBOUND.item / original chore ONLY (FORBIDDEN «לשלוח נדנוד» inside the clock title) — FORBIDDEN mutating the source series fireAt/recurrence; FORBIDDEN speaker-wrapper lists.add for the chore. Bare נדנדי לי שוב right after that outbound = same Option B for that item. Do not revive a done clock — add a new one-shot. Missing delay → ASK כמה. CRITICAL EXCLUSION: «סמן כבוצע» / «סמן כבוצע: <title>» after that outbound is Done (occurrence_done / interval ack / lists.remove) — FORBIDDEN routing Mark-done into snooze / לשלוח נדנוד / reminders.add one-shot / REMINDER_SNOOZE. STOP SERIES right after that outbound: bare «אל תזכירי לי» / «אל תזכירי לי יותר» / «תפסיקי» / «תפסיקי להזכיר לי את זה» / «בטלי» / «את זה» (no other chore named) → reminders.remove with RECENT_OUTBOUND.reminder_id copied exactly (see STOP SERIES / RIGHT AFTER PING) — FORBIDDEN inventing an id or guessing by title; FORBIDDEN blanket ASK when reminder_id is present.",
+        guestSpeaker
+          ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
+          : speakerIsOwner
+            ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
+            : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
+        guestSpeaker
+          ? ""
+          : "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
+        guestSpeaker
+          ? ""
+          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / משימות / תיוקים / הצג רשימת משימות|קניות|אנשי קשר): pick ONE category. For shopping|tasks|contacts|filings set metadata.show_dump = shopping|tasks|contacts|filings and lists=[] — the server replaces response with the live dump. ABOUT X («מה מיכל צריכה לקנות» / משימות של טל) → same show_dump + show_dump_about=X. All domains use the same dump marks: co-share (A, B) and assign (באחריות X · מאת Y). Bare FULL DUMP («מה יש לי» / הציגי הכל) → show_dump=full (not a category). Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
+        guestSpeaker
+          ? ""
+          : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / משימות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → show_dump=full (+ show_dump_about=X).",
+        guestSpeaker
+          ? ""
+          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק». Claim past-tense success ONLY for actions in THIS turn's metadata. MULTI-INTENT CONFIRM: כן after an offer of several mutations → re-emit EVERY offered ACTION this turn, not a subset (incl. every lists delete_list). DELETE CLARIFY follow-up (which item/list/scope) → emit only that resolved delete with ids from THIS turn; unambiguous deletes do not wait for כן. FORBIDDEN same-turn jobs.answer.",
+        guestSpeaker
+          ? ""
+          : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED); lists=[]; no reminders clock; buttons=[]. Server replaces with your tasks dump + ממתינים from OPEN_JOBS (omit if empty). FORBIDDEN show_dump=tasks alone (speaker book); FORBIDDEN «אין לי משימות» / «אין לי כלום» when WORKER_SAVED_DATA / OPEN_JOBS has rows; FORBIDDEN writing inventory lines yourself. Do NOT RAISE. Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks (show_dump=reminders).`,
+        "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / משימות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
+        "Status / דוח / show a list / «הצג רשימת X» / «הציגי תיוקים»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts|filings / ABOUT X / exact «הצג רשימת …» / «הצג תיוקים» / spoken inventory «הציגי תיוקים» → metadata.show_dump (+ show_dump_about for X) + empty lists; server replaces response — FORBIDDEN model-written numbered filing inventory. Unique filing lookup (address/home/gate code/by meaning when exactly one filing matches) → ITEM DUMP: show_dump=filings + show_dump_ids=[filing_id] from THIS turn; lists=[]; server replaces — FORBIDDEN prose restating item_info/coords. >=2 matches → ASK; 0 → short no-match (no bare filings inventory). SHOW DUMP SECTION: bare → show_dump only; אישית → personal; משותפת → shared; עם X → partner=X; באחריות שלי → assignee=self; באחריות מיכל → assignee=מיכל; date range → show_dump_from + show_dump_to YYYY-MM-DD. OR WITHIN FIELD: X או Y on same dimension → string[] (assignee/partner/about); AND across fields; אישית או משותפת → omit section; FORBIDDEN cross-shape OR — ask or full dump. FORBIDDEN same-as-bare for אישית/משותפת. Bare FULL DUMP («מה יש לי» / הציגי הכל / סיכום מלא / כל מה ששמור) → metadata.show_dump=full; lists=[]; server replaces (FORBIDDEN model-written overview). SAVE VERB (תייקי/תתייקי/תשמרי/תצרפי + text and/or files): (1) clear existing list or item (unique name / active context — NOT last-mentioned latch) → add/update THAT list or item (attachment_ids when files); (2) no clear list → filing add (new durable fact); (3) ambiguous ≥2 lists → NUMBERED which-list ask, actions empty. FORBIDDEN always-filing only because they said תייקי. TOPIC-ONLY «הוסיפי באג» → NUMBERED which-list ask if ≥2 באגים* titles (else ask destination); never invent/auto-pick custom list_name from topic. Deletes: unique target+scope → remove/delete_list NOW with ids; unclear → ASK, delete mutates empty. SHARE-ONLY FACTS: filing/contacts/directory co-share; partners may mutate/unshare by id. Contacts alter_list participants OK; shopping/tasks whole-list share refused.",
+        `Ping clocks (${SPEAKER_CLOCK_ASKS}) → metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
+        "WHEN / TODAY / SOON — FULL agenda only (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים with NO meaning filter): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה תורים יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. MEETING ≠ NUDGE: exclude להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / YOUR worker send rows from those ids (person+date alone ≠ meeting). TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
+        "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח הודעה / נדנוד / ברכת בוקר). (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
+        "SHOW MY LISTS / הציגי את הרשימות שלי / הצג רשימות: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact «הצג רשימת X» stays category/custom dump.",
+        "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list (share, unshare, emoji, rename, columns, files) → confirm button for THAT list («הצג רשימת <name>» / «הצג קניות» / «הצג משימות»); after delete_list → label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN «הצג רשימות» after create/alter_list; FORBIDDEN list-shell nav after item-level lists mutates alone.",
+        "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY משימות enumerate items (1. 2. 3. under one «משימות:» header; assign «(באחריות X · מאת Y)»; co-share «(A, B)»; LINKED REMINDER on task lines). קניות COUNTS ONLY breakdown under «קניות:» — אישיות / «(A, B)» / «(באחריות X · מאת Y)» (all involved on co-share); רשימות אחרות = «*name* (A, B) — N פריטים» (all involved, e.g. «(מיכל, טל)»; no «עם»). תזכורות פעילות: NUMBERED 1. 2. 3. (never •) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. Hint once: לפירוט רשימה: הצג רשימת …. תיוקים (one «תיוקים:» + «(A, B)»); אנשי קשר (one «אנשי קשר:» from EMPLOYEE_SAVED_DATA only — not SPEAKER_CONTACTS); ספר הטלפונים (one «ספר הטלפונים:» from SPEAKER_CONTACTS; co-share «(A, B)»; empty → ריק). FORBIDDEN: skipping ספר הטלפונים when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ספר הטלפונים from list_type contacts or calling the phone book «אנשי קשר». No schema jargon.",
+        "PHONE BOOK / אנשי קשר / ספר הטלפונים / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
+        "Show a named list / הציגי את רשימת X / «שיעורי נהיגה» / «שיעורי נהיגה של מאיה»: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written • inventory for named lists (breaks «הציגי 6»). items=[] → server empty sentence. Speak Hebrew only — never list_name / list_type / metadata. After that dump, «הציגי 6» / «את 3» → ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range → ASK, not invent ids.",
+        "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. scope=shared_items shopping/tasks → status header «קניות/משימות של <owner>» (FORBIDDEN משותפת עם). Named-list add/update/remove — follow LIST NAME MATCH. «רשימת קניות משותפת» / כן after that offer → shopping + list_name \"\" (FORBIDDEN custom with list_name קניות / משימות / אנשי קשר).",
+        "מה יש לי עם X / מה יש לי משותף עם X / מה משותף לי ול־X / מה משותף עם X / מה יש לנו עם X / מה אנחנו חולקים עם X: metadata.show_dump=\"full\"; show_dump_section=shared; show_dump_partner=X; lists=[]. Server dump (partner-filtered). FORBIDDEN model-written with-X overview.",
+        "Bold in response: inventory dump lines are server-owned — do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap «שם:»). Item urgency: wrap the whole numbered line in «…». very_urgent also appends ‼️ after the closing guillemet. FORBIDDEN: writing דחוף / דחוף מאוד on the line.",
+        guestSpeaker
+          ? ""
+          : "lists update: put the NEW value under the real column name (שם / שם משימה / …). Never emit \"שם חדש\" or \"X חדש\" as a separate key.",
+        guestSpeaker
+          ? ""
+          : "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
+        guestSpeaker
+          ? ""
+          : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
+        guestSpeaker
+          ? ""
+          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן, or a pick from options you listed — «1» / «הראשונה» / an exact title), emit the COMPLETE action this turn with every field you already had plus the answer — resolve picks to ids from THIS turn's live facts, never invent or speak ids — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ your להזכיר with that speaker row's תאריך/שעה לביצוע copied onto the worker item) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. If the open ask was a DELETE CLARIFY (which item/list/scope) → cancel ONLY that delete (ack that title); FORBIDDEN binding לא to AFTER ASSIGN / date+reminder / older offers. List/filing/directory deletes: unique target+scope+id → remove/delete_list NOW; unclear which → ASK then FOLLOW-UP with ids from THIS turn. Reminder deletes with reminder_id apply immediately (past tense).",
+        guestSpeaker
+          ? "If asked what you can do: «אני לוסי-אורח — אפשר לראות רשימות ששותפו איתך, ואפשר להירשם לחשבון Workee משלך.»"
+          : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
+        "LIVE FACTS (this turn only): Saved state — list/filing/reminder/contact rows, field values, urgency, dates, sharing, clocks, open jobs — comes ONLY from this turn's fact blocks in the user message (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, RECENT_OUTBOUND, OPEN_JOBS, SESSION_CLOCK, SPEAKER_ADDRESS). Second-person Hebrew gender comes from SPEAKER_ADDRESS (not chat history). Earlier chat turns and your own prior replies are NOT a source for those values. If chat memory conflicts with this turn's JSON, the JSON wins. A field missing from the JSON (e.g. no urgency) means absent/normal — never resurrect it from an older turn. Chat history is only for the speaker's current intent and unfinished drafts (what they just answered), never for «what is saved». Items can also change outside this chat (a reminder fired, someone bought or removed an item, an edit on the site). Examples: (a) you said «אני צריכה להזכיר לך לקנות חלב», then the task is gone from WORKER_SAVED_DATA → «מה את צריכה לעשות» = nothing open; (b) after lists.update sets urgency to normal, a later «הצג משימות» must NOT wrap that line or append ‼️ even if an earlier turn did.",
+        guestSpeaker
+          ? ""
+          : "Ping clocks only → active_reminders; list NUMBERED 1. 2. 3. (never •). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
+        guestSpeaker ? "" : ATTACHMENTS_RULE,
+        guestSpeaker
+          ? ""
+          : "LAST CHECK before you answer: every entry in metadata.messages must have all five fields — targets, text, expects_reply, ask_summary, urgency (normal unless the speaker stressed it). expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
+        // The engine never reads the reply text (it only overrides on a proven
+        // apply failure), so a success sentence with no ACTION reaches the
+        // speaker as-is. Last in the prompt on purpose (recency).
+        "SAY = DO (final check, critical): every success you state in responses — added / saved / set a reminder / cancelled / moved / deleted / shared (הוספתי / שמרתי / נשמרה / קבעתי / תזכורת נקבעה / ביטלתי / הזזתי / מחקתי / שיתפתי) — MUST be emitted as that mutation in THIS reply's metadata (lists / reminders / filing / directory / messages / jobs). Example: «תזכירי לי מחר ב־09:00 על התור לווטרינר» with that task in EMPLOYEE_SAVED_DATA → lists.update tasks items:[{ item_id, remind:{ date, time:\"09:00\" } }] AND then «הוספתי תזכורת…». No mutation emitted → do not claim it; ask or say what is missing instead. FORBIDDEN: a past-tense success sentence with empty lists/reminders/filing/directory/messages/jobs.",
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : [
+        config.systemMessage,
+        RESPONSES_RULE,
+        guestModeInstructions,
+        thinSessionEnvelope({
+          employees,
+          speaker,
+          worker: digital,
+          speakerIsOwner: speakerIsOwner,
+        }),
+        consultEnvelope,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 }
 
 function workerTargetingInstructions(
@@ -2143,14 +2285,6 @@ export async function sendChatMessage(input: {
   const assistantSpeaker = speakerName(digital);
   const consultFrom = input.consult?.fromWorkerName.trim() ?? "";
   const turnSpeaker = consultFrom ? `${consultFrom} (בשם ${speaker})` : speaker;
-  const consultEnvelope = consultFrom
-    ? [
-        `CONSULT: ${consultFrom} is another digital worker on this team. ${consultFrom} is asking you on behalf of ${speaker}, who is the speaker for permissions and saved data.`,
-        `Answer the question fully and directly in response. Your response is passed back to ${consultFrom} and shown to ${speaker} as your answer — write it so ${speaker} can read it as is.`,
-        `Do not handoff and do not message ${consultFrom} back. If you lack what you need to answer, say what is missing in response.`,
-        `This conversation with ${consultFrom} is shared by everyone ${consultFrom} asks for. Earlier turns may have been on behalf of other people — answer only for ${speaker}, from this turn's data, and never reveal another person's details.`,
-      ].join("\n")
-    : "";
   const conversationOwnerId = input.consult?.fromWorkerId ?? input.employeeId;
   let conversation = await getOrCreateConversation(
     input.userId,
@@ -2269,134 +2403,15 @@ export async function sendChatMessage(input: {
     pendingInvite: input.pendingInvite ?? null,
     tipsContext,
   });
-  const attachLucyEngine = shouldAttachLucyRuntimeEngine(
+  const instructions = buildLucyInstructions({
     digital,
     employees,
-    loadLlmConfig().systemMessage,
-  );
-  const guestModeInstructions = guestSpeaker
-    ? [
-        "GUEST MODE: The SPEAKER is a WhatsApp guest (אורח) — not you. You are לוסי-אורח.",
-        "Never say אני אורח / אני רק אורח / I'm a guest. Speak TO them (second person) or use impersonal Hebrew.",
-        input.pendingInvite
-          ? [
-              "PENDING_INVITE is active this turn.",
-              `First message: tell them ${input.pendingInvite.askerName} wants to know: ${input.pendingInvite.askSummary}.`,
-              "Then require registration before continuing that check: collect ONLY (1) first name (2) gender (זכר→male / נקבה→female). Surname optional if volunteered.",
-              "FORBIDDEN until metadata.register succeeds: answering the ask substance, messaging the asker, or claiming the check is done.",
-            ].join(" ")
-          : "Your purpose: help them register as a Workee team member (then they talk with לוסי). Collect ONLY: (1) first name, (2) gender (זכר→male / נקבה→female). Surname optional if they volunteer it.",
-        "FORBIDDEN: username, password, email, phone, login. If this chat earlier asked for username/password → stop; continue with name+gender only. When name+gender known emit metadata.register {name, gender} (+ surname if given); until then register=null and ask only for what is missing.",
-        "Also allowed: answer about lists/filings already shared with them in this turn's EMPLOYEE_SAVED_DATA (scope=shared). Show items, say if empty, confirm a named shared list exists.",
-        "Forbidden while guest: shopping adds, tasks, reminders, messages, directory, filings mutates, handoff, jokes/weather/market/mashov/smartschool/places/jewish/routes as the main topic.",
-        "Off-topic outside shared lists or registration → guide them back to shared lists or signing up. Empty lists/filing/reminders/messages/directory (register only when complete).",
-        "Add/update/delete/buy/remind/send while guest → say they can only view shared lists until they register. Empty mutate arrays.",
-        "lists/filing/reminders/directory/messages/handoff must always stay []. Do not invent private data.",
-      ].join("\n")
-    : "";
-  const instructions = attachLucyEngine
-    ? [
-        config.systemMessage,
-        RESPONSES_RULE,
-        `The user is chatting as ${speaker}.`,
-        guestModeInstructions ||
-          workerTargetingInstructions(employees, speaker, digital),
-        guestSpeaker ? "" : OPEN_JOBS_RULES,
-        consultEnvelope,
-        guestSpeaker
-          ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
-          : "Personal items belong only to this employee. Shared items are visible to the relevant employees listed on the item.",
-        "EMPLOYEE_SAVED_DATA is the speaker's visible saved items. WORKER_SAVED_DATA is YOUR lists and tasks. Do not invent items.",
-        "LIVE DATA ONLY (lists / status / clocks / jobs): answer «הצג רשימת…», מה המשימות/הקניות שלי, status dumps, reminders, OPEN_JOBS inventory ONLY from this turn's injected blocks (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, OPEN_JOBS, active_reminders, SPEAKER_CONTACTS, TEAM_SCHEDULES, SESSION_CLOCK; RECENT_OUTBOUND only for that outbound). Soft-deleted/done rows are never injected — absence means gone. FORBIDDEN: listing titles from earlier assistant/user messages or from your previous «מחקתי…» / «ברשימת המשימות…» reply if they are not in this turn's JSON — including after a delete when they tap הצג. Empty section → one empty sentence; never re-show chat-history-only titles. Exact button commands «הצג רשימת X» / «הצג תזכורות»: lists/reminders empty; the server may replace response with a live dump. EXCEPTION: BY LINE NUMBER — after a numbered dump, spoken indices map dump titles → ids in THIS turn's JSON, then any supported ACTION (תמחק / תשני / הוסף תזכורת / תשלחי את N…); FORBIDDEN show_dump on that turn.",
-        guestSpeaker
-          ? ""
-          : "BY LINE NUMBER: follow system BY LINE NUMBER / DECISION & FOCUS — LAST_NUMBERED_DUMP or dump-line stem → ACTION; filings dump → filing; share-by-index → update + dump ids + targets:[speaker, partner]; FORBIDDEN «שיתפתי» without those updates; FORBIDDEN JSON array index vs dump title; FORBIDDEN show_dump on line-index turns; AFTER a dump «ל3» is a line index not 03:00.",
-        guestSpeaker
-          ? ""
-          : "SPEAKER_ADDRESS is how to address this speaker (male/female/unknown). Always follow it for second-person Hebrew. filing is durable memory + explicit saves — use family/job silently; address gender prefers SPEAKER_ADDRESS. מה התיוקים שלי → prefer codes/docs/explicit תתיקי; מה את זוכרת עלי → memory rows. Do not claim you lack a fact that appears there.",
-        guestSpeaker
-          ? ""
-          : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
-        guestSpeaker
-          ? ""
-          : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker (includes reminder_id of that clock series). If they ask about מה ששלחת / הסיכום / ההודעה האחרונה / מה שכתבת about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent דני (or any other person) as who to ask/send — example names are not real; only message someone the speaker named this turn. Snooze / תזכירי לי בעוד / עוד פעם / בעוד X / «נדנדי לי…» about that block → Option B ONLY: YOUR «לשלוח נדנוד…» task + ONE new one-shot reminders.add (in≈10 minutes / REMINDER_SNOOZE) ping=speaker; reminders.add item/text = RECENT_OUTBOUND.item / original chore ONLY (FORBIDDEN «לשלוח נדנוד» inside the clock title) — FORBIDDEN mutating the source series fireAt/recurrence; FORBIDDEN speaker-wrapper lists.add for the chore. Bare נדנדי לי שוב right after that outbound = same Option B for that item. Do not revive a done clock — add a new one-shot. Missing delay → ASK כמה. CRITICAL EXCLUSION: «סמן כבוצע» / «סמן כבוצע: <title>» after that outbound is Done (occurrence_done / interval ack / lists.remove) — FORBIDDEN routing Mark-done into snooze / לשלוח נדנוד / reminders.add one-shot / REMINDER_SNOOZE. STOP SERIES right after that outbound: bare «אל תזכירי לי» / «אל תזכירי לי יותר» / «תפסיקי» / «תפסיקי להזכיר לי את זה» / «בטלי» / «את זה» (no other chore named) → reminders.remove with RECENT_OUTBOUND.reminder_id copied exactly (see STOP SERIES / RIGHT AFTER PING) — FORBIDDEN inventing an id or guessing by title; FORBIDDEN blanket ASK when reminder_id is present.",
-        guestSpeaker
-          ? "This speaker is a guest. EMPLOYEE_SAVED_DATA has only lists/filings shared with them. Never invent other employees' private lists or clocks."
-          : employee.isOwner
-            ? "This speaker is the account owner. EMPLOYEE_SAVED_DATA includes every human employee's lists, tasks, filings, and reminder clocks. When they ask what someone has, answer from that data and name the owner. When they ask about themselves, prefer their own rows."
-            : "This speaker is not the account owner. EMPLOYEE_SAVED_DATA has only their own items plus shared items visible to them. Never invent other employees' private lists or clocks.",
-        guestSpeaker
-          ? ""
-          : "VISIBILITY: Non-owners only see their own data. Account owner sees all humans' data in EMPLOYEE_SAVED_DATA. Personal SPEAKER_CONTACTS stay the speaker's alone.",
-        guestSpeaker
-          ? ""
-          : "SHAREABLE STATUS ASK (מה אני צריך לקנות / הציגי רשימות הקנייה / משימות / תיוקים / הצג רשימת משימות|קניות|אנשי קשר): pick ONE category. For shopping|tasks|contacts|filings set metadata.show_dump = shopping|tasks|contacts|filings and lists=[] — the server replaces response with the live dump. ABOUT X («מה מיכל צריכה לקנות» / משימות של טל) → same show_dump + show_dump_about=X. All domains use the same dump marks: co-share (A, B) and assign (באחריות X · מאת Y). Bare FULL DUMP («מה יש לי» / הציגי הכל) → show_dump=full (not a category). Shopping lines in any model-written leftover ALWAYS «שם - כמות».",
-        guestSpeaker
-          ? ""
-          : "SHAREABLE STATUS ASK ABOUT X (מה X צריך/צריכה לקנות / משימות של X / תיוקים של X): metadata.show_dump + show_dump_about=X or [X,Y] for X או Y (union). Optional section/partner/assignee (arrays = OR within field). Server applies visibility (owners see X's lists; others only rows already visible involving X). Empty → engine empty sentence. כל מה ששמור ל־X → show_dump=full (+ show_dump_about=X).",
-        guestSpeaker
-          ? ""
-          : "APPLY FEEDBACK: after saves/removes ALWAYS name the object and list (e.g. «מחקתי את החלב מרשימת הקניות»). FORBIDDEN: bare «בסדר, מחקתי!» / «נמחק». Claim past-tense success ONLY for actions in THIS turn's metadata. MULTI-INTENT CONFIRM: כן after an offer of several mutations → re-emit EVERY offered ACTION this turn, not a subset (incl. every lists delete_list). DELETE CLARIFY follow-up (which item/list/scope) → emit only that resolved delete with ids from THIS turn; unambiguous deletes do not wait for כן. FORBIDDEN same-turn jobs.answer.",
-        guestSpeaker
-          ? ""
-          : `If asked what you still need to do/check, or which tasks / work you have (${WORKER_INVENTORY_ASKS}): INVENTORY → metadata.show_dump=tasks + show_dump_about=YOUR display name (BOTH REQUIRED); lists=[]; no reminders clock; buttons=[]. Server replaces with your tasks dump + ממתינים from OPEN_JOBS (omit if empty). FORBIDDEN show_dump=tasks alone (speaker book); FORBIDDEN «אין לי משימות» / «אין לי כלום» when WORKER_SAVED_DATA / OPEN_JOBS has rows; FORBIDDEN writing inventory lines yourself. Do NOT RAISE. Never emit metadata.query. FORBIDDEN: treating «תזכורות» asks (${SPEAKER_CLOCK_ASKS}) as inventory — those are speaker ping clocks (show_dump=reminders).`,
-        "USER-FACING LANGUAGE: echo the speaker's words for any saved thing (תזכורות / משימות / קניות / תיוק). Never rename their category or explain storage. Never say schema words (sections, clocks, metadata, list_name).",
-        "Status / דוח / show a list / «הצג רשימת X» / «הציגי תיוקים»: LIVE DATA ONLY. SHAREABLE STATUS ASK shopping|tasks|contacts|filings / ABOUT X / exact «הצג רשימת …» / «הצג תיוקים» / spoken inventory «הציגי תיוקים» → metadata.show_dump (+ show_dump_about for X) + empty lists; server replaces response — FORBIDDEN model-written numbered filing inventory. Unique filing lookup (address/home/gate code/by meaning when exactly one filing matches) → ITEM DUMP: show_dump=filings + show_dump_ids=[filing_id] from THIS turn; lists=[]; server replaces — FORBIDDEN prose restating item_info/coords. >=2 matches → ASK; 0 → short no-match (no bare filings inventory). SHOW DUMP SECTION: bare → show_dump only; אישית → personal; משותפת → shared; עם X → partner=X; באחריות שלי → assignee=self; באחריות מיכל → assignee=מיכל; date range → show_dump_from + show_dump_to YYYY-MM-DD. OR WITHIN FIELD: X או Y on same dimension → string[] (assignee/partner/about); AND across fields; אישית או משותפת → omit section; FORBIDDEN cross-shape OR — ask or full dump. FORBIDDEN same-as-bare for אישית/משותפת. Bare FULL DUMP («מה יש לי» / הציגי הכל / סיכום מלא / כל מה ששמור) → metadata.show_dump=full; lists=[]; server replaces (FORBIDDEN model-written overview). SAVE VERB (תייקי/תתייקי/תשמרי/תצרפי + text and/or files): (1) clear existing list or item (unique name / active context — NOT last-mentioned latch) → add/update THAT list or item (attachment_ids when files); (2) no clear list → filing add (new durable fact); (3) ambiguous ≥2 lists → NUMBERED which-list ask, actions empty. FORBIDDEN always-filing only because they said תייקי. TOPIC-ONLY «הוסיפי באג» → NUMBERED which-list ask if ≥2 באגים* titles (else ask destination); never invent/auto-pick custom list_name from topic. Deletes: unique target+scope → remove/delete_list NOW with ids; unclear → ASK, delete mutates empty. SHARE-ONLY FACTS: filing/contacts/directory co-share; partners may mutate/unshare by id. Contacts alter_list participants OK; shopping/tasks whole-list share refused.",
-        `Ping clocks (${SPEAKER_CLOCK_ASKS}) → metadata.show_dump = reminders; lists/reminders/buttons=[]. Server replaces response with the live clocks dump. FORBIDDEN: answering any of these from WORKER_SAVED_DATA / OPEN_JOBS.`,
-        "WHEN / TODAY / SOON — FULL agenda only (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים with NO meaning filter): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה תורים יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. MEETING ≠ NUDGE: exclude להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / YOUR worker send rows from those ids (person+date alone ≠ meeting). TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
-        "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח הודעה / נדנוד / ברכת בוקר). (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
-        "SHOW MY LISTS / הציגי את הרשימות שלי / הצג רשימות: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact «הצג רשימת X» stays category/custom dump.",
-        "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list (share, unshare, emoji, rename, columns, files) → confirm button for THAT list («הצג רשימת <name>» / «הצג קניות» / «הצג משימות»); after delete_list → label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN «הצג רשימות» after create/alter_list; FORBIDDEN list-shell nav after item-level lists mutates alone.",
-        "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY משימות enumerate items (1. 2. 3. under one «משימות:» header; assign «(באחריות X · מאת Y)»; co-share «(A, B)»; LINKED REMINDER on task lines). קניות COUNTS ONLY breakdown under «קניות:» — אישיות / «(A, B)» / «(באחריות X · מאת Y)» (all involved on co-share); רשימות אחרות = «*name* (A, B) — N פריטים» (all involved, e.g. «(מיכל, טל)»; no «עם»). תזכורות פעילות: NUMBERED 1. 2. 3. (never •) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. Hint once: לפירוט רשימה: הצג רשימת …. תיוקים (one «תיוקים:» + «(A, B)»); אנשי קשר (one «אנשי קשר:» from EMPLOYEE_SAVED_DATA only — not SPEAKER_CONTACTS); ספר הטלפונים (one «ספר הטלפונים:» from SPEAKER_CONTACTS; co-share «(A, B)»; empty → ריק). FORBIDDEN: skipping ספר הטלפונים when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ספר הטלפונים from list_type contacts or calling the phone book «אנשי קשר». No schema jargon.",
-        "PHONE BOOK / אנשי קשר / ספר הטלפונים / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
-        "Show a named list / הציגי את רשימת X / «שיעורי נהיגה» / «שיעורי נהיגה של מאיה»: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written • inventory for named lists (breaks «הציגי 6»). items=[] → server empty sentence. Speak Hebrew only — never list_name / list_type / metadata. After that dump, «הציגי 6» / «את 3» → ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range → ASK, not invent ids.",
-        "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. scope=shared_items shopping/tasks → status header «קניות/משימות של <owner>» (FORBIDDEN משותפת עם). Named-list add/update/remove — follow LIST NAME MATCH. «רשימת קניות משותפת» / כן after that offer → shopping + list_name \"\" (FORBIDDEN custom with list_name קניות / משימות / אנשי קשר).",
-        "מה יש לי עם X / מה יש לי משותף עם X / מה משותף לי ול־X / מה משותף עם X / מה יש לנו עם X / מה אנחנו חולקים עם X: metadata.show_dump=\"full\"; show_dump_section=shared; show_dump_partner=X; lists=[]. Server dump (partner-filtered). FORBIDDEN model-written with-X overview.",
-        "Bold in response: inventory dump lines are server-owned — do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap «שם:»). Item urgency: wrap the whole numbered line in «…». very_urgent also appends ‼️ after the closing guillemet. FORBIDDEN: writing דחוף / דחוף מאוד on the line.",
-        guestSpeaker
-          ? ""
-          : "lists update: put the NEW value under the real column name (שם / שם משימה / …). Never emit \"שם חדש\" or \"X חדש\" as a separate key.",
-        guestSpeaker
-          ? ""
-          : "Dates in saved items: if a field still says היום/מחר, speak the concrete calendar date (YYYY-MM-DD) when answering. When saving, always emit YYYY-MM-DD, not היום.",
-        guestSpeaker
-          ? ""
-          : "Past deletes / already-fired / מה נמחק / מתי נשלחה / מה שלחנו: say you only have live saved data — do not invent history. Active scheduled sends and clocks → answer from this turn's EMPLOYEE_SAVED_DATA / active_reminders.",
-        guestSpeaker
-          ? ""
-          : "FOLLOW-UP TO YOUR QUESTION: the server keeps no draft — your previous turn in this conversation is the draft. When the speaker answers what you asked (time / hour HH:mm / ב־9 / 21:00, relative date היום/מחר/אתמול, calendar date YYYY-MM-DD or spoken date, weekday / day ראשון / יום רביעי, a duration/until you asked for, phone, name, message body, description, כן, or a pick from options you listed — «1» / «הראשונה» / an exact title), emit the COMPLETE action this turn with every field you already had plus the answer — resolve picks to ids from THIS turn's live facts, never invent or speak ids — never לא הבנתי. If you just asked for a date/day/time/start and they reply with only that kind of short answer (bare מחר / a weekday / a clock), that fills the draft — do NOT treat it as a new WHEN/TODAY / «מה יש לי» query and do NOT ask the same question again. Exception — REMINDER OFFER follow-up: if you already saved a timed speaker row and only asked whether/when to add a WhatsApp ping, their time/כן fills reminders (+ your להזכיר with that speaker row's תאריך/שעה לביצוע copied onto the worker item) only — never overwrite speaker שעה/תאריך לביצוע (APPOINTMENT VS PING). On כן to an offer, emit exactly that offered action (same targets) — if the offer was several mutations (lists remove/update/add, reminders, …), re-emit EVERY one this turn, not a subset. response may claim past-tense success ONLY for actions present in THIS turn's metadata. Cancel (לא / בטל / אל תשלחי / cancel / בעצם לא) → emit nothing for that draft and say you cancelled. If the open ask was a DELETE CLARIFY (which item/list/scope) → cancel ONLY that delete (ack that title); FORBIDDEN binding לא to AFTER ASSIGN / date+reminder / older offers. List/filing/directory deletes: unique target+scope+id → remove/delete_list NOW; unclear which → ASK then FOLLOW-UP with ids from THIS turn. Reminder deletes with reminder_id apply immediately (past tense).",
-        guestSpeaker
-          ? "If asked what you can do: «אני לוסי-אורח — אפשר לראות רשימות ששותפו איתך, ואפשר להירשם לחשבון Workee משלך.»"
-          : "If asked what you can do: FULL catalog — lists (any/custom), share lists/filings, meetings+תיאום, standing tasks, day/week agenda, filings, phone book, messages now/later, checks&nudges, reminders, scheduled digests, handoff. Lead «אני יודעת לנהל כל רשימה». Saved data does not limit that answer. No git digests / schema jargon.",
-        "LIVE FACTS (this turn only): Saved state — list/filing/reminder/contact rows, field values, urgency, dates, sharing, clocks, open jobs — comes ONLY from this turn's fact blocks in the user message (EMPLOYEE_SAVED_DATA, WORKER_SAVED_DATA, SPEAKER_CONTACTS, TEAM_SCHEDULES, RECENT_OUTBOUND, OPEN_JOBS, SESSION_CLOCK, SPEAKER_ADDRESS). Second-person Hebrew gender comes from SPEAKER_ADDRESS (not chat history). Earlier chat turns and your own prior replies are NOT a source for those values. If chat memory conflicts with this turn's JSON, the JSON wins. A field missing from the JSON (e.g. no urgency) means absent/normal — never resurrect it from an older turn. Chat history is only for the speaker's current intent and unfinished drafts (what they just answered), never for «what is saved». Items can also change outside this chat (a reminder fired, someone bought or removed an item, an edit on the site). Examples: (a) you said «אני צריכה להזכיר לך לקנות חלב», then the task is gone from WORKER_SAVED_DATA → «מה את צריכה לעשות» = nothing open; (b) after lists.update sets urgency to normal, a later «הצג משימות» must NOT wrap that line or append ‼️ even if an earlier turn did.",
-        guestSpeaker
-          ? ""
-          : "Ping clocks only → active_reminders; list NUMBERED 1. 2. 3. (never •). Empty active clocks does not mean you have no reminder jobs — those live in WORKER_SAVED_DATA.",
-        guestSpeaker ? "" : ATTACHMENTS_RULE,
-        guestSpeaker
-          ? ""
-          : "LAST CHECK before you answer: every entry in metadata.messages must have all five fields — targets, text, expects_reply, ask_summary, urgency (normal unless the speaker stressed it). expects_reply is true whenever the speaker waits for an answer, an agreement, or an action from that person (שאלה / בדיקה / תיאום / בקשה), false only for pure information. Never emit a messages entry without them.",
-        // The engine never reads the reply text (it only overrides on a proven
-        // apply failure), so a success sentence with no ACTION reaches the
-        // speaker as-is. Last in the prompt on purpose (recency).
-        "SAY = DO (final check, critical): every success you state in responses — added / saved / set a reminder / cancelled / moved / deleted / shared (הוספתי / שמרתי / נשמרה / קבעתי / תזכורת נקבעה / ביטלתי / הזזתי / מחקתי / שיתפתי) — MUST be emitted as that mutation in THIS reply's metadata (lists / reminders / filing / directory / messages / jobs). Example: «תזכירי לי מחר ב־09:00 על התור לווטרינר» with that task in EMPLOYEE_SAVED_DATA → lists.update tasks items:[{ item_id, remind:{ date, time:\"09:00\" } }] AND then «הוספתי תזכורת…». No mutation emitted → do not claim it; ask or say what is missing instead. FORBIDDEN: a past-tense success sentence with empty lists/reminders/filing/directory/messages/jobs.",
-      ]
-        .filter(Boolean)
-        .join("\n\n")
-    : [
-        config.systemMessage,
-        RESPONSES_RULE,
-        guestModeInstructions,
-        thinSessionEnvelope({
-          employees,
-          speaker,
-          worker: digital,
-          speakerIsOwner: employee.isOwner === true,
-        }),
-        consultEnvelope,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+    speaker,
+    speakerIsOwner: employee.isOwner === true,
+    guestSpeaker,
+    pendingInvite: input.pendingInvite ?? null,
+    consultFrom,
+  });
   // Live facts go to the model for THIS turn only (llm-client sends them ahead
   // of the message and stores just the message): the model conversation keeps
   // what was said, never one stale facts snapshot per earlier turn.

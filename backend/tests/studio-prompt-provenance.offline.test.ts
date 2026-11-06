@@ -44,7 +44,7 @@ function samplePrompt(
   overrides?: Partial<StudioEvalPromptProvenanceFields>,
 ): StudioEvalPromptProvenanceFields {
   return {
-    promptSource: "config:LLM.config.json+buildLucyModelEvalInstructions",
+    promptSource: "config:LLM.config.json+buildLucyInstructions",
     instructionsSha256: "a".repeat(64),
     envelopeMode: "lucy_eval",
     attachLucyRuntimeEngine: true,

@@ -104,4 +104,22 @@ describe("prompt sources", () => {
     expect(config.systemMessage).not.toMatch(/LIST NAME MATCH \(/);
     expect(config.systemMessage).toContain("Which list → LIST NAME MATCH");
   });
+
+  it("Q1: instructions are assembled only by buildLucyInstructions (server + every eval runner)", () => {
+    const evalSource = readFileSync(
+      resolve(root, "backend/src/eval/eval-prompt-source.ts"),
+      "utf8",
+    );
+    const batchSource = readFileSync(resolve(root, "backend/src/eval/run-batch-a.ts"), "utf8");
+    // One definition, one production call site.
+    expect(chatSource.match(/export function buildLucyInstructions\(/g)).toHaveLength(1);
+    const send = chatSource.slice(chatSource.indexOf("export async function sendChatMessage("));
+    expect(send.match(/buildLucyInstructions\(\{/g)).toHaveLength(1);
+    // No second assembly of the system message + RESPONSES_RULE anywhere.
+    expect(chatSource.match(/config\.systemMessage,\s*RESPONSES_RULE,/g)).toHaveLength(2); // attach + thin branch, inside the builder
+    expect(chatSource).not.toContain("buildLucyModelEvalInstructions");
+    expect(evalSource).toContain("helpers.buildLucyInstructions(");
+    expect(evalSource).not.toContain("RESPONSES_RULE");
+    expect(batchSource).toContain("buildLucyInstructions(");
+  });
 });

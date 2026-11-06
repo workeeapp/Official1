@@ -3,12 +3,12 @@
  * Does not import an LLM client; LIVE wiring stays out of Steps 0–4.
  *
  * Default instructions share LIVE_FULL fixtures (includeMichal: false) via
- * buildDefaultEvalFixtures + buildLucyModelEvalInstructions. Intentionally does
+ * buildDefaultEvalFixtures + buildLucyInstructions (production builder). Intentionally does
  * NOT call resolveEvalPrompt — WORKEE_EVAL_PROMPT_SOURCE=file|employee must not
  * change Batch A fingerprints or offline MODEL scoring.
  */
 import { parseLlmMetadata, type LlmMetadata } from "@workee/shared";
-import { buildLucyModelEvalInstructions } from "../services/chat.service.js";
+import { buildLucyInstructions } from "../services/chat.service.js";
 import {
   evaluateConstraints,
   type ModelEvalCaseResult,
@@ -32,10 +32,18 @@ import { metadataFromModelApplyPropose } from "./run-model-apply.js";
  * Fixture parity: LIVE_FULL default (no מיכל). Not LIVE_MODEL (has מיכל).
  */
 export function buildBatchAThinInstructions(speaker = "טל"): string {
-  const { employees, worker } = buildDefaultEvalFixtures(speaker, {
+  const { employees, worker, human } = buildDefaultEvalFixtures(speaker, {
     includeMichal: false,
   });
-  return buildLucyModelEvalInstructions({ employees, speaker, worker });
+  return buildLucyInstructions({
+    digital: worker,
+    employees,
+    speaker,
+    speakerIsOwner: human.isOwner === true,
+    guestSpeaker: false,
+    pendingInvite: null,
+    consultFrom: "",
+  });
 }
 
 export function buildBatchAFingerprint(options?: {

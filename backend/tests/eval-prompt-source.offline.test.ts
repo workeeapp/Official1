@@ -109,13 +109,17 @@ async function independentConfigBaseline(input: {
     : independentLiveFullFixtures(input.speaker);
   const config = loadLlmConfig();
   // Direct chat helper — not resolveEvalPrompt / composeInstructions / buildDefaultEvalFixtures.
-  const { buildLucyModelEvalInstructions } = await import(
+  const { buildLucyInstructions } = await import(
     "../src/services/chat.service.js"
   );
-  const instructions = buildLucyModelEvalInstructions({
+  const instructions = buildLucyInstructions({
+    digital: fixtures.worker,
     employees: fixtures.employees,
     speaker: input.speaker,
-    worker: fixtures.worker,
+    speakerIsOwner: true,
+    guestSpeaker: false,
+    pendingInvite: null,
+    consultFrom: "",
   });
   return {
     instructions,
