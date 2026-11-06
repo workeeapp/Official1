@@ -740,9 +740,9 @@ export function shouldAttachLucyRuntimeEngine(
  * written and the relay is out. A job problem must never fail the turn.
  */
 const ATTACHMENTS_RULE =
-  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent files not attached yet; saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. ATTACH via items[].attachment_ids / filing|reminders attachment_ids / directory add|update attachment_ids (phone-book contact) / lists alter_list add_attachments / lists[].list_attachment_ids. DESTINATION LADDER (full recipe in system DECISION & FOCUS / ATTACHMENTS): תייקי|תשמרי|תצרפי are equivalent save verbs — NOT always filings. (A) filings — only לתיוקים / «תחת…» / «כ…» new title + attachment_ids; (B) list SHELL — alter_list add_attachments ONLY when לרשימה עצמה / ברמת הרשימה; (C) list ITEM — default when «ל־X» uniquely matches a custom list_name or shopping/tasks item: update/add item_id + attachment_ids (identify item from wording / active USER topic / LAST_NUMBERED_DUMP / live rows — FORBIDDEN last-mentioned latch; item unclear → ask which item; never ask list-vs-item); (D) phone-book contact — directory.update contact_id + attachment_ids («לאיש הקשר X» / phone book) — NEVER shopping/tasks/custom item, NEVER assign-only. «ל־X» person → assign ONLY with assign intent; «לאיש הקשר X» → path (D). THIS-TURN DESTINATION WINS: NEW clear destination in THIS USER message beats deferred prior-target complete — FORBIDDEN re-emitting prior row attachment_ids onto the old target. No save intent in this or prior USER turns → empty mutates on bare file/forward (FORBIDDEN invent filing). Deferred file after USER named a target → complete with PENDING/new_attachments despite intervening Lucy messages unless THIS USER renamed the destination. BY LINE attach («תצרפי ל־1-3») → update ×N dump item_ids + same attachment_ids; stale/missing dump → ASK. STABLE REFS: pronouns (לו/אליו) and ordinals (הראשון/השני) → active USER topic + LAST_NUMBERED_DUMP id (+ live match); FORBIDDEN last-mentioned latch alone; unclear → ASK. Document/image filing when create-filing is clear: short item_name + attachment_ids; item_info = optional SHORT summary only; item_description = find-helper only when useful — FORBIDDEN full OCR into item_info/description. Reminder with files → same ids on task and reminder. PAPERCLIP / LINK ICON / send_attachments / DEICTIC SHOW: same as system ATTACHMENTS. Never speak ids; never invent video/document content.";
+  "ATTACHMENTS: files arrive as new_attachments under «[קבצים שהתקבלו בהודעה זו]» (you also see images); PENDING_ATTACHMENTS = recent unlinked files the speaker sent — context only, never a request (FILE INTENT); saved rows carry attachments; has_attachments is true ONLY when the list itself has files (list_attachment_ids / list attachments) — never because an item inside has files. ATTACH via items[].attachment_ids / filing|reminders attachment_ids / directory add|update attachment_ids (phone-book contact) / lists alter_list add_attachments / lists[].list_attachment_ids. DESTINATION LADDER (full recipe in system DECISION & FOCUS / ATTACHMENTS): תייקי|תשמרי|תצרפי are equivalent save verbs — NOT always filings. (A) filings — only לתיוקים / «תחת…» / «כ…» new title + attachment_ids; (B) list SHELL — alter_list add_attachments ONLY when לרשימה עצמה / ברמת הרשימה; (C) list ITEM — default when «ל־X» uniquely matches a custom list_name or shopping/tasks item: update/add item_id + attachment_ids (identify item from wording / active USER topic / LAST_NUMBERED_DUMP / live rows — FORBIDDEN last-mentioned latch; item unclear → ask which item; never ask list-vs-item); (D) phone-book contact — directory.update contact_id + attachment_ids («לאיש הקשר X» / phone book) — NEVER shopping/tasks/custom item, NEVER assign-only. «ל־X» person → assign ONLY with assign intent; «לאיש הקשר X» → path (D). THIS-TURN DESTINATION WINS: NEW clear destination in THIS USER message beats deferred prior-target complete — FORBIDDEN re-emitting prior row attachment_ids onto the old target. FILE INTENT: a file shows the speaker may want something done — never what, and never permission to do it. Act on a file only when THIS turn's request clearly refers to it, or the speaker is answering your explicit open question about it, or completing their own still-open «אשלח לך…» request (a completed save closes it — a later bare file is NOT for that target). Bare file / forward with no such instruction → ask what to do with it (empty mutates); several possible files or destinations → ask. CORRECTION («זה לא של X» / «הקובץ לא נשמר ל־Y») → move the exact file they mean: detach_attachment_ids on the wrong row + attachment_ids on the right row, ids from the saved rows' attachments in THIS turn's facts — FORBIDDEN substituting a PENDING or any other file. BY LINE attach («תצרפי ל־1-3») → update ×N dump item_ids + same attachment_ids; stale/missing dump → ASK. STABLE REFS: pronouns (לו/אליו) and ordinals (הראשון/השני) → active USER topic + LAST_NUMBERED_DUMP id (+ live match); FORBIDDEN last-mentioned latch alone; unclear → ASK. Document/image filing when create-filing is clear: short item_name + attachment_ids; item_info = optional SHORT summary only; item_description = find-helper only when useful — FORBIDDEN full OCR into item_info/description. Reminder with files → same ids on task and reminder. PAPERCLIP / LINK ICON / send_attachments / DEICTIC SHOW: same as system ATTACHMENTS. Never speak ids; never invent video/document content.";
 
-async function withAttachmentRefsSafe(
+export async function withAttachmentRefsSafe(
   snapshot: EmployeeRecordSnapshot,
 ): Promise<EmployeeRecordSnapshot> {
   const withAtt =
@@ -1131,9 +1131,9 @@ function workerTargetingInstructions(
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say משימות for tasks and קניות for shopping.",
     "PERSONAL TASK DEFAULT: «תוסיפי לי משימה» / «משימה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal משימות). Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
-    "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/משימות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. (1) IDENTICAL: exactly ONE list_name equals what they said → mutate NOW, no ask. Spoken token in TWO OR MORE titles (באגים / באגים לקוד / …) → NOT unique — treat as (3). (2) VERY SIMILAR but not identical (exactly one near-miss) → lists=[] and ASK once «התכוונת לרשימת «X»?» — never mutate until confirm. (3) Several close candidates, OR spoken token in ≥2 list_name titles, OR none → lists=[] and ASK which as NUMBERED 1. 2. 3. (exact list_name; personal vs משותפת עם X); never pick first/shared/looks-like. Example: «לאיזו רשימה התכוונת?» then «1. באגים» / «2. באגים לקוד (משותפת עם עמית)». After they answer with the title OR a line index («2» / «ל2») → map to the LAST list-pick ask line → exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index → re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone («הוסיפי באג» → a באגים* list). Server will not fix a wrong list_name.",
+    "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/משימות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. Match by MEANING — the speaker need not repeat the exact title; an exact title or a description that fits («הרשימה של ערב הפוקר») both refer to a list. (1) ONE clearly matching list → mutate NOW, no confirm. (2) TWO OR MORE plausible lists (e.g. spoken token in ≥2 titles: באגים / באגים לקוד; two poker-evening lists) → lists=[] and ASK which as NUMBERED 1. 2. 3. (3) No sufficiently clear match → lists=[] and ASK — never guess. For (2)/(3) list the candidates as NUMBERED 1. 2. 3. (exact list_name; personal vs משותפת עם X); never pick first/shared/looks-like. Example: «לאיזו רשימה התכוונת?» then «1. באגים» / «2. באגים לקוד (משותפת עם עמית)». After they answer with the title OR a line index («2» / «ל2») → map to the LAST list-pick ask line → exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index → re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone — a topic that refers to no list («הוסיפי באג») is not a list description (TOPIC-ONLY handling). Server will not fix a wrong list_name.",
     "SPEAKER_ADDRESS (this turn's fact block): always conjugate second-person Hebrew to gender male|female. If gender: unknown → do what this turn asks FIRST (every complete ACTION — lists / reminders / filing / messages / show_dump — emitted THIS turn, reply phrased gender-neutrally), then you may ask once «לפנות אליך בלשון זכר או נקבה?» as a separate LAST responses entry (skip while another question of yours is open); on answer → filing add «לשון פנייה» (item_info זכר/נקבה) — the server stores address gender for next turns. FORBIDDEN: empty actions or deferring any complete same-turn action (a durable filing/save such as «תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב», a reminder on an existing task such as «תזכירי לי מחר ב־09:00 על התור לווטרינר», anything) until gender is answered, and FORBIDDEN asking about the request itself because gender is unknown. Never ignore SPEAKER_ADDRESS.",
-    "Durable personal memory — file with lists add list_type filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school/diet/allergies. SAVE VERB (תייקי/תתייקי/תשמרי/תצרפי — text and/or files): follow ATTACHMENTS DESTINATION LADDER — unique custom list_name defaults to ITEM attach (ask which item if unclear; list shell only when explicitly «לרשימה עצמה» / «ברמת הרשימה»); filings only when «לתיוקים» / «תחת…» / «כ…»; FORBIDDEN filing only because «תייקי». LIST NAME MATCH on named lists. TOPIC-ONLY / NO LIST NAMED («הוסיפי באג: …» / «תשמרי את הבאג»): lists=[] — if ≥2 list_names contain באג/באגים → ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a באגים* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description = optional find-helper (מידע לחיפוש) after ANY code/ID/doc/car-number/gate-code/ת.ז/file filing when description empty (bare «מספר הרכב 703…» counts — not only תתייק); never after soft auto-memory (לשון פנייה/משפחה/כתובת…). Find filings by name+info+description. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
+    "Durable personal memory — file with lists add list_type filing in the same turn (do not only say אזכור): לשון פנייה/מגדר, משפחה, כתובת/עיר (street+city without the word כתובת still counts — רחוב שחם פתח תקוה), מצב משפחתי, השכלה, מקצוע, מקום עבודה, pets/school (health incl. allergies / diet → SENSITIVE: consent first). SAVE VERB (תייקי/תתייקי/תשמרי/תצרפי — text and/or files): follow ATTACHMENTS DESTINATION LADDER — unique custom list_name defaults to ITEM attach (ask which item if unclear; list shell only when explicitly «לרשימה עצמה» / «ברמת הרשימה»); filings only when «לתיוקים» / «תחת…» / «כ…»; FORBIDDEN filing only because «תייקי». LIST NAME MATCH on named lists. TOPIC-ONLY / NO LIST NAMED («הוסיפי באג: …» / «תשמרי את הבאג»): lists=[] — if ≥2 list_names contain באג/באגים → ASK which as NUMBERED 1. 2. 3. candidates (they may reply with the index); else ASK filings/shopping/tasks/named list. FORBIDDEN auto-picking a באגים* list by topic. Do NOT auto-file soft plans. Put detail in item_info (product תיאור); item_description = optional find-helper (מידע לחיפוש) after ANY code/ID/doc/car-number/gate-code/ת.ז/file filing when description empty (bare «מספר הרכב 703…» counts — not only תתייק); never after soft auto-memory (לשון פנייה/משפחה/כתובת…). Find filings by name+info+description. מה התיוקים שלי → explicit saves; מה את זוכרת עלי → memory. Prefer SPEAKER_ADDRESS for address gender.",
   ].join("\n");
 }
 
@@ -2039,6 +2039,60 @@ function matchHandoffWorker(
   });
 }
 
+/** Already-loaded per-turn context sources (production loaders fill them). */
+export interface TurnContextParts {
+  guestSpeaker: boolean;
+  consultFrom: boolean;
+  viewerId: string;
+  addressGender: Parameters<typeof formatSpeakerAddressContext>[0];
+  speakerSnapshot: EmployeeRecordSnapshot;
+  workerSnapshot: EmployeeRecordSnapshot | null;
+  speakerContacts: Parameters<typeof formatSpeakerContacts>[0];
+  contactBookShare: Parameters<typeof formatSpeakerContacts>[1];
+  teamSchedules: Parameters<typeof formatTeamSchedules>[0];
+  recentOutbound: Parameters<typeof formatRecentOutboundContext>[0];
+  openJobs: Parameters<typeof formatOpenJobsContext>[0];
+  lastNumberedDump: Parameters<typeof formatLastNumberedDumpContext>[0];
+  pendingAttachments: Parameters<typeof formatPendingAttachmentsContext>[0];
+  pendingLocation: Parameters<typeof formatPendingLocationContext>[0];
+  lastLiveLocation: Parameters<typeof formatLastLiveLocationContext>[0];
+  pendingInvite: Parameters<typeof formatPendingInviteContext>[0] | null;
+  tipsContext: string;
+}
+
+/**
+ * The live facts block sent ahead of the speaker's message each turn — one
+ * composer (order + guest/consult gating) shared by sendChatMessage and the
+ * LIVE_FULL eval harness so the two can never drift.
+ */
+export function composeTurnContext(parts: TurnContextParts): string {
+  const guest = parts.guestSpeaker;
+  return [
+    formatSessionClockContext(),
+    guest ? "" : formatSpeakerAddressContext(parts.addressGender),
+    formatEmployeeContext(parts.speakerSnapshot),
+    guest || !parts.workerSnapshot
+      ? ""
+      : formatEmployeeContext(parts.workerSnapshot, "WORKER_SAVED_DATA"),
+    guest
+      ? ""
+      : formatSpeakerContacts(parts.speakerContacts, parts.contactBookShare),
+    guest ? "" : formatTeamSchedules(parts.teamSchedules),
+    guest ? "" : formatRecentOutboundContext(parts.recentOutbound),
+    guest ? "" : formatOpenJobsContext(parts.openJobs, parts.viewerId),
+    guest ? "" : formatLastNumberedDumpContext(parts.lastNumberedDump),
+    guest || parts.consultFrom
+      ? ""
+      : formatPendingAttachmentsContext(parts.pendingAttachments),
+    guest ? "" : formatPendingLocationContext(parts.pendingLocation),
+    guest ? "" : formatLastLiveLocationContext(parts.lastLiveLocation),
+    parts.pendingInvite ? formatPendingInviteContext(parts.pendingInvite) : "",
+    parts.tipsContext,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function sendChatMessage(input: {
   userId: string;
   message: string;
@@ -2175,51 +2229,46 @@ export async function sendChatMessage(input: {
           scopeItemsToViewerId: input.employeeId,
         }),
       );
-  const context = [
-    formatSessionClockContext(),
-    guestSpeaker ? "" : formatSpeakerAddressContext(employee.addressGender),
-    formatEmployeeContext(speakerSnapshot),
-    guestSpeaker
-      ? ""
-      : formatEmployeeContext(workerSnapshot!, "WORKER_SAVED_DATA"),
-    guestSpeaker
-      ? ""
-      : formatSpeakerContacts(speakerContacts, contactBookShare),
-    guestSpeaker ? "" : formatTeamSchedules(await getTeamSchedules(input.employeeId)),
-    guestSpeaker ? "" : formatRecentOutboundContext(recentOutbound),
-    guestSpeaker ? "" : formatOpenJobsContext(openJobs, input.employeeId),
-    guestSpeaker ? "" : formatLastNumberedDumpContext(lastNumberedDump),
+  const pendingAttachments =
     guestSpeaker || consultFrom
-      ? ""
-      : formatPendingAttachmentsContext(
-          (
-            (await withoutFailingTurn("attachments_pending_failed", () =>
-              listPendingAttachments(input.employeeId),
-            )) ?? []
-          ).filter(
-            (fact) =>
-              !input.attachments?.facts.some(
-                (fresh) => fresh.attachment_id === fact.attachment_id,
-              ),
-          ),
-        ),
-    guestSpeaker
-      ? ""
-      : formatPendingLocationContext(getPendingLocation(input.employeeId)),
-    guestSpeaker ? "" : formatLastLiveLocationContext(lastLiveLocationCtx),
-    input.pendingInvite
-      ? formatPendingInviteContext(input.pendingInvite)
-      : "",
+      ? []
+      : (
+          (await withoutFailingTurn("attachments_pending_failed", () =>
+            listPendingAttachments(input.employeeId),
+          )) ?? []
+        ).filter(
+          (fact) =>
+            !input.attachments?.facts.some(
+              (fresh) => fresh.attachment_id === fact.attachment_id,
+            ),
+        );
+  const tipsContext =
     (await withoutFailingTurn("tips_context_failed", () =>
       formatAvailableTipsContext({
         userId: input.userId,
         speaker: employee,
         digitalEmployeeId: digital.id,
       }),
-    )) ?? "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    )) ?? "";
+  const context = composeTurnContext({
+    guestSpeaker,
+    consultFrom: Boolean(consultFrom),
+    viewerId: input.employeeId,
+    addressGender: employee.addressGender,
+    speakerSnapshot,
+    workerSnapshot,
+    speakerContacts,
+    contactBookShare,
+    teamSchedules: guestSpeaker ? [] : await getTeamSchedules(input.employeeId),
+    recentOutbound,
+    openJobs,
+    lastNumberedDump,
+    pendingAttachments,
+    pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
+    lastLiveLocation: lastLiveLocationCtx,
+    pendingInvite: input.pendingInvite ?? null,
+    tipsContext,
+  });
   const attachLucyEngine = shouldAttachLucyRuntimeEngine(
     digital,
     employees,
@@ -2301,7 +2350,7 @@ export async function sendChatMessage(input: {
         "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY משימות enumerate items (1. 2. 3. under one «משימות:» header; assign «(באחריות X · מאת Y)»; co-share «(A, B)»; LINKED REMINDER on task lines). קניות COUNTS ONLY breakdown under «קניות:» — אישיות / «(A, B)» / «(באחריות X · מאת Y)» (all involved on co-share); רשימות אחרות = «*name* (A, B) — N פריטים» (all involved, e.g. «(מיכל, טל)»; no «עם»). תזכורות פעילות: NUMBERED 1. 2. 3. (never •) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. Hint once: לפירוט רשימה: הצג רשימת …. תיוקים (one «תיוקים:» + «(A, B)»); אנשי קשר (one «אנשי קשר:» from EMPLOYEE_SAVED_DATA only — not SPEAKER_CONTACTS); ספר הטלפונים (one «ספר הטלפונים:» from SPEAKER_CONTACTS; co-share «(A, B)»; empty → ריק). FORBIDDEN: skipping ספר הטלפונים when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ספר הטלפונים from list_type contacts or calling the phone book «אנשי קשר». No schema jargon.",
         "PHONE BOOK / אנשי קשר / ספר הטלפונים / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
         "Show a named list / הציגי את רשימת X / «שיעורי נהיגה» / «שיעורי נהיגה של מאיה»: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written • inventory for named lists (breaks «הציגי 6»). items=[] → server empty sentence. Speak Hebrew only — never list_name / list_type / metadata. After that dump, «הציגי 6» / «את 3» → ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range → ASK, not invent ids.",
-        "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. scope=shared_items shopping/tasks → status header «קניות/משימות של <owner>» (FORBIDDEN משותפת עם). Named-list add/update/remove — LIST NAME MATCH (identical-unique → mutate; very similar one → confirm; several / token in ≥2 titles / topic-only «הוסיפי באג» → NUMBERED which-list ask; FORBIDDEN pick by topic). «רשימת קניות משותפת» / כן after that offer → shopping + list_name \"\" (FORBIDDEN custom with list_name קניות / משימות / אנשי קשר).",
+        "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. scope=shared_items shopping/tasks → status header «קניות/משימות של <owner>» (FORBIDDEN משותפת עם). Named-list add/update/remove — follow LIST NAME MATCH. «רשימת קניות משותפת» / כן after that offer → shopping + list_name \"\" (FORBIDDEN custom with list_name קניות / משימות / אנשי קשר).",
         "מה יש לי עם X / מה יש לי משותף עם X / מה משותף לי ול־X / מה משותף עם X / מה יש לנו עם X / מה אנחנו חולקים עם X: metadata.show_dump=\"full\"; show_dump_section=shared; show_dump_partner=X; lists=[]. Server dump (partner-filtered). FORBIDDEN model-written with-X overview.",
         "Bold in response: inventory dump lines are server-owned — do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap «שם:»). Item urgency: wrap the whole numbered line in «…». very_urgent also appends ‼️ after the closing guillemet. FORBIDDEN: writing דחוף / דחוף מאוד on the line.",
         guestSpeaker
@@ -4931,6 +4980,7 @@ export async function sendChatMessage(input: {
               ...(metadata.sendAttachments ?? []),
               ...itemDumpAttachmentIds,
             ].slice(0, SEND_ATTACHMENTS_MAX),
+            "send",
           ),
         )) ?? []);
     let celebrationRef: ChatAttachmentRef | null = null;
@@ -4944,7 +4994,9 @@ export async function sendChatMessage(input: {
         () =>
           runDeleteCelebration({
             userId: input.userId,
-            uploaderId: employee.id,
+            // Lucy-generated file: owned by the digital worker, never the speaker —
+            // otherwise it surfaces in PENDING_ATTACHMENTS as a file the user sent.
+            uploaderId: digital.id,
             profileAttachmentId,
             removes: celebrationRemoves,
             speakerName: employee.nickname?.trim() || employee.name,

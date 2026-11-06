@@ -891,6 +891,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       const rows = await resolveUsableAttachments(
         speaker.employeeId,
         turn.outboundAttachmentIds,
+        "send",
       );
       const result = await deliverAttachmentsToPhone(from, rows, {
         ignoreSession: true,

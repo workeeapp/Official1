@@ -465,12 +465,17 @@
               "itemTextIncludes": "עוגה"
             },
             {
+              "type": "lists_custom_create_and_link",
+              "listNameIncludes": "כיבוד",
+              "itemTextIncludes": "עוגה",
+              "hostListType": "tasks"
+            },
+            {
               "type": "lists_has_action",
               "action": "update",
               "listType": "tasks",
               "minCount": 1,
-              "maxCount": 1,
-              "itemTextIncludes": "כיבוד"
+              "maxCount": 1
             },
             {
               "type": "no_lists_add",

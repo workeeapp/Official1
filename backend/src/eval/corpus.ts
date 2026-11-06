@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EmployeeRecordSnapshot } from "../services/employee-records.service.js";
 import type { ReminderSnapshotRow } from "../services/reminder.service.js";
+import type { LastNumberedDumpLine } from "../services/show-button-dump.js";
 import type { ModelEvalConstraint, ModelEvalTag } from "./constraints.js";
 
 export interface ModelEvalCorpusCase {
@@ -184,6 +185,12 @@ export interface LiveFullCorpusTurn {
    * rememberInModelConversation; no extra model call, no WhatsApp.
    */
   injectAssistantAfter?: string;
+  /**
+   * Before this turn, start a fresh model conversation — mirrors the server's
+   * idle rotation (CONVERSATION_IDLE_MS): prior chat history is gone; persisted
+   * DB facts are rebuilt for this turn as usual. Ignored on turn 0.
+   */
+  newConversationBefore?: boolean;
 }
 
 export interface LiveFullCorpusCase {
@@ -192,13 +199,31 @@ export interface LiveFullCorpusCase {
   tags?: string[];
   description?: string;
   setup?: ModelEvalCorpusCase["setup"];
+  /** Per-turn production context sources the DB setup cannot express. */
+  context?: LiveFullCaseContext;
   turns: LiveFullCorpusTurn[];
+}
+
+/** Address gender stored on the speaker's Employee row (SPEAKER_ADDRESS). */
+export type EvalAddressGender = "male" | "female" | null;
+
+export interface LiveFullCaseContext {
+  /** Overrides the corpus default; null = unknown (the ask-once block). */
+  speakerAddressGender?: EvalAddressGender;
+  /**
+   * LAST_NUMBERED_DUMP the conversation starts with (a dump shown before turn 0).
+   * `id` may be a setup item_id / list_id / filing_id — mapped to the seeded row.
+   * Kept until a new model conversation starts (newConversationBefore).
+   */
+  lastNumberedDump?: LastNumberedDumpLine[];
 }
 
 export interface LiveFullCorpus {
   version: number;
   kind?: string;
   speaker: string;
+  /** Default SPEAKER_ADDRESS gender for every case (case context may override). */
+  speakerAddressGender?: EvalAddressGender;
   passRate: number;
   criticalCaseIds?: string[];
   cases: LiveFullCorpusCase[];

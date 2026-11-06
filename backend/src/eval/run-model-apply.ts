@@ -100,6 +100,8 @@ export interface ModelApplyProposeInput {
   account: HarnessAccount;
   /** Prior turns' model metadata (for multi-turn stubs). */
   priorMetadata: LlmMetadata[];
+  /** Setup id → seeded DB id (for context blocks that reference setup rows). */
+  idMap: ReadonlyMap<string, string>;
 }
 
 export interface ModelApplyProposeResult {
@@ -455,7 +457,12 @@ export async function runModelApplyCase(
   proposeTurn: (
     input: ModelApplyProposeInput,
   ) => Promise<ModelApplyProposeResult> | ModelApplyProposeResult,
-  options?: { speaker?: string; partners?: string[] },
+  options?: {
+    speaker?: string;
+    partners?: string[];
+    /** LIVE_FULL realism: speaker address gender + a digital worker row. */
+    harness?: { addressGender?: "male" | "female" | null; digitalWorker?: boolean };
+  },
 ): Promise<ModelApplyCaseResult> {
   const speaker = options?.speaker ?? "טל";
   const failures: string[] = [];
@@ -500,7 +507,10 @@ export async function runModelApplyCase(
         ...(options?.partners ?? []),
       ]),
     ];
-    account = await createHarnessAccount(speaker, { partners });
+    account = await createHarnessAccount(speaker, {
+      partners,
+      ...(options?.harness ?? {}),
+    });
     const nameToEmployeeId = new Map<string, string>([
       [speaker.trim(), account.employeeId],
       ...account.partners.map(
@@ -522,6 +532,7 @@ export async function runModelApplyCase(
         snapshot,
         account,
         priorMetadata: [...priorMetadata],
+        idMap,
       });
 
       const metadata = fillBlankCustomListNameFromSameTurnLinks(

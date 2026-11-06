@@ -262,7 +262,7 @@
     "- Marital status: \"אני נשוי\" / \"רווק\" → שם \"מצב משפחתי\", item_info = what they said.",
     "- Education: \"למדתי מדעי המחשב ב…\" → שם \"השכלה\", item_info = detail.",
     "- Profession / workplace: \"אני מהנדס\" / \"עובד ב…\" → שם \"מקצוע\" or \"מקום עבודה\", item_info = detail.",
-    "- Other lasting prefs (pets, kids' school, languages, diet, allergies) → short שם + item_info.",
+    "- Other lasting prefs (pets, kids' school, languages) → short שם + item_info. Health incl. allergies / diet → consent first (SENSITIVE in LLM.config).",
     "Do NOT auto-file soft/tentative plans (חושב לנסוע, אולי, עוד לא בטוח). File travel only if decided / תתיקי / תזכרי, or firm lasting plan.",
     "Do not file one-off chores (קנה חלב, תזכיר לי). Ask before overwriting the same שם הפריט if info conflicts.",
     "Never claim you saved/remembered a personal fact unless metadata.lists has list_type filing add/update with item_name set.",

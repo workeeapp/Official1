@@ -224,6 +224,10 @@ describe("attachment facts", () => {
     expect(block).toContain(A);
     expect(formatPendingAttachmentsContext([])).toBe("");
     expect(formatPendingAttachmentsContext([{ attachment_id: B, kind: "video" }])).toContain(B);
+    // Context, not a request: never framed as files waiting to be attached.
+    const header = formatPendingAttachmentsContext([{ attachment_id: B, kind: "video" }]);
+    expect(header).toContain("Context only — not a request and not permission");
+    expect(header).not.toContain("Attach them with attachment_ids on the action they belong to");
   });
 
   it("builds a chat ref from a row", () => {

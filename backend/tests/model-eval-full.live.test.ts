@@ -7,7 +7,21 @@ import {
   writeEvalReportArtifacts,
 } from "../src/eval/human-report.js";
 import { buildPostApplyEvidence } from "../src/eval/post-apply-evidence.js";
-import { runLiveFullCorpus } from "../src/eval/run-live-full.js";
+import {
+  runLiveFullCorpus,
+  useLegacyEvalContext,
+} from "../src/eval/run-live-full.js";
+import {
+  aggregateStability,
+  formatStabilityMarkdown,
+} from "../src/eval/stability.js";
+
+/** MODEL_EVAL_REPEAT=N → run the selection N times (G7 stability report). */
+function parseRepeat(): number {
+  const n = Number.parseInt(process.env.MODEL_EVAL_REPEAT ?? "1", 10);
+  return Number.isFinite(n) && n > 1 ? Math.min(n, 50) : 1;
+}
+const REPEAT = parseRepeat();
 
 /**
  * LIVE-full: Lucy + production apply on disposable workee_test.
@@ -15,6 +29,8 @@ import { runLiveFullCorpus } from "../src/eval/run-live-full.js";
  *   MODEL_EVAL_FULL_LIVE=1 MODEL_EVAL_LIVE=1 npm run test:model-eval-full -w backend
  * Optional: MODEL_EVAL_TAGS=shopping,reminders
  * Optional: MODEL_EVAL_CASES=full-list-buy-milk
+ * Optional: MODEL_EVAL_REPEAT=5 → stability report (docs/qa/live-full-stability.*)
+ * Optional: MODEL_EVAL_LEGACY_CONTEXT=1 → pre-G8 message composition (A/B only)
  *
  * Requires DATABASE_URL === WORKEE_APPROVED_TEST_DATABASE_URL (workee_test).
  */
@@ -38,9 +54,52 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
       .filter(Boolean);
     const corpus = loadLiveFullCorpus();
     const tagsFilter = parseModelEvalTags();
-    const summary = await runLiveFullCorpus(corpus, {
-      caseIds: caseFilter?.length ? caseFilter : undefined,
-    });
+    const runs: Awaited<ReturnType<typeof runLiveFullCorpus>>[] = [];
+    for (let i = 0; i < REPEAT; i += 1) {
+      runs.push(
+        await runLiveFullCorpus(corpus, {
+          caseIds: caseFilter?.length ? caseFilter : undefined,
+        }),
+      );
+    }
+    // Per-run artifacts below describe the LAST run; stability covers all.
+    const summary = runs[runs.length - 1]!;
+    const stability =
+      REPEAT > 1
+        ? aggregateStability(
+            runs.map((run) =>
+              run.results.map((row) => ({
+                id: row.id,
+                ok: row.ok,
+                failures: row.failures,
+                turns: row.turns.map((t) => ({
+                  turnIndex: t.turnIndex,
+                  utterance: t.utterance,
+                  response: t.response,
+                  ok: t.ok,
+                  metadata: t.metadata,
+                })),
+              })),
+            ),
+          )
+        : null;
+    if (stability) {
+      const stamp = new Date().toISOString();
+      const header = {
+        generatedAt: stamp,
+        filter: caseFilter?.length
+          ? `cases=${caseFilter.join(",")}`
+          : `tags=${(tagsFilter ?? []).join(",") || "(all)"}`,
+        contextMode: useLegacyEvalContext() ? "legacy (pre-G8)" : "production",
+      };
+      const base = resolve(import.meta.dirname, "../../docs/qa/live-full-stability");
+      writeFileSync(
+        `${base}.json`,
+        JSON.stringify({ ...header, ...stability }, null, 2),
+        "utf8",
+      );
+      writeFileSync(`${base}.md`, formatStabilityMarkdown(stability, header), "utf8");
+    }
 
     const generatedAt = new Date().toISOString();
     const corpusById = new Map(corpus.cases.map((c) => [c.id, c]));
@@ -133,6 +192,14 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
       },
     );
 
+    if (stability) {
+      // Measurement mode: gate on the aggregate rate; details live in the report.
+      expect(
+        stability.overallPassRate + 1e-9 >= summary.requiredPassRate,
+        `stability overall ${stability.overallPassRate.toFixed(2)} < ${summary.requiredPassRate}`,
+      ).toBe(true);
+      return;
+    }
     expect(
       summary.ok,
       [
@@ -150,5 +217,5 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
         .filter(Boolean)
         .join("; "),
     ).toBe(true);
-  }, 900_000);
+  }, 900_000 * REPEAT);
 });

@@ -86,6 +86,12 @@ export interface HarnessAccount {
   partners: PublicEmployee[];
   /** actor + partners — passed to applyListOps / applyReminders. */
   employees: PublicEmployee[];
+  /**
+   * LIVE_FULL only: the account's digital worker row (לוסי) so production
+   * context loaders (WORKER_SAVED_DATA / OPEN_JOBS) run against a real id.
+   * Not in `employees` — apply paths stay byte-identical.
+   */
+  digitalEmployeeId?: string;
 }
 
 function readItemId(item: Record<string, unknown>): string {
@@ -272,7 +278,11 @@ function requireFixtureMetadata(
 
 export async function createHarnessAccount(
   speaker: string,
-  options?: { partners?: string[] },
+  options?: {
+    partners?: string[];
+    addressGender?: "male" | "female" | null;
+    digitalWorker?: boolean;
+  },
 ): Promise<HarnessAccount> {
   // Central choke point for harness DB writes (ENGINE + MODEL_APPLY + LIVE_FULL).
   // Fail closed before any Prisma mutation — never self-approve DATABASE_URL.
@@ -293,8 +303,23 @@ export async function createHarnessAccount(
       surname: "",
       nickname: speaker,
       isOwner: true,
+      ...(options?.addressGender
+        ? { addressGender: options.addressGender }
+        : {}),
     },
   });
+  const digital = options?.digitalWorker
+    ? await prisma.employee.create({
+        data: {
+          userId: user.id,
+          kind: "digital",
+          name: "לוסי",
+          surname: "",
+          nickname: "לוסי",
+          isProtected: true,
+        },
+      })
+    : null;
   const actor: PublicEmployee = {
     id: employee.id,
     kind: "human",
@@ -341,6 +366,7 @@ export async function createHarnessAccount(
     actor,
     partners,
     employees: [actor, ...partners],
+    ...(digital ? { digitalEmployeeId: digital.id } : {}),
   };
 }
 
@@ -358,6 +384,11 @@ export async function destroyHarnessAccount(account: HarnessAccount): Promise<vo
   await prisma.employeeList.deleteMany({
     where: { employeeId: account.employeeId },
   });
+  if (account.digitalEmployeeId) {
+    await prisma.employeeList.deleteMany({
+      where: { employeeId: account.digitalEmployeeId },
+    });
+  }
   await prisma.employee.deleteMany({ where: { userId: account.userId } });
   await prisma.user.delete({ where: { id: account.userId } }).catch(() => undefined);
 }
@@ -678,6 +709,17 @@ export async function seedSetup(
           messageText: String(row.text ?? itemLabel),
           status: String(row.status ?? "active"),
           sendStatus: String(row.send_status ?? "pending"),
+          // A delivered clock (feeds RECENT_OUTBOUND like a real fire).
+          ...(String(row.send_status ?? "") === "sent"
+            ? {
+                sentAt: (() => {
+                  const raw = (row as { sent_at?: string }).sent_at;
+                  const at = raw ? new Date(String(raw)) : new Date();
+                  return Number.isFinite(at.getTime()) ? at : new Date();
+                })(),
+                lastComposedText: String(row.text ?? itemLabel),
+              }
+            : {}),
           ...(workerUuid ? { workerItemId: workerUuid } : {}),
         },
       });

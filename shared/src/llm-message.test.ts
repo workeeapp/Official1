@@ -2631,6 +2631,7 @@ describe("parseLlmReply", () => {
       radiusMeters: null,
       parkingCost: null,
       requireLiveSelect: false,
+      geoMode: "soft_place",
     });
   });
 
@@ -2666,6 +2667,7 @@ describe("parseLlmReply", () => {
       radiusMeters: 2000,
       parkingCost: null,
       requireLiveSelect: false,
+      geoMode: "soft_place",
     });
   });
 
@@ -2699,6 +2701,7 @@ describe("parseLlmReply", () => {
       radiusMeters: null,
       parkingCost: null,
       requireLiveSelect: false,
+      geoMode: "soft_place",
     });
   });
 
@@ -2732,6 +2735,7 @@ describe("parseLlmReply", () => {
       radiusMeters: null,
       parkingCost: null,
       requireLiveSelect: false,
+      geoMode: "soft_place",
     });
   });
 
@@ -3017,6 +3021,9 @@ describe("parseLlmReply", () => {
       aspects: ["eta"],
       requireLiveSelect: false,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: false,
     });
   });
 
@@ -3095,6 +3102,9 @@ describe("parseLlmReply", () => {
       aspects: ["lines"],
       requireLiveSelect: false,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: false,
     });
   });
 
@@ -3129,6 +3139,9 @@ describe("parseLlmReply", () => {
       aspects: ["schedule"],
       requireLiveSelect: false,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: false,
     });
   });
 
@@ -3162,6 +3175,9 @@ describe("parseLlmReply", () => {
       aspects: ["nearest_stop"],
       requireLiveSelect: false,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: false,
     });
   });
 
@@ -3194,6 +3210,9 @@ describe("parseLlmReply", () => {
       aspects: ["live_arrivals"],
       requireLiveSelect: false,
       prefer: "",
+      openItinerary: null,
+      recalculate: false,
+      discloseNetworkDisruption: false,
     });
   });
 
@@ -3221,6 +3240,7 @@ describe("parseLlmReply", () => {
       radiusMeters: null,
       parkingCost: null,
       requireLiveSelect: false,
+      geoMode: "soft_place",
     });
   });
 
@@ -3683,6 +3703,7 @@ describe("parseLlmReply", () => {
       place: "New York",
       date: "2026-10-21",
       aspects: ["wind", "waves"],
+      near: "",
     });
   });
 

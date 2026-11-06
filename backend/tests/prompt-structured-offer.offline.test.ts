@@ -24,6 +24,7 @@ describe("STRUCTURED LIST OFFER prompt contract", () => {
   it("defines the section once with the authorization ladder", () => {
     expect(prompt.match(/^STRUCTURED LIST OFFER \(/gm)?.length).toBe(1);
     expect(prompt).toMatch(/mentioning information NEVER authorizes saving it/);
+    expect(prompt).toMatch(/including news that changes a row of an existing list .* offer that update; the קניתי\/סיימתי Done rule is for shopping\/tasks only/);
     expect(prompt).toMatch(/authorizes ONE suggestion only — lists=\[\]/);
     expect(prompt).toMatch(/explicit approval .* authorizes creating it/);
     expect(prompt).toMatch(/explicit create \/ organize request skips the offer/);
@@ -59,12 +60,14 @@ describe("STRUCTURED LIST OFFER prompt contract", () => {
 
   it("keeps existing protections intact (clarified, not weakened)", () => {
     expect(prompt).toMatch(/SAVE IMMEDIATELY this turn \(B-IMPLICIT-SAVE\)/);
-    expect(prompt).toMatch(/FORBIDDEN save or reminder suggestion this turn \(incl\. STRUCTURED LIST OFFER/);
+    // Emotional-conversation protection: Stage A (no save / suggestion) + BAR (emotion alone → no offer).
+    expect(prompt).toMatch(/emotion without a concrete need for help → B-CONVERSE only; FORBIDDEN save or reminder suggestion this turn\./);
+    expect(prompt).toMatch(/emotion alone, with no concrete practical need → empathy only, no offer/);
     expect(prompt).toMatch(/Implicit save never creates a NEW custom list or new columns/);
     expect(prompt).toMatch(/Scope: this ladder governs creating or updating structured lists; it does not override the existing FILING rule/);
     expect(prompt).toMatch(/health information stays under SENSITIVE below/);
     // Existing durable-facts FILING rule untouched.
-    expect(prompt).toMatch(/Durable facts \(family, address form, address, job, …\) → filing add same turn when clearly stated/);
+    expect(prompt).toMatch(/Durable facts \(family, address form, address, job, …; health incl\. allergies \/ diet → SENSITIVE\) → filing add same turn when clearly stated/);
     expect(prompt).toMatch(/Do NOT open a custom list named as the event/);
     expect(prompt).toMatch(/Describing an existing or standing arrangement .* no implicit save and no assign; at most a STRUCTURED LIST OFFER/);
     expect(prompt).toMatch(/A concrete new need for a specific person .* is unchanged — ASSIGN as today/);
@@ -72,6 +75,162 @@ describe("STRUCTURED LIST OFFER prompt contract", () => {
     expect(prompt).toMatch(/• ASSIGN \(every item domain — shopping, tasks, custom items, filings, contacts\): «טל צריך לקנות חלב»/);
     expect(prompt).toMatch(/Do not treat consent to one action as consent to another/);
     expect(prompt).toMatch(/Never invent list_name from topic alone/);
+  });
+});
+
+describe("mechanism choice + health (consolidated into existing rules)", () => {
+  it("LIST TYPES defines each mechanism once and how to combine them", () => {
+    expect(prompt).toMatch(/custom = information to keep, consult and update/);
+    expect(prompt).toMatch(/Choose by intent; when a need spans several, keep each in its own mechanism/);
+    expect(prompt).toMatch(/a task may link to a whole list — TASK LINKED LISTS, not only events/);
+    expect(prompt).not.toMatch(/^CHOOSING THE MECHANISM/m);
+  });
+
+  it("row-level reminder is an example under the existing B-UNSUPPORTED", () => {
+    expect(prompt).toMatch(/B-UNSUPPORTED → say so in Hebrew; offer a supported alternative if any; no fake success \(e\.g\. a reminder \/ recurrence \/ task link on a custom-list row/);
+  });
+
+  it("one health rule covers storage consent and advice", () => {
+    expect(prompt.match(/^• SENSITIVE \(personal health/gm)?.length).toBe(1);
+    expect(prompt).toMatch(/never decide or recommend starting, stopping or changing a prescribed treatment or dose/);
+    expect(prompt).not.toMatch(/^HEALTH ADVICE:/m);
+  });
+
+  it("mention never updates an existing list — offer to add there", () => {
+    expect(prompt).toMatch(/fitting list already exists in THIS turn's facts — then offer to add it THERE \(one short confirm; an explicit add request runs now\), never a new list/);
+  });
+
+  it("Stage 1 duplicates removed", () => {
+    expect(prompt).not.toMatch(/^B-STRUCTURE-OFFER:/m);
+    expect(prompt).not.toMatch(/every other rule stay unchanged/);
+    expect(prompt).not.toMatch(/incl\. STRUCTURED LIST OFFER — emotion/);
+    expect(prompt).toMatch(/Implicit save never creates a NEW custom list or new columns/);
+  });
+});
+
+describe("mechanism eval corpus", () => {
+  const corpus = loadLiveFullCorpus();
+  const cases = corpus.cases.filter((c) =>
+    (c as { tags?: string[] }).tags?.includes("mechanism"),
+  );
+
+  it("covers combine, link, unsupported, family, choice and medical advice", () => {
+    const tags = new Set(cases.flatMap((c) => (c as { tags?: string[] }).tags ?? []));
+    for (const t of ["combine", "link", "unsupported", "family", "choice", "medical-advice", "consent"]) {
+      expect(tags.has(t), t).toBe(true);
+    }
+  });
+
+  it("uses only known constraint types and seeded ids", () => {
+    for (const c of cases) {
+      const seeded = new Set<string>();
+      for (const list of c.setup?.lists ?? []) {
+        for (const item of list.items ?? []) {
+          const id = (item as { item_id?: string }).item_id;
+          if (id) seeded.add(id);
+        }
+      }
+      for (const turn of c.turns) {
+        const checked = evaluateConstraints(
+          (turn.constraints ?? []) as ModelEvalConstraint[],
+          emptyLlmMetadata(),
+          "",
+        );
+        expect(checked.failures.filter((f) => f.startsWith("unknown constraint")), c.id).toEqual([]);
+        for (const row of (turn.constraints ?? []) as Array<{ ids?: string[] }>) {
+          for (const id of row.ids ?? []) expect(seeded.has(id), `${c.id}:${id}`).toBe(true);
+        }
+      }
+    }
+  });
+});
+
+describe("structured-crud corpus (G3) + persisted creation checks (G2)", () => {
+  const all = loadLiveFullCorpus().cases;
+  const crud = all.filter((c) => (c as { tags?: string[] }).tags?.includes("structured-crud"));
+
+  it("covers update, mention≠update, remove, aggregate retrieval, add with responsible, column rename", () => {
+    const tags = new Set(crud.flatMap((c) => (c as { tags?: string[] }).tags ?? []));
+    for (const t of ["update", "negative", "remove", "retrieval", "add", "columns"]) {
+      expect(tags.has(t), t).toBe(true);
+    }
+    for (const c of crud) {
+      expect(c.turns.every((t) => t.stateAfter || (t.constraints ?? []).some((k) => k.type.startsWith("show_dump"))), c.id).toBe(true);
+    }
+  });
+
+  it("uses only known constraints and seeded ids", () => {
+    for (const c of crud) {
+      const seeded = new Set<string>();
+      for (const list of c.setup?.lists ?? []) {
+        for (const item of list.items ?? []) {
+          const id = (item as { item_id?: string }).item_id;
+          if (id) seeded.add(id);
+        }
+      }
+      for (const turn of c.turns) {
+        const checked = evaluateConstraints((turn.constraints ?? []) as ModelEvalConstraint[], emptyLlmMetadata(), "");
+        expect(checked.failures.filter((f) => f.startsWith("unknown constraint")), c.id).toEqual([]);
+        const ids = [
+          ...((turn.constraints ?? []) as Array<{ ids?: string[]; itemIds?: string[] }>).flatMap((k) => [...(k.ids ?? []), ...(k.itemIds ?? [])]),
+          ...(turn.stateAfter?.itemIdsPresent ?? []),
+          ...(turn.stateAfter?.itemIdsAbsent ?? []),
+        ];
+        for (const id of ids) expect(seeded.has(id), `${c.id}:${id}`).toBe(true);
+      }
+    }
+  });
+
+  it("creation scenarios verify persisted rows, not only the action", () => {
+    for (const [id, turn] of [
+      ["so-timetable-offer-then-create", 1],
+      ["so-expenses-offer-then-create", 1],
+      ["so-household-share-offer", 1],
+      ["so-names-no-share", 0],
+      ["so-explicit-create-direct", 0],
+    ] as const) {
+      const row = all.find((c) => c.id === id)!;
+      expect(row.turns[turn]!.stateAfter?.factsInclude, id).toContain('"list_type":"custom"');
+    }
+  });
+});
+
+describe("continuity measurement corpus", () => {
+  const cases = loadLiveFullCorpus().cases.filter((c) =>
+    (c as { tags?: string[] }).tags?.includes("continuity"),
+  );
+
+  it("covers declined offer, open offer, not-saved info, automated messages — each with rotation", () => {
+    const tags = new Set(cases.flatMap((c) => (c as { tags?: string[] }).tags ?? []));
+    for (const t of ["declined", "open-offer", "not-saved", "automated", "reminder", "control"]) {
+      expect(tags.has(t), t).toBe(true);
+    }
+    const rotated = cases.filter((c) => c.turns.some((t) => t.newConversationBefore));
+    expect(rotated.length).toBeGreaterThanOrEqual(5);
+    // rotation is meaningless on turn 0
+    for (const c of cases) expect(c.turns[0]!.newConversationBefore, c.id).toBeFalsy();
+  });
+
+  it("is kept out of the default regression tags", () => {
+    const script = readFileSync(
+      resolve(import.meta.dirname, "../../scripts/run-regression.ps1"),
+      "utf8",
+    );
+    expect(script).toMatch(/\[string\]\$Tags = "structured-offer,mechanism,filing-policy,structured-crud",/);
+    expect(script).not.toMatch(/\$Tags = "[^"]*continuity/);
+  });
+
+  it("uses only known constraint types", () => {
+    for (const c of cases) {
+      for (const turn of c.turns) {
+        const checked = evaluateConstraints(
+          (turn.constraints ?? []) as ModelEvalConstraint[],
+          emptyLlmMetadata(),
+          "",
+        );
+        expect(checked.failures.filter((f) => f.startsWith("unknown constraint")), c.id).toEqual([]);
+      }
+    }
   });
 });
 
@@ -149,6 +308,16 @@ describe("structured-offer eval corpus", () => {
     );
     expect(runner).toMatch(/injectAssistantAfter/);
     expect(runner).toMatch(/appendAssistantMessage\?\.\(conversationId, inject\)/);
+  });
+
+  it("live-full runner reproduces idle rotation (new conversation, DB facts + RECENT_OUTBOUND kept)", () => {
+    const runner = readFileSync(
+      resolve(import.meta.dirname, "../src/eval/run-live-full.ts"),
+      "utf8",
+    );
+    expect(runner).toMatch(/newConversationBefore\s*\)\s*\{\s*conversationId = await client\.createConversation\(\);/);
+    expect(runner).toMatch(/formatRecentOutboundContext\(\s*await listRecentReminderOutbounds\(/);
+    expect(runner).toMatch(/\.\.\.\(recentOutbound \? \[recentOutbound\] : \[\]\)/);
   });
 
   it("no-save conversational turns assert filing_empty", () => {

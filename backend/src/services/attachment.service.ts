@@ -380,7 +380,7 @@ export function formatPendingAttachmentsContext(facts: AttachmentFact[]): string
   }
   return [
     "PENDING_ATTACHMENTS:",
-    `Files this speaker sent in the last ${PENDING_ATTACHMENT_HOURS} hours that are not attached to anything yet (oldest first). Attach them with attachment_ids on the action they belong to; never speak ids.`,
+    `Files this speaker sent in the last ${PENDING_ATTACHMENT_HOURS} hours that are not linked to anything yet (oldest first). Context only — not a request and not permission: use one (attachment_ids) only when the speaker's request clearly refers to it or answers your explicit open question about it (FILE INTENT); never speak ids.`,
     JSON.stringify(facts),
   ].join("\n");
 }
@@ -687,10 +687,14 @@ export async function withContactAttachmentRefs<
  * Attachments the actor may attach or receive: same account, not deleted, and
  * either their own upload, an account owner, or already attached to saved data
  * (ids the model copied from this turn's visible rows).
+ * purpose "send": files a digital worker on the account generated (e.g. the
+ * delete-celebration image) may also be delivered to the speaker. They are
+ * never attachable as if the speaker had uploaded them (purpose "attach").
  */
 export async function resolveUsableAttachments(
   actorId: string,
   attachmentIds: string[],
+  purpose: "attach" | "send" = "attach",
 ): Promise<Attachment[]> {
   const ids = [...new Set(attachmentIds.map((id) => id.trim()).filter(Boolean))].filter(
     (id) => UUID_RE.test(id),
@@ -707,15 +711,22 @@ export async function resolveUsableAttachments(
   }
   const rows = await prisma.attachment.findMany({
     where: { id: { in: ids }, userId: actor.userId, deletedAt: null },
-    include: { _count: { select: { links: true } } },
+    include: {
+      _count: { select: { links: true } },
+      uploader: { select: { kind: true } },
+    },
   });
   const usable = rows.filter(
-    (row) => row.uploaderId === actorId || actor.isOwner || row._count.links > 0,
+    (row) =>
+      row.uploaderId === actorId ||
+      actor.isOwner ||
+      row._count.links > 0 ||
+      (purpose === "send" && row.uploader?.kind === "digital"),
   );
   const order = new Map(ids.map((id, index) => [id, index]));
   return usable
     .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
-    .map(({ _count: _ignored, ...row }) => row);
+    .map(({ _count: _ignored, uploader: _uploader, ...row }) => row);
 }
 
 /** Apply the model's attachment_ids / detach ids on one saved target. */
