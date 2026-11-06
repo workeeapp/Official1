@@ -8,7 +8,7 @@
  * Layers included: eval-db harness, planTargetedActions, applyEmployeeRecords.
  * Layers skipped: real LLM, show_dump REPLACE, WhatsApp, product DB.
  *
- * Run: npm run test:eval-db -- tests/share-by-index-model-apply.offline.test.ts
+ * Run: npm run test:db -w backend -- tests/share-by-index-model-apply.db.test.ts
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {

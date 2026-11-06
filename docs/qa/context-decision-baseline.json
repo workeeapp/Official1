@@ -26,8 +26,8 @@
       "backend/tests/*pack*model-apply.offline.test.ts",
       "backend/tests/attachment-intent-contract.offline.test.ts",
       "backend/tests/places.test.ts (parking intent)",
-      "backend/tests/multi-shell-clear-model-apply.offline.test.ts",
-      "backend/tests/event-pack-model-apply.offline.test.ts",
+      "backend/tests/multi-shell-clear-model-apply.db.test.ts",
+      "backend/tests/event-pack-model-apply.db.test.ts",
       "backend/tests/event-pack.offline.test.ts",
       "backend/tests/show-turn-guard.test.ts / show-button-dump.test.ts",
       "backend/tests/jobs.test.ts (engine askWhich)",
@@ -54,7 +54,7 @@
       "classification": "gap_coverage",
       "existingCoverage": [
         "docs/qa/tasks-pack-suite.json T-UPDATE",
-        "backend/tests/tasks-pack-model-apply.offline.test.ts T-UPDATE-MT"
+        "backend/tests/tasks-pack-model-apply.db.test.ts T-UPDATE-MT"
       ],
       "desiredMetadata": {
         "lists": [
@@ -195,7 +195,7 @@
       "proofLevel": "model_decision_contract",
       "existingCoverage": [
         "docs/qa/shopping-pack-suite.json S-CLEAR-NOW",
-        "backend/tests/multi-shell-clear-model-apply.offline.test.ts P0-SINGLE-SHELL-CLEAR-NOW (engine_apply when eval DB available)",
+        "backend/tests/multi-shell-clear-model-apply.db.test.ts P0-SINGLE-SHELL-CLEAR-NOW (engine_apply when eval DB available)",
         "LLM.config.json BULK CLEAR — ONE SHELL (A1)"
       ],
       "desiredMetadata": {
@@ -231,7 +231,7 @@
       "proofLevel": "model_decision_contract",
       "existingCoverage": [
         "docs/qa/shopping-pack-suite.json S-CLEAR-MULTI-SHELL-ASK",
-        "backend/tests/multi-shell-clear-model-apply.offline.test.ts P0-MULTI-SHELL-CLEAR-ASK-THEN-PERSONAL (engine_apply when eval DB available)",
+        "backend/tests/multi-shell-clear-model-apply.db.test.ts P0-MULTI-SHELL-CLEAR-ASK-THEN-PERSONAL (engine_apply when eval DB available)",
         "LLM.config.json MULTI-SHELL CLEAR (A1)"
       ],
       "desiredMetadata": {
@@ -363,7 +363,7 @@
       "factsNote": "Existing speaker tasks item_id=task-gift; worker name לוסי",
       "classification": "gap_coverage",
       "existingCoverage": [
-        "backend/tests/batch-a-model-apply.offline.test.ts MT3-stop-nudge-keep-item (cancel path only)"
+        "backend/tests/batch-a-model-apply.db.test.ts MT3-stop-nudge-keep-item (cancel path only)"
       ],
       "desiredMetadata": {
         "lists": [
@@ -413,7 +413,7 @@
       "factsNote": "One COMPLEX EVENT host tasks item_id=host-1",
       "classification": "pass_existing",
       "existingCoverage": [
-        "backend/tests/event-pack-model-apply.offline.test.ts E-RENAME-SAME-HOST"
+        "backend/tests/event-pack-model-apply.db.test.ts E-RENAME-SAME-HOST"
       ],
       "desiredMetadata": {
         "lists": [
@@ -601,7 +601,7 @@
       "utterance": "איזה קווים עוברים בתחנת שלום דורני?",
       "classification": "gap_coverage",
       "existingCoverage": [
-        "backend/tests/routes.test.ts (engine format for aspects lines — not decide ASK)"
+        "backend/tests/routes.db.test.ts (engine format for aspects lines — not decide ASK)"
       ],
       "desiredMetadata": {
         "routes": null,
@@ -622,7 +622,7 @@
       "factsNote": "Follow-up after ROUTES-LINES-AT-STOP-ASK-FIRST",
       "classification": "gap_coverage",
       "existingCoverage": [
-        "backend/tests/routes.test.ts (aspects lines formatting)"
+        "backend/tests/routes.db.test.ts (aspects lines formatting)"
       ],
       "desiredMetadata": {
         "routes": {

@@ -1,0 +1,40 @@
+{
+  "_doc": "Reviewed skip/todo exceptions for regression-summary.ts. Any skipped or todo test NOT listed here fails its suite. Each entry: file (basename), test (vitest fullName), kind (skip|todo), reason, addedIn.",
+  "entries": [
+    {
+      "file": "item-reminder-multi-link.offline.test.ts",
+      "test": "multi-clock item↔reminder links (offline) FOLLOW-UP: linkedReminderField worker path (reminderId + activeByWorkerItemId) unions without dupes",
+      "kind": "todo",
+      "reason": "placeholder for follow-up coverage — owner asked not to implement until requested (file header)",
+      "addedIn": "pre-Q3"
+    },
+    {
+      "file": "item-reminder-multi-link.offline.test.ts",
+      "test": "multi-clock item↔reminder links (offline) FOLLOW-UP: missing / non-UUID / unauthorized item_id → clock saved, no join",
+      "kind": "todo",
+      "reason": "placeholder for follow-up coverage — owner asked not to implement until requested (file header)",
+      "addedIn": "pre-Q3"
+    },
+    {
+      "file": "item-reminder-multi-link.eval-db.test.ts",
+      "test": "multi-clock item↔reminder links (eval-db) FOLLOW-UP: chat E2E — same-turn lists.add (minted item_id) + two reminders with that item_id → two join rows on persisted PK",
+      "kind": "todo",
+      "reason": "placeholder for follow-up eval-db coverage — not implemented yet (file header)",
+      "addedIn": "pre-Q3"
+    },
+    {
+      "file": "item-reminder-multi-link.eval-db.test.ts",
+      "test": "multi-clock item↔reminder links (eval-db) FOLLOW-UP: migration preflight abort — deploy against workee_test fixture with duplicate live linked_reminder_id must RAISE and not create/backfill",
+      "kind": "todo",
+      "reason": "placeholder for follow-up eval-db coverage — not implemented yet (file header)",
+      "addedIn": "pre-Q3"
+    },
+    {
+      "file": "reminder-stop-nl.live-sendchat.eval-db.test.ts",
+      "test": "reminder stop NL → ACTION → DB (real model, eval-db) duplicate titles, no ping, cancel by title → clarify; cancel neither",
+      "kind": "skip",
+      "reason": "parked known model gap: with two same-title series and no ping the model may remove one/both instead of asking (comment in file; parked in 21e9e38, 2026-11-03)",
+      "addedIn": "21e9e38"
+    }
+  ]
+}

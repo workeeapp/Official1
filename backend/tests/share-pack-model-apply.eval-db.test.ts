@@ -15,7 +15,7 @@
  * - WhatsApp outbound, reminder fire ticker, relays/jobs
  * - Guest mutation block on actor (covered in sendChat E2E; SH-GUEST-VIEW is ask-only)
  *
- * Run: npm run test:eval-db -- tests/share-pack-model-apply.offline.test.ts
+ * Run: npm run test:eval-db -- tests/share-pack-model-apply.eval-db.test.ts
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {

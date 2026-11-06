@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "_doc": "Per-case expectations for model-eval suites, gated by backend/src/eval/regression-summary.ts. Built from the Q1 validation runs of 2026-11-06 (production instructions). Cases not listed are NEW: a passing new case is reported, a failing one fails the run. Every non-pass entry needs reason + measured evidence + reviewBy; after reviewBy the exception is ignored and the case gates as pass. Change this file only by explicit, reviewed edit.",
+  "suites": {
+    "live-full": {
+      "scope": "model+harness-apply",
+      "criticalCaseIds": [
+        "full-list-buy-milk",
+        "full-mt-clarify-then-delete",
+        "full-shopping-add-milk",
+        "full-task-done-doctor",
+        "full-list-clear-personal-shopping",
+        "full-reminder-cancel-named",
+        "full-filing-add-simple",
+        "full-directory-add-michal",
+        "full-share-shop-with-amit",
+        "full-event-host-create-poker",
+        "full-mt-event-clarify-then-link",
+        "full-mt-clarify-task-which",
+        "full-mt-multi-add-then-buy",
+        "full-mt-complex-personal-vs-shared",
+        "full-mt-share-ask-then-partner"
+      ],
+      "cases": {
+        "a-exam-reminder-via-task": {
+          "expect": "pass"
+        },
+        "a-family-activity-row-plus-standing-task": {
+          "expect": "pass"
+        },
+        "a-family-info-offer-not-task": {
+          "expect": "pass"
+        },
+        "a-link-task-to-whole-list": {
+          "expect": "pass"
+        },
+        "a-med-dose-change-no-advice": {
+          "expect": "pass"
+        },
+        "a-med-reminder-explicit-allowed": {
+          "expect": "pass"
+        },
+        "a-med-stop-no-advice": {
+          "expect": "pass"
+        },
+        "a-practical-to-task-not-list": {
+          "expect": "pass"
+        },
+        "a-row-reminder-unsupported": {
+          "expect": "pass"
+        },
+        "c-automated-chat-message-after-rotation": {
+          "expect": "known-fail",
+          "reason": "G9 continuity limitation: after the 40-min idle rotation the model conversation starts fresh (documented in claude/qa-followups.md, architecture decision deferred by owner) — an automated Lucy message sent before rotation is not remembered",
+          "evidence": "failed in every measured run on 2026-11-06: g8-full1 (15:36Z), q1 (16:49Z); same-conversation control passes",
+          "reviewBy": "2026-12-07"
+        },
+        "c-automated-chat-message-same-conversation-control": {
+          "expect": "pass"
+        },
+        "c-declined-offer-after-rotation": {
+          "expect": "pass"
+        },
+        "c-mentioned-not-saved-after-rotation": {
+          "expect": "pass"
+        },
+        "c-mentioned-not-saved-same-conversation-control": {
+          "expect": "pass"
+        },
+        "c-open-offer-after-rotation": {
+          "expect": "known-fail",
+          "reason": "G9 continuity limitation: after the 40-min idle rotation the model conversation starts fresh (documented in claude/qa-followups.md, architecture decision deferred by owner) — an open offer is lost, bare «כן» is not understood",
+          "evidence": "failed in every measured run on 2026-11-06: g8-full1 (15:36Z), female (15:49Z), q1 (16:49Z); same-conversation control passes",
+          "reviewBy": "2026-12-07"
+        },
+        "c-open-offer-same-conversation-control": {
+          "expect": "pass"
+        },
+        "c-reminder-fire-after-rotation": {
+          "expect": "pass"
+        },
+        "e-allergy-explicit-save": {
+          "expect": "pass"
+        },
+        "e-allergy-not-auto-filed": {
+          "expect": "pass"
+        },
+        "e-diet-used-not-filed": {
+          "expect": "pass"
+        },
+        "e-durable-fact-still-filed": {
+          "expect": "pass"
+        },
+        "g3-add-row-with-responsible": {
+          "expect": "pass"
+        },
+        "g3-aggregate-who-has-not": {
+          "expect": "pass"
+        },
+        "g3-mention-is-not-update": {
+          "expect": "pass"
+        },
+        "g3-remove-row-explicit": {
+          "expect": "pass"
+        },
+        "g3-rename-column": {
+          "expect": "pass"
+        },
+        "g3-update-row-explicit": {
+          "expect": "pass"
+        },
+        "g8-address-female": {
+          "expect": "pass"
+        },
+        "g8-dump-index-delete": {
+          "expect": "pass"
+        },
+        "lm-multiple-plausible-asks": {
+          "expect": "pass"
+        },
+        "lm-no-clear-match-asks": {
+          "expect": "pass"
+        },
+        "lm-unique-description-executes": {
+          "expect": "pass"
+        },
+        "so-chat-no-offer": {
+          "expect": "pass"
+        },
+        "so-cycle-consent-gate": {
+          "expect": "pass"
+        },
+        "so-declined-automated-return": {
+          "expect": "pass"
+        },
+        "so-declined-health-not-reoffered": {
+          "expect": "pass"
+        },
+        "so-exam-calendar-offer": {
+          "expect": "pass"
+        },
+        "so-existing-list-no-reoffer": {
+          "expect": "pass"
+        },
+        "so-expenses-offer-then-create": {
+          "expect": "pass"
+        },
+        "so-explicit-assign-still-works": {
+          "expect": "pass"
+        },
+        "so-explicit-create-direct": {
+          "expect": "pass"
+        },
+        "so-gathering-stays-complex-event": {
+          "expect": "pass"
+        },
+        "so-household-share-offer": {
+          "expect": "flaky",
+          "reason": "model sampling variance: the optional share offer after creating a household chore list is sometimes omitted (full omission, no button) — rule is clear, no prompt change (QA-2)",
+          "evidence": "G7 stability 2026-11-06: 9/10 with production context (hh-prod), 6/10 legacy context (hh-legacy); passed in g8-full1 and q1 single runs",
+          "reviewBy": "2026-12-07",
+          "minPassesOf3": 2
+        },
+        "so-med-practical-buy-still-saves": {
+          "expect": "pass"
+        },
+        "so-med-record-not-saved": {
+          "expect": "pass"
+        },
+        "so-multi-list-ambiguous-asks": {
+          "expect": "pass"
+        },
+        "so-multi-list-by-content": {
+          "expect": "pass"
+        },
+        "so-multi-list-meaning-not-recency": {
+          "expect": "pass"
+        },
+        "so-names-no-share": {
+          "expect": "pass"
+        },
+        "so-q-neg-anecdote": {
+          "expect": "pass"
+        },
+        "so-q-neg-general-question": {
+          "expect": "pass"
+        },
+        "so-q-neg-health-mention": {
+          "expect": "pass"
+        },
+        "so-q-neg-one-off-fact": {
+          "expect": "pass"
+        },
+        "so-q-neg-single-meeting": {
+          "expect": "pass"
+        },
+        "so-q-pos-babysitter-payments": {
+          "expect": "pass"
+        },
+        "so-q-pos-moving": {
+          "expect": "pass"
+        },
+        "so-retrieval-who-brings": {
+          "expect": "pass"
+        },
+        "so-standing-arrangement-no-tasks": {
+          "expect": "pass"
+        },
+        "so-timetable-offer-then-create": {
+          "expect": "pass"
+        },
+        "so-travel-offer": {
+          "expect": "pass"
+        }
+      }
+    },
+    "phase-4": {
+      "scope": "model-only",
+      "criticalCaseIds": [
+        "list-buy-milk",
+        "list-clear-tasks",
+        "list-clear-personal-shopping",
+        "list-filtered-multi-delete",
+        "list-not-filing",
+        "list-named-item-delete",
+        "delete-everything",
+        "delete-two-named-lists",
+        "delete-ambiguous-list-title",
+        "delete-unresolved-list",
+        "shopping-add-milk",
+        "task-empty-ask",
+        "shopping-empty-ask",
+        "share-shop-with-amit",
+        "share-ask-missing-partner",
+        "event-host-create-poker",
+        "event-maybe-no-host",
+        "event-help-organize-host",
+        "filing-add-simple",
+        "directory-add-michal",
+        "reminder-create-relative",
+        "task-done-doctor"
+      ],
+      "cases": {
+        "list-named-item-delete": {
+          "expect": "pass"
+        },
+        "delete-ambiguous-list-title": {
+          "expect": "pass"
+        }
+      }
+    },
+    "phase-4-mt": {
+      "scope": "model-only",
+      "criticalCaseIds": [
+        "mt-clarify-then-delete",
+        "mt-ambiguous-list-resolve",
+        "mt-cancel-reminder-resolve",
+        "mt-ask-then-add",
+        "mt-share-ask-then-partner",
+        "mt-event-clarify-then-link",
+        "mt-clarify-task-which",
+        "mt-multi-add-then-buy",
+        "mt-complex-personal-vs-shared-shop"
+      ],
+      "cases": {
+        "mt-ambiguous-list-resolve": {
+          "expect": "pass"
+        }
+      }
+    },
+    "attachment-intent": {
+      "scope": "model-only",
+      "cases": {
+        "att-no-intent": {
+          "expect": "pass"
+        },
+        "att-deferred-after-lucy": {
+          "expect": "pass"
+        },
+        "att-item-default": {
+          "expect": "pass"
+        },
+        "att-filing": {
+          "expect": "pass"
+        },
+        "att-rishon": {
+          "expect": "pass"
+        },
+        "att-ambiguous": {
+          "expect": "pass"
+        }
+      }
+    }
+  }
+}

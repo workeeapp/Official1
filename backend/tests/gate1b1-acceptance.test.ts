@@ -250,7 +250,7 @@ describe("Gate 1b.1 acceptance — A6 offline ENGINE (no live model)", () => {
 describe("Gate 1b.1 acceptance — A9 multi-turn continuity", () => {
   it("reuses Gate 1 coverage: existing offline suite asserts UUID continuity + reinjected facts", () => {
     const gate1 = readFileSync(
-      resolve(import.meta.dirname, "./regression-suite.offline.test.ts"),
+      resolve(import.meta.dirname, "./regression-suite.db.test.ts"),
       "utf8",
     );
     expect(gate1).toContain("appliedViaProduction");

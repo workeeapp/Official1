@@ -200,13 +200,9 @@ describe("P0 multi-shell clear prompt (offline)", () => {
   });
 });
 
-const hasApprovedEvalDb = Boolean(
-  process.env.DATABASE_URL?.trim() &&
-    process.env.WORKEE_APPROVED_TEST_DATABASE_URL?.trim(),
-);
-
-// Stage C: skip DB harness when no approved eval URL (do not run MODEL_APPLY).
-describe.skipIf(!hasApprovedEvalDb)("P0 multi-shell clear MODEL_APPLY (offline)", () => {
+// db track (*.db.test.ts): an unapproved / missing DB fails loudly in beforeAll —
+// never a silent skip that would read as passed.
+describe("P0 multi-shell clear MODEL_APPLY (offline)", () => {
   beforeAll(() => {
     const db = process.env.DATABASE_URL;
     if (!db?.trim()) throw new Error("DATABASE_URL required");

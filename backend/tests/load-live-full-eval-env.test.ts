@@ -193,24 +193,3 @@ describe("loadLiveFullEvalEnv (fail-closed, no product fallback)", () => {
     expect(src).not.toMatch(/override: true/);
   });
 });
-
-describe("eval-db vitest setup (real .env.live-full-eval)", () => {
-  const locked = process.env[WORKEE_EVAL_ENV_LOCKED] === "1";
-
-  it.skipIf(!locked)(
-    "after setup-eval-env, DATABASE_URL exactly matches approved workee_test URL",
-    () => {
-      expect(process.env.DATABASE_URL).toBeTruthy();
-      expect(process.env.WORKEE_APPROVED_TEST_DATABASE_URL).toBeTruthy();
-      expect(process.env.DATABASE_URL).toBe(
-        process.env.WORKEE_APPROVED_TEST_DATABASE_URL,
-      );
-      const db = new URL(process.env.DATABASE_URL!).pathname
-        .replace(/^\//, "")
-        .split("/")[0];
-      expect(db).toBe("workee_test");
-      expect(process.env.WORKEE_DISABLE_WHATSAPP_OUTBOUND).toBe("1");
-      expect(process.env.WORKEE_DISABLE_REMINDER_FIRE).toBe("1");
-    },
-  );
-});

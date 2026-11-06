@@ -14,17 +14,30 @@ Start here for ongoing development. Track guarantees, Studio gates, isolation ru
 
 Evidence artifacts (not status docs): `*-last-report.md` / `.json`. [`unit-test-summary.md`](unit-test-summary.md) is a historical snapshot only.
 
+## Test tracks (Q3)
+
+Every backend test file belongs to exactly one track, by file suffix:
+
+| Track | Files | Config / command | Needs | Scope reported |
+|-------|-------|------------------|-------|----------------|
+| offline | `*.test.ts`, `*.offline.test.ts` | `npm test -w backend` (default config) | nothing — runs with an unreachable `DATABASE_URL`, so a hidden DB dependency fails | unit / offline |
+| db | `*.db.test.ts` | `npm run test:db -w backend` | `.env.live-full-eval` → approved `workee_test` only (run fails, never skips, without it) | DB harness (stub model, production apply) |
+| eval-db | `*.eval-db.test.ts` | `npm run test:eval-db -w backend` | locked `.env.live-full-eval` | eval-db harness; `*.live-sendchat.eval-db.test.ts` = production path (real `sendChatMessage`, real model) |
+| live | `*.live.test.ts` | `test:model-eval*` / `test:attachment-intent-model` | OpenAI (+ DB for LIVE_FULL) | model only (phase-4, attachment-intent) · model + harness apply (LIVE_FULL) |
+
+`scripts/run-regression.ps1` runs the requested tracks and prints one verdict per suite via `backend/src/scripts/regression-summary.ts`: PASS / FAIL / NOT_RUN (a requested suite that produced no fresh results fails the run). Skips/todos are tolerated only when listed in [`baselines/test-skip-allowlist.json`](baselines/test-skip-allowlist.json). Model-eval suites gate per case against [`baselines/model-eval-baseline.json`](baselines/model-eval-baseline.json) (known-fail / flaky exceptions need reason, measured evidence and a review date). `-Tsc` fails only on TypeScript diagnostics not in [`baselines/tsc-diagnostics.txt`](baselines/tsc-diagnostics.txt) (written only by an explicit `-WriteTscBaseline`).
+
 ## Run matrix
 
 Commands run from the **repo root** with `-w backend`, or from `backend/` without the workspace flag. Vitest paths are relative to `backend/`.
 
 | Track | Corpus / suite | Test entry | Command | Approved test DB? | OpenAI / LIVE opt-in? |
 |-------|----------------|------------|---------|-------------------|------------------------|
-| **ENGINE** (Gate 1) | `docs/qa/regression-suite.json` | `tests/regression-suite.offline.test.ts` | `npx vitest run tests/regression-suite.offline.test.ts` (cwd `backend`) | **Yes** — harness calls `assertApprovedEvalDatabaseUrl` | No |
-| **ENGINE** (workflow) | `docs/qa/workflow-pack-suite.json` | `tests/workflow-pack.offline.test.ts` | `npx vitest run tests/workflow-pack.offline.test.ts` | **Yes** | No |
-| **ENGINE** (gap pack) | `docs/qa/engine-gap-suite.json` | `tests/engine-gap-pack.offline.test.ts` | `npx vitest run tests/engine-gap-pack.offline.test.ts` | **Yes** | No |
-| **MODEL_APPLY** (Batch A) | `docs/qa/batch-a-suite.json` | `tests/batch-a-model-apply.offline.test.ts` | `npx vitest run tests/batch-a-model-apply.offline.test.ts` | **Yes** | No (stub model) |
-| **MODEL_APPLY** (domain packs) | Matching `docs/qa/<name>-pack-suite.json` | Apply harness files that exist today: `shopping`, `tasks`, `reminder`, `filing`, `directory`, `event`, `workflow` (`tests/<name>-pack-model-apply.offline.test.ts`). **No** apply harness for `show`, `share`, or `custom-lists` (those suites are covered by loader/MODEL stub via `domain-packs.offline.test.ts` only). | `npx vitest run tests/<name>-pack-model-apply.offline.test.ts` | **Yes** | No (stub) |
+| **ENGINE** (Gate 1) | `docs/qa/regression-suite.json` | `tests/regression-suite.db.test.ts` | `npm run test:db -w backend -- tests/regression-suite.db.test.ts` | **Yes** — harness calls `assertApprovedEvalDatabaseUrl` | No |
+| **ENGINE** (workflow) | `docs/qa/workflow-pack-suite.json` | `tests/workflow-pack.db.test.ts` | `npm run test:db -w backend -- tests/workflow-pack.db.test.ts` | **Yes** | No |
+| **ENGINE** (gap pack) | `docs/qa/engine-gap-suite.json` | `tests/engine-gap-pack.db.test.ts` | `npm run test:db -w backend -- tests/engine-gap-pack.db.test.ts` | **Yes** | No |
+| **MODEL_APPLY** (Batch A) | `docs/qa/batch-a-suite.json` | `tests/batch-a-model-apply.db.test.ts` | `npm run test:db -w backend -- tests/batch-a-model-apply.db.test.ts` | **Yes** | No (stub model) |
+| **MODEL_APPLY** (domain packs) | Matching `docs/qa/<name>-pack-suite.json` | Apply harness files that exist today: `shopping`, `tasks`, `reminder`, `filing`, `directory`, `event`, `workflow` (`tests/<name>-pack-model-apply.db.test.ts`; `share-pack-model-apply.eval-db.test.ts`). **No** apply harness for `show`, `share`, or `custom-lists` (those suites are covered by loader/MODEL stub via `domain-packs.offline.test.ts` only). | `npm run test:db -w backend -- tests/<name>-pack-model-apply.db.test.ts` | **Yes** | No (stub) |
 | **MODEL** wire / loaders (offline) | Batch A + domain packs | `tests/batch-a-model-wire.offline.test.ts`, `tests/domain-packs.offline.test.ts`, … | `npx vitest run tests/<file>.offline.test.ts` | No (no apply) | No |
 | **LIVE_MODEL** | `docs/qa/phase-4-corpus.json` | `tests/model-eval.live.test.ts` | `MODEL_EVAL_LIVE=1 npm run test:model-eval -w backend` | No | **Yes** — `MODEL_EVAL_LIVE=1` + `OPENAI_API_KEY` |
 | **LIVE_MODEL_MT** | `docs/qa/phase-4-multi-turn-corpus.json` | `tests/model-eval-multi-turn.live.test.ts` | `MODEL_EVAL_LIVE=1 npm run test:model-eval-mt -w backend` | No | **Yes** — same |

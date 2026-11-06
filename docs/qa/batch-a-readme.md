@@ -31,7 +31,7 @@ npx vitest run tests/batch-a-model-wire.offline.test.ts
 npx vitest run tests/batch-a-prompt-align.offline.test.ts
 
 # MODEL_APPLY stub → production apply (requires approved test DB URL pair)
-npx vitest run tests/batch-a-model-apply.offline.test.ts
+npx vitest run tests/batch-a-model-apply.db.test.ts
 
 # Suite loader / held-out refusals
 npx vitest run tests/batch-a-suite.loader.test.ts

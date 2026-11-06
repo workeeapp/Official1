@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
     "test:eval-db": "vitest run --config vitest.eval-db.config.ts",
     "gtfs:ingest": "tsx src/scripts/ingest-gtfs.ts",
     "test:model-eval": "vitest run --config vitest.model-eval.config.ts tests/model-eval.live.test.ts",
