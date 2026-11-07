@@ -46,6 +46,12 @@ export type AppliedOp = {
   listName?: string;
   listId?: string;
   employeeId?: string;
+  /** lists: YYYY-MM-DD of the saved row (post-save / pre-delete), when dated. */
+  calendarYmd?: string;
+  /** lists: named custom list opened with no real rows (no item to open). */
+  listShell?: boolean;
+  /** lists: row added to a list created in this same turn. */
+  inNewList?: boolean;
 };
 
 export type ApplyMiss = {
@@ -686,6 +692,9 @@ export function buildApplyResult(input: {
       listType: row.listType,
       listName: row.listName,
       employeeId: row.employeeId,
+      ...(row.calendarYmd ? { calendarYmd: row.calendarYmd } : {}),
+      ...(row.listShell ? { listShell: true } : {}),
+      ...(row.inNewList ? { inNewList: true } : {}),
     }));
     const apply_misses: ApplyMiss[] = [
       ...(input.shareMisses ?? []).map((miss) => ({

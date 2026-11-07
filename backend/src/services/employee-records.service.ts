@@ -2171,6 +2171,8 @@ export interface ListItemMutation {
   calendarYmd?: string;
   /** Named custom list opened/updated with no real rows (columns only). */
   listShell?: boolean;
+  /** Row added to a list that this same action created (new list). */
+  inNewList?: boolean;
   /** Set on a remove/update of a digital-worker task: everyone it involved before the change. */
   workerTaskInvolvedIds?: string[];
   /**
@@ -3876,6 +3878,17 @@ async function applyListAction(
         },
         listOwnerId: employeeId,
       });
+    }
+  }
+
+  // Builtin lists (shopping / tasks) are created lazily on first use — that is
+  // not "a new list" for the speaker; only a newly named custom list is.
+  if (createdList && resolvedAction.listType === "custom") {
+    for (let i = itemMutationsBefore; i < mutations.length; i += 1) {
+      const row = mutations[i]!;
+      if (row.action === "add" && !row.listShell) {
+        mutations[i] = { ...row, inNewList: true };
+      }
     }
   }
 

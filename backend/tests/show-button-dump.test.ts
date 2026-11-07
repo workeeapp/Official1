@@ -303,7 +303,7 @@ describe("formatFilingDumpBody", () => {
     ).toBe("שרון וטרינרית");
   });
 
-  it("filingHiddenDetailMark is 📄 only when detail preview overflows", () => {
+  it("filingHiddenDetailMark is 📝 only when detail preview overflows", () => {
     expect(
       filingHiddenDetailMark(
         { item_info: "בתוקף", item_description: "" },
@@ -318,7 +318,7 @@ describe("formatFilingDumpBody", () => {
         },
         "list",
       ),
-    ).toBe(" 📄");
+    ).toBe(" 📝");
     expect(
       filingHiddenDetailMark(
         {
@@ -505,7 +505,7 @@ describe("formatFilingDumpBody", () => {
 });
 
 describe("filings flat dump", () => {
-  it("inventory: title + short preview; co-share mark; no 📄 when detail fits", () => {
+  it("inventory: title + short preview; co-share mark; no 📝 when detail fits", () => {
     const snap: EmployeeRecordSnapshot = {
       lists: [],
       filing: [
@@ -539,7 +539,7 @@ describe("filings flat dump", () => {
     );
     expect(dump).not.toContain("תיאור:");
     expect(dump).not.toContain("שם:");
-    expect(dump).not.toContain("📄");
+    expect(dump).not.toContain("📝");
     expect(dump).not.toContain("מידע:");
     expect(dump).not.toContain("(עם ");
     expect(dump).not.toContain("של ");
@@ -564,7 +564,7 @@ describe("filings flat dump", () => {
       viewerName: "טל",
     })!;
     expect(dump).toBe(
-      "📁 תיוקים:\n1. לוח מבחנים — יואב 📎 📄\nמתמטיקה 12/11…",
+      "📁 תיוקים:\n1. לוח מבחנים — יואב 📎 📝\nמתמטיקה 12/11…",
     );
     expect(dump).not.toContain("אנגלית");
     expect(dump).not.toContain("תיאור:");
@@ -588,7 +588,7 @@ describe("filings flat dump", () => {
       viewerName: "טל",
     })!;
     expect(dump).toBe("📁 תיוקים:\n1. מסמך ללא קובץ");
-    expect(dump).not.toContain("📄");
+    expect(dump).not.toContain("📝");
     expect(dump).not.toContain("📎");
   });
 
@@ -620,7 +620,7 @@ describe("filings flat dump", () => {
       section: "personal",
     })!;
     expect(personal).toBe(
-      "📁 תיוקים:\n1. רישיון 📄\nבתוקף עד סוף השנה.…",
+      "📁 תיוקים:\n1. רישיון 📝\nבתוקף עד סוף השנה.…",
     );
     expect(personal).not.toContain("קוד שער");
     expect(personal).not.toContain("תיאור:");
@@ -663,7 +663,7 @@ describe("filings flat dump", () => {
     expect(list).toMatch(/1\. מיקום הבית 📍/);
     expect(list).toContain("2. רישיון\nבתוקף");
     expect(list).toMatch(/3\. כתובת עבודה 📍/);
-    expect(list).not.toContain("📄");
+    expect(list).not.toContain("📝");
     expect(list).not.toContain("32.099279");
     expect(list).not.toContain("maps.google");
     expect(list).not.toContain("הרצל 1");
@@ -814,7 +814,7 @@ describe("filings flat dump", () => {
     expect(dump).not.toContain("רישיון");
     expect(dump).toMatch(/^📁 תיוקים:\n1\. /);
     expect(dump).toContain("שם: קוד שער · תיאור: 1234 · מידע לחיפוש: שער חניה");
-    expect(dump).not.toContain("📄");
+    expect(dump).not.toContain("📝");
   });
 
     it("ITEM DUMP filters tasks to multiple item ids", () => {
@@ -1400,7 +1400,7 @@ describe("filings flat dump", () => {
     expect(dump).toContain("📁 תיוקים:");
     expect(dump).toContain("לשון פנייה\nזכר");
     expect(dump).toContain("כתובת 📍");
-    expect(dump).not.toContain("📄");
+    expect(dump).not.toContain("📝");
     expect(dump).not.toContain("תיאור:");
     expect(dump).not.toContain("רחוב שחם");
     expect(dump).not.toContain("(עם ");
@@ -2561,7 +2561,7 @@ describe("formatShowDumpFromKind", () => {
     expect(text).toContain("📋 רשימת «אני ומיכל»:");
     expect(text).toContain("1. טל\nתיאור: נשוי למיכל");
     expect(text).toContain("2. מיכל\nתיאור: נשואה לטל");
-    expect(text).not.toContain("📄");
+    expect(text).not.toContain("📝");
     expect(text).not.toMatch(/^1\. שם: טל/m);
 
     const itemDump = formatShowDumpFromKind("אני ומיכל", snapshot, {
@@ -2601,7 +2601,7 @@ describe("formatShowDumpFromKind", () => {
       viewerName: "טל",
     })!;
     expect(text).toContain("📋 רשימת «הזמנות»:");
-    expect(text).toMatch(/^1\. A-100 📄$/m);
+    expect(text).toMatch(/^1\. A-100 📝$/m);
     expect(text).toContain("ספק: סופרפארם");
     expect(text).toContain("…");
     expect(text).not.toContain(longNote);
@@ -2610,10 +2610,10 @@ describe("formatShowDumpFromKind", () => {
       itemIds: new Set(["o1"]),
     })!;
     expect(full).toContain(`הערת לקוח: ${longNote}`);
-    expect(full).not.toContain("📄");
+    expect(full).not.toContain("📝");
   });
 
-  it("tasks and shopping keep full titles — no truncate-driven 📄", () => {
+  it("tasks and shopping keep full titles — no truncate-driven 📝", () => {
     const longTask =
       "לסכם עם כל הספקים את לוח הזמנים המלא לפרויקט השיפוץ של הדירה כולל חומרי גמר";
     const snap: EmployeeRecordSnapshot = {
@@ -2642,7 +2642,7 @@ describe("formatShowDumpFromKind", () => {
     };
     const tasks = formatShowDumpFromKind("tasks", snap, { viewerName: "טל" })!;
     expect(tasks).toContain(longTask);
-    expect(tasks).not.toContain("📄");
+    expect(tasks).not.toContain("📝");
     expect(tasks).not.toContain("…");
     const shopping = formatShowDumpFromKind("shopping", snap, {
       viewerName: "טל",
@@ -2650,7 +2650,7 @@ describe("formatShowDumpFromKind", () => {
     expect(shopping).toContain(
       "אבקת כביסה מרוכזת במיוחד לכביסה צבעונית באריזה גדולה למשפחה - 1",
     );
-    expect(shopping).not.toContain("📄");
+    expect(shopping).not.toContain("📝");
   });
 
   it("strips wrapping quotes from custom show_dump names", () => {

@@ -171,3 +171,129 @@ export function staticShowButtonDumpMap(): Readonly<Record<string, string>> {
     [showAllListButtonCommand("contacts")]: "phone_book",
   };
 }
+
+/**
+ * N1 result navigation: opaque item reference appended to an item-open tap
+ * command («הציגי את המשימה X ·#t:…»). The readable prefix is cosmetic; the
+ * engine resolves the reference to an ITEM DUMP of exactly those rows, which
+ * re-checks every id against the tapper's own live snapshot.
+ * kind: t=tasks s=shopping c=custom-list item f=filing r=reminder p=phone book.
+ */
+export type ItemNavKind = "t" | "s" | "c" | "f" | "r" | "p";
+export type ItemNavRef = { kind: ItemNavKind; id: string };
+
+const ITEM_NAV_REF_MARK = " ·#";
+const ITEM_NAV_REF_RE = /\s·#([tscfrp]:[A-Za-z0-9_-]{6,40}(?:,[tscfrp]:[A-Za-z0-9_-]{6,40})*)\s*$/u;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** UUID → 22-char base64url (keeps tap commands well under WhatsApp's 256). */
+function packId(id: string): string {
+  const trimmed = id.trim();
+  if (!UUID_RE.test(trimmed)) {
+    return trimmed;
+  }
+  return Buffer.from(trimmed.replace(/-/g, ""), "hex").toString("base64url");
+}
+
+function unpackId(token: string): string {
+  if (token.length !== 22) {
+    return token;
+  }
+  const hex = Buffer.from(token, "base64url").toString("hex");
+  if (hex.length !== 32) {
+    return token;
+  }
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function formatItemNavRef(refs: ReadonlyArray<ItemNavRef>): string {
+  if (refs.length === 0) {
+    return "";
+  }
+  return `${ITEM_NAV_REF_MARK}${refs.map((ref) => `${ref.kind}:${packId(ref.id)}`).join(",")}`;
+}
+
+export function parseItemNavRef(text: string): ItemNavRef[] | null {
+  const match = text.trim().match(ITEM_NAV_REF_RE);
+  if (!match?.[1]) {
+    return null;
+  }
+  const refs: ItemNavRef[] = [];
+  for (const part of match[1].split(",")) {
+    const kind = part.slice(0, 1) as ItemNavKind;
+    const id = unpackId(part.slice(2));
+    if (id) {
+      refs.push({ kind, id });
+    }
+  }
+  return refs.length > 0 ? refs : null;
+}
+
+/** Command text without the reference (readable part only). */
+export function stripItemNavRef(text: string): string {
+  return text.replace(ITEM_NAV_REF_RE, "").trim();
+}
+
+/** Readable prefix of an engine item-open tap, per item kind. */
+const ITEM_OPEN_PREFIX: Record<ItemNavKind, string> = {
+  t: "הציגי את המשימה",
+  s: "הציגי את הפריט",
+  c: "הציגי את הפריט",
+  f: "הציגי את התיוק",
+  r: "הציגי את התזכורת",
+  p: "הציגי את איש הקשר",
+};
+
+/** Label when the title does not fit a WhatsApp button (≤20). */
+export const ITEM_OPEN_FALLBACK_LABEL: Record<ItemNavKind, string> = {
+  t: "להצגת המשימה",
+  s: "להצגת הפריט",
+  c: "להצגת הפריט",
+  f: "להצגת התיוק",
+  r: "להצגת התזכורת",
+  p: "להצגת איש הקשר",
+};
+
+/** Readable part of the «open everything saved this turn» tap. */
+export const ITEM_OPEN_ALL_COMMAND = "הציגי את מה ששמרתי";
+
+const TAP_COMMAND_MAX = 256;
+
+/** «הציגי את המשימה ‹title› ·#t:…» — title shortened so the ref always fits. */
+export function itemOpenTapCommand(ref: ItemNavRef, title: string): string {
+  const suffix = formatItemNavRef([ref]);
+  const prefix = ITEM_OPEN_PREFIX[ref.kind];
+  const room = TAP_COMMAND_MAX - suffix.length - prefix.length - 1;
+  const cleanTitle = title.trim().replace(/\s+/gu, " ").slice(0, Math.max(0, room)).trim();
+  return `${prefix}${cleanTitle ? ` ${cleanTitle}` : ""}${suffix}`;
+}
+
+/** One tap that opens exactly these rows; null when the refs do not fit. */
+export function itemOpenAllTapCommand(refs: ReadonlyArray<ItemNavRef>): string | null {
+  const command = `${ITEM_OPEN_ALL_COMMAND}${formatItemNavRef(refs)}`;
+  return command.length <= TAP_COMMAND_MAX ? command : null;
+}
+
+/** Kind + readable title of an item-open tap (engine form, or the model's task/filing form). */
+export function parseItemOpenTap(
+  command: string,
+): { kind: ItemNavKind; title: string } | null {
+  const readable = stripItemNavRef(command)
+    .replace(/\s+/gu, " ")
+    .replace(/^הציג את /u, "הציגי את ");
+  for (const kind of ["t", "f", "s", "r", "p"] as const) {
+    const prefix = ITEM_OPEN_PREFIX[kind];
+    if (readable === prefix || readable.startsWith(`${prefix} `)) {
+      const title = readable.slice(prefix.length).trim();
+      const ref = parseItemNavRef(command);
+      const refKind = ref?.length === 1 ? ref[0]!.kind : null;
+      return { kind: refKind ?? kind, title };
+    }
+  }
+  // Legacy task noun (מטלה).
+  const legacy = readable.match(/^הציגי את המטלה(?:\s+(.*))?$/u);
+  if (legacy) {
+    return { kind: "t", title: (legacy[1] ?? "").trim() };
+  }
+  return null;
+}

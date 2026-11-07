@@ -13,6 +13,7 @@ import {
   type PublicEmployee,
 } from "@workee/shared";
 import { getEnv } from "../config/env.js";
+import { ITEM_OPEN_FALLBACK_LABEL, parseItemOpenTap } from "./builtin-lists.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
 import { EMPTY_REPLY_RETRY } from "./employee-records.service.js";
@@ -178,10 +179,6 @@ export function toWhatsAppFormatting(text: string): string {
 export const WHATSAPP_BUTTON_BODY_MAX = 1024;
 const WHATSAPP_BUTTONS_FOLLOWUP_BODY = "לצפייה ברשימה";
 
-/** Hebrew — avoid \\b (JS word chars are ASCII-only even with /u). */
-const ITEM_SHOW_TASK_COMMAND = /^הציגי?\s+את\s+ה(?:משימה|\u05de\u05d8\u05dc\u05d4)(?:\s|$)/u;
-const ITEM_SHOW_FILING_COMMAND = /^הציגי?\s+את\s+התיוק(?:\s|$)/u;
-
 /**
  * WhatsApp reply titles hard-cap at REPLY_BUTTON_LABEL_MAX (20). Prefer the
  * fixed item-show fallbacks over mid-string slice when the model put a long
@@ -207,18 +204,14 @@ export function fitReplyButtonLabel(button: LlmReplyButton): string {
  * Null for any other button.
  */
 export function itemOpenButtonLabel(button: LlmReplyButton): string | null {
-  const command = button.command.trim();
-  const task = command.match(ITEM_SHOW_TASK_COMMAND);
-  const filing = task ? null : command.match(ITEM_SHOW_FILING_COMMAND);
-  const hit = task ?? filing;
-  if (!hit) {
+  const tap = parseItemOpenTap(button.command.trim());
+  if (!tap) {
     return null;
   }
-  const title = command.slice(hit[0].length).trim();
-  if (title && title.length <= REPLY_BUTTON_LABEL_MAX) {
-    return title;
+  if (tap.title && tap.title.length <= REPLY_BUTTON_LABEL_MAX) {
+    return tap.title;
   }
-  return task ? "להצגת המשימה" : "להצגת התיוק";
+  return ITEM_OPEN_FALLBACK_LABEL[tap.kind];
 }
 
 export function whatsappButtonsBody(

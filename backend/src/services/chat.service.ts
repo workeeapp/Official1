@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type ChatMessage as ChatMessageRow } from "@prisma/client";
 import {
+  REPLY_BUTTON_LABEL_MAX,
   digitalEmployees,
   emptyLlmMetadata,
   humanEmployees,
@@ -98,6 +99,8 @@ import {
   ensureSpeakerShowButtons,
 
   listNavKeyFromMutation,
+  savedItemNavsFromApplyResult,
+  type SavedItemNav,
   showButtonsForNotify,
   type SharedListRef,
 } from "./employee-targets.service.js";
@@ -203,6 +206,7 @@ import {
   formatLastNumberedDumpContext,
   formatShowDumpWithLineMap,
   liveDumpRowIdsFromSnapshot,
+  shoppingRowsWithDetail,
   isTasksShowDumpKind,
   dumpFilterNames,
   mapShowButtonCommandToDumpTarget,
@@ -307,7 +311,11 @@ import {
   withAttachmentRefs,
   type TurnAttachments,
 } from "./attachment.service.js";
-import { builtinListHebrew, isBuiltinListType } from "./builtin-lists.js";
+import {
+  builtinListHebrew,
+  isBuiltinListType,
+  parseItemNavRef,
+} from "./builtin-lists.js";
 import {
   fillBlankCustomListNameFromSameTurnLinks,
   withLinkedListRefs,
@@ -2551,9 +2559,17 @@ export async function sendChatMessage(input: {
     // aliases («הצג X» / «הצג רשימת X» when that custom list exists). Synthesize show_dump
     // so LAST_NUMBERED_DUMP refreshes even if the model free-wrote inventory.
     // Unmatched free-form still requires model-emitted show_dump.
-    if (!(metadata.showDump?.trim() ?? "")) {
+    // N1 item-open taps (opaque item reference) always win over the model's
+    // own reading of the tap — the reference is the authoritative target.
+    if (
+      !(metadata.showDump?.trim() ?? "") ||
+      parseItemNavRef(stripWhatsAppReplyPrefix(input.message)) !== null
+    ) {
       const buttonText = stripWhatsAppReplyPrefix(input.message);
-      let buttonDump = mapShowButtonCommandToDumpTarget(buttonText);
+      // N1 item-open taps resolve custom-list rows from the live snapshot.
+      let buttonDump = parseItemNavRef(buttonText)
+        ? null
+        : mapShowButtonCommandToDumpTarget(buttonText);
       if (!buttonDump) {
         const listsForAllowlist = await getEmployeeRecordSnapshot(
           input.employeeId,
@@ -2578,6 +2594,21 @@ export async function sendChatMessage(input: {
             : {}),
           ...(buttonDump.about
             ? { showDumpAbout: buttonDump.about }
+            : {}),
+          ...(buttonDump.ids?.length
+            ? {
+                // Exact rows only — drop any filters the model attached to its
+                // own reading of the tap.
+                showDumpIds: buttonDump.ids,
+                showDumpSection: null,
+                showDumpPartner: null,
+                showDumpAssignee: null,
+                showDumpAbout: null,
+                showDumpFrom: null,
+                showDumpTo: null,
+                showDumpDateScope: null,
+                showDumpUrgency: null,
+              }
             : {}),
           ...(buttonDump.dateScope === "undated"
             ? {
@@ -4810,6 +4841,31 @@ export async function sendChatMessage(input: {
         itemKey: row.itemKey?.trim() || row.itemLabel?.trim() || "",
       }))
       .filter((row) => row.itemLabel);
+    // N1: direct taps for rows saved this turn. ApplyResult is the source;
+    // only ids the speaker can open survive (the same gate ITEM DUMP applies
+    // when the tap comes back).
+    let savedItemNavs: SavedItemNav[] = [];
+    if (
+      !guestSpeaker &&
+      !metadata.showDump &&
+      savedItemNavsFromApplyResult(turnApplyResult, undefined, "all").length > 0
+    ) {
+      savedItemNavs =
+        (await withoutFailingTurn("saved_item_nav_failed", async () => {
+          const snapshot = await withAttachmentRefsSafe(
+            await getEmployeeRecordSnapshot(employee.id),
+          );
+          const visible = liveDumpRowIdsFromSnapshot(
+            snapshot,
+            refreshedContacts.map((row) => ({ contact_id: row.id, name: row.name })),
+          );
+          return savedItemNavsFromApplyResult(
+            turnApplyResult,
+            visible,
+            shoppingRowsWithDetail(snapshot),
+          );
+        })) ?? [];
+    }
     // Freeze per-bubble buttons/Waze onto the model reply BEFORE engine
     // tips/notices append, so legacy turn-level metadata.buttons are not
     // redistributed onto trailing tip bubbles.
@@ -4905,6 +4961,17 @@ export async function sendChatMessage(input: {
                 ),
               ),
             },
+            savedItems: savedItemNavs,
+            newListKeys: new Set(
+              (turnApplyResult.domains.lists?.applied ?? [])
+                .filter((row) => row.inNewList || (row.listShell && row.op === "add"))
+                .map((row) =>
+                  listNavKeyFromMutation({
+                    listType: row.listType ?? "",
+                    listName: row.listName ?? "",
+                  }),
+                ),
+            ),
             // Item-open: keep existing-row taps; require apply proof for this-turn mutates.
             appliedItems: {
               lists: listMutations.map((row) => ({
@@ -4924,17 +4991,30 @@ export async function sendChatMessage(input: {
         );
       }
       // One deterministic item-open label (title ≤20, else «להצגת המשימה»).
-      bubbles = bubbles.map((bubble) =>
-        bubble.buttons?.length
-          ? {
-              ...bubble,
-              buttons: bubble.buttons.map((button) => {
-                const label = itemOpenButtonLabel(button);
-                return label ? { ...button, label } : button;
-              }),
+      // Two saved rows with the same title get distinct labels (WhatsApp
+      // drops a second button with an identical title).
+      bubbles = bubbles.map((bubble) => {
+        if (!bubble.buttons?.length) {
+          return bubble;
+        }
+        const used = new Set<string>();
+        return {
+          ...bubble,
+          buttons: bubble.buttons.map((button) => {
+            let label = itemOpenButtonLabel(button);
+            if (!label) {
+              used.add(button.label.trim());
+              return button;
             }
-          : bubble,
-      );
+            for (let n = 2; used.has(label); n += 1) {
+              const suffix = ` (${n})`;
+              label = `${label.slice(0, REPLY_BUTTON_LABEL_MAX - suffix.length)}${suffix}`;
+            }
+            used.add(label);
+            return { ...button, label };
+          }),
+        };
+      });
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);
     }
     const tipTurn =

@@ -25,8 +25,10 @@ import {
   SHOW_REMINDERS_COMMAND,
   SHOW_UNDATED_TASKS_COMMAND,
   SHOW_UNDATED_TASKS_COMMAND_LEGACY,
+  parseItemNavRef,
   showListButtonCommand,
   staticShowButtonDumpMap,
+  type ItemNavRef,
 } from "./builtin-lists.js";
 import type { EmployeeRecordSnapshot } from "./employee-records.service.js";
 import {
@@ -72,7 +74,54 @@ export type ShowButtonDumpTarget = {
   dateFrom?: string | null;
   /** Inclusive YYYY-MM-DD — absolute day-agenda button taps. */
   dateTo?: string | null;
+  /** N1 item-open tap: ITEM DUMP of exactly these row ids (show_dump_ids). */
+  ids?: string[];
 };
+
+const ITEM_NAV_DUMP_KIND: Record<ItemNavRef["kind"], string | null> = {
+  t: "tasks",
+  s: "shopping",
+  c: null,
+  f: "filings",
+  r: "reminders",
+  p: "phone_book",
+};
+
+/**
+ * N1 item-open tap («… ·#t:…») → ITEM DUMP target. One kind → that dump
+ * (custom items resolve their list from the snapshot); mixed kinds or an
+ * unresolved custom list → cross-kind full dump of only those ids. Visibility
+ * is enforced later: unknown / foreign ids are dropped against the tapper's
+ * live snapshot (never an unfiltered dump).
+ */
+function itemNavRefDumpTarget(
+  text: string,
+  snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
+): ShowButtonDumpTarget | null {
+  const refs = parseItemNavRef(text);
+  if (!refs) {
+    return null;
+  }
+  const ids = [...new Set(refs.map((ref) => ref.id))];
+  const kinds = new Set(refs.map((ref) => ref.kind));
+  if (kinds.size === 1) {
+    const only = refs[0]!.kind;
+    const builtin = ITEM_NAV_DUMP_KIND[only];
+    if (builtin) {
+      return { kind: builtin, ids };
+    }
+    const owning = (snapshot?.lists ?? []).filter(
+      (list) =>
+        list.list_type === "custom" &&
+        list.items.some((item) => ids.includes(String(item.item_id ?? ""))),
+    );
+    const name = owning.length === 1 ? (owning[0]!.list_name ?? "").trim() : "";
+    if (name) {
+      return { kind: name, ids };
+    }
+  }
+  return { kind: "full", ids };
+}
 
 const TITLE_KEYS: Record<string, string[]> = {
   shopping: ["שם פריט", "name", "item_name"],
@@ -299,6 +348,10 @@ export function mapShowButtonCommandToDumpTarget(
   text: string,
   snapshot?: Pick<EmployeeRecordSnapshot, "lists"> | null,
 ): ShowButtonDumpTarget | null {
+  const itemNav = itemNavRefDumpTarget(text, snapshot);
+  if (itemNav) {
+    return itemNav;
+  }
   const candidates = expandShowNavClickAliases(text);
   if (candidates.length === 0) {
     return null;
@@ -1855,7 +1908,7 @@ export function truncateFilingPreviewAtWord(
  * Deterministic list-detail preview from already-built original prose.
  * Shows a contiguous prefix of that text (sentence/line end preferred, else
  * word boundary near {@link LIST_ROW_PREVIEW_MAX_CHARS}). Appends `…` only when
- * that prefix is shorter than the source. `truncated` (for 📄) is true whenever
+ * that prefix is shorter than the source. `truncated` (for 📝) is true whenever
  * any remainder was omitted — never rewrites, paraphrases, or calls a model.
  */
 export function formatTruncatedListDetail(
@@ -1880,9 +1933,71 @@ export function formatTruncatedListDetail(
   };
 }
 
-/** `📄` when list detail overflow exists — not for title truncation. */
+/**
+ * `📝` — the row has additional text that the list view does not show
+ * (custom / filing detail overflow, shopping description). Not for title
+ * truncation; files keep 📎.
+ */
 export function listDetailOverflowMark(truncated: boolean): string {
-  return truncated ? " 📄" : "";
+  return truncated ? " 📝" : "";
+}
+
+/** «body · description» for an opened item; body unchanged when there is none. */
+function withItemDescription(body: string, description: string): string {
+  return description ? `${body} · ${description}` : body;
+}
+
+/**
+ * General item description on a custom row (`description`), separate from the
+ * list's own columns. Only when the list declares its columns and none of
+ * them is «description» — a user column of that name keeps its meaning, and
+ * lists without declared columns treat every key as a column (as today).
+ */
+export function customItemGeneralDescription(
+  item: Record<string, unknown>,
+  columns?: unknown,
+): string {
+  const declared = Array.isArray(columns)
+    ? columns
+        .filter((col): col is string => typeof col === "string")
+        .map((col) => col.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  if (declared.length === 0 || declared.includes("description")) {
+    return "";
+  }
+  return readText(item, ["description"]);
+}
+
+/**
+ * Shopping rows that carry something the list view does not show — a
+ * description or a file. Only these earn a direct item tap (N1).
+ */
+export function shoppingRowsWithDetail(
+  snapshot: Pick<EmployeeRecordSnapshot, "lists">,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const list of snapshot.lists ?? []) {
+    if (list.list_type !== "shopping") {
+      continue;
+    }
+    for (const item of list.items ?? []) {
+      const row = item as Record<string, unknown>;
+      const id = String(row.item_id ?? "").trim();
+      if (id && (shoppingItemDescription(row) || hasAttachments(row))) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * Optional shopping item description (empty / whitespace → ""). Canonical key
+ * `description`; older rows stored under «תיאור» are still read.
+ */
+export function shoppingItemDescription(item: Record<string, unknown>): string {
+  return readText(item, ["description", "תיאור"]);
 }
 
 /**
@@ -3352,6 +3467,8 @@ type DumpItem = {
    * {@link formatNumberedItem}; ITEM DUMP leaves this unset.
    */
   listDetailText?: string;
+  /** Custom row has a general `description` (list view shows 📝 only). */
+  hasDescription?: boolean;
 };
 
 type ListDumpType =
@@ -3498,8 +3615,12 @@ function collectListDumpRows(
           list.columns,
         );
         const nameTitle = itemTitle("custom", item, titleField);
+        const description = customItemGeneralDescription(item, list.columns);
         const title = itemDump
-          ? formatCustomItemBody(item, list.title_field, list.columns)
+          ? withItemDescription(
+              formatCustomItemBody(item, list.title_field, list.columns),
+              description,
+            )
           : nameTitle;
         const mark = customItemCoShareMark(list, item, viewer, aliases);
         const isShared =
@@ -3529,6 +3650,7 @@ function collectListDumpRows(
           ...shellShare,
           titleStem: nameTitle,
           ...(listDetailText ? { listDetailText } : {}),
+          ...(description && !itemDump ? { hasDescription: true } : {}),
           ...(partnerFilterKey ? { partnerFilterKey } : {}),
           ...(mark ? { responsibilityMark: mark } : {}),
         });
@@ -4045,6 +4167,7 @@ function formatSingleHeaderDump(
         now: opts?.now,
         itemIds: opts?.itemIds,
         listDetailText: row.listDetailText,
+        hasDescription: row.hasDescription,
       });
     }),
   ].join("\n"));
@@ -4575,6 +4698,8 @@ export function formatNumberedItem(
      * title — never truncates the title itself.
      */
     listDetailText?: string;
+    /** Custom row has a general `description`: 📝 in the list view. */
+    hasDescription?: boolean;
   },
 ): string {
   let body = title.trim() || "פריט";
@@ -4586,6 +4711,12 @@ export function formatNumberedItem(
   const choreHm = choreTimeRaw ? normalizeHm(choreTimeRaw) : "";
   if (choreHm) {
     body = stripMatchingTitleClock(body, choreHm) || "פריט";
+  }
+  // Shopping description: the item view shows the text; the list view only 📝.
+  const shoppingDescription =
+    listType === "shopping" ? shoppingItemDescription(item) : "";
+  if (!listMode) {
+    body = withItemDescription(body, shoppingDescription);
   }
   if (hasAttachments(item)) {
     body += " 📎";
@@ -4624,6 +4755,9 @@ export function formatNumberedItem(
   ) {
     body += ` (${opts.sharedWithLabel.trim()})`;
   }
+  if (listMode && shoppingDescription) {
+    body += listDetailOverflowMark(true);
+  }
   // Detail preview under the title (filings / custom). Titles stay full.
   if (listMode && listType === "filings") {
     const preview = formatFilingListPreview(item);
@@ -4632,8 +4766,12 @@ export function formatNumberedItem(
     }
   } else if (listMode && listType === "custom") {
     const detail = formatTruncatedListDetail(opts?.listDetailText ?? "");
+    // 📝 = more text than the preview shows: a truncated column preview or a
+    // general description (never shown in the list view).
+    body += listDetailOverflowMark(
+      Boolean(detail?.truncated) || opts?.hasDescription === true,
+    );
     if (detail) {
-      body += listDetailOverflowMark(detail.truncated);
       body += `\n${detail.text}`;
     }
   }

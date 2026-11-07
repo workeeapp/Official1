@@ -1,6 +1,7 @@
 import {
   emptyLlmMetadata,
   isDigitalEmployee,
+  isClosedChoiceReplyButton,
   isGuestEmployee,
   llmItemLabel,
   messageHasSchedule,
@@ -27,8 +28,13 @@ import {
   SHOW_LISTS_COMMAND,
   SHOW_REMINDERS_COMMAND,
   TASKS_HEBREW_LEGACY,
+  itemOpenAllTapCommand,
+  itemOpenTapCommand,
+  parseItemNavRef,
   showListButtonCommand,
   showWorkerTasksButtonCommand,
+  stripItemNavRef,
+  type ItemNavRef,
 } from "./builtin-lists.js";
 import type {
   FilingOwnerRef,
@@ -37,6 +43,7 @@ import type {
 } from "./employee-records.service.js";
 import { matchContact, type SpeakerContact } from "./contact.service.js";
 import { formatRelativeDayLabel } from "./show-button-dump.js";
+import type { ApplyResult } from "./apply-result.js";
 import {
   shiftJerusalemYmd,
   upcomingWeekdayDates,
@@ -1853,6 +1860,22 @@ export type SpeakerShowButtonOptions = {
   appliedReminders?: { saved: number; removed: number };
   /** Clock for relative day labels on dated-item day-show safety-net. */
   now?: Date;
+  /**
+   * N1: rows saved (add/update) this turn, from ApplyResult.applied, already
+   * filtered to ids the speaker can see. Each gets a direct item-open tap.
+   */
+  savedItems?: SavedItemNav[];
+  /**
+   * N1: list keys (listNavKeyFromMutation) of lists created this turn. Their
+   * list nav is the result view of the new list and ranks with item taps.
+   */
+  newListKeys?: ReadonlySet<string>;
+};
+
+/** A row saved this turn that the speaker can open directly. */
+export type SavedItemNav = {
+  ref: ItemNavRef;
+  title: string;
 };
 
 /** Builtin list_type, or `custom:<normalized name>`. */
@@ -1994,7 +2017,7 @@ function normalizeItemOpenTitle(value: string): string {
 export function parseItemOpenButton(
   button: LlmReplyButton,
 ): { kind: "tasks" | "filing"; title: string } | null {
-  const cmd = button.command.trim();
+  const cmd = stripItemNavRef(button.command.trim());
   const task = cmd.match(ITEM_OPEN_TASK_COMMAND);
   if (task?.[1]) {
     const title = normalizeItemOpenTitle(task[1]);
@@ -2670,7 +2693,14 @@ export function ensureSpeakerShowButtons(
   existing: LlmReplyButton[] = [],
   options?: SpeakerShowButtonOptions,
 ): LlmReplyButton[] {
+  // Every candidate is collected with a rank, then the best REPLY_BUTTON_MAX
+  // are kept in their original order. Rank (N1): the result of this turn
+  // first — saved-item opens, then the day of a saved dated task — then the
+  // model's conversational taps (often follow-up-question taps that migrate
+  // to the confirm bubble), then specific list / collab / worker nav, then
+  // generic list nav, then soft כן/לא.
   const buttons: LlmReplyButton[] = [];
+  const ranks: number[] = [];
   const seen = new Set<string>();
   const coveredListKeys = new Set<string>();
   const coveredDayKeys = new Set<string>();
@@ -2685,13 +2715,19 @@ export function ensureSpeakerShowButtons(
   const skipSourceCommands = sourceShowCommandsSkippedForMoves(listMutates);
   const speakerNames = options?.speakerNames ?? [];
   const workerNames = options?.workerNames ?? [];
+  const savedItems = options?.savedItems ?? [];
+  const coveredSaved = new Set<number>();
   const remember = (command: string): boolean => {
     const key = normalizeShowNavCommand(command) || command;
-    if (!key || seen.has(key) || buttons.length >= REPLY_BUTTON_MAX) {
+    if (!key || seen.has(key)) {
       return false;
     }
     seen.add(key);
     return true;
+  };
+  const add = (button: LlmReplyButton, rank: number): void => {
+    buttons.push(button);
+    ranks.push(rank);
   };
   const markDayCoverage = (button: LlmReplyButton): void => {
     const ymd = resolveDayAgendaYmdFromButton(button, now);
@@ -2699,24 +2735,45 @@ export function ensureSpeakerShowButtons(
       coveredDayKeys.add(dayAgendaFollowUpKey(ymd));
     }
   };
+  /** Model item-open of a row saved this turn → same tap, now id-addressed. */
+  const withSavedRef = (button: LlmReplyButton): LlmReplyButton => {
+    const tap = parseItemOpenButton(button);
+    if (!tap || parseItemNavRef(button.command)) {
+      return button;
+    }
+    const needle = normalizeItemOpenTitle(tap.title);
+    const kind = tap.kind === "tasks" ? "t" : "f";
+    const matches = savedItems
+      .map((item, index) => ({ item, index }))
+      .filter(
+        ({ item, index }) =>
+          !coveredSaved.has(index) &&
+          item.ref.kind === kind &&
+          normalizeItemOpenTitle(item.title) === needle,
+      );
+    if (matches.length !== 1) {
+      return button;
+    }
+    coveredSaved.add(matches[0]!.index);
+    return {
+      label: button.label,
+      command: itemOpenTapCommand(matches[0]!.item.ref, matches[0]!.item.title),
+    };
+  };
 
-  // Pre-scan: model already offered reminders → do not reserve engine net.
   coveredReminders = existing.some(
     (button) =>
       normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND,
   );
-  // Reserve reminder early (max-3) when omitted — Apply-gated when provided.
   if (
     !coveredReminders &&
     reminderApplySucceeded(metadata, options?.appliedReminders) &&
     remember(SHOW_REMINDERS_COMMAND)
   ) {
-    buttons.push(SHOW_REMINDERS_BUTTON);
+    add(SHOW_REMINDERS_BUTTON, NAV_RANK_GENERIC);
     coveredReminders = true;
   }
 
-  // Pass 1: model LIST/collab, worker inventory, reminders, item-open,
-  // content-aware. Defer speaker day + כן/לא so day keeps priority under max-3.
   const deferredDay: LlmReplyButton[] = [];
   const deferredChoices: LlmReplyButton[] = [];
   for (const button of existing) {
@@ -2736,7 +2793,7 @@ export function ensureSpeakerShowButtons(
         coveredListKeys.add(validated.listKey);
         continue;
       }
-      buttons.push(validated.button);
+      add(validated.button, listNavRank(validated.button, options?.newListKeys));
       coveredListKeys.add(validated.listKey);
       continue;
     }
@@ -2757,23 +2814,27 @@ export function ensureSpeakerShowButtons(
         coveredListKeys.add(workerInventoryListKey(workerCmd));
         continue;
       }
-      // Keep the model button; workerCmd only proves the turn is worker inventory.
-      buttons.push({
-        label: button.label.trim() || "המשימות שלך",
-        command: button.command.trim() || workerCmd,
-      });
+      add(
+        {
+          label: button.label.trim() || "המשימות שלך",
+          command: button.command.trim() || workerCmd,
+        },
+        NAV_RANK_SPECIFIC,
+      );
       coveredListKeys.add(workerInventoryListKey(workerCmd));
       continue;
     }
-    // Model reminders: keep label+command exactly; do not remap to engine label.
     if (normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND) {
       if (!remember(SHOW_REMINDERS_COMMAND)) {
         continue;
       }
-      buttons.push({
-        label: button.label.trim() || SHOW_REMINDERS_BUTTON.label,
-        command: button.command.trim() || SHOW_REMINDERS_COMMAND,
-      });
+      add(
+        {
+          label: button.label.trim() || SHOW_REMINDERS_BUTTON.label,
+          command: button.command.trim() || SHOW_REMINDERS_COMMAND,
+        },
+        NAV_RANK_GENERIC,
+      );
       continue;
     }
     if (isWorkerPerspectiveDayButton(button)) {
@@ -2789,46 +2850,51 @@ export function ensureSpeakerShowButtons(
     const label = button.label.trim();
     const cmd = button.command.trim();
     if (
-      (label === "כן" || label === "לא" || cmd === "כן" || cmd === "לא") &&
-      label === cmd
+      ((label === "כן" || label === "לא" || cmd === "כן" || cmd === "לא") &&
+        label === cmd) ||
+      isClosedChoiceReplyButton(button)
     ) {
       deferredChoices.push(button);
       continue;
     }
-    if (!remember(button.command)) {
+    const isItemOpen = parseItemOpenButton(button) !== null;
+    const kept = isItemOpen ? withSavedRef(button) : button;
+    if (!remember(kept.command)) {
       continue;
     }
-    buttons.push(button);
+    add(kept, isItemOpen ? NAV_RANK_ITEM : NAV_RANK_CONVERSATIONAL);
   }
 
-  // Model day before LIST/day safety-nets: preserve exactly, mark coverage so
-  // the day net cannot compete, and keep priority over כן/לא under max-3.
+  // N1: every saved row the model did not open gets its own item tap.
+  const savedTapIndexes: number[] = [];
+  for (let i = 0; i < buttons.length; i += 1) {
+    if (parseItemNavRef(buttons[i]!.command)) {
+      savedTapIndexes.push(i);
+    }
+  }
+  savedItems.forEach((item, index) => {
+    if (coveredSaved.has(index)) {
+      return;
+    }
+    const command = itemOpenTapCommand(item.ref, item.title);
+    if (!remember(command)) {
+      return;
+    }
+    savedTapIndexes.push(buttons.length);
+    add(
+      { label: item.title.trim() || "הצג", command },
+      NAV_RANK_ITEM,
+    );
+  });
+
   for (const button of deferredDay) {
     markDayCoverage(button);
     if (!remember(button.command)) {
       continue;
     }
-    buttons.push(button);
+    add(button, NAV_RANK_DAY);
   }
 
-  // LIST safety-net — only uncovered listKeys; after model day so content-aware
-  // day taps the model already offered are not crowded out by plain LIST.
-  for (const required of plainSafetyNetListShowButtons(
-    metadata,
-    options?.appliedNav,
-    skipSourceCommands,
-    coveredListKeys,
-    speakerNames,
-    workerNames,
-    options?.appliedWorkerWatchName,
-  )) {
-    if (!remember(required.command)) {
-      continue;
-    }
-    buttons.push(required);
-  }
-
-  // Dated-item day show: only for days the model did not already cover.
   for (const dayBtn of datedDayShowSafetyNetButtons(
     options?.appliedItems,
     now,
@@ -2843,7 +2909,22 @@ export function ensureSpeakerShowButtons(
     if (ymd) {
       coveredDayKeys.add(dayAgendaFollowUpKey(ymd));
     }
-    buttons.push(dayBtn);
+    add(dayBtn, NAV_RANK_DAY);
+  }
+
+  for (const required of plainSafetyNetListShowButtons(
+    metadata,
+    options?.appliedNav,
+    skipSourceCommands,
+    coveredListKeys,
+    speakerNames,
+    workerNames,
+    options?.appliedWorkerWatchName,
+  )) {
+    if (!remember(required.command)) {
+      continue;
+    }
+    add(required, listNavRank(required, options?.newListKeys));
   }
 
   // Soft כן/לא last — never crowd out day / LIST / reminders.
@@ -2851,10 +2932,97 @@ export function ensureSpeakerShowButtons(
     if (!remember(button.command)) {
       continue;
     }
-    buttons.push(button);
+    add(button, NAV_RANK_CHOICE);
   }
 
-  return buttons;
+  collapseSavedItemTaps(buttons, ranks, savedTapIndexes);
+  return selectRankedButtons(buttons, ranks);
+}
+
+const NAV_RANK_ITEM = 1;
+const NAV_RANK_DAY = 2;
+const NAV_RANK_CONVERSATIONAL = 3;
+const NAV_RANK_SPECIFIC = 4;
+const NAV_RANK_GENERIC = 5;
+const NAV_RANK_CHOICE = 6;
+const NAV_RANK_DROPPED = 99;
+
+/**
+ * A list created this turn: its nav is the result (ranks with item taps).
+ * Custom list / collab / worker nav is specific; plain builtin list nav is generic.
+ */
+function listNavRank(
+  button: LlmReplyButton,
+  newListKeys?: ReadonlySet<string>,
+): number {
+  const parsed = parseFixedListNavButton(button);
+  if (!parsed) {
+    return NAV_RANK_SPECIFIC;
+  }
+  if (newListKeys?.has(parsed.listKey)) {
+    return NAV_RANK_ITEM;
+  }
+  if (parsed.kind !== "plain" || parsed.listKey.startsWith("custom:")) {
+    return NAV_RANK_SPECIFIC;
+  }
+  return NAV_RANK_GENERIC;
+}
+
+/**
+ * Several saved rows that cannot all get their own slot (next to the day
+ * taps of saved dated tasks) → one tap that opens exactly those
+ * rows. If the references do not fit one tap, the per-row taps stay as they
+ * are and the lowest-priority ones are cut like any other button.
+ */
+function collapseSavedItemTaps(
+  buttons: LlmReplyButton[],
+  ranks: number[],
+  savedTapIndexes: number[],
+): void {
+  if (savedTapIndexes.length < 2) {
+    return;
+  }
+  const fixed = ranks.filter((rank) => rank === NAV_RANK_DAY).length;
+  const otherItems = ranks.filter((rank, i) =>
+    rank === NAV_RANK_ITEM && !savedTapIndexes.includes(i),
+  ).length;
+  if (fixed + otherItems + savedTapIndexes.length <= REPLY_BUTTON_MAX) {
+    return;
+  }
+  const refs = savedTapIndexes.flatMap(
+    (i) => parseItemNavRef(buttons[i]!.command) ?? [],
+  );
+  const command = itemOpenAllTapCommand(refs);
+  if (!command) {
+    return;
+  }
+  const first = savedTapIndexes[0]!;
+  buttons[first] = {
+    label: `הצג את ${refs.length} הפריטים`,
+    command,
+  };
+  for (const i of savedTapIndexes.slice(1)) {
+    ranks[i] = NAV_RANK_DROPPED;
+  }
+}
+
+/**
+ * Best REPLY_BUTTON_MAX by rank (ties: original order), output in original
+ * order. Closed choices rank last: they only fill a free slot (and
+ * applyShowButtonsToBubbles keeps them on the bubble the model gave them).
+ */
+function selectRankedButtons(
+  buttons: LlmReplyButton[],
+  ranks: number[],
+): LlmReplyButton[] {
+  const keep = new Set(
+    buttons
+      .map((_, index) => index)
+      .filter((index) => ranks[index]! < NAV_RANK_DROPPED)
+      .sort((a, b) => ranks[a]! - ranks[b]! || a - b)
+      .slice(0, REPLY_BUTTON_MAX),
+  );
+  return buttons.filter((_, index) => keep.has(index));
 }
 
 function speakerNameSet(speakerNames: string[]): Set<string> {
@@ -3717,4 +3885,72 @@ function findSharedListForActor(
   return preferSharedList(
     findExistingCustomListsForActor(list, actorId, sharedLists),
   );
+}
+
+const SAVED_LIST_KIND: Record<string, ItemNavRef["kind"]> = {
+  tasks: "t",
+  shopping: "s",
+  custom: "c",
+};
+
+/**
+ * N1: rows saved (add / update) this turn according to ApplyResult — the
+ * authoritative execution result. Removes, misses, skips, held deletes and
+ * rolled-back rows never appear in `applied`, so they never get a tap. Pass
+ * `visibleIds` to keep only rows the speaker can open (the ITEM DUMP gate).
+ * Shopping rows get a tap only when they carry something the list view does
+ * not show (a description or a file): `shoppingWithDetail` lists those ids
+ * ("all" = every shopping row, for a cheap "anything to check?" pre-pass);
+ * plain shopping rows keep the general «הצג קניות».
+ */
+export function savedItemNavsFromApplyResult(
+  applyResult: ApplyResult,
+  visibleIds?: ReadonlySet<string>,
+  shoppingWithDetail: ReadonlySet<string> | "all" = new Set(),
+): SavedItemNav[] {
+  const out: SavedItemNav[] = [];
+  const seen = new Set<string>();
+  const push = (kind: ItemNavRef["kind"], id: string | undefined, title: string | undefined) => {
+    const trimmed = id?.trim() ?? "";
+    if (!trimmed || seen.has(trimmed) || (visibleIds && !visibleIds.has(trimmed))) {
+      return;
+    }
+    seen.add(trimmed);
+    out.push({ ref: { kind, id: trimmed }, title: (title ?? "").trim() });
+  };
+  for (const row of applyResult.domains.lists?.applied ?? []) {
+    const kind = SAVED_LIST_KIND[row.listType ?? ""];
+    // Rows of a list created this turn: the list nav is the result view
+    // (owner decision 2026-11-07) — no per-row taps.
+    const shoppingOk =
+      kind !== "s" ||
+      shoppingWithDetail === "all" ||
+      shoppingWithDetail.has(row.id?.trim() ?? "");
+    if (
+      kind &&
+      shoppingOk &&
+      !row.listShell &&
+      !row.inNewList &&
+      (row.op === "add" || row.op === "update")
+    ) {
+      push(kind, row.id, row.label);
+    }
+  }
+  for (const row of applyResult.domains.filing?.applied ?? []) {
+    if (row.op === "add_filing" || row.op === "update_filing") {
+      push("f", row.id, row.label);
+    }
+  }
+  for (const row of applyResult.domains.reminders?.applied ?? []) {
+    // Saved clocks (new and updated) carry their id; `changes` rows do not.
+    if (row.op === "add" || row.op === "update") {
+      push("r", row.id, row.label);
+    }
+  }
+  for (const row of applyResult.domains.directory?.applied ?? []) {
+    if (row.op === "add") {
+      push("p", row.id, row.label);
+    }
+  }
+  return out;
 }
