@@ -21,6 +21,7 @@ import {
   setLlmClientForTests,
   type LlmClient,
   type LlmResponseInput,
+  type LlmTurn,
 } from "../services/llm-client.js";
 import { listEmployeesForUser } from "../services/employee.service.js";
 import type { LastNumberedDumpLine } from "../services/show-button-dump.js";
@@ -46,12 +47,14 @@ export const ROTATION_AGE_MS = 41 * 60 * 1000;
 export const productionCleanupLeaks: string[] = [];
 
 /** Recording wrapper: forwards every call to the real client unchanged. */
-export function recordingClient(real: LlmClient, calls: Array<{ input: LlmResponseInput; reply: string }>): LlmClient {
+type RecordedCall = { input: LlmResponseInput; reply: string; usage?: LlmTurn["usage"] };
+
+export function recordingClient(real: LlmClient, calls: RecordedCall[]): LlmClient {
   return {
     createConversation: () => real.createConversation(),
     async createResponse(input) {
       const turn = await real.createResponse(input);
-      calls.push({ input, reply: turn.reply });
+      calls.push({ input, reply: turn.reply, usage: turn.usage ?? null });
       return turn;
     },
     ...(real.appendAssistantMessage
@@ -92,6 +95,25 @@ async function seedNumberedDump(account: HarnessAccount, digitalId: string, line
   });
 }
 
+/** Summed OpenAI usage of a turn's model calls (null fields when not reported). */
+function turnUsage(turnCalls: RecordedCall[]): {
+  evalInputTokens: number | null;
+  evalCachedTokens: number | null;
+  evalOutputTokens: number | null;
+} {
+  const rows = turnCalls.map((call) => call.usage).filter((u): u is NonNullable<typeof u> => Boolean(u));
+  if (rows.length === 0) {
+    return { evalInputTokens: null, evalCachedTokens: null, evalOutputTokens: null };
+  }
+  const sum = (key: "inputTokens" | "cachedTokens" | "outputTokens") =>
+    rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+  return {
+    evalInputTokens: sum("inputTokens"),
+    evalCachedTokens: sum("cachedTokens"),
+    evalOutputTokens: sum("outputTokens"),
+  };
+}
+
 export async function runLiveFullProductionCase(
   suiteCase: LiveFullCorpusCase,
   applyCase: ModelApplyCase,
@@ -99,7 +121,7 @@ export async function runLiveFullProductionCase(
 ): Promise<ModelApplyCaseResult> {
   const chat = await import("../services/chat.service.js");
   const real = getLlmClient();
-  const calls: Array<{ input: LlmResponseInput; reply: string }> = [];
+  const calls: RecordedCall[] = [];
   setLlmClientForTests(recordingClient(real, calls));
   try {
     return await runModelApplyCase(
@@ -165,6 +187,8 @@ export async function runLiveFullProductionCase(
             evalModelResponse: modelReply.response,
             evalInstructionsSha256: sha(main.input.instructions),
             evalModelCalls: calls.length - before,
+            // Stage 0: real OpenAI usage for this turn (all model calls).
+            ...turnUsage(calls.slice(before)),
           }),
           // Response constraints score what the user actually receives.
           response: finalReply.response,

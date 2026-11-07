@@ -5129,6 +5129,191 @@
           ]
         }
       ]
+    },
+    {
+      "id": "v-shopping-add",
+      "tags": [
+        "voice",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Voice: plain shopping add — natural confirm (wording observed, not gated)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v-task-family-context",
+      "tags": [
+        "voice",
+        "full-live",
+        "family",
+        "single-turn"
+      ],
+      "description": "Voice: task about a known child — saved as a task; use of the child's name observed, not gated",
+      "setup": {
+        "filing": [
+          {
+            "filing_id": "eval-filing-kids",
+            "item_name": "ילדים",
+            "item_info": "נועה (10), יואב (7)",
+            "item_description": "",
+            "owner": "טל",
+            "scope": "personal"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "צריך לקבוע לנועה תור לרופא שיניים ביום חמישי",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "רופא"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v-task-done",
+      "tags": [
+        "voice",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Voice: finished task removed — natural confirm",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-v",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-arnona",
+                "שם משימה": "לשלם ארנונה"
+              },
+              {
+                "item_id": "eval-item-car",
+                "שם משימה": "לקחת את הרכב לטסט"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "שילמתי את הארנונה",
+          "constraints": [
+            {
+              "type": "lists_remove_item_ids",
+              "listType": "tasks",
+              "itemIds": [
+                "eval-item-arnona"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v-greeting",
+      "tags": [
+        "voice",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Voice: bare greeting — nothing saved; wording observed",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v-thanks",
+      "tags": [
+        "voice",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Voice: thanks — nothing saved; wording observed",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תודה רבה!",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "v-allergy-no-announce",
+      "tags": [
+        "voice",
+        "full-live",
+        "health",
+        "sensitive",
+        "single-turn"
+      ],
+      "description": "Voice / QA-4: allergy mentioned — nothing auto-filed and no unprompted «לא אשמור» announcement",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני אלרגי לבוטנים",
+          "constraints": [
+            {
+              "type": "filing_empty"
+            },
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לא אשמור",
+                "לא אשמור את"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }
