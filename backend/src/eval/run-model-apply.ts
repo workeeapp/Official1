@@ -113,6 +113,8 @@ export interface ModelApplyProposeResult {
    * Distinguishes empty model emission from silent parse drops.
    */
   rawActionDiagnostic?: EvalRawActionDiagnostic;
+  /** applyByProposer only: the proposer's production turn applied mutations. */
+  appliedViaProduction?: boolean;
 }
 
 /**
@@ -462,6 +464,14 @@ export async function runModelApplyCase(
     partners?: string[];
     /** LIVE_FULL realism: speaker address gender + a digital worker row. */
     harness?: { addressGender?: "male" | "female" | null; digitalWorker?: boolean };
+    /**
+     * LIVE_FULL production path: the proposer already ran the turn through
+     * sendChatMessage (production apply + final reply). Skip the harness apply
+     * and the harness reply correction; only re-snapshot and score.
+     */
+    applyByProposer?: boolean;
+    /** Replaces destroyHarnessAccount (production path also clears chat rows). */
+    cleanup?: (account: HarnessAccount) => Promise<void>;
   },
 ): Promise<ModelApplyCaseResult> {
   const speaker = options?.speaker ?? "טל";
@@ -557,7 +567,9 @@ export async function runModelApplyCase(
         attachmentOutcome: emptyAttachmentOutcome(),
         listOpResults: [],
       };
-      if (metadataHasMutations(metadata)) {
+      if (options?.applyByProposer) {
+        appliedViaProduction = proposed.appliedViaProduction === true;
+      } else if (metadataHasMutations(metadata)) {
         const applied = await applyModelMetadataTurn({ account, metadata });
         appliedViaProduction = true;
         applyResult = {
@@ -573,12 +585,15 @@ export async function runModelApplyCase(
       snapshot = enriched.snapshot;
       facts = enriched.facts;
       // Align spoken reply with apply evidence even when apply was skipped.
-      const response = correctModelApplyTurnResponse({
-        response: rawResponse,
-        metadata,
-        ...applyResult,
-        snapshotAfter: snapshot,
-      });
+      // Production path: the reply is already sendChatMessage's final reply.
+      const response = options?.applyByProposer
+        ? rawResponse
+        : correctModelApplyTurnResponse({
+            response: rawResponse,
+            metadata,
+            ...applyResult,
+            snapshotAfter: snapshot,
+          });
       const contactNames = (
         await listContactsForEmployee(account.employeeId)
       ).map((row) => row.name);
@@ -621,7 +636,8 @@ export async function runModelApplyCase(
     failures.push(err instanceof Error ? err.message : String(err));
   } finally {
     if (account) {
-      await destroyHarnessAccount(account);
+      if (options?.cleanup) await options.cleanup(account);
+      else await destroyHarnessAccount(account);
     }
   }
 

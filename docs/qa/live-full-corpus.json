@@ -3951,7 +3951,7 @@
             {
               "type": "response_forbids_any",
               "needles": [
-                "רשימה",
+                "רשימ",
                 "לרכז",
                 "לסדר לך"
               ]

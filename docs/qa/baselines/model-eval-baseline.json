@@ -3,7 +3,7 @@
   "_doc": "Per-case expectations for model-eval suites, gated by backend/src/eval/regression-summary.ts. Built from the Q1 validation runs of 2026-11-06 (production instructions). Cases not listed are NEW: a passing new case is reported, a failing one fails the run. Every non-pass entry needs reason + measured evidence + reviewBy; after reviewBy the exception is ignored and the case gates as pass. Change this file only by explicit, reviewed edit.",
   "suites": {
     "live-full": {
-      "scope": "model+harness-apply",
+      "scope": "production-path",
       "criticalCaseIds": [
         "full-list-buy-milk",
         "full-mt-clarify-then-delete",
@@ -59,7 +59,10 @@
           "expect": "pass"
         },
         "c-declined-offer-after-rotation": {
-          "expect": "pass"
+          "expect": "known-fail",
+          "reason": "G9 continuity limitation: after the 40-min idle rotation the model conversation starts fresh (documented in claude/qa-followups.md, architecture decision deferred by owner) — a declined offer is not remembered and the model offers a list again",
+          "evidence": "production path (Q2, 2026-11-07): re-offered in 4/4 measured executions — q2 (00:29Z) and q2-flip-prod 3/3 (00:36Z); the old needle «רשימה» missed «רשימת», fixed to the stem «רשימ»; harness path did not re-offer",
+          "reviewBy": "2026-12-07"
         },
         "c-mentioned-not-saved-after-rotation": {
           "expect": "pass"

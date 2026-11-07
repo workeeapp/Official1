@@ -11,7 +11,7 @@
 #   ... -Db                                                                             # + db track (*.db.test.ts, approved workee_test)
 #   ... -EvalDb                                                                         # + full eval-db track (long; locked eval env)
 #   ... -EvalDbFiles "tests/a.eval-db.test.ts,tests/b.eval-db.test.ts"                  # + specific eval-db files
-#   ... -Live                                                                           # + LIVE_FULL (tagged cases; model + harness apply)
+#   ... -Live                                                                           # + LIVE_FULL (tagged cases; production path: sendChatMessage)
 #   ... -Live -Full | -Live -Cases "id1,id2" | -Live -Tags "continuity"
 #   ... -Live -Cases "so-household-share-offer" -Repeat 3                               # re-verify a flaky baseline case (3 runs)
 #   ... -AttachmentIntent                                                               # + attachment-intent corpus (model only)
@@ -19,7 +19,8 @@
 #   ... -Tsc                                                                            # + TypeScript: no new diagnostics vs baseline
 #   ... -WriteTscBaseline                                                               # explicit, reviewed baseline (re)write; never automatic
 #   ... -SkipOffline                                                                    # do not run the offline track
-#   ... -LegacyContext                                                                  # pre-G8 eval message (A/B attribution only)
+#   ... -LegacyContext                                                                  # pre-G8 eval message (A/B attribution only; implies -HarnessApply)
+#   ... -HarnessApply                                                                   # LIVE_FULL via model + harness apply (A/B only; removed in C1)
 #
 # Runs in its own process: eval env vars never leak into your shell.
 # Outputs: backend\scripts\.tmp-regression-*.out / *.json + .tmp-regression-summary-<OutTag|profile>.json
@@ -38,6 +39,7 @@ param(
   [string]$Cases = "",
   [int]$Repeat = 1,
   [switch]$LegacyContext,
+  [switch]$HarnessApply,
   [string]$OutTag = "",
   [switch]$Tsc,
   [switch]$WriteTscBaseline
@@ -85,7 +87,9 @@ Add-Suite "offline-shared" "vitest" "unit" $requestOffline
 Add-Suite "offline-backend" "vitest" "unit" $requestOffline
 Add-Suite "db" "vitest" "db-harness" ([bool]$Db)
 Add-Suite "eval-db" "vitest" "eval-db-harness" $requestEvalDb
-Add-Suite "live-full" "model-eval" "model+harness-apply" ([bool]$Live) "live-full"
+$liveScope = "production-path"
+if ($HarnessApply -or $LegacyContext) { $liveScope = "model+harness-apply" }
+Add-Suite "live-full" "model-eval" $liveScope ([bool]$Live) "live-full"
 Add-Suite "phase-4" "model-eval" "model-only" ([bool]$Phase4Cases) "phase-4"
 Add-Suite "phase-4-mt" "model-eval" "model-only" ([bool]$Phase4MtCases) "phase-4-mt"
 Add-Suite "attachment-intent" "model-eval" "model-only" ([bool]$AttachmentIntent) "attachment-intent"
@@ -162,6 +166,7 @@ try {
     $env:MODEL_EVAL_FULL_LIVE = "1"
     $env:MODEL_EVAL_REPEAT = "$Repeat"
     if ($LegacyContext) { $env:MODEL_EVAL_LEGACY_CONTEXT = "1" } else { $env:MODEL_EVAL_LEGACY_CONTEXT = "" }
+    if ($HarnessApply) { $env:MODEL_EVAL_LIVE_FULL_PATH = "harness" } else { $env:MODEL_EVAL_LIVE_FULL_PATH = "" }
     if ($Cases) { $env:MODEL_EVAL_CASES = $Cases; $env:MODEL_EVAL_TAGS = "" }
     elseif ($Full) { $env:MODEL_EVAL_CASES = ""; $env:MODEL_EVAL_TAGS = "" }
     else { $env:MODEL_EVAL_CASES = ""; $env:MODEL_EVAL_TAGS = $Tags }

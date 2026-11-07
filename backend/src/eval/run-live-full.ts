@@ -57,6 +57,20 @@ export function useLegacyEvalContext(): boolean {
   return process.env.MODEL_EVAL_LEGACY_CONTEXT === "1";
 }
 
+/**
+ * Q2: LIVE_FULL runs through sendChatMessage (production path) by default.
+ * MODEL_EVAL_LIVE_FULL_PATH=harness (or the legacy context A/B) keeps the
+ * previous harness-apply runner for comparison during the transition only.
+ */
+export function useHarnessApplyPath(): boolean {
+  return process.env.MODEL_EVAL_LIVE_FULL_PATH === "harness" || useLegacyEvalContext();
+}
+
+/** Report label for the scored execution path (never merged with model-only). */
+export function liveFullExecutionScope(): "production-path" | "model+harness-apply" {
+  return useHarnessApplyPath() ? "model+harness-apply" : "production-path";
+}
+
 /** Setup ids in a seeded LAST_NUMBERED_DUMP → the rows actually seeded. */
 export function mapSeededDumpLines(
   lines: LastNumberedDumpLine[] | undefined,
@@ -125,6 +139,28 @@ async function buildProductionLiveFacts(input: {
   });
 }
 
+/**
+ * Production path: instructions are built per harness account by
+ * buildLucyInstructions inside sendChatMessage; each turn records its SHA-256
+ * in turns[].metadata.evalInstructionsSha256 (and is checked against the builder).
+ */
+export function productionPromptProvenance(): ReturnType<typeof evalPromptProvenance> {
+  const config = loadLlmConfig();
+  return {
+    promptSource: "production-path:sendChatMessage+buildLucyInstructions(account)",
+    instructionsSha256: "per-turn (turns[].metadata.evalInstructionsSha256)",
+    envelopeMode: "lucy_eval",
+    attachLucyRuntimeEngine: true,
+    model: config.model,
+    temperature: config.temperature,
+    reasoningEffort: config.reasoningEffort,
+    workerName: "לוסי",
+    workerProtected: true,
+    employeeId: null,
+    instructionsFile: null,
+  } as ReturnType<typeof evalPromptProvenance>;
+}
+
 export type LiveFullCaseResult = Omit<ModelApplyCaseResult, "track"> & {
   track: "LIVE_FULL";
   prompt?: ReturnType<typeof evalPromptProvenance>;
@@ -163,6 +199,18 @@ export async function runLiveFullCase(
   await assertLiveFullDbRoleIsolation();
 
   const speaker = options?.speaker ?? "טל";
+  if (!useHarnessApplyPath()) {
+    const addressGenderProd: EvalAddressGender =
+      suiteCase.context?.speakerAddressGender !== undefined
+        ? suiteCase.context.speakerAddressGender
+        : (options?.speakerAddressGender ?? null);
+    const { runLiveFullProductionCase } = await import("./run-live-full-production.js");
+    const produced = await runLiveFullProductionCase(suiteCase, toModelApplyCase(suiteCase), {
+      speaker,
+      addressGender: addressGenderProd,
+    });
+    return { ...produced, track: "LIVE_FULL", prompt: productionPromptProvenance() };
+  }
   // LIVE_FULL historically omitted מיכל from Known employees — keep byte-identical.
   const prompt =
     options?.prompt ??
@@ -303,6 +351,7 @@ export async function runLiveFullCorpus(
     speaker: corpus.speaker,
     includeMichal: false,
   });
+  const production = !useHarnessApplyPath();
   const results: LiveFullCaseResult[] = [];
   for (const row of selected) {
     results.push(
@@ -335,6 +384,6 @@ export async function runLiveFullCorpus(
     criticalFailed,
     ok: softOk && criticalFailed.length === 0,
     results,
-    prompt: evalPromptProvenance(prompt),
+    prompt: production ? productionPromptProvenance() : evalPromptProvenance(prompt),
   };
 }

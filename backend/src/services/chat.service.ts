@@ -394,7 +394,8 @@ function buildOpenAiRequest(input: {
   return toResponsesCreateBody(input);
 }
 
-function packStoredLlmRaw(
+/** Exported for the LIVE_FULL production-path runner (seeded dump); unchanged. */
+export function packStoredLlmRaw(
   request: unknown,
   response: unknown,
   lastNumberedDump?: LastNumberedDumpLine[],
@@ -1332,7 +1333,8 @@ async function expireIdleConversation(existing: {
   };
 }
 
-async function getOrCreateConversation(
+/** Exported for the LIVE_FULL production-path runner (seeded dump); unchanged. */
+export async function getOrCreateConversation(
   userId: string,
   employeeId: string,
   digitalEmployeeId: string,
@@ -1627,7 +1629,12 @@ export function planInvolvedChangeNotices(input: {
   });
 }
 
-async function pushRelayMessage(input: {
+/**
+ * Server-sent assistant message on the speaker's thread (stored + remembered in
+ * the model conversation). Exported for the LIVE_FULL production-path runner
+ * (automated-message turns); unchanged.
+ */
+export async function pushRelayMessage(input: {
   userId: string;
   employeeId: string;
   digitalEmployeeId: string;
@@ -1675,7 +1682,8 @@ async function pushRelayMessage(input: {
   return notification;
 }
 
-async function saveAssistantMessage(input: {
+/** Exported for the LIVE_FULL production-path runner (seeded dump); unchanged. */
+export async function saveAssistantMessage(input: {
   conversationId: string;
   /** Also record the text in this OpenAI conversation (server-sent messages). */
   modelConversationId?: string;

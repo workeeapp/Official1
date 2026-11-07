@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadLiveFullCorpus, parseModelEvalTags } from "../src/eval/corpus.js";
 import {
   casesFromLiveFullResults,
@@ -8,9 +8,13 @@ import {
 } from "../src/eval/human-report.js";
 import { buildPostApplyEvidence } from "../src/eval/post-apply-evidence.js";
 import {
+  liveFullExecutionScope,
   runLiveFullCorpus,
   useLegacyEvalContext,
 } from "../src/eval/run-live-full.js";
+import { productionCleanupLeaks } from "../src/eval/run-live-full-production.js";
+import * as reminderFire from "../src/services/reminder-fire.js";
+import * as whatsappSend from "../src/services/whatsapp-send.js";
 import {
   aggregateStability,
   formatStabilityMarkdown,
@@ -31,10 +35,27 @@ const REPEAT = parseRepeat();
  * Optional: MODEL_EVAL_CASES=full-list-buy-milk
  * Optional: MODEL_EVAL_REPEAT=5 → stability report (docs/qa/live-full-stability.*)
  * Optional: MODEL_EVAL_LEGACY_CONTEXT=1 → pre-G8 message composition (A/B only)
+ * Optional: MODEL_EVAL_LIVE_FULL_PATH=harness → model + harness apply (A/B only;
+ *   default is the production path: every turn through sendChatMessage)
+ *
+ * Production path safety: WhatsApp sends and reminder delivery are stubbed;
+ * every harness account is deleted and verified (leaks fail the run).
  *
  * Requires DATABASE_URL === WORKEE_APPROVED_TEST_DATABASE_URL (workee_test).
  */
 describe("LIVE-full model→apply→facts (Lucy)", () => {
+  // No outbound delivery from the production path (same stubs as live-sendchat suites).
+  beforeAll(() => {
+    vi.spyOn(whatsappSend, "sendWhatsAppText").mockResolvedValue("sent");
+    vi.spyOn(whatsappSend, "sendWhatsAppButtons").mockResolvedValue("sent");
+    vi.spyOn(whatsappSend, "sendWhatsAppMedia").mockResolvedValue("sent");
+    vi.spyOn(reminderFire, "fireDueReminders").mockResolvedValue(0);
+    vi.spyOn(reminderFire, "scheduleSoon").mockImplementation(() => {});
+  });
+  afterAll(() => {
+    vi.restoreAllMocks();
+  });
+
   it("meets soft pass-rate on the live-full corpus", async () => {
     const liveEnabled =
       process.env.MODEL_EVAL_FULL_LIVE === "1" ||
@@ -91,6 +112,7 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
           ? `cases=${caseFilter.join(",")}`
           : `tags=${(tagsFilter ?? []).join(",") || "(all)"}`,
         contextMode: useLegacyEvalContext() ? "legacy (pre-G8)" : "production",
+        executionScope: liveFullExecutionScope(),
       };
       const base = resolve(import.meta.dirname, "../../docs/qa/live-full-stability");
       writeFileSync(
@@ -127,7 +149,11 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
           workerProtected: summary.prompt.workerProtected,
           employeeId: summary.prompt.employeeId,
           instructionsFile: summary.prompt.instructionsFile,
-          evalPath: "model-then-production-apply",
+          evalPath:
+            liveFullExecutionScope() === "production-path"
+              ? "production-sendChatMessage"
+              : "model-then-harness-apply",
+          executionScope: liveFullExecutionScope(),
           productionApply: true,
           total: summary.total,
           passed: summary.passed,
@@ -191,6 +217,11 @@ describe("LIVE-full model→apply→facts (Lucy)", () => {
         cases: reportCases,
       },
     );
+
+    expect(
+      productionCleanupLeaks,
+      `harness accounts left in workee_test: ${productionCleanupLeaks.join(", ")}`,
+    ).toEqual([]);
 
     if (stability) {
       // Measurement mode: gate on the aggregate rate; details live in the report.

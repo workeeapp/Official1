@@ -168,7 +168,7 @@ const CLASS_ORDER: StabilityClass[] = [
 
 export function formatStabilityMarkdown(
   summary: StabilitySummary,
-  header: { generatedAt: string; filter: string; contextMode: string },
+  header: { generatedAt: string; filter: string; contextMode: string; executionScope?: string },
 ): string {
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   const lines: string[] = [
@@ -177,6 +177,7 @@ export function formatStabilityMarkdown(
     `- **Generated:** ${header.generatedAt}`,
     `- **Filter:** ${header.filter}`,
     `- **Context mode:** ${header.contextMode}`,
+    ...(header.executionScope ? [`- **Execution scope:** ${header.executionScope}`] : []),
     `- **Runs:** ${summary.runs} × ${summary.cases} cases = ${summary.totalExecutions} executions`,
     `- **Overall:** ${summary.totalPassed}/${summary.totalExecutions} (${pct(summary.overallPassRate)})`,
     `- **Classes:** consistent-fail ${summary.counts["consistent-fail"]} · intermittent ${summary.counts.intermittent} · stable-pass ${summary.counts["stable-pass"]}`,
