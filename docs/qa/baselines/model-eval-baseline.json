@@ -214,6 +214,21 @@
         },
         "so-travel-offer": {
           "expect": "pass"
+        },
+        "v-allergy-no-announce": {
+          "expect": "pass"
+        },
+        "v-greeting": {
+          "expect": "pass"
+        },
+        "v-shopping-add": {
+          "expect": "pass"
+        },
+        "v-task-done": {
+          "expect": "pass"
+        },
+        "v-thanks": {
+          "expect": "pass"
         }
       }
     },

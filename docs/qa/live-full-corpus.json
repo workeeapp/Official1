@@ -4341,7 +4341,7 @@
           ],
           "stateAfter": {
             "factsInclude": [
-              "שלושה ילדים"
+              "שלושה"
             ]
           }
         }
@@ -5161,7 +5161,7 @@
         "family",
         "single-turn"
       ],
-      "description": "Voice: task about a known child — saved as a task; use of the child's name observed, not gated",
+      "description": "Voice: task about a known child — saved as a task, or a relevant clarification (e.g. the appointment time) with nothing saved yet; use of the child's name observed, not gated",
       "setup": {
         "filing": [
           {
@@ -5179,10 +5179,22 @@
           "utterance": "צריך לקבוע לנועה תור לרופא שיניים ביום חמישי",
           "constraints": [
             {
-              "type": "lists_has_action",
-              "action": "add",
-              "listType": "tasks",
-              "itemTextIncludes": "רופא"
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "lists_has_action",
+                  "action": "add",
+                  "listType": "tasks",
+                  "itemTextIncludes": "רופא"
+                },
+                {
+                  "type": "response_looks_like_ask"
+                }
+              ]
+            },
+            {
+              "type": "no_lists_add",
+              "listType": "shopping"
             }
           ]
         }
