@@ -3,6 +3,7 @@
  *
  *   npx tsx src/scripts/regression-summary.ts summarize <manifest.json> <summary-out.json>
  *   npx tsx src/scripts/regression-summary.ts rerun-list <manifest.json> <suiteId>
+ *   npx tsx src/scripts/regression-summary.ts flaky-rerun-list <result.json> <baselineSuite> [<startedAt ISO>]
  *   npx tsx src/scripts/regression-summary.ts write-tsc-baseline <tsc-output.txt>
  *
  * summarize: prints the per-suite / per-scope table, writes the JSON summary and
@@ -78,7 +79,16 @@ function evaluate(suite: ManifestSuite, baseline: ModelEvalBaseline, allowlist: 
 }
 
 function main(): number {
-  const [cmd, a, b] = process.argv.slice(2);
+  const [cmd, a, b, c] = process.argv.slice(2);
+  if (cmd === "flaky-rerun-list" && a && b) {
+    // Orchestrator hook: baseline-flaky cases that failed in this result file
+    // (comma-separated; empty when there is nothing to re-run). With <startedAt>,
+    // a result file older than this run yields nothing (never re-run stale data).
+    if (!existsSync(a)) return 0;
+    const baselineForRerun = readJson<ModelEvalBaseline>(MODEL_BASELINE);
+    console.log(flakyCasesToRerun(readJson(a), baselineForRerun.suites[b], new Date(), c ?? null).join(","));
+    return 0;
+  }
   if (cmd === "write-tsc-baseline" && a) {
     const lines = normalizeTscOutput(readText(a));
     writeFileSync(TSC_BASELINE, `${lines.join("\n")}\n`, "utf8");
@@ -96,7 +106,7 @@ function main(): number {
     return 0;
   }
   if (cmd !== "summarize" || !a || !b) {
-    console.error("usage: summarize <manifest> <out> | rerun-list <manifest> <suiteId> | write-tsc-baseline <tsc.txt>");
+    console.error("usage: summarize <manifest> <out> | rerun-list <manifest> <suiteId> | flaky-rerun-list <result.json> <baselineSuite> [startedAt] | write-tsc-baseline <tsc.txt>");
     return 2;
   }
   const manifest = readJson<RunManifest>(a);

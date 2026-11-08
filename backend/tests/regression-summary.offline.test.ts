@@ -217,6 +217,44 @@ describe("model-eval baseline gate (B6)", () => {
     expect(run([{ id: "fl", ok: true }]).details).toEqual([]);
   });
 
+  it("automatic re-run: original result stays visible; consistent vs intermittent failures are told apart", () => {
+    const ok = run([{ id: "fl", ok: false }], { rows: [{ id: "fl", runs: 3, passed: 3 }] }).details[0]!;
+    expect(ok.status).toBe("FLAKY_OK");
+    expect(ok.note).toMatch(/original run failed; re-run 3\/3/);
+    expect(ok.note).toMatch(/intermittent within tolerance/);
+    const consistent = run([{ id: "fl", ok: false }], { rows: [{ id: "fl", runs: 3, passed: 0 }] }).details[0]!;
+    expect(consistent.status).toBe("FAIL");
+    expect(consistent.note).toMatch(/original run failed; re-run 0\/3 — consistently failing/);
+    const intermittent = run([{ id: "fl", ok: false }], { rows: [{ id: "fl", runs: 3, passed: 1 }] }).details[0]!;
+    expect(intermittent.status).toBe("FAIL");
+    expect(intermittent.note).toMatch(/intermittent below tolerance/);
+  });
+
+  it("re-run evidence older than the re-run is ignored (stale file from an earlier run never passes a flaky case)", () => {
+    const rerunStart = new Date(LATER).toISOString();
+    const withStart = { ...ms, rerunStartedAt: rerunStart };
+    const report = { generatedAt: new Date(LATER).toISOString(), results: [{ id: "fl", ok: false, failures: ["x"] }] };
+    const stale = evaluateModelEval(withStart, report, base, NOW, {
+      generatedAt: new Date(LATER - 60_000).toISOString(),
+      rows: [{ id: "fl", runs: 10, passed: 6 }],
+    });
+    expect(stale.status).toBe("FAIL");
+    expect(stale.details[0]!.note).toMatch(/older than the re-run \(stale\) and was ignored/);
+    const undated = evaluateModelEval(withStart, report, base, NOW, { rows: [{ id: "fl", runs: 3, passed: 3 }] });
+    expect(undated.status).toBe("FAIL");
+    const fresh = evaluateModelEval(withStart, report, base, NOW, {
+      generatedAt: new Date(LATER + 60_000).toISOString(),
+      rows: [{ id: "fl", runs: 3, passed: 3 }],
+    });
+    expect(fresh.details[0]!.status).toBe("FLAKY_OK");
+  });
+
+  it("a re-run that covers no row for the case leaves it FAIL (incomplete re-run output)", () => {
+    const o = run([{ id: "fl", ok: false }], { rows: [{ id: "other", runs: 3, passed: 3 }] });
+    expect(o.status).toBe("FAIL");
+    expect(o.details[0]!.note).toMatch(/not re-verified/);
+  });
+
   it("measurement never gates and is never counted as PASS", () => {
     const o = run([{ id: "m", ok: false }]);
     expect(o.status).toBe("PASS");
@@ -242,6 +280,14 @@ describe("model-eval baseline gate (B6)", () => {
     expect(
       flakyCasesToRerun({ results: [{ id: "fl", ok: false }, { id: "p", ok: false }, { id: "fl2", ok: true }] }, base, NOW),
     ).toEqual(["fl"]);
+  });
+
+  it("flakyCasesToRerun returns nothing for a result file older than this run", () => {
+    const failing = { results: [{ id: "fl", ok: false }] };
+    const started = new Date(LATER).toISOString();
+    expect(flakyCasesToRerun({ ...failing, generatedAt: new Date(LATER - 60_000).toISOString() }, base, NOW, started)).toEqual([]);
+    expect(flakyCasesToRerun(failing, base, NOW, started)).toEqual([]);
+    expect(flakyCasesToRerun({ ...failing, generatedAt: new Date(LATER + 1_000).toISOString() }, base, NOW, started)).toEqual(["fl"]);
   });
 });
 

@@ -69,6 +69,8 @@ export interface ManifestSuite {
   baselineSuite?: string;
   /** model-eval only: stability JSON from a flaky re-run (MODEL_EVAL_REPEAT). */
   rerunFile?: string | null;
+  /** model-eval only: ISO time the flaky re-run started; older re-run evidence is ignored. */
+  rerunStartedAt?: string | null;
 }
 
 export interface RunManifest {
@@ -346,7 +348,18 @@ export interface ModelEvalResultJson {
 
 /** Stability JSON written by MODEL_EVAL_REPEAT runs (see stability.ts). */
 export interface StabilityJson {
+  generatedAt?: string;
   rows?: Array<{ id: string; runs: number; passed: number }>;
+}
+
+/** True when a report was written before `startedAt` (2 s tolerance), or has no generatedAt to prove otherwise. */
+export function isReportOlderThan(generatedAt: string | undefined, startedAt: string | null | undefined): boolean {
+  if (!startedAt) return false;
+  const started = Date.parse(startedAt);
+  if (!Number.isFinite(started)) return false;
+  if (!generatedAt) return true;
+  const generated = Date.parse(generatedAt);
+  return !Number.isFinite(generated) || generated < started - 2000;
 }
 
 export function evaluateModelEval(
@@ -367,7 +380,9 @@ export function evaluateModelEval(
   const results = json.results ?? [];
   if (results.length === 0) return notRun(suite, "0 cases in eval report");
   const critical = new Set(baseline?.criticalCaseIds ?? []);
-  const rerunById = new Map((rerun?.rows ?? []).map((r) => [r.id, r]));
+  // Re-run evidence written before the re-run started belongs to an earlier run: ignore it.
+  const staleRerun = Boolean(rerun) && isReportOlderThan(rerun?.generatedAt, suite.rerunStartedAt);
+  const rerunById = new Map((staleRerun ? [] : rerun?.rows ?? []).map((r) => [r.id, r]));
   for (const r of results) {
     const entry = baseline?.cases?.[r.id];
     const firstFailure = (r.failures?.[0] ?? "").split("\n")[0];
@@ -387,10 +402,15 @@ export function evaluateModelEval(
     const flakyRerun = expect === "flaky" ? rerunById.get(r.id) : undefined;
     if (flakyRerun) {
       const need = entry!.minPassesOf3 ?? 3;
+      // The original single run stays visible next to the re-run evidence.
+      const original = `original run ${r.ok ? "passed" : "failed"}`;
+      const tally = `${flakyRerun.passed}/${flakyRerun.runs}`;
       if (flakyRerun.runs >= 3 && flakyRerun.passed >= need) {
-        add("FLAKY_OK", `re-run ${flakyRerun.passed}/${flakyRerun.runs} ≥ ${need}/3 — ${entry!.reason}`);
+        add("FLAKY_OK", `${original}; re-run ${tally} ≥ ${need}/3 — intermittent within tolerance — ${entry!.reason}`);
+      } else if (flakyRerun.passed === 0) {
+        add("FAIL", `${original}; re-run ${tally} — consistently failing — regression`);
       } else {
-        add("FAIL", `flaky re-run ${flakyRerun.passed}/${flakyRerun.runs} < ${need}/3 — regression`);
+        add("FAIL", `${original}; re-run ${tally} < ${need}/3 — intermittent below tolerance — regression`);
       }
       continue;
     }
@@ -407,7 +427,12 @@ export function evaluateModelEval(
       add("KNOWN_FAIL", `${entry!.reason} [evidence: ${entry!.evidence}; review by ${entry!.reviewBy}]`);
     } else if (expect === "flaky") {
       const need = entry!.minPassesOf3 ?? 3;
-      add("FAIL", `flaky case failed and was not re-verified (needs ≥${need}/3 in a re-run)`);
+      add(
+        "FAIL",
+        staleRerun
+          ? `flaky case failed; re-run evidence is older than the re-run (stale) and was ignored (needs ≥${need}/3 in a re-run)`
+          : `flaky case failed and was not re-verified (needs ≥${need}/3 in a re-run)`,
+      );
     } else if (expect === "new") {
       add("FAIL", `not in baseline and failing: ${firstFailure}`);
     } else {
@@ -425,7 +450,14 @@ export function evaluateModelEval(
 }
 
 /** Flaky failures the orchestrator should re-run (3×) before the final summary. */
-export function flakyCasesToRerun(json: ModelEvalResultJson, baseline: BaselineSuite | undefined, now: Date): string[] {
+export function flakyCasesToRerun(
+  json: ModelEvalResultJson,
+  baseline: BaselineSuite | undefined,
+  now: Date,
+  startedAt?: string | null,
+): string[] {
+  // Never re-run on the strength of an earlier run's report.
+  if (startedAt && isReportOlderThan(json.generatedAt, startedAt)) return [];
   return (json.results ?? [])
     .filter((r) => !r.ok)
     .filter((r) => {
