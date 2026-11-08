@@ -5556,7 +5556,7 @@
         "single-turn",
         "tasks"
       ],
-      "description": "P3 standing one occurrence vs series: «move Noa's Tuesday class to 18:00» → ask whether only one date or every Tuesday, naming the class; the row is unchanged",
+      "description": "P3 standing one occurrence vs series: «move Noa's Tuesday class to 18:00» → ask whether only the upcoming occurrence or every Tuesday — both alternatives offered (the class, Noa or the weekday identifies it); no mutation before the answer; the row is unchanged",
       "setup": {
         "lists": [
           {
@@ -5601,7 +5601,30 @@
               "type": "response_mentions_any",
               "needles": [
                 "חוג",
-                "נועה"
+                "נועה",
+                "שלישי",
+                "רק ב־",
+                "רק ל־",
+                "רק ב-",
+                "רק ל-"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שלישי הקרוב",
+                "רק ליום שלישי",
+                "רק ביום שלישי",
+                "רק השבוע",
+                "השבוע הזה",
+                "רק הפעם",
+                "רק לשבוע",
+                "רק בשבוע",
+                "רק ב־",
+                "רק ל־",
+                "רק ב-",
+                "רק ל-",
+                "רק בתאריך"
               ]
             },
             {
