@@ -85,7 +85,7 @@ describe("Batch A prompt align to LIVE_FULL fixtures (offline)", () => {
     expect(text).toContain("SPEAKER_ADDRESS");
     expect(text).toContain("תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב");
     expect(text).toMatch(/FORBIDDEN:\s*empty actions or deferring/i);
-    expect(text).toContain("לפנות אליך בלשון זכר או נקבה");
+    expect(text).toContain("ask once how they would like to be addressed (male or female)");
   });
 
   it("matches resolveEvalPrompt config path with includeMichal:false", async () => {

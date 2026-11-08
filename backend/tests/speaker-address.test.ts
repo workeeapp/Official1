@@ -40,7 +40,7 @@ describe("formatSpeakerAddressContext", () => {
     expect(formatSpeakerAddressContext("female")).toContain("gender: female");
     expect(formatSpeakerAddressContext("female")).toContain("את,");
     expect(formatSpeakerAddressContext(null)).toContain("gender: unknown");
-    expect(formatSpeakerAddressContext(null)).toContain("לפנות אליך בלשון זכר או נקבה");
+    expect(formatSpeakerAddressContext(null)).toContain("ask once how they would like to be addressed (male or female)");
   });
 
   it("unknown gender must not block a complete same-turn durable address filing", () => {
@@ -49,7 +49,7 @@ describe("formatSpeakerAddressContext", () => {
     expect(unknown).toContain("תייקי שהכתובת שלי היא רחוב הרצל 1 תל אביב");
     expect(unknown).toMatch(/never block|FORBIDDEN[\s\S]*empty actions/i);
     // Still keeps the gender ask for turns that need conjugation only.
-    expect(unknown).toContain("לפנות אליך בלשון זכר או נקבה");
+    expect(unknown).toContain("ask once how they would like to be addressed (male or female)");
   });
 
   // Regression (eval-db reminder-link-existing-task, 2026-11-04): once the

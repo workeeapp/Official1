@@ -832,7 +832,7 @@ describe("chat API", () => {
     const instructions = createResponse.mock.calls[0][0].instructions as string;
     expect(instructions).toContain("SEND BY MEANING");
     expect(instructions).toContain("SEND-ME FREE TEXT");
-    expect(instructions).toContain("מתי תרצה שאשלח?");
+    expect(instructions).toContain("response ONLY asks when to send it");
     expect(instructions).toContain("את ההודעה «…»");
     expect(instructions).toContain("תמסרי למיכל שאני אוהב אותה");
   });
