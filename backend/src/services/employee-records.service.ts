@@ -861,20 +861,12 @@ function listsForEmployeeContext(
     });
 }
 
-export function formatEmployeeContext(
-  snapshot: EmployeeRecordSnapshot,
-  label = "EMPLOYEE_SAVED_DATA",
-): string {
-  if (!hasEmployeeRecords(snapshot)) {
-    return [
-      `${label}:`,
-      "There are currently no visible lists, tasks, or filings.",
-      "If asked what someone needs to buy or do, say they have nothing pending.",
-    ].join("\n");
-  }
-
-  return [
-    `${label}:`,
+/**
+ * Fixed rules for reading EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA. Chat sends
+ * them once in the system instructions (cached prefix) and the facts blocks
+ * carry data only; other callers still get them inline.
+ */
+export const EMPLOYEE_SAVED_DATA_RULES: readonly string[] = [
     "Only these saved items exist. Do not invent others. active_reminders and reminders are pending clocks only (status=active). Past scheduled sends are not listed as history — answer only from live rows here when asked what is still scheduled.",
     "LIVE FACTS THIS TURN (saved lists/tasks/reminders/day plans only): if an earlier assistant reply named a saved task, reminder, or day-plan item that is NOT in this JSON now, do not repeat it as still visible (e.g. do not resurrect להזכיר למאיוש… from prior turns). This does NOT cancel a question you just asked (send text, missing phone/time) — the answer still completes it.",
     "MUTATE BY ID (like OPEN_JOBS job_id): every list item has item_id, every filing has filing_id, every reminder has reminder_id. lists.remove / lists.update (incl. list_type filing) / reminders remove|update MUST copy that id from THIS turn — never omit it, never invent it, never speak ids aloud. DELETE WHEN CLEAR (rows): unique target + id → remove NOW with past-tense responses («מחקתי את «title»…»); FORBIDDEN inventing «האם מאשר?» / yes-no when the target is unique; FORBIDDEN empty responses on that remove; FORBIDDEN alter_list/delete_list for a single item. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל / whole-list vs item) → delete mutates empty; ONE responses entry — FORBIDDEN raise/«אגב»; after they pick, remove with ids from THIS turn. CLOCK TITLE COLLISIONS: active_reminders may list several rows with the same item — distinguish by fire_at / repeat / recurrence_text. If clock_title_collisions is non-empty for that item and they cancel by title only (no RECENT_OUTBOUND.reminder_id bind) → ASK which (name those distinctions); reminders=[] — FORBIDDEN removing the first id or every matching id. WHOLE-LIST: unique list_id → delete_list NOW; several matches → ASK. On לא / בטל while a DELETE CLARIFY is open → remove empty; short ack; FORBIDDEN answering AFTER ASSIGN / date+reminder offers or older drafts. The server ignores remove/update without a matching id.",
@@ -886,6 +878,24 @@ export function formatEmployeeContext(
     "List items may include urgency (urgent / very_urgent only — normal is omitted). When listing, wrap that whole numbered line in «…» (urgent) and append ‼️ after the closing guillemet only for very_urgent. FORBIDDEN: the words דחוף / דחוף מאוד on the line. מה יש לי דחוף → only those rows.",
     "TASK LINKED LISTS: a tasks item may carry linked_lists [{list_id, list_type, list_name}] — shopping/custom lists attached to that task (many). A shopping/custom list may carry linked_from_items [{item_id, list_type, title}] naming the tasks that link it. LINK = lists.update/add on the task with linked_list_ids (list_id from this JSON) or linked_lists [{list_type, list_name}] for same-turn creates; UNLINK = unlink_list_ids. Host must be tasks; linked lists shopping/custom only. Linking does NOT auto-share. Never speak ids. When listing a task with non-empty linked_lists → append 🗂️ after the title (after 📎 if both, before reminder parentheses, inside urgency «…»). When the speaker asks to show/view ONE such task → first responses entry = the item; second entry = if 2+ linked lists numbered names only («כרגע מחוברות למשימה הזו N רשימות:»), if exactly 1 → that list's name + its items from this JSON. No follow-up when linked_lists empty or for whole-list/status dumps.",
     "Each list has list_id (copy into lists alter_list / delete_list — never speak it) and emoji (effective display glyph). Custom lists also show columns (current column names) and title_field (the column that names each row).",
+];
+
+export function formatEmployeeContext(
+  snapshot: EmployeeRecordSnapshot,
+  label = "EMPLOYEE_SAVED_DATA",
+  options?: { rulesInInstructions?: boolean },
+): string {
+  if (!hasEmployeeRecords(snapshot)) {
+    return [
+      `${label}:`,
+      "There are currently no visible lists, tasks, or filings.",
+      "If asked what someone needs to buy or do, say they have nothing pending.",
+    ].join("\n");
+  }
+
+  return [
+    `${label}:`,
+    ...(options?.rulesInInstructions ? [] : EMPLOYEE_SAVED_DATA_RULES),
     JSON.stringify({
       lists: listsForEmployeeContext(snapshot.lists),
       filing: snapshot.filing,

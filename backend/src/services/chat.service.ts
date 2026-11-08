@@ -52,6 +52,7 @@ import {
   EMPTY_REPLY_RETRY,
   LIST_FIND_MISS,
   formatAppliedMutationFallback,
+  EMPLOYEE_SAVED_DATA_RULES,
   formatEmployeeContext,
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
@@ -105,7 +106,10 @@ import {
   type SharedListRef,
 } from "./employee-targets.service.js";
 import { phonesMatch } from "../utils/phone.js";
-import { formatSessionClockContext } from "../utils/relative-date.js";
+import {
+  formatSessionClockContext,
+  SESSION_CLOCK_RULES,
+} from "../utils/relative-date.js";
 import { formatSpeakerAddressContext } from "./speaker-address.js";
 import {
   answerOpenJobForPair,
@@ -989,6 +993,18 @@ export async function requireDigitalChatPartner(
  * eval can never score a different prompt than production sends.
  * (Extracted verbatim from sendChatMessage; Q1 parity.)
  */
+/**
+ * How to read this turn's fact blocks — fixed text, sent once in the
+ * instructions (cached) instead of inside every facts block (Stage 2).
+ */
+const FACTS_RULES = [
+  "FACTS RULES — how to read this turn's fact blocks (they carry data only):",
+  "SESSION_CLOCK:",
+  ...SESSION_CLOCK_RULES,
+  "EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA:",
+  ...EMPLOYEE_SAVED_DATA_RULES,
+].join("\n");
+
 export function buildLucyInstructions(input: {
   digital: PublicEmployee;
   employees: PublicEmployee[];
@@ -1046,6 +1062,7 @@ export function buildLucyInstructions(input: {
     ? [
         config.systemMessage,
         RESPONSES_RULE,
+        FACTS_RULES,
         `The user is chatting as ${speaker}.`,
         guestModeInstructions ||
           workerTargetingInstructions(employees, speaker, digital),
@@ -1095,7 +1112,7 @@ export function buildLucyInstructions(input: {
         "RETRIEVAL CONTRACT (runtime): INTENT->ACTION: retrieve/inspect via show_dump - FORBIDDEN easy factual prose when dump+ids exists (incl. focused single-record / next-nearest among visible); FORBIDDEN inventing next fire in responses; prose OK for explanation/analysis/general knowledge/clarify. (1) full inventory/date agenda -> show_dump + from/to, show_dump_ids null. (2) SAME-KIND SEMANTIC / focused by intent (broad, single-record, semantic, person, temporal among visible rows) inside ONE dump domain: engine does NOT infer categories or rewrite dump with computed next fire - YOU pick id(s) from live facts + SESSION_CLOCK (that pick IS dump path, not prose); clear matches -> show_dump=<kind> + show_dump_ids=[all matching ids], lists=[]; FORBIDDEN parallel prose inventory; multiple clear matches are NOT ambiguity; single focused/temporal hit -> dump that one id even if one-sentence prose seems enough; no matches -> no dump + short no-match; material ambiguity of criteria -> one ASK, no dump; never invent ids; meetings/appointments example -> show_dump=tasks + show_dump_ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח הודעה / נדנוד / ברכת בוקר). (3) CROSS-KIND SEMANTIC -> show_dump=full + show_dump_ids=[row ids whose own meaning matches the topic across kinds]; lists=[]; FORBIDDEN including a row only because its custom list_name matches; explicit whole-list ask -> show_dump=<exact list_name>; server multi-section dump of ONLY those rows (omit empty sections; shopping item lines); FORBIDDEN prose inventory / inventing ids / list_id; empty/unknown ids -> no-match (never unfiltered full). (4) TIME-OF-DAY -> not an engine hour filter.",
         "SHOW MY LISTS / הציגי את הרשימות שלי / הצג רשימות: metadata.show_dump=\"full\"; lists=[]; no reminders clock; buttons=[]. Same engine as FULL DUMP (server replaces). FORBIDDEN writing the overview yourself. Exact «הצג רשימת X» stays category/custom dump.",
         "LIST SHELL SHOW (runtime): after applied empty custom create / alter_list (share, unshare, emoji, rename, columns, files) → confirm button for THAT list («הצג רשימת <name>» / «הצג קניות» / «הצג משימות»); after delete_list → label «הצג רשימות» command «הצג רשימות» (show_dump=full). Engine safety-nets the same. FORBIDDEN «הצג רשימות» after create/alter_list; FORBIDDEN list-shell nav after item-level lists mutates alone.",
-        "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. FULL DUMP DETAIL RULE (server): ONLY משימות enumerate items (1. 2. 3. under one «משימות:» header; assign «(באחריות X · מאת Y)»; co-share «(A, B)»; LINKED REMINDER on task lines). קניות COUNTS ONLY breakdown under «קניות:» — אישיות / «(A, B)» / «(באחריות X · מאת Y)» (all involved on co-share); רשימות אחרות = «*name* (A, B) — N פריטים» (all involved, e.g. «(מיכל, טל)»; no «עם»). תזכורות פעילות: NUMBERED 1. 2. 3. (never •) for clocks NOT already on a task LINKED REMINDER line. SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. Hint once: לפירוט רשימה: הצג רשימת …. תיוקים (one «תיוקים:» + «(A, B)»); אנשי קשר (one «אנשי קשר:» from EMPLOYEE_SAVED_DATA only — not SPEAKER_CONTACTS); ספר הטלפונים (one «ספר הטלפונים:» from SPEAKER_CONTACTS; co-share «(A, B)»; empty → ריק). FORBIDDEN: skipping ספר הטלפונים when SPEAKER_CONTACTS is non-empty; FORBIDDEN filling ספר הטלפונים from list_type contacts or calling the phone book «אנשי קשר». No schema jargon.",
+        "FULL DUMP / מה יש לי / הציגי הכל / הצג הכל / מה שמור לי / כל מה ששמור עלי / סיכום מלא: metadata.show_dump = \"full\"; lists=[]; no reminders clock; buttons=[]. Server replaces response with the live flat-list overview (EMPLOYEE_SAVED_DATA + SPEAKER_CONTACTS). FORBIDDEN writing the overview in response yourself. The server lays out the overview (sections, counts, marks). SHAREABLE STATUS ASK / הצג רשימת X stay category dumps. No schema jargon.",
         "PHONE BOOK / אנשי קשר / ספר הטלפונים / contacts: metadata.show_dump=\"phone_book\"; lists=[]; server replaces from SPEAKER_CONTACTS. Mutate via directory only (never lists.contacts). FORBIDDEN model-written phone book.",
         "Show a named list / הציגי את רשימת X / «שיעורי נהיגה» / «שיעורי נהיגה של מאיה»: metadata.show_dump = exact custom list_name from EMPLOYEE_SAVED_DATA (or shopping|tasks|contacts|filings); lists=[]; server replaces numbered dump + LAST_NUMBERED_DUMP. FORBIDDEN model-written • inventory for named lists (breaks «הציגי 6»). items=[] → server empty sentence. Speak Hebrew only — never list_name / list_type / metadata. After that dump, «הציגי 6» / «את 3» → ITEM DUMP show_dump + show_dump_ids from LAST_NUMBERED_DUMP line n (same list kind); missing/out of range → ASK, not invent ids.",
         "SHARED LISTS: use scope + shared_with from EMPLOYEE_SAVED_DATA. Shared → say משותפת and name shared_with partners; never «של עמית» alone if the speaker is in shared_with. הציגי רשימות משותפות → only scope=shared. scope=shared_items shopping/tasks → status header «קניות/משימות של <owner>» (FORBIDDEN משותפת עם). Named-list add/update/remove — follow LIST NAME MATCH. «רשימת קניות משותפת» / כן after that offer → shopping + list_name \"\" (FORBIDDEN custom with list_name קניות / משימות / אנשי קשר).",
@@ -1270,7 +1287,6 @@ function workerTargetingInstructions(
     "MUTATE BY ID: lists/filing/reminders/directory remove|update need item_id / filing_id / reminder_id / contact_id from THIS turn. DELETE WHEN CLEAR (rows): unique target → remove NOW with item_id; responses non-empty past-tense («מחקתי את «title»…»); FORBIDDEN empty responses; FORBIDDEN alter_list/delete_list for a single item (those are only for the whole list); FORBIDDEN same-turn jobs.answer; FORBIDDEN «האם מאשר?» when the target is unique. ASK WHEN UNCLEAR (≥2 candidates / which domain / מחק הכל) → delete mutates empty; one responses entry; FORBIDDEN raise/«אגב». WHOLE-LIST: each explicitly named list with unique list_id → delete_list NOW (one per list); a name with several matches or unresolved → ASK, lists=[]. Update with id applies immediately. Never invent or speak ids.",
     "CLEAR ALL CONTACTS / PHONE BOOK: «תמחקי את כל אנשי הקשר» / «מחק את כל ספר הטלפונים» → ASK first (which domain / confirm wipe); directory=[] lists=[]. If SPEAKER_CONTACTS has rows this turn, FORBIDDEN claiming the book is empty — ask whether they meant ספר הטלפונים (name that contacts exist). Never wipe-all without a clarifying ask.",
     "Speaker still needs → EMPLOYEE_SAVED_DATA lists. Your tasks / your reminder jobs (להזכיר ל…) → WORKER_SAVED_DATA (+ OPEN_JOBS). Ping clocks only → active_reminders. Empty clocks ≠ you have no work. Never emit metadata.query.",
-    "WHEN / TODAY / SOON — FULL agenda only (מה לעשות היום / מחר / יום שלישי / השבוע / בעוד שעתיים with NO meaning filter): SESSION_CLOCK. אני/שלי → metadata.show_dump=tasks + show_dump_from/to YYYY-MM-DD; show_dump_ids=null; lists=[]; server replaces EVERY row in range. מה את צריכה ביום X → show_dump=tasks + show_dump_about=YOUR display name + from/to. FORBIDDEN model-written agenda. Multi-day (השבוע) → from=first to=last of the window. SEMANTIC day asks («פגישות» / «תורים» / «אילו פגישות יש לי השבוע» / «איזה תורים יש לי השבוע») → RETRIEVAL CONTRACT path 2 (same-kind semantic: show_dump=tasks + show_dump_ids=[all matching meeting ids]; lists=[]; server REPLACE; no parallel prose inventory; no dump on no-match/ASK) — FORBIDDEN bare show_dump without ids; FORBIDDEN answering meetings in prose instead of dump+ids. MEETING ≠ NUDGE: exclude להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / YOUR worker send rows from those ids (person+date alone ≠ meeting). TIME-OF-DAY (בוקר) is NOT an engine dump filter.",
     "LIST ITEM URGENCY: on lists add/update set item urgency = normal | urgent | very_urgent by MEANING (same as messages) — never ask. normal by default; urgent when they stress it (דחוף / בהקדם); very_urgent when hard (ממש דחוף / דחוף מאוד / מיד). Clean title without urgency words. Shopping/tasks/contacts/custom alike.",
     "URGENCY IN RESPONSE: when a saved item has urgency (urgent / very_urgent — normal is omitted from EMPLOYEE_SAVED_DATA), wrap that entire numbered line in guillemets so the whole row is bold. urgent → «1. לשתות מים מחר». very_urgent → the same wrap plus ‼️ after the closing guillemet: «1. לשתות מים מחר» ‼️. 📎 and «(תזכורת: …)» stay inside the wrap. FORBIDDEN: the words דחוף / דחוף מאוד on the line. Never wrap or mark normal/missing. מה יש לי דחוף / מה דחוף → metadata.show_dump=tasks (or full) + show_dump_urgency=urgent; lists=[]; server replaces.",
     "Status / דוח / what someone needs to buy or do / show a list: LIVE DATA ONLY — never resurrect titles from earlier chat after a delete. Bare «מה יש לי» / «הציגי הכל» / סיכום מלא / כל מה ששמור → metadata.show_dump=full; lists=[]; server replaces response (FORBIDDEN model-written overview; shopping COUNTS + tasks detail + phone book). SHAREABLE STATUS ASK / ABOUT X / «הצג רשימת משימות|קניות»: metadata.show_dump = shopping|tasks|…; one flat dump header + row marks (co-share (A, B); assign (באחריות X · מאת Y)); filings two-section; about X = speaker↔X co-share. Current field values only — never dump שם חדש / update drafts. Inventory dump lines are server-owned — do not bold them. On confirms, bold only the item title with a single WhatsApp pair *title* (never **, never wrap «שם:»). Urgency: wrap the whole item line in «…»; very_urgent also appends ‼️ after the closing guillemet. FORBIDDEN to write דחוף / דחוף מאוד on that line. Shared lists: use scope/shared_with. Custom list titles follow LIST NAME MATCH. APPLY FEEDBACK: name object+list after mutates.",
@@ -2216,6 +2232,12 @@ export interface TurnContextParts {
   lastLiveLocation: Parameters<typeof formatLastLiveLocationContext>[0];
   pendingInvite: Parameters<typeof formatPendingInviteContext>[0] | null;
   tipsContext: string;
+  /**
+   * Stage 2: the fixed SESSION_CLOCK / SAVED_DATA reading rules ride in the
+   * system instructions (FACTS RULES), so the facts blocks carry data only.
+   * Set only when buildLucyInstructions attaches the Lucy engine.
+   */
+  rulesInInstructions?: boolean;
 }
 
 /**
@@ -2225,13 +2247,14 @@ export interface TurnContextParts {
  */
 export function composeTurnContext(parts: TurnContextParts): string {
   const guest = parts.guestSpeaker;
+  const factsOnly = { rulesInInstructions: parts.rulesInInstructions === true };
   return [
-    formatSessionClockContext(),
+    formatSessionClockContext(undefined, factsOnly),
     guest ? "" : formatSpeakerAddressContext(parts.addressGender),
-    formatEmployeeContext(parts.speakerSnapshot),
+    formatEmployeeContext(parts.speakerSnapshot, "EMPLOYEE_SAVED_DATA", factsOnly),
     guest || !parts.workerSnapshot
       ? ""
-      : formatEmployeeContext(parts.workerSnapshot, "WORKER_SAVED_DATA"),
+      : formatEmployeeContext(parts.workerSnapshot, "WORKER_SAVED_DATA", factsOnly),
     guest
       ? ""
       : formatSpeakerContacts(parts.speakerContacts, parts.contactBookShare),
@@ -2418,6 +2441,11 @@ export async function sendChatMessage(input: {
     lastLiveLocation: lastLiveLocationCtx,
     pendingInvite: input.pendingInvite ?? null,
     tipsContext,
+    rulesInInstructions: shouldAttachLucyRuntimeEngine(
+      digital,
+      employees,
+      loadLlmConfig().systemMessage,
+    ),
   });
   const instructions = buildLucyInstructions({
     digital,

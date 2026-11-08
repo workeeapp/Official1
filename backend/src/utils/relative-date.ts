@@ -49,14 +49,37 @@ export function sessionClock(now = new Date()): SessionClock {
 }
 
 /**
+ * Fixed rules for reading SESSION_CLOCK. Chat sends them once in the system
+ * instructions (cached prefix) and the clock block carries data only; other
+ * model calls (compose / watch) still get them inline.
+ */
+export const SESSION_CLOCK_RULES: readonly string[] = [
+    "WEEK BOUNDARIES (Israel): a week runs ראשון→שבת. השבוע / this week = this_week only (today through this שבת, inclusive) — NEVER include days from next_week, even if this_week has few days left or nothing matches. If nothing in this_week matches, say so plainly (e.g. אין לך כלום להמשך השבוע). השבוע הבא / next week = next_week (ראשון→שבת).",
+    "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to the NEAREST upcoming YYYY-MM-DD (today inclusive) — it is a lookup for a single named day, not the definition of השבוע. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
+    "For any date further than weekday_dates (בעוד שבועיים, השבוע הבא, ב-20 לחודש, עד דצמבר) read the exact date + weekday from calendar — never count days in your head.",
+    "RECURRING / WHEN DATE ASK: standing task (חוזר / next_occurrences) or repeating clock — FULL date-window agenda (no meaning filter) → metadata.show_dump=tasks + show_dump_from/to from this clock; show_dump_ids=null; lists=[]; server prints the day agenda. FORBIDDEN model-written agenda for that path. Semantic/focused asks on a date window («פגישות» / «תורים» / «אילו פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2 ONLY: show_dump=tasks + show_dump_ids=[all matching meeting task ids] from THIS turn's JSON (+ optional from/to for the window); lists=[]; server REPLACE; FORBIDDEN prose inventory / free-built agenda in responses; FORBIDDEN bare show_dump without ids. MEETING ≠ NUDGE: never include להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / ping-or-send worker rows as meeting ids (person+date alone ≠ meeting). Bare rule («כל שלישי וחמישי») only when they ask what repeats with NO date window.",
+    "Use this clock when resolving show_dump_from/to for today, tomorrow, this week/month, in N hours/days, or similar.",
+    "Compare date/time fields for the question's subject only: אני/שלי → speaker show_dump without about. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
+    "מה את/ה צריך/ה ביום X / what YOU need that day → show_dump=tasks + show_dump_about=YOUR display name + from/to. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
+    "WHEN / FULL day plan (no meaning filter) → server dump only with show_dump_ids=null (FORBIDDEN model-written agenda). Semantic day asks («פגישות» / «אילו פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2: show_dump=tasks + show_dump_ids for every clear meeting match (server REPLACE) — FORBIDDEN answering in prose instead of dump+ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח / נדנוד / ברכת בוקר); bare dump without ids expands to every row (not a semantic filter). TIME-OF-DAY (בוקר) is not an engine from/to filter. Bare status answers without show_dump still use matching injected facts.",
+    "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך משימות או תזכורות בשעה הקרובה) — never jargon like משימות מתוזמנות.",
+];
+
+/**
  * Injected every chat turn. The model filters EMPLOYEE_SAVED_DATA / schedules /
  * reminders vs this clock — the server does not pre-filter for "today" questions.
  */
-export function formatSessionClockContext(now = new Date()): string {
+export function formatSessionClockContext(
+  now = new Date(),
+  options?: { rulesInInstructions?: boolean },
+): string {
   const clock = sessionClock(now);
   const weekdayDates = upcomingWeekdayDates(now);
   const thisWeek = remainingThisWeek(now);
   const nextWeek = weekRange(now, 1);
+  // Inline rules keep their original positions for callers that still want them.
+  const rule = (from: number, to = from + 1): readonly string[] =>
+    options?.rulesInInstructions ? [] : SESSION_CLOCK_RULES.slice(from, to);
   return [
     "SESSION_CLOCK:",
     `timezone: ${clock.timezone}`,
@@ -65,18 +88,12 @@ export function formatSessionClockContext(now = new Date()): string {
     `now_iso: ${clock.nowIso}`,
     `this_week: ${thisWeek.from}..${thisWeek.to}`,
     `next_week: ${nextWeek.from}..${nextWeek.to}`,
-    "WEEK BOUNDARIES (Israel): a week runs ראשון→שבת. השבוע / this week = this_week only (today through this שבת, inclusive) — NEVER include days from next_week, even if this_week has few days left or nothing matches. If nothing in this_week matches, say so plainly (e.g. אין לך כלום להמשך השבוע). השבוע הבא / next week = next_week (ראשון→שבת).",
+    ...rule(0),
     `weekday_dates: ${JSON.stringify(weekdayDates)}`,
-    "weekday_dates maps היום/מחר/אתמול and Hebrew weekdays (ראשון…שבת, also יום חמישי) to the NEAREST upcoming YYYY-MM-DD (today inclusive) — it is a lookup for a single named day, not the definition of השבוע. When the speaker says ביום חמישי / מחר, resolve via weekday_dates then match EMPLOYEE_SAVED_DATA תאריך לביצוע (and יום בשבוע when present).",
+    ...rule(1),
     "calendar (Sunday-first weeks; line 1 = this week, line 2 = next week, line 3 = in two weeks…):",
     ...upcomingCalendarWeeks(now),
-    "For any date further than weekday_dates (בעוד שבועיים, השבוע הבא, ב-20 לחודש, עד דצמבר) read the exact date + weekday from calendar — never count days in your head.",
-    "RECURRING / WHEN DATE ASK: standing task (חוזר / next_occurrences) or repeating clock — FULL date-window agenda (no meaning filter) → metadata.show_dump=tasks + show_dump_from/to from this clock; show_dump_ids=null; lists=[]; server prints the day agenda. FORBIDDEN model-written agenda for that path. Semantic/focused asks on a date window («פגישות» / «תורים» / «אילו פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2 ONLY: show_dump=tasks + show_dump_ids=[all matching meeting task ids] from THIS turn's JSON (+ optional from/to for the window); lists=[]; server REPLACE; FORBIDDEN prose inventory / free-built agenda in responses; FORBIDDEN bare show_dump without ids. MEETING ≠ NUDGE: never include להזכיר / לשלוח הודעה / לשלוח נדנוד / ברכת בוקר / ping-or-send worker rows as meeting ids (person+date alone ≠ meeting). Bare rule («כל שלישי וחמישי») only when they ask what repeats with NO date window.",
-    "Use this clock when resolving show_dump_from/to for today, tomorrow, this week/month, in N hours/days, or similar.",
-    "Compare date/time fields for the question's subject only: אני/שלי → speaker show_dump without about. Do not pull WORKER_SAVED_DATA or other people's schedules into a first-person day plan.",
-    "מה את/ה צריך/ה ביום X / what YOU need that day → show_dump=tasks + show_dump_about=YOUR display name + from/to. Does not affect the answer to a question you just asked (e.g. short היי after asking what to send).",
-    "WHEN / FULL day plan (no meaning filter) → server dump only with show_dump_ids=null (FORBIDDEN model-written agenda). Semantic day asks («פגישות» / «אילו פגישות יש לי השבוע») → RETRIEVAL CONTRACT path 2: show_dump=tasks + show_dump_ids for every clear meeting match (server REPLACE) — FORBIDDEN answering in prose instead of dump+ids; MEETING ≠ NUDGE (exclude להזכיר / לשלוח / נדנוד / ברכת בוקר); bare dump without ids expands to every row (not a semantic filter). TIME-OF-DAY (בוקר) is not an engine from/to filter. Bare status answers without show_dump still use matching injected facts.",
-    "When nothing matches a timed window, speak plain product Hebrew (e.g. אין לך משימות או תזכורות בשעה הקרובה) — never jargon like משימות מתוזמנות.",
+    ...rule(2, SESSION_CLOCK_RULES.length),
   ].join("\n");
 }
 

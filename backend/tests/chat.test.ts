@@ -864,12 +864,10 @@ describe("chat API", () => {
     expect(instructions).toContain("one flat dump header + row marks");
     expect(instructions).toContain("באחריות X · מאת Y");
     expect(instructions).toContain("FULL DUMP / מה יש לי / הציגי הכל");
-    expect(instructions).toContain("FULL DUMP DETAIL RULE");
-    expect(instructions).toContain("COUNTS ONLY");
-    expect(instructions).toContain("ONLY משימות enumerate");
+    // Stage 2: the overview layout is server-owned — the prompt only says so.
+    expect(instructions).toContain("The server lays out the overview");
     expect(instructions).toContain("SHOW MY LISTS / הציגי את הרשימות שלי");
     expect(instructions).toContain('show_dump="full"');
-    expect(instructions).toContain("לפירוט רשימה: הצג רשימת");
     expect(instructions).toContain("OR WITHIN FIELD");
     expect(instructions).toContain("SHOW DUMP SECTION");
     expect(instructions).toContain("show_dump_section=shared");
