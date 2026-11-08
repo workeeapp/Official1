@@ -5326,6 +5326,361 @@
           ]
         }
       ]
+    },
+    {
+      "id": "p3-overlap-asks-before-save",
+      "tag": "action-confusion",
+      "tags": [
+        "full-live",
+        "p3-clarify",
+        "single-turn",
+        "tasks"
+      ],
+      "description": "P3 overlap: a new timed task inside an existing meeting → ask once whether to save anyway, naming the overlapping meeting and its time; nothing saved yet",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-accountant-meeting",
+                "שם מטלה": "פגישה עם רואה החשבון",
+                "תאריך לביצוע": "2030-03-14",
+                "שעה לביצוע": "10:00",
+                "שעת סיום": "12:00"
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי לי תור לרופא שיניים ב־14.3.2030 ב־11:00",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "רואה החשבון",
+                "רואה חשבון"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "10:00",
+                "12:00",
+                "10–12",
+                "10-12",
+                "בין 10",
+                "מ־10",
+                "מ-10",
+                "עד 12"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-accountant-meeting"
+            ],
+            "factsExclude": [
+              "רופא שיניים"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "p3-send-me-asks-when",
+      "tag": "action-confusion",
+      "tags": [
+        "full-live",
+        "p3-clarify",
+        "single-turn",
+        "reminders"
+      ],
+      "description": "P3 send-me: «send me a message» with no time → ask only when to send; no clock, no list row, no claim it was sent",
+      "turns": [
+        {
+          "utterance": "תשלחי לי הודעה: לבדוק את תיבת הדואר",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "מתי",
+                "באיזו שעה",
+                "לאיזו שעה",
+                "באיזה יום",
+                "איזו שעה",
+                "מועד"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "הודעה",
+                "דואר",
+                "תזכורת"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "שלחתי"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsExclude": [
+              "לבדוק את תיבת הדואר"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "p3-standing-delete-asks-task-or-clock",
+      "tag": "action-confusion",
+      "tags": [
+        "full-live",
+        "p3-clarify",
+        "single-turn",
+        "tasks",
+        "reminders"
+      ],
+      "description": "P3 standing + linked clock delete: «cancel Pilates» → ask once whether to delete the standing task (with its reminders) or only stop the reminders, naming the task; nothing removed yet",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-pilates-standing",
+                "שם מטלה": "ללכת לשיעור פילאטיס",
+                "שעה לביצוע": "19:00",
+                "חוזר": "כל יום שני ב־19:00",
+                "__recurrence": {
+                  "freq": "weekly",
+                  "interval": 1,
+                  "weekdays": [
+                    1
+                  ],
+                  "time": "19:00",
+                  "start": "2026-11-02"
+                }
+              }
+            ]
+          }
+        ],
+        "reminders": [
+          {
+            "reminder_id": "eval-rem-pilates-weekly",
+            "item": "ללכת לשיעור פילאטיס",
+            "list_type": "tasks",
+            "fire_at": "2099-01-05T17:00:00.000Z",
+            "repeat": "weekdays:1",
+            "text": "ללכת לשיעור פילאטיס",
+            "status": "active",
+            "send_status": "pending",
+            "worker_item_id": "eval-item-pilates-standing"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תבטלי את הפילאטיס",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "פילאטיס"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "להפסיק",
+                "לעצור",
+                "רק את התזכורות",
+                "רק התזכורות",
+                "בלי התזכורות"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-pilates-standing"
+            ],
+            "factsInclude": [
+              "ללכת לשיעור פילאטיס"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "p3-one-occurrence-or-series-asks",
+      "tag": "action-confusion",
+      "tags": [
+        "full-live",
+        "p3-clarify",
+        "single-turn",
+        "tasks"
+      ],
+      "description": "P3 standing one occurrence vs series: «move Noa's Tuesday class to 18:00» → ask whether only one date or every Tuesday, naming the class; the row is unchanged",
+      "setup": {
+        "lists": [
+          {
+            "list_id": "eval-list-tasks-personal",
+            "list_type": "tasks",
+            "owner": "טל",
+            "scope": "personal",
+            "items": [
+              {
+                "item_id": "eval-item-noa-class",
+                "שם מטלה": "להסיע את נועה לחוג",
+                "שעה לביצוע": "17:00",
+                "חוזר": "כל יום שלישי ב־17:00",
+                "__recurrence": {
+                  "freq": "weekly",
+                  "interval": 1,
+                  "weekdays": [
+                    2
+                  ],
+                  "time": "17:00",
+                  "start": "2026-11-03"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תזיזי את החוג של נועה של יום שלישי ל־18:00",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "חוג",
+                "נועה"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "כל יום שלישי",
+                "בכל שלישי",
+                "בכל שבוע",
+                "כל השבועות",
+                "הבאים",
+                "מעכשיו",
+                "באופן קבוע",
+                "להמשך"
+              ]
+            }
+          ],
+          "stateAfter": {
+            "itemIdsPresent": [
+              "eval-item-noa-class"
+            ],
+            "factsExclude": [
+              "18:00"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "p3-unknown-gender-acts-ask-optional",
+      "tag": "action-confusion",
+      "tags": [
+        "full-live",
+        "p3-clarify",
+        "single-turn",
+        "shopping",
+        "g8-context"
+      ],
+      "description": "P3 SPEAKER_ADDRESS unknown: a complete action is done first and is never blocked. The address question is optional (the prompt says «may ask once»); if Lucy asks, the question must offer both forms (male and female).",
+      "context": {
+        "speakerAddressGender": null
+      },
+      "turns": [
+        {
+          "utterance": "תוסיפי חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping"
+            },
+            {
+              "type": "any",
+              "constraints": [
+                {
+                  "type": "response_forbids_any",
+                  "needles": [
+                    "זכר",
+                    "נקבה",
+                    "לשון פנייה",
+                    "איך לפנות"
+                  ]
+                },
+                {
+                  "type": "response_mentions_all",
+                  "needles": [
+                    "זכר",
+                    "נקבה"
+                  ]
+                }
+              ]
+            }
+          ],
+          "stateAfter": {
+            "factsInclude": [
+              "חלב"
+            ]
+          }
+        }
+      ]
     }
   ]
 }
