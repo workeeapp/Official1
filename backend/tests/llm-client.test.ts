@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractUsage,
   extractWebSearchSources,
+  hostedWebSearchInput,
   rememberInModelConversation,
   setLlmClientForTests,
   toResponsesCreateBody,
@@ -126,6 +127,17 @@ describe("gpt-6 Responses request", () => {
 
     expect(body.reasoning).toBeUndefined();
     expect(body.temperature).toBe(0);
+  });
+});
+
+describe("hostedWebSearchInput", () => {
+  it("grounds the query on Asia/Jerusalem SESSION_CLOCK", () => {
+    const text = hostedWebSearchInput("תוצאת המשחק אתמול", new Date("2026-11-08T12:00:00Z"));
+    expect(text).toContain("SESSION_CLOCK:");
+    expect(text).toContain("Asia/Jerusalem");
+    expect(text).toContain("current_date:");
+    expect(text).toContain("current_time:");
+    expect(text).toContain("Search query: תוצאת המשחק אתמול");
   });
 });
 

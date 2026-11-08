@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ReasoningEffort } from "@workee/shared";
 import type { LlmJsonSchemaFormat } from "../config/llm.js";
 import { getEnv } from "../config/env.js";
+import { formatSessionClockContext } from "../utils/relative-date.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 
 export interface LlmUsage {
@@ -426,9 +427,20 @@ export function extractWebSearchSources(response: unknown): string[] {
  * One-shot Responses call with hosted `web_search` (no conversation / JSON schema).
  * Used by the mission `web.search` tool — results become TOOL_RESULTS evidence.
  */
+/** Ground hosted search on the same Asia/Jerusalem clock Lucy uses. */
+export function hostedWebSearchInput(query: string, now = new Date()): string {
+  const clock = formatSessionClockContext(now, { rulesInInstructions: true });
+  return [
+    clock,
+    "User timezone is Asia/Jerusalem. Prefer live results for current_date when the query is about היום/אתמול/מחר/today/yesterday.",
+    `Search query: ${query.trim()}`,
+  ].join("\n\n");
+}
+
 export async function runHostedWebSearch(input: {
   query: string;
   model?: string;
+  now?: Date;
 }): Promise<HostedWebSearchResult> {
   const query = input.query.trim();
   if (!query) {
@@ -443,7 +455,7 @@ export async function runHostedWebSearch(input: {
   const body: Record<string, unknown> = {
     model,
     tools: [{ type: "web_search" }],
-    input: query,
+    input: hostedWebSearchInput(query, input.now),
     store: false,
   };
   if (usesGpt6RequestRules(model)) {

@@ -805,8 +805,9 @@ export async function runMissionTurn(
     const openaiConversationId = await client.createConversation();
     const liveFacts = [
       "MISSION_TURN — emit metadata.missions only. responses may be empty.",
-      formatSessionClockContext(),
-      "Resolve אתמול/היום/מחר from SESSION_CLOCK before searching or completing. FORBIDDEN answering with a different calendar year/date than SESSION_CLOCK implies.",
+      // Same SESSION_CLOCK data Lucy gets; fixed reading rules live in executor instructions.
+      formatSessionClockContext(undefined, { rulesInInstructions: true }),
+      "Resolve אתמול/היום/מחר and booking relative dates from SESSION_CLOCK above before searching, typing, or completing. FORBIDDEN inventing dates/times or using a different calendar day/year.",
       `MISSION_STATE: ${JSON.stringify({
         mission_id: mission.id,
         goal: mission.goal,

@@ -727,7 +727,20 @@ describe("mission search-first guards in source", () => {
     expect(src).toContain("engineExtractAndWakeExecutor");
     expect(src).toContain('policy === "continue_tools"');
     expect(src).toContain("MISSION_EXECUTOR_INSTRUCTIONS");
+    expect(src).toContain("formatSessionClockContext");
+    expect(src).toContain("rulesInInstructions: true");
     expect(src).toContain("SEARCH_BROWSE_BUDGET");
+  });
+
+  it("executor instructions carry SESSION_CLOCK rules like Lucy", () => {
+    const src = readFileSync(
+      join(here, "../src/services/mission-executor-prompt.ts"),
+      "utf8",
+    );
+    expect(src).toContain("MISSION_SESSION_CLOCK_RULES");
+    expect(src).toContain("SESSION_CLOCK:");
+    expect(src).toContain("Asia/Jerusalem");
+    expect(src).toContain("weekday_dates");
   });
 
   it("dig empty retry helpers bump and cap", () => {
