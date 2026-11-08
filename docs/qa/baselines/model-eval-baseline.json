@@ -127,6 +127,18 @@
         "lm-unique-description-executes": {
           "expect": "pass"
         },
+        "p3-overlap-asks-before-save": {
+          "expect": "pass"
+        },
+        "p3-send-me-asks-when": {
+          "expect": "pass"
+        },
+        "p3-standing-delete-asks-task-or-clock": {
+          "expect": "pass"
+        },
+        "p3-unknown-gender-acts-ask-optional": {
+          "expect": "pass"
+        },
         "so-chat-no-offer": {
           "expect": "pass"
         },
@@ -225,6 +237,9 @@
           "expect": "pass"
         },
         "v-task-done": {
+          "expect": "pass"
+        },
+        "v-task-family-context": {
           "expect": "pass"
         },
         "v-thanks": {
