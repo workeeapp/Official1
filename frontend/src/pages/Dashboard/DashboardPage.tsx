@@ -60,6 +60,15 @@ function usageCards(usage: TeamUsageSummary): UsageCard[] {
       emphasize: true,
     },
     {
+      key: "agents",
+      label: "Agents",
+      totalUsd: usage.purposes.missionTurnUsd,
+      months: nonZeroMonths(usage.months, (row) => row.purposes.missionTurnUsd),
+      testId: "dashboard-usage-agents",
+      monthsTestId: "dashboard-usage-agents-months",
+      title: "Mission executor turns (purpose=mission_turn)",
+    },
+    {
       key: "tips",
       label: "Tips",
       totalUsd: usage.purposes.catalogTipUsd,

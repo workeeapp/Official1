@@ -881,6 +881,16 @@ const STATUS_ADDRESSEE_RULE =
 export const RESPONSES_RULE =
   "OUTPUT: your spoken reply is the top-level \"responses\" array (not a single \"response\" string). Each entry is an object {text, buttons?, navigate_address?} sent as its own message, in order. Put tap buttons and Waze on the bubble they belong to (POST-MUTATE SHOW / LIST/collab nav on confirm; כן/לא on the soft-reminder offer; navigate_address on the address line). After applied list/filing mutate YOU emit the matching LIST / collab nav on the confirm bubble (engine validates vs apply; may add one plain LIST safety-net if you omitted it; never invents collab). FORBIDDEN list/collab nav on soft-offer כן/לא or tips. After add|update, when the title uniquely opens that row → you MAY emit an item-show button ONLY for tasks|filing (reliable open commands); shopping/contacts/custom → no item-open from you. ITEM DUMP: show specific row(s) → show_dump + show_dump_ids (server replaces; FORBIDDEN writing the body; empty/mismatch ids → no-match, never full list). After remove → engine list nav only. New tasks add WITHOUT explicit «תזכירי לי» → TWO responses entries (confirm with optional item-open; engine adds list nav; then soft reminder offer with כן/לא). New tasks add WITH explicit reminder schedule same turn → ONE confirm (task+reminder under APPLY FEEDBACK) + optional item-open; FORBIDDEN soft-offer כן/לא. Usually one entry otherwise; use several only for independent messages (e.g. the answer, then a raise of an open job). Wherever these instructions say \"response\", they mean these entries' text. After an item MOVE (lists.remove + lists.add) → engine dest list-show only (never source+dest). metadata.show_icon (one emoji or null) attaches to the speaker's message and is sent/shown before spoken replies.";
 
+const MISSIONS_RULES = [
+  "ACTIVE_MISSIONS (when injected): open-world work you orchestrate. A hidden executor plans and runs tools in the background; YOU talk to the speaker.",
+  "Real-world do-it OR live-lookup asks that need the web/login («תבטלי לי…» / «תקבעי תור…» / «תקני לי…» / «תחפשי מלון…» / «כמה נגמר המשחק…» / «מה תוצאות הבדיקות…» / «מה יתרת החשבון בבנק…») → SAME TURN metadata.missions.create {goal, success_criteria} AND lists.add tasks targets:[YOUR display name] tracking title. Normalize goal to a clear Hebrew phrase (infinitive when it is an action). Tracking task = YOUR (Lucy) tasks only — NEVER the speaker's tasks. Tell them you will plan and return for plan approval; the executor may then ask missing details (which bank/HMO/dates/city) before browsing.",
+  "waiting_plan_approval + speaker approves (כן / אשר תכנית / button) → missions.approve_plan with mission_id from ACTIVE_MISSIONS. Several waiting rows + bare כן → ASK which mission.",
+  "waiting_user + speaker answers (קופה/בנק/תאריכים/העדפות/סיסמה) → SAME TURN missions.resume {mission_id, summary: their words}. Speaker asks to search again («תחפשי שוב») → resume with re_search:true + same summary. Brief ack; executor continues (may clarify more or browse).",
+  "While status is running / waiting_approval: do NOT ask «באיזה אתר לחפש» as a substitute for doing the work — show last_summary / that work continues. Cancel → missions.cancel with mission_id.",
+  "Status asks («מה קורה עם הקורקינט») → answer from ACTIVE_MISSIONS last_summary/status in product Hebrew. Continue normal chat on other topics while a mission runs.",
+  "FORBIDDEN: claiming browser/login/payment success without engine push; emitting browser/payment tools yourself (executor only); inventing mission_id; putting the mission tracking task on the speaker.",
+].join("\n");
+
 const OPEN_JOBS_RULES = [
   "OPEN JOBS — expects_reply IS MANDATORY (critical): every message you send to another human for the speaker where the speaker is waiting for something back MUST carry expects_reply:true and ask_summary. That covers a question (מה שלומך / אם קנית חלב), a check (תבדקי עם ערן…), AND a request to do or arrange something (תתאמי פגישה עם ערן / תבקשי מערן לשלוח את הקובץ / תגידי לערן שיאשר). If the other person has to answer, agree, or act — expects_reply:true. Use false ONLY for pure information with nothing coming back (בוקר טוב / המערכת למעלה / תודה).",
   "SELF-CHECK («תבדקי איתי…» / check with me): when the speaker asks YOU to check with THEM (תבדקי איתי אם קניתי שוקו / check with me if I bought…), emit messages targeting the SPEAKER with expects_reply:true + ask_summary + urgency, lists:[]. text, ask_summary, and response MUST address the speaker in second person — convert their first person (קניתי / הכנתי / עשיתי) to second (קנית / הכנת / עשית). Example: עמית אומר «תבדקי איתי אם קניתי שוקו» → messages: [{ \"targets\": [\"עמית\"], \"text\": \"קנית שוקו?\", \"expects_reply\": true, \"ask_summary\": \"אם קנית שוקו?\", \"urgency\": \"normal\" }], lists: [], response: short ack + ask NOW («בסדר — קנית שוקו?»). FORBIDDEN when asker===subject: keeping first person in those fields, «<name> מחכה לתשובה», or third-party framing. «תבדקי איתי דחוף…» / «ממש דחוף» → same shape with urgency urgent / very_urgent; response notes the urgency like any other job. The server opens a self-job on you (לבדוק עם עמית: …) — never lists.add it. Do NOT claim you relayed a message to someone else; the ask lives in response. Urgency follow-ups run like any other OPEN_JOB. Later turns: OPEN_JOBS shows viewer_is=subject — raise/answer like any other job. On answer leave report_text empty (no third party). Never say «עמית ביקש ממני…» when asker===subject — phrase as their own check, as a separate raise entry: «אגב, ביקשת שאבדוק אם קנית שוקו?»",
@@ -1067,6 +1077,7 @@ export function buildLucyInstructions(input: {
         guestModeInstructions ||
           workerTargetingInstructions(employees, speaker, digital),
         guestSpeaker ? "" : OPEN_JOBS_RULES,
+        guestSpeaker ? "" : MISSIONS_RULES,
         consultEnvelope,
         guestSpeaker
           ? "GUEST MODE: shared-list Q&A + registration (metadata.register). Never claim you are the guest. You are לוסי-אורח."
@@ -2226,6 +2237,7 @@ export interface TurnContextParts {
   teamSchedules: Parameters<typeof formatTeamSchedules>[0];
   recentOutbound: Parameters<typeof formatRecentOutboundContext>[0];
   openJobs: Parameters<typeof formatOpenJobsContext>[0];
+  activeMissionsBlock: string;
   lastNumberedDump: Parameters<typeof formatLastNumberedDumpContext>[0];
   pendingAttachments: Parameters<typeof formatPendingAttachmentsContext>[0];
   pendingLocation: Parameters<typeof formatPendingLocationContext>[0];
@@ -2261,6 +2273,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
     guest ? "" : formatTeamSchedules(parts.teamSchedules),
     guest ? "" : formatRecentOutboundContext(parts.recentOutbound),
     guest ? "" : formatOpenJobsContext(parts.openJobs, parts.viewerId),
+    guest ? "" : parts.activeMissionsBlock,
     guest ? "" : formatLastNumberedDumpContext(parts.lastNumberedDump),
     guest || parts.consultFrom
       ? ""
@@ -2272,6 +2285,131 @@ export function composeTurnContext(parts: TurnContextParts): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+const UUID_RE =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
+
+async function handleMissionShortcutMessage(input: {
+  userId: string;
+  speaker: PublicEmployee;
+  orchestrator: PublicEmployee;
+  text: string;
+  conversationId: string;
+  assistantSpeaker: string;
+}): Promise<
+  | { handled: false }
+  | {
+      handled: true;
+      result: Awaited<ReturnType<typeof sendChatMessage>>;
+    }
+> {
+  const text = input.text.trim();
+  const approvePlan = text.match(
+    new RegExp(`^(?:אשר תכנית|אשר את התכנית)\\s+(${UUID_RE.source})$`, "i"),
+  );
+  const cancelMission = text.match(
+    new RegExp(`^(?:בטל משימה|בטלי משימה)\\s+(${UUID_RE.source})$`, "i"),
+  );
+  const approveTool = text.match(
+    new RegExp(`^(?:אשר פעולה)\\s+(${UUID_RE.source})$`, "i"),
+  );
+  const rejectTool = text.match(
+    new RegExp(`^(?:דחה פעולה)\\s+(${UUID_RE.source})$`, "i"),
+  );
+  if (!approvePlan && !cancelMission && !approveTool && !rejectTool) {
+    return { handled: false };
+  }
+
+  const {
+    applyMissionActions,
+    approvePendingToolCall,
+    rejectPendingToolCall,
+  } = await import("./mission.service.js");
+  const { scheduleMissionWake } = await import("./mission-runner.js");
+
+  let replyText = "בסדר.";
+  if (approvePlan?.[1]) {
+    await applyMissionActions({
+      userId: input.userId,
+      speaker: input.speaker,
+      orchestrator: input.orchestrator,
+      actions: [{ action: "approve_plan", missionId: approvePlan[1] }],
+    });
+    scheduleMissionWake(approvePlan[1], 100);
+    replyText = "תודה — ממשיכה לפי התכנית שאושרה.";
+  } else if (cancelMission?.[1]) {
+    await applyMissionActions({
+      userId: input.userId,
+      speaker: input.speaker,
+      orchestrator: input.orchestrator,
+      actions: [
+        {
+          action: "cancel",
+          missionId: cancelMission[1],
+          summary: "בוטל לבקשתך",
+        },
+      ],
+    });
+    replyText = "ביטלתי את המשימה.";
+  } else if (approveTool?.[1]) {
+    const ok = await approvePendingToolCall({
+      userId: input.userId,
+      speakerId: input.speaker.id,
+      toolCallId: approveTool[1],
+      actorEmployeeId: input.orchestrator.id,
+    });
+    if (ok) {
+      scheduleMissionWake(ok.missionId, 100);
+      replyText = "פעולה אושרה — ממשיכה.";
+    } else {
+      replyText = "לא מצאתי פעולה ממתינה לאישור.";
+    }
+  } else if (rejectTool?.[1]) {
+    const ok = await rejectPendingToolCall({
+      userId: input.userId,
+      speakerId: input.speaker.id,
+      toolCallId: rejectTool[1],
+    });
+    if (ok) {
+      scheduleMissionWake(ok.missionId, 100);
+      replyText = "דחיתי את הפעולה — אתכנן מחדש.";
+    } else {
+      replyText = "לא מצאתי פעולה ממתינה לאישור.";
+    }
+  }
+
+  const created = await prisma.chatMessage.create({
+    data: {
+      conversationId: input.conversationId,
+      author: "assistant",
+      speaker: input.assistantSpeaker,
+      text: replyText,
+      raw: { mission_shortcut: true },
+    },
+  });
+  const reply = JSON.stringify({
+    responses: [replyText],
+    metadata: emptyLlmMetadata(),
+  });
+  return {
+    handled: true,
+    result: {
+      reply,
+      raw: { mission_shortcut: true },
+      request: null,
+      notifications: [],
+      answeredBy: input.orchestrator.name,
+      timing: { llmMs: 0, afterLlmMs: 0 },
+      messageIds: {
+        user: "",
+        assistant: created.id,
+        assistants: [created.id],
+      },
+      outboundAttachmentIds: [],
+      outboundAttachments: [],
+    },
+  };
 }
 
 export async function sendChatMessage(input: {
@@ -2384,6 +2522,20 @@ export async function sendChatMessage(input: {
           viewerId: input.employeeId,
         }),
       )) ?? []);
+  const activeMissionsBlock = guestSpeaker
+    ? ""
+    : ((await withoutFailingTurn("missions_list_failed", async () => {
+        const {
+          listActiveMissionsForChat,
+          formatActiveMissionsBlock,
+        } = await import("./mission.service.js");
+        const missions = await listActiveMissionsForChat({
+          userId: input.userId,
+          speaker: employee,
+          seeAll: employee.isOwner === true,
+        });
+        return formatActiveMissionsBlock(missions);
+      })) ?? "");
   const lastNumberedDump = guestSpeaker
     ? []
     : await loadLastNumberedDumpForConversation(conversation.id);
@@ -2435,6 +2587,7 @@ export async function sendChatMessage(input: {
     teamSchedules: guestSpeaker ? [] : await getTeamSchedules(input.employeeId),
     recentOutbound,
     openJobs,
+    activeMissionsBlock,
     lastNumberedDump,
     pendingAttachments,
     pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
@@ -2467,6 +2620,25 @@ export async function sendChatMessage(input: {
     .filter(Boolean)
     .join("\n\n");
   const imageUrls = input.attachments?.imageUrls ?? [];
+
+  // Engine-handled mission approval taps (buttons from mission-push).
+  if (!guestSpeaker && !consultFrom) {
+    const missionShortcut = await withoutFailingTurn(
+      "mission_shortcut_failed",
+      () =>
+        handleMissionShortcutMessage({
+          userId: input.userId,
+          speaker: employee,
+          orchestrator: digital,
+          text: input.message,
+          conversationId: conversation.id,
+          assistantSpeaker,
+        }),
+    );
+    if (missionShortcut?.handled) {
+      return missionShortcut.result;
+    }
+  }
 
   try {
     let turn;
@@ -3198,6 +3370,119 @@ export async function sendChatMessage(input: {
             jobs: openJobs,
           }),
         );
+    const missionApply = guestSpeaker
+      ? null
+      : await withoutFailingTurn("mission_apply_failed", async () => {
+          const {
+            applyMissionActions,
+            ensureOrchestratorTrackingTask,
+            linkTrackingItemToMission,
+          } = await import("./mission.service.js");
+          const {
+            scheduleMissionWake,
+            recoverMissionSearchComeback,
+          } = await import("./mission-runner.js");
+          // Snapshot before apply: if Lucy forgets missions.resume on a waiting_user
+          // answer, we auto-resume that single parked mission with the speaker text.
+          const waitingBefore = await prisma.mission.findMany({
+            where: {
+              userId: input.userId,
+              speakerId: employee.id,
+              orchestratorId: digital.id,
+              status: "waiting_user",
+            },
+            select: { id: true },
+            take: 3,
+          });
+          let applied = await applyMissionActions({
+            userId: input.userId,
+            speaker: employee,
+            orchestrator: digital,
+            actions: metadata.missions ?? [],
+          });
+          const speakerText = input.message.trim();
+          const {
+            isNonMissionAnswerText,
+          } = await import("./mission.service.js");
+          const resumedAlready = applied.notices.some(
+            (n) =>
+              n.startsWith("resumed:") ||
+              n.startsWith("re_search:") ||
+              n.startsWith("cancelled"),
+          );
+          // Inventory / cancel chatter must not auto-resume into context_facts / Bing.
+          if (
+            speakerText &&
+            waitingBefore.length === 1 &&
+            waitingBefore[0] &&
+            !resumedAlready &&
+            applied.createdIds.length === 0 &&
+            !isNonMissionAnswerText(speakerText)
+          ) {
+            const parkedId = waitingBefore[0].id;
+            const safety = await applyMissionActions({
+              userId: input.userId,
+              speaker: employee,
+              orchestrator: digital,
+              actions: [
+                {
+                  action: "resume",
+                  missionId: parkedId,
+                  summary: speakerText,
+                },
+              ],
+            });
+            applied = {
+              ...safety,
+              createdIds: [...applied.createdIds, ...safety.createdIds],
+              wakeIds: [...applied.wakeIds, ...safety.wakeIds],
+              notices: [...applied.notices, ...safety.notices],
+              refused: [...applied.refused, ...safety.refused],
+            };
+          }
+          // Same-turn tracking: prefer model Lucy tasks add; else engine creates one.
+          for (const missionId of applied.createdIds) {
+            const tracking = listMutations.find(
+              (row) =>
+                row.action === "add" &&
+                row.listType === "tasks" &&
+                row.employeeId === digital.id &&
+                row.itemId,
+            );
+            if (tracking?.itemId) {
+              await linkTrackingItemToMission(missionId, tracking.itemId);
+            } else {
+              const created = await prisma.mission.findUnique({
+                where: { id: missionId },
+                select: { goal: true },
+              });
+              await ensureOrchestratorTrackingTask({
+                missionId,
+                orchestratorId: digital.id,
+                goal: created?.goal ?? "",
+              });
+            }
+          }
+          const reSearchIds = new Set(
+            applied.notices
+              .filter((n) => n.startsWith("re_search:"))
+              .map((n) => n.slice("re_search:".length)),
+          );
+          for (const missionId of reSearchIds) {
+            void recoverMissionSearchComeback(missionId);
+          }
+          for (const wakeId of [
+            ...applied.createdIds,
+            ...applied.wakeIds,
+          ]) {
+            if (reSearchIds.has(wakeId)) {
+              continue;
+            }
+            scheduleMissionWake(wakeId, 100);
+          }
+          return applied;
+        });
+    void missionApply;
     // Removing a job task through lists.remove must also drop its follow-up clock
     // and notify the other party (full job end).
     const removedJobReports =
@@ -5117,7 +5402,10 @@ export async function sendChatMessage(input: {
     let celebrationRef: ChatAttachmentRef | null = null;
     const celebrationRemoves = guestSpeaker
       ? []
-      : collectCelebrationRemoves(listMutations);
+      : collectCelebrationRemoves(listMutations, {
+          // Lucy / digital-worker mission tracking tasks — no tip or victory image.
+          excludeEmployeeIds: [digital.id],
+        });
     const profileAttachmentId = employee.profileAttachmentId?.trim() ?? "";
     if (celebrationRemoves.length > 0 && profileAttachmentId) {
       const celebration = await withoutFailingTurn(

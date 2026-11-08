@@ -169,6 +169,7 @@ describe("Employees page", () => {
         liveSelectUsd: 0,
         deleteCelebrationUsd: 0,
         imageUsd: 0,
+        missionTurnUsd: 0,
       },
       months: [
         {
@@ -183,8 +184,9 @@ describe("Employees page", () => {
             weatherTipUsd: 0,
             reminderComposeUsd: 0,
             liveSelectUsd: 0,
-        deleteCelebrationUsd: 0,
-        imageUsd: 0,
+            deleteCelebrationUsd: 0,
+            imageUsd: 0,
+            missionTurnUsd: 0,
           },
         },
         {
@@ -199,8 +201,9 @@ describe("Employees page", () => {
             weatherTipUsd: 0,
             reminderComposeUsd: 0,
             liveSelectUsd: 0,
-        deleteCelebrationUsd: 0,
-        imageUsd: 0,
+            deleteCelebrationUsd: 0,
+            imageUsd: 0,
+            missionTurnUsd: 0,
           },
         },
       ],

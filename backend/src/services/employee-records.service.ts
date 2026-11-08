@@ -2744,6 +2744,12 @@ async function deleteOwnedListItem(
     where: { id: existing.id },
     data: { deletedAt: new Date(), reminderId: null },
   });
+  try {
+    const { cancelMissionsForTrackingItem } = await import("./mission.service.js");
+    await cancelMissionsForTrackingItem(existing.id, actorId);
+  } catch {
+    // Mission cascade is best-effort; list delete already succeeded.
+  }
   const linked = await cancelReminderLinkedToWorkerItem(existing.id);
   const owner = await prisma.employee.findUnique({
     where: { id: existing.list.employeeId },
@@ -3204,6 +3210,12 @@ async function applyListAction(
         where: { id: existing.id },
         data: { deletedAt: new Date(), reminderId: null },
       });
+      try {
+        const { cancelMissionsForTrackingItem } = await import("./mission.service.js");
+        await cancelMissionsForTrackingItem(existing.id, actorId);
+      } catch {
+        // best-effort mission cascade
+      }
       const owner = await prisma.employee.findUnique({
         where: { id: rowOwnerId },
         select: { userId: true },
@@ -4286,6 +4298,12 @@ export async function removeVisibleCustomItems(input: {
           where: { id: existing.id },
           data: { deletedAt: new Date(), reminderId: null },
         });
+        try {
+          const { cancelMissionsForTrackingItem } = await import("./mission.service.js");
+          await cancelMissionsForTrackingItem(existing.id, input.actorId);
+        } catch {
+          // best-effort mission cascade
+        }
         const removedData = asRecord(existing.data);
         const label =
           ownedItemTitle(

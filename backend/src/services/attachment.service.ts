@@ -74,7 +74,8 @@ export type AttachmentTarget =
   | { listItemId: string }
   | { filingId: string }
   | { reminderId: string }
-  | { contactId: string };
+  | { contactId: string }
+  | { missionId: string };
 
 /** Outcome of one applyAttachmentLinks call. Attach and detach are independent. */
 export type AttachmentApplyOutcome = {
@@ -803,6 +804,9 @@ function targetEntity(target: AttachmentTarget): [string, string] {
   }
   if ("contactId" in target) {
     return ["Contact", target.contactId];
+  }
+  if ("missionId" in target) {
+    return ["Mission", target.missionId];
   }
   return ["Reminder", target.reminderId];
 }

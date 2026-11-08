@@ -41,6 +41,7 @@ function parts(over: Partial<TurnContextParts> = {}): TurnContextParts {
     teamSchedules: [],
     recentOutbound: [],
     openJobs: [],
+    activeMissionsBlock: "",
     lastNumberedDump: [{ n: 1, id: "item-1", kind: "custom", title_stem: "חלב" }],
     pendingAttachments: [
       {

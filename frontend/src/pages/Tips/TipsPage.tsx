@@ -18,7 +18,7 @@ import {
   TIP_TRIGGER_AREAS,
   TIP_TRIGGER_KINDS,
   TIP_TRIGGER_OPS,
-  digitalEmployees,
+  workspaceDigitals,
 } from "@workee/shared";
 import {
   IconButton,
@@ -259,7 +259,7 @@ export function TipsPage() {
       employeeApi.list(),
     ]);
     setTips(nextTips);
-    setDigitals(digitalEmployees(employees));
+    setDigitals(workspaceDigitals(employees));
     setStatus("ready");
     setError(null);
     if (selectedId && !nextTips.some((tip) => tip.id === selectedId)) {
@@ -277,7 +277,7 @@ export function TipsPage() {
           return;
         }
         setTips(nextTips);
-        setDigitals(digitalEmployees(employees));
+        setDigitals(workspaceDigitals(employees));
         setStatus("ready");
         setError(null);
       })

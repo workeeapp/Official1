@@ -158,6 +158,7 @@ const EMPTY_PURPOSES = (): TeamUsagePurposeBreakdown => ({
   liveSelectUsd: 0,
   deleteCelebrationUsd: 0,
   imageUsd: 0,
+  missionTurnUsd: 0,
 });
 
 function addPurposeCost(
@@ -183,6 +184,9 @@ function addPurposeCost(
       break;
     case "image":
       purposes.imageUsd += cost;
+      break;
+    case "mission_turn":
+      purposes.missionTurnUsd += cost;
       break;
     case "chat":
     default:
@@ -294,7 +298,8 @@ export async function getTeamUsageSummary(
         row.purposes.reminderComposeUsd !== 0 ||
         row.purposes.liveSelectUsd !== 0 ||
         row.purposes.deleteCelebrationUsd !== 0 ||
-        row.purposes.imageUsd !== 0,
+        row.purposes.imageUsd !== 0 ||
+        row.purposes.missionTurnUsd !== 0,
     )
     .sort((a, b) => b.month.localeCompare(a.month));
   return { totalUsd, ...totals(perEmployee), guestsUsd, purposes, months };
@@ -308,7 +313,8 @@ export type LlmUsagePurpose =
   | "reminder_compose"
   | "live_select"
   | "delete_celebration"
-  | "image";
+  | "image"
+  | "mission_turn";
 
 /** Billing context for ephemeral compose LLM calls (not the main chat turn). */
 export type ComposeLlmBilling = {

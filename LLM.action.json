@@ -82,6 +82,7 @@
     "TIPS: when AVAILABLE_TIPS lists a key and the situation matches, set metadata.tips to that key (array). The engine appends the catalog text as its own message — never rewrite tip copy in responses. Action/general tips are automatic (engine-only); do not restate them. If no tip this turn → tips null or [].",
     "",
     "If no actions exist, metadata.lists = [], metadata.messages = [], and metadata.jobs = [].",
+    "MISSIONS: real-world do-it OR live-lookup asks (buy/cancel/book/hotel/score/labs/bank balance…) → metadata.missions.create + YOUR tracking tasks add. Plan approval before tools. Executor may ask_user for missing slots (bank/HMO/dates/city) then search/dig — Lucy never emits browser/payment tools. approve_plan / resume / cancel by mission_id. waiting_user answers → resume with their words.",
     "OPEN JOBS: when you ask someone something on another person's behalf, set expects_reply true + ask_summary on that message. OPEN_JOBS lists what is still open; answer / decline / progress / counter / snooze / clear_clock / close / escalate them with metadata.jobs by job_id. SELF-CHECK («תבדקי איתי…»): messages targeting the speaker with expects_reply true + ask_summary + urgency; ask in response now; server opens the self-job — never lists.add it. DEFERRED CHECK («תבדקי איתי בעוד שעתיים…» / «תבררי עם טל מחר ב־20:00…» / recurring): same messages entry PLUS in / date+time / recurrence — response is ack only (no ask yet); server schedules your לבדוק task + clock; at fire it asks. Urgency follow-ups work the same as any other OPEN_JOB once activated. Escalate (asker only): jobs.escalate with higher urgency — never a second job for the same check.",
     "",
     "------------------------------------------------------------",
@@ -842,6 +843,94 @@
                     "ask_summary",
                     "urgency"
                   ]
+                }
+              },
+              "missions": {
+                "type": "array",
+                      "description": "Open-world missions (actions + live lookups). Lucy: create / approve_plan / resume / cancel. waiting_user + speaker reply → resume with summary=their words. Executor MISSION_TURN: update_plan / request_plan_approval / ask_user for missing slots / run_tools (model chooses URLs and digs) / request_approval / verify / complete with evidenced answers / fail. Engine refuses create for guests. run_tools blocked until plan approved. Clarify domain slots before browse; dig until useful; never invent facts; do not ask which random site instead of searching.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "update_plan",
+                        "request_plan_approval",
+                        "approve_plan",
+                        "run_tools",
+                        "request_approval",
+                        "ask_user",
+                        "resume",
+                        "verify",
+                        "complete",
+                        "fail",
+                        "cancel"
+                      ]
+                    },
+                    "mission_id": {
+                      "type": "string",
+                      "description": "Copy from ACTIVE_MISSIONS[].mission_id. Required except on create."
+                    },
+                    "goal": {
+                      "type": "string",
+                      "description": "create: what to accomplish in product Hebrew."
+                    },
+                    "success_criteria": {
+                      "type": "string",
+                      "description": "create: how completion is verified (order id, confirmation screenshot, etc.)."
+                    },
+                    "plan_steps": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "3–7 Hebrew steps for the user-facing plan."
+                    },
+                    "plan_revision": {
+                      "type": "string",
+                      "enum": ["minor", "major"],
+                      "description": "major resets plan approval and requires request_plan_approval again."
+                    },
+                    "tools": {
+                      "type": "array",
+                      "description": "Executor only after plan approval. Catalog: web.search (hosted public lookup — fact/generic ONLY path, no Bing fallback), browser.navigate|click|type|extract|observe|wait|scroll|select|press|screenshot|submit (options/portal), vault.ask_and_store|use, payment.prepare|charge, ask_user. Dig with observe+click/type/select before ask_user on browse shapes.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tool": { "type": "string" },
+                          "args": { "type": "object", "additionalProperties": true },
+                          "requires_approval": { "type": "boolean" }
+                        },
+                        "required": ["tool"]
+                      }
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "complete/verify: attachment ids, order numbers, confirmation codes."
+                    },
+                    "summary": {
+                      "type": "string",
+                      "description": "Hebrew text pushed to the user as Lucy (plan ask, progress, done)."
+                    },
+                    "re_search": {
+                      "type": "boolean",
+                      "description": "resume only: speaker asked to search again («תחפשי שוב»). Engine runs a fresh web search → extract → ask_user. Omit for prefs/quantity answers."
+                    },
+                    "context_facts": {
+                      "type": "array",
+                      "items": { "type": "object", "additionalProperties": true },
+                      "description": "Optional fact refs Lucy attaches for the executor (not full ESD)."
+                    },
+                    "tracking_item_id": {
+                      "type": "string",
+                      "description": "Optional Lucy tasks item_id for the tracking row."
+                    },
+                    "user_attested": {
+                      "type": "boolean",
+                      "description": "complete when the speaker attested they finished manually."
+                    }
+                  },
+                  "required": ["action"]
                 }
               },
               "jobs": {

@@ -23,7 +23,18 @@ export type AuditAction =
   | "attachment_link"
   | "attachment_unlink"
   | "list_item_list_link"
-  | "list_item_list_unlink";
+  | "list_item_list_unlink"
+  | "mission_create"
+  | "mission_update"
+  | "mission_plan_approval"
+  | "mission_tool"
+  | "mission_complete"
+  | "mission_cancel"
+  | "mission_fail"
+  | "vault_store"
+  | "vault_use"
+  | "payment_prepare"
+  | "payment_charge";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;
