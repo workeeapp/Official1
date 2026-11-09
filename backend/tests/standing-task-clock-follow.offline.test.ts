@@ -2,6 +2,8 @@
  * B1 — a standing task moved → which rule a linked repeating clock follows
  * (pure, no DB). Server-side, without asking (owner decision 2026-11-09).
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Recurrence } from "@workee/shared";
 import { formatJerusalemDateTime } from "@workee/shared";
@@ -92,5 +94,15 @@ describe("followStandingTaskMove", () => {
     });
     expect(result?.rule).toMatchObject({ freq: "monthly", monthDay: 15, time: "08:00" });
     expect(formatJerusalemDateTime(result!.fireAt)).toBe("2030-01-15 08:00");
+  });
+});
+
+describe("B1 prompt: no ask to move the linked reminder", () => {
+  it("system STANDING rule: lists.update only, the server moves the reminder", () => {
+    const config = (JSON.parse(readFileSync(resolve(process.cwd(), "..", "LLM.config.json"), "utf8")) as {
+      systemMessage: string[];
+    }).systemMessage.join("\n");
+    expect(config).not.toContain("Series time change with linked clock → ask whether to move WhatsApp too");
+    expect(config).toContain("the server moves the linked reminder too (no ask)");
   });
 });

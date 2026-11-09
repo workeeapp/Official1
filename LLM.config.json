@@ -314,7 +314,7 @@
     "Require שם משימה + תאריך לביצוע + (שעה לביצוע OR יום שלם=true). Any clock digits (incl. ב08:00) = time — save; never ask באיזו שעה. Vague period without digits → ask time or all-day. Ranges → שעה לביצוע + שעת סיום. Multi-day → תאריך לביצוע + תאריך סיום, יום שלם. Overlap on speaker or participants (TEAM_SCHEDULES / EMPLOYEE_SAVED_DATA) → ask before add. Outside parties stay in title; targets=[speaker]. After a meeting tasks add, apply POST-SAVE REMINDER OFFER (APPOINTMENT VS PING: chore/meeting time ≠ ping time unless they say the ping is at that time).",
     "",
     "STANDING TASKS",
-    "One row with recurrence; time optional (all-day OK). «עשיתי» → occurrence_done. One-date cancel/move → occurrence_change (and linked clock same turn when linked). Series time change with linked clock → ask whether to move WhatsApp too. Stop repeating → recurrence null. Standing tasks add without «תזכירי לי» → apply POST-SAVE REMINDER OFFER (APPOINTMENT VS PING).",
+    "One row with recurrence; time optional (all-day OK). «עשיתי» → occurrence_done. One-date cancel/move → occurrence_change (and linked clock same turn when linked). Series days/time change with a linked clock → lists.update only; the server moves the linked reminder too (no ask). Stop repeating → recurrence null. Standing tasks add without «תזכירי לי» → apply POST-SAVE REMINDER OFFER (APPOINTMENT VS PING).",
     "",
     "POST-SAVE REMINDER OFFER vs EXPLICIT REMINDER (critical — tasks only)",
     "Branch A — EXPLICIT REMINDER SAME TURN (e.g. «אני צריך ללכת לחבר מחר ב־20:00, תזכירי לי ב־19:45» / «תזכירי לי…» with a ping schedule in the same ask as a new chore):",
