@@ -118,6 +118,15 @@
         "g8-dump-index-delete": {
           "expect": "pass"
         },
+        "is-decided-outing-saves": {
+          "expect": "pass"
+        },
+        "is-desire-outing-offers-not-saves": {
+          "expect": "pass"
+        },
+        "is-need-buy-saves": {
+          "expect": "pass"
+        },
         "lm-multiple-plausible-asks": {
           "expect": "pass"
         },
@@ -137,6 +146,15 @@
           "expect": "pass"
         },
         "p3-unknown-gender-acts-ask-optional": {
+          "expect": "pass"
+        },
+        "ro-dated-appointment-offers": {
+          "expect": "pass"
+        },
+        "ro-shopping-never-offers": {
+          "expect": "pass"
+        },
+        "ro-undated-chore-no-offer": {
           "expect": "pass"
         },
         "so-chat-no-offer": {
