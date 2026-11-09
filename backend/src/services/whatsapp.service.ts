@@ -96,6 +96,11 @@ export interface InboundWhatsAppText {
   media?: InboundMedia;
   /** WhatsApp location pin. */
   location?: InboundLocation;
+  /**
+   * When WhatsApp received the message from the sender (webhook `timestamp`,
+   * ISO 8601). Pass-through only — not used for batching yet.
+   */
+  sentAt?: string;
 }
 
 const MEDIA_KINDS: AttachmentKind[] = ["image", "video", "audio", "document", "sticker"];
@@ -116,6 +121,7 @@ export function readInboundMedia(record: Record<string, unknown>): InboundMedia 
     caption?: unknown;
     filename?: unknown;
     voice?: unknown;
+    sha256?: unknown;
   };
   const mediaId = asTrimmed(media.id);
   if (!mediaId) {
@@ -128,7 +134,18 @@ export function readInboundMedia(record: Record<string, unknown>): InboundMedia 
     caption: asTrimmed(media.caption),
     fileName: asTrimmed(media.filename),
     voice: media.voice === true,
+    ...(asTrimmed(media.sha256) ? { sha256: asTrimmed(media.sha256) } : {}),
   };
+}
+
+/** WhatsApp webhook `timestamp` (Unix seconds, string or number) → ISO 8601; undefined when invalid. */
+export function readWhatsAppTimestamp(raw: unknown): string | undefined {
+  const text = typeof raw === "number" ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d{9,11}$/.test(text)) {
+    return undefined;
+  }
+  const date = new Date(Number(text) * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
 export function verifyWhatsAppWebhook(query: WhatsAppVerifyQuery): string {
@@ -191,6 +208,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const record = message as {
           id?: unknown;
           from?: unknown;
+          timestamp?: unknown;
           text?: { body?: unknown };
           interactive?: { button_reply?: { id?: unknown } };
           contacts?: unknown;
@@ -221,11 +239,13 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const replyToText = replyToId
           ? lookupWhatsAppOutbound(replyToId)
           : undefined;
+        const sentAt = readWhatsAppTimestamp(record.timestamp);
         if ((text || media || location) && from && messageId) {
           messages.push({
             from,
             text,
             messageId,
+            ...(sentAt ? { sentAt } : {}),
             ...(replyToText ? { replyToText } : {}),
             ...(media ? { media } : {}),
             ...(location ? { location } : {}),

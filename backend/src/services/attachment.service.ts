@@ -34,6 +34,8 @@ export interface InboundMedia {
   fileName: string;
   /** WhatsApp voice note (push-to-talk) rather than an audio file. */
   voice: boolean;
+  /** SHA-256 WhatsApp reports for the file (webhook media object); "" when absent. Pass-through only. */
+  sha256?: string;
 }
 
 /** One attachment as the model sees it. */
