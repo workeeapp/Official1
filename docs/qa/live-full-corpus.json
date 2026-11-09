@@ -5704,6 +5704,102 @@
           }
         }
       ]
+    },
+    {
+      "id": "ro-dated-appointment-offers",
+      "tags": [
+        "reminder-offer",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Dated appointment saved without «תזכירי» → task saved now, no clock yet, and a reminder is offered (it is easy to miss)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "יש לי תור לרופא שיניים ביום חמישי ב־10:00, תרשום לי",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "שיניים"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "תזכור"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ro-undated-chore-no-offer",
+      "tags": [
+        "reminder-offer",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Undated chore with nothing to miss → task saved, no reminder offer (offer only when useful). Tip text mentioning reminders would also fail this needle (known harness limitation)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיף משימה לסדר את הארון בחדר",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "ארון"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "תזכור"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ro-shopping-never-offers",
+      "tags": [
+        "reminder-offer",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Shopping add → confirm only, never a reminder offer",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "תוסיף חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "תזכור"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

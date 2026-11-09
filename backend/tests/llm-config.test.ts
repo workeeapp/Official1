@@ -358,20 +358,24 @@ describe("LLM action schema", () => {
     );
   });
 
-  it("requires two-entry soft reminder offer after tasks add without explicit ping", () => {
+  it("post-save reminder offer: only when useful; when offered, a separate כן/לא entry (owner 2026-11-08)", () => {
     const config = loadLlmConfig(repoRoot);
     expect(config.systemMessage).toContain(
       "POST-SAVE REMINDER OFFER vs EXPLICIT REMINDER",
     );
     expect(config.systemMessage).toContain("Branch B — TASK ONLY");
     expect(config.systemMessage).toContain(
-      "TWO separate WhatsApp messages",
+      "OFFER ONLY WHEN USEFUL (contextual judgment, never mandatory)",
+    );
+    expect(config.systemMessage).toContain(
+      "When you offer, responses use TWO separate WhatsApp messages",
     );
     expect(config.systemMessage).toContain(
       "NEVER choose between navigation and כן/לא",
     );
-    expect(config.systemMessage).toContain(
-      "רוצה שאוסיף גם תזכורת למשימה הזו?",
+    expect(config.systemMessage).toContain("No offer → [0] confirm only.");
+    expect(config.systemMessage).not.toContain(
+      "FORBIDDEN a single responses entry with no offer",
     );
     expect(config.systemMessage).toContain(
       "כן without a complete reminder schedule → ask schedule only",

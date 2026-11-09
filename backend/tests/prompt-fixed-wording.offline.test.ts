@@ -102,8 +102,8 @@ describe("P1+P3: the requirements behind them are kept", () => {
     expect(instructions).toMatch(/EXACT OUTBOUND QUOTE/);
   });
 
-  it("the post-save reminder offer is untouched in this phase", () => {
-    expect(instructions).toContain("רוצה שאוסיף גם תזכורת למשימה הזו?");
-    expect(instructions).toContain("FORBIDDEN a single responses entry with no offer");
+  it("the post-save reminder offer has no prescribed sentence (reminder-offer step)", () => {
+    expect(instructions).not.toContain("רוצה שאוסיף גם תזכורת למשימה הזו?");
+    expect(instructions).toContain("a short reminder offer in your own words");
   });
 });
