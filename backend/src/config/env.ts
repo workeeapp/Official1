@@ -44,6 +44,8 @@ const envSchema = z.object({
 
   /** Root folder for uploaded attachment bytes. */
   UPLOADS_DIR: z.string().default(".data/uploads"),
+  /** Minutes a WhatsApp request waits for a missing file before it expires (not run). */
+  WHATSAPP_SUBMISSION_EXPIRY_MINUTES: z.coerce.number().int().min(1).max(1440).default(20),
   /** OpenAI model for voice/audio transcription. */
   TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
   /** Google Places API key for live local business search (optional). */

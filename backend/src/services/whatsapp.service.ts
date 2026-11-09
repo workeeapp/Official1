@@ -35,6 +35,7 @@ import {
   type InboundMedia,
 } from "./attachment.service.js";
 import { createInboundBatcher } from "./whatsapp-inbound-batch.js";
+import { routeWhatsAppSubmission } from "./whatsapp-submission.service.js";
 import {
   formatWhatsAppReplyContext,
   lookupWhatsAppOutbound,
@@ -696,8 +697,6 @@ function runSerialized(phone: string, task: () => Promise<void>): Promise<void> 
   return next;
 }
 
-const MEDIA_FAILED_NOTICE = "לא הצלחתי לקבל את הקובץ. אפשר לנסות לשלוח אותו שוב?";
-
 /** Caption / text of the batch, in order; a voice note with no text speaks for itself. */
 export function batchSpokenText(
   batch: Array<Pick<InboundWhatsAppText, "text">>,
@@ -710,8 +709,8 @@ export function batchSpokenText(
   return text || transcripts.map((value) => value.trim()).filter(Boolean).join("\n");
 }
 
-async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
-  const last = batch[batch.length - 1];
+async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
+  const last = incoming[incoming.length - 1];
   if (!last) {
     return;
   }
@@ -724,7 +723,7 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
   try {
     await markWhatsAppInbound(from);
     let speaker = await resolveWhatsAppSpeaker(from);
-    const inboundSpoken = batch
+    const inboundSpoken = incoming
       .map((message) => message.text.trim())
       .filter(Boolean)
       .join("\n");
@@ -778,23 +777,36 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       throw new ServiceUnavailableError();
     }
 
-    const stored: Array<{ row: Attachment; voice: boolean }> = [];
-    let mediaFailed = 0;
-    for (const message of batch) {
-      if (!message.media) {
-        continue;
-      }
-      const row = await ingestInboundMedia({
+    // Files: download (with retries). A request with a missing file is held, never
+    // run partially; while one is held nothing else from this phone is run or merged.
+    const route = await routeWhatsAppSubmission(
+      {
+        phone: from,
         userId: speaker.userId,
-        uploaderId: speaker.employeeId,
-        media: message.media,
-      });
-      if (row) {
-        stored.push({ row, voice: message.media.voice });
-      } else {
-        mediaFailed += 1;
-      }
+        employeeId: speaker.employeeId,
+        batch: incoming,
+      },
+      {
+        ingest: (media) =>
+          ingestInboundMedia({
+            userId: speaker.userId,
+            uploaderId: speaker.employeeId,
+            media,
+          }),
+        notify: (text, buttons) =>
+          buttons.length > 0
+            ? sendWhatsAppButtons(from, text, buttons, { ignoreSession: true })
+            : sendWhatsAppText(from, text, { ignoreSession: true }),
+      },
+    );
+    if (route.kind === "handled") {
+      turnAnswered = true;
+      recordWhatsAppEvent("submission_held", `files=${incoming.filter((m) => m.media).length}`);
+      return;
     }
+    // The request to run: this batch, or a held one now complete (its original messages).
+    const batch = route.batch;
+    const stored = route.stored;
     const locMessage = batch.find((message) => message.location);
     const location = locMessage?.location
       ? await enrichEmptyLocationLabels(locMessage.location)
@@ -812,9 +824,6 @@ async function runWhatsAppTurn(batch: InboundWhatsAppText[]): Promise<void> {
       stored.map(({ row }) => row.transcript),
     );
     if (stored.length === 0 && !spoken && !location) {
-      if (mediaFailed > 0) {
-        await sendWhatsAppText(from, MEDIA_FAILED_NOTICE, { ignoreSession: true });
-      }
       return;
     }
     const replyToText = batch.find((message) => message.replyToText)?.replyToText;
