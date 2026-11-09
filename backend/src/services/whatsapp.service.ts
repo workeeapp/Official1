@@ -34,7 +34,7 @@ import {
   resolveUsableAttachments,
   type InboundMedia,
 } from "./attachment.service.js";
-import { createInboundBatcher } from "./whatsapp-inbound-batch.js";
+import { createInboundBatcher, mediaBatchHoldUntil } from "./whatsapp-inbound-batch.js";
 import { routeWhatsAppSubmission } from "./whatsapp-submission.service.js";
 import {
   formatWhatsAppReplyContext,
@@ -677,6 +677,13 @@ const MEDIA_BATCH_MAX_MS = 15_000;
 const inboundBatcher = createInboundBatcher<InboundWhatsAppText>({
   idleMs: MEDIA_BATCH_IDLE_MS,
   maxMs: MEDIA_BATCH_MAX_MS,
+  holdUntil: (batch) => {
+    const env = getEnv();
+    return mediaBatchHoldUntil(batch, {
+      enabled: env.WHATSAPP_MEDIA_GROUP_BY_SENT_AT,
+      windowMs: env.WHATSAPP_MEDIA_GROUP_WINDOW_SECONDS * 1_000,
+    });
+  },
   flush: (phone, batch) => {
     void runSerialized(phone, () => runWhatsAppTurn(batch));
   },

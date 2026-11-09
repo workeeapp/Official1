@@ -46,6 +46,16 @@ const envSchema = z.object({
   UPLOADS_DIR: z.string().default(".data/uploads"),
   /** Minutes a WhatsApp request waits for a missing file before it expires (not run). */
   WHATSAPP_SUBMISSION_EXPIRY_MINUTES: z.coerce.number().int().min(1).max(1440).default(20),
+  /**
+   * M7: group WhatsApp files by their WhatsApp send time (keep a media batch open
+   * until the latest file's send time + window). Off by default: plain 3 s idle.
+   */
+  WHATSAPP_MEDIA_GROUP_BY_SENT_AT: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((value) => value === "true" || value === "1"),
+  /** M7 window in seconds after the latest file's send time (only when grouping is on). */
+  WHATSAPP_MEDIA_GROUP_WINDOW_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
   /** OpenAI model for voice/audio transcription. */
   TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
   /** Google Places API key for live local business search (optional). */
