@@ -462,11 +462,11 @@ export async function runHostedWebSearch(input: {
     body.reasoning = { effort: "low" };
   }
   const response = await client.responses.create(
-    body as Parameters<OpenAI["responses"]["create"]>[0],
+    body as OpenAI.Responses.ResponseCreateParamsNonStreaming,
   );
   const raw = toPlainJson(response);
   return {
-    text: extractOutputText(response),
+    text: extractOutputText(response as unknown as Parameters<typeof extractOutputText>[0]),
     sources: extractWebSearchSources(raw),
     usage: extractUsage(raw),
     raw,

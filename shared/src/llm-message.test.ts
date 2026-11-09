@@ -1654,6 +1654,7 @@ describe("parseLlmReply", () => {
       reminders: [],
       directory: [],
       jobs: [],
+      missions: [],
       handoff: null,
       register: null,
       reportSections: [],
