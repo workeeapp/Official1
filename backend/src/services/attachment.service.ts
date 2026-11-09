@@ -22,7 +22,7 @@ import {
   transcribeAudio,
   type TranscriptStatus,
 } from "./attachment-understanding.js";
-import { downloadWhatsAppMedia, uploadWhatsAppMedia } from "./whatsapp-media.js";
+import { downloadWhatsAppMediaWithRetry, uploadWhatsAppMedia } from "./whatsapp-media.js";
 import { sendWhatsAppMedia, type WhatsAppTextResult } from "./whatsapp-send.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 
@@ -230,7 +230,8 @@ export async function ingestInboundMedia(input: {
 }): Promise<Attachment | null> {
   const { media } = input;
   try {
-    const downloaded = await downloadWhatsAppMedia(
+    // Retries (transient only) happen inside the fetch, before anything is stored.
+    const downloaded = await downloadWhatsAppMediaWithRetry(
       media.mediaId,
       ATTACHMENT_MAX_BYTES[media.kind],
     );
