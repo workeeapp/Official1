@@ -74,6 +74,7 @@ import {
   listReminderRowsForUser,
   reminderRuleSnapshot,
   shiftLinkedClocksForTaskMove,
+  shiftLinkedClocksForStandingMove,
   toReminderSnapshotRow,
   type NestedSavedClock,
   type ReminderSnapshotRow,
@@ -3549,6 +3550,14 @@ async function applyListAction(
         !occurrence.change
       ) {
         await shiftLinkedClocksForTaskMove({
+          listItemId: existing.id,
+          before: asRecord(existing.data),
+          after: nextDataRecord,
+          userId: listOwner?.userId,
+          actorEmployeeId: actorId,
+        });
+        // B1: a standing task moved → its linked repeating clocks follow it.
+        await shiftLinkedClocksForStandingMove({
           listItemId: existing.id,
           before: asRecord(existing.data),
           after: nextDataRecord,

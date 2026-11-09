@@ -87,7 +87,6 @@ describe("P1+P3: the requirements behind them are kept", () => {
   it("clarifications keep the question, its purpose and the empty-actions contract", () => {
     expect(instructions).toMatch(/lists=\[\] and ask once whether to save anyway, naming the overlapping item/);
     expect(instructions).toMatch(/response ONLY asks when to send it; messages=\[\], no reminders clock, lists=\[\]/);
-    expect(instructions).toMatch(/ASK whether to move the linked WhatsApp reminder too, with lists\/reminders empty/);
     expect(instructions).toMatch(/ASK once whether to delete the standing task \(with its WhatsApp reminders\) or only stop the reminders/);
     expect(instructions).toMatch(/ask ONLY for the school year \(one question; mashov=null/);
     expect(instructions).toMatch(/list the candidates as NUMBERED 1\. 2\. 3\./);

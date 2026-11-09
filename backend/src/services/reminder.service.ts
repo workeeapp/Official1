@@ -2270,6 +2270,175 @@ export async function shiftLinkedClocksForTaskMove(input: {
   }
 }
 
+/** The parts of a calendar rule that decide WHICH days it lands on (not the time). */
+function sameDayPattern(a: Recurrence, b: Recurrence): boolean {
+  const days = (rule: Recurrence) => [...(rule.weekdays ?? [])].sort((x, y) => x - y).join(",");
+  return (
+    a.freq === b.freq &&
+    (a.interval ?? 1) === (b.interval ?? 1) &&
+    (a.unit ?? "") === (b.unit ?? "") &&
+    days(a) === days(b) &&
+    (a.monthDay ?? 0) === (b.monthDay ?? 0) &&
+    (a.month ?? 0) === (b.month ?? 0)
+  );
+}
+
+function clockMinutes(value: string | undefined): number | null {
+  const match = typeof value === "string" ? value.match(/^(\d{1,2}):(\d{2})$/) : null;
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+/**
+ * B1: a standing task's days and/or time changed → the rule a linked repeating
+ * clock should follow. Only a clock that tracks the series (lands on the same
+ * days as the task's OLD rule) follows; it takes the task's new days and keeps
+ * its own offset from the task time («חצי שעה לפני» stays half an hour before).
+ * null = leave the clock as is (not tracking, interval rules, no clock time,
+ * the offset would cross midnight, or nothing changed). One-off exceptions are
+ * dropped (they were keyed to the old days); until / count carry over.
+ */
+export function followStandingTaskMove(input: {
+  taskBefore: Recurrence;
+  taskAfter: Recurrence;
+  clock: Recurrence;
+  now: Date;
+}): { rule: Recurrence; fireAt: Date } | null {
+  const { taskBefore, taskAfter, clock } = input;
+  if (clock.freq === "interval" || taskBefore.freq === "interval" || taskAfter.freq === "interval") {
+    return null;
+  }
+  if (!sameDayPattern(clock, taskBefore)) {
+    return null;
+  }
+  const oldTime = clockMinutes(taskBefore.time);
+  const newTime = clockMinutes(taskAfter.time);
+  const minuteDelta = oldTime !== null && newTime !== null ? newTime - oldTime : 0;
+  if (sameDayPattern(taskBefore, taskAfter) && minuteDelta === 0) {
+    return null;
+  }
+  const clockTime = clockMinutes(clock.time);
+  if (clockTime === null) {
+    return null;
+  }
+  const next = clockTime + minuteDelta;
+  if (next < 0 || next >= 24 * 60) {
+    return null;
+  }
+  const rule: Recurrence = {
+    freq: taskAfter.freq,
+    interval: taskAfter.interval,
+    ...(taskAfter.weekdays?.length ? { weekdays: [...taskAfter.weekdays].sort((x, y) => x - y) } : {}),
+    ...(taskAfter.monthDay ? { monthDay: taskAfter.monthDay } : {}),
+    ...(taskAfter.month ? { month: taskAfter.month } : {}),
+    time: `${String(Math.floor(next / 60)).padStart(2, "0")}:${String(next % 60).padStart(2, "0")}`,
+    ...(clock.until ? { until: clock.until } : {}),
+    ...(clock.count ? { count: clock.count } : {}),
+  };
+  const fireAt = firstOccurrence(rule, input.now);
+  if (!withinUntil(rule, fireAt)) {
+    return null;
+  }
+  return { rule: anchorRecurrence(rule, fireAt), fireAt };
+}
+
+/**
+ * B1: a standing (repeating) task moved to other days and/or another time →
+ * every active repeating clock linked to it that tracks the series moves with
+ * it on the server, without asking (owner decision 2026-11-09). One-off tasks
+ * use shiftLinkedClocksForTaskMove.
+ */
+export async function shiftLinkedClocksForStandingMove(input: {
+  listItemId: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  userId?: string;
+  actorEmployeeId?: string;
+  now?: Date;
+}): Promise<ShiftedLinkedClock[]> {
+  const before = itemRecurrence(input.before);
+  const after = itemRecurrence(input.after);
+  if (!before || !after || !prisma.reminder?.findMany || !prisma.reminder?.update) {
+    return [];
+  }
+  const now = input.now ?? new Date();
+  try {
+    const item = prisma.employeeListItem?.findUnique
+      ? await prisma.employeeListItem.findUnique({
+          where: { id: input.listItemId },
+          select: { linkedReminderId: true },
+        })
+      : null;
+    const joinRows = prisma.employeeListItemReminderLink?.findMany
+      ? await prisma.employeeListItemReminderLink.findMany({
+          where: { listItemId: input.listItemId },
+          select: { reminderId: true },
+        })
+      : [];
+    const ids = new Set<string>(
+      [item?.linkedReminderId ?? "", ...joinRows.map((row) => row.reminderId ?? "")]
+        .map((id) => id.trim())
+        .filter(Boolean),
+    );
+    if (ids.size === 0) {
+      return [];
+    }
+    const clocks = await prisma.reminder.findMany({
+      where: { id: { in: [...ids] }, status: "active" },
+    });
+    const shifted: ShiftedLinkedClock[] = [];
+    for (const clock of clocks) {
+      if (isOneShotClock(clock) || (typeof clock.scheduleAnchor === "string" && clock.scheduleAnchor.trim())) {
+        continue;
+      }
+      const rule = storedReminderRule(clock);
+      if (!rule) {
+        continue;
+      }
+      const follow = followStandingTaskMove({ taskBefore: before.rule, taskAfter: after.rule, clock: rule, now });
+      if (!follow) {
+        continue;
+      }
+      await prisma.reminder.update({
+        where: { id: clock.id },
+        data: {
+          fireAt: follow.fireAt,
+          sendStatus: "pending",
+          recurrence: serializeRecurrence(follow.rule) as Prisma.InputJsonValue,
+          repeat: legacyRepeatFor(follow.rule),
+        },
+      });
+      await syncLinkedWorkerTaskClock({
+        reminderId: clock.id,
+        workerItemId: clock.workerItemId,
+        fireAt: follow.fireAt,
+        rule: follow.rule,
+      });
+      if (input.userId) {
+        await recordAuditEvent({
+          userId: input.userId,
+          actorEmployeeId: input.actorEmployeeId,
+          action: "reminder_save",
+          entityType: "Reminder",
+          entityId: clock.id,
+          summary: `follow standing task move → ${formatRecurrenceHe(follow.rule)} reminder: ${clock.itemLabel}`,
+        });
+      }
+      shifted.push({
+        reminderId: clock.id,
+        label: clock.itemLabel,
+        previousFireAt: clock.fireAt,
+        fireAt: follow.fireAt,
+      });
+    }
+    return shifted;
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 async function shiftWorkerTaskDate(input: {
   reminderId: string;
   workerItemId?: string | null;
