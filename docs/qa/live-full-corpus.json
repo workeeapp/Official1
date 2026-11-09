@@ -5800,6 +5800,84 @@
           ]
         }
       ]
+    },
+    {
+      "id": "is-desire-outing-offers-not-saves",
+      "tags": [
+        "implicit-save",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Desire / interest in an outing with a vague time (owner report 2026-11-10) → no task, no clock, one practical offer (a question)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני מעוניין ללכת למשחק של מכבי תל אביב עם הפועל פתח תקוה בעוד שבועיים וחצי",
+          "constraints": [
+            {
+              "type": "lists_empty"
+            },
+            {
+              "type": "reminders_empty"
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "is-decided-outing-saves",
+      "tags": [
+        "implicit-save",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "A decided plan with a real day/time → saved now as a task (control for the desire case)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני הולך למשחק של מכבי תל אביב ביום שני הבא ב־20:00",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "tasks",
+              "itemTextIncludes": "מכבי"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "is-need-buy-saves",
+      "tags": [
+        "implicit-save",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "A concrete need to buy → shopping save now (control: need ≠ desire)",
+      "setup": {},
+      "turns": [
+        {
+          "utterance": "אני צריך לקנות חלב",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "reminders_empty"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
