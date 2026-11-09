@@ -159,7 +159,7 @@ describe("live-full corpus loader", () => {
       /durable spoken fact \(address \/ family \/ job[\s\S]*?NO file → lists\.add list_type filing SAME TURN/,
     );
     expect(raw).toMatch(
-      /FORBIDDEN: filing only because תייקי when a file has no destination/,
+      /filing only because תייקי when neither the file's content nor the instruction identifies it \(→ ask\)/,
     );
   });
 
