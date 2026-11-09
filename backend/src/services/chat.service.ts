@@ -5176,6 +5176,11 @@ export async function sendChatMessage(input: {
             turnApplyResult,
             visible,
             shoppingRowsWithDetail(snapshot),
+            // Digital workers' rows are Lucy's internal tasks — never a tap.
+            new Set([
+              digital.id,
+              ...employees.filter((row) => row.kind === "digital").map((row) => row.id),
+            ]),
           );
         })) ?? [];
     }

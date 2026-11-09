@@ -242,19 +242,10 @@ describe("LLM action schema", () => {
     );
   });
 
-  it("reminder confirm buttons: omit אצלך twin for same-day appointment/תור", () => {
+  it("reminder confirm buttons: the reminder + the speaker's content — never Lucy's book (owner 2026-11-10)", () => {
     const config = loadLlmConfig(repoRoot);
-    expect(config.systemMessage).toContain("יום ג׳ אצלך");
-    expect(config.systemMessage).toContain("מה יש לך ביום שלישי");
-    expect(config.systemMessage).toContain(
-      "Omit (1) when the nudged item is a speaker meeting/appointment/תור",
-    );
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN two buttons that only rename the same weekday",
-    );
-    expect(config.systemMessage).toContain(
-      "FORBIDDEN pairing it with «יום ד׳ אצלך»",
-    );
+    expect(config.systemMessage).toContain("FORBIDDEN any button to YOUR book");
+    expect(config.systemMessage).not.toContain('{label:"יום ג׳ אצלך", command:"מה יש לך ביום שלישי"}');
     expect(config.systemMessage).toContain('label «התור»');
   });
 

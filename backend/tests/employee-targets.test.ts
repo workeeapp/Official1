@@ -733,7 +733,7 @@ describe("employee targets", () => {
     ]);
   });
 
-  it("WATCH tasks add gets worker inventory nav (not speaker הצג משימות)", () => {
+  it("WATCH tasks add: the reminder is the result — never Lucy's task list (no «המשימות שלך»)", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -776,13 +776,10 @@ describe("employee targets", () => {
         [],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([
-      { label: "הצג", command: "הצג תזכורות" },
-      { label: "המשימות שלך", command: "הצג משימות של לוסי" },
-    ]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
-  it("WATCH: model speaker LIST is dropped; worker inventory safety-net fills", () => {
+  it("WATCH: model speaker LIST is dropped; no worker inventory is added", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -800,10 +797,34 @@ describe("employee targets", () => {
         [{ label: "הצג משימות", command: "הצג רשימת משימות" }],
         { speakerNames: ["טל"], workerNames: ["לוסי"] },
       ),
-    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
+    ).toEqual([]);
   });
 
-  it("WATCH cadence update with appliedWorkerWatchName gets worker inventory + תזכורות", () => {
+  it("a model «המשימות שלך» / «הצג משימות של לוסי» button is always dropped (worker-only turn)", () => {
+    expect(
+      ensureSpeakerShowButtons(
+        {
+          ...emptyLlmMetadata(),
+          lists: [
+            {
+              action: "add",
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם משימה": "להזכיר לטל לקנות חלב" }],
+              targets: ["לוסי"],
+            },
+          ],
+        },
+        [
+          { label: "המשימות שלך", command: "הצג משימות של לוסי" },
+          { label: "מה לקנות", command: "מה יש לי לקנות" },
+        ],
+        { speakerNames: ["טל"], workerNames: ["לוסי"] },
+      ),
+    ).toEqual([{ label: "מה לקנות", command: "מה יש לי לקנות" }]);
+  });
+
+  it("WATCH cadence update (watch proven saved) gets תזכורות only — never Lucy's task list", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -841,10 +862,7 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([
-      { label: "הצג", command: "הצג תזכורות" },
-      { label: "המשימות שלך", command: "הצג משימות של לוסי" },
-    ]);
+    ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
   it("WATCH cadence update without appliedWorkerWatchName still safety-nets תזכורות", () => {
@@ -920,7 +938,7 @@ describe("employee targets", () => {
     ).toEqual([{ label: "הצג", command: "הצג תזכורות" }]);
   });
 
-  it("WATCH create + appliedWorkerWatchName dedupes to one worker inventory button", () => {
+  it("WATCH create (watch proven saved, no clock in metadata) → no worker inventory button", () => {
     expect(
       ensureSpeakerShowButtons(
         {
@@ -942,7 +960,7 @@ describe("employee targets", () => {
           appliedWorkerWatchName: "לוסי",
         },
       ),
-    ).toEqual([{ label: "המשימות שלך", command: "הצג משימות של לוסי" }]);
+    ).toEqual([]);
   });
 
   it("chat appliedWorkerWatchName predicate follows saved.hasComposeCondition", () => {

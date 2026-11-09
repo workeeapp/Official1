@@ -183,6 +183,28 @@ describe("saved rows come from ApplyResult only", () => {
     expect(ids(undefined)).toEqual([ID1, "f-111111", "r-111111", "p-111111"]);
   });
 
+  it("a digital worker's row (Lucy's internal להזכיר / WATCH task) never gets an item tap, even when visible", () => {
+    const withWorker = buildApplyResult({
+      requested: {
+        ...emptyRequested,
+        lists: [
+          { action: "add", listType: "tasks", listName: "", items: [{ "שם משימה": "תור לרופא" }], targets: [] },
+          { action: "add", listType: "tasks", listName: "", items: [{ "שם משימה": "להזכיר לטל על התור" }], targets: ["לוסי"] },
+        ] as never,
+        reminders: [{ action: "add", reminderId: "" }] as never,
+      },
+      listMutations: [
+        { action: "add", itemId: ID1, employeeId: "speaker", listType: "tasks", itemKey: "תור לרופא", itemLabel: "תור לרופא" },
+        { action: "add", itemId: ID3, employeeId: "lucy", listType: "tasks", itemKey: "להזכיר", itemLabel: "להזכיר לטל על התור" },
+      ],
+      reminderResult: { saved: [{ id: "r-111111", itemLabel: "תור לרופא" }], missed: [] },
+    });
+    const ids = savedItemNavsFromApplyResult(withWorker, new Set([ID1, ID3, "r-111111"]), new Set(), new Set(["lucy"])).map(
+      (row) => row.ref.id,
+    );
+    expect(ids).toEqual([ID1, "r-111111"]);
+  });
+
   it("nothing applied → nothing to open", () => {
     const failed = buildApplyResult({
       requested: { ...emptyRequested, reminders: [{ action: "add", reminderId: "" }] as never },

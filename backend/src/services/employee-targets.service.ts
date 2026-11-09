@@ -1849,8 +1849,8 @@ export type SpeakerShowButtonOptions = {
    */
   appliedItems?: AppliedItemEvidence;
   /**
-   * When set, a WATCH clock (compose_condition) was proven saved this turn.
-   * Safety-net emits worker inventory when there is no speaker-book tasks mutate.
+   * @deprecated Ignored. Lucy's internal tasks (incl. WATCH) never get a nav
+   * button (owner decision 2026-11-10).
    */
   appliedWorkerWatchName?: string;
   /**
@@ -2802,26 +2802,9 @@ export function ensureSpeakerShowButtons(
       workerNames,
     );
     if (workerCmd) {
-      const workerOnly =
-        !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames) &&
-        Boolean(
-          workerOnlyTasksDisplayName(metadata, speakerNames, workerNames),
-        );
-      if (!workerOnly) {
-        continue;
-      }
-      if (!remember(workerCmd)) {
-        coveredListKeys.add(workerInventoryListKey(workerCmd));
-        continue;
-      }
-      add(
-        {
-          label: button.label.trim() || "המשימות שלך",
-          command: button.command.trim() || workerCmd,
-        },
-        NAV_RANK_SPECIFIC,
-      );
-      coveredListKeys.add(workerInventoryListKey(workerCmd));
+      // Lucy's internal task list is never offered on a confirm (owner
+      // decision 2026-11-10): shown only when the speaker explicitly asks
+      // (INVENTORY → show_dump=tasks + show_dump_about), never as a button.
       continue;
     }
     if (normalizeShowNavCommand(button.command) === SHOW_REMINDERS_COMMAND) {
@@ -2919,7 +2902,6 @@ export function ensureSpeakerShowButtons(
     coveredListKeys,
     speakerNames,
     workerNames,
-    options?.appliedWorkerWatchName,
   )) {
     if (!remember(required.command)) {
       continue;
@@ -3102,17 +3084,6 @@ function workerOnlyTasksDisplayName(
   return null;
 }
 
-function workerInventoryButton(workerDisplayName: string): LlmReplyButton {
-  return {
-    label: fitNavButtonLabel("המשימות שלך"),
-    command: showWorkerTasksButtonCommand(workerDisplayName),
-  };
-}
-
-function workerInventoryListKey(command: string): string {
-  return `tasks:worker:${command}`;
-}
-
 /** Normalize model «הצג משימות של X» / legacy «הצג משימות של X» to opaque command. */
 function workerInventoryCommandIfMatch(
   command: string,
@@ -3188,7 +3159,7 @@ function pushNavButton(
 /**
  * Safety net only: plain LIST / filing nav after proven (or metadata) mutate.
  * Never invents collab, כל ה…, or item-open. Skips keys the model already covered.
- * Worker-only tasks (no speaker-book tasks this turn) → worker inventory nav.
+ * Worker-only tasks (Lucy's internal tasks) get no nav at all.
  */
 function plainSafetyNetListShowButtons(
   metadata: LlmMetadata,
@@ -3197,7 +3168,6 @@ function plainSafetyNetListShowButtons(
   coveredListKeys: ReadonlySet<string>,
   speakerNames: string[] = [],
   workerNames: string[] = [],
-  appliedWorkerWatchName?: string,
 ): LlmReplyButton[] {
   const buttons: LlmReplyButton[] = [];
   const seen = new Set<string>();
@@ -3269,27 +3239,8 @@ function plainSafetyNetListShowButtons(
     }
   }
 
-  if (workerDisplay) {
-    const workerBtn = workerInventoryButton(workerDisplay);
-    const workerKey = workerInventoryListKey(workerBtn.command);
-    if (
-      !coveredListKeys.has(workerKey) &&
-      listKeyNavEligible("tasks", metadata, appliedNav, skipSourceCommands)
-    ) {
-      pushNavButton(buttons, seen, workerBtn);
-    }
-  } else if (
-    !hasSpeakerBookTasksMutate(metadata, speakerNames, workerNames)
-  ) {
-    const watchName = (appliedWorkerWatchName ?? "").trim();
-    if (watchName) {
-      const workerBtn = workerInventoryButton(watchName);
-      const workerKey = workerInventoryListKey(workerBtn.command);
-      if (!coveredListKeys.has(workerKey)) {
-        pushNavButton(buttons, seen, workerBtn);
-      }
-    }
-  }
+  // Lucy's internal tasks (WATCH / להזכיר / לשלוח הודעה) never get a nav
+  // button (owner decision 2026-11-10); the saved reminder is the result view.
 
   const filingMutates = (metadata.filing ?? []).filter(
     (row) =>
@@ -3907,6 +3858,8 @@ export function savedItemNavsFromApplyResult(
   applyResult: ApplyResult,
   visibleIds?: ReadonlySet<string>,
   shoppingWithDetail: ReadonlySet<string> | "all" = new Set(),
+  /** Row owners whose rows never get a tap — digital workers' internal tasks. */
+  hiddenOwnerIds: ReadonlySet<string> = new Set(),
 ): SavedItemNav[] {
   const out: SavedItemNav[] = [];
   const seen = new Set<string>();
@@ -3926,6 +3879,10 @@ export function savedItemNavsFromApplyResult(
       kind !== "s" ||
       shoppingWithDetail === "all" ||
       shoppingWithDetail.has(row.id?.trim() ?? "");
+    if (row.employeeId && hiddenOwnerIds.has(row.employeeId)) {
+      // Lucy's internal task (להזכיר / WATCH / לשלוח הודעה): never an item tap.
+      continue;
+    }
     if (
       kind &&
       shoppingOk &&
