@@ -2,6 +2,8 @@ import { createApp } from "./app.js";
 import { getEnv } from "./config/env.js";
 import { prisma } from "./database/prisma.js";
 import { startReminderTicker } from "./services/reminder-fire.js";
+import { startMissionTicker } from "./services/mission-runner.js";
+import { shutdownMissionBrowsers } from "./services/mission-tools/browser.js";
 import { startWhatsAppSubmissionSweep } from "./services/whatsapp-submission.service.js";
 
 async function main(): Promise<void> {
@@ -12,11 +14,13 @@ async function main(): Promise<void> {
     console.log(`API listening on http://localhost:${env.PORT}`);
   });
   startReminderTicker();
+  startMissionTicker();
   startWhatsAppSubmissionSweep();
 
   const shutdown = async (signal: string) => {
     console.log(`Received ${signal}, shutting down`);
     server.close(async () => {
+      await shutdownMissionBrowsers();
       await prisma.$disconnect();
       process.exit(0);
     });

@@ -207,6 +207,7 @@ export function toPublicEmployee(employee: Employee): PublicEmployee {
     protected: employee.isProtected,
     isOwner: kind === "human" ? employee.isOwner : false,
     isGuest,
+    isExecutor: kind === "digital" ? employee.isExecutor === true : false,
     teamId: isGuest ? null : (employee.teamId ?? null),
     addressGender: publicAddressGender(kind, employee.addressGender),
     shareMirrorEmployeeId:
@@ -366,6 +367,12 @@ export async function listEmployeesForUser(
   const teamId = options?.teamId ?? (await ensureTeamForUser(userId)).id;
   await ensureProtectedLucy(userId, teamId);
   await ensureGuestLucy(userId, teamId);
+  try {
+    const { ensureMissionExecutor } = await import("./mission.service.js");
+    await ensureMissionExecutor(userId, teamId);
+  } catch (error) {
+    console.error("ensureMissionExecutor failed during listEmployeesForUser", error);
+  }
   // Tip catalog sync must not block listing employees (Employees UI / chat-as).
   try {
     await ensureDefaultTips(userId);

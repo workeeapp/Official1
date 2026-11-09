@@ -113,6 +113,7 @@ describe("Dashboard page", () => {
         liveSelectUsd: 0.0003,
         deleteCelebrationUsd: 0,
         imageUsd: 0.0021,
+        missionTurnUsd: 0.0035,
       },
       months: [
         {
@@ -129,6 +130,7 @@ describe("Dashboard page", () => {
             liveSelectUsd: 0.0002,
             deleteCelebrationUsd: 0,
             imageUsd: 0.0015,
+            missionTurnUsd: 0.002,
           },
         },
         {
@@ -145,6 +147,7 @@ describe("Dashboard page", () => {
             liveSelectUsd: 0.0001,
             deleteCelebrationUsd: 0,
             imageUsd: 0.0006,
+            missionTurnUsd: 0.0015,
           },
         },
       ],
@@ -226,6 +229,7 @@ describe("Dashboard page", () => {
       expect(screen.getByTestId("dashboard-teams-count")).toHaveTextContent("2");
     });
     expect(screen.getByTestId("dashboard-employees-count")).toHaveTextContent("2");
+    expect(screen.queryByTestId("dashboard-agents-count")).not.toBeInTheDocument();
     expect(screen.getByTestId("dashboard-guests-count")).toHaveTextContent("1");
   });
 
@@ -263,11 +267,12 @@ describe("Dashboard page", () => {
     expect(months).not.toHaveTextContent("$0.012");
   });
 
-  it("shows purpose and guest usage cards with monthly breakdowns", async () => {
+  it("shows purpose, agents, and guest usage cards with monthly breakdowns", async () => {
     renderDashboard();
 
     expect(await screen.findByTestId("dashboard-usage-breakdown")).toBeInTheDocument();
     expect(screen.queryByTestId("dashboard-usage-chat")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-usage-agents")).toHaveTextContent("$0.0035");
     expect(screen.getByTestId("dashboard-usage-tips")).toHaveTextContent("$0.0015");
     expect(screen.getByTestId("dashboard-usage-weather")).toHaveTextContent("$0.0008");
     expect(screen.getByTestId("dashboard-usage-reminder-compose")).toHaveTextContent(
@@ -278,6 +283,12 @@ describe("Dashboard page", () => {
     );
     expect(screen.getByTestId("dashboard-usage-images")).toHaveTextContent("$0.0021");
     expect(screen.getByTestId("dashboard-usage-guests")).toHaveTextContent("$0.0012");
+
+    const agentsMonths = screen.getByTestId("dashboard-usage-agents-months");
+    expect(agentsMonths).toHaveTextContent("10/2026");
+    expect(agentsMonths).toHaveTextContent("$0.002");
+    expect(agentsMonths).toHaveTextContent("09/2026");
+    expect(agentsMonths).toHaveTextContent("$0.0015");
 
     const tipsMonths = screen.getByTestId("dashboard-usage-tips-months");
     expect(tipsMonths).toHaveTextContent("10/2026");

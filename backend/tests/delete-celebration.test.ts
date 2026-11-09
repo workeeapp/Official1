@@ -130,6 +130,37 @@ describe("delete celebration", () => {
     ]);
   });
 
+  it("skips Lucy / digital-worker task removes (no tip or victory image)", () => {
+    const lucyId = "lucy-digital-id";
+    const removes = collectCelebrationRemoves(
+      [
+        {
+          action: "remove",
+          listType: "tasks",
+          itemLabel: "לקנות מיקסר",
+          employeeId: lucyId,
+        },
+        {
+          action: "remove",
+          listType: "tasks",
+          itemLabel: "מוסך",
+          employeeId: "speaker-id",
+        },
+        {
+          action: "remove",
+          listType: "shopping",
+          itemLabel: "חלב",
+          employeeId: "speaker-id",
+        },
+      ],
+      { excludeEmployeeIds: [lucyId] },
+    );
+    expect(removes).toEqual([
+      { itemLabel: "מוסך", listType: "tasks" },
+      { itemLabel: "חלב", listType: "shopping" },
+    ]);
+  });
+
   it("always prepends the style bible to the scene prompt", () => {
     const prompt = buildCelebrationImagePrompt("waving with milk and bread");
     expect(prompt.startsWith(CELEBRATION_STYLE_BIBLE)).toBe(true);

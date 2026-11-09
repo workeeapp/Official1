@@ -68,6 +68,8 @@ export interface PublicEmployee {
   isOwner?: boolean;
   /** WhatsApp outsider shell — not a team member. Digitals are never guests. */
   isGuest?: boolean;
+  /** Hidden mission-executor digital — not shown in Chat-as / Employees UI. */
+  isExecutor?: boolean;
   /** Account team id; null for guests. */
   teamId?: string | null;
   /** Humans only: male | female | null/undefined when unknown. */
@@ -156,6 +158,8 @@ export interface TeamUsagePurposeBreakdown {
   deleteCelebrationUsd: number;
   /** Images API (celebration / future image gen), purpose=image. */
   imageUsd: number;
+  /** Hidden mission executor turns, purpose=mission_turn. */
+  missionTurnUsd: number;
 }
 
 export interface TeamUsageMonth {
@@ -433,11 +437,30 @@ export function isGuestLucy(
   return name === GUEST_LUCY_NAME || nickname === GUEST_LUCY_NAME;
 }
 
-/** Digitals shown in Chat-with (excludes לוסי-אורח). */
+/** Dedicated hidden mission executor (not a chat persona). */
+export const MISSION_EXECUTOR_NAME = "סוכן ביצוע";
+
+export function isMissionExecutor(
+  employee: Pick<PublicEmployee, "kind" | "name" | "nickname" | "isExecutor">,
+): boolean {
+  if (employee.kind !== "digital") {
+    return false;
+  }
+  if (employee.isExecutor === true) {
+    return true;
+  }
+  const name = (employee.name ?? "").trim();
+  const nickname = employee.nickname?.trim() ?? "";
+  return name === MISSION_EXECUTOR_NAME || nickname === MISSION_EXECUTOR_NAME;
+}
+
+/** Digitals shown in Chat-with (excludes לוסי-אורח and hidden executors). */
 export function workspaceDigitals<
-  T extends Pick<PublicEmployee, "kind" | "name" | "nickname">,
+  T extends Pick<PublicEmployee, "kind" | "name" | "nickname" | "isExecutor">,
 >(employees: T[]): T[] {
-  return digitalEmployees(employees).filter((employee) => !isGuestLucy(employee));
+  return digitalEmployees(employees).filter(
+    (employee) => !isGuestLucy(employee) && !isMissionExecutor(employee),
+  );
 }
 
 export function isProtectedEmployee(

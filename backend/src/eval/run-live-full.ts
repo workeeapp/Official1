@@ -130,6 +130,7 @@ async function buildProductionLiveFacts(input: {
           viewerId: account.employeeId,
         })
       : [],
+    activeMissionsBlock: "",
     lastNumberedDump: input.lastNumberedDump,
     pendingAttachments: await listPendingAttachments(account.employeeId),
     pendingLocation: getPendingLocation(account.employeeId),

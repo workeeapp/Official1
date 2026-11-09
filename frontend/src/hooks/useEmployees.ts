@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  digitalEmployees,
   humanEmployees,
   isGuestEmployee,
+  workspaceDigitals,
   workspaceHumans,
   type EmployeeInput,
   type PublicEmployee,
@@ -30,7 +30,7 @@ function toVisibleState(employees: PublicEmployee[]) {
   const guests = humanEmployees(employees).filter((employee) =>
     isGuestEmployee(employee),
   );
-  const digitals = digitalEmployees(employees);
+  const digitals = workspaceDigitals(employees);
   const visible = [...table, ...digitals];
   return {
     employees: visible,

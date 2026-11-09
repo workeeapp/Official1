@@ -75,8 +75,10 @@ describe("getTeamUsageSummary", () => {
       row("tal", "0.03", "2026-10-05T12:00:00Z", "weather_tip"),
       row("amit", "0.04", "2026-10-05T13:00:00Z", "reminder_compose"),
       row("guest", "0.05", "2026-10-05T14:00:00Z", "live_select"),
+      row("amit", "0.015", "2026-10-05T15:00:00Z", "mission_turn"),
       row("amit", "0.06", "2026-09-05T10:00:00Z", "catalog_tip"),
       row("guest", "0.07", "2026-09-06T10:00:00Z", "chat"),
+      row("amit", "0.005", "2026-09-07T10:00:00Z", "mission_turn"),
     ]);
 
     const summary = await getTeamUsageSummary("u1", team);
@@ -89,18 +91,21 @@ describe("getTeamUsageSummary", () => {
       liveSelectUsd: 0.05,
       deleteCelebrationUsd: 0,
       imageUsd: 0,
+      missionTurnUsd: 0.02,
     });
-    expect(summary.totalUsd).toBeCloseTo(0.28);
+    expect(summary.totalUsd).toBeCloseTo(0.3);
     expect(summary.guestsUsd).toBeCloseTo(0.12);
     const [oct, sep] = summary.months;
     expect(oct.month).toBe("2026-10");
-    expect(oct.totalUsd).toBeCloseTo(0.15);
+    expect(oct.totalUsd).toBeCloseTo(0.165);
     expect(oct.purposes.catalogTipUsd).toBeCloseTo(0.02);
+    expect(oct.purposes.missionTurnUsd).toBeCloseTo(0.015);
     expect(oct.guestsUsd).toBeCloseTo(0.05);
     expect(sep.month).toBe("2026-09");
-    expect(sep.totalUsd).toBeCloseTo(0.13);
+    expect(sep.totalUsd).toBeCloseTo(0.135);
     expect(sep.purposes.catalogTipUsd).toBeCloseTo(0.06);
     expect(sep.purposes.chatUsd).toBeCloseTo(0.07);
+    expect(sep.purposes.missionTurnUsd).toBeCloseTo(0.005);
     expect(sep.guestsUsd).toBeCloseTo(0.07);
   });
 

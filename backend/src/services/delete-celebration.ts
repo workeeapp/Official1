@@ -105,13 +105,34 @@ export function setCelebrationImageGenForTests(fn: ImageGenFn | null): void {
   imageGenOverride = fn;
 }
 
+/**
+ * Collect shopping/tasks removes that earn a celebration.
+ * Digital-worker (Lucy) tasks are excluded — cancelling her mission/tracking
+ * work is not a speaker "win" (no tip / victory image).
+ */
 export function collectCelebrationRemoves(
-  mutations: Array<{ action: string; listType: string; itemLabel: string }>,
+  mutations: Array<{
+    action: string;
+    listType: string;
+    itemLabel: string;
+    employeeId?: string;
+  }>,
+  options?: { excludeEmployeeIds?: readonly string[] },
 ): CelebrationRemove[] {
+  const exclude = new Set(
+    (options?.excludeEmployeeIds ?? []).map((id) => id.trim()).filter(Boolean),
+  );
   const out: CelebrationRemove[] = [];
   for (const row of mutations) {
     if (row.action !== "remove") continue;
     if (row.listType !== "shopping" && row.listType !== "tasks") continue;
+    if (
+      row.listType === "tasks" &&
+      row.employeeId &&
+      exclude.has(row.employeeId)
+    ) {
+      continue;
+    }
     const label = row.itemLabel.trim();
     if (!label) continue;
     out.push({

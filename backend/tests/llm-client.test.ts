@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractUsage,
+  extractWebSearchSources,
+  hostedWebSearchInput,
   rememberInModelConversation,
   setLlmClientForTests,
   toResponsesCreateBody,
@@ -125,5 +127,61 @@ describe("gpt-6 Responses request", () => {
 
     expect(body.reasoning).toBeUndefined();
     expect(body.temperature).toBe(0);
+  });
+});
+
+describe("hostedWebSearchInput", () => {
+  it("grounds the query on Asia/Jerusalem SESSION_CLOCK", () => {
+    const text = hostedWebSearchInput("תוצאת המשחק אתמול", new Date("2026-11-08T12:00:00Z"));
+    expect(text).toContain("SESSION_CLOCK:");
+    expect(text).toContain("Asia/Jerusalem");
+    expect(text).toContain("current_date:");
+    expect(text).toContain("current_time:");
+    expect(text).toContain("Search query: תוצאת המשחק אתמול");
+  });
+});
+
+describe("extractWebSearchSources", () => {
+  it("collects unique url_citation annotations", () => {
+    expect(
+      extractWebSearchSources({
+        output: [
+          { type: "web_search_call" },
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: "חיפה ניצחה 2-1",
+                annotations: [
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/a",
+                    title: "Score",
+                  },
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/a",
+                    title: "dup",
+                  },
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/b",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([
+      "Score — https://example.com/a",
+      "https://example.com/b",
+    ]);
+  });
+
+  it("returns empty for missing output", () => {
+    expect(extractWebSearchSources(null)).toEqual([]);
+    expect(extractWebSearchSources({})).toEqual([]);
   });
 });

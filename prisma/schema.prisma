@@ -65,6 +65,8 @@ model Employee {
   isOwner      Boolean  @default(false) @map("is_owner")
   /** WhatsApp outsider shell — not a team member. Digitals are never guests. */
   isGuest      Boolean  @default(false) @map("is_guest")
+  /** Hidden mission-executor digital — not shown in Chat-as / Employees UI. */
+  isExecutor   Boolean  @default(false) @map("is_executor")
   /** How Lucy addresses this human in Hebrew: male | female | null (ask once). */
   addressGender String?  @map("address_gender") @db.VarChar(16)
   /**
@@ -92,11 +94,16 @@ model Employee {
   tipsTargeted             Tip[]              @relation("TipDigital")
   tipProgressAsSpeaker     TipProgress[]      @relation("TipProgressSpeaker")
   tipProgressAsDigital     TipProgress[]      @relation("TipProgressDigital")
+  missionsOrchestrated     Mission[]          @relation("MissionOrchestrator")
+  missionsExecuted         Mission[]          @relation("MissionExecutor")
+  missionsAsSpeaker        Mission[]          @relation("MissionSpeaker")
+  secretVaults             SecretVault[]
 
   @@index([userId])
   @@index([teamId])
   @@index([shareMirrorEmployeeId])
   @@index([profileAttachmentId])
+  @@index([userId, isExecutor])
   @@map("Employees")
 }
 
@@ -308,6 +315,8 @@ model EmployeeListItem {
   attachmentLinks  AttachmentLink[]
   /** Task hosts: shopping/custom lists linked to this item. */
   linkedLists      ListItemListLink[]
+  /** Open-world mission tracked by this worker task (at most one). */
+  trackedMission   Mission?
 
   @@index([listId, itemKey])
   @@index([linkedReminderId])
@@ -485,6 +494,7 @@ model AttachmentLink {
   filingId     String?           @map("filing_id") @db.Uuid
   reminderId   String?           @map("reminder_id") @db.Uuid
   contactId    String?           @map("contact_id") @db.Uuid
+  missionId    String?           @map("mission_id") @db.Uuid
   addedById    String?           @map("added_by_id") @db.Uuid
   createdAt    DateTime          @default(now()) @map("created_at")
   attachment   Attachment        @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
@@ -493,18 +503,103 @@ model AttachmentLink {
   filing       EmployeeFiling?   @relation(fields: [filingId], references: [id], onDelete: Cascade)
   reminder     Reminder?         @relation(fields: [reminderId], references: [id], onDelete: Cascade)
   contact      Contact?          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  mission      Mission?          @relation(fields: [missionId], references: [id], onDelete: Cascade)
 
   @@unique([attachmentId, listId])
   @@unique([attachmentId, listItemId])
   @@unique([attachmentId, filingId])
   @@unique([attachmentId, reminderId])
   @@unique([attachmentId, contactId])
+  @@unique([attachmentId, missionId])
   @@index([listId])
   @@index([listItemId])
   @@index([filingId])
   @@index([reminderId])
   @@index([contactId])
+  @@index([missionId])
   @@map("AttachmentLinks")
+}
+
+/// Open-world work Lucy orchestrates; a hidden executor plans/runs tools/verifies.
+model Mission {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  speakerId         String    @map("speaker_id") @db.Uuid
+  orchestratorId    String    @map("orchestrator_id") @db.Uuid
+  executorId        String    @map("executor_id") @db.Uuid
+  goal              String    @db.Text
+  successCriteria   String    @map("success_criteria") @db.Text
+  /** open|planning|waiting_plan_approval|waiting_user|waiting_approval|running|done|failed|cancelled */
+  status            String    @default("open") @db.VarChar(32)
+  plan              Json      @default("[]")
+  planUpdatedAt     DateTime? @map("plan_updated_at")
+  planApprovedAt    DateTime? @map("plan_approved_at")
+  currentStep       Int       @default(0) @map("current_step")
+  contextFacts      Json      @default("[]") @map("context_facts")
+  lastSummary       String    @default("") @map("last_summary") @db.Text
+  waitingOn         String    @default("") @map("waiting_on") @db.VarChar(64)
+  stepCount         Int       @default(0) @map("step_count")
+  maxSteps          Int       @default(40) @map("max_steps")
+  trackingItemId    String?   @unique @map("tracking_item_id") @db.Uuid
+  wakeAt            DateTime? @map("wake_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  speaker           Employee  @relation("MissionSpeaker", fields: [speakerId], references: [id], onDelete: Cascade)
+  orchestrator      Employee  @relation("MissionOrchestrator", fields: [orchestratorId], references: [id], onDelete: Cascade)
+  executor          Employee  @relation("MissionExecutor", fields: [executorId], references: [id], onDelete: Cascade)
+  trackingItem      EmployeeListItem? @relation(fields: [trackingItemId], references: [id], onDelete: SetNull)
+  toolCalls         MissionToolCall[]
+  attachmentLinks   AttachmentLink[]
+
+  @@index([userId, status])
+  @@index([speakerId, status])
+  @@index([orchestratorId, status])
+  @@index([wakeAt])
+  @@map("Missions")
+}
+
+model MissionToolCall {
+  id                    String    @id @default(uuid()) @db.Uuid
+  missionId             String    @map("mission_id") @db.Uuid
+  tool                  String    @db.VarChar(64)
+  args                  Json      @default("{}")
+  /** pending|waiting_approval|running|done|failed|cancelled|rejected */
+  status                String    @default("pending") @db.VarChar(32)
+  resultSummary         String    @default("") @map("result_summary") @db.Text
+  evidenceAttachmentIds Json      @default("[]") @map("evidence_attachment_ids")
+  requiresApproval      Boolean   @default(false) @map("requires_approval")
+  approvedAt            DateTime? @map("approved_at")
+  rejectedAt            DateTime? @map("rejected_at")
+  approvalExpiresAt     DateTime? @map("approval_expires_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  mission               Mission   @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId, status])
+  @@index([approvalExpiresAt])
+  @@map("MissionToolCalls")
+}
+
+/// Encrypted third-party secrets (login / payment tokens). Never inject plaintext into LLM context.
+model SecretVault {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  speakerId       String    @map("speaker_id") @db.Uuid
+  /** login | payment */
+  kind            String    @db.VarChar(16)
+  label           String    @db.VarChar(120)
+  site            String    @default("") @db.VarChar(255)
+  ciphertext      String    @db.Text
+  iv              String    @db.VarChar(64)
+  authTag         String    @map("auth_tag") @db.VarChar(64)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  lastUsedAt      DateTime? @map("last_used_at")
+  speaker         Employee  @relation(fields: [speakerId], references: [id], onDelete: Cascade)
+
+  @@index([userId, speakerId])
+  @@index([speakerId, kind])
+  @@map("SecretVaults")
 }
 
 model AuditEvent {

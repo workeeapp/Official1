@@ -193,6 +193,47 @@ export type LlmJobActionName =
   | "close"
   | "escalate";
 
+export type LlmMissionActionName =
+  | "create"
+  | "update_plan"
+  | "request_plan_approval"
+  | "approve_plan"
+  | "run_tools"
+  | "request_approval"
+  | "ask_user"
+  | "resume"
+  | "verify"
+  | "complete"
+  | "fail"
+  | "cancel";
+
+export type LlmMissionPlanRevision = "minor" | "major";
+
+export interface LlmMissionToolCall {
+  tool: string;
+  args?: Record<string, unknown>;
+  requiresApproval?: boolean;
+}
+
+/** Open-world mission orchestration / executor tool loop. */
+export interface LlmMissionAction {
+  action: LlmMissionActionName;
+  missionId?: string;
+  goal?: string;
+  successCriteria?: string;
+  planSteps?: string[];
+  planRevision?: LlmMissionPlanRevision;
+  tools?: LlmMissionToolCall[];
+  evidence?: string[];
+  summary?: string;
+  /** resume: speaker asked to search the web again — engine fresh navigate→extract→ask_user. */
+  reSearch?: boolean;
+  /** Explicit fact refs Lucy attaches for the executor (filing_id / label / value). */
+  contextFacts?: Array<Record<string, unknown>>;
+  trackingItemId?: string;
+  userAttested?: boolean;
+}
+
 /** Lifecycle of an open job the digital worker holds for one person about another. */
 export interface LlmJobAction {
   action: LlmJobActionName;
@@ -483,6 +524,8 @@ export interface LlmMetadata {
   directory?: LlmDirectoryAction[];
   /** Lifecycle updates for jobs listed in OPEN_JOBS this turn. */
   jobs?: LlmJobAction[];
+  /** Open-world missions (create/approve_plan/cancel from Lucy; tool loop from executor). */
+  missions?: LlmMissionAction[];
   handoff?: LlmHandoffAction | null;
   /**
    * לוסי-אורח only: promote WhatsApp guest in place on the host shared team.
@@ -1326,6 +1369,21 @@ const JOB_ACTIONS = new Set<LlmJobActionName>([
   "escalate",
 ]);
 
+const MISSION_ACTIONS = new Set<LlmMissionActionName>([
+  "create",
+  "update_plan",
+  "request_plan_approval",
+  "approve_plan",
+  "run_tools",
+  "request_approval",
+  "ask_user",
+  "resume",
+  "verify",
+  "complete",
+  "fail",
+  "cancel",
+]);
+
 const REMINDER_ACTIONS = new Set<LlmReminderActionName>(["add", "remove", "update"]);
 const REMINDER_REPEATS = new Set<LlmReminderRepeat>([
   "once",
@@ -1344,6 +1402,7 @@ export function emptyLlmMetadata(): LlmMetadata {
     reminders: [],
     directory: [],
     jobs: [],
+    missions: [],
     handoff: null,
     register: null,
     reportSections: [],
@@ -1425,6 +1484,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     reminders,
     directory,
     jobs: parseJobActions(meta),
+    missions: parseMissionActions(meta),
     handoff: parseHandoff(meta),
     register: parseRegister(meta),
     reportSections,
@@ -4851,6 +4911,105 @@ function parseJobActions(meta: Record<string, unknown>): LlmJobAction[] {
     const action = toJobAction(entry);
     return action ? [action] : [];
   });
+}
+
+function parseMissionActions(meta: Record<string, unknown>): LlmMissionAction[] {
+  if (!Array.isArray(meta.missions)) {
+    return [];
+  }
+  return meta.missions.flatMap((entry) => {
+    const action = toMissionAction(entry);
+    return action ? [action] : [];
+  });
+}
+
+function toMissionAction(value: unknown): LlmMissionAction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const name = typeof record.action === "string" ? record.action.trim() : "";
+  if (!MISSION_ACTIONS.has(name as LlmMissionActionName)) {
+    return null;
+  }
+  const planStepsRaw = record.plan_steps ?? record.planSteps;
+  const planSteps = Array.isArray(planStepsRaw)
+    ? planStepsRaw
+        .map((step) => (typeof step === "string" ? step.trim() : ""))
+        .filter(Boolean)
+    : undefined;
+  const toolsRaw = record.tools;
+  const tools = Array.isArray(toolsRaw)
+    ? toolsRaw.flatMap((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          return [];
+        }
+        const toolRow = row as Record<string, unknown>;
+        const tool =
+          typeof toolRow.tool === "string"
+            ? toolRow.tool.trim()
+            : typeof toolRow.name === "string"
+              ? toolRow.name.trim()
+              : "";
+        if (!tool) {
+          return [];
+        }
+        const args =
+          toolRow.args &&
+          typeof toolRow.args === "object" &&
+          !Array.isArray(toolRow.args)
+            ? (toolRow.args as Record<string, unknown>)
+            : {};
+        return [
+          {
+            tool,
+            args,
+            requiresApproval:
+              toolRow.requires_approval === true ||
+              toolRow.requiresApproval === true,
+          } satisfies LlmMissionToolCall,
+        ];
+      })
+    : undefined;
+  const evidenceRaw = record.evidence;
+  const evidence = Array.isArray(evidenceRaw)
+    ? evidenceRaw
+        .map((row) => (typeof row === "string" ? row.trim() : ""))
+        .filter(Boolean)
+    : undefined;
+  const contextRaw = record.context_facts ?? record.contextFacts;
+  const contextFacts = Array.isArray(contextRaw)
+    ? contextRaw.filter(
+        (row): row is Record<string, unknown> =>
+          !!row && typeof row === "object" && !Array.isArray(row),
+      )
+    : undefined;
+  const revisionRaw = readText(record, ["plan_revision", "planRevision"]);
+  const planRevision =
+    revisionRaw === "major" || revisionRaw === "minor"
+      ? revisionRaw
+      : undefined;
+  return {
+    action: name as LlmMissionActionName,
+    missionId: readText(record, ["mission_id", "missionId", "id"]) || undefined,
+    goal: readText(record, ["goal"]) || undefined,
+    successCriteria:
+      readText(record, ["success_criteria", "successCriteria"]) || undefined,
+    ...(planSteps ? { planSteps } : {}),
+    ...(planRevision ? { planRevision } : {}),
+    ...(tools ? { tools } : {}),
+    ...(evidence ? { evidence } : {}),
+    summary: readText(record, ["summary"]) || undefined,
+    reSearch:
+      record.re_search === true || record.reSearch === true ? true : undefined,
+    ...(contextFacts ? { contextFacts } : {}),
+    trackingItemId:
+      readText(record, ["tracking_item_id", "trackingItemId"]) || undefined,
+    userAttested:
+      record.user_attested === true || record.userAttested === true
+        ? true
+        : undefined,
+  };
 }
 
 function toJobAction(value: unknown): LlmJobAction | null {

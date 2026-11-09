@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ReasoningEffort } from "@workee/shared";
 import type { LlmJsonSchemaFormat } from "../config/llm.js";
 import { getEnv } from "../config/env.js";
+import { formatSessionClockContext } from "../utils/relative-date.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 
 export interface LlmUsage {
@@ -362,4 +363,112 @@ export function getLlmClient(): LlmClient {
 
   cachedOpenAi ??= createOpenAiClient(apiKey);
   return cachedOpenAi;
+}
+
+/** Default model for OpenAI hosted web_search (mission fact/generic bootstrap). */
+export const HOSTED_WEB_SEARCH_MODEL = "gpt-6-luna";
+
+export type HostedWebSearchResult = {
+  text: string;
+  sources: string[];
+  usage: LlmUsage | null;
+  raw: unknown;
+};
+
+/** Pull url_citation annotations from a Responses API payload. */
+export function extractWebSearchSources(response: unknown): string[] {
+  const sources: string[] = [];
+  const seen = new Set<string>();
+  if (!response || typeof response !== "object") {
+    return sources;
+  }
+  const output = (response as { output?: unknown }).output;
+  if (!Array.isArray(output)) {
+    return sources;
+  }
+  for (const item of output) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    for (const part of content) {
+      if (!part || typeof part !== "object") {
+        continue;
+      }
+      const annotations = (part as { annotations?: unknown }).annotations;
+      if (!Array.isArray(annotations)) {
+        continue;
+      }
+      for (const ann of annotations) {
+        if (!ann || typeof ann !== "object") {
+          continue;
+        }
+        const row = ann as { type?: unknown; url?: unknown; title?: unknown };
+        if (row.type !== "url_citation" || typeof row.url !== "string") {
+          continue;
+        }
+        const url = row.url.trim();
+        if (!url || seen.has(url)) {
+          continue;
+        }
+        seen.add(url);
+        const title = typeof row.title === "string" ? row.title.trim() : "";
+        sources.push(title ? `${title} — ${url}` : url);
+      }
+    }
+  }
+  return sources;
+}
+
+/**
+ * One-shot Responses call with hosted `web_search` (no conversation / JSON schema).
+ * Used by the mission `web.search` tool — results become TOOL_RESULTS evidence.
+ */
+/** Ground hosted search on the same Asia/Jerusalem clock Lucy uses. */
+export function hostedWebSearchInput(query: string, now = new Date()): string {
+  const clock = formatSessionClockContext(now, { rulesInInstructions: true });
+  return [
+    clock,
+    "User timezone is Asia/Jerusalem. Prefer live results for current_date when the query is about היום/אתמול/מחר/today/yesterday.",
+    `Search query: ${query.trim()}`,
+  ].join("\n\n");
+}
+
+export async function runHostedWebSearch(input: {
+  query: string;
+  model?: string;
+  now?: Date;
+}): Promise<HostedWebSearchResult> {
+  const query = input.query.trim();
+  if (!query) {
+    throw new Error("runHostedWebSearch requires a non-empty query");
+  }
+  const apiKey = getEnv().OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new ServiceUnavailableError();
+  }
+  const client = new OpenAI({ apiKey });
+  const model = input.model?.trim() || HOSTED_WEB_SEARCH_MODEL;
+  const body: Record<string, unknown> = {
+    model,
+    tools: [{ type: "web_search" }],
+    input: hostedWebSearchInput(query, input.now),
+    store: false,
+  };
+  if (usesGpt6RequestRules(model)) {
+    body.reasoning = { effort: "low" };
+  }
+  const response = await client.responses.create(
+    body as Parameters<OpenAI["responses"]["create"]>[0],
+  );
+  const raw = toPlainJson(response);
+  return {
+    text: extractOutputText(response),
+    sources: extractWebSearchSources(raw),
+    usage: extractUsage(raw),
+    raw,
+  };
 }
