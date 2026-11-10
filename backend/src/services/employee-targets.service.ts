@@ -1214,12 +1214,17 @@ export function planTargetedActions(input: {
       [...(input.workers ?? []), ...externalPartners],
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
+    // A digital worker is never a share partner. A named custom list whose
+    // only other target is Lucy is two personal rows, not one shared shell.
+    const humanShareTargets = targets.filter(
+      (target) => !isDigitalEmployee(target),
+    );
     const sharedCollection = isSharedCollectionAction(
       "list",
       normalizedList,
-      targets,
+      humanShareTargets,
       input.actor.id,
-      normalizedList.targets,
+      isAllTarget(normalizedList.targets) ? normalizedList.targets : humanShareTargets.map((target) => target.name),
     );
     // A digital worker is not a sharing partner: its tasks reach people through involvement.
     const humanOthers = others.filter((target) => !isDigitalEmployee(target));
@@ -1233,14 +1238,38 @@ export function planTargetedActions(input: {
     const metadata = { lists: [{ ...normalizedList, targets: [] }], filing: [] };
 
     if (sharedCollection) {
-      // One shared list owned by the speaker; all partners see every item.
+      // One shared list owned by the speaker; human partners see every item.
+      // A named digital worker gets a personal copy, not a seat on that shell.
+      const shareVisibility = visibilityFor(
+        input.actor.id,
+        humanShareTargets,
+        true,
+      );
       applications.push({
         employeeId: input.actor.id,
         metadata,
-        visibility,
+        visibility: shareVisibility,
       });
-      for (const target of others) {
-        addNotification(target.id, metadata, partnerLabel(targets, target.id));
+      for (const target of humanShareTargets) {
+        if (target.id === input.actor.id) continue;
+        addNotification(
+          target.id,
+          metadata,
+          partnerLabel(humanShareTargets, target.id),
+        );
+      }
+      if (!isAllTarget(normalizedList.targets)) {
+        for (const worker of targets.filter((target) => isDigitalEmployee(target))) {
+          applications.push({
+            employeeId: worker.id,
+            metadata,
+            visibility: {
+              scope: "personal",
+              addedById: input.actor.id,
+              visibleTo: [worker.id],
+            },
+          });
+        }
       }
       continue;
     }
@@ -1259,9 +1288,15 @@ export function planTargetedActions(input: {
     // speaker and Lucy is two personal rows. A worker-tracking title
     // (להזכיר ל… / לשלוח הודעה / לשלוח נדנוד / לעזור ל…) stays only on the
     // worker's book, even when the speaker is also named. Other humans still
-    // receive a chore assignment on their own book. One list add does not
-    // create a reminder.
-    if (normalizedList.action === "add" && digitalTargets.length > 0) {
+    // receive a chore assignment on their own book. Update and remove use
+    // the same split when the item id was not already routed to its owner.
+    // One list add does not create a reminder.
+    if (
+      (normalizedList.action === "add" ||
+        normalizedList.action === "update" ||
+        normalizedList.action === "remove") &&
+      digitalTargets.length > 0
+    ) {
       const humanList = humanCopyOfDigitalAdd(normalizedList);
       const humanMetadata = humanList
         ? { lists: [{ ...humanList, targets: [] }], filing: [] }

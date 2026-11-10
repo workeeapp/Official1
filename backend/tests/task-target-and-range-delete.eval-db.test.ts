@@ -609,6 +609,28 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
       where: { id: missed!.id },
       data: { deletedAt: new Date() },
     });
+    const partialTip =
+      "טיפ-בדיקה: ההסרה החלקית נשארת גם כשמצורף טיפ.";
+    await prisma.tip.create({
+      data: {
+        userId: account.userId,
+        key: "partial_delete_tip_pin",
+        audience: "member",
+        digitalEmployeeId: lucyId,
+        triggerKind: "action",
+        triggerArea: "lists",
+        triggerOp: "remove",
+        tier: "basic",
+        topic: "tasks",
+        listType: "tasks",
+        systemSeed: false,
+        outputMode: "static",
+        maxShows: 5,
+        order: 0,
+        text: partialTip,
+        enabled: true,
+      },
+    });
 
     const removed = await sendChatMessage({
       userId: account.userId,
@@ -619,6 +641,8 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
     const spoken = parseLlmReply(removed.reply).response;
     expect(spoken).toContain("הסרתי 3 פריטים.");
     expect(spoken).toContain(`לא הוסר: 2. «${missed!.title_stem}».`);
+    expect(spoken).toContain(partialTip);
+    expect(spoken.indexOf("הסרתי 3 פריטים.")).toBeLessThan(spoken.indexOf(partialTip));
     expect(spoken).not.toContain("הסרתי 4");
     expect(spoken).not.toContain(LIST_FIND_MISS);
 

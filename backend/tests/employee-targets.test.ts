@@ -3687,6 +3687,199 @@ describe("employee targets", () => {
     }
   });
 
+  it("an update or remove of a tracking title that names Lucy stays on Lucy", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    for (const action of ["update", "remove"] as const) {
+      const plan = planTargetedActions({
+        actor: amit,
+        employees,
+        workers: [lucy],
+        metadata: {
+          lists: [
+            {
+              action,
+              listType: "tasks",
+              listName: "",
+              items: [{ "שם משימה": "להזכיר לעמית לקנות חלב" }],
+              targets: ["עמית", "לוסי"],
+            },
+          ],
+          filing: [],
+        },
+      });
+      expect(plan.applications.map((row) => row.employeeId)).toEqual([lucy.id]);
+      expect(plan.applications[0]?.visibility).toMatchObject({
+        scope: "personal",
+        visibleTo: [lucy.id],
+      });
+    }
+  });
+
+  it("a chore update that names the speaker and Lucy is applied on both books", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "update",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "להתקשר לעמיר" }],
+            targets: ["עמית", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [amit.id, lucy.id].sort(),
+    );
+    for (const row of plan.applications) {
+      expect(row.visibility.visibleTo).toEqual([row.employeeId]);
+    }
+  });
+
+  it("a shopping add that names the speaker and Lucy is two personal rows", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "shopping",
+            listName: "",
+            items: [{ "שם פריט": "חלב" }],
+            targets: ["עמית", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [amit.id, lucy.id].sort(),
+    );
+    for (const row of plan.applications) {
+      expect(JSON.stringify(row.metadata.lists)).toContain("חלב");
+      expect(row.visibility).toMatchObject({
+        scope: "personal",
+        visibleTo: [row.employeeId],
+      });
+    }
+  });
+
+  it("a named custom list that names Lucy is not a share with Lucy", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "מה מביאים",
+            items: [{ פריט: "שתייה" }],
+            targets: ["עמית", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [amit.id, lucy.id].sort(),
+    );
+    const speaker = plan.applications.find((row) => row.employeeId === amit.id);
+    expect(speaker?.visibility).toMatchObject({
+      scope: "personal",
+      visibleTo: [amit.id],
+    });
+    expect(speaker?.visibility.visibleTo).not.toContain(lucy.id);
+    expect(
+      plan.applications.find((row) => row.employeeId === lucy.id)?.visibility,
+    ).toMatchObject({ scope: "personal", visibleTo: [lucy.id] });
+  });
+
+  it("a named custom list shared with a person still gives Lucy only a personal copy", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "custom",
+            listName: "מה מביאים",
+            items: [{ פריט: "שתייה" }],
+            targets: ["עמית", "טל", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    const speaker = plan.applications.find((row) => row.employeeId === amit.id);
+    expect(speaker?.visibility.scope).toBe("shared");
+    expect(speaker?.visibility.visibleTo.sort()).toEqual([amit.id, tal.id].sort());
+    expect(speaker?.visibility.visibleTo).not.toContain(lucy.id);
+    expect(
+      plan.applications.find((row) => row.employeeId === lucy.id)?.visibility,
+    ).toMatchObject({ scope: "personal", visibleTo: [lucy.id] });
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
+  });
+
   it("user + family + Lucy keeps a tracking title only on Lucy", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",
