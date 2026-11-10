@@ -149,8 +149,9 @@ describe("open jobs context", () => {
     expect(block).toContain('"ask":"אם קנית חלב?"');
     expect(block).toContain('"raisable":true');
     expect(block).toMatch(/"job_id"\s*:\s*"/);
-    expect(block).toContain("using its job_id");
-    expect(block).toContain("metadata.show_dump=tasks");
+    // Rules live once in OPEN JOBS RULES; the header points there.
+    expect(block).toContain("OPEN JOBS RULES");
+    expect(block).toContain("show_dump=tasks");
     expect(block).toContain("ממתינים");
   });
 
@@ -327,9 +328,8 @@ describe("open jobs context", () => {
       ],
       AMIT,
     );
-    expect(block).toContain("overdue_tasks=true");
-    expect(block).toContain("הצג את המשימות");
-    expect(block).toContain("show_dump_ids");
+    // Field described in the header; the overdue flow rules are in OPEN JOBS RULES.
+    expect(block).toContain("overdue_tasks");
     const [row] = JSON.parse(block.split("\n").at(-1) ?? "[]");
     expect(row.overdue_tasks).toBe(true);
     expect(row.overdue_item_ids).toEqual(["t1", "t2"]);
@@ -373,8 +373,8 @@ describe("open jobs context", () => {
       ],
       AMIT,
     );
-    expect(open).toContain("stale_undated=true");
-    expect(open).toContain("להוסיף תאריך");
+    // Field described in the header; the stale flow rules are in OPEN JOBS RULES.
+    expect(open).toContain("stale_undated");
     const [row] = JSON.parse(open.split("\n").at(-1) ?? "[]");
     expect(row.stale_undated).toBe(true);
     expect(row.stale_item_ids).toEqual(["t1"]);

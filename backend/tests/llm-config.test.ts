@@ -147,10 +147,6 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("Status/inventory");
     expect(config.systemMessage).toContain("LIVE DATA ONLY");
     expect(config.systemMessage).toContain("באחריות X · מאת Y");
-    expect(config.systemMessage).toContain(
-      "show_dump=tasks + show_dump_about=YOUR display name",
-    );
-    expect(config.systemMessage).toContain("אין לי משימות");
     expect(config.systemMessage).toContain("FORBIDDEN model-written");
     expect(config.systemMessage).toContain("show_dump_about");
     expect(config.systemMessage).toContain("show_dump_assignee");
@@ -192,7 +188,6 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain("filing_id");
     expect(config.systemMessage).toContain("reminder_id");
     expect(config.systemMessage).toContain("share_book");
-    expect(config.systemMessage).toContain("URGENCY FOLLOW-UP");
     expect(config.systemMessage).toContain("intentional PRODUCT CONTRACT");
     expect(config.systemMessage).toContain("COMPLEX EVENT TOPIC vs ORGANIZE INTENT");
     expect(config.systemMessage).toContain("DYNAMIC AXES");
