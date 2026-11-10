@@ -2701,6 +2701,8 @@ export async function applyReminderOccurrenceChange(input: {
 /** A remove/update of an existing clock, so everyone else it involves can be told. */
 export type ReminderChange = {
   action: "remove" | "update";
+  /** Clock id that was cancelled or updated. Classification pairs on this, not on the label. */
+  id?: string;
   label: string;
   fireAt: string;
   involvedIds: string[];
@@ -2991,6 +2993,7 @@ export async function applyReminders(input: {
         pushCascadedTasks(cancelled.removedWorkerTasks);
         changes.push({
           action: "remove",
+          id: reminderId,
           label: cancelled.label,
           fireAt: formatJerusalemDateTime(cancelled.fireAt),
           involvedIds: cancelled.involvedIds,
@@ -3034,6 +3037,7 @@ export async function applyReminders(input: {
           });
           changes.push({
             action: "update",
+            id: applied.id,
             label: applied.label,
             fireAt: fireLabel,
             involvedIds: applied.involvedIds,
@@ -3042,6 +3046,7 @@ export async function applyReminders(input: {
           removed.push(applied.label);
           changes.push({
             action: "remove",
+            id: applied.id,
             label: applied.label,
             fireAt: formatJerusalemDateTime(applied.previousFireAt),
             involvedIds: applied.involvedIds,
@@ -3636,6 +3641,7 @@ export async function applyReminders(input: {
       if (existing) {
         changes.push({
           action: "update",
+          id: reminderId || row.id,
           label,
           fireAt: fireLabel,
           involvedIds: [

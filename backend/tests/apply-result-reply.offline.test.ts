@@ -584,6 +584,163 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.keepDraft).toBe(true);
   });
 
+  it("one cancelled clock is complete and keeps the model's confirmation", () => {
+    const clockId = "172b39e1-4d56-4b84-9707-bc4baa0a0c89";
+    const requested = captureRequestedFromMetadata({
+      reminders: [
+        {
+          ...reminderAdd("shopping"),
+          action: "remove",
+          item: "לשתות מים",
+          reminderId: clockId,
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: ["לשתות מים"],
+        missed: [],
+        skipped: [],
+        changes: [
+          { action: "remove", id: clockId, label: "לשתות מים" },
+        ],
+      },
+    });
+    expect(result.completeness).toBe("complete");
+    expect(result.domains.reminders?.applied).toEqual([
+      expect.objectContaining({
+        op: "remove",
+        id: clockId,
+        label: "לשתות מים",
+      }),
+    ]);
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הפסקתי את התזכורת היומית לשתות מים."),
+    });
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("הפסקתי את התזכורת היומית לשתות מים.");
+    expect(decided.spoken).not.toContain("הסרתי 2");
+    expect(decided.spoken).not.toContain(APPLY_RESULT_UNKNOWN_CAUTION);
+  });
+
+  it("a label-only cascade cancel still pairs to the requested clock id", () => {
+    const clockId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const requested = captureRequestedFromMetadata({
+      reminders: [
+        {
+          ...reminderAdd("tasks"),
+          action: "remove",
+          item: "לשתות מים",
+          reminderId: clockId,
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: ["לשתות מים"],
+        missed: [],
+        skipped: [],
+        changes: [],
+      },
+    });
+    expect(result.completeness).toBe("complete");
+    expect(result.domains.reminders?.applied).toHaveLength(1);
+    expect(result.domains.reminders?.applied[0]).toEqual(
+      expect.objectContaining({ op: "remove", id: clockId, label: "לשתות מים" }),
+    );
+  });
+
+  it("one applied cancel and one known miss stays a partial failure", () => {
+    const kept = "172b39e1-4d56-4b84-9707-bc4baa0a0c89";
+    const missing = "99999999-8888-4777-8666-555555555555";
+    const requested = captureRequestedFromMetadata({
+      reminders: [
+        {
+          ...reminderAdd("shopping"),
+          action: "remove",
+          item: "לשתות מים",
+          reminderId: kept,
+        },
+        {
+          ...reminderAdd("shopping"),
+          action: "remove",
+          item: "להוריד את הכלב",
+          reminderId: missing,
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: ["לשתות מים"],
+        missed: ["להוריד את הכלב"],
+        skipped: [],
+        changes: [{ action: "remove", id: kept, label: "לשתות מים" }],
+      },
+    });
+    expect(result.completeness).toBe("partial");
+    expect(result.domains.reminders?.applied).toHaveLength(1);
+    expect(result.domains.reminders?.apply_misses).toEqual([
+      expect.objectContaining({
+        reason: "missed",
+        id: missing,
+        detail: "להוריד את הכלב",
+      }),
+    ]);
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הפסקתי את שתי התזכורות."),
+    });
+    expect(decided.keepDraft).toBe(false);
+    expect(decided.spoken).toContain("לשתות מים");
+    expect(decided.spoken).toContain(LIST_FIND_MISS);
+    expect(decided.spoken).not.toContain("הסרתי 2");
+    expect(decided.spoken).not.toContain(APPLY_RESULT_UNKNOWN_CAUTION);
+    expect(decided.spoken).not.toContain("שתי התזכורות");
+  });
+
+  it("two applied cancels and one miss still names both removals", () => {
+    const first = "11111111-1111-4111-8111-111111111111";
+    const second = "22222222-2222-4222-8222-222222222222";
+    const missing = "33333333-3333-4333-8333-333333333333";
+    const requested = captureRequestedFromMetadata({
+      reminders: [first, second, missing].map((id) => ({
+        ...reminderAdd("tasks"),
+        action: "remove" as const,
+        item: "",
+        reminderId: id,
+      })),
+    });
+    const result = buildApplyResult({
+      requested,
+      reminderResult: {
+        saved: [],
+        removed: ["מים", "כלב"],
+        missed: [missing],
+        skipped: [],
+        changes: [
+          { action: "remove", id: first, label: "מים" },
+          { action: "remove", id: second, label: "כלב" },
+        ],
+      },
+    });
+    expect(result.completeness).toBe("partial");
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הפסקתי הכל."),
+    });
+    expect(decided.keepDraft).toBe(false);
+    expect(decided.spoken).toContain("הסרתי 2 פריטים.");
+    expect(decided.spoken).toContain(LIST_FIND_MISS);
+    expect(decided.spoken).not.toContain(APPLY_RESULT_UNKNOWN_CAUTION);
+  });
+
   it("failure replacement text comes from ApplyResult, not from the draft", () => {
     const a = decideReplyFromApplyResult({
       applyResult: resultFullFailure(),

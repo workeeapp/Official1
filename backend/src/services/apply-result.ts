@@ -135,6 +135,9 @@ export type DumpGuardDrop = {
   listName?: string;
   op?: string;
   reason: "outside_dump" | "outside_dump_scope";
+  /** Numbered-dump line and title, when the dropped id was on the map. */
+  dumpLine?: number;
+  label?: string;
 };
 
 function cloneJson<T>(value: T): T {
@@ -626,6 +629,117 @@ function rollupCompleteness(
   return "complete";
 }
 
+type ReminderApplySlice = {
+  saved?: Array<{ id: string; itemLabel?: string; item?: string }>;
+  /** Cancelled-clock labels for the delete fallback. Not clock ids. */
+  removed?: string[];
+  changes?: Array<{ action: string; label?: string; id?: string }>;
+};
+
+/**
+ * One applied row per saved clock or per change.
+ * `removed` repeats the same cancel as a label (the delete fallback reads it).
+ * A label with no matching change is a same-turn cascade that already
+ * cancelled the clock; it pairs to the requested remove id that no change claimed.
+ */
+function reminderAppliedOps(
+  rr: ReminderApplySlice | undefined,
+  requested: RequestedOp[],
+): AppliedOp[] {
+  const saved: AppliedOp[] = (rr?.saved ?? []).map((row) => ({
+    domain: "reminders",
+    op: "add",
+    id: row.id,
+    label: row.itemLabel || row.item,
+  }));
+  const fromChanges: AppliedOp[] = (rr?.changes ?? []).map((row) => ({
+    domain: "reminders",
+    op: row.action === "remove" ? "remove" : "update",
+    ...(row.id ? { id: row.id } : {}),
+    ...(row.label ? { label: row.label } : {}),
+  }));
+  const unmatchedChanges = fromChanges.filter((row) => row.op === "remove");
+  const leftoverLabels: string[] = [];
+  for (const raw of rr?.removed ?? []) {
+    const label = raw.trim();
+    if (!label) {
+      continue;
+    }
+    const idx = unmatchedChanges.findIndex(
+      (row) => (row.label ?? "").trim() === label,
+    );
+    if (idx >= 0) {
+      unmatchedChanges.splice(idx, 1);
+      continue;
+    }
+    leftoverLabels.push(label);
+  }
+  const claimedIds = new Set(
+    fromChanges.flatMap((row) =>
+      row.op === "remove" && row.id ? [row.id] : [],
+    ),
+  );
+  const unclaimedIds = requested
+    .filter(
+      (row) =>
+        row.domain === "reminders" &&
+        row.op === "remove" &&
+        Boolean(row.id) &&
+        !claimedIds.has(row.id!),
+    )
+    .map((row) => row.id!);
+  const cascade: AppliedOp[] =
+    leftoverLabels.length > 0 && leftoverLabels.length === unclaimedIds.length
+      ? leftoverLabels.map((label, index) => ({
+          domain: "reminders",
+          op: "remove",
+          id: unclaimedIds[index],
+          label,
+        }))
+      : [];
+  return [...saved, ...fromChanges, ...cascade];
+}
+
+/**
+ * `missed` stores a display label when the request had an item name, so the
+ * string is not the clock id. Pair those known misses onto the requested
+ * remove ids that did not apply, in request order.
+ */
+function reminderMissesAsApplyMisses(
+  missed: string[],
+  requested: RequestedOp[],
+  applied: AppliedOp[],
+): ApplyMiss[] {
+  const appliedIds = new Set(
+    applied.flatMap((row) => (row.id ? [row.id] : [])),
+  );
+  const unclaimed = requested.filter(
+    (row) =>
+      row.domain === "reminders" &&
+      row.op === "remove" &&
+      Boolean(row.id) &&
+      !appliedIds.has(row.id!),
+  );
+  if (missed.length > 0 && unclaimed.length === missed.length) {
+    return missed.map((token, index) => {
+      const id = unclaimed[index]!.id!;
+      const label = token.trim();
+      return {
+        domain: "reminders" as const,
+        reason: "missed",
+        id,
+        op: "remove",
+        ...(label && label !== id ? { detail: label } : {}),
+      };
+    });
+  }
+  return missed.map((id) => ({
+    domain: "reminders" as const,
+    reason: "missed",
+    id,
+  }));
+}
+
 export function buildApplyResult(input: {
   requested: CapturedRequested;
   intentMisses?: IntentMiss[];
@@ -651,12 +765,12 @@ export function buildApplyResult(input: {
   listOpResults?: ListOpResult[];
   reminderResult?: {
     saved: Array<{ id: string; itemLabel?: string; item?: string }>;
-    /** Cancelled reminder ids. */
+    /** Cancelled reminder labels (the delete fallback). Not clock ids. */
     removed?: string[];
-    /** Requested reminder ids that did not apply. */
+    /** Missed reminder ids, or the item label when the request named one. */
     missed?: string[];
     skipped?: Array<{ reason?: string; item?: string }>;
-    changes?: Array<{ action: string; label?: string }>;
+    changes?: Array<{ action: string; label?: string; id?: string }>;
   };
   directoryResult?: {
     saved: Array<{ id: string; name?: string }>;
@@ -817,24 +931,7 @@ export function buildApplyResult(input: {
     nestedReminderMisses.length > 0 ||
     hasReminderOutcome
   ) {
-    const applied: AppliedOp[] = [
-      ...(rr?.saved ?? []).map((row) => ({
-        domain: "reminders" as const,
-        op: "add",
-        id: row.id,
-        label: row.itemLabel || row.item,
-      })),
-      ...(rr?.removed ?? []).map((id) => ({
-        domain: "reminders" as const,
-        op: "remove",
-        id,
-      })),
-      ...(rr?.changes ?? []).map((row) => ({
-        domain: "reminders" as const,
-        op: row.action === "remove" ? "remove" : "update",
-        label: row.label,
-      })),
-    ];
+    const applied = reminderAppliedOps(rr, reminderRequested);
     const intent_misses = stripMisses.filter(
       (miss) => miss.domain === "reminders",
     );
@@ -842,11 +939,11 @@ export function buildApplyResult(input: {
       (op) => op.domain === "reminders",
     );
     const apply_misses: ApplyMiss[] = [
-      ...(rr?.missed ?? []).map((id) => ({
-        domain: "reminders" as const,
-        reason: "missed",
-        id,
-      })),
+      ...reminderMissesAsApplyMisses(
+        rr?.missed ?? [],
+        reminderRequested,
+        applied,
+      ),
       ...(rr?.skipped ?? []).map((row) => ({
         domain: "reminders" as const,
         reason: String(row.reason ?? "skipped"),
