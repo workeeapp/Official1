@@ -25,7 +25,7 @@ import {
 } from "../services/llm-client.js";
 import { listEmployeesForUser } from "../services/employee.service.js";
 import type { LastNumberedDumpLine } from "../services/show-button-dump.js";
-import type { EvalAddressGender, LiveFullCorpusCase } from "./corpus.js";
+import type { EvalAddressGender, LiveFullCorpusCase, LiveFullOpenJob } from "./corpus.js";
 import { extractEvalRawActionDiagnostic } from "./raw-action-diagnostic.js";
 import {
   runModelApplyCase,
@@ -95,6 +95,50 @@ async function seedNumberedDump(account: HarnessAccount, digitalId: string, line
   });
 }
 
+/** OPEN_JOBS at turn 0, opened exactly as production opens a relayed check. */
+async function seedOpenJobs(
+  account: HarnessAccount,
+  digitalId: string,
+  speaker: string,
+  jobs: LiveFullOpenJob[],
+): Promise<void> {
+  const { createJobsFromRelays } = await import("../services/jobs.service.js");
+  for (const job of jobs) {
+    const askerName = job.asker.trim();
+    const askerId =
+      askerName === speaker.trim()
+        ? account.employeeId
+        : account.partners.find((p) => (p.nickname?.trim() || p.name) === askerName)?.id;
+    if (!askerId) throw new Error(`openJobs: asker «${askerName}» is not on the harness account`);
+    const opened = await createJobsFromRelays({
+      userId: account.userId,
+      digitalEmployeeId: digitalId,
+      asker: { id: askerId, name: askerName },
+      deliveries: [
+        {
+          subjectId: account.employeeId,
+          subjectName: speaker,
+          text: job.ask,
+          ask: job.ask,
+          urgency: job.urgency ?? "normal",
+        },
+      ],
+    });
+    if (opened.length !== 1) throw new Error(`openJobs: job «${job.ask}» was not opened`);
+  }
+}
+
+/** Askers on seeded OPEN_JOBS other than the speaker (harness partners). */
+export function openJobAskers(suiteCase: LiveFullCorpusCase, speaker: string): string[] {
+  return [
+    ...new Set(
+      (suiteCase.context?.openJobs ?? [])
+        .map((job) => job.asker.trim())
+        .filter((name) => name && name !== speaker.trim()),
+    ),
+  ];
+}
+
 /** Summed OpenAI usage of a turn's model calls (null fields when not reported). */
 function turnUsage(turnCalls: RecordedCall[]): {
   evalInputTokens: number | null;
@@ -137,6 +181,9 @@ export async function runLiveFullProductionCase(
             digitalId,
             suiteCase.context.lastNumberedDump.map((l) => ({ ...l, id: input.idMap.get(l.id) ?? l.id })),
           );
+        }
+        if (input.turnIndex === 0 && suiteCase.context?.openJobs?.length) {
+          await seedOpenJobs(account, digitalId, options.speaker, suiteCase.context.openJobs);
         }
         if (input.turnIndex > 0 && turn?.newConversationBefore) await ageConversations(account.userId);
 
@@ -198,6 +245,7 @@ export async function runLiveFullProductionCase(
       },
       {
         speaker: options.speaker,
+        partners: openJobAskers(suiteCase, options.speaker),
         harness: { addressGender: options.addressGender, digitalWorker: true },
         applyByProposer: true,
         cleanup: cleanupProductionAccount,

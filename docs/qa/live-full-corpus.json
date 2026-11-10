@@ -5880,6 +5880,172 @@
           ]
         }
       ]
+    },
+    {
+      "id": "oj-greeting-then-raise",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Open job (עמית asked Lucy to check with the speaker) + a greeting → greet back AND raise the job: names the asker and the ask; nothing mutated",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "אם קנית חלב?"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "חלב"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-self-check-raise-second-person",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Self-check (the speaker asked Lucy to check with them) + a greeting → raised as their own check in second person, never third-party framing",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "טל",
+            "ask": "אם קנית שוקו?"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "שוקו"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "טל ביקש",
+                "מחכה לתשובה",
+                "קניתי"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-urgent-raise-with-own-request",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Urgent open job + an unrelated request → the request is done AND the urgent job is raised, stating the urgency and who asked",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "אם שלחת את הקובץ ללקוח?",
+            "urgency": "urgent"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיף חלב לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "דחוף",
+                "בדחיפות",
+                "דחופ"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "קובץ"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-answer-closes-job",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "The speaker answers the open check → jobs.answer (the server reports to the asker); no list rows",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "אם קנית חלב?"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "כן, קניתי חלב היום",
+          "constraints": [
+            {
+              "type": "jobs_has_action",
+              "action": "answer"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

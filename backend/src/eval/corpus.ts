@@ -216,6 +216,21 @@ export interface LiveFullCaseContext {
    * Kept until a new model conversation starts (newConversationBefore).
    */
   lastNumberedDump?: LastNumberedDumpLine[];
+  /**
+   * OPEN_JOBS the speaker owes at turn 0 — production path only. Each row is a
+   * check another employee (or the speaker: a self-check) asked Lucy to make
+   * with the speaker, opened the way production opens it (createJobsFromRelays).
+   * Askers other than the speaker are added to the harness account.
+   */
+  openJobs?: LiveFullOpenJob[];
+}
+
+export interface LiveFullOpenJob {
+  /** Asker display name; the speaker's own name = self-check. */
+  asker: string;
+  /** The ask, in the asker's words, without the subject's name («אם קנית חלב?»). */
+  ask: string;
+  urgency?: "normal" | "urgent" | "very_urgent";
 }
 
 export interface LiveFullCorpus {

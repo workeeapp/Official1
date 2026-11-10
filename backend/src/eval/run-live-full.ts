@@ -212,6 +212,9 @@ export async function runLiveFullCase(
     });
     return { ...produced, track: "LIVE_FULL", prompt: productionPromptProvenance() };
   }
+  if (suiteCase.context?.openJobs?.length) {
+    throw new Error(`${suiteCase.id}: context.openJobs needs the production path (not -HarnessApply)`);
+  }
   // LIVE_FULL historically omitted מיכל from Known employees — keep byte-identical.
   const prompt =
     options?.prompt ??
