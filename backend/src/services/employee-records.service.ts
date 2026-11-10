@@ -2188,6 +2188,12 @@ export interface ListItemMutation {
   /** Set on a remove/update of a digital-worker task: everyone it involved before the change. */
   workerTaskInvolvedIds?: string[];
   /**
+   * Clock cancel already soft-deleted this worker task. It is counted as a
+   * list remove so the reply does not report a miss, and it is not a task
+   * the speaker deleted.
+   */
+  fromReminderCascade?: boolean;
+  /**
    * Co-share apply outcome for this row (update with partners).
    * newlySharedCount 1 = at least one partner first added this turn;
    * alreadySharedCount 1 = share intent but every intended partner was already

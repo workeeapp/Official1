@@ -13,7 +13,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { formatJerusalemDateTime, parseLlmReply } from "@workee/shared";
 import { prisma } from "../src/database/prisma.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
-import { sendChatMessage } from "../src/services/chat.service.js";
+import { pushRelayMessage, sendChatMessage } from "../src/services/chat.service.js";
 import { parseItemNavRef } from "../src/services/builtin-lists.js";
 import {
   getEmployeeRecordSnapshot,
@@ -655,4 +655,406 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
     expect(rows).toHaveLength(4);
     expect(rows.every((row) => row.deletedAt != null)).toBe(true);
   });
+
+  function idsOf(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === "string")
+      : [];
+  }
+
+  async function persistDualResponsibility(lucyId: string) {
+    const chore = "להתקשר לעמיר";
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "אזכיר לך מחר ב־18:00 להתקשר לעמיר." }],
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "tasks",
+                list_name: "",
+                targets: ["טל", "לוסי"],
+                items: [
+                  {
+                    "שם משימה": chore,
+                    "תאריך לביצוע": tomorrow,
+                    "שעה לביצוע": "18:00",
+                  },
+                ],
+              },
+            ],
+            reminders: [
+              {
+                action: "add",
+                item: chore,
+                date: tomorrow,
+                time: "18:00",
+                ping: ["טל"],
+                text: chore,
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    await sendChatMessage({
+      userId: account!.userId,
+      employeeId: account!.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תזכירי לי מחר להתקשר לעמיר",
+    });
+    const speaker = await prisma.employeeListItem.findFirst({
+      where: {
+        deletedAt: null,
+        list: { employeeId: account!.employeeId, listType: "tasks" },
+      },
+      select: {
+        id: true,
+        reminderId: true,
+        addedById: true,
+        visibleTo: true,
+        data: true,
+      },
+    });
+    const lucy = await prisma.employeeListItem.findFirst({
+      where: {
+        deletedAt: null,
+        list: { employeeId: lucyId, listType: "tasks" },
+      },
+      select: {
+        id: true,
+        reminderId: true,
+        addedById: true,
+        visibleTo: true,
+        data: true,
+      },
+    });
+    const clocks = await prisma.reminder.findMany({
+      where: { userId: account!.userId, status: "active" },
+      select: { id: true, ownerId: true, workerItemId: true },
+    });
+    expect(speaker?.id).toBeTruthy();
+    expect(lucy?.id).toBeTruthy();
+    expect(speaker!.id).not.toBe(lucy!.id);
+    expect(idsOf(speaker!.visibleTo)).toEqual([account!.employeeId]);
+    expect(idsOf(lucy!.visibleTo)).toEqual([lucyId]);
+    expect(speaker!.addedById).toBe(account!.employeeId);
+    expect(lucy!.addedById).toBe(account!.employeeId);
+    expect(speaker!.reminderId).toBeNull();
+    expect(clocks).toHaveLength(1);
+    expect(clocks[0]!.ownerId).toBe(account!.employeeId);
+    expect(clocks[0]!.workerItemId).toBe(lucy!.id);
+    expect(lucy!.reminderId).toBe(clocks[0]!.id);
+    const joins = await prisma.employeeListItemReminderLink.findMany({
+      where: { reminderId: clocks[0]!.id },
+      select: { listItemId: true },
+    });
+    expect(joins.map((row) => row.listItemId)).toEqual([speaker!.id]);
+    return { chore, speaker: speaker!, lucy: lucy!, clockId: clocks[0]!.id };
+  }
+
+  async function speakerDumpExcludesLucy(lucyItemId: string, chore: string) {
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "הנה המשימות." }],
+          metadata: { lists: [], show_dump: "tasks" },
+        },
+      ]),
+    );
+    const shown = await sendChatMessage({
+      userId: account!.userId,
+      employeeId: account!.employeeId,
+      digitalEmployeeId: (
+        await prisma.employee.findFirst({
+          where: { userId: account!.userId, kind: "digital", isProtected: true },
+          select: { id: true },
+        })
+      )!.id,
+      message: "הצג משימות",
+    });
+    const spoken = parseLlmReply(shown.reply).response;
+    expect(spoken).toContain(chore);
+    const dump = await latestNumberedDump(account!.userId);
+    expect(dump.some((line) => line.id === lucyItemId)).toBe(false);
+    return dump;
+  }
+
+  it("cancelling the user reminder deletes Lucy's follow-up and keeps the speaker task", async () => {
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(account);
+    silenceOutbound();
+    const { chore, speaker, lucy, clockId } = await persistDualResponsibility(lucyId);
+
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "הפסקתי את התזכורת." }],
+          metadata: {
+            lists: [],
+            reminders: [
+              {
+                action: "remove",
+                reminder_id: clockId,
+                item: chore,
+                list_type: "tasks",
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    const cancelled = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תפסיקי את התזכורת",
+    });
+    expect(parseLlmReply(cancelled.reply).response).toBe("הפסקתי את התזכורת.");
+
+    const clock = await prisma.reminder.findUnique({
+      where: { id: clockId },
+      select: { status: true, workerItemId: true },
+    });
+    expect(clock?.status).toBe("cancelled");
+    expect(clock?.workerItemId).toBeNull();
+    const lucyRow = await prisma.employeeListItem.findUnique({
+      where: { id: lucy.id },
+      select: { deletedAt: true, reminderId: true },
+    });
+    expect(lucyRow?.deletedAt).not.toBeNull();
+    expect(lucyRow?.reminderId).toBeNull();
+    const speakerRow = await prisma.employeeListItem.findUnique({
+      where: { id: speaker.id },
+      select: { deletedAt: true },
+    });
+    expect(speakerRow?.deletedAt).toBeNull();
+    const joins = await prisma.employeeListItemReminderLink.findMany({
+      where: { reminderId: clockId },
+    });
+    expect(joins).toEqual([]);
+
+    const dump = await speakerDumpExcludesLucy(lucy.id, chore);
+    expect(dump.map((line) => line.id)).toEqual([speaker.id]);
+  }, 30000);
+
+  it("removing Lucy's follow-up cancels her clock and leaves the speaker task", async () => {
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(account);
+    silenceOutbound();
+    const { chore, speaker, lucy, clockId } = await persistDualResponsibility(lucyId);
+
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "הסרתי את המשימה שלי." }],
+          metadata: {
+            lists: [
+              {
+                action: "remove",
+                list_type: "tasks",
+                list_name: "",
+                targets: ["טל", "לוסי"],
+                items: [{ item_id: lucy.id }],
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תמחקי את המשימה שלך על זה",
+    });
+
+    const lucyRow = await prisma.employeeListItem.findUnique({
+      where: { id: lucy.id },
+      select: { deletedAt: true, reminderId: true },
+    });
+    expect(lucyRow?.deletedAt).not.toBeNull();
+    expect(lucyRow?.reminderId).toBeNull();
+    const clock = await prisma.reminder.findUnique({
+      where: { id: clockId },
+      select: { status: true, workerItemId: true },
+    });
+    expect(clock?.status).toBe("cancelled");
+    expect(clock?.workerItemId).toBeNull();
+    const speakerRow = await prisma.employeeListItem.findUnique({
+      where: { id: speaker.id },
+      select: { deletedAt: true },
+    });
+    expect(speakerRow?.deletedAt).toBeNull();
+
+    const dump = await speakerDumpExcludesLucy(lucy.id, chore);
+    expect(dump.map((line) => line.id)).toEqual([speaker.id]);
+  }, 30000);
+
+  it("a dump-line update still hits that row after an automated message", async () => {
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(account);
+    silenceOutbound();
+    const milk = "לקנות חלב";
+    const bread = "לקנות לחם";
+    const internal = "לבדוק עם טל אם נקנה חלב";
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "רשמתי." }],
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "tasks",
+                list_name: "",
+                items: [{ "שם משימה": milk }, { "שם משימה": bread }],
+              },
+              {
+                action: "add",
+                list_type: "tasks",
+                list_name: "",
+                targets: ["לוסי"],
+                items: [{ "שם משימה": internal }],
+              },
+            ],
+          },
+        },
+        {
+          responses: [{ text: "הנה המשימות." }],
+          metadata: { lists: [], show_dump: "tasks" },
+        },
+      ]),
+    );
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תוסיפי לקנות חלב ולקנות לחם",
+    });
+    const shown = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "הצג משימות",
+    });
+    expect(parseLlmReply(shown.reply).response).not.toContain(internal);
+    const dump = await latestNumberedDump(account.userId);
+    expect(dump.map((line) => line.title_stem).sort()).toEqual([bread, milk].sort());
+    const breadLine = dump.find((line) => line.title_stem === bread)!;
+    const milkLine = dump.find((line) => line.title_stem === milk)!;
+
+    const relay = "עדכון אוטומטי: אין דיווח חדש.";
+    const remembered: Array<{ conversationId: string; text: string }> = [];
+    setLlmClientForTests({
+      async createConversation() {
+        return `conv-${randomUUID()}`;
+      },
+      async createResponse() {
+        return { reply: "{}", raw: {} };
+      },
+      async appendAssistantMessage(conversationId: string, text: string) {
+        remembered.push({ conversationId, text });
+      },
+    });
+    await pushRelayMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      speaker: "לוסי",
+      text: relay,
+    });
+    const thread = await prisma.chatConversation.findFirst({
+      where: {
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+      },
+      select: { id: true, openaiConversationId: true },
+    });
+    expect(remembered).toEqual([
+      { conversationId: thread!.openaiConversationId, text: relay },
+    ]);
+
+    const seen: string[] = [];
+    setLlmClientForTests({
+      async createConversation() {
+        return `conv-${randomUUID()}`;
+      },
+      async createResponse(input: { liveFacts?: string }) {
+        seen.push(input.liveFacts ?? "");
+        return {
+          reply: JSON.stringify({
+            responses: [{ text: "עדכנתי את הלחם." }],
+            metadata: {
+              lists: [
+                {
+                  action: "update",
+                  list_type: "tasks",
+                  list_name: "",
+                  items: [
+                    {
+                      mutate_source: "dump_line",
+                      dump_line: breadLine.n,
+                      "שם משימה": "לקנות לחם מחר",
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          raw: {},
+        };
+      },
+    });
+    await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תעדכני את 2 למחר",
+    });
+    const relayRow = await prisma.chatMessage.findFirst({
+      where: {
+        author: "assistant",
+        text: relay,
+        conversation: { userId: account.userId },
+      },
+      select: { id: true, conversationId: true },
+    });
+    expect(relayRow?.conversationId).toBe(thread!.id);
+    expect(seen[0]).toContain("LAST_NUMBERED_DUMP:");
+    expect(seen[0]).toContain(breadLine.id);
+    expect(seen[0]).toContain(milkLine.id);
+    expect(seen[0]).not.toContain(relay);
+
+    const titles = taskTitles(await getEmployeeRecordSnapshot(account.employeeId));
+    expect(titles.sort()).toEqual(["לקנות חלב", "לקנות לחם מחר"].sort());
+    const lucyTitles = taskTitles(await getEmployeeRecordSnapshot(lucyId));
+    expect(lucyTitles).toEqual([internal]);
+    const shownAgain = await (async () => {
+      setLlmClientForTests(
+        stubLlmQueue([
+          {
+            responses: [{ text: "הנה המשימות." }],
+            metadata: { lists: [], show_dump: "tasks" },
+          },
+        ]),
+      );
+      return sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "הצג משימות",
+      });
+    })();
+    const spoken = parseLlmReply(shownAgain.reply).response;
+    expect(spoken).toContain("לקנות לחם מחר");
+    expect(spoken).toContain(milk);
+    expect(spoken).not.toContain(internal);
+    const finalDump = await latestNumberedDump(account.userId);
+    expect(finalDump.map((line) => line.id).sort()).toEqual(
+      [breadLine.id, milkLine.id].sort(),
+    );
+  }, 30000);
 });

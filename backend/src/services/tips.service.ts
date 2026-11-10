@@ -524,7 +524,12 @@ function buildComposeFactsFromTurn(
 
 /** Build applied ops from this turn's engine results. */
 export function collectAppliedTipOps(input: {
-  listMutations: Array<{ action: string; listType?: string }>;
+  listMutations: Array<{
+    action: string;
+    listType?: string;
+    /** Worker task removed because its clock was cancelled. Not a speaker delete. */
+    fromReminderCascade?: boolean;
+  }>;
   filingMutations: Array<{ action: string }>;
   reminderSavedCount: number;
   reminderUpdateCount: number;
@@ -548,6 +553,9 @@ export function collectAppliedTipOps(input: {
   for (const row of input.listMutations) {
     const action = row.action;
     if (action !== "add" && action !== "update" && action !== "remove") {
+      continue;
+    }
+    if (row.fromReminderCascade) {
       continue;
     }
     const listType = row.listType?.trim() || null;

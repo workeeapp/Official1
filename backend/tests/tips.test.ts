@@ -210,6 +210,48 @@ describe("tips service", () => {
     );
   });
 
+  it("a clock cascade is not a task-delete tip", () => {
+    const ops = collectAppliedTipOps({
+      listMutations: [
+        { action: "remove", listType: "tasks", fromReminderCascade: true },
+      ],
+      filingMutations: [],
+      reminderSavedCount: 0,
+      reminderUpdateCount: 0,
+      reminderRemovedCount: 1,
+      reminderRequestedAdd: false,
+      directorySavedCount: 0,
+      directoryRemovedCount: 0,
+      directoryRequestedUpdate: false,
+    });
+    expect(ops).toEqual([
+      expect.objectContaining({ topic: "reminders", op: "remove" }),
+    ]);
+  });
+
+  it("a speaker task delete still tips beside a clock cascade", () => {
+    const ops = collectAppliedTipOps({
+      listMutations: [
+        { action: "remove", listType: "tasks" },
+        { action: "remove", listType: "tasks", fromReminderCascade: true },
+      ],
+      filingMutations: [],
+      reminderSavedCount: 0,
+      reminderUpdateCount: 0,
+      reminderRemovedCount: 1,
+      reminderRequestedAdd: false,
+      directorySavedCount: 0,
+      directoryRemovedCount: 0,
+      directoryRequestedUpdate: false,
+    });
+    expect(ops).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ topic: "tasks", op: "remove" }),
+        expect.objectContaining({ topic: "reminders", op: "remove" }),
+      ]),
+    );
+  });
+
   it("upserts ladder catalog without rotating ids", async () => {
     employeeFindMany.mockResolvedValue([
       {

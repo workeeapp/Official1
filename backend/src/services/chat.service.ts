@@ -3236,6 +3236,7 @@ export async function sendChatMessage(input: {
         listType: "tasks",
         itemKey: task.itemKey,
         itemLabel: task.itemLabel,
+        fromReminderCascade: true,
       });
     }
     const directoryResult = guestSpeaker
@@ -5125,6 +5126,7 @@ export async function sendChatMessage(input: {
       listMutations: listMutations.map((row) => ({
         action: row.action,
         listType: row.listType,
+        fromReminderCascade: row.fromReminderCascade === true,
       })),
       filingMutations,
       reminderSavedCount: reminderResult.saved.length,
