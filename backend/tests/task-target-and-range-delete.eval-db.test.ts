@@ -1,6 +1,7 @@
 /**
- * Speaker task dumps must not contain a digital worker's tracking task, and a
- * numbered range delete must remove exactly the dump-line ids.
+ * An add that names the speaker and Lucy persists both task rows and one
+ * reminder. A Lucy-only tracking task stays off the speaker dump. A numbered
+ * range delete removes exactly the dump-line ids.
  *
  * Real path: sendChatMessage + persisted rows on workee_test. Stubbed model.
  * No WhatsApp send, no reminder fire.
@@ -130,29 +131,39 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
     new Date(Date.now() + 24 * 3600_000),
   ).slice(0, 10);
 
-  it("task + reminder targeting the user and Lucy stays on Lucy's book", async () => {
+  async function ownedTasks(employeeId: string) {
+    return prisma.employeeListItem.findMany({
+      where: {
+        deletedAt: null,
+        list: { employeeId, listType: "tasks" },
+      },
+      select: {
+        id: true,
+        reminderId: true,
+        itemKey: true,
+        data: true,
+        list: { select: { employeeId: true, scope: true } },
+      },
+    });
+  }
+
+  function rowTitle(row: { data: unknown; itemKey: string }): string {
+    const data = row.data as { "שם משימה"?: unknown } | null;
+    const title = data?.["שם משימה"];
+    return typeof title === "string" && title.trim() ? title.trim() : row.itemKey;
+  }
+
+  it("one add targeting the speaker and Lucy persists both tasks and one reminder", async () => {
     account = await createHarnessAccount("טל");
     const lucyId = await ensureLucy(account);
     silenceOutbound();
-    const workerTitle = "להזכיר לטל לקנות חלב";
+    const chore = "להתקשר לעמיר";
     setLlmClientForTests(
       stubLlmQueue([
         {
-          responses: [{ text: "אזכיר לך מחר ב־18:00 לקנות חלב." }],
+          responses: [{ text: "אזכיר לך מחר ב־18:00 להתקשר לעמיר." }],
           metadata: {
             lists: [
-              {
-                action: "add",
-                list_type: "shopping",
-                list_name: "",
-                items: [{ "שם פריט": "חלב" }],
-              },
-              {
-                action: "add",
-                list_type: "tasks",
-                list_name: "",
-                items: [{ "שם משימה": "לשתות מים" }],
-              },
               {
                 action: "add",
                 list_type: "tasks",
@@ -160,7 +171,7 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
                 targets: ["טל", "לוסי"],
                 items: [
                   {
-                    "שם משימה": workerTitle,
+                    "שם משימה": chore,
                     "תאריך לביצוע": tomorrow,
                     "שעה לביצוע": "18:00",
                   },
@@ -170,11 +181,11 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
             reminders: [
               {
                 action: "add",
-                item: "לקנות חלב",
+                item: chore,
                 date: tomorrow,
                 time: "18:00",
                 ping: ["טל"],
-                text: "לקנות חלב",
+                text: chore,
               },
             ],
           },
@@ -190,21 +201,47 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
       userId: account.userId,
       employeeId: account.employeeId,
       digitalEmployeeId: lucyId,
-      message: "תזכירי לי מחר ב־18:00 לקנות חלב",
+      message: "תזכירי לי מחר להתקשר לעמיר",
     });
+    const speakerRows = await ownedTasks(account.employeeId);
+    const lucyRows = await ownedTasks(lucyId);
+    expect(speakerRows.map(rowTitle)).toEqual([chore]);
+    expect(lucyRows.map(rowTitle)).toEqual([chore]);
+    expect(speakerRows[0]!.list.employeeId).toBe(account.employeeId);
+    expect(lucyRows[0]!.list.employeeId).toBe(lucyId);
+    expect(speakerRows[0]!.list.scope).toBe("personal");
+    expect(lucyRows[0]!.list.scope).toBe("personal");
+
+    const clocks = await prisma.reminder.findMany({
+      where: { userId: account.userId, status: "active" },
+      select: {
+        id: true,
+        ownerId: true,
+        actorId: true,
+        pingIds: true,
+        workerItemId: true,
+      },
+    });
+    expect(clocks).toHaveLength(1);
+    const clock = clocks[0]!;
+    expect(clock.ownerId).toBe(account.employeeId);
+    expect(clock.actorId).toBe(account.employeeId);
+    expect(clock.pingIds).toEqual([account.employeeId]);
+    expect(clock.workerItemId).toBe(lucyRows[0]!.id);
+    expect(lucyRows[0]!.reminderId).toBe(clock.id);
+
     const speaker = await getEmployeeRecordSnapshot(account.employeeId);
-    const lucy = await getEmployeeRecordSnapshot(lucyId);
-    const lucyTasks = await prisma.employeeListItem.findMany({
-      where: { deletedAt: null, list: { employeeId: lucyId, listType: "tasks" } },
-      select: { id: true },
-    });
-    expect(taskTitles(speaker)).toEqual(["לשתות מים"]);
-    expect(taskTitles(speaker).join("\n")).not.toContain("להזכיר");
-    expect(taskTitles(lucy)).toContain(workerTitle);
-    expect(lucyTasks.length).toBeGreaterThan(0);
-    for (const id of buttonIds(saved.reply)) {
-      expect(lucyTasks.map((row) => row.id)).not.toContain(id);
+    expect(taskTitles(speaker)).toEqual([chore]);
+    const visibleIds = new Set<string>();
+    for (const list of speaker.lists) {
+      if (list.list_type !== "tasks") continue;
+      for (const item of list.items) {
+        const id = item.item_id ?? item.id;
+        if (typeof id === "string") visibleIds.add(id);
+      }
     }
+    expect(visibleIds).toEqual(new Set([speakerRows[0]!.id]));
+    expect(buttonIds(saved.reply)).not.toContain(lucyRows[0]!.id);
 
     const shown = await sendChatMessage({
       userId: account.userId,
@@ -213,16 +250,104 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
       message: "הצג משימות",
     });
     const spoken = parseLlmReply(shown.reply).response;
-    expect(spoken).toContain("לשתות מים");
-    expect(spoken).not.toContain(workerTitle);
+    expect(spoken).toContain(chore);
     const dump = await latestNumberedDump(account.userId);
-    expect(dump.map((line) => line.title_stem)).toEqual(["לשתות מים"]);
-    expect(dump.some((line) => lucyTasks.some((row) => row.id === line.id))).toBe(
-      false,
-    );
-  });
+    expect(dump.map((line) => line.id)).toEqual([speakerRows[0]!.id]);
+    expect(dump.some((line) => line.id === lucyRows[0]!.id)).toBe(false);
+  }, 30000);
 
-  it("user + family + Lucy assigns the family member and not the speaker", async () => {
+  it("two separate adds keep the speaker chore and Lucy's tracking task apart", async () => {
+    account = await createHarnessAccount("טל");
+    const lucyId = await ensureLucy(account);
+    silenceOutbound();
+    const chore = "להתקשר לעמיר";
+    const tracking = "להזכיר לטל להתקשר לעמיר";
+    setLlmClientForTests(
+      stubLlmQueue([
+        {
+          responses: [{ text: "אזכיר לך מחר ב־18:00 להתקשר לעמיר." }],
+          metadata: {
+            lists: [
+              {
+                action: "add",
+                list_type: "tasks",
+                list_name: "",
+                items: [
+                  {
+                    "שם משימה": chore,
+                    "תאריך לביצוע": tomorrow,
+                    "שעה לביצוע": "18:00",
+                  },
+                ],
+              },
+              {
+                action: "add",
+                list_type: "tasks",
+                list_name: "",
+                targets: ["לוסי"],
+                items: [
+                  {
+                    "שם משימה": tracking,
+                    "תאריך לביצוע": tomorrow,
+                    "שעה לביצוע": "18:00",
+                  },
+                ],
+              },
+            ],
+            reminders: [
+              {
+                action: "add",
+                item: chore,
+                date: tomorrow,
+                time: "18:00",
+                ping: ["טל"],
+                text: chore,
+              },
+            ],
+          },
+        },
+        {
+          responses: [{ text: "הנה המשימות." }],
+          metadata: { lists: [], show_dump: "tasks" },
+        },
+      ]),
+    );
+
+    const saved = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "תזכירי לי מחר להתקשר לעמיר",
+    });
+    const speakerRows = await ownedTasks(account.employeeId);
+    const lucyRows = await ownedTasks(lucyId);
+    expect(speakerRows.map(rowTitle)).toEqual([chore]);
+    expect(lucyRows.map(rowTitle)).toEqual([tracking]);
+    const clocks = await prisma.reminder.findMany({
+      where: { userId: account.userId, status: "active" },
+      select: { id: true, ownerId: true, pingIds: true, workerItemId: true },
+    });
+    expect(clocks).toHaveLength(1);
+    expect(clocks[0]!.ownerId).toBe(account.employeeId);
+    expect(clocks[0]!.pingIds).toEqual([account.employeeId]);
+    expect(clocks[0]!.workerItemId).toBe(lucyRows[0]!.id);
+    expect(lucyRows[0]!.reminderId).toBe(clocks[0]!.id);
+    expect(buttonIds(saved.reply)).not.toContain(lucyRows[0]!.id);
+
+    const shown = await sendChatMessage({
+      userId: account.userId,
+      employeeId: account.employeeId,
+      digitalEmployeeId: lucyId,
+      message: "הצג משימות",
+    });
+    const spoken = parseLlmReply(shown.reply).response;
+    expect(spoken).toContain(chore);
+    expect(spoken).not.toContain(tracking);
+    const dump = await latestNumberedDump(account.userId);
+    expect(dump.map((line) => line.id)).toEqual([speakerRows[0]!.id]);
+  }, 30000);
+
+  it("user + family + Lucy keeps the speaker row and the family assignment", async () => {
     account = await createHarnessAccount("טל", { partners: ["עמית"] });
     const partner = account.partners[0];
     expect(partner?.id).toBeTruthy();
@@ -278,7 +403,9 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
       });
     }
 
-    expect(await ownedTaskTitles(account.employeeId)).toEqual(["לשתות מים"]);
+    expect(new Set(await ownedTaskTitles(account.employeeId))).toEqual(
+      new Set(["לשתות מים", sharedTitle]),
+    );
     expect(await ownedTaskTitles(partner!.id)).toEqual([sharedTitle]);
     expect(await ownedTaskTitles(lucyId)).toEqual([sharedTitle]);
   });
@@ -307,7 +434,7 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
                 action: "add",
                 list_type: "tasks",
                 list_name: "",
-                targets: ["טל", "לוסי"],
+                targets: ["לוסי"],
                 items: [{ "שם משימה": workerTitle }],
               },
             ],
@@ -433,7 +560,7 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
                 action: "add",
                 list_type: "tasks",
                 list_name: "",
-                targets: ["טל", "לוסי"],
+                targets: ["לוסי"],
                 items: [{ "שם משימה": "להזכיר לטל לבדוק" }],
               },
             ],

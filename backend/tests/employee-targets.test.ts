@@ -3588,7 +3588,7 @@ describe("employee targets", () => {
     expect(lucyApply?.visibility.scope).toBe("personal");
   });
 
-  it("user + Lucy task is persisted only on Lucy's book", () => {
+  it("user + Lucy task is persisted on both books, not as a share", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",
       kind: "digital",
@@ -3626,22 +3626,32 @@ describe("employee targets", () => {
     const speakerTasks = plan.applications.filter(
       (row) => row.employeeId === amit.id,
     );
-    expect(speakerTasks).toHaveLength(1);
-    expect(
-      JSON.stringify(speakerTasks[0]?.metadata.lists),
-    ).not.toContain("להזכיר");
+    expect(speakerTasks).toHaveLength(2);
+    const speakerTracking = speakerTasks.find((row) =>
+      JSON.stringify(row.metadata.lists).includes("להזכיר"),
+    );
+    expect(speakerTracking?.visibility).toMatchObject({
+      scope: "personal",
+      visibleTo: [amit.id],
+    });
     const lucyTasks = plan.applications.filter(
       (row) => row.employeeId === lucy.id,
     );
     expect(lucyTasks).toHaveLength(1);
     expect(JSON.stringify(lucyTasks[0]?.metadata.lists)).toContain("להזכיר");
-    expect(lucyTasks[0]?.visibility.visibleTo).toEqual([lucy.id]);
+    expect(lucyTasks[0]?.visibility).toMatchObject({
+      scope: "personal",
+      visibleTo: [lucy.id],
+    });
     expect(plan.notifications.map((row) => row.employee.id)).not.toContain(
       lucy.id,
     );
+    expect(plan.notifications.map((row) => row.employee.id)).not.toContain(
+      amit.id,
+    );
   });
 
-  it("user + family + Lucy keeps the family assignment and skips the speaker copy", () => {
+  it("user + family + Lucy keeps the speaker row and the family assignment", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",
       kind: "digital",
@@ -3670,13 +3680,25 @@ describe("employee targets", () => {
       },
     });
     expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
-      [lucy.id, tal.id].sort(),
+      [amit.id, lucy.id, tal.id].sort(),
     );
+    expect(
+      plan.applications.find((row) => row.employeeId === amit.id)?.visibility,
+    ).toMatchObject({
+      scope: "personal",
+      visibleTo: [amit.id],
+    });
     expect(
       plan.applications.find((row) => row.employeeId === tal.id)?.visibility,
     ).toMatchObject({
       scope: "personal",
       visibleTo: [tal.id],
+    });
+    expect(
+      plan.applications.find((row) => row.employeeId === lucy.id)?.visibility,
+    ).toMatchObject({
+      scope: "personal",
+      visibleTo: [lucy.id],
     });
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
   });

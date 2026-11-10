@@ -42,3 +42,11 @@ Ideas to consider later — not committed work. Captured from product discussion
 **Today:** every turn preloads `EMPLOYEE_SAVED_DATA`, ownership-scoped `TEAM_SCHEDULES`, and ownership-scoped `WORKER_SAVED_DATA` (non-owners: only worker jobs tied to the speaker; owners: full worker list). The model still filters timed windows in `response` (SESSION_CLOCK + WHEN prompts), including standing/`next_occurrences` rows. Mixing the speaker’s tasks with **their own** Lucy jobs on «מה אני צריך ביום…» remains prompt-soft.
 
 **Consider later:** real fetch actions — model declares what to load (retrieval action) → engine fetches that slice → second step answers only from the fetch.
+
+## Digital-worker targeting follow-ups (after ba22249)
+
+An **add** that names a digital worker is persisted on that worker’s book and on each named person’s own book, including the speaker when the speaker is a target. It is not a share with the worker. An add that names only the worker stays on the worker’s book. These follow-ups are still open:
+
+1. **Update / remove that targets Lucy.** Those actions still use the older per-target loop, so a change or delete that names Lucy can still land on the speaker’s book.
+2. **Confirm the same add rule for shopping and custom lists.** Shopping adds go through the new split and are not covered by the task tests. A **named custom list** is matched as a shared collection *before* that split, so an add that names Lucy on a named custom list can still be written on the speaker.
+3. **Partial range-delete copy when a tip is also appended.** The engine line is `הסרתי N פריטים.` plus `לא הוסר: …`. An existing tip can still be appended after that sentence; that combined reply is not asserted.

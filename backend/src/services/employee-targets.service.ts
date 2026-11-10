@@ -1255,10 +1255,26 @@ export function planTargetedActions(input: {
     const digitalTargets = mutateTargets.filter((target) =>
       isDigitalEmployee(target),
     );
-    // A digital worker is never a share participant. A task that names the
-    // speaker and Lucy is persisted only on Lucy's book. Other humans named
-    // on that same action still receive an assignment on their own book.
+    // A digital worker is never a share participant. An add that names the
+    // speaker and Lucy is two personal rows: the speaker's task, and Lucy's
+    // tracking task. An add that names only Lucy stays on her book. Other
+    // humans named on that same action still receive an assignment on their
+    // own book. One list add does not create a reminder.
     if (normalizedList.action === "add" && digitalTargets.length > 0) {
+      const speakerTarget = humanTargets.find(
+        (target) => target.id === input.actor.id,
+      );
+      if (speakerTarget) {
+        applications.push({
+          employeeId: speakerTarget.id,
+          metadata,
+          visibility: {
+            scope: "personal",
+            addedById: input.actor.id,
+            visibleTo: [speakerTarget.id],
+          },
+        });
+      }
       for (const worker of digitalTargets) {
         applications.push({
           employeeId: worker.id,
