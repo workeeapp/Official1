@@ -56,6 +56,8 @@ describe("open-job rules: one authoritative copy", () => {
     expect(instructions).toContain("After that meeting save, apply POST-SAVE REMINDER OFFER unless they already asked for a ping.");
     expect(instructions).toContain("an unanswered reminder-schedule / PING AFTER CHORE ask (a soft post-save reminder offer alone does not block a raise)");
     expect(instructions).toContain("Urgent and «לא כרגע» with no time → offer a short snooze once.");
+    expect(instructions).toContain("states the urgency up front with the word דחוף or בדחיפות");
+    expect(instructions).toContain("and says דחוף מאוד");
     expect(instructions).toContain("follow_ups_left=0 → say they still have not answered");
     expect(instructions).toContain("show_dump=tasks + show_dump_about=YOUR display name");
     expect(instructions).toContain("אין לי משימות");

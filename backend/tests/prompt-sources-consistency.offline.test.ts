@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadLlmConfig } from "../src/config/llm.js";
+import { buildDefaultEvalFixtures } from "../src/eval/eval-prompt-source.js";
+import { buildLucyInstructions } from "../src/services/chat.service.js";
 
 const root = resolve(import.meta.dirname, "../..");
 const config = loadLlmConfig(root);
@@ -50,9 +52,16 @@ describe("prompt sources", () => {
     expect(config.systemMessage).toMatch(/unsaved, it may still inform the current conversation/);
   });
 
-  it("non-health durable facts still auto-file in both runtime sources", () => {
-    expect(config.systemMessage).toMatch(/Durable facts \(family, address form, address, job, …; health incl\. allergies \/ diet → SENSITIVE\) → filing add same turn when clearly stated/);
-    expect(chatSource).toMatch(/Durable personal memory — file with lists add list_type filing in the same turn/);
+  it("non-health durable facts follow FILING once; extras only point at it", () => {
+    expect(config.systemMessage).toMatch(
+      /Durable facts \(family, address form, address, job, …; health incl\. allergies \/ diet → SENSITIVE\) → file them the same turn when clearly stated \(update the one existing home, otherwise add\)/,
+    );
+    expect(config.systemMessage.match(/SPOKEN DESTINATION/g)).toHaveLength(1);
+    expect(config.systemMessage).not.toContain("filing add same turn when clearly stated");
+    expect(chatSource).toMatch(/Durable personal memory — follow FILING \(do not only say אזכור\)/);
+    expect(chatSource).toContain("Spoken text with no file: FILING / SPOKEN DESTINATION is the only copy.");
+    expect(chatSource).not.toContain("no clear list → filing add");
+    expect(chatSource).not.toContain("the fact, the instruction, and the destination stay apart");
   });
 
   it("FILE INTENT is one identical principle in both runtime sources; old auto-attach wording gone", () => {
@@ -121,5 +130,29 @@ describe("prompt sources", () => {
     expect(evalSource).toContain("helpers.buildLucyInstructions(");
     expect(evalSource).not.toContain("RESPONSES_RULE");
     expect(batchSource).toContain("buildLucyInstructions(");
+  });
+
+  it("LIVE instructions carry each filing and list-update decision once", () => {
+    const { employees, worker } = buildDefaultEvalFixtures("טל", {
+      includeMichal: false,
+    });
+    const instructions = buildLucyInstructions({
+      digital: worker,
+      employees,
+      speaker: "טל",
+      speakerIsOwner: true,
+      guestSpeaker: false,
+      pendingInvite: null,
+      consultFrom: "",
+    });
+    const count = (needle: string) => instructions.split(needle).length - 1;
+    expect(instructions.startsWith(config.systemMessage)).toBe(true);
+    expect(count("SPOKEN DESTINATION (text, no file)")).toBe(1);
+    expect(count("FILING / SPOKEN DESTINATION")).toBe(2);
+    expect(count("FORBIDDEN lists.update on that turn")).toBe(1);
+    expect(count("A mention or aside that a row already changed")).toBe(1);
+    expect(instructions).not.toContain("no clear list → filing add");
+    expect(instructions).not.toContain("filing add same turn when clearly stated");
+    expect(instructions).not.toContain("changes → lists.update / lists.remove by item_id.");
   });
 });

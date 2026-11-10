@@ -37,6 +37,16 @@ describe("CONTENT-FIRST filing destination", () => {
     expect(config).toContain("FORBIDDEN a second row with the same content or name as an existing one");
   });
 
+  it("SPOKEN DESTINATION: fact, instruction, and destination stay apart", () => {
+    expect(config).toContain("SPOKEN DESTINATION");
+    expect(config).toContain("The instruction (the verb and the place they named) is never item_name or item_info");
+    expect(config).toContain("The same fact already in that row → no mutate");
+    expect(config).toContain("Several plausible filings → ASK which");
+    expect(config).toContain("The word תתייקי alone does not create a filing");
+    expect(chat).toContain("Spoken text with no file: FILING / SPOKEN DESTINATION is the only copy.");
+    expect(chat).not.toContain("no clear list → filing add");
+  });
+
   it("FILING document rule: existing filing first; new name = what the document is", () => {
     expect(config).toContain("an existing filing for it → update that filing + attachment_ids");
     expect(config).toContain("naming what the document is (never the instruction sentence)");

@@ -24,7 +24,8 @@ describe("STRUCTURED LIST OFFER prompt contract", () => {
   it("defines the section once with the authorization ladder", () => {
     expect(prompt.match(/^STRUCTURED LIST OFFER \(/gm)?.length).toBe(1);
     expect(prompt).toMatch(/mentioning information NEVER authorizes saving it/);
-    expect(prompt).toMatch(/including news that changes a row of an existing list .* offer that update; the קניתי\/סיימתי Done rule is for shopping\/tasks only/);
+    expect(prompt).toMatch(/including news that changes a row of an existing list .* one short offer to update that row; lists=\[\] list_ops=\[\]; FORBIDDEN lists.update on that turn; the קניתי\/סיימתי Done rule is for shopping\/tasks only/);
+    expect(prompt).toMatch(/A mention or aside that a row already changed .* is NOT that request — one short offer to update, lists=\[\] and list_ops=\[\]/);
     expect(prompt).toMatch(/authorizes ONE suggestion only — lists=\[\]/);
     expect(prompt).toMatch(/explicit approval .* authorizes creating it/);
     expect(prompt).toMatch(/explicit create \/ organize request skips the offer/);
@@ -66,8 +67,8 @@ describe("STRUCTURED LIST OFFER prompt contract", () => {
     expect(prompt).toMatch(/Implicit save never creates a NEW custom list or new columns/);
     expect(prompt).toMatch(/Scope: this ladder governs creating or updating structured lists; it does not override the existing FILING rule/);
     expect(prompt).toMatch(/health information stays under SENSITIVE below/);
-    // Existing durable-facts FILING rule untouched.
-    expect(prompt).toMatch(/Durable facts \(family, address form, address, job, …; health incl\. allergies \/ diet → SENSITIVE\) → filing add same turn when clearly stated/);
+    // Durable facts still file the same turn; an existing home is updated rather than always added.
+    expect(prompt).toMatch(/Durable facts \(family, address form, address, job, …; health incl\. allergies \/ diet → SENSITIVE\) → file them the same turn when clearly stated \(update the one existing home, otherwise add\)/);
     expect(prompt).toMatch(/Do NOT open a custom list named as the event/);
     expect(prompt).toMatch(/Describing an existing or standing arrangement .* no implicit save and no assign; at most a STRUCTURED LIST OFFER/);
     expect(prompt).toMatch(/A concrete new need for a specific person .* is unchanged — ASSIGN as today/);
