@@ -5556,7 +5556,7 @@
         "single-turn",
         "tasks"
       ],
-      "description": "P3 standing one occurrence vs series: «move Noa's Tuesday class to 18:00» → ask whether only the upcoming occurrence or every Tuesday — both alternatives offered (the class, Noa or the weekday identifies it); no mutation before the answer; the row is unchanged",
+      "description": "P3 standing one occurrence vs series: «move Noa's Tuesday class to 18:00» → ask whether only the upcoming occurrence or every Tuesday — both alternatives offered (the class, Noa or the weekday identifies it); no mutation before the answer; the row is unchanged — the upcoming-occurrence alternative may be phrased «רק (את) החוג הקרוב» / «רק היום» (2026-11-10: 3/3 correct asks used these)",
       "setup": {
         "lists": [
           {
@@ -5612,6 +5612,8 @@
             {
               "type": "response_mentions_any",
               "needles": [
+                "הקרוב",
+                "רק היום",
                 "שלישי הקרוב",
                 "רק ליום שלישי",
                 "רק ביום שלישי",
