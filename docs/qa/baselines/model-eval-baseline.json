@@ -136,6 +136,21 @@
         "lm-unique-description-executes": {
           "expect": "pass"
         },
+        "oj-answer-closes-job": {
+          "expect": "pass"
+        },
+        "oj-greeting-then-raise": {
+          "expect": "pass"
+        },
+        "oj-self-check-raise-second-person": {
+          "expect": "pass"
+        },
+        "oj-urgent-raise-with-own-request": {
+          "expect": "pass"
+        },
+        "p3-one-occurrence-or-series-asks": {
+          "expect": "pass"
+        },
         "p3-overlap-asks-before-save": {
           "expect": "pass"
         },
