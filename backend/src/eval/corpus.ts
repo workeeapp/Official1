@@ -231,6 +231,8 @@ export interface LiveFullOpenJob {
   /** The ask, in the asker's words, without the subject's name («אם קנית חלב?»). */
   ask: string;
   urgency?: "normal" | "urgent" | "very_urgent";
+  /** A meeting slot the asker proposes (book on yes); the date is relative to the run day. */
+  book?: { title: string; daysFromNow: number; time: string };
 }
 
 export interface LiveFullCorpus {

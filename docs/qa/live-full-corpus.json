@@ -5532,7 +5532,9 @@
                 "לעצור",
                 "רק את התזכורות",
                 "רק התזכורות",
-                "בלי התזכורות"
+                "בלי התזכורות",
+                "רק את התזכורת",
+                "רק התזכורת"
               ]
             }
           ],
@@ -5639,7 +5641,8 @@
                 "הבאים",
                 "מעכשיו",
                 "באופן קבוע",
-                "להמשך"
+                "להמשך",
+                "כל ימי שלישי"
               ]
             }
           ],
@@ -6042,6 +6045,145 @@
             },
             {
               "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-meeting-raise-asks-to-book",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Meeting coordination job (עמית proposes a slot) + a greeting → raise states who asked and the slot, and asks yes/no whether to book it; nothing booked yet",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "לתאם פגישת עבודה",
+            "book": {
+              "title": "פגישת עבודה",
+              "daysFromNow": 3,
+              "time": "10:00"
+            }
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "היי",
+          "constraints": [
+            {
+              "type": "mutations_empty_or_read_only"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "10:00",
+                "10"
+              ]
+            },
+            {
+              "type": "response_looks_like_ask"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-meeting-counter-other-time",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "The speaker proposes a different time for the asked meeting → jobs.counter (the asker must approve); nothing booked yet",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "לתאם פגישת עבודה",
+            "book": {
+              "title": "פגישת עבודה",
+              "daysFromNow": 3,
+              "time": "10:00"
+            }
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "לא מתאים לי ב־10, אפשר ב־14:00 באותו יום?",
+          "constraints": [
+            {
+              "type": "jobs_has_action",
+              "action": "counter"
+            },
+            {
+              "type": "lists_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oj-very-urgent-raise",
+      "tags": [
+        "open-jobs",
+        "full-live",
+        "single-turn"
+      ],
+      "description": "Very urgent open job + an unrelated request → the request is done AND the job is raised, stating the urgency and who asked",
+      "setup": {},
+      "context": {
+        "openJobs": [
+          {
+            "asker": "עמית",
+            "ask": "אם אישרת את ההצעה ללקוח?",
+            "urgency": "very_urgent"
+          }
+        ]
+      },
+      "turns": [
+        {
+          "utterance": "תוסיף לחם לקניות",
+          "constraints": [
+            {
+              "type": "lists_has_action",
+              "action": "add",
+              "listType": "shopping",
+              "itemTextIncludes": "לחם"
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "דחוף",
+                "בדחיפות",
+                "דחופ"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "עמית"
+              ]
+            },
+            {
+              "type": "response_mentions_any",
+              "needles": [
+                "הצעה",
+                "ההצעה"
+              ]
             }
           ]
         }

@@ -142,10 +142,19 @@
         "oj-greeting-then-raise": {
           "expect": "pass"
         },
+        "oj-meeting-counter-other-time": {
+          "expect": "pass"
+        },
+        "oj-meeting-raise-asks-to-book": {
+          "expect": "pass"
+        },
         "oj-self-check-raise-second-person": {
           "expect": "pass"
         },
         "oj-urgent-raise-with-own-request": {
+          "expect": "pass"
+        },
+        "oj-very-urgent-raise": {
           "expect": "pass"
         },
         "p3-one-occurrence-or-series-asks": {

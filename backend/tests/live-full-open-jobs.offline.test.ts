@@ -16,6 +16,9 @@ describe("LIVE_FULL context.openJobs", () => {
       [
         "oj-answer-closes-job",
         "oj-greeting-then-raise",
+        "oj-meeting-counter-other-time",
+        "oj-meeting-raise-asks-to-book",
+        "oj-very-urgent-raise",
         "oj-self-check-raise-second-person",
         "oj-urgent-raise-with-own-request",
       ].sort(),
@@ -25,6 +28,11 @@ describe("LIVE_FULL context.openJobs", () => {
         expect(job.asker.trim(), row.id).not.toBe("");
         expect(job.ask.trim(), row.id).not.toBe("");
         expect(["normal", "urgent", "very_urgent", undefined]).toContain(job.urgency);
+        if (job.book) {
+          expect(job.book.title.trim(), row.id).not.toBe("");
+          expect(job.book.daysFromNow, row.id).toBeGreaterThan(0);
+          expect(job.book.time, row.id).toMatch(/^\d{2}:\d{2}$/);
+        }
       }
     }
   });

@@ -14,7 +14,7 @@
  * stored. No harness apply, no harness context building.
  */
 import { createHash } from "node:crypto";
-import { parseLlmReply, parseReplyMetadata } from "@workee/shared";
+import { formatJerusalemDateTime, parseLlmReply, parseReplyMetadata } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import {
   getLlmClient,
@@ -121,6 +121,17 @@ async function seedOpenJobs(
           text: job.ask,
           ask: job.ask,
           urgency: job.urgency ?? "normal",
+          ...(job.book
+            ? {
+                book: {
+                  title: job.book.title,
+                  date: formatJerusalemDateTime(
+                    new Date(Date.now() + job.book.daysFromNow * 24 * 3600_000),
+                  ).slice(0, 10),
+                  time: job.book.time,
+                },
+              }
+            : {}),
         },
       ],
     });
